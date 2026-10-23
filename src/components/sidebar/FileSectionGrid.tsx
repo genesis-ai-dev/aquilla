@@ -3,6 +3,7 @@ import { useSectionProgressState } from "@/hooks/useSectionProgress"
 import { Spinner } from "@/components/ui/spinner"
 import { BookHealthSpine, type BookHealthChapter } from "./BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { progressViewFor } from "@/lib/progress/milestone-progress-view"
 
 interface Props {
   projectId: string
@@ -23,10 +24,17 @@ interface Props {
    * for the active file the spine renders from `getChapters` regardless.
    */
   deferFetch?: boolean
+  /**
+   * AQU-2118: the target lane the sections are read for — the one the
+   * sidebar's switcher shows. Omitted, the read names no lane and the server
+   * answers the project's default, which is not the open lane on a
+   * multi-lane project.
+   */
+  lane?: string
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch, lane }: Props) {
   const t = useT()
   const chapters = useMemo(() => getChapters?.(), [getChapters])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
@@ -37,6 +45,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
     validationCount,
     getTokenForFile,
     countStructural,
+    lane,
   )
 
   if (!chapters && sections === null) {
@@ -58,13 +67,32 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
     return null
   }
 
-  const spineChapters: BookHealthChapter[] = chapters ?? (sections ?? []).map((section) => ({
+  // AQU-2112: a file expanded WITHOUT being opened is drawn from the server's
+  // per-chapter progress, which carries the audio pair — so the chapter list
+  // shows it, in the same unit the chapter picker would. The view is decided
+  // over the whole file by AQU-2110's shared rule, so a file never shows a
+  // patchwork of chapters measured in different things.
+  const serverChapters = sections ?? []
+  const serverView = progressViewFor(serverChapters.map((section) => ({
+    translated: Math.round(section.textCompleted),
+    validated: Math.round(section.textValidated),
+    total: 100,
+    // `textCompleted` is target text alone server-side — a take never counts
+    // toward it — which is exactly the distinction the rule needs.
+    textTranslated: Math.round(section.textCompleted),
+    audioRecorded: Math.round(section.audioCompleted),
+    audioValidated: Math.round(section.audioValidated),
+  })))
+  const spineChapters: BookHealthChapter[] = chapters ?? serverChapters.map((section) => ({
     key: section.label,
     label: section.label,
     translated: Math.round(section.textCompleted),
     validated: Math.round(section.textValidated),
     total: 100,
     percentagesOnly: true,
+    audioRecorded: Math.round(section.audioCompleted),
+    audioValidated: Math.round(section.audioValidated),
+    progressView: serverView,
   }))
 
   return (

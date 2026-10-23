@@ -40,6 +40,23 @@ export class TypingAssist {
     return this.editor(cellId).getByTestId("ghost-text")
   }
 
+  /**
+   * Ghost text is off by default (AQU-2117): turn the "Suggest next words"
+   * switch on through View settings, the way a translator would, and close
+   * the menu again. Asserts the default on the way, so a regression to
+   * on-by-default fails here rather than silently passing.
+   */
+  async enableGhostText(): Promise<void> {
+    await this.ws.openViewSettingsMenu()
+    const toggle = this.page.getByRole("switch", { name: "Suggest next words" })
+    await expect(toggle).toBeVisible()
+    await expect(toggle).not.toBeChecked()
+    await toggle.click()
+    await expect(toggle).toBeChecked()
+    await this.page.keyboard.press("Escape")
+    await expect(toggle).toBeHidden()
+  }
+
   /** "Next unfinished" scrolls to the first untranslated cell and focuses its editor. */
   async openNextUnfinished(cellId: string): Promise<Locator> {
     await this.ws.jumpNextUnfinished()

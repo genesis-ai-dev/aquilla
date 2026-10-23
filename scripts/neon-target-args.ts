@@ -17,6 +17,7 @@ export type NeonTargetCommand =
   | "prepare-comments-key"
   | "backfill-progress"
   | "backfill-activity"
+  | "backfill-book-codes"
   | "backfill-lanes"
   | "backfill-lane-batch"
   | "repair-lane-grants"
@@ -24,10 +25,12 @@ export type NeonTargetCommand =
   | "verify-lanes"
   | "seed-extract"
   | "scrub-integrations"
+  | "copy-dev-audio"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
   if (command === "backfill-activity") return "scripts/neon-backfill-activity.ts"
+  if (command === "backfill-book-codes") return "scripts/neon-backfill-book-codes.ts"
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
@@ -38,6 +41,9 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "seed-extract") return "scripts/seed-extract.ts"
   // AQU-1775: strip the integration tokens a production copy carries.
   if (command === "scrub-integrations") return "scripts/neon-scrub-integrations.ts"
+  // AQU-2114: copy one project's prod audio into the dev bucket, so the rows
+  // the dev refresh restored have bytes behind them.
+  if (command === "copy-dev-audio") return "scripts/neon-copy-dev-audio.ts"
   return "scripts/neon-migrate.ts"
 }
 
@@ -55,6 +61,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "repair-lane-grants" ||
     command === "prune-phantom-voices" ||
     command === "seed-extract" ||
-    command === "scrub-integrations"
+    command === "scrub-integrations" ||
+    command === "copy-dev-audio"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

@@ -52,7 +52,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
 import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
-interface FileStats { translated: number; validated: number; total: number }
+// AQU-2111: the shared shape, which now carries the audio pair too — a local
+// re-declaration would have dropped it silently on the way to FileRow.
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 
 /** What the Reset-order confirmation needs to remember while it is open: which
  *  group is being reset, how to label it, and the writes that will clear it. */
@@ -167,6 +169,14 @@ interface Props {
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
   /**
+   * AQU-2118: the target lane every per-file `/progress` read here names —
+   * the lane the editor's switcher shows, so an expanded file's chapters and
+   * the hover prefetch report that lane and not the project's default. '' is
+   * the default lane. The collapsed bars come from `fileProgress`, which the
+   * caller already reads for this lane.
+   */
+  lane?: string
+  /**
    * AQU-1531: lets another surface put the keyboard cursor in the filter box —
    * the Agent workbench's "Choose file" button, whose only other effect (show
    * the Files panel) is invisible when the panel is already showing.
@@ -212,6 +222,7 @@ export function ExpandableFileList({
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
+  lane = "",
   filterFocus,
   canReorderFiles = false,
   onReorderFiles,
@@ -249,9 +260,9 @@ export function ExpandableFileList({
   // the prefetch still happens, just behind the cells.
   useEffect(() => {
     if (deferSectionProgress) return
-    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
-    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
-  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, projectId])
+    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile, lane)
+    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile, lane)
+  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, lane, projectId])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -608,8 +619,8 @@ export function ExpandableFileList({
                           insertBefore={preview !== null && preview.refusal === null && preview.toPosition === position}
                         >
                           <div
-                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
-                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
+                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                           >
                           <FileRow
                             file={file}
@@ -662,6 +673,7 @@ export function ExpandableFileList({
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}
+                              lane={lane}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

@@ -8,7 +8,20 @@ import { progressPercent } from "@/lib/progress/progress-percent"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 
 interface StatusBarProps {
-  progress: { total: number; translated: number; validated: number }
+  /**
+   * AQU-2111: `recorded` / `audioValidated` are OPTIONAL and undefined means
+   * "this file has no audio figures here" — an older sync-worker, or the live
+   * count before the attachment map lands. The footer draws the audio half
+   * only when it has one, because a fabricated 0 would read as "nothing
+   * recorded" over a file where every line has a take.
+   */
+  progress: {
+    total: number
+    translated: number
+    validated: number
+    recorded?: number
+    audioValidated?: number
+  }
   getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
   projectHealth: number
   staleSourceCount?: number
@@ -27,15 +40,24 @@ export function StatusBar({
 }: StatusBarProps) {
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
+  const recorded = progress.recorded ?? 0
+  const audioValidated = progress.audioValidated ?? 0
   const unvalidated = translated - validated
+  const unvalidatedAudio = recorded - audioValidated
+  // AQU-2111: the display rule AQU-2110 settled, in the footer. A file with
+  // recordings and no target text reports its audio instead of "0 translated
+  // (0%)"; a file with both reports text as before and gains the audio
+  // badges; a text-only file is untouched.
+  const showAudio = recorded > 0
+  const audioOnly = showAudio && translated === 0
   // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
-  const fraction = progressPercent(translated, total) / 100
+  const fraction = progressPercent(audioOnly ? recorded : translated, total) / 100
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each
   // formatted numeric token so its digits/punctuation can't be reordered.
   const totalDisplay = bidiIsolate(formatNumber(total, locale))
-  const translatedDisplay = bidiIsolate(formatNumber(translated, locale))
+  const translatedDisplay = bidiIsolate(formatNumber(audioOnly ? recorded : translated, locale))
   const pctDisplay = bidiIsolate(`(${formatPercent(fraction, locale)})`)
 
   return (
@@ -56,7 +78,7 @@ export function StatusBar({
       </DecayBreakdown>
       <span className="flex items-center gap-2">
         <span>
-          {t("workspace.statusBar.summary", {
+          {t(audioOnly ? "workspace.statusBar.audioSummary" : "workspace.statusBar.summary", {
             total: totalDisplay,
             translated: translatedDisplay,
             pct: pctDisplay,
@@ -80,6 +102,24 @@ export function StatusBar({
             <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textValidated}`} />
             {t("terminology.livingMemory.validatedCount", {
               count: bidiIsolate(formatNumber(validated, locale)),
+            })}
+          </Badge>
+        )}
+        {/* AQU-2111: the audio twins, in the palette's magenta tones — light
+            for recorded but not validated, dark for audio validated. */}
+        {showAudio && unvalidatedAudio > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated-audio">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
+            {t("workspace.statusBar.unvalidatedAudioBadge", {
+              count: bidiIsolate(formatNumber(unvalidatedAudio, locale)),
+            })}
+          </Badge>
+        )}
+        {showAudio && audioValidated > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated-audio">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioValidated}`} />
+            {t("workspace.statusBar.audioValidatedBadge", {
+              count: bidiIsolate(formatNumber(audioValidated, locale)),
             })}
           </Badge>
         )}

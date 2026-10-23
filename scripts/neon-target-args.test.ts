@@ -9,6 +9,10 @@ describe("neon-target hands the backfill its flags", () => {
       .toEqual(["scripts/neon-backfill-progress.ts", "--missing-books"])
     expect(childArgs("backfill-activity", ["--missing-only", "--dry-run"]))
       .toEqual(["scripts/neon-backfill-activity.ts", "--missing-only", "--dry-run"])
+    // AQU-1196: --apply is the book-code backfill's write gate — dropping it
+    // would turn the production write into a silent dry run.
+    expect(childArgs("backfill-book-codes", ["--apply", "--verbose"]))
+      .toEqual(["scripts/neon-backfill-book-codes.ts", "--apply", "--verbose"])
     // AQU-1240: the lane backfill takes --apply / --project / --limit the same way.
     expect(childArgs("backfill-lanes", ["--apply", "--project", "p1", "--limit", "5"]))
       .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1", "--limit", "5"])
@@ -28,6 +32,10 @@ describe("neon-target hands the backfill its flags", () => {
     // AQU-1775: --dry-run must reach the scrub, or a rehearsal deletes for real.
     expect(childArgs("scrub-integrations", ["--dry-run"]))
       .toEqual(["scripts/neon-scrub-integrations.ts", "--dry-run"])
+    // AQU-2114: --project names the one project to copy and --dry-run keeps the
+    // rehearsal read-only; dropping either copies the wrong thing, for real.
+    expect(childArgs("copy-dev-audio", ["--project", "p1", "--dry-run"]))
+      .toEqual(["scripts/neon-copy-dev-audio.ts", "--project", "p1", "--dry-run"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

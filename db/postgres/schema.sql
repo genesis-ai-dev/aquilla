@@ -995,6 +995,11 @@ CREATE TABLE cell_audio (
     reference_audio_id TEXT,
     duration_ms        BIGINT,
     timings_json       TEXT,
+    -- Two-step transcription (0186): what ASR heard, kept through corrections,
+    -- and the provenance of an AI cleanup while the transcript is still the AI's.
+    asr_text           TEXT,
+    asr_model          TEXT,
+    transcript_ai      TEXT,
     selected           INTEGER NOT NULL DEFAULT 0,
     deleted            INTEGER NOT NULL DEFAULT 0,
     event_id           TEXT NOT NULL,

@@ -76,6 +76,24 @@ describe("JsonImportPanel", () => {
     expect(importFile).not.toHaveBeenCalled()
   })
 
+  // AQU-2120: the key picker used to drop the collision screen's answer, so
+  // "Update existing" quietly created a second en.json.
+  it("re-imports into the existing file the collision screen chose", async () => {
+    renderPanel({ reimportTarget: { id: "existing-en", name: "en.json" } })
+    await user.click(await screen.findByRole("button", { name: "Import selected keys" }))
+
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.get("en.json")).toBe("existing-en")
+  })
+
+  it("imports fresh when no re-import was chosen", async () => {
+    renderPanel()
+    await user.click(await screen.findByRole("button", { name: "Import selected keys" }))
+
+    await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+    expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds).toBeUndefined()
+  })
+
   it("imports only the selected values, and keeps the original document as the side-car", async () => {
     const { onImported } = renderPanel()
     await user.click(await screen.findByRole("checkbox", { name: "app.legal" }))

@@ -1,7 +1,13 @@
 // Project-scoped file read routes.
 //
-//   GET /api/v1/projects/:projectId/files            (?trash=1, ?limit=&cursor=)
-//   GET /api/v1/projects/:projectId/files/:fileId
+//   GET /api/v1/projects/:projectId/files            (?trash=1, ?limit=&cursor=, ?lane=)
+//   GET /api/v1/projects/:projectId/files/:fileId    (?lane=)
+//
+// AQU-2118: `?lane=<tag>` pins the FILLED / APPROVED counters (and, AQU-2111,
+// the audio pair beside them) to that target lane's progress row — the
+// sidebar passes the lane its switcher shows.
+// Without it the counters stay pinned to the project's bridge / only lane,
+// byte-identical to before.
 //
 // The listing returns { files, nextCursor }. `limit` (max 500) turns on keyset
 // paging; `nextCursor` is null when there is no further page. Without `limit`
@@ -24,8 +30,8 @@ import { loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { sourceLaneIdSql, targetLaneIdSql } from "../../../db/shared/lane-sql"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { notHiddenFileSql } from "../../../db/shared/counted-files"
-import { legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
-import { visibleLanesForRead } from "./lane-read-wall"
+import { lanesForRequestedTag, legacyTagsForVisibleLanes } from "../../../src/lib/lanes/read-wall"
+import { laneTagAllowed, loadTargetLanes, visibleLanesForRead } from "./lane-read-wall"
 import { effectiveThresholdSql } from '../../../db/shared/validation-threshold'
 
 export interface FilesReadEnv {
@@ -47,6 +53,11 @@ interface FileRowRaw {
   cell_count: number
   approved_count: number
   filled_count: number
+  /** AQU-2111: the audio twin of the pair above, for this file's pinned lane.
+   *  Zero when the file has no projection row — `files` carries no audio
+   *  rollup to fall back on, exactly as the per-file progress read has it. */
+  audio_count: number
+  audio_validated_count: number
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
@@ -115,6 +126,18 @@ interface FileSummary {
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
   filledCount: number
+  /**
+   * AQU-2111: lines with a take of their own, and lines whose weakest chosen
+   * take meets the project's AUDIO validation requirement.
+   *
+   * Same rules as the per-file progress read and the Dashboard's audio tiles:
+   * the weakest selected dub take decides, an imported source clip is not a
+   * recording, and the structural-cell policy subtracts from both halves. An
+   * audio-only project reads 0 translated here and always will — these are the
+   * numbers that say how much of it is done.
+   */
+  audioCount: number
+  audioValidatedCount: number
   wordCount: number
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
@@ -183,6 +206,8 @@ function mapRow(row: FileRowRaw): FileSummary {
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
+    audioCount: row.audio_count,
+    audioValidatedCount: row.audio_validated_count,
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
@@ -246,6 +271,17 @@ export async function handleFilesReadRequest(
   // see, and the list sorts by it.
   const grantedTags = await grantedLaneTagsForFiles(env, projectId, auth.claims)
 
+  // AQU-2118: an explicit `?lane=<tag>` pins the FILLED / APPROVED counters
+  // below to that lane's progress row instead of the legacy pin. The tag is
+  // resolved to its lane id here and BOUND into the `thr` CTE, never spliced.
+  // `pinnedLane` is null when no lane was named (the legacy pin), that lane's
+  // id, or '' for a tag no lane carries or one the lane read wall hides from
+  // this caller — which matches no row and takes no files-counter fallback,
+  // so filled and approved read 0 (see resolveLanePin).
+  const requestedLane = (url.searchParams.get("lane") ?? "").trim()
+  const pin = requestedLane ? await resolveLanePin(env, projectId, auth.claims, requestedLane) : null
+  const pinnedLane = pin === null ? null : pin.laneId
+
   // Threshold-aware approved count from the default lane's progress row.
   // `files.filled_count` and `files.approved_count` sum every target lane.
   // A missing progress row uses them only when the project has at most one
@@ -294,6 +330,20 @@ export async function handleFilesReadRequest(
             THEN GREATEST(0, f.filled_count - ${less("f.structural_filled_count")})
             ELSE 0
           END AS filled_count, ` +
+    // AQU-2111: the audio pair, off the same pinned-lane row. There is no
+    // `files` counter to fall back on — the projection is the only source, as
+    // the per-file progress read already documents — so a file with no row
+    // reads 0, which is what that read reports for it too.
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, p.audio_count - ${less("p.structural_audio_count")})
+            ELSE 0
+          END AS audio_count, ` +
+    // AQU-490: validated is the histogram mass at or above the project's AUDIO
+    // threshold, never the stored `audio_validated_count` (fixed at one vote).
+    `CASE WHEN p.file_id IS NOT NULL
+            THEN GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")})
+            ELSE 0
+          END AS audio_validated_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at, " +
     "(b.file_id IS NOT NULL) AS has_original_source"
   // Anchored on the bound project id rather than on either table, so the CTE
@@ -303,19 +353,29 @@ export async function handleFilesReadRequest(
   const thresholdCte =
     // AQU-1771: project → org → 1, from the generated columns.
     `WITH thr AS (SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n, ` +
+    // AQU-2111: resolved in the same CTE as the text threshold, and project →
+    // org → 1 by the same rule. A project that asks for two listens must not
+    // have its sidebar call a one-vote line validated.
+    `${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na, ` +
     "COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural, " +
-    "(SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
-    "FROM (SELECT ?::text AS id) q " +
+    // AQU-2118: the lane `?lane=` named, read by the progress join below. The
+    // files-counter fallback is for the lane whose fill that sum IS — the
+    // project's only target lane, named or not — and never for a '' pin,
+    // which names none.
+    "q.pinned_lane AS pinned_lane_id, " +
+    "COALESCE(q.pinned_lane, 'x') <> '' AND (SELECT COUNT(*) FROM lanes l WHERE l.project_id = q.id AND l.role = 'target') <= 1 AS one_target_lane " +
+    "FROM (SELECT ?::text AS id, ?::text AS pinned_lane) q " +
     "LEFT JOIN project_settings ps ON ps.project_id = q.id " +
     "LEFT JOIN projects pr ON pr.id = q.id " +
     "LEFT JOIN org_settings os ON os.org_id = pr.org_id)"
   const joins =
-    // AQU-538: file_section_progress now materializes one row per lane. The
-    // files list is a cross-project legacy surface and takes no `?lane=`, so
-    // its FILLED / APPROVED counters stay pinned to one lane so that N=1 stays
-    // byte-identical and an N>1 file does not fan out into one listing row per
-    // lane. (Showing the ACTIVE lane's counters here is AQU-1601's, once the
-    // surface learns which lane that is.)
+    // AQU-538: file_section_progress now materializes one row per lane. Without
+    // `?lane=` the FILLED / APPROVED counters stay pinned to one lane so that
+    // N=1 stays byte-identical and an N>1 file does not fan out into one
+    // listing row per lane. AQU-2118: `?lane=<tag>` names the lane instead —
+    // the sidebar passes the one its switcher shows — and that pin is bound
+    // into `thr`, which is why `thr` is joined FIRST below (one row, ON true;
+    // its place in the join order changes nothing else).
     //
     // AQU-1599: pinned by LANE ID, not `target_lang = ''`. The source lane's
     // row carries '' there too — its `legacy_tag` is NULL — so the old pin
@@ -328,14 +388,18 @@ export async function handleFilesReadRequest(
     // here, so the file is not repeated once per lane. Neither join below adds
     // a bind: each subquery reads `f.project_id`, and the bridge's tag is a
     // literal.
-    ` LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = COALESCE(${targetLaneIdSql("f.project_id", "''")}, ` +
+    " LEFT JOIN thr ON true" +
+    ` LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = COALESCE(thr.pinned_lane_id, ${targetLaneIdSql("f.project_id", "''")}, ` +
     "(SELECT CASE WHEN COUNT(*) = 1 THEN MIN(l.id) END FROM public.lanes l WHERE l.project_id = f.project_id AND l.role = 'target'))" +
     // The lane-independent half of the same row set: the source lane's.
     ` LEFT JOIN file_section_progress ps ON ps.project_id = f.project_id AND ps.file_id = f.id AND ps.scope = 'file' AND ps.section_key = '' AND ps.lane_id = ${sourceLaneIdSql("f.project_id")}` +
-    " LEFT JOIN thr ON true" +
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
     // AQU-1083: the structural share of the same buckets, for the subtraction.
     " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) sa ON true" +
+    // AQU-2111: the audio histogram and its structural share, at the AUDIO
+    // threshold.
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) aa ON true" +
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.structural_audio_validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.na, 1)) saa ON true" +
     " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
   const orderBy = "ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC, f.id ASC"
 
@@ -349,10 +413,10 @@ export async function handleFilesReadRequest(
       : columns.replace("f.last_edit_at", `${visibleLastEditSql(tagList.length)} AS last_edit_at`)
     const sql = `${thresholdCte} SELECT ${fileColumns} FROM files f${joins} WHERE f.project_id = ? AND f.id = ?`
     const row = await env.AQUILLA_PG.prepare(sql)
-      .bind(projectId, ...tagList, projectId, fileId)
+      .bind(projectId, pinnedLane, ...tagList, projectId, fileId)
       .first<FileRowRaw>()
     if (!row) return new Response("file not found", { status: 404 })
-    await hideUngrantedDefaultLaneCounts(env, projectId, auth.claims, [row])
+    await settleLaneCounts(env, projectId, auth.claims, pin, [row])
     return Response.json({ file: mapRow(row) })
   }
 
@@ -381,12 +445,13 @@ export async function handleFilesReadRequest(
     ? `(${notHiddenFileSql("f")} OR f.role = 'extension-data')`
     : notHiddenFileSql("f")
   const where: string[] = [`f.project_id = ?`, `f.${tombstoneFilter}`, hiddenFilter]
-  // Unrestricted: [threshold project, page project]. Restricted: the lane
-  // tags bind inside the clock subquery, which sits between those two.
+  // Unrestricted: [threshold project, pinned lane, page project]. Restricted:
+  // the lane tags bind inside the clock subquery, which sits between the
+  // pinned lane and the page project.
   const tagList = grantedTags === null ? [] : [...grantedTags]
   const binds: unknown[] = grantedTags === null
-    ? [projectId, projectId]
-    : [projectId, ...tagList, projectId]
+    ? [projectId, pinnedLane, projectId]
+    : [projectId, pinnedLane, ...tagList, projectId]
   const clock = grantedTags === null ? "f.last_edit_at" : "f.visible_last_edit"
   if (cursor) {
     if (cursor.lastEditAt === null) {
@@ -429,7 +494,7 @@ export async function handleFilesReadRequest(
     .all<FileRowRaw>()
   const rows = result.results
   const page = limit !== null && rows.length > limit ? rows.slice(0, limit) : rows
-  await hideUngrantedDefaultLaneCounts(env, projectId, auth.claims, page)
+  await settleLaneCounts(env, projectId, auth.claims, pin, page)
   const last = page[page.length - 1]
   const nextCursor =
     limit !== null && rows.length > limit && last
@@ -478,6 +543,67 @@ function visibleLastEditSql(tagCount: number): string {
 }
 
 /**
+ * AQU-2118: what `?lane=<tag>` pins the counters to.
+ *
+ * `laneId` is the named lane's id, or '' when no lane of this project carries
+ * the tag: that matches no progress row and takes no files-counter fallback,
+ * so filled and approved read 0 over the source denominator, as `/progress`
+ * reads an unknown tag (AQU-1977). `hidden` is the lane read wall refusing the
+ * lane to this caller (AQU-730): the listing is still served, every counter
+ * zeroed, as `/progress` answers it. The tag matches a lane the way the wall
+ * matches one — by legacy tag or display name, exactly once.
+ */
+interface LanePin {
+  laneId: string
+  hidden: boolean
+}
+
+async function resolveLanePin(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  lane: string,
+): Promise<LanePin> {
+  if (!env.AQUILLA_PG) return { laneId: "", hidden: true }
+  const matches = lanesForRequestedTag(await loadTargetLanes(env.AQUILLA_PG, projectId), lane)
+  const match = matches.length === 1 ? matches[0] : undefined
+  if (!match) return { laneId: "", hidden: false }
+  const visible = visibleLanesForRead(env.LANE_READ_WALL, claims)
+  if (!laneTagAllowed(visible, match.id)) return { laneId: "", hidden: true }
+  return { laneId: match.id, hidden: false }
+}
+
+/**
+ * The counters a response carries once the page is cut. No lane named: the
+ * legacy pin, with the read wall's replacement below. A named lane the wall
+ * allowed already carries its own numbers. A hidden one reads 0 of 0.
+ */
+async function settleLaneCounts(
+  env: FilesReadEnv,
+  projectId: string,
+  claims: SyncTokenClaims,
+  pin: LanePin | null,
+  rows: FileRowRaw[],
+): Promise<void> {
+  if (pin === null) return hideUngrantedDefaultLaneCounts(env, projectId, claims, rows)
+  if (pin.hidden) zeroCounters(rows)
+}
+
+function zeroCounters(rows: FileRowRaw[]): void {
+  for (const row of rows) {
+    row.cell_count = 0
+    row.filled_count = 0
+    row.approved_count = 0
+    // AQU-2111: the audio pair is lane-scoped exactly as the text pair is.
+    // Leaving it behind would publish, to a caller walled off from every
+    // target lane (or from the one `?lane=` named), the one set of counters
+    // that is not zero on an audio-only project.
+    row.audio_count = 0
+    row.audio_validated_count = 0
+  }
+}
+
+/**
  * The files list's counters are pinned to the default lane so a project with
  * several lanes does not fan out into one row per lane. That pin is the
  * default lane's counts. When the wall is on and this caller was not granted
@@ -502,11 +628,7 @@ async function hideUngrantedDefaultLaneCounts(
   if (tags.has("")) return
 
   if (tags.size === 0) {
-    for (const row of rows) {
-      row.cell_count = 0
-      row.filled_count = 0
-      row.approved_count = 0
-    }
+    zeroCounters(rows)
     return
   }
 
@@ -519,6 +641,7 @@ async function hideUngrantedDefaultLaneCounts(
   const { results } = await env.AQUILLA_PG.prepare(
     `WITH thr AS (
        SELECT ${effectiveThresholdSql('ps.validation_count', 'os.validation_count')} AS n,
+              ${effectiveThresholdSql('ps.validation_count_audio', 'os.validation_count_audio')} AS na,
               COALESCE(ps.count_structural, os.count_structural) = 'false' AS exclude_structural
          FROM (SELECT ?::text AS id) q
          LEFT JOIN project_settings ps ON ps.project_id = q.id
@@ -528,7 +651,9 @@ async function hideUngrantedDefaultLaneCounts(
      SELECT p.file_id AS file_id,
             MAX(GREATEST(0, p.total_count - ${less("p.structural_count")}))::int AS cell_count,
             SUM(GREATEST(0, p.filled_count - ${less("p.structural_filled_count")}))::int AS filled_count,
-            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count
+            SUM(GREATEST(0, COALESCE(a.approved, 0) - ${less("COALESCE(sa.approved, 0)")}))::int AS approved_count,
+            SUM(GREATEST(0, p.audio_count - ${less("p.structural_audio_count")}))::int AS audio_count,
+            SUM(GREATEST(0, COALESCE(aa.approved, 0) - ${less("COALESCE(saa.approved, 0)")}))::int AS audio_validated_count
        FROM file_section_progress p
        JOIN public.lanes pl
          ON pl.project_id = p.project_id AND pl.id = p.lane_id AND pl.role = 'target'
@@ -543,6 +668,16 @@ async function hideUngrantedDefaultLaneCounts(
            FROM jsonb_each_text(p.structural_validator_histogram) entry
           WHERE entry.key::integer >= COALESCE(thr.n, 1)
        ) sa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) aa ON true
+       LEFT JOIN LATERAL (
+         SELECT SUM(entry.value::integer)::integer AS approved
+           FROM jsonb_each_text(p.structural_audio_validator_histogram) entry
+          WHERE entry.key::integer >= COALESCE(thr.na, 1)
+       ) saa ON true
       WHERE p.project_id = ?
         AND p.scope = 'file' AND p.section_key = ''
         AND p.file_id IN (${filePlaceholders})
@@ -550,7 +685,14 @@ async function hideUngrantedDefaultLaneCounts(
       GROUP BY p.file_id`,
   )
     .bind(projectId, projectId, ...fileIds, ...tagList)
-    .all<{ file_id: string; cell_count: number; filled_count: number; approved_count: number }>()
+    .all<{
+      file_id: string
+      cell_count: number
+      filled_count: number
+      approved_count: number
+      audio_count: number
+      audio_validated_count: number
+    }>()
 
   const byFile = new Map((results ?? []).map((row) => [row.file_id, row]))
   for (const row of rows) {
@@ -558,6 +700,8 @@ async function hideUngrantedDefaultLaneCounts(
     row.cell_count = counts ? Number(counts.cell_count) || 0 : 0
     row.filled_count = counts ? Number(counts.filled_count) || 0 : 0
     row.approved_count = counts ? Number(counts.approved_count) || 0 : 0
+    row.audio_count = counts ? Number(counts.audio_count) || 0 : 0
+    row.audio_validated_count = counts ? Number(counts.audio_validated_count) || 0 : 0
   }
 }
 

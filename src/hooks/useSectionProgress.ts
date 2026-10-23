@@ -17,9 +17,10 @@ export function useSectionProgress(
   validationCount: number,
   getTokenForFile: ((fileId: string) => Promise<string | null>) | undefined,
   countStructural = true,
+  lane = '',
 ): SectionProgress[] | null {
   const state = useSectionProgressState(
-    projectId, fileId, validationCount, getTokenForFile, countStructural,
+    projectId, fileId, validationCount, getTokenForFile, countStructural, lane,
   )
   return state.sections
 }
@@ -33,6 +34,11 @@ export function useSectionProgress(
  * answer, and nothing in the response says which policy produced it. The
  * default counts headings, which is what every caller meant before the
  * setting existed.
+ *
+ * AQU-2118: `lane` is the target lane the sections are read for — the one the
+ * sidebar's switcher shows. Progress is materialized per lane (AQU-538), and
+ * a read that names none gets the project's own default lane, which is not
+ * the open one on a multi-lane project. '' is the default lane, as everywhere.
  */
 export function useSectionProgressState(
   projectId: string | null,
@@ -40,8 +46,9 @@ export function useSectionProgressState(
   validationCount: number,
   getTokenForFile: ((fileId: string) => Promise<string | null>) | undefined,
   countStructural = true,
+  lane = '',
 ): { sections: SectionProgress[] | null; error: boolean; retry: () => void } {
-  const resource = useFileProgressResource(projectId, fileId, getTokenForFile)
+  const resource = useFileProgressResource(projectId, fileId, getTokenForFile, lane)
   // Both policies alter every number in the cached snapshot without touching
   // the file's revision, so a flip has to force the refetch itself — the ETag
   // carries each one, but only a request can discover that.
@@ -52,8 +59,8 @@ export function useSectionProgressState(
     const changed =
       previous.validationCount !== validationCount
       || previous.countStructural !== countStructural
-    if (changed && projectId && fileId) invalidateFileProgress(projectId, fileId)
-  }, [fileId, projectId, validationCount, countStructural])
+    if (changed && projectId && fileId) invalidateFileProgress(projectId, fileId, lane)
+  }, [fileId, lane, projectId, validationCount, countStructural])
   const sections = resource.progress
     ? resource.progress.sections.map((section) => ({
         label: section.key,
@@ -61,10 +68,21 @@ export function useSectionProgressState(
         textCompleted: percent(section.filledCount, section.totalCount),
         textValidated: percent(section.validatedCount, section.totalCount),
         textValidationLevels: section.validationLevels.map((count) => percent(count, section.totalCount)),
-        audioCompleted: 0,
-        audioValidated: 0,
+        // AQU-2112: the server has always sent these two beside the text
+        // counts — lines with a take of their own, and those whose every
+        // chosen take meets the project's audio validation requirement — and
+        // this mapper threw them away for a hardcoded zero. That is why an
+        // audio-only file expanded in the sidebar read 0% however many of its
+        // takes were signed off.
+        //
+        // Absent (an older worker, or the editor's own optimistic snapshot,
+        // which knows nothing about audio) still reads as zero WITH
+        // `hasAudio` false, so a file with no recordings is unchanged: the
+        // flag, not the count, is what says audio is being measured here.
+        audioCompleted: percent(section.audioCount ?? 0, section.totalCount),
+        audioValidated: percent(section.audioValidatedCount ?? 0, section.totalCount),
         audioValidationLevels: [],
-        hasAudio: false,
+        hasAudio: (section.audioCount ?? 0) > 0,
       }))
     : resource.loading ? null : []
   return { sections, error: resource.error, retry: resource.retry }

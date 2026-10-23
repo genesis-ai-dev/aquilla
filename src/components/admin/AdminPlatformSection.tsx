@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AdminSettingsSection } from "./AdminSettingsSection"
 import { AdminCreditsSection } from "./AdminCreditsSection"
@@ -11,12 +11,26 @@ import { AdminBillingSection } from "./AdminBillingSection"
  * top-level tab bar stays about "what's happening" vs. "what I configure".
  */
 type Sub = "settings" | "credits" | "billing"
+const SUBS: readonly Sub[] = ["settings", "credits", "billing"]
 
 export function AdminPlatformSection({ jwt }: { jwt: string }) {
-  const [sub, setSub] = useState<Sub>("settings")
+  // `?platform=` keeps the sub-tab across reloads and in shared links; changing
+  // it keeps the console tab and drops the billing list's search keys.
+  const [params, setParams] = useSearchParams()
+  const subParam = params.get("platform")
+  const sub: Sub = SUBS.includes(subParam as Sub) ? (subParam as Sub) : "settings"
   return (
     <div className="space-y-4">
-      <Tabs value={sub} onValueChange={(v) => setSub(v as Sub)}>
+      <Tabs
+        value={sub}
+        onValueChange={(v) => {
+          const next = new URLSearchParams()
+          const tab = params.get("tab")
+          if (tab) next.set("tab", tab)
+          if (v !== "settings") next.set("platform", String(v))
+          setParams(next)
+        }}
+      >
         <TabsList>
           <TabsTrigger value="settings">AI settings</TabsTrigger>
           <TabsTrigger value="credits">AI credits</TabsTrigger>

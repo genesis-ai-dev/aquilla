@@ -12,6 +12,35 @@ export interface FileStats {
   translated: number
   validated: number
   total: number
+  /**
+   * AQU-2111: lines with a take of their own, and lines whose audio meets the
+   * project's audio validation requirement.
+   *
+   * OPTIONAL, and undefined means "not known here" rather than "none" — the
+   * same contract `ProgressCounts` keeps for the same pair. A sync-worker from
+   * before AQU-2111 sends neither, and an audio-only file whose figures were
+   * fabricated as 0 would read as nothing-recorded, which is the very bug this
+   * pair exists to fix. A caller draws the audio part only when it has them.
+   */
+  recorded?: number
+  audioValidated?: number
+}
+
+/** Does this file have audio worth drawing? Undefined counts never do. */
+export function hasAudioProgress(stats: Pick<FileStats, "recorded"> | undefined): boolean {
+  return (stats?.recorded ?? 0) > 0
+}
+
+/**
+ * Does this file's progress live on its audio alone?
+ *
+ * The display rule AQU-2110 settled and AQU-2111 applies here: a file with
+ * recordings and no target text in the lane being viewed shows its audio
+ * figures ONLY, so an audio-only project never reads "0% translated" beside
+ * work that is done. A file with both shows text as before and gains audio.
+ */
+export function isAudioOnlyProgress(stats: FileStats | undefined): boolean {
+  return hasAudioProgress(stats) && (stats?.translated ?? 0) === 0
 }
 
 /** Maps server file rollups (GET /projects/:id/files) to the sidebar's FileStats shape. */
@@ -20,7 +49,16 @@ export function fileSummariesToProgress(
 ): Map<string, FileStats> {
   const map = new Map<string, FileStats>()
   for (const s of summaries) {
-    map.set(s.fileId, { translated: s.filledCount, validated: s.approvedCount, total: s.cellCount })
+    map.set(s.fileId, {
+      translated: s.filledCount,
+      validated: s.approvedCount,
+      total: s.cellCount,
+      // Spread rather than assigned, so an older worker's absent pair stays
+      // absent instead of becoming an explicit `undefined` that a caller
+      // merging objects could not tell from a deliberate one.
+      ...(s.audioCount == null ? {} : { recorded: s.audioCount }),
+      ...(s.audioValidatedCount == null ? {} : { audioValidated: s.audioValidatedCount }),
+    })
   }
   return map
 }
@@ -36,6 +74,42 @@ export function mergeFileProgress(
   live: ReadonlyMap<string, FileStats>,
 ): Map<string, FileStats> {
   const merged = new Map(base)
-  for (const [fileId, stats] of live) merged.set(fileId, stats)
+  for (const [fileId, stats] of live) {
+    // AQU-2111: the TEXT half is wholly the live entry's, as it always was.
+    // The audio half is only taken from it when it has one: the live count is
+    // derived from an attachment map that is fetched separately and arrives
+    // after the cells do, so a blanket overwrite would blank an audio-only
+    // file's bar on open — the server snapshot is the only thing that knows
+    // those figures until then.
+    const previous = merged.get(fileId)
+    merged.set(fileId, stats.recorded == null && previous?.recorded != null
+      ? { ...stats, recorded: previous.recorded, audioValidated: previous.audioValidated }
+      : stats)
+  }
   return merged
+}
+
+/**
+ * Put a file's audio pair onto the text figures a surface is about to draw.
+ *
+ * AQU-2132: one rule for every surface that reports the OPEN file, because the
+ * editor footer had its own and they disagreed. `stats` is the merged entry —
+ * the server's per-file rollup with the live, cell-derived one on top, as
+ * `mergeFileProgress` composes them — so the pair is the server's until the
+ * attachment map lands and the live count's afterwards. The footer used to
+ * read the live count alone and fall through to the text pair when it was not
+ * there yet, which is why an audio-only file reported `0 translated` and drew
+ * no audio half while the sidebar row beside it read the same file correctly.
+ *
+ * `recorded == null` means no audio figures from anywhere — a file the server
+ * described before it sent the pair at all — and leaves `text` untouched
+ * rather than fabricating `0 recorded`, which is the distinction the whole
+ * optional pair exists to keep.
+ */
+export function withAudioProgress<T extends { translated: number; validated: number; total: number }>(
+  text: T,
+  stats: FileStats | undefined,
+): T & { recorded?: number; audioValidated?: number } {
+  if (stats?.recorded == null) return text
+  return { ...text, recorded: stats.recorded, audioValidated: stats.audioValidated ?? 0 }
 }

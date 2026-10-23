@@ -179,6 +179,7 @@ import {
   timelinePlayReady,
   ruleFixPreflight,
   fetchDeletedFilesWithProjectToken,
+  pushedRollupProgress,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -427,6 +428,7 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
+import { TranscribeEditor } from "@/components/transcribe/TranscribeEditor"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -494,10 +496,12 @@ import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIn
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
-import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
+import { fileSummariesToProgress, mergeFileProgress, withAudioProgress, type FileStats } from "@/lib/progress/file-summary-progress"
+import { liveAudioProgress } from "@/lib/progress/live-audio-progress"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
+import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -508,6 +512,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
+import { audioProgressCellIds } from "@/lib/progress/audio-progress-cells"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -1817,6 +1822,10 @@ export function ProjectWorkspace() {
     () => (project?.lanes != null ? laneIdForTag(activeLane, laneRows) : null),
     [project?.lanes, activeLane, laneRows],
   )
+  // AQU-2118: the lane the sidebar's progress reads are for, as the
+  // long-lived socket handler below sees it.
+  const activeLaneRef = useRef(activeLane)
+  activeLaneRef.current = activeLane
   // AQU-1326: opening a file used to fan out every workspace data hook at
   // mount — audit stats, comments, per-file audio attachments, the project-wide
   // progress rollup — all racing the cell stream for the same connection pool.
@@ -1920,6 +1929,48 @@ export function ProjectWorkspace() {
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
+  /**
+   * AQU-2111: how many sign-offs a recording needs on this project — project →
+   * org → 1, the same number the line's audio control and the server's audio
+   * histogram read, so the footer cannot call a line validated that the gutter
+   * calls outstanding.
+   */
+  const audioValidationRequirement = project ? readValidationCountAudio(project) : 1
+
+  /**
+   * AQU-490: the open file's audio, read UNCONDITIONALLY — for the two bulk
+   * audio-validation actions, and (AQU-2111) for the live audio figures the
+   * open file's sidebar row and the editor footer draw.
+   *
+   * A second read of one file looks redundant and is not. The gated map
+   * further down (`workspaceAudioByCellId`) feeds the timeline, the seek
+   * context, attachment warming and the transcribe/synth counts, none of
+   * which the text lens wants — and widening it would make "Transcribe all"
+   * and "Synth all" appear in a lens where they have never been offered.
+   * Sam's call when shown the trade (2026-09-21): keep those hidden, so audio
+   * validation gets its own read rather than dragging four other surfaces
+   * along with it.
+   *
+   * Bulk validation cannot be gated the same way, because the selection island
+   * and the whole-file action both live in the TEXT lens, where the gated map
+   * is empty — which is exactly why both of them silently offered nothing. Nor
+   * can the progress figures: an audio-only project is worked in either lens
+   * and its rows must be honest in both.
+   *
+   * AQU-2111 moved it UP here, ahead of `useHealth`, because the live progress
+   * count it now feeds is derived beside the text one.
+   *
+   * It costs no extra request: useFileAudioAttachments coalesces per
+   * project/file at module level, so this, the gated map and EditorTable's own
+   * read share one fetch.
+   */
+  const { byCellId: audioValidationByCellId, hasLoaded: audioValidationLoaded } = useFileAudioAttachments(
+    project?.id ?? null,
+    activeFileId,
+    // AQU-1591: bulk audio validation votes on the takes of the lane you are
+    // in. Unscoped, "validate all recordings" reached into every language.
+    activeLane,
+  )
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -1945,13 +1996,16 @@ export function ProjectWorkspace() {
   const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return
+    // AQU-2118: the store holds the open lane's cells, so its snapshot is
+    // that lane's record — not the default lane's, which it used to overwrite.
     readAtVersion(cellStoreVersion, () => setLocalFileProgress(
       project.id,
       activeFileId,
       localFileProgress,
       cellStore.getPendingProgressEventIds(),
+      activeLane,
     ))
-  }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
+  }, [activeFileId, activeLane, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
   // Fortify pass: raw store cells carry NO audio attachments — any handler
@@ -7482,11 +7536,24 @@ export function ProjectWorkspace() {
   // show the policy-resolved number or it contradicts the sidebar bar for the
   // same file. Subtracted here, not inside useHealth, so the health hook stays
   // ignorant of cell types.
-  const statusBarProgress = useMemo(() => {
-    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
-    if (!live) return EMPTY_STATUS_PROGRESS
-    return applyStructuralPolicy(live, cellSummaries, countStructuralCells)
-  }, [activeFileId, cellSummaries, countStructuralCells, liveFileProgress])
+  /**
+   * AQU-2111: the open file's audio figures, counted from the attachment map
+   * read above by the SAME rules the server counts with.
+   *
+   * Null until that map has loaded — the footer and the row draw the audio
+   * half only when they have one, because "0 recorded" over a fully recorded
+   * file is the bug being fixed here, and a map that has not arrived yet
+   * cannot tell the two apart.
+   */
+  const liveAudioCounts = useMemo(() => activeFileId
+    ? liveAudioProgress(
+        cellSummaries,
+        audioValidationLoaded ? audioValidationByCellId : null,
+        audioValidationRequirement,
+        countStructuralCells,
+      )
+    : null,
+  [activeFileId, audioValidationByCellId, audioValidationLoaded, audioValidationRequirement, cellSummaries, countStructuralCells])
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -7495,20 +7562,32 @@ export function ProjectWorkspace() {
   // file table reads — org/ProjectOverview.tsx) once per project so every
   // file gets a snapshot, then merge the live, per-keystroke-accurate entry
   // for the open file back on top so it doesn't regress to the last fetch.
-  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<
-    Map<string, { translated: number; validated: number; total: number }>
-  >(new Map())
+  // AQU-2132: typed as `FileStats`, which carries the optional audio pair the
+  // server sends. The narrower inline shape silently dropped `recorded` /
+  // `audioValidated` from the declared contract while `fileSummariesToProgress`
+  // put them there at runtime — and they are what the sidebar row and now the
+  // footer read for a file whose attachment map has not landed.
+  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<Map<string, FileStats>>(new Map())
   const progressSnapshotTokenFileId = project?.files[0]?.id ?? null
+  // AQU-2118: the rollup is read for the lane the switcher shows, and re-read
+  // when that changes — the server pins it to the bridge / only lane
+  // otherwise, which is not the open lane on a multi-lane project. Reads can
+  // overlap (a lane switch during a push-triggered refresh), so each one
+  // takes a ticket and only the newest may land: an older lane's numbers
+  // arriving last must not paint over the current lane's.
+  const progressSnapshotTicket = useRef(0)
   const refreshAllFilesProgress = useCallback(async () => {
+    const ticket = ++progressSnapshotTicket.current
     if (!project?.id || !progressSnapshotTokenFileId) {
       setAllFilesProgressSnapshot(new Map())
       return
     }
     const token = await getTokenForFile(progressSnapshotTokenFileId)
     if (!token) throw new Error("project progress token unavailable")
-    const summaries = await fetchProjectFiles(project.id, token)
+    const summaries = await fetchProjectFiles(project.id, token, { lane: activeLane })
+    if (ticket !== progressSnapshotTicket.current) return
     setAllFilesProgressSnapshot(fileSummariesToProgress(summaries))
-  }, [getTokenForFile, progressSnapshotTokenFileId, project?.id])
+  }, [activeLane, getTokenForFile, progressSnapshotTokenFileId, project?.id])
   useEffect(() => {
     // AQU-1326: the rollup paints the SIDEBAR's per-file progress bars, not the
     // open file — hold it until the first cell page has painted so it doesn't
@@ -7520,12 +7599,53 @@ export function ProjectWorkspace() {
         // (existing behavior) until the next successful fetch.
       })
     // Re-fetch whenever the file count changes (import/delete) so newly
-    // added files pick up a snapshot without a full reload.
+    // added files pick up a snapshot without a full reload, and whenever the
+    // lane changes (AQU-2118) — the callback's identity carries it.
   }, [editorFirstPaint, project?.files.length, refreshAllFilesProgress])
   const fileProgress = useMemo(
-    () => mergeFileProgress(allFilesProgressSnapshot, liveFileProgress),
-    [allFilesProgressSnapshot, liveFileProgress],
+    () => {
+      const merged = mergeFileProgress(allFilesProgressSnapshot, liveFileProgress)
+      // AQU-2111: the open file's row reads the live entry, which is derived
+      // from cells and so knows nothing about audio. Put the live audio
+      // figures on it, so validating a take moves that row as well as the
+      // footer — without a reload, and without the row falling back to the
+      // text-only count while it is the open one.
+      const live = activeFileId ? merged.get(activeFileId) : undefined
+      if (activeFileId && live && liveAudioCounts) {
+        merged.set(activeFileId, {
+          ...live,
+          recorded: liveAudioCounts.recorded,
+          audioValidated: liveAudioCounts.audioValidated,
+        })
+      }
+      return merged
+    },
+    [activeFileId, allFilesProgressSnapshot, liveAudioCounts, liveFileProgress],
   )
+  /**
+   * The footer's figures for the open file.
+   *
+   * AQU-2132: the audio pair is taken from `fileProgress` above — the same
+   * merged value the sidebar's row for this file draws — rather than from
+   * `liveAudioCounts` directly. The two differ in exactly one case, and it is
+   * the bug: before the attachment map lands `liveAudioCounts` is null, and
+   * the footer used to fall through to the text pair alone, so an audio-only
+   * file read `0 translated` and drew no audio half at all. `mergeFileProgress`
+   * settled the rule for the row — the server's per-file figures are the only
+   * ones that know a file's takes until the live map arrives, and they are not
+   * discarded for a live entry that has no audio half. The footer now keeps
+   * that rule instead of contradicting the row beside it.
+   *
+   * `recorded == null` still means "no audio figures from anywhere" (a file
+   * the server reported before AQU-2111 sent the pair), and still draws the
+   * text pair exactly as before — never a fabricated `0 recorded`.
+   */
+  const statusBarProgress = useMemo(() => {
+    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
+    if (!live) return EMPTY_STATUS_PROGRESS
+    const text = applyStructuralPolicy(live, cellSummaries, countStructuralCells)
+    return withAudioProgress(text, activeFileId ? fileProgress.get(activeFileId) : undefined)
+  }, [activeFileId, cellSummaries, countStructuralCells, fileProgress, liveFileProgress])
   // SWARM-TODO(AQU-516) live-verify: open a project with multiple files,
   // don't open any file — every file in the sidebar should show a progress
   // indicator (the validation bar in FileRow), and the numbers should match
@@ -7578,35 +7698,6 @@ export function ProjectWorkspace() {
   // and chapters, so the sidebar's chapter grid also skips re-rendering.
   const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const hasActiveChapters = activeFileId != null && readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex().length > 0)
-  // Only the expanded sidebar consumes this projection. Keep health live, but
-  // defer its whole-file display walk until that surface actually renders.
-  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
-    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
-    return readAtVersion(cellStoreVersion, () => {
-      // Summaries sit in store order, so the store's index is a direct lookup;
-      // the id check guards the (never observed) case of a skipped row, falling
-      // back to a map built once for this pass.
-      let summaryById: Map<string, CellSummary> | null = null
-      const getSummary = (cellId: string): CellSummary | undefined => {
-        const index = cellStore.findIndexByCellId(cellId)
-        const direct = index >= 0 ? cellSummaries[index] : undefined
-        if (direct && direct.id === cellId) return direct
-        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
-        return summaryById.get(cellId)
-      }
-      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
-        getSummary,
-        health: (cellId) => effectiveHealthMap.get(cellId),
-        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
-        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
-        // PARKED cell, as "not counted" rather than as work left to do. The
-        // chapter's fraction already excludes both — the store does that — so this
-        // only chooses the colour and what it announces. The rule itself lives in
-        // `isExcludedFromWork`, where the two cases stay separate and tested.
-        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
-      })
-    })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -7723,7 +7814,7 @@ export function ProjectWorkspace() {
         // visible, else the first visible row).
         const idx = editorRef.current?.getCurrentIndex?.() ?? -1
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
-      } else if (timelineSelectedCellIdRef.current) {
+      } else if (next === "text" && timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
         // no edit-focus change. The trace is always within the open file (the
         // lens switch doesn't navigate), so it parks against `activeFileId`.
@@ -8441,7 +8532,7 @@ export function ProjectWorkspace() {
                 // writing request says it is pushing the numbers, they are
                 // already on their way in this same batch — the refetch would
                 // only race them to the same answer.
-                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file)
+                if (!msg.progressPushed) invalidateFileProgress(pid, msg.file, activeLaneRef.current)
               }
               // target.cell.commit is also Autopilot's durable review
               // boundary. Reconcile proposals for the exact mounted scope
@@ -8577,7 +8668,7 @@ export function ProjectWorkspace() {
                 counts: msg.counts,
                 sections: msg.sections,
               })) {
-                invalidateFileProgress(pid, msg.file)
+                invalidateFileProgress(pid, msg.file, msg.lane)
               }
               // The sidebar's own bars come from the project file rollup, not
               // from this resource (file-summary-progress.ts), and that rollup
@@ -8586,37 +8677,23 @@ export function ProjectWorkspace() {
               // now moves the bar live instead of waiting for a remount —
               // without the GET /files that refreshing it would cost.
               //
-              // Only the default lane, because that is the lane the rollup
-              // itself is pinned to: files-read-route takes its filled and
-              // approved counts from the '' bridge lane, falling back to the
-              // single target lane when a project has no bridge (AQU-1594).
-              // On such a project no frame ever matches and the bar keeps its
-              // old refresh — the one thing that must not happen is a named
-              // lane's numbers landing in a row reporting the bridge's. The
-              // denominator is safe either way: it is a fact about the source
-              // text, so every lane's row carries the same one (AQU-1599).
-              if (msg.lane === "") {
-                setAllFilesProgressSnapshot((current) => {
-                  const existing = current.get(msg.file)
-                  const next = {
-                    translated: msg.counts.filledCount,
-                    validated: msg.counts.validatedCount,
-                    total: msg.counts.totalCount,
-                  }
-                  if (
-                    existing
-                    && existing.translated === next.translated
-                    && existing.validated === next.validated
-                    && existing.total === next.total
-                  ) return current
-                  const merged = new Map(current)
-                  merged.set(msg.file, next)
-                  return merged
-                })
-              }
+              // Only a frame for the lane the rollup was read for (AQU-2118:
+              // the one the switcher shows, which `refreshAllFilesProgress`
+              // names on the wire). A frame for any other lane leaves the row
+              // alone — the one thing that must not happen is one lane's
+              // numbers landing in a row reporting another's. The denominator
+              // is safe either way: it is a fact about the source text, so
+              // every lane's row carries the same one (AQU-1599).
+              setAllFilesProgressSnapshot((current) => pushedRollupProgress(
+                current,
+                { file: msg.file, lane: msg.lane, counts: msg.counts },
+                activeLaneRef.current,
+              ))
             } else if (msg.t === "file.progress.updated") {
               if (msg.project !== pid) return
-              invalidateFileProgress(pid, msg.file)
+              // The frame names no lane; the record on screen is the open
+              // lane's (AQU-2118).
+              invalidateFileProgress(pid, msg.file, activeLaneRef.current)
               void refreshAllFilesProgress().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
@@ -10795,37 +10872,10 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
-    editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
+    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells) ? activeFileId : null,
     activeLane, // AQU-1591: takes belong to a lane.
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
-  /**
-   * AQU-490: the same file's audio, read UNCONDITIONALLY, for the two bulk
-   * audio-validation actions alone.
-   *
-   * A second read of one file looks redundant and is not. The map above is
-   * deliberately gated — it feeds the timeline, the seek context, attachment
-   * warming and the transcribe/synth counts, none of which the text lens wants
-   * — and widening it would make "Transcribe all" and "Synth all" appear in a
-   * lens where they have never been offered. Sam's call when shown the
-   * trade (2026-09-21): keep those hidden, so audio validation gets its own
-   * read rather than dragging four other surfaces along with it.
-   *
-   * Bulk validation cannot be gated the same way, because the selection island
-   * and the whole-file action both live in the TEXT lens, where the gated map
-   * is empty — which is exactly why both of them silently offered nothing.
-   *
-   * It costs no extra request: useFileAudioAttachments coalesces per
-   * project/file at module level, so this, the map above and EditorTable's own
-   * read share one fetch.
-   */
-  const { byCellId: audioValidationByCellId } = useFileAudioAttachments(
-    project?.id ?? null,
-    activeFileId,
-    // AQU-1591: bulk audio validation votes on the takes of the lane you are
-    // in. Unscoped, "validate all recordings" reached into every language.
-    activeLane,
-  )
 
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
   // a dub with no text counts as translated work in the status bar, file
@@ -10858,6 +10908,97 @@ export function ProjectWorkspace() {
   useEffect(() => {
     cellStore.setOwnTakeCellIds(ownTakeCellIds)
   }, [cellStore, ownTakeCellIds])
+
+  // AQU-2110: and which of those lines are AUDIO VALIDATED, so the chapter
+  // picker's rollup can show the audio pair — a chapter on an audio-only
+  // project read "100% translated / 0% validated" however many takes were
+  // signed off, because only the text flag was ever counted.
+  //
+  // AQU-2112 reads the SAME two sets for the sidebar's chapter list, which is
+  // why there is one derivation here and not two: the picker and the sidebar
+  // cannot disagree about which lines are recorded if neither owns the answer.
+  //
+  // Read off the UNGATED map, not `workspaceAudioByCellId`: both surfaces live
+  // in the text lens, where the gated map is empty for anyone who may not
+  // restructure cells, and a contributor validating takes there is exactly
+  // who needs the figure to move. The requirement is `audioValidationRequirement`
+  // declared above (AQU-2111): the project's audio one, resolved project → org
+  // → 1 — the same threshold the cell's audio validation control and the
+  // server's progress counts apply.
+  const audioProgressIds = useMemo(
+    () => audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
+    [audioValidationByCellId, audioValidationRequirement],
+  )
+  useEffect(() => {
+    cellStore.setAudioProgressCellIds(audioProgressIds)
+  }, [cellStore, audioProgressIds])
+
+  /**
+   * AQU-2112: the same two sets as one per-line reader for the sidebar's
+   * chapter list, or NO reader at all when nothing in the file is recorded —
+   * which is how a text-only project keeps the chapter list, the colours and
+   * the single whole-file walk it had before audio progress existed.
+   *
+   * DEPENDS ON `audioProgressIds` DIRECTLY, and must keep doing so. The first
+   * cut of this held the sets in a ref and compared them by membership, to
+   * spare the chapter projection a whole-file walk when a refetch changed
+   * nothing. A ref read is not a dependency the React Compiler can see, so it
+   * memoized this against a value it believed never changed and froze the
+   * reader at `undefined` — the state on first render, before the attachment
+   * read returns. The chapter list then showed TEXT figures for an audio-only
+   * file until something else in the session invalidated the memo, which is
+   * precisely the bug this ticket is about, reintroduced one layer up. It
+   * survived the whole unit suite because Vitest runs with the compiler off
+   * (CLAUDE.md, "React Compiler gotcha"); the PR preview caught it.
+   *
+   * The walk it was protecting is cheap to protect honestly: for a file with
+   * no recordings `audioProgressCellIds` returns a frozen empty singleton, so
+   * a text-only project — the case AQU-1104 cared about — is identity-stable
+   * anyway, and a file with audio only re-derives when the attachment read
+   * actually returns.
+   */
+  const audioChapterStage = useMemo(() => {
+    if (audioProgressIds.recorded.size === 0) return undefined
+    return (cellId: string): AudioCellStage | undefined =>
+      audioProgressIds.audioValidated.has(cellId)
+        ? "audioValidated"
+        : audioProgressIds.recorded.has(cellId) ? "recorded" : undefined
+  }, [audioProgressIds])
+
+  // Only the expanded sidebar consumes this projection. Keep health live, but
+  // defer its whole-file display walk until that surface actually renders.
+  const getActiveChapterHealth = useCallback((): BookHealthChapter[] => {
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
+    return readAtVersion(cellStoreVersion, () => {
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+        // AQU-1083 / AQU-1424: draw a heading the project does not count, and any
+        // PARKED cell, as "not counted" rather than as work left to do. The
+        // chapter's fraction already excludes both — the store does that — so this
+        // only chooses the colour and what it announces. The rule itself lives in
+        // `isExcludedFromWork`, where the two cases stay separate and tested.
+        isExcluded: (cellId) => isExcludedFromWork(getSummary(cellId), countStructuralCells),
+        // AQU-2112: the line's audio state, so an audio-only file's chapters
+        // fill in as its takes are signed off instead of reading untranslated
+        // forever. Undefined on a project with no recordings — see
+        // `audioChapterStage`.
+        audioStage: audioChapterStage,
+      })
+    })
+  }, [activeFileId, audioChapterStage, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   /** The link index in the shape every cue-aware resolver takes. */
   const cueLinkArgs = useMemo(
@@ -15530,6 +15671,7 @@ export function ProjectWorkspace() {
                   files={project.files}
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
+                  lane={activeLane}
                   hasActiveChapters={hasActiveChapters}
                   getActiveChapterHealth={getActiveChapterHealth}
                   // AQU-1326: the sidebar's per-file /progress reads wait for
@@ -16579,7 +16721,23 @@ export function ProjectWorkspace() {
                   its own "Video" header at the same height. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
-              {extensionEditorActive && activeFileId && activeFile ? (
+              {lens === "transcribe" && activeFileId && project ? (
+                // Two-step transcription: one row per line with audio — ASR,
+                // then an AI cleanup taught by this file's corrections. The
+                // chapter toolbar (and its lens switch) stays above it.
+                <div className="flex h-full min-h-0 flex-col">
+                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  <TranscribeEditor
+                    project={project}
+                    cells={batchAudioCells}
+                    session={frontierSession}
+                    {...(activeLane ? { targetLang: activeLane } : {})}
+                    concepts={laneEditorConcepts}
+                    editable={!isReadOnly && !laneWriteFrozen}
+                    onCommitted={handleCellCommitted}
+                  />
+                </div>
+              ) : extensionEditorActive && activeFileId && activeFile ? (
                 // Smart Extensions: the editor extension takes EditorTable's
                 // place INSIDE the same layout — the media lens's timeline and
                 // video, the footnote tray, the search overlay and the load
@@ -17495,7 +17653,7 @@ export function ProjectWorkspace() {
           // AQU-965: the number the line's own audio check compares against,
           // so the dialog's count of unvalidated lines agrees with the ticks
           // in the gutter rather than counting "at least one vote".
-          audioValidationRequirement={project ? readValidationCountAudio(project) : 1}
+          audioValidationRequirement={audioValidationRequirement}
           // Take the viewer to a line with no validated take. On a dubbing
           // file that line is a CUE in the audio-cue sibling, where the takes
           // are, so both surfaces are aimed at it: the timeline seats the cue,

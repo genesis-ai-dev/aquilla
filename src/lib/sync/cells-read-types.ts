@@ -44,6 +44,13 @@ export interface FileSummary {
   /** Target cells with content (TRIM(value) != ''): the "translated" count,
    *  distinct from approvedCount (validated). Matches the chapter-dot signal. */
   filledCount: number
+  /** AQU-2111: lines with a take of their own, and lines whose weakest chosen
+   *  take meets the project's AUDIO validation requirement — the figures an
+   *  audio-only file's progress actually lives on. Optional on the wire: a
+   *  sync-worker from before AQU-2111 sends neither, and absent must read as
+   *  "unknown", never as "nothing recorded". */
+  audioCount?: number
+  audioValidatedCount?: number
   wordCount: number
   /** Last cell.commit timestamp on this file. Null on freshly-created files. */
   lastEditAt: number | null

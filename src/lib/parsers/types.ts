@@ -8,6 +8,7 @@ export type {
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
+  SubtitleCueRepair,
   ExportCellFields,
 } from "./core-types"
 // Also needed in local type positions below, not just re-exported.
@@ -408,6 +409,14 @@ export interface Voice {
    * is set *without* this key (a recorded or uploaded clip).
    */
   referenceTakeKey?: string
+  /**
+   * A pre-built character voice from the Voice library (src/lib/audio/voice-library.ts),
+   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
+   * take into it through the voice forge instead of Seed-VC (sync-worker POST
+   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * words, pronunciation, timing and intonation are kept; only the timbre changes.
+   */
+  libraryVoiceId?: string
 }
 
 export interface ProjectTtsSettings {

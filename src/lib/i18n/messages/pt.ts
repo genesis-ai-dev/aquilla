@@ -2055,7 +2055,6 @@ export const pt: Catalog = {
   "audio.newVoice.engineLabel": "Motor",
   "audio.newVoice.inworldVoiceLabel": "Voz",
   "audio.newVoice.inworldVoiceLoading": "Carregando vozes…",
-  "audio.newVoice.inworldVoiceUnavailable": "Não foi possível carregar as vozes do Inworld para estes idiomas. Mostrando a lista incluída.",
   "audio.newVoice.inworldCustomVoice": "Voz de design",
   "audio.newVoice.tabPrebuilt": "Voz predefinida",
   "audio.newVoice.tabDesign": "Design de voz",

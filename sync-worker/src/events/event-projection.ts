@@ -1267,6 +1267,21 @@ export function buildEventProjectionStmts(
               )
               .bind(sp.transcription, event.projectId, event.fileId, event.cellId),
           )
+          // 0186: a hand edit of the transcript makes it the editor's, so the
+          // segment's AI-cleanup mark goes (the attach path clears it the same
+          // way when new timings arrive without one).
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cell_audio SET transcript_ai = NULL
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND role = 'source'
+                    AND transcript_ai IS NOT NULL`,
+              )
+              .bind(event.projectId, event.fileId, event.cellId),
+          )
+          if (!opts?.deferFileCounters)
+            stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+          return ['cells', 'files', 'cell_audio']
         }
       }
 
@@ -1978,8 +1993,9 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
+              timings_json, asr_text, asr_model, transcript_ai,
+              selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
                       ${attachPieceOf ? attachPieceLaneSql() : audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
@@ -1992,6 +2008,17 @@ case 'cell.audio.attach': {
               trim_start_ms      = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms),
               trim_end_ms        = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms),
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
+              -- 0186: what ASR heard survives every correction — only an attach
+              -- that carries an asr field (a new ASR run) replaces it.
+              asr_text           = COALESCE(excluded.asr_text, cell_audio.asr_text),
+              asr_model          = COALESCE(excluded.asr_model, cell_audio.asr_model),
+              -- 0186: the AI-cleanup mark is the transcript's, not the clip's.
+              -- New timings without it mean someone else's transcript now
+              -- (a human correction, or fresh ASR), so it goes; an attach with
+              -- no timings (a trim, a duration heal) leaves it alone.
+              transcript_ai      = CASE WHEN excluded.transcript_ai IS NOT NULL THEN excluded.transcript_ai
+                                        WHEN excluded.timings_json IS NOT NULL THEN NULL
+                                        ELSE cell_audio.transcript_ai END,
               selected           = 1,
               deleted            = 0,
               event_id           = excluded.event_id,
@@ -2045,6 +2072,9 @@ case 'cell.audio.attach': {
             p.trimStartMs ?? null,
             p.trimEndMs ?? null,
             p.timings ? JSON.stringify(p.timings) : null,
+            p.asr && typeof p.asr.text === 'string' ? p.asr.text : null,
+            p.asr && typeof p.asr.model === 'string' ? p.asr.model : null,
+            p.transcriptAi ? JSON.stringify(p.transcriptAi) : null,
             event.id,
             event.serverTs,
             // AQU-490: 'source' only when the attach says so — an import

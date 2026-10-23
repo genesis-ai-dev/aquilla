@@ -99,6 +99,7 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import { reimportTargetFor, type ReimportTarget } from "@/lib/import/reimport-target"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
   EMPTY_UPLOAD_HEADER,
@@ -524,9 +525,12 @@ export function ImportDialog({
     returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
+  // AQU-2120: the existing file the collision screen chose for the seed file.
+  const [spreadsheetReimportTarget, setSpreadsheetReimportTarget] = useState<ReimportTarget | null>(null)
   const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-525: a single JSON file goes through the key picker before import.
   const [jsonSeedFile, setJsonSeedFile] = useState<File | null>(null)
+  const [jsonReimportTarget, setJsonReimportTarget] = useState<ReimportTarget | null>(null)
   const [jsonReturnScreen, setJsonReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
@@ -565,7 +569,10 @@ export function ImportDialog({
       setPreviewUploadPhase("")
       setPreviewUploadProgress(null)
       setSpreadsheetSeedFile(null)
+      setSpreadsheetReimportTarget(null)
       setSpreadsheetReturnScreen("landing")
+      setJsonSeedFile(null)
+      setJsonReimportTarget(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -1223,6 +1230,7 @@ export function ImportDialog({
               setPartnerId(selectedPartnerId ?? null)
               if (s === "spreadsheet") {
                 setSpreadsheetSeedFile(null)
+                setSpreadsheetReimportTarget(null)
                 setSpreadsheetReturnScreen("landing")
               }
               setScreen(s)
@@ -1294,13 +1302,15 @@ export function ImportDialog({
               setPreviewState({ results, commit, returnScreen: "upload" })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("upload")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("upload")
               setScreen("jsonKeys")
             }}
@@ -1343,13 +1353,15 @@ export function ImportDialog({
               setPreviewState({ results, commit, returnScreen: "gdrive" })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("gdrive")
               setScreen("jsonKeys")
             }}
@@ -1504,8 +1516,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={spreadsheetSeedFile}
+            reimportTarget={spreadsheetReimportTarget}
             onCancel={() => {
               setSpreadsheetSeedFile(null)
+              setSpreadsheetReimportTarget(null)
               setScreen(spreadsheetReturnScreen)
             }}
           />
@@ -1532,8 +1546,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={jsonSeedFile}
+            reimportTarget={jsonReimportTarget}
             onCancel={() => {
               setJsonSeedFile(null)
+              setJsonReimportTarget(null)
               setScreen(jsonReturnScreen)
             }}
           />
@@ -2122,11 +2138,15 @@ interface UploadPanelProps {
   onCommitError?: (message: string | null) => void
   /** Spreadsheet-shaped files need explicit column mapping before preview.
    * Keep this handoff inside the unified Upload files entry point so users do
-   * not have to know which specialized importer to choose. */
-  onSpreadsheetFile: (file: File) => void
+   * not have to know which specialized importer to choose.
+   * AQU-2120: the handoff carries the re-import target the collision screen
+   * resolved for this file, so "Update existing" updates instead of quietly
+   * creating a second file with the same name. */
+  onSpreadsheetFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-525: a lone JSON file goes through the key picker, so the user says
-   * which keys hold translatable text before any cell is created. */
-  onJsonFile: (file: File) => void
+   * which keys hold translatable text before any cell is created.
+   * AQU-2120: carries the re-import target, as `onSpreadsheetFile` does. */
+  onJsonFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
@@ -2350,7 +2370,10 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setError(t("importExport.upload.oneSpreadsheetAtATime"))
           return
         }
-        onSpreadsheetFile(spreadsheets[0])
+        onSpreadsheetFile(
+          spreadsheets[0],
+          reimportTargetFor(spreadsheets[0].name, reimportFileIds, existingFiles),
+        )
         return
       }
 
@@ -2371,7 +2394,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }
         })
         if (parseable) {
-          onJsonFile(candidate)
+          onJsonFile(candidate, reimportTargetFor(candidate.name, reimportFileIds, existingFiles))
           return
         }
       }
@@ -2533,7 +2556,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, onTranslationCheck, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -4240,6 +4263,13 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
       {collisions.some((collision) => collision.ambiguous) && (
         <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
           {t("importExport.collision.ambiguousWarning")}
+        </p>
+      )}
+      {/* AQU-2120: media has no in-place re-import, so say so rather than
+          leaving a disabled button unexplained. */}
+      {collisions.some((collision) => collision.updateUnsupported) && (
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+          {t("importExport.collision.mediaUpdateUnavailable")}
         </p>
       )}
 

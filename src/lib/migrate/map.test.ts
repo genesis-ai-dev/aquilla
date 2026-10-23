@@ -215,6 +215,45 @@ describe("mapFilePairToEvents", () => {
       .toContain('data-segment-index="9"')
   })
 
+  // AQU-1196: `files.book_code` is what the sidebar's OT/NT grouping,
+  // re-import collision matching and server-side rollups read. A migrated file
+  // is named by its `.codex` stem, so a Scripture file's name IS a bare USFM
+  // code — stamp it on file.create instead of leaving the column NULL and
+  // making every reader guess from the name.
+  describe("bookCode on file.create (AQU-1196)", () => {
+    const named = (name: string, originalName = name): FilePairInput => ({
+      relPath: name,
+      name,
+      source: {
+        metadata: { id: "f", originalName },
+        cells: [{ kind: 2, languageId: "html", value: "<p>x</p>", metadata: { id: "c1", type: "text" } }],
+      },
+    })
+    const fileCreatePayload = (pair: FilePairInput) =>
+      mapFilePairToEvents(pair, OPTS).find((e) => e.kind === "file.create")!.payload
+
+    it("carries the code when the stem is a known book code", () => {
+      expect(fileCreatePayload(named("1CH"))).toMatchObject({ fileType: "codex", bookCode: "1CH" })
+      // Codex stems are upper-case, but a lower-case one still names its book.
+      expect(fileCreatePayload(named("mat"))).toMatchObject({ bookCode: "MAT" })
+    })
+
+    it("omits it for a stem that is not a book code", () => {
+      // `intro` and other paratext must stay NULL — the fuzzy file-name
+      // detector would read a code out of stems like this one.
+      expect(fileCreatePayload(named("intro"))).not.toHaveProperty("bookCode")
+      expect(fileCreatePayload(named("TheChosen_101"))).not.toHaveProperty("bookCode")
+      expect(fileCreatePayload(named("GEN1-source"))).not.toHaveProperty("bookCode")
+    })
+
+    it("omits it for an IDML pair, book-code-shaped name or not", () => {
+      // An IDML pair is a layout document; it is never Scripture.
+      const payload = fileCreatePayload(named("GEN", "GEN.idml"))
+      expect(payload).toMatchObject({ fileType: "idml" })
+      expect(payload).not.toHaveProperty("bookCode")
+    })
+  })
+
   it("emits file.create + per-cell source.create + per-value-edit target.commit", () => {
     const ev = mapFilePairToEvents(fixture(), OPTS)
     const kinds = ev.map((e) => e.kind)

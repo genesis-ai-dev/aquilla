@@ -9,6 +9,7 @@ import type { BacktranslationRecord } from "@/lib/completion/bt-record"
 import type { GlossRecord } from "@/lib/completion/gloss-record"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
@@ -538,4 +539,39 @@ export async function fetchDeletedFilesWithProjectToken(args: {
   const token = await getTokenForFile(PROJECT_SENTINEL_FILE_ID)
   if (!token) return null
   return fetchFiles(projectId, token)
+}
+
+/**
+ * AQU-2118 / AQU-1832: the sidebar rollup row a pushed file-progress frame
+ * may move. The rollup is read for the lane the switcher shows, so only a
+ * frame for THAT lane may land in it — one lane's numbers in a row reporting
+ * another's is the one thing this must never do. The same map comes back when
+ * the frame is another lane's or changes nothing, so the state setter skips
+ * the render.
+ */
+export function pushedRollupProgress(
+  current: Map<string, FileStats>,
+  push: {
+    file: string
+    lane: string
+    counts: { totalCount: number; filledCount: number; validatedCount: number }
+  },
+  activeLane: string,
+): Map<string, FileStats> {
+  if (push.lane !== activeLane) return current
+  const next: FileStats = {
+    translated: push.counts.filledCount,
+    validated: push.counts.validatedCount,
+    total: push.counts.totalCount,
+  }
+  const existing = current.get(push.file)
+  if (
+    existing
+    && existing.translated === next.translated
+    && existing.validated === next.validated
+    && existing.total === next.total
+  ) return current
+  const merged = new Map(current)
+  merged.set(push.file, next)
+  return merged
 }

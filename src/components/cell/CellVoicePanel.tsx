@@ -652,7 +652,7 @@ export function CellVoicePanel({
               <ChangeVoiceButton
                 disabled={isVoicing || changeBlocker != null}
                 triggerDisabled={changeBlocker === "not-cloned"}
-                qualityDisabled={isVoicing || changeBlocker === "not-cloned"}
+                qualityDisabled={isVoicing || changeBlocker === "not-cloned" || active.libraryVoiceId != null}
                 quality={quality}
                 reason={
                   changeBlocker === "not-cloned"

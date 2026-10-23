@@ -1,4 +1,4 @@
--- 0186_lane_delivers.sql — media redesign slice 1: each target language says
+-- 0187_lane_delivers.sql — media redesign slice 1: each target language says
 -- what it DELIVERS (Text, Audio, or Text and audio), and the counting follows it.
 --
 -- `lanes.delivers` is the choice on each row of Project settings → Languages,

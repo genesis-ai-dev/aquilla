@@ -570,7 +570,7 @@ export interface ProjectLaneView {
    * Media redesign slice 1: what this language delivers — Text, Audio, or
    * Text and audio. Null is "not chosen yet" (a language that had "Records
    * audio" on before this existed), which counts as before and asks for a
-   * choice. Absent from a server that predates migration 0186.
+   * choice. Absent from a server that predates migration 0187.
    */
   delivers?: LaneDelivers | null
 }

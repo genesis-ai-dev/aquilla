@@ -48,7 +48,7 @@ interface ProgressRow {
   audio_validator_histogram?: ProgressRow['validator_histogram']
   structural_audio_validator_histogram?: ProgressRow['validator_histogram']
   /**
-   * Media redesign slice 1: the joint text × audio histogram (migration 0186)
+   * Media redesign slice 1: the joint text × audio histogram (migration 0187)
    * and its structural share, for `bothValidatedCount`. Optional like the
    * pairs above; absent reads as nothing done on both halves.
    */

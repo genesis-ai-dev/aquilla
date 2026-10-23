@@ -138,7 +138,7 @@ describe("joint text × audio histogram", () => {
     for (const stmt of fullProgressRecomputeStmts(db, P, F, TS)) await stmt.run()
     const stale = async () => (await db.prepare(TEXT_AUDIO_STALE_FILES_SQL).all<{ id: string }>()).results.map((r) => r.id)
     expect(await stale()).toEqual([])
-    // What every row written before migration 0186 looks like after it.
+    // What every row written before migration 0187 looks like after it.
     await db.prepare("UPDATE file_section_progress SET text_audio_validator_histogram = '{}'::jsonb").run()
     expect(await stale()).toEqual([F])
     for (const stmt of fullProgressRecomputeStmts(db, P, F, TS)) await stmt.run()

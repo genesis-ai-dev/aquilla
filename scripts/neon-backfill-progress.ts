@@ -54,9 +54,9 @@ async function main(): Promise<void> {
     const unreferencedLines = process.argv.includes('--unreferenced-lines')
     // Media redesign slice 1: `--text-and-audio` re-runs only the files whose
     // progress rows have recordings and no joint text × audio histogram yet
-    // (migration 0186), which "Text and audio" languages count their finished
+    // (migration 0187), which "Text and audio" languages count their finished
     // lines from. Safe to re-run: a re-projected file is never selected again.
-    // Production: apply 0186, deploy, then run it once, before or right after
+    // Production: apply 0187, deploy, then run it once, before or right after
     // applying Sam's Text / Text and audio choices.
     const textAndAudio = process.argv.includes('--text-and-audio')
     const scoped = missingOnly || missingBooks || unreferencedLines || textAndAudio

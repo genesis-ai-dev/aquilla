@@ -924,7 +924,7 @@ describe("LanguagesSection — Delivers per language", () => {
     id: "lane-tpi", role: "target", name: "Tok Pisin", langCode: "tpi", legacyTag: "tpi", position: 1, archivedAt: null,
     recordsAudio: false, delivers: "audio",
   }
-  // A language that had "Records audio" on: migration 0186 leaves it unchosen.
+  // A language that had "Records audio" on: migration 0187 leaves it unchosen.
   const SWAHILI: ProjectLaneView = {
     id: "lane-sw", role: "target", name: "Swahili", langCode: "sw", legacyTag: "sw", position: 2, archivedAt: null,
     recordsAudio: true, delivers: null,

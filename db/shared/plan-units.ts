@@ -121,7 +121,7 @@ export interface PlanUnitRow {
   // instead of trusting a stored verdict that a threshold change invalidates.
   audio_validator_histogram: Record<string, number> | string
   structural_audio_validator_histogram: Record<string, number> | string
-  /** Media redesign slice 2: the unit's own joint text × audio histogram (0186). */
+  /** Media redesign slice 2: the unit's own joint text × audio histogram (0187). */
   text_audio_validator_histogram?: Record<string, number> | string
   structural_text_audio_validator_histogram?: Record<string, number> | string
   /**

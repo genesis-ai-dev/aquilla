@@ -16,7 +16,7 @@
  *
  * A language nobody has chosen for yet (`null`) counts by text, exactly as
  * every language did before this existed. That is the state every language
- * with "Records audio" on is left in by migration 0186 until Sam picks Text or
+ * with "Records audio" on is left in by migration 0187 until Sam picks Text or
  * Text and audio for it, so no existing number moves on deploy.
  *
  * The worker readers import this file directly, so it stays free of fetch,
@@ -37,7 +37,7 @@ export function parseLaneDelivers(raw: unknown): LaneDelivers | null {
 
 /**
  * A lane row's choice as the client receives it. A server that predates
- * migration 0186 sends no `delivers` at all; there, "Records audio" off was
+ * migration 0187 sends no `delivers` at all; there, "Records audio" off was
  * Text, and on was a language nobody has chosen for yet, exactly what the
  * migration writes.
  */

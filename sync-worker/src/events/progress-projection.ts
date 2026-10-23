@@ -236,7 +236,7 @@ export function audioStaleProgressFilesSql(
 
 /**
  * Media redesign slice 1: the files whose progress rows predate the joint
- * text × audio histogram (migration 0186) — a recording counted in the audio
+ * text × audio histogram (migration 0187) — a recording counted in the audio
  * histogram and nothing in the joint one, which a recompute by this code can
  * never write. `scripts/neon-backfill-progress.ts --text-and-audio` re-projects
  * exactly these, so a language set to "Text and audio" counts its finished

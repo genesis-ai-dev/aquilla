@@ -574,8 +574,8 @@ export interface ProjectLaneRecord {
    * Media redesign slice 1: what this language delivers — Text, Audio, or
    * Text and audio — which decides how its lines are counted
    * (src/lib/lanes/lane-delivers.ts). Null is "not chosen yet" and counts as
-   * before; migration 0186 leaves every "Records audio" language there until
-   * its owner picks. Optional so a record built before 0186 still type-checks.
+   * before; migration 0187 leaves every "Records audio" language there until
+   * its owner picks. Optional so a record built before 0187 still type-checks.
    */
   delivers?: LaneDelivers | null
 }

@@ -145,7 +145,7 @@ describe("the stored choice", () => {
     expect(deliversRecordsAudio("text_and_audio")).toBe(true)
   })
 
-  it("reads an older server's row from Records audio, as migration 0186 does", () => {
+  it("reads an older server's row from Records audio, as migration 0187 does", () => {
     expect(laneRowDelivers({ recordsAudio: false })).toBe("text")
     expect(laneRowDelivers({ recordsAudio: true })).toBeNull()
     expect(laneRowDelivers({ recordsAudio: true, delivers: "audio" })).toBe("audio")

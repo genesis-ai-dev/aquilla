@@ -14,6 +14,9 @@ Issue: AQU-2127. Checked on 2026-10-23, Asia/Singapore.
 - `scripts/chatgpt-plugin.test.ts`: 10 tests pass under Vitest 5.0.1,
   using the worktree's own installed runner and a temporary Node config.
   The config selects only this test and caps execution at one worker.
+- After the frozen dependency installation completes, the standard app
+  test configuration also passes all 10 package tests with one worker.
+- The repository's secret scan passes with no credential patterns found.
 - An unauthenticated production MCP `initialize` request returns HTTP 401
   with `WWW-Authenticate`, the correct resource metadata URL, and `act` scope.
 - The referenced protected-resource document returns the exact MCP URL,
@@ -32,25 +35,40 @@ The production MCP endpoint is:
 https://api.aquilla.app/sync/api/v1/external/mcp
 ```
 
-The hosted client identity and callback checked are:
+The initial manual probe uses this client identity and callback:
 
 ```text
 https://claude.ai/api/oauth/mcp-oauth-client-metadata
 https://claude.ai/api/mcp/auth_callback
 ```
 
+The real hosted Claude connection instead sends
+`https://claude.ai/oauth/mcp-oauth-client-metadata` as its client ID.
+Record the actual client from the current browser flow rather than pinning
+the manual probe's URL into server configuration.
+
 ## Pending authenticated verification
 
-The available browser redirects Claude's connector settings to sign-in.
-The local Claude CLI has API-key authentication; that does not sign the
-browser into a paid Claude account or grant access to Aquilla.
-The direct browser probe of Aquilla's consent URL shows **Loading** with
-only the build-info button. Jev's `done` result does not prove consent
-readiness; the returned elements contain no sign-in or consent controls.
+After the user identifies a signed-in Chrome window, native browser
+inspection reaches the real connector list. Aquilla is absent initially.
+We add **Aquilla** with the production URL, **Sign in now**, and
+**Use Claude's published identity**. Its saved connector ID is
+`1520052a-d732-4dcc-9280-11f80577a99c`.
+
+Clicking **Connect** opens Aquilla's OAuth consent URL with S256 PKCE,
+`act` scope, the canonical MCP resource, and Claude's fixed callback.
+Aquilla displays its username/email and password form. The user must
+sign in before client validation, organization choices, and token exchange
+can be tested. No consent is submitted and no access is granted yet.
+
+Earlier Jev observations only show **Loading**. Their `done` result does
+not prove readiness; the signed-in native Chrome window provides the
+actual login form. The local Claude CLI's API key does not authenticate
+Aquilla or authorize access to its data.
 
 Consequently, these checks remain unrun:
 
-- Real Claude connector installation, consent, and token exchange.
+- Aquilla sign-in, organization consent, and token exchange.
 - Authenticated `initialize`, tool discovery, and each tool invocation in Claude.
 - Read-only reports, requested correction, excluded organization rejection,
   prompt injection resistance, and connection revocation in Claude.
@@ -77,6 +95,9 @@ Commands actually run:
 ```sh
 claude plugin validate ./plugins/aquilla
 claude plugin validate /private/tmp/aquilla-claude-submission/aquilla
+node node_modules/vitest/vitest.mjs run scripts/chatgpt-plugin.test.ts \
+  --project app --maxWorkers 1
+node node_modules/tsx/dist/cli.mjs scripts/secret-scan.ts
 ```
 
 The package suite runs through the installed Vitest entry point with
@@ -106,6 +127,8 @@ is required. This does not reconcile the broader OAuth spec backlog.
 ## Submission status
 
 Not submitted. Listing text, setup instructions, existing icon, and reviewer
-journeys are in `CLAUDE-CONNECTOR.md`. Public documentation, a public plugin
-distribution repository, reviewer credentials, and authenticated tests remain
-prerequisites. Do not check the portal's all-tools-tested acknowledgment yet.
+journeys are in `CLAUDE-CONNECTOR.md`. The existing repository is public;
+the portal accepts `plugins/aquilla` as its plugin path. Push the final
+package and guide to the tracked branch before portal validation.
+Reviewer credentials and authenticated tests remain prerequisites.
+Do not check the portal's all-tools-tested acknowledgment yet.

@@ -77,16 +77,22 @@ Description:
 > Human translation validation remains a separate review step.
 > Connect your Aquilla account and choose which organizations Claude can access.
 
-Provide a publicly accessible setup documentation URL before submission.
-This file can supply that content after publication. Do not submit a private
-repository URL as public documentation. Use the existing support contact;
+The repository `genesis-ai-dev/aquilla` is public (verified with GitHub).
+After these changes reach the tracked branch, use its public copy of this
+file as the setup documentation URL. Use the existing support contact;
 confirm the primary review contact in the portal.
 
 Submit the remote server through the
 [Claude developer portal](https://claude.ai/directory/manage).
-For skills, also submit a plugin bundle pointing to a publicly accessible
-repository containing this package. Do not publish the application repository
-just to expose the plugin.
+For skills, also submit a plugin bundle using these source fields:
+
+- Repository: `genesis-ai-dev/aquilla`
+- Plugin path: `plugins/aquilla`
+- Branch: the branch containing this change; use `dev` after integration.
+
+The [plugin submission guide](https://claude.com/docs/plugins/submit)
+supports a plugin folder inside a larger repository. No separate public
+repository or marketplace is required for directory submission.
 
 ## Reviewer test plan
 
@@ -120,7 +126,7 @@ Submission remains pending until:
 
 - Authenticated Claude tests pass, including the full declared tool inventory.
 - Reviewer access and populated fixtures are confirmed.
-- Public setup documentation and a distributable plugin repository exist.
+- The package and setup documentation are pushed to the tracked public branch.
 - A paid Claude account completes the portal's listing and policy fields.
 
 ## Authoritative requirements

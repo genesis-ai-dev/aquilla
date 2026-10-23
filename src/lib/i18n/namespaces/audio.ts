@@ -12,6 +12,30 @@ export const audio = defineNamespace({
     "audio.newVoice.tabTts": "TTS voice",
     "audio.newVoice.tabClone": "Clone voice",
     "audio.newVoice.tabCharacter": "Characters",
+    "audio.newVoice.tabTrain": "Train voice",
+
+    // TrainVoicePanel — train a custom voice from an organization's own
+    // recordings of a real person. Consent is the organization's responsibility.
+    "audio.train.intro":
+      "Train a voice from recordings of a real person, such as an actor or narrator. Training takes about 45 minutes; then Change voice can give any reader's lines this voice.",
+    "audio.train.speakerNameLabel": "Speaker name",
+    "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
+    "audio.train.addRecordings": "Add recordings",
+    "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
+    "audio.train.recordingTips":
+      "Clean speech from this one speaker, with no music or other voices. Any language. Audio or video files, up to 20 MB each.",
+    "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.removeRecordingAriaLabel": "Remove {name}",
+    "audio.train.audioMeter": "{minutes} min of speech. At least {min} min needed, {recommended}+ recommended.",
+    "audio.train.tooMuchAudio": "More than {max} minutes. Remove some recordings.",
+    "audio.train.consentTitle": "Consent is your organization's responsibility",
+    "audio.train.consentBody":
+      "Only train the voice of a person who has given informed consent for an AI model of their voice to be made and used in this project. Your organization must obtain and keep that consent, honour any withdrawal of it, and follow the laws and agreements that apply to you and to the speaker, such as voice and likeness rights, data protection and union rules. Aquilla records who confirmed this and when.",
+    "audio.train.consentCheckbox":
+      "On behalf of my organization, I confirm we have this speaker's informed consent and that this use complies with the laws that apply to us.",
+    "audio.train.consentCheckboxAriaLabel": "Confirm the speaker's consent on behalf of your organization",
+    "audio.train.uploading": "Uploading {done} of {total}…",
+    "audio.train.start": "Start training",
     "audio.newVoice.errorCharacterRequired": "Pick a character voice.",
     "audio.newVoice.kindGroupLabel": "Voice kind",
 
@@ -420,6 +444,9 @@ export const audio = defineNamespace({
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",
     "audio.library.characterEngineLabel": "Character",
+    "audio.library.customEngineLabel": "Custom",
+    "audio.library.trainingEngineLabel": "Training",
+    "audio.library.trainingFailedLabel": "Training failed",
 
     // VoiceCloneSection — record/upload the reference clip a cloned voice
     // is re-voiced to match.
@@ -782,6 +809,40 @@ export const audio = defineNamespace({
           "Tab label for picking a ready-made character voice from a built-in list, " +
           "next to the TTS voice and Clone voice tabs.",
         maxLength: 18,
+      },
+      "audio.newVoice.tabTrain": {
+        description:
+          "Tab label for training a custom voice from recordings of a real person, next to " +
+          "the TTS voice, Clone voice and Characters tabs.",
+        maxLength: 18,
+      },
+      "audio.train.addRecordingsAriaLabel": {
+        description: "Accessible label of the file picker for adding audio recordings of the speaker.",
+      },
+      "audio.train.removeRecordingAriaLabel": {
+        description: "Accessible label of the remove button next to one picked recording.",
+        placeholders: { name: "The recording's file name, e.g. 'session-1.wav'." },
+      },
+      "audio.train.audioMeter": {
+        description: "Line under the meter showing how much speech the picked recordings add up to.",
+        placeholders: {
+          minutes: "Total minutes picked so far, one decimal, e.g. '12.5'.",
+          min: "Minimum minutes required, e.g. '5'.",
+          recommended: "Recommended minutes, e.g. '15'.",
+        },
+      },
+      "audio.train.tooMuchAudio": {
+        description: "Shown instead of the meter line when the recordings exceed the maximum.",
+        placeholders: { max: "Maximum minutes allowed, e.g. '60'." },
+      },
+      "audio.train.consentCheckboxAriaLabel": {
+        description:
+          "Accessible label of the consent checkbox. The user confirms, for their organization, " +
+          "that the speaker consented and that the use is lawful. Keep the legal meaning exact.",
+      },
+      "audio.train.uploading": {
+        description: "Start button text while the recordings upload.",
+        placeholders: { done: "Recordings uploaded so far, e.g. '3'.", total: "Recordings in total, e.g. '8'." },
       },
       "audio.characters.filterGroupAriaLabel": {
         description:
@@ -2490,6 +2551,18 @@ export const audio = defineNamespace({
           "Small label on a voice row naming its engine, shown for voices that are " +
           "clones (built from a reference clip) rather than plain TTS voices.",
         maxLength: 12,
+      },
+      "audio.library.customEngineLabel": {
+        description: "Same slot as audio.library.cloneEngineLabel, for a ready custom voice trained from recordings.",
+        maxLength: 12,
+      },
+      "audio.library.trainingEngineLabel": {
+        description: "Same slot, while a custom voice is still training.",
+        maxLength: 12,
+      },
+      "audio.library.trainingFailedLabel": {
+        description: "Same slot, when training a custom voice failed.",
+        maxLength: 16,
       },
       "audio.library.characterEngineLabel": {
         description:

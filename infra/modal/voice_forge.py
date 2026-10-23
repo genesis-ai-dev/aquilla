@@ -19,6 +19,12 @@ Why this shape (see research_notes/Low resource voice cloning options/): RVC kee
 reader's phonetics, timing and pitch contour — the language lives there — and only swaps
 timbre. Every component is commercially licensed, unlike Seed-VC (GPL, archived).
 
+Custom voices (a real speaker, from the org's own recordings — consent is the org's
+responsibility and is recorded by the sync-worker before anything reaches here):
+
+  ingest_clip   one uploaded recording → voices/<id>/corpus/upload-<n>.wav (mono PCM)
+  custom_train  async: corpus stats + preview → train → status.json "ready" | "failed"
+
 Usage:
   modal run infra/modal/voice_forge.py::design --voice-id fisherman \
       --description "A weathered middle-aged fisherman: warm, gravelly baritone..."
@@ -380,6 +386,78 @@ def read_files(voice_id: str, names: list[str]) -> dict:
     return {n: (vdir / n).read_bytes() for n in names if (vdir / n).exists()}
 
 
+# ----------------------------------------------------------------- custom (real-speaker) voices
+# Bounds on what one custom voice may be trained from. RVC needs ~10 min to be stable;
+# below 5 it audibly wobbles. Above an hour adds GPU time without adding quality.
+CUSTOM_MIN_SECONDS = 5 * 60
+CUSTOM_MAX_SECONDS = 60 * 60
+CUSTOM_EPOCHS = 150
+
+
+def _status_path(voice_id: str) -> Path:
+    return _voice_dir(voice_id) / "status.json"
+
+
+def _write_status(voice_id: str, **fields) -> None:
+    path = _status_path(voice_id)
+    current = json.loads(path.read_text()) if path.exists() else {}
+    path.write_text(json.dumps({**current, **fields, "updated_at": time.time()}))
+    vol.commit()
+
+
+@app.function(image=applio_image, volumes={FORGE: vol}, timeout=600, cpu=2)
+def ingest_clip(voice_id: str, index: int, data: bytes) -> dict:
+    """Decode one uploaded recording (webm/opus, m4a, mp3, wav…) to mono 40 kHz PCM in the
+    voice's corpus. Applio's preprocess slices long files itself, so no splitting here."""
+    import subprocess
+
+    import soundfile as sf
+
+    vol.reload()
+    cdir = _voice_dir(voice_id) / "corpus"
+    cdir.mkdir(parents=True, exist_ok=True)
+    raw, out = Path(f"/tmp/in-{index}"), cdir / f"upload-{index:03d}.wav"
+    raw.write_bytes(data)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ac", "1", "-ar", str(SR_TRAIN),
+                    str(out)], check=True)
+    seconds = sf.info(str(out)).duration
+    vol.commit()
+    return {"index": index, "seconds": round(seconds, 2)}
+
+
+@app.function(image=applio_image, volumes={FORGE: vol}, timeout=4 * 3600, cpu=2)
+def custom_train(voice_id: str, epochs: int = CUSTOM_EPOCHS) -> dict:
+    """Train a custom voice from its ingested uploads. Spawned by the web route, which
+    returns at once; progress is read back from status.json."""
+    import soundfile as sf
+
+    vol.reload()
+    vdir = _voice_dir(voice_id)
+    clips = sorted((vdir / "corpus").glob("upload-*.wav"))
+    total = sum(sf.info(str(c)).duration for c in clips)
+    try:
+        if total < CUSTOM_MIN_SECONDS:
+            raise ValueError(f"only {total / 60:.1f} min of audio; at least {CUSTOM_MIN_SECONDS // 60} needed")
+        # Preview = the first ~10 s of the first recording; pitch from a spread of clips
+        # so auto-transpose in convert_audio has the speaker's real median.
+        y, sr = sf.read(str(clips[0]))
+        sf.write(vdir / "anchor.wav", y[: sr * 10], sr)
+        f0s = [f for f in (_median_f0(str(c)) for c in clips[:24]) if f > 0]
+        stats = {"voice_id": voice_id, "kept": len(clips), "audio_minutes": round(total / 60, 2),
+                 "anchor_median_f0": round(_median_f0(str(vdir / "anchor.wav")), 1),
+                 "voice_median_f0": round(sorted(f0s)[len(f0s) // 2], 1) if f0s else 0.0,
+                 "source": "custom-upload"}
+        (vdir / "corpus.json").write_text(json.dumps({"stats": stats}, indent=2))
+        _write_status(voice_id, state="training", audio_minutes=stats["audio_minutes"], started_at=time.time())
+        train.remote(voice_id, epochs)
+        vol.reload()
+        _write_status(voice_id, state="ready")
+        return {"voice_id": voice_id, "state": "ready"}
+    except Exception as e:  # surfaced to the user through status.json
+        _write_status(voice_id, state="failed", error=str(e)[:300])
+        raise
+
+
 # --- Web endpoint: the sync-worker's /api/v1/voice/convert calls this for library voices.
 auth_secret = modal.Secret.from_name("voice-forge-auth", required_keys=["VOICE_FORGE_TOKEN"])
 
@@ -417,10 +495,72 @@ def web():
             raise HTTPException(status_code=400, detail="bad voice_id")
         vol.reload()
         if not (_voice_dir(voice_id) / "train.json").exists():
+            if _status_path(voice_id).exists():
+                raise HTTPException(status_code=409, detail="voice is still training")
             raise HTTPException(status_code=404, detail="unknown voice")
         res = await convert_audio.remote.aio(voice_id, await source.read())
         return Response(content=res["wav"], media_type="audio/wav",
                         headers={"X-Transpose": str(res["transpose"])})
+
+    def custom_dir(voice_id: str) -> Path:
+        # Custom voices are minted by the sync-worker as `c-<hex>`; never touch a cast voice.
+        if not re.fullmatch(r"c-[a-f0-9]{12,32}", voice_id):
+            raise HTTPException(status_code=400, detail="bad custom voice_id")
+        return _voice_dir(voice_id)
+
+    @web_app.post("/voices/{voice_id}/clips")
+    async def add_clip(voice_id: str, index: int = Form(...), clip: UploadFile = File(...),
+                       x_auth_token: str = Header(default="")):
+        check(x_auth_token)
+        vdir = custom_dir(voice_id)
+        vol.reload()
+        if (vdir / "status.json").exists():
+            raise HTTPException(status_code=409, detail="training already started")
+        if not 0 <= index < 200:
+            raise HTTPException(status_code=400, detail="bad clip index")
+        return await ingest_clip.remote.aio(voice_id, index, await clip.read())
+
+    @web_app.post("/voices/{voice_id}/train")
+    async def start_training(voice_id: str, x_auth_token: str = Header(default="")):
+        check(x_auth_token)
+        vdir = custom_dir(voice_id)
+        vol.reload()
+        if (vdir / "status.json").exists():
+            raise HTTPException(status_code=409, detail="training already started")
+        uploads = list((vdir / "corpus").glob("upload-*.wav"))
+        # ingest_clip writes 16-bit mono PCM at SR_TRAIN, so size gives duration without
+        # decoding: refuse a too-short set here, before the caller is billed for a run.
+        seconds = sum(max(0, p.stat().st_size - 44) for p in uploads) / (2 * SR_TRAIN)
+        if seconds < CUSTOM_MIN_SECONDS:
+            raise HTTPException(status_code=400, detail=f"only {seconds / 60:.1f} min of audio; "
+                                                        f"at least {CUSTOM_MIN_SECONDS // 60} needed")
+        if seconds > CUSTOM_MAX_SECONDS:
+            raise HTTPException(status_code=400, detail=f"{seconds / 60:.0f} min of audio; "
+                                                        f"at most {CUSTOM_MAX_SECONDS // 60} allowed")
+        (vdir / "status.json").write_text(json.dumps({"state": "queued", "updated_at": time.time()}))
+        vol.commit()
+        await custom_train.spawn.aio(voice_id)
+        return {"voice_id": voice_id, "state": "queued"}
+
+    @web_app.get("/voices/{voice_id}/status")
+    async def status(voice_id: str, x_auth_token: str = Header(default="")):
+        check(x_auth_token)
+        vdir = custom_dir(voice_id)
+        vol.reload()
+        if (vdir / "train.json").exists():
+            return {"voice_id": voice_id, "state": "ready"}
+        if not (vdir / "status.json").exists():
+            raise HTTPException(status_code=404, detail="unknown voice")
+        return {"voice_id": voice_id, **json.loads((vdir / "status.json").read_text())}
+
+    @web_app.get("/voices/{voice_id}/preview")
+    async def preview(voice_id: str, x_auth_token: str = Header(default="")):
+        check(x_auth_token)
+        anchor = custom_dir(voice_id) / "anchor.wav"
+        vol.reload()
+        if not anchor.exists():
+            raise HTTPException(status_code=404, detail="no preview yet")
+        return Response(content=anchor.read_bytes(), media_type="audio/wav")
 
     return web_app
 

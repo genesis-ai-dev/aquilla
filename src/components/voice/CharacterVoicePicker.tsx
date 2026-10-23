@@ -9,6 +9,8 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Toggle } from "@/components/ui/toggle"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import {
   CHARACTER_VOICE_FILTERS,
@@ -27,6 +29,9 @@ export interface CharacterVoicePickerProps {
   onPick: (character: CharacterVoice) => void
   /** Editing re-points the voice ("Use"); creating adds a new cast member ("Add"). */
   editing?: boolean
+  /** While editing, the voice's name is shown above the grid and stays editable. */
+  name?: string
+  onNameChange?: (name: string) => void
 }
 
 const FILTER_LABEL_KEYS = {
@@ -39,7 +44,7 @@ const FILTER_LABEL_KEYS = {
   elderly: "audio.characters.filterElderly",
 } as const satisfies Record<CharacterVoiceFilter, string>
 
-export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = false }: CharacterVoicePickerProps) {
+export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = false, name, onNameChange }: CharacterVoicePickerProps) {
   const t = useT()
   const [filters, setFilters] = useState<CharacterVoiceFilter[]>([])
   const shown = useMemo(() => filterCharacterVoices(CHARACTER_VOICES, filters), [filters])
@@ -77,6 +82,18 @@ export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = 
 
   return (
     <div className="space-y-3">
+      {editing && onNameChange && (
+        <Field>
+          <FieldLabel htmlFor="voice-name">{t("common.name")}</FieldLabel>
+          <Input
+            id="voice-name"
+            value={name ?? ""}
+            onChange={(e) => onNameChange(e.target.value)}
+            className="h-10"
+            aria-label={t("audio.newVoice.nameAriaLabel")}
+          />
+        </Field>
+      )}
       <p className="text-xs text-muted-foreground">{t("audio.characters.intro")}</p>
 
       <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("audio.characters.filterGroupAriaLabel")}>

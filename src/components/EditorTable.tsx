@@ -249,6 +249,7 @@ import {
 import {
   firstActuallyVisibleIndex,
   resolveActiveChapterLabel,
+  type ChapterRowBounds,
 } from "@/lib/chapter-navigation"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
@@ -746,7 +747,14 @@ export interface EditorTableHandle {
   /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
    *  for time-ordered files, where store order ≠ display order), optionally
    *  flashing it. Returns false when the id is not currently displayable. */
-  scrollToCellId: (cellId: string, opts?: { flash?: boolean; follow?: "engage" | "release" }) => boolean
+  scrollToCellId: (
+    cellId: string,
+    opts?: { flash?: boolean; follow?: "engage" | "release"; align?: "center" | "top" },
+  ) => boolean
+  /** AQU-2153: the cell of the row at the top of the viewport — what a lens
+   *  switch remembers so the view can resume there. Null when the list has
+   *  not rendered a measurable row yet. */
+  getTopVisibleCellId: () => string | null
   /** 2026-08-08: command the media-lens playback follow directly (wire b —
    *  a row click doesn't scroll the table but must re-engage following). */
   setMediaFollow: (intent: "engage" | "release") => void
@@ -1826,26 +1834,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [])
   const getListQueryRoot = useCallback(() => parentRef.current ?? listRootRef.current, [])
 
-  const updateChapterVisibleIndex = useCallback(() => {
-    const viewport = listRootRef.current
+  /** Every rendered row's display index and vertical bounds, live from the
+   *  DOM — the chapter heading reads it on scroll and AQU-2153's lens switch
+   *  reads it once, at the moment the view is torn down. */
+  const measureRowBounds = useCallback((): ChapterRowBounds[] => {
     const root = getListQueryRoot()
-    if (!viewport || !root) return
-
-    const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"))
+    if (!root) return []
+    return Array.from(root.querySelectorAll<HTMLElement>("[data-cell-id][data-index]"))
       .map((row) => {
         const index = Number(row.dataset.index)
         if (!Number.isInteger(index)) return null
         const rect = row.getBoundingClientRect()
         return { index, top: rect.top, bottom: rect.bottom }
       })
-      .filter((row): row is { index: number; top: number; bottom: number } => row !== null)
+      .filter((row): row is ChapterRowBounds => row !== null)
+  }, [getListQueryRoot])
+
+  const updateChapterVisibleIndex = useCallback(() => {
+    const viewport = listRootRef.current
+    if (!viewport) return
+
     const nextIndex = firstActuallyVisibleIndex(
-      rows,
+      measureRowBounds(),
       viewport.getBoundingClientRect().top,
       firstVisibleIndex,
     )
     setChapterVisibleIndex((current) => current === nextIndex ? current : nextIndex)
-  }, [firstVisibleIndex, getListQueryRoot])
+  }, [firstVisibleIndex, measureRowBounds])
 
   const handleListScroll = useCallback(() => {
     // A native smooth animation emits scroll events far past any single
@@ -1991,7 +2006,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // reintroducing the bug.
   const scrollToDisplayCell = useCallback((
     cellId: string,
-    opts?: { flash?: boolean; follow?: "engage" | "release" },
+    opts?: { flash?: boolean; follow?: "engage" | "release"; align?: "center" | "top" },
   ): boolean => {
     // AQU-646 round 3: id-based scroll in DISPLAY space. The older
     // index-based path resolved indexes via cellStore.findIndexByCellId —
@@ -2003,8 +2018,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // Default "release": a jump the user is INSPECTING (search, presence,
     // findings) must not have playback yank the table back a beat later.
     // Wire a (chip clicks) passes "engage" — that jump means "watch this".
+    // AQU-2153: a view-switch resume asks for "top" — it is putting back the
+    // row that was at the top of the viewport, so centring it would land the
+    // reader half a screen above where they left off.
     programmaticListScroll(index, {
-      viewPosition: 0.5,
+      viewPosition: opts?.align === "top" ? 0 : 0.5,
       animated: false,
       follow: opts?.follow ?? "release",
     })
@@ -2022,6 +2040,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useImperativeHandle(ref, () => ({
     scrollToCellId: scrollToDisplayCell,
+    getTopVisibleCellId: () => {
+      const viewport = listRootRef.current
+      if (!viewport) return null
+      // -1 as the fallback so "nothing measurable yet" reads as null rather
+      // than claiming row 0 — a remembered row 0 would scroll the view the
+      // user is coming back to up to the top, which is the bug itself.
+      const index = firstActuallyVisibleIndex(
+        measureRowBounds(),
+        viewport.getBoundingClientRect().top,
+        -1,
+      )
+      return index < 0 ? null : displayCellIdsRef.current[index] ?? null
+    },
     setMediaFollow(intent: "engage" | "release") {
       issueFollowCommand(intent)
     },
@@ -2056,7 +2087,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage, scrollToDisplayCell])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, measureRowBounds, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage, scrollToDisplayCell])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.

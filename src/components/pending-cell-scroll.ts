@@ -27,7 +27,14 @@ export interface PendingCellScroll {
   flash: boolean
   /** The file the cell was parked FOR; null means "wherever we are". */
   fileId: string | null
-  source: "link" | "restore" | "trace"
+  source: "link" | "restore" | "trace" | "view"
+  /**
+   * Where the row should land in the viewport. "center" (the default) is what
+   * a jump the user is inspecting wants. AQU-2153's view-switch resume needs
+   * "top": it is putting back the row that WAS at the top, and centring it
+   * would leave the reader half a screen from where they were.
+   */
+  align?: "center" | "top"
 }
 
 /** The consumer's bookkeeping: one park's spent budget and travel history. */
@@ -49,9 +56,27 @@ export interface PendingScrollAttempt {
  * first unvalidated cell" link asked for, and the link appeared to land on a
  * random row. (`trace` never races either parker — it fires from a click,
  * long after both — so it needs no rule here.)
+ *
+ * AQU-2153: a `view` resume is excluded too. It is parked by a lens switch,
+ * which does not navigate — so the arrival this effect keys off has not
+ * changed, and re-parking the remembered LAST position over it would undo the
+ * resume the user just asked for by switching back.
  */
 export function restoreMayPark(existing: PendingCellScroll | null): boolean {
-  return existing?.source !== "link"
+  return existing?.source !== "link" && existing?.source !== "view"
+}
+
+/**
+ * May a view-switch resume (AQU-2153) park over what is already parked?
+ *
+ * It is the weakest parker in the machine. Every other park is a place
+ * someone asked for — a `?cellId=` deep link, a comment thread's "go to
+ * cell", the media→text trace, the remembered last position on arrival — and
+ * a resume is only where the user happened to be standing. So rather than
+ * ranking itself against each source, it yields to anything already waiting.
+ */
+export function viewMayPark(existing: PendingCellScroll | null): boolean {
+  return existing === null
 }
 
 export type PendingScrollStep =

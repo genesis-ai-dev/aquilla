@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   PENDING_CELL_SCROLL_MAX_ATTEMPTS,
-  restoreMayPark, stepPendingScroll,
+  restoreMayPark, stepPendingScroll, viewMayPark,
   type PendingCellScroll, type PendingScrollAttempt,
 } from "./pending-cell-scroll"
 
@@ -40,6 +40,22 @@ describe("who may park over whom", () => {
     // this rule made "go to the first unvalidated cell" appear to land on a
     // random row — the remembered position had quietly replaced it.
     expect(restoreMayPark(park({ source: "link" }))).toBe(false)
+  })
+
+  it("never lets the restore replace a view-switch resume (AQU-2153)", () => {
+    // A lens switch does not navigate, so the arrival the restore keys off has
+    // not changed — re-parking the remembered LAST position over the resume
+    // would undo the switch back the user just asked for.
+    expect(restoreMayPark(park({ source: "view" }))).toBe(false)
+  })
+
+  it("lets a view-switch resume park over nothing, and over nothing else (AQU-2153)", () => {
+    // Every other park is a place someone ASKED for; the resume is only where
+    // they happened to be standing, so it is the weakest parker in the machine.
+    expect(viewMayPark(null)).toBe(true)
+    for (const source of ["link", "restore", "trace", "view"] as const) {
+      expect(viewMayPark(park({ source }))).toBe(false)
+    }
   })
 })
 

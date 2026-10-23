@@ -4,6 +4,7 @@
 // cleanup on that one row.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { createRef } from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 vi.mock("@/hooks/useCellAudio", () => ({
@@ -35,7 +36,7 @@ vi.mock("@/lib/transcript-cleanup/save", () => ({
   }),
 }))
 
-import { TranscribeEditor } from "./TranscribeEditor"
+import { TranscribeEditor, type TranscribeEditorHandle } from "./TranscribeEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -128,6 +129,107 @@ describe("TranscribeEditor", () => {
     fireEvent.click(screen.getByTestId("transcribe-run"))
     await waitFor(() => expect(runCalls).toEqual(["tts"]))
     expect(runAudio.tts).toBe("audio-tts-1700000000-tts.webm")
+  })
+
+  // ── AQU-2153: the list resumes the line you left it at ──────────────────
+  // happy-dom lays nothing out, so these two stub the geometry the measure and
+  // the restore read: a 400px list under a 40px sticky toolbar, with 100px
+  // rows. The point is the ARITHMETIC against the toolbar's bottom edge (the
+  // real top of the visible content) and the anchoring by cell rather than by
+  // pixel offset — not the browser's layout.
+  const ROW_H = 100
+  const TOOLBAR_H = 40
+  const asRect = (top: number, height: number) => ({
+    top, bottom: top + height, height, y: top, left: 0, right: 0, width: 0, x: 0, toJSON() {},
+  }) as DOMRect
+
+  function stubGeometry(list: HTMLElement) {
+    // Re-read the rows per call: a take arriving adds one, and a stub that
+    // captured the old set would place the new row nowhere.
+    return vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      if (this === list) return asRect(0, 400)
+      // Sticky: the toolbar stays pinned to the list's top edge.
+      if (this === list.firstElementChild) return asRect(0, TOOLBAR_H)
+      const rows = Array.from(list.querySelectorAll<HTMLElement>("[data-cell-id]"))
+      const index = rows.indexOf(this as HTMLElement)
+      return index < 0 ? asRect(0, 0) : asRect(TOOLBAR_H + index * ROW_H - list.scrollTop, ROW_H)
+    })
+  }
+
+  const fiveLines = () => ["r0", "r1", "r2", "r3", "r4"].map((id) => take(id, { heard: "a", transcript: "a" }))
+
+  it("reports the line at the top of the visible content, not the first line rendered (AQU-2153)", () => {
+    const ref = createRef<TranscribeEditorHandle>()
+    render(<TranscribeEditor ref={ref} project={project} cells={fiveLines()} session={session} concepts={[]} editable />)
+    const list = screen.getByTestId("transcribe-editor")
+    const rects = stubGeometry(list)
+    try {
+      expect(ref.current?.getTopVisibleCellId()).toBe("r0")
+      // Scrolled past r0 and r1, and r2's lower half is under the toolbar.
+      list.scrollTop = 250
+      expect(ref.current?.getTopVisibleCellId()).toBe("r2")
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it("reopens at the remembered line, anchored by cell rather than pixel offset (AQU-2153)", () => {
+    const cells = fiveLines()
+    const { rerender } = render(
+      <TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable initialTopCellId={null} />,
+    )
+    const list = screen.getByTestId("transcribe-editor")
+    const rects = stubGeometry(list)
+    try {
+      rerender(
+        <TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable initialTopCellId="r3" />,
+      )
+      // r3 starts 300px below the toolbar's bottom edge; that is the scroll.
+      expect(list.scrollTop).toBe(300)
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it("leaves the list alone for a remembered line the file no longer has (AQU-2153)", () => {
+    const cells = fiveLines()
+    const { rerender } = render(
+      <TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable initialTopCellId={null} />,
+    )
+    const list = screen.getByTestId("transcribe-editor")
+    const rects = stubGeometry(list)
+    try {
+      list.scrollTop = 250
+      rerender(
+        <TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable initialTopCellId="deleted-since" />,
+      )
+      // A line deleted or re-imported since is never going to turn up: the
+      // list must not scroll to some other row, or hunt it on every commit.
+      expect(list.scrollTop).toBe(250)
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it("waits for a remembered line whose take has not arrived yet (AQU-2153)", () => {
+    const { rerender } = render(
+      <TranscribeEditor project={project} cells={fiveLines()} session={session} concepts={[]} editable initialTopCellId={null} />,
+    )
+    const list = screen.getByTestId("transcribe-editor")
+    const rects = stubGeometry(list)
+    try {
+      rerender(
+        <TranscribeEditor project={project} cells={fiveLines()} session={session} concepts={[]} editable initialTopCellId="r5" />,
+      )
+      expect(list.scrollTop).toBe(0)
+      const withR5 = [...fiveLines(), take("r5", { heard: "a", transcript: "a" })]
+      rerender(
+        <TranscribeEditor project={project} cells={withR5} session={session} concepts={[]} editable initialTopCellId="r5" />,
+      )
+      expect(list.scrollTop).toBe(500)
+    } finally {
+      rects.mockRestore()
+    }
   })
 
   it("withholds the empty state until the file's audio has been read", () => {

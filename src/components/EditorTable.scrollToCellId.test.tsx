@@ -230,4 +230,55 @@ describe("EditorTableHandle.scrollToCellId (AQU-646)", () => {
     const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
     expect(ref.current?.scrollToCellId("nope")).toBe(false)
   })
+
+  it("centres by default and tops the viewport for a view-switch resume (AQU-2153)", () => {
+    const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
+    scrollToIndex.mockClear()
+    ref.current?.scrollToCellId("m1")
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ viewPosition: 0.5 }))
+    scrollToIndex.mockClear()
+    // Putting back the row that WAS at the top: centring it would land the
+    // reader half a screen above where they left off.
+    ref.current?.scrollToCellId("m1", { align: "top" })
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ viewPosition: 0 }))
+  })
+})
+
+describe("EditorTableHandle.getTopVisibleCellId (AQU-2153)", () => {
+  /** happy-dom lays nothing out: place each rendered row by its DISPLAY index,
+   *  scrolled so the third one crosses the viewport's top edge at y=0. */
+  function stubRowGeometry() {
+    const asRect = (top: number) => ({
+      top, bottom: top + 100, height: 100, y: top, left: 0, right: 0, width: 0, x: 0, toJSON() {},
+    }) as DOMRect
+    return vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const index = Number((this as HTMLElement).dataset?.index)
+      const isRow = this.hasAttribute("data-cell-id") && Number.isInteger(index)
+      return isRow ? asRect(index * 100 - 250) : asRect(0)
+    })
+  }
+
+  it("names the row at the viewport's top edge in DISPLAY order", () => {
+    // Store order: late, mid, early — display (time) order is early, mid, late.
+    const ref = renderTable(makeStore([
+      mediaRow("late", 20_000, 30_000),
+      mediaRow("mid", 10_000, 20_000),
+      mediaRow("early", 0, 10_000),
+    ]))
+    const rects = stubRowGeometry()
+    try {
+      // Display index 2 is "late"; the store's index 2 is "early" — the
+      // store-space answer is exactly the row the user is NOT looking at.
+      expect(ref.current?.getTopVisibleCellId()).toBe("late")
+    } finally {
+      rects.mockRestore()
+    }
+  })
+
+  it("says null rather than row 0 when no row is measurable", () => {
+    // A remembered row 0 would scroll the view being resumed to the top —
+    // which is the bug this resume exists to fix.
+    const ref = renderTable(makeStore([mediaRow("m1", 0, 5_000)]))
+    expect(ref.current?.getTopVisibleCellId()).toBeNull()
+  })
 })

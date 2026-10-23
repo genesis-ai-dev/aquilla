@@ -9,7 +9,7 @@
 //   §2  GET /changesets/:id/wait — settles on approval, honors its timeout
 //   §3  ask-mode 24h TTL — a changeset approved 3 hours after prepare commits
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*).
 vi.mock('partyserver', () => ({
@@ -18,6 +18,7 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
+import { handleExternalMcpRequest } from '../external/mcp-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from '../external/stage'
 import { WAIT_MAX_TIMEOUT_MS } from '../external/changeset-wait'
@@ -141,6 +142,8 @@ async function approve(
     )
     .run()
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 beforeEach(async () => {
@@ -465,5 +468,44 @@ describe('ask-mode expiry outlives human deliberation (AQU-1177 §3)', () => {
 
     const rows = await tdb.rows<{ status: string }>('changesets')
     expect(rows[0].status).toBe('expired')
+  })
+})
+
+
+describe('pre-creation OAuth proposal reads', () => {
+  it('reads and waits on a real create proposal without granting another credential or organization access', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_ALICE, projectId: null })
+    const resource = 'https://w/api/v1/external/mcp'
+    await tdb.pg.query("INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Allowed', 1)")
+    await tdb.pg.query("INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 1, 700)")
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1, org_ids = $2 WHERE id = $3', [resource, JSON.stringify(['10']), CRED_ALICE])
+    async function call(bearer: string, name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request(resource, {
+        method: 'POST', headers: { Authorization: `Bearer ${bearer}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+      }), makeEnv(tdb.db))
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      return { error: body.result.isError === true, payload: JSON.parse(body.result.content[0].text) }
+    }
+    const staged = await call(token, 'prepare_create_project', { projectId: 'future-project', updates: [{ name: 'Future project', orgId: 10 }] })
+    expect(staged.error).toBe(false)
+    const args = { projectId: 'future-project', changesetId: staged.payload.changesetId }
+    expect((await call(token, 'get_changeset', args)).error).toBe(false)
+    const waiting = await call(token, 'wait_for_changeset', { ...args, timeoutMs: 0 })
+    expect(waiting.error).toBe(false)
+    expect(waiting.payload.approved).toBe(false)
+    const sibling = await credToken(tdb, { credentialId: CRED_ALICE_2, projectId: null })
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1, org_ids = $2 WHERE id = $3', [resource, JSON.stringify(['10']), CRED_ALICE_2])
+    expect((await call(sibling, 'get_changeset', args)).payload.error.code).toBe('permission_denied')
+    await tdb.pg.query('UPDATE api_credentials SET org_ids = $1 WHERE id = $2', [JSON.stringify(['20']), CRED_ALICE])
+    expect((await call(token, 'wait_for_changeset', { ...args, timeoutMs: 0 })).payload.error.code).toBe('scope_denied')
+    await tdb.pg.query('UPDATE api_credentials SET org_ids = $1 WHERE id = $2', [JSON.stringify(['10']), CRED_ALICE])
+    await tdb.pg.query('DELETE FROM org_members WHERE org_id = 10 AND user_id = 1')
+    expect((await call(token, 'get_changeset', args)).payload.error.code).toBe('permission_denied')
+    await tdb.pg.query('INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 1, 700)')
+    await tdb.pg.query(`INSERT INTO changeset_confirmations (id, changeset_id, user_id, credential_id, digest, expires_at) VALUES ('human', $1, '1', $2, $3, now() + interval '1 hour')`, [staged.payload.changesetId, CRED_ALICE, staged.payload.digest])
+    expect((await call(token, 'wait_for_changeset', { ...args, timeoutMs: 0 })).payload.approved).toBe(true)
+    expect((await call(token, 'confirm_changeset', { ...args, digest: staged.payload.digest })).error).toBe(false)
+    expect((await call(token, 'get_project', { projectId: 'future-project' })).error).toBe(false)
   })
 })

@@ -16,8 +16,6 @@ import {
   CheckCheck,
   CheckIcon,
   CornerDownRight,
-  Languages,
-  Mic,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -33,6 +31,7 @@ import {
   ComboboxSeparator,
   ComboboxTrigger,
 } from "@/components/ui/combobox"
+import { PROGRESS_ICON } from "@/lib/progress/progress-icons"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -313,7 +312,7 @@ function TextProgressColumn({ translated, validated, total }: {
   return (
     <span data-progress-column="text" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
-        icon={Languages}
+        icon={PROGRESS_ICON.text}
         swatchClassName={PROGRESS_BG.textTranslated}
         label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
         value={asPercent(translated)}
@@ -345,7 +344,7 @@ function AudioProgressColumn({ audioRecorded, audioValidated, total }: {
   return (
     <span data-progress-column="audio" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
-        icon={Mic}
+        icon={PROGRESS_ICON.audio}
         swatchClassName={PROGRESS_BG.audioRecorded}
         label={t("editor.milestone.percentRecorded", { percent: percent(audioRecorded, total) })}
         value={asPercent(audioRecorded)}

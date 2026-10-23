@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest"
-import { screen } from "@testing-library/react"
+import { fireEvent, screen } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import { CheckMarks, GutterMarks } from "./table-header-marks"
+import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 
 // Sam, 2026-09-28: the header names the table's narrow columns.
 describe("the table header's column marks", () => {
@@ -54,4 +55,53 @@ describe("the table header's column marks", () => {
     renderWithTooltips(<CheckMarks audioColumn="checking" />)
     expect(screen.getByRole("img", { name: "Audio validation" })).toBeInTheDocument()
   })
+
+  // AQU-2139: the header's two marks are the chapter picker's two glyphs. The
+  // header was drawn before the picker grew its audio column and chose a "T"
+  // and a sound wave, so one screen named text and audio twice over. Both
+  // surfaces read `PROGRESS_ICON` now; this renders them together and compares
+  // the glyphs, so a change on either side that does not move the other fails
+  // here rather than shipping two vocabularies again.
+  it("marks the two check columns with the glyphs the chapter picker uses", () => {
+    // A chapter with target text AND recordings, so the picker shows both
+    // progress columns ("N% translated" and "N% recorded").
+    const chapter: MilestoneNavigationItem = {
+      key: "scripture:GEN:1",
+      kind: "chapter",
+      label: "Genesis 1",
+      shortLabel: "1",
+      description: "Verses 1-10",
+      translated: 6,
+      validated: 2,
+      textTranslated: 6,
+      audioRecorded: 4,
+      audioValidated: 1,
+      total: 10,
+    }
+    renderWithTooltips(
+      <>
+        <CheckMarks audioColumn="on" />
+        <MilestoneNavigator items={[chapter]} activeKey={chapter.key} onSelect={() => {}} />
+      </>,
+    )
+    fireEvent.click(screen.getByRole("combobox", { name: /Current chapter: Genesis 1/ }))
+
+    // The picker's icons are aria-hidden, so role=img finds only the header's.
+    const [text, audio] = screen.getAllByRole("img")
+    expect(glyphOf(text)).toBe(glyphOf(pickerLine("60% translated")))
+    expect(glyphOf(audio)).toBe(glyphOf(pickerLine("40% recorded")))
+  })
 })
+
+/** The lucide glyph drawn inside `el` — `lucide-languages`, `lucide-mic`, … */
+function glyphOf(el: Element): string {
+  const svg = el.tagName === "svg" ? el : el.querySelector("svg")
+  const glyph = [...(svg?.classList ?? [])].find((c) => c.startsWith("lucide-"))
+  expect(glyph, `no lucide glyph in ${el.outerHTML}`).toBeDefined()
+  return glyph!
+}
+
+/** The chapter picker's progress line whose figure reads `label`. */
+function pickerLine(label: string): Element {
+  return screen.getByText(label).closest("[title]")!
+}

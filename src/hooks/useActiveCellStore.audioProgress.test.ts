@@ -263,3 +263,32 @@ describe("AQU-2110 — the navigation rollup counts audio validation", () => {
     expect(figures(s)[0]).toMatchObject({ total: 9, audioRecorded: 9, audioValidated: 9 })
   })
 })
+
+describe("AQU-2132 — the audio sets belong to the file that was read", () => {
+  it("drops the previous file's recorded and audio-validated lines on a file switch", () => {
+    const s = store()
+    s.replaceRows(twoChapters())
+    feedAudio(s, chapterOneRecorded(() => 1), 1)
+    expect(figures(s)[0]).toMatchObject({ audioRecorded: 10, audioValidated: 10 })
+
+    // Open a DIFFERENT file whose cells happen to carry the same ids — the
+    // coincidence that makes the leak visible rather than merely latent. Its
+    // own attachment read has not landed yet, so nothing in it is recorded.
+    s.reset("p", "file-b")
+    s.replaceRows(twoChapters())
+    expect(figures(s)[0]).toMatchObject({ translated: 0, audioRecorded: 0, audioValidated: 0 })
+  })
+
+  it("keeps them across a full re-read of the SAME file, so a refetch cannot blank the figures", () => {
+    const s = store()
+    s.replaceRows(twoChapters())
+    feedAudio(s, chapterOneRecorded(() => 1), 1)
+
+    // `reset()` also runs on every full re-read of the open file, where the
+    // hand-off has nothing new to re-assert: clearing there would leave the
+    // footer, the chapter picker and the sidebar chapter grid on text figures.
+    s.reset("p", "f")
+    s.replaceRows(twoChapters())
+    expect(figures(s)[0]).toMatchObject({ translated: 10, audioRecorded: 10, audioValidated: 10 })
+  })
+})

@@ -46,6 +46,18 @@ import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
  *  mutation app-wide; we only care that OUR file's events moved). */
 const OUTBOX_REFETCH_DEBOUNCE_MS = 300
 
+/**
+ * AQU-2132: backoff for a read that could not answer — a sync-token mint that
+ * returned null, or a GET that threw. Nothing else re-runs this read on its
+ * own (its deps are stable once the session lands, and the bus and the outbox
+ * only poke on a local change), so without a retry ONE failed read on page
+ * load is permanent for the tab: every surface that counts audio off this map
+ * reads text figures until the user happens to touch a take. Mirrors
+ * `FETCH_RETRY_DELAYS_MS` in useActiveCellStore, shorter because this read is
+ * one GET rather than a paginated stream.
+ */
+const READ_RETRY_DELAYS_MS = [400, 1200, 3000] as const
+
 function emptyEntry(): CellAudioEntry {
   return {
     attachments: {},
@@ -302,12 +314,28 @@ export function useFileAudioAttachments(
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const doFetchRef = useRef<(() => Promise<void>) | null>(null)
+  // AQU-2132: the bounded retry for a read that could not answer, and the read
+  // key the attempt counter belongs to so a new file gets its own budget.
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryAttemptsRef = useRef(0)
+  const retryKeyRef = useRef<string | null>(null)
+  /** The read key whose answer `byCellId` currently holds. A failure for THIS
+   *  key must leave that answer alone — a transient error is not news that the
+   *  takes went away — while a failure for a different file or lane must blank
+   *  it, because the old map is then a lie about the file on screen. */
+  const answeredKeyRef = useRef<string | null>(null)
+
+  const cancelRetry = useCallback(() => {
+    if (retryRef.current) clearTimeout(retryRef.current)
+    retryRef.current = null
+  }, [])
 
   const doFetch = useCallback(async () => {
     // No project/file, or auth not ready yet → nothing to read. Gating on `jwt`
     // here (rather than only inside getToken) makes it a real dependency, so the
     // fetch re-runs the moment the session lands on a cold reload.
     if (!projectId || !fileId || !jwt) {
+      cancelRetry()
       setByCellId(EMPTY)
       return
     }
@@ -318,6 +346,33 @@ export function useFileAudioAttachments(
     // (once per file per session, keyed inside the bus).
     await rehydrateShadowsFromOutbox(projectId, fileId).catch(() => { /* best-effort */ })
     const gen = ++generationRef.current
+    const key = `${projectId}/${fileId}/${laneKey}`
+    // A fresh read supersedes any pending retry, and owns the attempt budget.
+    cancelRetry()
+    if (retryKeyRef.current !== key) {
+      retryKeyRef.current = key
+      retryAttemptsRef.current = 0
+    }
+    /**
+     * This read could not answer. That is NOT "this file has no recordings",
+     * and publishing an empty map said exactly that — to the editor footer,
+     * the chapter picker and the open file's sidebar chapter grid, all three of
+     * which count audio off this map. `hasLoaded` still flips in `finally`, so
+     * the per-line gutter does not wait forever (AQU-2111's 3G finding); what
+     * changes is that the empty map is no longer the last word.
+     */
+    const failRead = (): void => {
+      if (answeredKeyRef.current !== key) setByCellId(EMPTY)
+      const attempt = retryAttemptsRef.current
+      if (attempt >= READ_RETRY_DELAYS_MS.length) return
+      retryAttemptsRef.current = attempt + 1
+      retryRef.current = setTimeout(() => {
+        retryRef.current = null
+        // Fenced like every other scheduled read here: a newer fetch has
+        // already superseded this one and must not be re-run behind it.
+        if (gen === generationRef.current) void doFetchRef.current?.()
+      }, READ_RETRY_DELAYS_MS[attempt])
+    }
     setIsLoading(true)
     try {
       const registry = getOptimisticShadows(fileId)
@@ -339,7 +394,7 @@ export function useFileAudioAttachments(
       ])
       if (gen !== generationRef.current) return // a newer fetch superseded us
       if (!res) {
-        setByCellId(EMPTY)
+        failRead()
         return
       }
       const map = new Map(Object.entries(res.cells))
@@ -368,6 +423,8 @@ export function useFileAudioAttachments(
         if (entry) map.set(cellId, entry)
       }
       setByCellId(map)
+      answeredKeyRef.current = key
+      retryAttemptsRef.current = 0
       // Re-arm a sweep for the EARLIEST grace deadline still outstanding.
       // Arming only on a fresh transition was wrong: two overlays settling a
       // few seconds apart share one timer, and the fetch it triggers sees no
@@ -393,16 +450,16 @@ export function useFileAudioAttachments(
         )
       }
     } catch {
-      // Read failures degrade to "no attachments" — playback shows nothing
-      // rather than the editor crashing. The next poke retries.
-      if (gen === generationRef.current) setByCellId(EMPTY)
+      // A thrown read degrades gracefully rather than crashing the editor, and
+      // (AQU-2132) retries on its own instead of waiting for the next poke.
+      if (gen === generationRef.current) failRead()
     } finally {
       if (gen === generationRef.current) {
         setIsLoading(false)
         setSettledKey(`${projectId}/${fileId}/${laneKey}`)
       }
     }
-  }, [projectId, fileId, lane, laneKey, getToken, jwt])
+  }, [projectId, fileId, lane, laneKey, getToken, jwt, cancelRetry])
 
   useEffect(() => {
     doFetchRef.current = doFetch
@@ -416,8 +473,9 @@ export function useFileAudioAttachments(
     () => () => {
       if (sweepRef.current) clearTimeout(sweepRef.current)
       sweepRef.current = null
+      cancelRetry()
     },
-    [],
+    [cancelRetry],
   )
 
   // Refetch when a producer pokes this file's bus channel.

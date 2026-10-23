@@ -29,8 +29,25 @@ export interface TranscriptRow {
 const loose = (s: string): string =>
   s.toLowerCase().replace(/[\p{P}\p{S}]/gu, "").trim().split(/\s+/).filter(Boolean).join(" ")
 
+/**
+ * The clip a row is about: the recording slot's selection when it holds one
+ * (a recorded take, or on a media line the imported source clip), else the
+ * selected generated voice.
+ *
+ * Every Inworld / Gemini voice on the default track lives in the
+ * generatedVoice slot (generate-voice.ts, regenerate-voice.ts), so a line
+ * voiced only by TTS has an EMPTY recording slot. Reading that pointer alone
+ * called a whole file of such lines "no audio yet" while the Recording tab
+ * listed the takes (AQU-2146). The order is playback's (`playingTakeId`),
+ * except that a media line keeps its source segment: that row's transcript is
+ * the source speech (spec §2), whatever voice sits beside it.
+ */
+function rowAudioIdOf(cell: CellData): string | null {
+  return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
+}
+
 export function transcriptRowOf(cell: CellData): TranscriptRow | null {
-  const audioId = cell.selectedAudioId
+  const audioId = rowAudioIdOf(cell)
   if (!audioId) return null
   const attachment = cell.attachments?.[audioId]
   if (!attachment || attachment.isDeleted) return null

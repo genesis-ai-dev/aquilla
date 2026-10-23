@@ -10868,7 +10868,7 @@ export function ProjectWorkspace() {
   const mayRestructureCells =
     resolveCellEditingFloor(project) != null &&
     (project?.syncRole?.level ?? 0) >= (resolveCellEditingFloor(project) ?? Infinity)
-  const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
+  const { byCellId: workspaceAudioByCellId, hasLoaded: workspaceAudioLoaded } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
@@ -16735,6 +16735,8 @@ export function ProjectWorkspace() {
                     concepts={laneEditorConcepts}
                     editable={!isReadOnly && !laneWriteFrozen}
                     onCommitted={handleCellCommitted}
+                    // AQU-2146: "no audio yet" only once the read has answered.
+                    audioLoaded={workspaceAudioLoaded}
                   />
                 </div>
               ) : extensionEditorActive && activeFileId && activeFile ? (

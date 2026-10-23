@@ -16,9 +16,13 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 const runCalls: string[] = []
+/** The clip each run was handed, by cell: the sparkle must transcribe the
+ *  row's own take, not whatever the recording slot holds. */
+const runAudio: Record<string, string> = {}
 vi.mock("@/lib/transcript-cleanup/run", () => ({
-  transcribeAndCleanUp: vi.fn(async ({ row }: { row: { cell: { id: string } } }) => {
+  transcribeAndCleanUp: vi.fn(async ({ row }: { row: { cell: { id: string }; audioId: string } }) => {
     runCalls.push(row.cell.id)
+    runAudio[row.cell.id] = row.audioId
     return { kind: "cleaned", changes: 1 }
   }),
 }))
@@ -59,6 +63,25 @@ function take(id: string, opts: { heard?: string; transcript?: string; validated
   } as unknown as CellData
 }
 
+/** A line voiced only by TTS (AQU-2146): the recording slot is empty and the
+ *  generated voice is selected in its own slot. */
+function voice(id: string): CellData {
+  const audioId = `audio-${id}-1700000000-tts.webm`
+  return {
+    id,
+    fileId: "f1",
+    cellLabel: id,
+    selectedGeneratedVoiceAudioId: audioId,
+    attachments: {
+      [audioId]: {
+        url: `frontier-audio://${audioId}`, type: "audio", isDeleted: false, createdAt: 0, updatedAt: 0,
+        slot: "generatedVoice", voiceId: "v1",
+      },
+    },
+    audioTimings: {},
+  } as unknown as CellData
+}
+
 beforeEach(() => {
   runCalls.length = 0
   saves.length = 0
@@ -92,5 +115,25 @@ describe("TranscribeEditor", () => {
     render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema akasema", transcript: "Yesu akasema" })]} session={session} concepts={[]} editable />)
     expect(screen.getByTestId("transcribe-heard").textContent).toBe("eema akasema")
     expect((screen.getByTestId("transcribe-transcript") as HTMLTextAreaElement).value).toBe("Yesu akasema")
+  })
+
+  it("lists a line voiced only by a generated voice instead of calling the file silent (AQU-2146)", () => {
+    render(<TranscribeEditor project={project} cells={[voice("tts")]} session={session} concepts={[]} editable />)
+    expect(screen.queryByTestId("transcribe-empty")).toBeNull()
+    expect(screen.getByTestId("transcribe-row").getAttribute("data-cell-id")).toBe("tts")
+  })
+
+  it("runs the sparkle against the generated take itself", async () => {
+    render(<TranscribeEditor project={project} cells={[voice("tts")]} session={session} concepts={[]} editable />)
+    fireEvent.click(screen.getByTestId("transcribe-run"))
+    await waitFor(() => expect(runCalls).toEqual(["tts"]))
+    expect(runAudio.tts).toBe("audio-tts-1700000000-tts.webm")
+  })
+
+  it("withholds the empty state until the file's audio has been read", () => {
+    const { rerender } = render(<TranscribeEditor project={project} cells={[]} session={session} concepts={[]} editable audioLoaded={false} />)
+    expect(screen.queryByTestId("transcribe-empty")).toBeNull()
+    rerender(<TranscribeEditor project={project} cells={[]} session={session} concepts={[]} editable audioLoaded />)
+    expect(screen.getByTestId("transcribe-empty")).toBeTruthy()
   })
 })

@@ -34,9 +34,13 @@ interface Props {
   editable: boolean
   /** Flush the outbox and refetch the cell (the editor's onCellCommitted). */
   onCommitted?: (cellId?: string) => Promise<void> | void
+  /** Whether the file's audio attachments have been read (the attachments
+   *  hook's `hasLoaded`). Until then an empty row list means "not read yet",
+   *  not "no audio", so the empty state waits for it. Omitted reads as read. */
+  audioLoaded?: boolean
 }
 
-export function TranscribeEditor({ project, cells, session, targetLang, concepts, editable, onCommitted }: Props) {
+export function TranscribeEditor({ project, cells, session, targetLang, concepts, editable, onCommitted, audioLoaded = true }: Props) {
   const t = useT()
   const rows = useMemo(
     () => cells.map(transcriptRowOf).filter((r): r is TranscriptRow => r !== null),
@@ -115,6 +119,9 @@ export function TranscribeEditor({ project, cells, session, targetLang, concepts
   }, [project.id, targetLang, session, setStatus, refresh])
 
   if (rows.length === 0) {
+    // Nothing until the read answers: a file whose takes are still on their
+    // way is not a file with no audio (AQU-2146).
+    if (!audioLoaded) return null
     return <p className="px-4 py-10 text-center text-sm text-muted-foreground" data-testid="transcribe-empty">{t("transcribe.empty")}</p>
   }
 

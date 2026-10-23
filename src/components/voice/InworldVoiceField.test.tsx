@@ -88,6 +88,38 @@ describe("InworldVoiceField", () => {
     })
   })
 
+  // AQU-2152 — the French stock voices are Étienne and Hélène as much as Alain.
+  // An ASCII-only validity check treated the accented ones as not-a-voice, so
+  // picking one left the field on the saved speaker (Dennis in the report).
+  it("selects an accented catalog voice when it is picked", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Alain", displayName: "Alain", language: "fr-FR" },
+      { voiceId: "Étienne", displayName: "Étienne", language: "fr-FR" },
+      { voiceId: "Hélène", displayName: "Hélène", language: "fr-FR" },
+    ])
+    const user = userEvent.setup()
+    const { onChange } = renderField(["fr"], "fr-FR", "Alain")
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await user.click(trigger)
+    await user.click(await screen.findByRole("option", { name: /Étienne/ }))
+    expect(onChange).toHaveBeenCalledWith("Étienne", "fr-FR")
+  })
+
+  // The same check decided whether a saved speaker missing from the catalog is
+  // kept: an accented one was dropped and the first catalog row silently took
+  // its place (AQU-2152).
+  it("keeps an accented saved speaker that is momentarily absent from the catalog", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Alain", displayName: "Alain", language: "fr-FR" },
+      { voiceId: "Mathieu", displayName: "Mathieu", language: "fr-FR" },
+    ])
+    const { onChange } = renderField(["fr"], "fr-FR", "Hélène")
+    const trigger = await screen.findByRole("combobox", { name: "Voice" })
+    await waitFor(() => expect(trigger).toBeEnabled())
+    expect(trigger).toHaveTextContent("Hélène")
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
   it("keeps a designed voice id that is not in the catalog", async () => {
     vi.mocked(listInworldVoices).mockResolvedValue([
       { voiceId: "Dennis", displayName: "Dennis", language: "en-US" },

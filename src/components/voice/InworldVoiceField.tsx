@@ -79,9 +79,15 @@ export function InworldVoiceField({
         value={selectValue}
         disabled={unavailable}
         onValueChange={(next) => {
-          const id = typeof next === "string" && next ? next : DEFAULT_INWORLD_VOICE
-          const match = voices.find((v) => v.voiceId === id)
-          onChange(id, match?.language)
+          // AQU-2152: the item list re-registers right after a pick lands — the
+          // saved-speaker row drops out, and the catalog refetches for the
+          // language the pick just seeded — and base-ui emits a null value for
+          // it. Coercing that to the built-in default overwrote the speaker the
+          // user had just chosen with Dennis. There is no "no voice" item, so a
+          // nullish value is never a real choice: ignore it and keep the pick.
+          if (typeof next !== "string" || !next) return
+          const match = voices.find((v) => v.voiceId === next)
+          onChange(next, match?.language)
         }}
       >
         <SelectTrigger id="inworld-voice" className="h-10">

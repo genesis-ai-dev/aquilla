@@ -4,6 +4,7 @@ import {
   hasAudioProgress,
   isAudioOnlyProgress,
   mergeFileProgress,
+  withAudioProgress,
 } from "./file-summary-progress"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 
@@ -147,5 +148,39 @@ describe("mergeFileProgress", () => {
     const merged = mergeFileProgress(base, live)
     expect(merged.size).toBe(2)
     expect(merged.get("new-file")).toEqual({ translated: 1, validated: 0, total: 5 })
+  })
+})
+
+// AQU-2132: the footer reported an audio-only file as `9 cells · 0 translated`
+// on most page loads while the sidebar row for the SAME file read
+// `67% recorded, 67% audio validated`. Both draw the open file; only the row
+// honoured `mergeFileProgress`'s rule that the server's figures stand until
+// the attachment map lands. This is that rule, in one place, for both.
+describe("withAudioProgress", () => {
+  const TEXT = { translated: 0, validated: 0, total: 9 }
+
+  it("draws the server's pair while the live attachment map has not landed", () => {
+    // What `mergeFileProgress` leaves for the open file in that window: the
+    // live text half, the server's audio half.
+    expect(withAudioProgress(TEXT, { translated: 0, validated: 0, total: 9, recorded: 6, audioValidated: 6 }))
+      .toEqual({ translated: 0, validated: 0, total: 9, recorded: 6, audioValidated: 6 })
+  })
+
+  it("prefers the live pair once it is on the merged entry", () => {
+    expect(withAudioProgress(TEXT, { translated: 0, validated: 0, total: 9, recorded: 9, audioValidated: 7 }))
+      .toEqual({ translated: 0, validated: 0, total: 9, recorded: 9, audioValidated: 7 })
+  })
+
+  it("leaves the text figures alone when no audio figures exist anywhere", () => {
+    // A file the server described before it sent the pair at all. Fabricating
+    // `recorded: 0` here is the regression — it reads as "nothing recorded"
+    // and hides the audio half for a file that may be fully recorded.
+    expect(withAudioProgress(TEXT, { translated: 0, validated: 0, total: 9 })).toBe(TEXT)
+    expect(withAudioProgress(TEXT, undefined)).toBe(TEXT)
+  })
+
+  it("keeps a genuine zero, which is an answer", () => {
+    expect(withAudioProgress(TEXT, { translated: 0, validated: 0, total: 9, recorded: 0 }))
+      .toEqual({ translated: 0, validated: 0, total: 9, recorded: 0, audioValidated: 0 })
   })
 })

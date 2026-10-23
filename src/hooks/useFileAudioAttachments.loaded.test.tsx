@@ -131,6 +131,41 @@ describe("useFileAudioAttachments — hasLoaded", () => {
     const { result } = renderHook(() => useFileAudioAttachments("proj-1", null))
     expect(result.current.hasLoaded).toBe(true)
   })
+
+  /**
+   * AQU-2132: the shape of every reload of `/project/:id/file/:fileId`. The
+   * file id is on the URL from the first render; `project?.id` is null until
+   * `useProject` resolves, since that read is server-only with no IDB
+   * fallback. "No project yet" used to count as "nothing to read", so the hook
+   * answered for a file that IS open, with an empty map — and a fabricated
+   * "nothing is recorded" overrides the server's figures, the only ones that
+   * know this file's takes until the read lands.
+   */
+  it("does not answer for an open file while its project is still resolving", async () => {
+    fetchMock.mockResolvedValueOnce(ONE_TAKE)
+    const { result, rerender } = renderHook(
+      ({ projectId }) => useFileAudioAttachments(projectId, "file-reload"),
+      { initialProps: { projectId: null as string | null } },
+    )
+    expect(result.current.hasLoaded).toBe(false)
+    expect(result.current.byCellId.size).toBe(0)
+    // There is nothing to read FROM yet, so no request is made either.
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    rerender({ projectId: "proj-1" })
+    await waitFor(() => expect(result.current.hasLoaded).toBe(true))
+    expect(result.current.byCellId.size).toBe(1)
+  })
+
+  it("still answers at once when nobody is signed in and no project is known", () => {
+    // The other half of the old `readKey === null` clause, which was right:
+    // there is genuinely nothing to read, so nothing may wait on it.
+    auth.session = null
+    auth.loading = false
+    const { result } = renderHook(() => useFileAudioAttachments(null, "file-anon"))
+    expect(result.current.hasLoaded).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })
 
 // AQU-2132: an empty map after a read that could not answer was published as

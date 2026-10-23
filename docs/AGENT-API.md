@@ -1288,8 +1288,13 @@ the weekly-allowance reservation, and settlement on provider cost (Whisper/Qwen)
 metered GPU-seconds (Omnilingual). `creditsCharged` is that settlement in credit units;
 it is `null` while a provider cost is still being reconciled.
 
-**Credentials.** The tools need a **project-scoped** `aqk_` credential with
+**Credentials.** Ordinary REST callers need a **project-scoped** `aqk_` credential with
 **read-write** access (the call spends credits), and a contributor role or higher.
+
+Organization-scoped MCP OAuth connections can transcribe within their selected
+organizations and live project permissions. The MCP request remains resource-bound;
+its token cannot be replayed on ordinary REST. Write access, Contributor permissions
+and project credit admission still apply.
 
 **Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
 Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so

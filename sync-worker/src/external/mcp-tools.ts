@@ -313,7 +313,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'a cold call fails with reason "asr_warming". language (BCP-47) defaults to the lane\'s. ' +
       'Returns { text, words: [{ text, start, end }] (seconds), model, timingsApproximate, ' +
       'creditsCharged }. SPENDS WORKSPACE CREDITS (metered GPU time for Omnilingual) and needs a ' +
-      'project-scoped read-write credential. WRITES NOTHING: to store the transcript, stage it with ' +
+      'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
       'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',

@@ -267,6 +267,36 @@ describe('transcription_status', () => {
 })
 
 describe('MCP + discovery', () => {
+  it('admits organization-scoped MCP OAuth while retaining scope, role and write ceilings', async () => {
+    const token = await credToken({ userId: 2, projectId: null })
+    await tdb.pg.query("INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Allowed', 2)")
+    await tdb.pg.query('INSERT INTO org_members (org_id, user_id, role_level) VALUES (10, 2, 400)')
+    await tdb.pg.query('UPDATE projects SET org_id = 10 WHERE id = $1', [PROJECT])
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1, org_ids = $2', ['https://w/api/v1/external/mcp', JSON.stringify(['10'])])
+    async function call(name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { projectId: PROJECT, ...args } } }),
+      }), makeEnv())
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      return { error: body.result.isError === true, payload: JSON.parse(body.result.content[0].text) }
+    }
+    reply = () => Response.json({ state: 'ready' })
+    expect((await call('transcription_status', { model: 'omni-ctc', warm: false })).error).toBe(false)
+    expect(calls[0].body).toMatchObject({ projectId: PROJECT, userId: '2', action: 'status' })
+    reply = () => Response.json({ text: 'ami', chunks: [], model: 'omni-ctc', timingsApproximate: false, creditsCharged: 0.25 })
+    expect((await call('transcribe_audio', { audio: { data: wav(1), format: 'wav' }, language: 'luo', model: 'omni-ctc' })).payload.text).toBe('ami')
+    expect(calls).toHaveLength(2)
+    await tdb.pg.query('UPDATE api_credentials SET org_ids = $1', [JSON.stringify(['20'])])
+    expect((await call('transcription_status', { warm: false })).payload.error.code).toBe('scope_denied')
+    await tdb.pg.query("UPDATE api_credentials SET org_ids = $1, access = 'read'", [JSON.stringify(['10'])])
+    expect((await call('transcription_status', { warm: false })).payload.error.code).toBe('scope_denied')
+    await tdb.pg.query("UPDATE api_credentials SET access = 'write'")
+    await tdb.pg.query('DELETE FROM project_members WHERE user_id = 2')
+    expect((await call('transcription_status', { warm: false })).payload.error.code).toBe('permission_denied')
+    expect(calls).toHaveLength(2)
+  })
+
   it('transcribe_audio over MCP reaches the same route', async () => {
     const token = await credToken({ userId: 2 })
     const res = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {

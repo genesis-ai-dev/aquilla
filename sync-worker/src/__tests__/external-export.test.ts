@@ -13,7 +13,7 @@
 // credential scope, a file with no preserved artifact, and the MCP tool's
 // binary/oversize refusals that hand the caller back to REST.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // mcp-route → changesets-route → commit.ts → events/route.ts → broadcast.ts
 // reaches partyserver, which imports cloudflare:* — unavailable under node.
@@ -76,6 +76,8 @@ function makeStubBucket() {
     },
   }
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 let bucket: ReturnType<typeof makeStubBucket>
@@ -443,6 +445,23 @@ describe('export_file (MCP)', () => {
     expect(err.code).toBe('validation_failed')
     expect(err.restPath).toContain(`/files/${FILE}/export`)
     expect(err.message).toContain('REST')
+  })
+
+  it('gives OAuth clients an app fallback for binary and oversized exports', async () => {
+    await seedUsfmFile()
+    const token = await credToken({ credentialId: CRED_MAINTAINER, userId: 1, username: 'maint', projectId: PROJECT })
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [
+      'https://w/api/v1/external/mcp', CRED_MAINTAINER,
+    ])
+    await tdb.pg.query(`UPDATE cells SET value = $1 WHERE side = 'target'`, ['x'.repeat(MCP_EXPORT_MAX_BYTES + 1)])
+    const large = await callMcpTool(token, 'export_file', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
+    expect(large.isError).toBe(true)
+    expect(large.payload.error).toMatchObject({ code: 'validation_failed', message: expect.stringContaining('export from the app') })
+    await bucket.put('blob/binary', new TextEncoder().encode('PKbinary'))
+    await tdb.pg.query(`UPDATE file_source_blobs SET format = 'docx', raw_source = NULL, r2_key = 'blob/binary' WHERE file_id = $1`, [FILE])
+    const binary = await callMcpTool(token, 'export_file', { projectId: PROJECT, fileId: FILE, lane: 'deflane1' })
+    expect(binary.isError).toBe(true)
+    expect(binary.payload.error).toMatchObject({ code: 'validation_failed', message: expect.stringContaining('export from the app') })
   })
 
   it('refuses an export larger than the inline limit rather than truncating it', async () => {

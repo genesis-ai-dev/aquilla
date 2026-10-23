@@ -39,6 +39,10 @@ interface AudioRowRaw {
   validators?: string[]
   /** AQU-1767: the take this row was cut from (its group's root), or null. */
   piece_of?: string | null
+  /** 0186: what ASR heard, and the AI-cleanup provenance (JSON text). */
+  asr_text?: string | null
+  asr_model?: string | null
+  transcript_ai?: string | null
 }
 
 export interface AttachmentOut {
@@ -95,6 +99,27 @@ export interface AttachmentOut {
    * of a group is selected, every live piece of it is.
    */
   pieceOf: string | null
+  /**
+   * 0186 (two-step transcription): what ASR heard for this clip, kept through
+   * corrections, and the model that heard it. Null for clips transcribed
+   * before the column existed.
+   */
+  asrText: string | null
+  asrModel: string | null
+  /** Provenance of an AI cleanup while the transcript is still the AI's. */
+  transcriptAi: { model: string; at: number; changes: number } | null
+}
+
+function parseTranscriptAi(raw: string | null | undefined): AttachmentOut["transcriptAi"] {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as Partial<NonNullable<AttachmentOut["transcriptAi"]>>
+    return typeof v.model === "string" && typeof v.at === "number" && typeof v.changes === "number"
+      ? { model: v.model, at: v.at, changes: v.changes }
+      : null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -178,6 +203,9 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       role: r.role === "source" ? "source" : "dub",
       recordedBy: r.created_by ?? null,
       pieceOf: r.piece_of ?? null,
+      asrText: r.asr_text ?? null,
+      asrModel: r.asr_model ?? null,
+      transcriptAi: parseTranscriptAi(r.transcript_ai),
     }
     if (r.timings_json) {
       try {

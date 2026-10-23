@@ -427,6 +427,7 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
+import { TranscribeEditor } from "@/components/transcribe/TranscribeEditor"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -7806,7 +7807,7 @@ export function ProjectWorkspace() {
         // visible, else the first visible row).
         const idx = editorRef.current?.getCurrentIndex?.() ?? -1
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
-      } else if (timelineSelectedCellIdRef.current) {
+      } else if (next === "text" && timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
         // no edit-focus change. The trace is always within the open file (the
         // lens switch doesn't navigate), so it parks against `activeFileId`.
@@ -10864,7 +10865,7 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page — the attachment map only
     // decorates rows that have to exist first.
-    editorFirstPaint && (lens === "audio" || mayRestructureCells) ? activeFileId : null,
+    editorFirstPaint && (lens === "audio" || lens === "transcribe" || mayRestructureCells) ? activeFileId : null,
     activeLane, // AQU-1591: takes belong to a lane.
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
@@ -16642,7 +16643,23 @@ export function ProjectWorkspace() {
                   its own "Video" header at the same height. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
-              {extensionEditorActive && activeFileId && activeFile ? (
+              {lens === "transcribe" && activeFileId && project ? (
+                // Two-step transcription: one row per line with audio — ASR,
+                // then an AI cleanup taught by this file's corrections. The
+                // chapter toolbar (and its lens switch) stays above it.
+                <div className="flex h-full min-h-0 flex-col">
+                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  <TranscribeEditor
+                    project={project}
+                    cells={batchAudioCells}
+                    session={frontierSession}
+                    {...(activeLane ? { targetLang: activeLane } : {})}
+                    concepts={laneEditorConcepts}
+                    editable={!isReadOnly && !laneWriteFrozen}
+                    onCommitted={handleCellCommitted}
+                  />
+                </div>
+              ) : extensionEditorActive && activeFileId && activeFile ? (
                 // Smart Extensions: the editor extension takes EditorTable's
                 // place INSIDE the same layout — the media lens's timeline and
                 // video, the footnote tray, the search overlay and the load

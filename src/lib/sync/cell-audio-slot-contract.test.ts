@@ -147,3 +147,26 @@ describe("a take on an added track survives the whole round trip", () => {
     expect(resolveTargetAudio(cell)?.audioId).toBe(DEFAULT_TAKE)
   })
 })
+
+// Two-step transcription (migration 0186). mergeCellsWithAudio rebuilds every
+// attachment field by field, so a column the route returns but the merge does
+// not list is dropped on the way to the editor with no type error. The
+// Transcribe lens would then show "Not transcribed yet" over a saved ASR text
+// and lose the "Cleaned up" mark — every layer passing its own tests.
+describe("what ASR heard reaches the Transcribe lens", () => {
+  it("collapse → merge → transcript row, with the AI-cleanup mark", async () => {
+    const { transcriptRowOf } = await import("@/lib/transcript-cleanup/rows")
+    const cell = cellFor([
+      {
+        ...row({ audio_id: DEFAULT_TAKE, slot: "recording", selected: 1 }),
+        timings_json: JSON.stringify([{ word: "Yesu", t0: 0, t1: 1, start: 0, end: 4 }]),
+        asr_text: "eema",
+        asr_model: "omni-ctc",
+        transcript_ai: JSON.stringify({ model: "m", at: 1, changes: 1 }),
+      } as Row,
+    ])
+    const r = transcriptRowOf(cell)
+    expect(r).toEqual(expect.objectContaining({ heard: "eema", transcript: "Yesu", aiCleaned: true }))
+    expect(cell.attachments?.[DEFAULT_TAKE]?.asrModel).toBe("omni-ctc")
+  })
+})

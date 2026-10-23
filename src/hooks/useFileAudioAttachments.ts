@@ -518,6 +518,10 @@ export function mergeCellsWithAudio(
         // AQU-1767: which take a piece was cut from — the chips, the playback
         // overlay and the validation gutter all expand a selection by it.
         ...(a.pieceOf ? { pieceOf: a.pieceOf } : {}),
+        // Two-step transcription: what ASR heard, and the AI-cleanup mark.
+        ...(a.asrText != null ? { asrText: a.asrText } : {}),
+        ...(a.asrModel != null ? { asrModel: a.asrModel } : {}),
+        ...(a.transcriptAi ? { transcriptAi: a.transcriptAi } : {}),
       }
     }
     return {

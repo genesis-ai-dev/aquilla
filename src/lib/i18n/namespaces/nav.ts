@@ -10,6 +10,7 @@ export const nav = defineNamespace({
     // switch (AQU-353). Shared by every entry point that toggles this lens so
     // the name can never drift ("Audio" vs the old sidebar "Voice"). --
     "nav.lens.audio": "Audio",
+    "nav.lens.transcribe": "Transcribe",
     "nav.lens.media": "Media",
 
     // -- NavHistoryControls: back/forward arrows + hold-for-history popover --
@@ -502,6 +503,12 @@ export const nav = defineNamespace({
           "ordered file: reveals the cast library, transport and per-line speaker " +
           "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
           "icon 'Text' tab in a two-tab segmented control.",
+      },
+      "nav.lens.transcribe": {
+        description:
+          "Third tab of the header lens switch, offered when the file has audio: a view for " +
+          "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
+          "beside the Text and Audio tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:

@@ -118,13 +118,15 @@ describe("cell-audio projection", () => {
     expect(a[11]).toBeNull() // trim_start_ms (unset)
     expect(a[12]).toBeNull() // trim_end_ms (unset)
     expect(a[13]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
-    expect(a[14]).toBe("evt-audio-1") // event_id
-    expect(a[15]).toBe(100) // created_ts = serverTs
-    expect(a[16]).toBe("dub") // role — nothing said 'source'
+    // 0186: asr_text, asr_model, transcript_ai — unset on a plain attach.
+    expect(a.slice(14, 17)).toEqual([null, null, null])
+    expect(a[17]).toBe("evt-audio-1") // event_id
+    expect(a[18]).toBe(100) // created_ts = serverTs
+    expect(a[19]).toBe("dub") // role — nothing said 'source'
     // AQU-1591: lane_id's resolve subquery binds (project, role, role, tag).
-    expect(a.slice(18, 22)).toEqual(["p1", "dub", "dub", ""])
+    expect(a.slice(21, 25)).toEqual(["p1", "dub", "dub", ""])
     // AQU-1767: piece_of, last — null unless the attach is a piece being born.
-    expect(a.slice(22)).toEqual([null])
+    expect(a.slice(25)).toEqual([null])
   })
 
   it("attach: binds NULL for optional fields the payload omits", () => {
@@ -172,6 +174,66 @@ describe("cell-audio projection", () => {
     for (const col of ["duration_ms", "mime_type", "voice_id", "reference_audio_id", "timings_json", "label"]) {
       expect(sql).toContain(`${col} = COALESCE(excluded.${col}, cell_audio.${col})`)
     }
+  })
+
+  // Two-step transcription (0186). The cleanup step learns from pairs of
+  // "ASR heard X → a person settled on Y". A correction is a partial re-attach
+  // with new timings and no `asr`; if that nulled asr_text, every pair would be
+  // destroyed by the very edit that creates it.
+  it("attach: what ASR heard survives a correction, and only a new ASR run replaces it", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [{ word: "Yesu", t0: 0, t1: 0.5, start: 0, end: 4 }],
+        asr: { text: "eema", model: "omni-ctc" },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.sql).toContain("asr_text = COALESCE(excluded.asr_text, cell_audio.asr_text)")
+    expect(insert.sql).toContain("asr_model = COALESCE(excluded.asr_model, cell_audio.asr_model)")
+    expect(insert.args).toContain("eema")
+    expect(insert.args).toContain("omni-ctc")
+  })
+
+  // The "Cleaned up" mark must describe the transcript as it reads NOW. Once a
+  // person corrects it (new timings, no mark) it is theirs; a trim or a
+  // duration heal (no timings) says nothing about the words and leaves it.
+  it("attach: new timings without an AI mark clear it; an attach with no timings keeps it", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [{ word: "Yesu", t0: 0, t1: 0.5, start: 0, end: 4 }],
+        transcriptAi: { model: "m", at: 5, changes: 1 },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.sql).toContain(
+      "transcript_ai = CASE WHEN excluded.transcript_ai IS NOT NULL THEN excluded.transcript_ai " +
+        "WHEN excluded.timings_json IS NOT NULL THEN NULL ELSE cell_audio.transcript_ai END",
+    )
+    expect(insert.args).toContain(JSON.stringify({ model: "m", at: 5, changes: 1 }))
+  })
+
+  it("source commit of a transcription clears the segment's AI-cleanup mark", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("source.cell.commit", { transcription: "ni Yesu akaenda" }),
+      [],
+    )
+    const clear = recorded.find((s) => s.sql.startsWith("UPDATE cell_audio SET transcript_ai = NULL"))
+    expect(clear?.sql).toContain("role = 'source'")
+    expect(clear?.args).toEqual(["p1", "f1", "c1"])
   })
 
   // 2026-08-14: this test used to assert the OPPOSITE — that trims stayed a

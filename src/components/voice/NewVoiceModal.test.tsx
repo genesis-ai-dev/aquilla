@@ -302,6 +302,36 @@ describe("NewVoiceModal engine selection", () => {
     expect(saved.language).toBe("en-GB")
   })
 
+  // AQU-2152 \u2014 reported as "picking a different voice doesn't work in the Edit
+  // voice menu", on a French voice resting on the English default Dennis. The
+  // pick seeds the draft language, which re-registers the Voice list, and the
+  // null value base-ui emits for that used to be coerced back to Dennis.
+  const frenchCatalog = [
+    { voiceId: "Alain", displayName: "Alain", language: "fr-FR" },
+    { voiceId: "\u00c9tienne", displayName: "\u00c9tienne", language: "fr-FR" },
+    { voiceId: "H\u00e9l\u00e8ne", displayName: "H\u00e9l\u00e8ne", language: "fr-FR" },
+  ]
+  const frenchSession = { jwt: "tok", username: "dev" } as FrontierSession
+
+  it.each(["Alain", "\u00c9tienne", "H\u00e9l\u00e8ne"])(
+    "keeps the prebuilt speaker %s once it is picked (AQU-2152)",
+    async (speaker) => {
+      vi.mocked(listInworldVoices).mockResolvedValue(frenchCatalog)
+      const user = userEvent.setup()
+      const { onSave } = renderCreate({
+        provider: "inworld", targetLanguage: "fr", projectId: "p1", fileId: "f1",
+        session: frenchSession,
+      })
+      await user.click(screen.getByRole("combobox", { name: "Voice" }))
+      await user.click(await screen.findByRole("option", { name: speaker }))
+      expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(speaker)
+      create()
+      const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+      expect(saved.voiceName).toBe(speaker)
+      expect(saved.language).toBe("fr-FR")
+    },
+  )
+
   it("keeps the accent when the Voice list is the built-in English fallback (AQU-2032)", async () => {
     // No Inworld key: the Voice list falls back to the built-in speakers, every
     // one of them tagged en-US. That tag must not land on an Arabic voice.

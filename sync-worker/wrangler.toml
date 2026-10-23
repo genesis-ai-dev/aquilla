@@ -427,3 +427,12 @@ bucket_name = "aquilla-snapshots"
 [[env.e2e.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
+
+# Internal AI bridges must reach the matching identity Worker, not the zone origin.
+[[env.production.services]]
+binding = "AUTH_WORKER"
+service = "aquilla-identity"
+
+[[env.development.services]]
+binding = "AUTH_WORKER"
+service = "aquilla-dev-identity"

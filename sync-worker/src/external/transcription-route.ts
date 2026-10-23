@@ -1,3 +1,4 @@
+import { fetchIdentity } from './identity-bridge'
 // Agent API transcription (Omnilingual ASR spec §7).
 //
 //   POST /api/v1/external/projects/:projectId/transcriptions
@@ -104,7 +105,7 @@ async function callAuthWorker(env: ExternalEnv, path: string, body: unknown): Pr
     return errorResponse('job_failed', 'transcription backend is not configured in this environment')
   }
   try {
-    return await fetch(`${env.AUTH_WORKER_URL.replace(/\/+$/, '')}${path}`, {
+    return await fetchIdentity(env, `${env.AUTH_WORKER_URL.replace(/\/+$/, '')}${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.SYNC_SECRET_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

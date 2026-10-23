@@ -61,30 +61,32 @@ export interface EditorActionsContextValue {
   onMediaRowActivate?: (cellId: string) => void
   /**
    * 2026-08-07: the character gutter's PURE voice assignment (never
-   * synthesizes; applyToSpeaker covers every line sharing the cell's
-   * diarized cast_name). Ref-wrapped in the workspace so the context value
-   * stays identity-stable while cast data changes underneath.
+   * synthesizes). `scope` (Oct 23) says how far it reaches: this line, this
+   * character's lines in the file, or the character in every episode — see
+   * `CastScope`. Ref-wrapped in the workspace so the context value stays
+   * identity-stable while cast data changes underneath.
    */
   onAssignCastVoice?: (
     cell: import("@/hooks/useCells").CellData,
     voiceId: string,
-    opts?: { applyToSpeaker?: boolean },
+    opts?: { scope?: import("@/lib/audio/character-cast").CastScope },
   ) => void
   /**
    * Matt's QA (2026-08-21): the inverse — take the character OFF a line
    * without putting another in its place. Returns the row to the NC ring.
    * Clears the voice-map entry and the line's cast NAME only; the camera
    * angle and the client's line number are sheet data and survive.
-   * `applyToSpeaker` mirrors the assign side's checkbox: every line in the
-   * file sharing this cell's cast name goes back to NC together.
+   * `scope: "file"` takes it off every line in the file sharing this cell's
+   * cast name together. Removing a character is one file at a time, so the
+   * picker never sends `"everywhere"` here.
    */
   onClearCastVoice?: (
     cell: import("@/hooks/useCells").CellData,
-    opts?: { applyToSpeaker?: boolean },
+    opts?: { scope?: import("@/lib/audio/character-cast").CastScope },
   ) => void
   /**
    * How many lines in the file share this cast name — what the gutter
-   * picker's "Apply to all «name» lines" would change (Sam, 2026-09-28).
+   * picker's "Every «name» line in this file" would change (Sam, 2026-09-28).
    * Asked only when the picker opens, never per row per render.
    */
   countCastLines?: (castName: string) => number

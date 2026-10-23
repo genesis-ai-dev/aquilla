@@ -6431,8 +6431,6 @@ export const my: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "အုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုခွင့်ပြုသည့်သည်",
   "workspace.targetAudioLane.drawnShortNextDubStays": "အုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုခွင့်ပြုသည့်သည်",
   "workspace.dataTable.noResults": "ရလဒ်မရှိပါ။",
-  "workspace.castGutterVoice.applyToAllLines": "«{name}» လုံးများအားလုံးကို အသုံးချသည်",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"«{name}» စာကြောင်း {count} ကြောင်းလုံးတွင် အသုံးပြုရန်"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "အစီအစဉ်ကို ဖွင့်လှစ်နေသည်",
   "workspace.fileSort.lastUpdated": "အဆုံးအမလည်းအုပ်စုလူမှုအုပ်စု",
   "workspace.fileSort.canonical": "အုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စုအုပ်စုလူမှုအုပ်စု",

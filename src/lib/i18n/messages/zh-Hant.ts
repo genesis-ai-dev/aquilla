@@ -6455,8 +6455,6 @@ export const zh_Hant: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "靜止時繪製得較短，好讓前一段配音仍可點選",
   "workspace.targetAudioLane.drawnShortNextDubStays": "靜止時繪製得較短，好讓下一段配音仍可點選",
   "workspace.dataTable.noResults": "沒有結果。",
-  "workspace.castGutterVoice.applyToAllLines": "套用到所有「{name}」的行",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"套用到所有 {count} 句「{name}」的台詞"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "正在開啟專案",
   "workspace.fileSort.lastUpdated": "最近更新",
   "workspace.fileSort.canonical": "正典順序",

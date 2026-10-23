@@ -18,10 +18,12 @@ import { laneScopedTtsSettings, stampNewVoiceLanes } from "@/lib/audio/voice-lan
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
 import {
   castLinesOf,
+  castPickPatch,
   expandCharacterCast,
   foldCastByCharacter,
   setLaneCharacterCast,
   type CastLine,
+  type CastPick,
 } from "@/lib/audio/character-cast"
 import {
   migrateOmnivoiceTtsSettings,
@@ -90,6 +92,8 @@ export interface ProjectTtsApi {
    * see `setLaneCharacterCast`. `null` sends the character to the default.
    */
   assignCharacter: (castName: string, voiceId: string | null, lineIds: Iterable<string>) => void
+  /** One pick in the voice picker, as far as its scope reaches (`castPickPatch`). */
+  assignPick: (pick: CastPick) => void
 }
 
 /**
@@ -294,6 +298,13 @@ export function useProjectTts(
     [localTts, serverSettings, lane, activeLaneId, saveTts],
   )
 
+  const assignPick = useCallback(
+    (pick: CastPick) => {
+      void saveTts(castPickPatch(localTts ?? serverSettings, lane, activeLaneId, pick))
+    },
+    [localTts, serverSettings, lane, activeLaneId, saveTts],
+  )
+
   const allVoices = useMemo(() => getVoiceLibrary(settings), [settings])
   // Everything a surface READS goes through the lane view, built in a fixed
   // order: first the lane-scoped library — which voices this lane can see
@@ -332,7 +343,7 @@ export function useProjectTts(
     return m
   }, [cells, laneSettings, defaultVoiceId])
 
-  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells, assignCharacter }
+  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells, assignCharacter, assignPick }
 }
 
 /**

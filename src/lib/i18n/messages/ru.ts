@@ -6572,8 +6572,6 @@ export const ru: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "В покое отображается короче, чтобы предыдущий дубляж оставался доступным",
   "workspace.targetAudioLane.drawnShortNextDubStays": "В покое отображается короче, чтобы следующий дубляж оставался доступным",
   "workspace.dataTable.noResults": "Результатов нет.",
-  "workspace.castGutterVoice.applyToAllLines": "Применить ко всем строкам «{name}»",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"one":"Применить к {count} реплике «{name}»","few":"Применить ко всем {count} репликам «{name}»","many":"Применить ко всем {count} репликам «{name}»","other":"Применить ко всем {count} реплики «{name}»"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "Открытие проекта",
   "workspace.fileSort.lastUpdated": "По дате обновления",
   "workspace.fileSort.canonical": "В каноническом порядке",

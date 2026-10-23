@@ -6444,8 +6444,6 @@ export const ar: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "مرسوم بشكل قصير في الراحة بحيث تبقى الدبلجة السابقة قابلة للوصول",
   "workspace.targetAudioLane.drawnShortNextDubStays": "مرسوم بشكل قصير في الراحة بحيث تبقى الدبلجة التالية قابلة للوصول",
   "workspace.dataTable.noResults": "لا توجد نتائج.",
-  "workspace.castGutterVoice.applyToAllLines": "تطبيق على جميع أسطر «{name}»",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"zero":"تطبيق على جميع أسطر «{name}» ({count})","one":"تطبيق على سطر «{name}» ({count})","two":"تطبيق على جميع أسطر «{name}» ({count})","few":"تطبيق على جميع أسطر «{name}» ({count})","many":"تطبيق على جميع أسطر «{name}» ({count})","other":"تطبيق على جميع أسطر «{name}» ({count})"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "جاري فتح المشروع",
   "workspace.fileSort.lastUpdated": "آخر تحديث",
   "workspace.fileSort.canonical": "الترتيب الكنسي",

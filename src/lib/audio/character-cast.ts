@@ -282,3 +282,44 @@ export function setLaneCharacterCast(
   }
   return { laneCastAssignments: { ...(written.laneCastAssignments ?? {}), [lane]: laneMap } }
 }
+
+/**
+ * How far a voice picked for one line reaches (Sam, Oct 23):
+ *  - `line`: only this line — its own entry, the picker's default;
+ *  - `file`: every line of this character in the open file, each with its own
+ *    entry. Deliberate choices: the fold never drops them, because it folds the
+ *    project-wide map and these are the lane's own entries, which a character
+ *    entry never outranks. Other episodes' lines are left alone;
+ *  - `everywhere`: the character itself, in every episode (`setLaneCharacterCast`).
+ */
+export type CastScope = "line" | "file" | "everywhere"
+
+export interface CastPick {
+  scope: CastScope
+  /** The line the picker was opened on. */
+  lineId: string
+  /** Its character, if it has one. Without one only `line` applies. */
+  castName: string | null | undefined
+  /** This character's lines in the open file (the line itself included). */
+  fileLineIds: Iterable<string>
+  /** `null` sends the lines (or the character) back to the lane's default. */
+  voiceId: string | null
+}
+
+/** The lane cast to save for one pick in the voice picker. */
+export function castPickPatch(
+  settings: ProjectTtsSettings | undefined,
+  lane: string,
+  laneId: string | null | undefined,
+  pick: CastPick,
+): Pick<ProjectTtsSettings, "laneCastAssignments"> {
+  const name = pick.castName?.trim()
+  const fileIds = [...new Set(pick.fileLineIds)]
+  if (name && pick.scope === "everywhere") {
+    return setLaneCharacterCast(settings, lane, laneId, name, pick.voiceId, fileIds.length > 0 ? fileIds : [pick.lineId])
+  }
+  if (name && pick.scope === "file") {
+    return setLaneCast(settings, lane, fileIds.length > 0 ? fileIds : [pick.lineId], pick.voiceId)
+  }
+  return setLaneCast(settings, lane, [pick.lineId], pick.voiceId)
+}

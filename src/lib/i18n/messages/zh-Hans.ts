@@ -6453,8 +6453,6 @@ export const zh_Hans: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "静止时绘制得较短，好让前一段配音仍可点击",
   "workspace.targetAudioLane.drawnShortNextDubStays": "静止时绘制得较短，好让下一段配音仍可点击",
   "workspace.dataTable.noResults": "没有结果。",
-  "workspace.castGutterVoice.applyToAllLines": "套用到所有「{name}」的行",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"应用到全部 {count} 行“{name}”的台词"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "正在打开项目",
   "workspace.fileSort.lastUpdated": "最近更新",
   "workspace.fileSort.canonical": "正典顺序",

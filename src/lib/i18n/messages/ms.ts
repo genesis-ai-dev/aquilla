@@ -6410,8 +6410,6 @@ export const ms: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "Dilukis pendek semasa berehat supaya dub sebelumnya tetap boleh dicapai",
   "workspace.targetAudioLane.drawnShortNextDubStays": "Dilukis pendek semasa berehat supaya dub seterusnya tetap boleh dicapai",
   "workspace.dataTable.noResults": "Tiada hasil.",
-  "workspace.castGutterVoice.applyToAllLines": "Laksanakan ke semua baris «{name}»",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"Gunakan pada semua {count} baris «{name}»"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "Membuka projek",
   "workspace.fileSort.lastUpdated": "Kemaskini terakhir",
   "workspace.fileSort.canonical": "Susunan kanonis",

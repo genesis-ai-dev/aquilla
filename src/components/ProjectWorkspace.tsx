@@ -292,7 +292,7 @@ import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
-import { buildCharacterCastWrite, castLinesOf, type CastLine } from "@/lib/audio/character-cast"
+import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
@@ -3722,10 +3722,12 @@ export function ProjectWorkspace() {
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
   // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
-  // explicit act); apply-to-speaker covers every line sharing the diarized
-  // name. Ref-wrapped below so the context value stays identity-stable.
+  // explicit act). The picker's scope (Oct 23) says how far it reaches: this
+  // line, this character's lines in the file, or — AQU-2125 — the character
+  // itself in every episode, cast once rather than line by line.
+  // Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
-    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) => {
+    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }) => {
       const level = project?.syncRole?.level ?? null
       if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
         toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
@@ -3733,23 +3735,19 @@ export function ProjectWorkspace() {
       }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
-      if (opts?.applyToSpeaker && castName) {
-        const ids = getActiveCells()
-          .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
-          .map((c) => c.id)
-        // AQU-2125: the CHARACTER is cast, once — not each of its lines, which
-        // is what grew a dubbing project's settings past the size cap.
-        tts.assignCharacter(castName, voiceId, ids.length > 0 ? ids : [cell.id])
-        return
-      }
-      tts.assignCells([cell.id], voiceId)
+      const fileLineIds = castName
+        ? getActiveCells()
+            .filter((c) => c.metadata && (c.metadata.cast_name as unknown) === castName)
+            .map((c) => c.id)
+        : []
+      tts.assignPick({ scope: opts?.scope ?? "line", lineId: cell.id, castName, fileLineIds, voiceId })
     },
     [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t],
   )
   const timelineAssignVoiceRef = useRef(handleTimelineAssignVoice)
   timelineAssignVoiceRef.current = handleTimelineAssignVoice
   const handleAssignCastVoice = useCallback(
-    (cell: CellData, voiceId: string, opts?: { applyToSpeaker?: boolean }) =>
+    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }) =>
       timelineAssignVoiceRef.current(cell, voiceId, opts),
     [],
   )
@@ -4592,7 +4590,10 @@ export function ProjectWorkspace() {
   // and deliberately survive; taking those off is what the sheet-level clear
   // is for.
   const handleTimelineClearVoice = useCallback(
-    async (cell: CellData, opts?: { applyToSpeaker?: boolean }) => {
+    async (cell: CellData, opts?: { scope?: CastScope }) => {
+      // Removing a character is one file at a time; the picker never offers
+      // "every episode" for it, so anything else is this line.
+      const wholeFile = opts?.scope === "file"
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? cell.metadata.cast_name : ""
       // The name lives in the shared projection behind the maintainer floor
@@ -4607,14 +4608,14 @@ export function ProjectWorkspace() {
         }
       }
 
-      // "Apply to all «name» lines", honoured for the clear too (Sam,
-      // 2026-08-21: the checkbox sat right there and only the PICK read it).
+      // "Every «name» line in this file", honoured for the clear too (Sam,
+      // 2026-08-21: the choice sat right there and only the PICK read it).
       // Same target set as the assign side — every line in this file sharing
       // the diarized name — and the same per-line treatment as the single
       // clear: name off, voice-map entry pruned, camera angle and line number
       // untouched. Shares the character write lock and progress machinery
       // with the other bulk writers; a main character is hundreds of lines.
-      if (opts?.applyToSpeaker && castName !== "") {
+      if (wholeFile && castName !== "") {
         if (!project?.id || !activeFileId) return
         if (characterWriteBusy.current) return
         if (!navigator.onLine) {
@@ -4694,7 +4695,7 @@ export function ProjectWorkspace() {
   const timelineClearVoiceRef = useRef(handleTimelineClearVoice)
   timelineClearVoiceRef.current = handleTimelineClearVoice
   const handleClearCastVoice = useCallback(
-    (cell: CellData, opts?: { applyToSpeaker?: boolean }) => void timelineClearVoiceRef.current(cell, opts),
+    (cell: CellData, opts?: { scope?: CastScope }) => void timelineClearVoiceRef.current(cell, opts),
     [],
   )
   // The same set handleTimelineAssignVoice applies "all «name» lines" to.

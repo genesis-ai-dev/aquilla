@@ -88,3 +88,28 @@ export function mergeFileProgress(
   }
   return merged
 }
+
+/**
+ * Put a file's audio pair onto the text figures a surface is about to draw.
+ *
+ * AQU-2132: one rule for every surface that reports the OPEN file, because the
+ * editor footer had its own and they disagreed. `stats` is the merged entry —
+ * the server's per-file rollup with the live, cell-derived one on top, as
+ * `mergeFileProgress` composes them — so the pair is the server's until the
+ * attachment map lands and the live count's afterwards. The footer used to
+ * read the live count alone and fall through to the text pair when it was not
+ * there yet, which is why an audio-only file reported `0 translated` and drew
+ * no audio half while the sidebar row beside it read the same file correctly.
+ *
+ * `recorded == null` means no audio figures from anywhere — a file the server
+ * described before it sent the pair at all — and leaves `text` untouched
+ * rather than fabricating `0 recorded`, which is the distinction the whole
+ * optional pair exists to keep.
+ */
+export function withAudioProgress<T extends { translated: number; validated: number; total: number }>(
+  text: T,
+  stats: FileStats | undefined,
+): T & { recorded?: number; audioValidated?: number } {
+  if (stats?.recorded == null) return text
+  return { ...text, recorded: stats.recorded, audioValidated: stats.audioValidated ?? 0 }
+}

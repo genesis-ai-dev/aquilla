@@ -309,7 +309,31 @@ export function useFileAudioAttachments(
   const [settledKey, setSettledKey] = useState<string | null>(null)
   const laneKey = lane ?? "\u0000all"
   const readKey = projectId && fileId ? `${projectId}/${fileId}/${laneKey}` : null
-  const hasLoaded = readKey === null || (!jwt && !sessionLoading) || settledKey === readKey
+  /**
+   * Is the map on hand the answer for the file on screen?
+   *
+   * AQU-2132: `readKey === null` used to count as answered. That is right for
+   * the case it was written for — no file open, nothing to read — and wrong
+   * for the one that happens on every reload of `/project/:id/file/:fileId`:
+   * the file id is on the URL from the first render while `project?.id` is
+   * still null, because `useProject` is server-only with no IDB fallback. For
+   * those renders the hook reported an EMPTY map as authoritative for a file
+   * that IS open, so every surface counting audio off it was told "nothing is
+   * recorded" rather than "not read yet" — and a fabricated `0 recorded`
+   * overrides the server's figures, which are the only ones that know the
+   * truth until this read lands (see `mergeFileProgress`).
+   *
+   * `settledKey === readKey` was the same mistake by another route: before the
+   * project resolves BOTH are null, so the comparison answered true on its own.
+   * Hence the explicit `readKey !== null`.
+   *
+   * So: nothing to read at all — no file open, or nobody signed in — is
+   * answered. Anything else is answered only once THIS key's read has settled,
+   * which `finally` does whether the read succeeded or failed (AQU-2111's 3G
+   * finding: the per-line gutter must not wait forever).
+   */
+  const nothingToRead = !fileId || (!jwt && !sessionLoading)
+  const hasLoaded = nothingToRead || (readKey !== null && settledKey === readKey)
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)

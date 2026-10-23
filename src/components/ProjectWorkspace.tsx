@@ -494,7 +494,7 @@ import { renameFile, moveFileToCorpus, renameCorpus, deleteFile, applyFileSortIn
 import { deleteFileProjection } from "@/lib/sync/file-projection"
 import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/sync/cells-read"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
-import { fileSummariesToProgress, mergeFileProgress } from "@/lib/progress/file-summary-progress"
+import { fileSummariesToProgress, mergeFileProgress, withAudioProgress, type FileStats } from "@/lib/progress/file-summary-progress"
 import { liveAudioProgress } from "@/lib/progress/live-audio-progress"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
 import { applyStructuralPolicy } from "@/lib/cells/structural"
@@ -7537,14 +7537,6 @@ export function ProjectWorkspace() {
       )
     : null,
   [activeFileId, audioValidationByCellId, audioValidationLoaded, audioValidationRequirement, cellSummaries, countStructuralCells])
-  const statusBarProgress = useMemo(() => {
-    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
-    if (!live) return EMPTY_STATUS_PROGRESS
-    const text = applyStructuralPolicy(live, cellSummaries, countStructuralCells)
-    return liveAudioCounts
-      ? { ...text, recorded: liveAudioCounts.recorded, audioValidated: liveAudioCounts.audioValidated }
-      : text
-  }, [activeFileId, cellSummaries, countStructuralCells, liveAudioCounts, liveFileProgress])
 
   // AQU-516: useHealth (above) only ever sees the currently-open file, so
   // fileProgress historically had an entry for at most one file — every
@@ -7553,9 +7545,12 @@ export function ProjectWorkspace() {
   // file table reads — org/ProjectOverview.tsx) once per project so every
   // file gets a snapshot, then merge the live, per-keystroke-accurate entry
   // for the open file back on top so it doesn't regress to the last fetch.
-  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<
-    Map<string, { translated: number; validated: number; total: number }>
-  >(new Map())
+  // AQU-2132: typed as `FileStats`, which carries the optional audio pair the
+  // server sends. The narrower inline shape silently dropped `recorded` /
+  // `audioValidated` from the declared contract while `fileSummariesToProgress`
+  // put them there at runtime — and they are what the sidebar row and now the
+  // footer read for a file whose attachment map has not landed.
+  const [allFilesProgressSnapshot, setAllFilesProgressSnapshot] = useState<Map<string, FileStats>>(new Map())
   const progressSnapshotTokenFileId = project?.files[0]?.id ?? null
   // AQU-2118: the rollup is read for the lane the switcher shows, and re-read
   // when that changes — the server pins it to the bridge / only lane
@@ -7610,6 +7605,30 @@ export function ProjectWorkspace() {
     },
     [activeFileId, allFilesProgressSnapshot, liveAudioCounts, liveFileProgress],
   )
+  /**
+   * The footer's figures for the open file.
+   *
+   * AQU-2132: the audio pair is taken from `fileProgress` above — the same
+   * merged value the sidebar's row for this file draws — rather than from
+   * `liveAudioCounts` directly. The two differ in exactly one case, and it is
+   * the bug: before the attachment map lands `liveAudioCounts` is null, and
+   * the footer used to fall through to the text pair alone, so an audio-only
+   * file read `0 translated` and drew no audio half at all. `mergeFileProgress`
+   * settled the rule for the row — the server's per-file figures are the only
+   * ones that know a file's takes until the live map arrives, and they are not
+   * discarded for a live entry that has no audio half. The footer now keeps
+   * that rule instead of contradicting the row beside it.
+   *
+   * `recorded == null` still means "no audio figures from anywhere" (a file
+   * the server reported before AQU-2111 sent the pair), and still draws the
+   * text pair exactly as before — never a fabricated `0 recorded`.
+   */
+  const statusBarProgress = useMemo(() => {
+    const live = activeFileId ? liveFileProgress.get(activeFileId) : undefined
+    if (!live) return EMPTY_STATUS_PROGRESS
+    const text = applyStructuralPolicy(live, cellSummaries, countStructuralCells)
+    return withAudioProgress(text, activeFileId ? fileProgress.get(activeFileId) : undefined)
+  }, [activeFileId, cellSummaries, countStructuralCells, fileProgress, liveFileProgress])
   // SWARM-TODO(AQU-516) live-verify: open a project with multiple files,
   // don't open any file — every file in the sidebar should show a progress
   // indicator (the validation bar in FileRow), and the numbers should match

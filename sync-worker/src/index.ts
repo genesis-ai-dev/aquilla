@@ -14,6 +14,7 @@ import { handleDbTimeoutsRequest } from "./db-timeouts-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
+import { handleCustomVoiceRequest } from "./custom-voice"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
@@ -443,6 +444,8 @@ const worker = {
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
     if (voiceReferenceResponse) return withCors(voiceReferenceResponse, request)
+    const customVoiceResponse = await handleCustomVoiceRequest(request, env)
+    if (customVoiceResponse) return withCors(customVoiceResponse, request)
     const ttsResponse = await handleTtsRequest(request, env)
     if (ttsResponse) return withCors(ttsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)

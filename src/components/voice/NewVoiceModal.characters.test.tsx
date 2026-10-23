@@ -40,7 +40,7 @@ function renderModal(props: { voice?: Voice | null; existingVoices?: Voice[] } =
   return { onSave, onClose }
 }
 
-const card = (name: string) => screen.getByText(name, { selector: "span" }).closest("li") as HTMLElement
+const card = (name: string) => screen.getByText(name, { selector: "p" }).closest("li") as HTMLElement
 
 describe("NewVoiceModal Characters tab", () => {
   it("adds a character to the cast in one click, with no engine or Create step", () => {
@@ -48,7 +48,7 @@ describe("NewVoiceModal Characters tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Characters/ }))
     expect(screen.queryByRole("button", { name: /Create voice/ })).toBeNull()
 
-    fireEvent.click(within(card("Hearth")).getByRole("button", { name: "Add" }))
+    fireEvent.click(within(card("Hearth")).getByRole("button", { name: "Add Hearth to the cast" }))
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: "Hearth", libraryVoiceId: "narrator-hearth" }))
     const saved = onSave.mock.calls[0][0] as Voice
     expect(saved.provider).toBeUndefined()
@@ -59,8 +59,8 @@ describe("NewVoiceModal Characters tab", () => {
   it("marks characters already in the cast instead of offering them again", () => {
     renderModal({ existingVoices: [{ id: "v1", name: "Hearth", libraryVoiceId: "narrator-hearth" }] })
     fireEvent.click(screen.getByRole("tab", { name: /Characters/ }))
-    expect(within(card("Hearth")).getByRole("button", { name: /In cast/ })).toBeDisabled()
-    expect(within(card("Willow")).getByRole("button", { name: "Add" })).toBeEnabled()
+    expect(within(card("Hearth")).getByRole("button", { name: "Hearth is already in the cast" })).toBeDisabled()
+    expect(within(card("Willow")).getByRole("button", { name: "Add Willow to the cast" })).toBeEnabled()
   })
 
   it("narrows the grid with filter chips", () => {
@@ -75,7 +75,7 @@ describe("NewVoiceModal Characters tab", () => {
     const voice: Voice = { id: "v1", name: "Grandpa", color: "#475569", libraryVoiceId: "narrator-hearth" }
     const { onSave } = renderModal({ voice })
     expect(screen.queryByRole("tab", { name: /Characters/ })).toBeNull()
-    fireEvent.click(within(card("Oak")).getByRole("button", { name: "Use" }))
+    fireEvent.click(within(card("Oak")).getByRole("button", { name: "Use Oak" }))
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     expect(onSave).toHaveBeenCalledWith({ id: "v1", name: "Grandpa", color: "#475569", libraryVoiceId: "elder-oak" })
   })

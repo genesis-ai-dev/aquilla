@@ -271,7 +271,9 @@ describe("useCompletion IDML protected-output boundary", () => {
   })
 
   it("aligns styles by committing slot text without drafting a new translation", async () => {
-    const unit = await parsedUnit()
+    // Apostrophe glue is not a sentence the shape placer can keep, so this
+    // still asks the model. A plain "Hello" / "WORLD" cell is placed without one.
+    const unit = await parsedUnit({ slots: ["'", "'"] })
     const cell = completionCell(unit)
     cell.translated = "Bonjour MONDE"
     cell.translatedHtml = renderIdmlUnitHtml({
@@ -336,7 +338,7 @@ describe("useCompletion IDML protected-output boundary", () => {
   })
 
   it("does not save an align-styles reply that changes the wording", async () => {
-    const unit = await parsedUnit()
+    const unit = await parsedUnit({ slots: ["'", "'"] })
     const cell = completionCell(unit)
     cell.translated = "Bonjour MONDE"
     cell.translatedHtml = renderIdmlUnitHtml({
@@ -367,7 +369,7 @@ describe("useCompletion IDML protected-output boundary", () => {
   })
 
   it("clears the align warning when the model leaves the runs unchanged", async () => {
-    const unit = await parsedUnit()
+    const unit = await parsedUnit({ slots: ["'", "'"] })
     const cell = completionCell(unit)
     cell.translated = "Bonjour MONDE"
     cell.translatedHtml = renderIdmlUnitHtml({
@@ -392,6 +394,42 @@ describe("useCompletion IDML protected-output boundary", () => {
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
     expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
+  })
+
+  it("places a collapsed translation into the source runs without calling the model", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    cell.translated = "Bonjour MONDE"
+    cell.translatedHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bonjour MONDE" : "",
+      })),
+    })
+    const bodies: string[] = []
+    mockCompletion("should-not-be-called", bodies)
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const record = vi.fn()
+    const { result } = renderCompletion(cell, commit, record)
+
+    markStyleAlignDirty(cell.id, cell.translatedHtml)
+    let saved = false
+    await act(async () => {
+      saved = await result.current.alignCellStyles(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(bodies).toEqual([])
+    expect(record).not.toHaveBeenCalled()
+    expect(styleAlignDirtyMatches(cell.id, cell.translatedHtml)).toBe(false)
+    expect(commit).toHaveBeenCalledOnce()
+    const committedHtml = commit.mock.calls[0]![1] as string
+    const checked = validateIdmlTranslation(unit.sourceHtml, committedHtml, unit.metadata)
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[0]).toBe("Bonjour ")
+    expect(checked.slots[1]).toBe("MONDE")
+    expect(result.current.completing.get(cell.id)).toBeUndefined()
   })
 })
 
@@ -446,7 +484,7 @@ function completionCell(unit: IdmlTranslationUnit) {
   }
 }
 
-async function parsedUnit(options: { singleSlot?: boolean } = {}): Promise<IdmlTranslationUnit> {
+async function parsedUnit(options: { singleSlot?: boolean; slots?: readonly string[] } = {}): Promise<IdmlTranslationUnit> {
   const mime = "application/vnd.adobe.indesign-idml-package"
   const namespace = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
   const storyPath = "Stories/Story_u100.xml"
@@ -462,9 +500,9 @@ async function parsedUnit(options: { singleSlot?: boolean } = {}): Promise<IdmlT
     [
       `<?xml version="1.0"?><idPkg:Story ${namespace}><Story Self="u100">`,
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>${options.slots?.[0] ?? "Hello"}</Content></CharacterStyleRange>`,
       ...(!options.singleSlot
-        ? ['<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>']
+        ? [`<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>${options.slots?.[1] ?? "WORLD"}</Content></CharacterStyleRange>`]
         : ["<Br/>"]),
       "</ParagraphStyleRange></Story></idPkg:Story>",
     ].join(""),

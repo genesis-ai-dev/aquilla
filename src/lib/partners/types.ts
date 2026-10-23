@@ -146,16 +146,23 @@ export type IdmlTargetHtmlNormalizer = (
 /**
  * One partner's whole contribution, the default export of its `register.ts`.
  *
- * Note what is NOT here: the partner's editions. Which templates a publisher
- * ships, and which one a given package is, is the partner's own business — its
- * panel picks an edition and hands the descriptor to `importPartnerNotes`. The
- * registry therefore carries only what generic code has to discover on its own:
- * the tile to offer, and the hooks that run inside generic paths.
+ * Editions stay off the eager surface. A fresh import still has the partner's
+ * panel pick a template and hand that descriptor to `importPartnerNotes`.
+ * Repair is the exception: it has to reproduce those cell breaks without the
+ * person picking a template again, so `idmlImportEditions` is a lazy list the
+ * repair path can score against the cells already in the file. With the
+ * partner folders deleted the hook is simply absent.
  */
 export interface PartnerIntegration {
   /** Folder name under `src/partner-integrations/`, e.g. `biblica`. */
   id: string
   importScreen?: PartnerImportScreen
+  /**
+   * The partner's IDML templates, loaded only when a repair copy has to
+   * reproduce a normal import of the same package. Absent when this partner
+   * has no IDML importer.
+   */
+  idmlImportEditions?: () => Promise<readonly PartnerImportEdition[]>
   idmlTargetHtmlNormalizers?: readonly IdmlTargetHtmlNormalizer[]
   /**
    * Extra controls on the export dialog for files this partner imported, and

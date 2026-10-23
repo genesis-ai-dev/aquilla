@@ -106,6 +106,40 @@ export function plainTextFromProtectedHtml(
   return container.textContent ?? fallbackSlots.join("")
 }
 
+/** Editable runs in order. Empty glue slots add nothing. */
+export function idmlEditableSlotText(
+  slots: readonly string[],
+  editableSlotIndexes: readonly number[],
+): string {
+  return editableSlotIndexes.map((index) => slots[index] ?? "").join("")
+}
+
+/**
+ * A trailing line break from a protected `br` is not a different translation.
+ * A missing "." or space is.
+ */
+export function idmlPlainMatchesTranslation(actual: string, expected: string): boolean {
+  return actual.replace(/\n+$/g, "") === expected.replace(/\n+$/g, "")
+}
+
+/**
+ * Keep a partner reflow when it still spells the stored translation. Moving a
+ * period from a bold run into the following plain run does not change the
+ * words. Keep the current HTML only when that reflow would drop a character
+ * the translation still has.
+ */
+export function chooseIdmlHtmlMatchingTranslation(
+  currentHtml: string,
+  reflowedHtml: string,
+  currentText: string,
+  reflowedText: string,
+  translation: string,
+): string {
+  if (idmlPlainMatchesTranslation(reflowedText, translation)) return reflowedHtml
+  if (idmlPlainMatchesTranslation(currentText, translation)) return currentHtml
+  return reflowedHtml
+}
+
 export class ProtectedIdmlHtmlError extends Error {
   readonly diagnostics: readonly IdmlDiagnostic[]
 

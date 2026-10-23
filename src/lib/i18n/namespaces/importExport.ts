@@ -577,6 +577,7 @@ export const importExport = defineNamespace({
     "importExport.upload.finishingUp": "Finishing up…",
     "importExport.upload.finalizationFailed": "Import finalization failed",
     "importExport.upload.uploadingFile": "Uploading {fileName}…",
+    "importExport.upload.aligningIdmlStyles": "Aligning styles in {fileName}… {count}/{total}",
     "importExport.upload.notAttempted": "not attempted after an earlier file failed",
     "importExport.upload.castAssignmentsLabel": "Cast assignments",
     "importExport.upload.importFinalizationLabel": "Import finalization",
@@ -918,7 +919,14 @@ export const importExport = defineNamespace({
       "suitable for re-import.",
     "importExport.dialog.prefixWithRef": "Prefix each line with canonical ref (e.g. {example})",
     "importExport.dialog.downloadOriginalUnchanged": "Download original unchanged",
-    "importExport.dialog.repairByReimporting": "Repair by re-importing",
+    "importExport.dialog.repairByReimporting": "Repair a copy",
+    "importExport.dialog.repairingIdmlCopy": "Repairing a copy of {fileName}…",
+    "importExport.dialog.repairIdmlCopyDone": "Created {fileName}. The original file was left unchanged.",
+    "importExport.dialog.repairIdmlCopyDoneUnmatched": plural({
+      one: "Created {fileName}. {count} translation could not be paired and stayed on the original file.",
+      other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
+    }),
+    "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -2169,6 +2177,33 @@ export const importExport = defineNamespace({
       "importExport.upload.uploadingFile": {
         description: "Upload-phase progress label on the Upload files panel, naming the file currently uploading.",
         placeholders: { fileName: "Name of the file currently uploading — not translated." },
+      },
+      "importExport.upload.aligningIdmlStyles": {
+        description:
+          "Progress label after an IDML file is updated in place, while existing translations are placed into the source's style runs.",
+        placeholders: {
+          fileName: "Name of the IDML file whose styles are being aligned — not translated.",
+          count: "Number of cells placed so far, already locale-formatted.",
+          total: "Number of cells that need placement, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairingIdmlCopy": {
+        description: "Progress label in the Export dialog while a repaired copy of the current IDML file is being built.",
+        placeholders: { fileName: "Display name of the file being copied — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDone": {
+        description: "Success message after a repaired IDML copy is created. The original file is not modified.",
+        placeholders: { fileName: "Display name of the new repaired copy — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDoneUnmatched": {
+        description: "Success message when some translations could not be matched to the re-parsed IDML and remain only on the original file.",
+        placeholders: {
+          fileName: "Display name of the new repaired copy — not translated.",
+          count: "Number of translations that stayed on the original file, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairIdmlCopyNeedsOriginal": {
+        description: "Error when the file being repaired has no stored IDML package to re-parse.",
       },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",

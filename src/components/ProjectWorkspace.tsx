@@ -11,6 +11,7 @@ import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { repairIdmlFileAsCopy } from "@/lib/idml/repair-idml-copy"
 import { useProject } from "@/hooks/useProject"
 import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import {
@@ -6640,7 +6641,7 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
-  const { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -6697,6 +6698,21 @@ export function ProjectWorkspace() {
     (cell: CellData) => alignCellStyles(cell),
     [alignCellStyles],
   )
+
+  const alignReimportedIdml = useMemo(() => {
+    if (!isConfigured || !project?.id) return undefined
+    return {
+      ask: askAlignStyles,
+      author: alignStylesModel.model,
+      model: alignStylesModel.model,
+      provider: alignStylesModel.provider,
+      flush: async (eventIds: readonly string[]) => {
+        await flushOutboxUntilSettled([...eventIds], {
+          getTokenForFile: getTokenForProjectFile,
+        }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
+      },
+    }
+  }, [isConfigured, project?.id, askAlignStyles, alignStylesModel, getTokenForProjectFile])
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
   // lint + chain heads, and the post-apply flush/revalidate sequence — the
@@ -17500,6 +17516,7 @@ export function ProjectWorkspace() {
           lanes={project.lanes}
           targetLang={activeLane}
           identityToken={frontierSession?.jwt}
+          alignReimportedIdml={alignReimportedIdml}
           onImported={handleImported}
           sourceCells={importSourceCells}
           ttsSettings={tts.settings}
@@ -17648,12 +17665,37 @@ export function ProjectWorkspace() {
             editorRef.current?.scrollToCellId(cellId, { flash: true })
           }}
           orgId={projectOrg?.id.toString()}
-          /* AQU-481: "Import again" is an import affordance too — omitted below
+          /* AQU-481: repairing a copy is an import affordance too — omitted below
              the file.create floor, which leaves the dialog's own button
-             disabled (`disabled={!onReimport}`) instead of dead. */
-          onReimport={canImportSource ? () => {
-            setExportOpen(false)
-            openImportFlow()
+             disabled (`disabled={!onRepairIdmlCopy}`) instead of dead. */
+          onRepairIdmlCopy={canImportSource ? async ({ fileId, fileName, onProgress }) => {
+            const repaired = await repairIdmlFileAsCopy({
+              projectId: project.id,
+              fileId,
+              fileName,
+              existingNames: project.files.map((file) => file.name),
+              lane: activeLane,
+              author: currentUsername,
+              sourceLanguage: activeSourceLanguage,
+              targetLanguage: activeLaneTargetLanguage,
+              getToken: getTokenForFile,
+              align: alignReimportedIdml ?? {
+                ask: async () => {
+                  throw new Error(t("editor.idml.alignStylesUnavailable"))
+                },
+                author: currentUsername,
+                model: "unavailable",
+                provider: "none",
+                flush: async (eventIds) => {
+                  await flushOutboxUntilSettled([...eventIds], {
+                    getTokenForFile: getTokenForProjectFile,
+                  }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
+                },
+              },
+              onProgress,
+            })
+            await handleImported([repaired.ref])
+            return { name: repaired.ref.name, unmatched: repaired.unmatched }
           } : undefined}
           outstandingInfractionCount={activeFileInfractionCount}
         />

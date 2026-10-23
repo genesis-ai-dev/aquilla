@@ -65,12 +65,16 @@ except `id`, so an integration contributes only the surfaces it needs:
 | `importScreen` | A tile on the import dialog's landing screen plus the lazily-loaded panel behind it. The dialog routes to it generically — there is no per-partner `Screen` id. |
 | `idmlTargetHtmlNormalizers` | Synchronous normalizations applied to a translated IDML cell before validation, for typesetting a publisher's templates carry that is not text (see the apostrophe glue, AQU-1174). |
 | `idmlExportOptions` | Extra controls on the export dialog for files whose profile id the option lists, plus an optional rewrite of the finished IDML. The panel is a lazy import. |
+| `idmlImportEditions` | Lazy list of this partner's IDML templates. A fresh import does not use it — the panel still picks one edition. Repair uses it to reproduce that import's cell breaks, and keeps the parse that matches the cells already in the file. |
 
-Editions are deliberately **not** in the registry. Which templates a publisher
-ships, and which one a given package is, is that partner's own business: its
-panel picks a `PartnerImportEdition` and hands the descriptor to
-`importPartnerNotes` in `src/lib/import.ts`. Generic code never enumerates a
-partner's titles.
+A fresh import does not enumerate a partner's titles. The panel picks a
+`PartnerImportEdition` and hands the descriptor to `importPartnerNotes` in
+`src/lib/import.ts`. Repair is the path that has to choose without asking
+again, because a plain IDML read of the same package cuts different cells
+(a study-note paragraph that the notes importer keeps separate comes back as
+one long cell). It calls `idmlImportEditions` and keeps whichever read — the
+plain IDML parse included — places the existing source lines. Delete the
+partner folder and that hook is absent; repair then stays on the plain parse.
 
 A `PartnerImportEdition` carries the `builtin:*` profile id stamped onto imported
 files, the sidebar corpus marker, a `parse` thunk, and the message to show when a

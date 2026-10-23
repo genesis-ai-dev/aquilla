@@ -78,10 +78,12 @@ import {
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletionWithRepair,
   IdmlCompletionError,
+  type IdmlRepairMessage,
 } from "@/lib/idml/completion"
 import { idmlDraftRejectionProperties } from "@/lib/idml/telemetry"
 import { alignIdmlStyles, cellCanAlignStyles } from "@/lib/idml/align-styles"
-import { clearStyleAlignDirty } from "@/lib/store/style-align-dirty"
+import { forceAlignIdmlStyles } from "@/lib/idml/force-align"
+import { clearManualStyleAlign, clearStyleAlignDirty } from "@/lib/store/style-align-dirty"
 import { t } from "@/lib/i18n/standalone"
 
 // Cap per LLM call. Above this we split into independent review packages.
@@ -641,6 +643,35 @@ export function useCompletion(
     }
     setCompleting((p) => new Map(p).set(lk(cell.id), "aligning"))
     try {
+      // The shape placement keeps the saved words and does not call the model,
+      // so a provider rate limit cannot leave the note as one unsplit block.
+      const preserved = forceAlignIdmlStyles(cell)
+      if (preserved?.valueHtml && preserved.valueHtml !== cell.translatedHtml) {
+        const interventionId = crypto.randomUUID()
+        await commitCompletedCell?.(
+          cell,
+          preserved.valueHtml,
+          modelName,
+          {
+            interventionId,
+            model: modelName,
+            provider,
+            promptVersion: "align-styles-v1",
+            exampleIds: [],
+            generatedAt: Date.now(),
+            mode: "align-styles",
+            projectState: {
+              sourceLanguage,
+              targetLanguage,
+              approvedExampleCount: 0,
+            },
+          },
+        )
+        clearStyleAlignDirty(cell.id)
+        clearManualStyleAlign(cell.id)
+        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        return true
+      }
       // AQU-1656: kept for the AI intervention trail, like every other draft.
       let sentMessages: ModelCallRecord["messages"] = []
       let rawOutput = ""
@@ -657,6 +688,7 @@ export function useCompletion(
       })
       if (!aligned.changed) {
         clearStyleAlignDirty(cell.id)
+        clearManualStyleAlign(cell.id)
         setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
         setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
         return false
@@ -706,6 +738,7 @@ export function useCompletion(
         }],
       })
       clearStyleAlignDirty(cell.id)
+      clearManualStyleAlign(cell.id)
       setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
       return true
     } catch (err) {
@@ -719,6 +752,17 @@ export function useCompletion(
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
+
+  const askAlignStyles = useCallback(async (
+    messages: readonly IdmlRepairMessage[],
+    signal?: AbortSignal,
+  ) => complete({
+    settings: { ...effectiveSettings, temperature: 0 },
+    session,
+    messages: [...messages],
+    stream: false,
+    signal,
+  }), [effectiveSettings, session])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -1489,5 +1533,5 @@ export function useCompletion(
   const completingForLane = useMemo(() => sliceCompletionLaneMap(completing, lane), [completing, lane])
   const errorsForLane = useMemo(() => sliceCompletionLaneMap(errors, lane), [errors, lane])
 
-  return { completeSingle, alignCellStyles, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
+  return { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel: { model: modelName, provider }, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing: completingForLane, examples: examplesForLane, errors: errorsForLane, previews: previewsForLane }
 }

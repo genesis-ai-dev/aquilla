@@ -101,6 +101,11 @@ describe("language registry", () => {
 
     it("derives study volume from file names", () => {
         expect(studyVolumeFromFileName("JOS-EST.idml")).toBe("JOS-EST");
+        expect(
+            studyVolumeFromFileName("Isaías a Malaquias - Atualizado (repaired).idml")
+        ).toBe("ISA-MAL");
+        expect(studyVolumeFromFileName("Gênesis a Deuteronômio.idml")).toBe("GEN-DEU");
+        expect(studyVolumeFromFileName("Atos a Apocalipse.idml")).toBe("ACT-REV");
         expect(studyVolumeFromFileName("jos-est.codex")).toBe("JOS-EST");
         expect(studyVolumeFromFileName("C:\\files\\MAT-JOHN.idml")).toBe("MAT-JOHN");
         expect(studyVolumeFromFileName("GEN-DEU.idml")).toBe("GEN-DEU");

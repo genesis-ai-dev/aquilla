@@ -21,7 +21,7 @@ import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
+import { markManualStyleAlign, markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
 import {
   resetVisibleStyleSegmentsCacheForTests,
   setVisibleStyleSegments,
@@ -731,6 +731,32 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       resetVisibleStyleSegmentsCacheForTests()
       resetStyleAlignDirtyForTests()
       localStorage.clear()
+    }
+  })
+
+  it("flags a re-imported cell in yellow when Align styles was left for a manual pass", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Plain", "Hello ") + idmlSlot(1, "Bold", "world"))
+    const target = idmlParagraph(idmlSlot(0, "Plain", "Bonjour monde") + idmlSlot(1, "Bold", ""))
+    markManualStyleAlign("cell-1")
+    setVisibleStyleSegments(false)
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    try {
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, target),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      const warning = await screen.findByRole("button", { name: "This cell needs Align styles" })
+      fireEvent.click(warning)
+      expect(onAlignStyles).toHaveBeenCalledTimes(1)
+    } finally {
+      resetStyleAlignDirtyForTests()
+      resetVisibleStyleSegmentsCacheForTests()
     }
   })
 

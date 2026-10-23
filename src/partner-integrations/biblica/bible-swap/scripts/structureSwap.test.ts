@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+    applyBibleSwapWithShared,
     applyStructureSwapToStudyXml,
     buildBibleChapterBlockIndex,
+    buildBibleSwapSharedResources,
     buildChapterBlockIndex,
     buildVersificationPlan,
 } from "../index";
@@ -794,6 +796,52 @@ describe("structureSwap", () => {
         expect(xml).toContain("Portuguese 3:2.");
         const exportIdx = buildBibleVerseIndex(xml);
         expect(exportIdx.has("HAB|3|2")).toBe(true);
+    });
+
+    it("keeps the Habakkuk 3 drop cap and verse 1 when the file is not named ISA-MAL", () => {
+        // The app builds the plan from the study scan. The opening verse is a
+        // `head:d_dc1` superscription, so that scan used to omit it. The span
+        // still covers verses 1–2, and the rewrite then started at verse 2,
+        // deleting the drop cap, the verse number, and the prayer. The exported
+        // project file is "Isaías a Malaquias…", not ISA-MAL.idml.
+        const study = bookStory(
+            "HAB",
+            `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/head%3ad_dc1">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>3</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av1"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>3:</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>English prayer title.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>
+</ParagraphStyleRange>` +
+                chapterVerse("3", "2", "English 3:2.", "ParagraphStyle/text%3ap", false)
+        );
+        const bible = bookStory(
+            "HAB",
+            `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/title%3ad_h_dc1">
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3adc"><Content>3</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/cv%3av1"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3ac"><Content>3.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}"><Content>Oração do profeta Habacuque.</Content></CharacterStyleRange>
+  <CharacterStyleRange AppliedCharacterStyle="CharacterStyle/meta%3av"><Content>1</Content></CharacterStyleRange>
+</ParagraphStyleRange>` +
+                chapterVerse("3", "2", "Portuguese 3:2.", "ParagraphStyle/text%3ap", false)
+        );
+        const shared = buildBibleSwapSharedResources(bible, "structure", "portuguese");
+        const { xml } = applyBibleSwapWithShared(study, bible, "structure", shared, {
+            language: "portuguese",
+            studyVolume: "ISAÍAS A MALAQUIAS - ATUALIZADO (REPAIRED)",
+        });
+
+        expect(xml).toContain("Oração do profeta Habacuque.");
+        expect(xml).not.toContain("English prayer title.");
+        expect(xml).toContain("Portuguese 3:2.");
+        expect(xml).toMatch(/cv%3adc[^>]*>\s*<Content>3<\/Content>/);
+        expect(xml).toMatch(/cv%3av1[^>]*>\s*<Content>1<\/Content>/);
+        expect(buildBibleVerseIndex(xml).get("HAB|3|1")?.text).toContain(
+            "Oração do profeta Habacuque"
+        );
     });
 
     it("indexes boundary paragraph verses per chapter segment, not whole paragraph", () => {

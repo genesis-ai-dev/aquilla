@@ -370,6 +370,7 @@ export function VoiceLibraryPanel({
           fileId={fileId}
           session={session}
           cells={cells ?? []}
+          existingVoices={voices}
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
@@ -445,9 +446,11 @@ function VoiceRow({
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
-  const engineLabel = voice.referenceAudioId
-    ? t("audio.library.cloneEngineLabel")
-    : providerInfo(voice.provider ?? projectProvider).shortTitle
+  const engineLabel = voice.libraryVoiceId
+    ? t("audio.library.characterEngineLabel")
+    : voice.referenceAudioId
+      ? t("audio.library.cloneEngineLabel")
+      : providerInfo(voice.provider ?? projectProvider).shortTitle
   const languageTag = languageForVoiceDescription(voice.language)
   const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (

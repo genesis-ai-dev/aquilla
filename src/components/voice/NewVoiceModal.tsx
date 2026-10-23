@@ -1,4 +1,4 @@
-// NewVoiceModal — one modal, two ways to make a voice:
+// NewVoiceModal — one modal, three ways to make a voice:
 //   • TTS voice — name it, pick the engine (Inworld / Gemini / MMS —
 //     seeded from the project's configured engine), and fill that engine's
 //     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
@@ -10,13 +10,16 @@
 //     Gemini — MMS is on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
 //     to match it. A local project default is remapped to Inworld on this tab.
+//   • Character — one click adds a ready-made synthetic character voice
+//     (CharacterVoicePicker, src/lib/audio/character-voices.ts). Change voice
+//     re-voices takes into it; no engine or reference clip to set up.
 //
 // Editing an existing voice reuses this same modal, locked to the voice's kind
 // (TTS: all three engines; clone: cloud clone engines only).
 // Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AudioLines, Check, Pause, Play, Sparkles, Star, Trash2, UserRound } from "lucide-react"
+import { AudioLines, Check, Drama, Pause, Play, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -37,6 +40,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
+import { CharacterVoicePicker } from "@/components/voice/CharacterVoicePicker"
+import { voiceFromCharacter } from "@/lib/audio/character-voices"
 import { cn } from "@/lib/utils"
 import { isRecordedCloneClip, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
@@ -83,7 +88,7 @@ import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-type Mode = "tts" | "clone"
+type Mode = "tts" | "clone" | "character"
 
 export interface NewVoiceModalProps {
   open: boolean
@@ -110,6 +115,8 @@ export interface NewVoiceModalProps {
   initialMode?: Mode
   /** When opened from a line's take, preselect + highlight that take. */
   seedCellId?: string | null
+  /** The project's current cast, so the Characters tab marks ones already added. */
+  existingVoices?: readonly Voice[]
 }
 
 export function NewVoiceModal(props: NewVoiceModalProps) {
@@ -186,11 +193,17 @@ function seedDraft(args: {
 
 function NewVoiceModalBody({
   onClose, voice, provider, targetLanguage, targetLanes, archivedLanes, isDefault, paletteIndex, projectId, fileId,
-  session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId,
+  session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId, existingVoices,
 }: NewVoiceModalProps) {
   const t = useT()
   const isNew = voice === null
-  const lockedMode: Mode | null = voice ? (voice.referenceAudioId ? "clone" : "tts") : null
+  const lockedMode: Mode | null = voice
+    ? (voice.libraryVoiceId ? "character" : voice.referenceAudioId ? "clone" : "tts")
+    : null
+  const charactersInCast = useMemo(
+    () => new Set((existingVoices ?? []).flatMap((v) => (v.libraryVoiceId ? [v.libraryVoiceId] : []))),
+    [existingVoices],
+  )
   const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
 
   const projectProvider = effectiveTtsProvider(provider ?? DEFAULT_TTS_PROVIDER)
@@ -292,6 +305,23 @@ function NewVoiceModalBody({
   const handleSave = useCallback(async () => {
     if (!draft.name.trim()) {
       setTakeError(t("audio.newVoice.errorNameRequired"))
+      return
+    }
+    if (mode === "character") {
+      // Only reachable while editing: a new character is added straight from
+      // its card. Keep identity + name, drop every engine/clone knob.
+      if (!draft.libraryVoiceId) {
+        setTakeError(t("audio.newVoice.errorCharacterRequired"))
+        return
+      }
+      onSave({
+        id: draft.id,
+        name: draft.name.trim(),
+        libraryVoiceId: draft.libraryVoiceId,
+        ...(draft.color ? { color: draft.color } : {}),
+        ...(draft.laneId ? { laneId: draft.laneId } : {}),
+      })
+      onClose()
       return
     }
     if (mode === "clone" && !hasReference) {
@@ -407,12 +437,15 @@ function NewVoiceModalBody({
               }}
               className="w-full gap-0"
             >
-              <TabsList size="lg" className="grid w-full grid-cols-2" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-3" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
                 </TabsTrigger>
                 <TabsTrigger value="clone">
                   <UserRound /> {t("audio.newVoice.tabClone")}
+                </TabsTrigger>
+                <TabsTrigger value="character">
+                  <Drama /> {t("audio.newVoice.tabCharacter")}
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -420,6 +453,36 @@ function NewVoiceModalBody({
 
           <DialogBody>
             <FieldGroup className="space-y-4 pt-1">
+            {mode === "character" ? (
+              <>
+                {!isNew && (
+                  <Field>
+                    <FieldLabel htmlFor="voice-name">{t("common.name")}</FieldLabel>
+                    <Input
+                      id="voice-name"
+                      value={draft.name}
+                      onChange={(e) => update({ name: e.target.value })}
+                      className="h-10"
+                      aria-label={t("audio.newVoice.nameAriaLabel")}
+                    />
+                  </Field>
+                )}
+                <CharacterVoicePicker
+                  editing={!isNew}
+                  selectedId={draft.libraryVoiceId}
+                  inCastIds={charactersInCast}
+                  onPick={(character) => {
+                    if (!isNew) {
+                      update({ libraryVoiceId: character.id })
+                      return
+                    }
+                    onSave(voiceFromCharacter(character, { id: draft.id, color: draft.color }))
+                    onClose()
+                  }}
+                />
+              </>
+            ) : (
+            <>
             {/* Name */}
             <Field>
               <FieldLabel htmlFor="voice-name">{t("common.name")}</FieldLabel>
@@ -553,6 +616,8 @@ function NewVoiceModalBody({
                 onApplyTake={(take) => void applyTake(take)}
               />
             )}
+            </>
+            )}
             </FieldGroup>
           </DialogBody>
 
@@ -599,10 +664,12 @@ function NewVoiceModalBody({
               )}
               <div className="ms-auto flex gap-2">
                 <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
-                <Button type="button" onClick={() => void handleSave()} disabled={saving}>
-                  {saving ? <Spinner className="size-3" /> : null}
-                  {isNew ? t("audio.newVoice.createButton") : t("common.save")}
-                </Button>
+                {!(isNew && mode === "character") && (
+                  <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+                    {saving ? <Spinner className="size-3" /> : null}
+                    {isNew ? t("audio.newVoice.createButton") : t("common.save")}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

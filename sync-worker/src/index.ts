@@ -186,6 +186,10 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
+      /** Voice-forge library-voice endpoint (infra/modal/voice_forge.py `web`). */
+      VOICE_FORGE_URL?: string
+      /** Shared secret for the voice-forge endpoint (matches its VOICE_FORGE_TOKEN). */
+      VOICE_FORGE_TOKEN?: string
       /**
        * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
        * See docs/INWORLD-TTS.md.

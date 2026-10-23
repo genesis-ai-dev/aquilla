@@ -84,8 +84,11 @@ export interface ConvertToCloneVoiceArgs {
   projectId: string
   /** File the converted audio is attached to (scopes the sync token). */
   fileId: string
-  /** Reference clip id whose timbre to convert into. */
-  referenceAudioId: string
+  /** Reference clip id whose timbre to convert into (Seed-VC). */
+  referenceAudioId?: string
+  /** Or a Voice library voice to convert into (voice forge RVC). Exactly one of
+   *  `referenceAudioId` / `libraryVoiceId`. */
+  libraryVoiceId?: string
   /** Fresh source audio (e.g. TTS output) to re-voice. */
   source?: Blob
   /** Or an existing cell-audio object id under this file to re-voice. */
@@ -114,9 +117,12 @@ export interface ConvertToCloneVoiceResult {
 export async function convertToCloneVoice(
   args: ConvertToCloneVoiceArgs,
 ): Promise<ConvertToCloneVoiceResult> {
-  const { projectId, fileId, referenceAudioId, source, sourceAudioId, cellId, diffusionSteps, getSyncToken } = args
+  const { projectId, fileId, referenceAudioId, libraryVoiceId, source, sourceAudioId, cellId, diffusionSteps, getSyncToken } = args
   if (!source && !sourceAudioId) {
     throw new Error("convertToCloneVoice: provide a source blob or sourceAudioId")
+  }
+  if (!referenceAudioId === !libraryVoiceId) {
+    throw new Error("convertToCloneVoice: provide exactly one of referenceAudioId or libraryVoiceId")
   }
   const token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("voice convert: no sync token")
@@ -124,11 +130,12 @@ export async function convertToCloneVoice(
   const form = new FormData()
   form.append("projectId", projectId)
   form.append("fileId", fileId)
-  form.append("referenceAudioId", referenceAudioId)
+  if (referenceAudioId) form.append("referenceAudioId", referenceAudioId)
+  if (libraryVoiceId) form.append("libraryVoiceId", libraryVoiceId)
   if (source) form.append("source", source, "source")
   if (sourceAudioId) form.append("sourceAudioId", sourceAudioId)
   if (cellId) form.append("cellId", cellId)
-  if (typeof diffusionSteps === "number") form.append("diffusionSteps", String(diffusionSteps))
+  if (referenceAudioId && typeof diffusionSteps === "number") form.append("diffusionSteps", String(diffusionSteps))
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/convert`, {
     method: "POST",

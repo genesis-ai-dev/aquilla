@@ -128,7 +128,7 @@ changeset `01a16912-6923-7181-b0d5-49ca8649f552` successfully, then verifies
 project `f7bdfee7-1b1c-4a66-9040-dbb841ff0d1a` in organization `46486`.
 The existing Review Spanish fixture stays unchanged.
 
-Two reproducible limitations are filed separately in Triage:
+Two reproducible limitations are tracked separately:
 
 - [AQU-2136](https://linear.app/frontierrandd/issue/AQU-2136): the MCP
   create-project schema omits the command's supported language lanes.
@@ -199,13 +199,14 @@ Final readback returns the original four source rows in their original
 order and the unchanged MAT 1:1 Spanish target, still unvalidated.
 No other project or permission changes occur.
 
-These checks remain pending:
+These checks remain pending in hosted Claude:
 
 - `preview_import` and `prepare_import`: the read fixtures expose no
   existing agent source-artifact ID. No identifier is invented.
 - `prepare_draft_cells`, `prepare_link_media`, `transcribe_audio`, and
   `transcription_status`.
   Import and media tool descriptions require REST artifact uploads.
+  Transcription accepts inline base64 audio; it does not require an artifact.
   `artifacts-route.ts` authenticates ordinary REST requests, while
   `db/shared/api-credentials.ts:299` accepts only REST-audience OAuth tokens
   there. The hosted MCP grant cannot perform that documented upload.
@@ -229,8 +230,44 @@ or token exchange; the successful hosted flow above supplies that evidence.
 membership. Claude's native client uses ephemeral loopback ports, which
 [Claude's authentication requirements](https://claude.com/docs/connectors/building/authentication)
 require matching without the port for both localhost and 127.0.0.1.
-The package loads locally, but native OAuth compatibility remains unresolved.
-This packaging change does not alter authorization validation.
+AQU-2154 fixes loopback port matching locally, with 47 passing OAuth/client
+metadata tests. Non-loopback and confidential-client callbacks remain exact.
+A real native OAuth session still requires the fix to be deployed.
+
+## Blocker fixes prepared on 2026-10-24
+
+The user authorizes fixing the remaining blockers. Each fix has an isolated
+ticket branch. These are local results, not production deployment claims:
+
+| Issue | Change | Verification |
+| --- | --- | --- |
+| AQU-2135 | MCP-native source/audio upload, nested import delegation, usable export guidance | 126 targeted worker tests; text/DOCX/multi-book commit composition; actual audio linking; 2 passing OAuth browser smoke tests |
+| AQU-2136 | Language lanes in the declared create schema | 50 project-command tests, including forced approval and stored lanes |
+| AQU-2137 | Owned pre-creation proposal reads and waits | 15 lifecycle tests, including credential/org/live-role denial |
+| AQU-2154 | Registered native loopback port matching | 47 OAuth/client-metadata tests; auth typecheck; `npm run build` |
+| AQU-2155 | Authorized organization-scoped MCP OAuth transcription | 18 transcription tests and worker typecheck |
+| AQU-2156 | Matching identity Worker service binding for AI bridges | 33 draft/transcription tests; OAuth draft → commit → AI provenance readback; worker typecheck and Wrangler type generation |
+
+The new `upload_artifact` raises the catalog from 40 to 41 tools.
+The [tool matrix](CLAUDE-CONNECTOR-TOOL-MATRIX.md) separates hosted results
+from local regression evidence. All six previously incomplete workflows
+now have local regression coverage. Hosted drafting still returns
+`job_failed` without staging. Hosted transcription status hits the
+project-only credential gate. Both must be retested after deployment.
+
+Cloudflare documents that unconfigured same-zone `fetch` can bypass a
+sibling Worker route. AQU-2156 supplies service bindings instead; the
+specific production drafting response remains unobserved. The empty
+project generation model is not established as its cause, so we do not
+change project settings based on that hypothesis.
+
+The initial browser test environment fails because the shared 2 GiB Docker
+VM runs more than twenty containers. Local SQL statements time out there.
+A dedicated 4 GiB `aquilla-e2e` Colima profile isolates Postgres, preserves
+the original stopped container, and leaves the active Docker context alone.
+The final targeted OAuth artifact smoke passes in 7.4 seconds without
+slow-request lines. The normal AQU-2135 pre-push gate also passes all 13 affected browser tests.
+Earlier attempts are diagnostic failures, not passes.
 
 ## Test impact
 
@@ -270,9 +307,10 @@ with `--plugin-dir`, `--tools Skill`, and `--no-session-persistence`.
 Live requests use curl against the MCP endpoint, its resource metadata,
 the issuer metadata, and the initial authorization route.
 
-No application build or full smoke suite runs: these changes affect static
-plugin packaging, and no application or worker source changes. The affected
-browser gate runs the existing agent-connection sentinel automatically.
+Initial package validation does not require an application build because
+it changes only static plugin packaging. The later blocker fixes change
+worker code and run the checks recorded above. The full smoke gate remains
+a merge/release requirement; no full-suite pass is claimed here.
 
 The changed contract is plugin discovery: Claude consumes the shared HTTP
 MCP configuration and three skills through `.claude-plugin/plugin.json`.
@@ -280,12 +318,16 @@ The existing OAuth catalog produces the tool names and annotations used
 by those skill instructions. The regression in `scripts/chatgpt-plugin.test.ts`
 checks that composition, shared identity/version, and HTTP transport.
 
-No application UI, persistence, import, or permission contract changes.
+The packaging commit changes no application UI, persistence, import, or
+permission contract. Separate blocker fixes above change MCP import and
+authorization behavior and include boundary regressions.
 No new browser smoke journey is needed for static packaging.
 The existing spec's `04-features/auth-and-account.md`,
 **External agent project authorization**, distinguishes device authorization
 from MCP OAuth discovery. Packaging changes neither contract; no spec edit
-is required. This does not reconcile the broader OAuth spec backlog.
+is required for packaging alone. The later fixes add MCP boundary rules
+in a separate aquilla-specs worktree under AQU-2127. This does not reconcile
+the broader spec backlog.
 
 ## Submission status
 

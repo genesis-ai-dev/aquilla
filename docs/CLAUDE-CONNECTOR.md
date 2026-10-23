@@ -40,9 +40,9 @@ claude --plugin-dir ./plugins/aquilla
 
 In Claude Code, use `/mcp` to authenticate the Aquilla server.
 Claude Code authentication is not yet verified. Its ephemeral loopback
-callback requires port-agnostic matching; the current authorization route
-uses exact redirect matching. Resolve and test this before claiming native
-Claude Code OAuth support. Hosted Claude uses a fixed HTTPS callback.
+callback requires port-agnostic matching. AQU-2154 implements and tests
+that matching locally. Deploy it and test a native OAuth session before
+claiming Claude Code OAuth support. Hosted Claude uses a fixed HTTPS callback.
 Invoke `/aquilla:translation-status-report`, `/aquilla:attention-queue`,
 or `/aquilla:terminology-drift`.
 Adding a remote connector alone does not install these skills.
@@ -118,7 +118,8 @@ for the complete tool inventory.
 
 ## Verification and submission status
 
-Track the actual results in `CLAUDE-CONNECTOR-VERIFICATION.md`.
+Track the actual results in `CLAUDE-CONNECTOR-VERIFICATION.md` and the
+[per-tool matrix](CLAUDE-CONNECTOR-TOOL-MATRIX.md).
 Do not describe discovery checks or package validation as an authenticated
 Claude conversation test.
 

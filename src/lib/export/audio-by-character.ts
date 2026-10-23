@@ -34,7 +34,7 @@ import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audi
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { isInternalIdName, stripInternalIds } from "./internal-id-names"
-import { isSilencedForExport } from "./audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 
 export interface CharacterClip {
   cellId: string
@@ -92,9 +92,12 @@ export interface CharacterPreview {
 }
 
 /** Pick the best-available audio for a cell: recording slot first, else
- *  generated-voice slot. Returns null when the cell has no usable audio. */
+ *  generated-voice slot. Returns null when the cell has no usable audio.
+ *  AQU-2148: "usable" is the point — a slot whose selected take was removed
+ *  falls through to the other rather than resolving to a dead id and dropping
+ *  the line out of the deliverable. See `defaultTrackTakeId`. */
 function bestAudioId(cell: CellData): string | null {
-  return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
+  return defaultTrackTakeId(cell)
 }
 
 /**

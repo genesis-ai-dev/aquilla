@@ -22,7 +22,7 @@ import type { CellData } from "@/hooks/useCells"
 import { parseCanonicalRef } from "@/lib/progress/canonical-rollup"
 import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
-import { isSilencedForExport } from "./audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 export interface ChapterClip {
@@ -82,8 +82,11 @@ export interface ChapterPreview {
 
 const FILE_GROUP_KEY = "__file__"
 
+/** AQU-2148: the take this cell actually ships — see `defaultTrackTakeId`. A
+ *  dead pointer in the recording slot falls through to the generated voice
+ *  instead of emitting a gap the editor says is a recorded line. */
 function bestAudioId(cell: CellData): string | null {
-  return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
+  return defaultTrackTakeId(cell)
 }
 
 function canonicalOf(cell: CellData) {

@@ -15,8 +15,17 @@ export class BillingSettingsPage {
     await this.page.getByRole('tab', { name: /^Billing$/i }).click()
   }
 
+  /** The org list is paged, so find the org by id rather than hoping it is on page one. */
+  async showOrg(orgId: number) {
+    await this.page.getByLabel('Search name, owner or org id…').fill(String(orgId))
+    // The search is applied (and kept in the URL) once typing pauses.
+    await expect(this.page).toHaveURL(new RegExp(`[?&]q=${orgId}(&|$)`))
+    await expect(this.page.getByTestId(`weekly-allowance-${orgId}`)).toBeVisible()
+  }
+
   async setWeeklyAllowance(orgId: number, allowance: number) {
     await this.openPlatformBilling()
+    await this.showOrg(orgId)
     const field = this.page.getByTestId(`weekly-allowance-${orgId}`)
     await expect(field).toBeVisible()
     await field.fill(String(allowance))

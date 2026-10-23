@@ -77,7 +77,8 @@ authenticated tool discovery, and those four tool calls.
 The grant is Act mode with write access, restricted to one organization:
 **PluginReviewer's workspace**, containing **Review Spanish**. A null
 single-org or project field does not remove the organization allowlist.
-The verification uses read-only calls despite that write capability.
+Initial verification uses read-only calls. Later writes use only the separate
+test project authorized by the user.
 
 The next conversation successfully exercises 16 further distinct tools:
 `get_project`, `get_project_settings`, `read_quality`, `read_comments`,
@@ -119,19 +120,86 @@ not prove readiness; the signed-in native Chrome window provides the
 actual login form. The local Claude CLI's API key does not authenticate
 Aquilla or authorize access to its data.
 
+## Isolated write verification
+
+The user authorizes a separate **Claude connector test AQU-2127** project
+and approves its forced-Ask creation proposal in Aquilla. Claude confirms
+changeset `01a16912-6923-7181-b0d5-49ca8649f552` successfully, then verifies
+project `f7bdfee7-1b1c-4a66-9040-dbb841ff0d1a` in organization `46486`.
+The existing Review Spanish fixture stays unchanged.
+
+Two reproducible limitations are filed separately in Triage:
+
+- [AQU-2136](https://linear.app/frontierrandd/issue/AQU-2136): the MCP
+  create-project schema omits the command's supported language lanes.
+- [AQU-2137](https://linear.app/frontierrandd/issue/AQU-2137): reading or
+  waiting for a pre-creation proposal returns project `not_found`.
+  Confirmation after human approval succeeds. Reads of later changesets
+  in the existing project succeed.
+
+We configure English source lane `f3c9f342` and Spanish target lane
+`f9251aa1` through Aquilla, then import a synthetic four-cell USFM fixture.
+File `01a16917-9cd6-7737-92f4-88c704ac41d7` contains a header and MAT 1:1–3.
+This UI setup does not establish MCP import-tool coverage.
+
+`prepare_translations` stages the Spanish MAT 1:1 target,
+“Bienvenidos a nuestra comunidad de prueba.” Its Act-mode proposal has
+one addition, no warnings, and no approval URL. `confirm_changeset`
+commits changeset `01a16919-064c-7b17-b555-db006ed37c8d`, applying one
+change with zero stale cells. The receipt event is
+`01a16919-09d1-7a15-a655-54b438bb7a72` at 14:10:23 UTC.
+
+`read_content` verifies persistence, and `read_history` returns the new
+`target.cell.commit` event at sequence 8. The target remains unvalidated.
+`get_changeset` and `wait_for_changeset` return the committed receipt.
+`export_file` succeeds with USFM text: `exportMode: round-trip`,
+`lossyVerseCount: 0`, and 226 bytes. Verse 1 contains the Spanish target;
+untranslated verses retain their source text, as documented.
+
+Settings tests also pass. `patch_settings` stages changeset
+`01a1691b-5e36-76e5-98f7-116653c130f5` to set
+`translationBrief.freeformNotes` to synthetic test text. Confirmation
+and readback advance the settings version from 0 to 1.
+`prepare_replace_project_settings` then stages restoration of the original
+empty settings object in `01a1691b-c4fb-741e-9a65-00360fa4ee56`.
+Confirmation and readback restore `{}` at version 2. Both use the current
+version guard. Lanes remain unchanged. Claude observes an empty replacement
+summary despite removing a key; this summary concern needs investigation.
+
+`prepare_hide_cells` and `prepare_show_cells` also pass. We hide MAT 1:3,
+verify `hidden: true`, then restore it and verify `hidden: false`.
+Changesets are `01a1691c-db1a-7518-888d-50833f205582` and
+`01a1691d-41f9-7871-9245-0ef4dba85464`. Each receipt applies one event
+with zero stale cells. Server sequence advances from 8 to 9 to 10.
+All four original source rows retain their text and order, and the Spanish
+target remains unchanged. No permission change is required.
+
+`prepare_insert_cell` commits a new synthetic source row after MAT 1:3.
+Its changeset is `01a1691e-8112-7297-83a9-bc6670e488fd`.
+`prepare_split_cell` then stages only that new row at a sentence boundary
+in changeset `01a1691e-fa39-7dcc-b70e-a7a0cca1d9fa`. The split receipt
+applies two events with zero stale cells and no warnings. These operations
+use existing permissions and no approval URL. Readback returns the two
+new rows at indexes 4 and 5; concatenating their values preserves the exact
+original text. Server sequence advances from 10 to 11 to 13.
+
 These checks remain pending:
 
-- `preview_import`: no existing source artifact ID is exposed by the
-  fixtures read in this conversation. No identifier is invented.
-- `get_changeset` and `wait_for_changeset`: this connection has no staged
-  changesets. Neither tool is claimed as tested.
-- The 16 write/delete tools in the live catalog, saved correction,
-  excluded-organization rejection, and connection revocation in hosted Claude.
+- `preview_import` and `prepare_import`: the read fixtures expose no
+  existing agent source-artifact ID. No identifier is invented.
+- Deletion, draft, media, transcription, and discard operations.
+  Import and media tool descriptions require REST artifact uploads.
+  `artifacts-route.ts` authenticates ordinary REST requests, while
+  `db/shared/api-credentials.ts:299` accepts only REST-audience OAuth tokens
+  there. The hosted MCP grant cannot perform that documented upload.
+  AQU-2135 also records this related artifact-workflow limitation.
+- Excluded-organization rejection and connection revocation in hosted Claude.
 - Complete tool-inventory coverage and private delivery of reviewer credentials.
 
-The user is asked whether write tests should use a separate Claude test
-project. The existing Review Spanish fixture also supports the submitted
-ChatGPT plugin, so it remains unchanged while that decision is pending.
+Successful authenticated coverage currently includes 32 distinct tools:
+23 read tools and nine write tools. Failed binary export and pre-creation
+reads are recorded separately from successful text export and changeset reads.
+Do not interpret package validation or UI fixture setup as all-tool testing.
 
 Direct fetching of Claude's client metadata from this machine returns 403.
 The initial authorize route forwards parameters to the consent page without
@@ -206,10 +274,9 @@ is required. This does not reconcile the broader OAuth spec backlog.
 
 Not submitted. Listing text, setup instructions, existing icon, and reviewer
 journeys are in `CLAUDE-CONNECTOR.md`. The existing repository is public;
-the portal accepts `plugins/aquilla` as its plugin path. Push the final
-package and guide to the tracked branch before portal validation.
+the portal accepts `plugins/aquilla` as its plugin path. The package and
+guides are pushed to the ticket branch; validation uses that branch.
 The hosted OAuth connection and core read workflows now pass. Full
-tool-inventory coverage, a suitable text-export fixture, and private
-delivery of reviewer credentials remain prerequisites. AQU-2135 tracks
+tool-inventory coverage and private delivery of reviewer credentials remain prerequisites. AQU-2135 tracks
 the unusable REST fallback guidance found during export testing.
 Do not check the portal's all-tools-tested acknowledgment yet.

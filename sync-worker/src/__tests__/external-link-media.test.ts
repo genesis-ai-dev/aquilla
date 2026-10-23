@@ -13,7 +13,7 @@
 //     duplicate cell.audio events / cell_audio rows)
 //   - observer-role credential is permission_denied
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*).
 vi.mock('partyserver', () => ({
@@ -24,6 +24,7 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalArtifactsRequest, MAX_ARTIFACT_BYTES } from '../external/artifacts-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleExternalMcpRequest } from '../external/mcp-route'
 import { audioObjectKey } from '../audio'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -202,6 +203,8 @@ async function uploadAudio(
   expect(body.kind).toBe('audio')
   return { artifactId: body.artifactId, audioId: body.audioId }
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 let bucket: ReturnType<typeof makeStubBucket>
@@ -393,6 +396,29 @@ async function prepareLinkMedia(
 }
 
 describe('LinkMedia — commit', () => {
+  it('uploads OAuth base64 audio and commits its actual artifact through the declared media tool', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_CONTRIB, userId: 1, username: 'alice' })
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', CRED_CONTRIB])
+    async function call(name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+      }), env)
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      expect(body.result.isError, body.result.content[0].text).not.toBe(true)
+      return JSON.parse(body.result.content[0].text)
+    }
+    const uploaded = await call('upload_artifact', { projectId: PROJECT, name: 'sample.wav', kind: 'audio', contentType: 'audio/wav', encoding: 'base64', data: 'BQUFCQkJ' })
+    const plan = await call('prepare_link_media', { projectId: PROJECT, updates: [{ fileId: FILE, cellId: CELL, artifactId: uploaded.artifactId, laneId: LANE_AR }] })
+    await call('confirm_changeset', { projectId: PROJECT, changesetId: plan.changesetId, digest: plan.digest })
+    const audio = await tdb.rows<{ audio_id: string; cell_id: string; lane_id: string }>('cell_audio')
+    expect(audio).toHaveLength(1)
+    expect(audio[0].cell_id).toBe(CELL)
+    expect(audio[0].lane_id).toBe(LANE_AR)
+    const stored = await bucket.get(audioObjectKey(env, PROJECT, FILE, audio[0].audio_id))
+    expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(new Uint8Array([5, 5, 5, 9, 9, 9]))
+  })
+
   it('attaches + selects the clip, projecting cell_audio and copying bytes under the cell file', async () => {
     const token = await credToken(tdb, { credentialId: CRED_CONTRIB, userId: 1, username: 'alice' })
     const audioBytes = new Uint8Array([5, 5, 5, 9, 9, 9])

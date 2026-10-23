@@ -182,7 +182,7 @@ export async function handleParseArtifact(
   if (channel) headers['x-aquilla-channel'] = channel
 
   const prepared = await handlePrepare(
-    new Request(`https://internal/api/v1/external/projects/${encodeURIComponent(projectId)}/changesets`, {
+    (env.mcpRequest ?? ((input, init) => new Request(input, init)))(`https://internal/api/v1/external/projects/${encodeURIComponent(projectId)}/changesets`, {
       method: 'POST',
       headers,
       body: JSON.stringify(prepareBody),

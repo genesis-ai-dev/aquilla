@@ -143,7 +143,7 @@ import {
   searchWithoutCommentDeepLink,
 } from "./project-workspace-lane-deeplink"
 import {
-  restoreMayPark, stepPendingScroll,
+  restoreMayPark, stepPendingScroll, viewMayPark,
   type PendingCellScroll, type PendingScrollAttempt,
 } from "./pending-cell-scroll"
 import { laneTargetLanguages, resolveActiveTargetLanguage } from "./project-workspace-lane-target"
@@ -428,7 +428,8 @@ import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
-import { TranscribeEditor } from "@/components/transcribe/TranscribeEditor"
+import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
+import { createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -7803,18 +7804,31 @@ export function ProjectWorkspace() {
   )
   const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
 
+  // AQU-2153: where each view of each file was scrolled to, so a switch that
+  // rebuilds the surface can put it back. Session-only, keyed by file + view —
+  // the rules and the reason only Transcribe switches qualify live in
+  // lib/editor/view-scroll-memory.ts, where they are tested.
+  const viewScrollMemory = useMemo(() => createViewScrollMemory(), [])
+  const transcribeRef = useRef<TranscribeEditorHandle | null>(null)
+  const [transcribeTopCellId, setTranscribeTopCellId] = useState<string | null>(null)
+
   // The single traced lens-switch entry point — every setLens call site routes
   // through this so no path skips the trace. Self-no-ops when the lens isn't
   // changing, the file isn't time-ordered, or there's nothing to trace.
   const switchLens = useCallback((next: EditorLens) => {
     const timeOrdered = Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    // AQU-646's trace belongs to the TEXT ↔ MEDIA pair alone: those two lenses
+    // share the mounted table, and the timeline whose selection it carries only
+    // exists in Media. AQU-2153: a switch through Transcribe is not that pair —
+    // it must resume where the view was left, not jump to a timeline selection
+    // made before the detour.
     if (next !== lens && timeOrdered) {
-      if (next === "audio") {
+      if (next === "audio" && lens === "text") {
         // TEXT → MEDIA: the row the user is on (last-active editor cell when
         // visible, else the first visible row).
         const idx = editorRef.current?.getCurrentIndex?.() ?? -1
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
-      } else if (next === "text" && timelineSelectedCellIdRef.current) {
+      } else if (next === "text" && lens === "audio" && timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
         // no edit-focus change. The trace is always within the open file (the
         // lens switch doesn't navigate), so it parks against `activeFileId`.
@@ -7826,8 +7840,29 @@ export function ProjectWorkspace() {
         }
       }
     }
+    // AQU-2153: Text and Media keep their own scroll while the table stays
+    // mounted, so only a switch into or out of Transcribe loses it. Remember
+    // the row at the top of the view being torn down, and hand the one being
+    // built the row it was left at.
+    if (viewSwitchRebuilds(lens, next)) {
+      viewScrollMemory.remember(
+        activeFileId,
+        lens,
+        (lens === "transcribe" ? transcribeRef.current : editorRef.current)?.getTopVisibleCellId() ?? null,
+      )
+      const resume = viewScrollMemory.recall(activeFileId, next)
+      if (next === "transcribe") {
+        // The Transcribe list restores itself: it is not the editor table, so
+        // it has no parked-scroll consumer to go through.
+        setTranscribeTopCellId(resume)
+      } else if (resume && viewMayPark(pendingCellScrollRef.current)) {
+        pendingCellScrollRef.current = {
+          cellId: resume, flash: false, fileId: activeFileId, source: "view", align: "top",
+        }
+      }
+    }
     setLens(next)
-  }, [lens, setLens, activeFile, activeFileId, cellStore])
+  }, [lens, setLens, activeFile, activeFileId, cellStore, viewScrollMemory])
 
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -7838,10 +7873,12 @@ export function ProjectWorkspace() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 
-  // Traces never outlive the file they were captured in.
+  // Traces never outlive the file they were captured in. (AQU-2153's remembered
+  // rows do, but they are keyed by file, so each file only ever sees its own.)
   useEffect(() => {
     timelineSelectedCellIdRef.current = null
     setMediaTraceCellId(null)
+    setTranscribeTopCellId(null)
   }, [activeFileId])
 
   const pendingPresenceJumpRef = useRef<{ fileId: string; cellId?: string } | null>(null)
@@ -8040,7 +8077,7 @@ export function ProjectWorkspace() {
     }
     pendingCellScrollTryRef.current = step.attempt
     const ok = step.kind === "try"
-      ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
+      ? editor.scrollToCellId(pending.cellId, { flash: pending.flash, align: pending.align })
       : false
     if (ok || step.last) giveUp()
   // `centerSurface`: coming back from comments/agent/memory remounts the
@@ -16728,6 +16765,8 @@ export function ProjectWorkspace() {
                 <div className="flex h-full min-h-0 flex-col">
                   {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
+                    ref={transcribeRef}
+                    initialTopCellId={transcribeTopCellId}
                     project={project}
                     cells={batchAudioCells}
                     session={frontierSession}

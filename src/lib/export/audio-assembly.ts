@@ -30,7 +30,7 @@ import { encodeWavPcm16Blobs, toPcm16, WAV_HEADER_BYTES } from "@/lib/audio/wav-
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { characterKey } from "@/lib/export/audio-by-character"
-import { isSilencedForExport } from "@/lib/export/audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "@/lib/export/audio-validation-scope"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 
@@ -184,11 +184,14 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   const skipped: AudioAssemblyResult["skipped"] = []
 
   // Clip selection mirrors audio-by-character: recording slot first, then the
-  // generated-voice slot. Cells without usable audio are recorded, never
-  // silently dropped — the manifest is the transparency contract.
+  // generated-voice slot — and AQU-2148's guard that the slot's selected take
+  // is still there, so a removed recording falls through to the voice that
+  // sounds instead of being manifested as "no audio". Cells without usable
+  // audio are recorded, never silently dropped — the manifest is the
+  // transparency contract.
   const resolved: ResolvedClip[] = []
   args.cells.forEach((cell, docIndex) => {
-    const attachedId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+    const attachedId = defaultTrackTakeId(cell)
     const attachment = attachedId ? cell.attachments?.[attachedId] : undefined
     if (!attachedId || !attachment?.url) {
       skipped.push({ cellId: cell.id, reason: "no audio" })

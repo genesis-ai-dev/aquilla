@@ -68,27 +68,46 @@ async function handleGet(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
+  const auth = await authorizeChangesetItem(request, db, projectId, id)
+  if (auth instanceof Response) return auth
+  const cs = auth.cs
+  const approvalUrl = approvalUrlFor(env, cs.id)
+  return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
+}
+
+/** A plan may precede its project. Only its creating credential can read it,
+ * with the same live organization authority required to create the project. */
+async function authorizeChangesetItem(
+  request: Request, db: AquillaDb, projectId: string, id: string,
+): Promise<{ cred: ApiCredentialContext; cs: StoredChangeset } | Response> {
   const cred = await validateApiCredentialRequest(db, request)
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
   const limited = await checkChangesetLifecycleRateLimit(db, cred.userId)
   if (limited) return limited
-
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
-  if (cred.credentialId !== cs.credentialId) {
-    return errorResponse('permission_denied', 'credential did not create this changeset')
+  if (cred.credentialId !== cs.credentialId) return errorResponse('permission_denied', 'credential did not create this changeset')
+  if (!(await projectExists(db, projectId))) {
+    const command = cs.commands[0]
+    if (cs.commands.length !== 1 || command?.kind !== 'CreateProject' ||
+      (command.projectId ?? cs.projectId) !== projectId) {
+      return errorResponse('not_found', `project ${projectId} not found`)
+    }
+    const orgId = command.orgId == null ? null : String(command.orgId)
+    if (cred.projectId != null || !credentialAllowsOrganization(cred, orgId)) {
+      return errorResponse('scope_denied', 'changeset is outside the credential scope')
+    }
+    if (orgId !== null) {
+      const member = await db.prepare('SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?')
+        .bind(orgId, cred.userId).first<{ role_level: number }>()
+      if (!member || member.role_level < ROLE.MAINTAINER) return errorResponse('permission_denied', 'org role >= maintainer required to read a project creation plan')
+    }
+    return { cred, cs }
   }
-  try {
-    await assertCredentialScope(db, cred, projectId)
-  } catch (err) { return toErrorResponse(err) }
-  // Live-role resolution on every call (§2): a viewer floor to read the plan,
-  // so a user removed from the project after prepare can no longer see it.
+  try { await assertCredentialScope(db, cred, projectId) } catch (err) { return toErrorResponse(err) }
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
-  if (!role || role.level < ROLE.VIEWER) {
-    return errorResponse('permission_denied', 'no project membership')
-  }
-  const approvalUrl = approvalUrlFor(env, cs.id)
-  return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
+  if (!role || role.level < ROLE.VIEWER) return errorResponse('permission_denied', 'no project membership')
+  return { cred, cs }
 }
 
 /**
@@ -183,14 +202,9 @@ async function handleWait(
 ): Promise<Response> {
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
-  const auth = await authorizeChangesetRead(request, db, projectId)
+  const auth = await authorizeChangesetItem(request, db, projectId, id)
   if (auth instanceof Response) return auth
-
-  const cs = await loadChangeset(db, projectId, id)
-  if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
-  if (auth.cred.credentialId !== cs.credentialId) {
-    return errorResponse('permission_denied', 'credential did not create this changeset')
-  }
+  const cs = auth.cs
 
   const rawTimeout = url.searchParams.get('timeoutMs')
   if (rawTimeout !== null && !Number.isFinite(Number(rawTimeout))) {

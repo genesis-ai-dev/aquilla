@@ -846,6 +846,21 @@ const TOOL_SPECS: McpToolSpec[] = [
                     type: ['string', 'number'],
                     description: 'Target org id; omit for a personal (org-less) project.',
                   },
+                  lanes: {
+                    type: 'array',
+                    description: 'Language lanes to create with the project. Omit for an unnamed source lane.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        role: { type: 'string', enum: ['source', 'target'] },
+                        language: { type: 'string', description: 'Language as entered by the user.' },
+                        name: { type: ['string', 'null'], description: 'Optional display-name override.' },
+                        code: { type: ['string', 'null'], description: 'Optional language-code override.' },
+                      },
+                      required: ['role', 'language'],
+                      additionalProperties: false,
+                    },
+                  },
                 },
                 required: ['kind', 'name'],
                 additionalProperties: false,

@@ -145,13 +145,16 @@
        --card could do neither: in light it is pure white on a near-white
        header, in dark it is defined to exactly --surface, so the active
        tab's fill vanished into the header behind it and only the border
-       carried the state. Same reason --tl-folder-band exists. Active is the
-       one tinted fill (a selected state, which is where the palette does
-       allow blue); inactive steps away from the header neutrally and hover
-       stays neutral too, so a hovered inactive tab can never be mistaken for
-       the active one. Light recedes the inactive tabs below a near-white
-       header; dark lifts everything above a mid grey-blue one. */
-    --tab-active: oklch(0.955 0.032 245);
+       carried the state. Same reason --tl-folder-band exists. Inactive steps
+       away from the header neutrally and hover stays neutral too, so a
+       hovered inactive tab can never be mistaken for the active one. Light
+       recedes the inactive tabs below a near-white header; dark lifts
+       everything above a mid grey-blue one.
+       AQU-2147: in light the active tab is NOT tinted. It is the one white
+       fill (--surface, the editor sheet it opens onto) and so the only tab
+       lighter than the 0.965 header, with its full-opacity border drawing
+       the edge. The tinted active fill survives in dark only. */
+    --tab-active: var(--surface);
     --tab-inactive: oklch(0.928 0.002 264);
     --tab-hover: oklch(0.948 0.002 264);
     /* Neutral hover/selection overlay — no blue tint on the chrome. */
@@ -213,9 +216,11 @@
        must sit clear of it; 0.355 reads as a band without becoming a second
        surface. */
     --tl-folder-band: oklch(0.355 0.014 250);
-    /* AQU-2138: the tab strip's dark fills; see the light block. Active sits
-       clear of --accent (0.38 0.04 248) in BOTH lightness and chroma so the
-       neutral hover below it cannot catch up to it. */
+    /* AQU-2138: the tab strip's dark fills; see the light block. Dark keeps
+       the tinted active fill (AQU-2147 made only the light one white): its
+       header IS --surface, so there is no "lighter than the header" to use.
+       Active sits clear of --accent (0.38 0.04 248) in BOTH lightness and
+       chroma so the neutral hover below it cannot catch up to it. */
     --tab-active: oklch(0.42 0.045 248);
     --tab-inactive: oklch(0.345 0.012 250);
     --tab-hover: oklch(0.375 0.014 250);

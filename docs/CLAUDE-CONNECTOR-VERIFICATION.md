@@ -17,6 +17,15 @@ Issue: AQU-2127. Checked on 2026-10-23, Asia/Singapore.
 - After the frozen dependency installation completes, the standard app
   test configuration also passes all 10 package tests with one worker.
 - The repository's secret scan passes with no credential patterns found.
+- Existing OAuth tests pass: 46 identity-worker tests across
+  `mcp-oauth.test.ts` and `mcp-oauth-client-id.test.ts`, plus 11 sync-worker
+  tests in `external-mcp-oauth.test.ts`.
+- The normal pre-push gate passes its 67 runner guard tests and both
+  `agent-connection.smoke.spec.ts` journeys. The journeys cover browser
+  credential consent/revocation and OAuth Act grants restricted to selected
+  current organizations. No slow-request log lines appear in this run.
+  The first attempt fails during boot because worker dependencies are
+  missing; frozen worker installs resolve that setup failure before rerun.
 - An unauthenticated production MCP `initialize` request returns HTTP 401
   with `WWW-Authenticate`, the correct resource metadata URL, and `act` scope.
 - The referenced protected-resource document returns the exact MCP URL,
@@ -100,6 +109,24 @@ node node_modules/vitest/vitest.mjs run scripts/chatgpt-plugin.test.ts \
 node node_modules/tsx/dist/cli.mjs scripts/secret-scan.ts
 ```
 
+From `auth-worker`, run:
+
+```sh
+node node_modules/vitest/vitest.mjs run \
+  src/__tests__/mcp-oauth.test.ts \
+  src/__tests__/mcp-oauth-client-id.test.ts --maxWorkers 1
+```
+
+From `sync-worker`, run:
+
+```sh
+node node_modules/vitest/vitest.mjs run \
+  src/__tests__/external-mcp-oauth.test.ts --maxWorkers 1
+```
+
+`git push` invokes the repository's unchanged `pnpm test:e2e:affected`
+hook, which selects `e2e/specs/agent/agent-connection.smoke.spec.ts`.
+
 The package suite runs through the installed Vitest entry point with
 `run --config /private/tmp/aqu-2127-vitest.config.mjs`.
 That temporary config selects `scripts/chatgpt-plugin.test.ts` in Node,
@@ -109,7 +136,8 @@ Live requests use curl against the MCP endpoint, its resource metadata,
 the issuer metadata, and the initial authorization route.
 
 No application build or full smoke suite runs: these changes affect static
-plugin packaging, and no application or worker source changes.
+plugin packaging, and no application or worker source changes. The affected
+browser gate runs the existing agent-connection sentinel automatically.
 
 The changed contract is plugin discovery: Claude consumes the shared HTTP
 MCP configuration and three skills through `.claude-plugin/plugin.json`.

@@ -142,6 +142,20 @@ export function laneLineDone(
 }
 
 /**
+ * A line's status in the editor's vocabulary — empty, under way, done — by
+ * what its language delivers. The editor's progress surfaces (the status bar,
+ * the file bar, the chapter list and grid, "Next unfinished") read this for a
+ * language that counts its recordings; a Text language keeps its text status.
+ */
+export function laneLineStatus(
+  delivers: LaneDelivers | null | undefined,
+  line: LaneLineState,
+): "empty" | "unvalidated" | "validated" {
+  if (laneLineDone(delivers, line)) return "validated"
+  return laneLineStarted(delivers, line) ? "unvalidated" : "empty"
+}
+
+/**
  * One lane's counts, as the progress rows give them. The audio figures are
  * measured against `audioTotal` (a dubbing file's cue sheet where it has one,
  * else the file's own lines).

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  fileProgressView,
   fileSummariesToProgress,
   hasAudioProgress,
   isAudioOnlyProgress,
@@ -182,5 +183,19 @@ describe("withAudioProgress", () => {
   it("keeps a genuine zero, which is an answer", () => {
     expect(withAudioProgress(TEXT, { translated: 0, validated: 0, total: 9, recorded: 0 }))
       .toEqual({ translated: 0, validated: 0, total: 9, recorded: 0, audioValidated: 0 })
+  })
+})
+
+describe("fileProgressView (media redesign)", () => {
+  it("follows the file's evidence when nobody has chosen", () => {
+    expect(fileProgressView({ total: 10, translated: 4, validated: 1 })).toBe("text")
+    expect(fileProgressView({ total: 10, translated: 0, validated: 0, recorded: 6 })).toBe("audio")
+    expect(fileProgressView({ total: 10, translated: 4, validated: 1, recorded: 6 })).toBe("both")
+  })
+
+  it("what the language delivers wins where someone has chosen", () => {
+    expect(fileProgressView({ total: 10, translated: 4, validated: 1, recorded: 6, delivers: "text" })).toBe("text")
+    expect(fileProgressView({ total: 10, translated: 4, validated: 1, delivers: "audio" })).toBe("audio")
+    expect(fileProgressView({ total: 10, translated: 0, validated: 0, recorded: 6, delivers: "text_and_audio" })).toBe("both")
   })
 })

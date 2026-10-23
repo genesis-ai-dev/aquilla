@@ -279,3 +279,34 @@ describe("FileRow — AQU-894 unassigned de-emphasis", () => {
     expect(renderRow().container.querySelector(".sr-only")).toBeNull()
   })
 })
+
+// Media redesign slice 2 (P2.1): a language that counts its recordings
+// describes the file by them.
+describe("FileRow progress in a language that counts its recordings", () => {
+  it("Audio: the bar says recorded and approved, never translated", () => {
+    const { getByTestId } = renderRow({ progress: { total: 45, translated: 10, validated: 6, delivers: "audio" } })
+    const label = getByTestId("file-row-progress-slot").getAttribute("aria-label") ?? ""
+    expect(label).toMatch(/^\d+% recorded, \d+% audio validated$/)
+    expect(label).not.toMatch(/translated/)
+  })
+
+  it("Text: a language that delivers text draws its text alone, however much is recorded", () => {
+    const { getByTestId } = renderRow({
+      progress: { total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label")).not.toMatch(/recorded/)
+  })
+
+  it("Text and audio: the bar says lines done on both halves", () => {
+    const { getByTestId } = renderRow({ progress: { total: 10, translated: 9, validated: 4, delivers: "text_and_audio" } })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label"))
+      .toBe("4 of 10 lines done on text and audio, 9 started")
+  })
+
+  it("Text: exactly as before", () => {
+    const { getByTestId } = renderRow({ progress: { total: 10, translated: 5, validated: 2 } })
+    const slot = getByTestId("file-row-progress-slot")
+    expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
+    expect(slot.getAttribute("title")).toBeNull()
+  })
+})

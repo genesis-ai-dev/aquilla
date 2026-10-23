@@ -53,6 +53,7 @@ function renderPanel(
   defaultVoiceId: string,
   onAfterGenerate = vi.fn(),
   onRecord?: () => void,
+  voiceFromText = true,
 ) {
   const settings = { voices, defaultVoiceId } as ProjectTtsSettings
   const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
@@ -67,6 +68,7 @@ function renderPanel(
       onRecord={onRecord}
       onAfterGenerate={onAfterGenerate}
       onMakeCharacter={() => {}}
+      voiceFromText={voiceFromText}
     />,
   )
   return { onAfterGenerate }
@@ -314,5 +316,23 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     await user.click(button)
     await waitFor(() => expect(changeCellVoice).toHaveBeenCalled())
     expect(vi.mocked(changeCellVoice).mock.calls[0][0]).toMatchObject({ diffusionSteps: 40 })
+  })
+})
+
+// Media redesign slice 2 (P2.3): a language that delivers Audio and no text
+// has nothing to speak, so its cards offer no voice generated from text.
+describe("CellVoicePanel in an Audio language", () => {
+  it("an empty card offers Record only, no Generate", () => {
+    renderPanel(unvoiced, "v-mary", vi.fn(), vi.fn(), false)
+    expect(screen.getByTestId("voice-card-empty")).toHaveAttribute("data-state", "record-only")
+    expect(screen.queryByTestId("voice-card-generate")).toBeNull()
+    expect(screen.queryByRole("button", { name: /Generate/ })).toBeNull()
+    expect(screen.getByTestId("voice-card-record")).toBeInTheDocument()
+  })
+
+  it("a recorded card keeps Change voice and drops Generate audio from text", () => {
+    renderPanel(recorded, "v-anna", vi.fn(), vi.fn(), false)
+    expect(screen.queryByRole("button", { name: "Generate audio from text" })).toBeNull()
+    expect(screen.getByTestId("voice-card-change-voice")).toBeInTheDocument()
   })
 })

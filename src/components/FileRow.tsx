@@ -21,7 +21,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercent } from "@/lib/progress/progress-percent"
 import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
-import { hasAudioProgress, isAudioOnlyProgress, type FileStats } from "@/lib/progress/file-summary-progress"
+import { fileProgressView, type FileStats } from "@/lib/progress/file-summary-progress"
 
 interface FileRowProps {
   file: FileReference
@@ -93,12 +93,20 @@ export function FileRow(props: FileRowProps) {
   // written form. `recorded` absent means this row has no audio figures — an
   // older sync-worker, or the live count before the attachment map lands — and
   // absent must never draw as "0% recorded", which is the bug being fixed.
-  const recordedPct = progress ? progressPercent(progress.recorded ?? 0, progress.total) : 0
-  const audioValidatedPct = progress ? progressPercent(progress.audioValidated ?? 0, progress.total) : 0
-  const showAudio = hasAudioProgress(progress)
+  // An Audio language's started / done lines ARE its recorded / approved ones.
+  const audioLanguage = progress?.delivers === "audio"
+  const recordedPct = progress
+    ? progressPercent(progress.recorded ?? (audioLanguage ? progress.translated : 0), progress.total) : 0
+  const audioValidatedPct = progress
+    ? progressPercent(progress.audioValidated ?? (audioLanguage ? progress.validated : 0), progress.total) : 0
   // The display rule AQU-2110 settled: audio only when there is no target text
-  // in this lane, both when there is, text alone when there is no audio.
-  const showText = !isAudioOnlyProgress(progress)
+  // in this lane, both when there is, text alone when there is no audio. What
+  // the language delivers wins where someone has chosen (media redesign), and
+  // Text and audio draws ONE bar of its lines done on both halves.
+  const view = fileProgressView(progress)
+  const bothDone = view === "both" && progress?.delivers === "text_and_audio"
+  const showText = view !== "audio"
+  const showAudio = !bothDone && view !== "text" && (audioLanguage || (progress?.recorded ?? 0) > 0)
   const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
@@ -249,9 +257,18 @@ export function FileRow(props: FileRowProps) {
             <div
               className="flex w-[50px] shrink-0 items-center justify-end gap-0.5"
               data-testid="file-row-progress-slot"
+              title={progress?.delivers && progress.total > 0 && bothDone
+                ? t("nav.fileRow.bothProgressAriaLabel", {
+                    done: progress.validated, total: progress.total, started: progress.translated,
+                  })
+                : undefined}
               aria-label={
                 progress && progress.total > 0
-                  ? showText
+                  ? bothDone
+                    ? t("nav.fileRow.bothProgressAriaLabel", {
+                        done: progress.validated, total: progress.total, started: progress.translated,
+                      })
+                    : showText
                     ? showAudio
                       ? t("nav.fileRow.progressWithAudioAriaLabel", {
                           translated: translatedPct,

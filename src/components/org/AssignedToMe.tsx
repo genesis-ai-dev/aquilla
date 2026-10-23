@@ -170,8 +170,11 @@ export function AssignedToMe() {
       const getToken = () => (token ??= fetchSyncToken(jwt, a.projectId, fileId)
         .then((r) => r.token)
         .catch(() => null))
-      const cellId = await resolveAssignmentLandingCell(a, async (key) =>
-        (await getFileSectionProgress(a.projectId, fileId, key, getToken, a.targetLang ?? "")).verses,
+      const cellId = await resolveAssignmentLandingCell(
+        a,
+        async (key) =>
+          (await getFileSectionProgress(a.projectId, fileId, key, getToken, a.targetLang ?? "")).verses,
+        a.laneDelivers,
       ).catch(() => null)
       navigate(cellId
         ? editorCellHref(a.projectId, fileId, cellId, assignmentLane(a), true)

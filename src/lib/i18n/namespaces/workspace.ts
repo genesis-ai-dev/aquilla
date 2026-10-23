@@ -401,6 +401,11 @@ export const workspace = defineNamespace({
     "workspace.statusBar.audioSummary": "{total} lines · {translated} recorded {pct}",
     "workspace.statusBar.unvalidatedAudioBadge": "{count} recorded, not validated",
     "workspace.statusBar.audioValidatedBadge": "{count} audio validated",
+    // Media redesign: the footer of a language that delivers Text and audio
+    // counts the lines done on both halves, and says what is left of each.
+    "workspace.statusBar.bothSummary": "{total} lines · {done} done {pct}",
+    "workspace.statusBar.textLeftBadge": "Text left: {count}",
+    "workspace.statusBar.audioLeftBadge": "Audio left: {count}",
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
@@ -1829,6 +1834,29 @@ export const workspace = defineNamespace({
           pct: "Already-formatted percentage in parentheses, e.g. '(42%)'.",
         },
         screenshot: "workspace-nav",
+      },
+      "workspace.statusBar.bothSummary": {
+        description:
+          "Main status line in the bottom footer for a language that delivers text and " +
+          "audio: how many lines the file has and how many are done (text validated AND " +
+          "recording approved). Values arrive formatted and bidi-isolated.",
+        placeholders: {
+          total: "Already-formatted line count.",
+          done: "Already-formatted count of lines done on both halves.",
+          pct: "Already-formatted percentage in parentheses, e.g. '(42%)'.",
+        },
+      },
+      "workspace.statusBar.textLeftBadge": {
+        description:
+          "Badge in the status footer, for a language that delivers text and audio, " +
+          "counting lines whose text is not yet validated.",
+        placeholders: { count: "How many lines still need their text validated." },
+      },
+      "workspace.statusBar.audioLeftBadge": {
+        description:
+          "Badge in the status footer, for a language that delivers text and audio, " +
+          "counting lines whose recording is not yet approved.",
+        placeholders: { count: "How many lines still need an approved recording." },
       },
       "workspace.statusBar.unvalidatedBadge": {
         description:

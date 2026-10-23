@@ -13,7 +13,7 @@ import { LANE_DELIVERS, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
-export function laneDeliversLabel(delivers: LaneDelivers, t: TFunction): string {
+function laneDeliversLabel(delivers: LaneDelivers, t: TFunction): string {
   switch (delivers) {
     case "audio":
       return t("projectSettings.languages.deliversAudio")

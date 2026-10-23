@@ -32,6 +32,12 @@ import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
 import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
+import {
+  laneCountsAudio,
+  laneLineStatus,
+  type LaneDelivers,
+  type LaneLineState,
+} from "@/lib/lanes/lane-delivers"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 /** AQU-2094: what a sparse audit read says about a cell it leaves out. */
@@ -154,6 +160,22 @@ export interface CellSummary {
    *  Carried so the cast lookup can find a character's voice from a summary.
    *  Absent on a line that names nobody. */
   castName?: string
+  /** Media redesign slice 2: mirrors `CellData.audioApproved`. */
+  audioApproved?: boolean
+  /** Media redesign slice 2: mirrors `CellData.laneStatus`. */
+  laneStatus?: CellData["status"]
+}
+
+/**
+ * Media redesign slice 2: what the active language delivers, and which of the
+ * open file's lines carry a recording in it and an approved one. Set by the
+ * workspace from the lane-scoped attachment read, apart from `setRuntime` for
+ * the reason `setOwnTakeCellIds` is.
+ */
+export interface LaneAudioState {
+  delivers: LaneDelivers | null
+  recorded: ReadonlySet<string>
+  approved: ReadonlySet<string>
 }
 
 export interface CellTextPair {
@@ -270,6 +292,11 @@ interface RuntimeContext {
    * navigation index and nothing else.
    */
   audioProgressCellIds?: AudioProgressCellIds
+  /**
+   * Media redesign slice 2: see `LaneAudioState`. Absent, or a language that
+   * delivers Text, and every line is counted by its text exactly as before.
+   */
+  laneAudio?: LaneAudioState
   /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
@@ -581,6 +608,63 @@ export class CellStore {
     this.emitAll()
   }
 
+  /**
+   * Media redesign slice 2: what the active language delivers and which lines
+   * are recorded and approved in it. A language that counts its recordings
+   * re-derives every line's progress status from them (`applyOwnTake`); a
+   * Text language ignores it. The chapter counts read the navigation rollup's
+   * audio figures instead, which the workspace feeds the SAME two sets
+   * through `setAudioProgressCellIds`. Bumps exactly the cells whose answer
+   * changed, or every cell when the choice itself did.
+   */
+  setLaneAudio(next: LaneAudioState): void {
+    const prev = this.ctx.laneAudio
+    if (
+      prev
+      && prev.delivers === next.delivers
+      && prev.recorded === next.recorded
+      && prev.approved === next.approved
+    ) return
+    this.ctx = { ...this.ctx, laneAudio: next }
+    const wasCounted = laneCountsAudio(prev?.delivers)
+    const isCounted = laneCountsAudio(next.delivers)
+    if (!wasCounted && !isCounted) return
+    if ((prev?.delivers ?? null) !== next.delivers) {
+      this.bumpAllCells()
+      this.fileVersion++
+      this.rebuildDerivedIndexes()
+      this.emit(this.order)
+      return
+    }
+    const changed = new Set<string>()
+    const diff = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
+      for (const id of a) if (!b.has(id)) changed.add(id)
+      for (const id of b) if (!a.has(id)) changed.add(id)
+    }
+    diff(prev?.recorded ?? EMPTY_TAKES, next.recorded)
+    diff(prev?.approved ?? EMPTY_TAKES, next.approved)
+    if (changed.size === 0) return
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.rebuildDerivedIndexes()
+    this.emit(changed)
+  }
+
+  /**
+   * Media redesign slice 2: a line's state in a language that counts its
+   * recordings, or null in a Text language (whose lines keep today's rules).
+   */
+  private laneLineOf(cellId: string, textFilled: boolean, textValidated: boolean): LaneLineState | null {
+    const lane = this.ctx.laneAudio
+    if (!lane || !laneCountsAudio(lane.delivers)) return null
+    return {
+      textFilled,
+      textValidated,
+      recorded: lane.recorded.has(cellId),
+      audioApproved: lane.approved.has(cellId),
+    }
+  }
+
   /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
   private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
     return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
@@ -617,6 +701,7 @@ export class CellStore {
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
       // AQU-2110: same hand-off, same rule.
       audioProgressCellIds: next.audioProgressCellIds ?? this.ctx.audioProgressCellIds,
+      laneAudio: next.laneAudio ?? this.ctx.laneAudio,
     }
     if (showHiddenChanged) {
       this.visibleOrderCache = null
@@ -681,6 +766,11 @@ export class CellStore {
         ...this.ctx,
         ownTakeCellIds: EMPTY_TAKES,
         audioProgressCellIds: EMPTY_AUDIO_PROGRESS_CELL_IDS,
+        // Media redesign: the same for the lane's recorded / approved lines;
+        // what the language delivers is the project's, and stays.
+        ...(this.ctx.laneAudio
+          ? { laneAudio: { delivers: this.ctx.laneAudio.delivers, recorded: EMPTY_TAKES, approved: EMPTY_TAKES } }
+          : {}),
       }
     }
     // Rows still subscribed to the outgoing cells must hear about the reset —
@@ -979,6 +1069,14 @@ export class CellStore {
    * can see WHY the status is what it is.
    */
   private applyOwnTake(cell: CellData): void {
+    // Media redesign slice 2: in a language that counts its recordings, the
+    // line's PROGRESS status follows what the language delivers. `status`
+    // itself stays the text's, for the dozen readers that mean text.
+    const line = this.laneLineOf(cell.id, Boolean(cell.translated.trim()), cell.status === "validated")
+    if (line) {
+      cell.audioApproved = line.audioApproved
+      cell.laneStatus = laneLineStatus(this.ctx.laneAudio?.delivers, line)
+    }
     if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
     // ONLY the flag, since 2026-09-22. This used to flip an empty line's
     // status to unvalidated/validated as well, so that a dub with no text
@@ -1056,6 +1154,8 @@ export class CellStore {
       transcription: view.transcription,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
+      audioApproved: view.audioApproved,
+      laneStatus: view.laneStatus,
       // AQU-1424: so the surfaces that read SUMMARIES rather than rows — the
       // chapter health builder's `isExcluded`, and batch drafting's target list —
       // can apply the same predicate without reaching back into the store's rows.
@@ -2496,6 +2596,10 @@ export class CellStore {
    * Callers must retain the full rebuild for structural/footnote/validation changes.
    */
   private updateTargetFilledProgress(cellId: string, before: boolean, after: boolean): boolean {
+    // Media redesign slice 2: a language that counts its recordings counts a
+    // line by the shared rule, which these text deltas do not speak for; the
+    // full rebuild does.
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
@@ -2540,6 +2644,7 @@ export class CellStore {
    * file totals prefer audit validators, navigation uses the projected flag.
    */
   private updateTargetValidationProgress(cellId: string, previous: CellRow, next: CellRow): boolean {
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false

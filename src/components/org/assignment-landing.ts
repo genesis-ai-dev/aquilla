@@ -20,6 +20,7 @@
 
 import type { MyAssignment } from "@/lib/sync/assignments"
 import { getBookOrdinal, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
+import { laneCountsAudio, laneCountsText, laneLineDone, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { shortVerses, type ShortVerse } from "./plan/verse-chips"
 
 /**
@@ -99,11 +100,25 @@ function compareSectionKeys(a: string, b: string): number {
 export async function resolveAssignmentLandingCell(
   a: Pick<MyAssignment, "scopeKind" | "scopeLabel" | "fileId">,
   readSection: (sectionKey: string) => Promise<readonly ShortVerse[]>,
+  /**
+   * Media redesign slice 2: what the assignment's language delivers. An Audio
+   * language lands on the first line without an approved recording (P2.2),
+   * Text and audio on the first not done on both halves; Text, and a language
+   * nobody has chosen for, keep the order above.
+   */
+  delivers?: LaneDelivers | null,
 ): Promise<string | null> {
   const keys = assignmentSectionKeys(a)
   if (!a.fileId || keys.length === 0) return null
   const chapters = await Promise.all(keys.map((k) => readSection(k).catch(() => [] as const)))
   const verses = chapters.flat()
+  if (laneCountsAudio(delivers)) {
+    const firstOpen = verses.find((v) => v.cellId && !laneLineDone(delivers, {
+      textValidated: laneCountsText(delivers) ? v.validated : true,
+      audioApproved: v.audioValidated === true,
+    }))
+    return firstOpen?.cellId ?? verses.find((v) => v.cellId)?.cellId ?? null
+  }
   return shortVerses(verses, "untranslated")[0]?.cellId
     ?? shortVerses(verses, "unvalidated")[0]?.cellId
     ?? verses.find((v) => v.cellId)?.cellId

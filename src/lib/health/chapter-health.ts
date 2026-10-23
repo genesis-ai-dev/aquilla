@@ -1,5 +1,6 @@
 import type { BookHealthCell, BookHealthChapter } from "@/components/sidebar/BookHealthSpine"
 import { progressViewFor, type MilestoneProgressView } from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** A navigation-index chapter: the fields the sidebar's chapter map reads. */
 export interface ChapterHealthSource {
@@ -12,7 +13,7 @@ export interface ChapterHealthSource {
 }
 
 export interface ChapterHealthReaders {
-  getSummary(cellId: string): { status: string; translated: string } | null | undefined
+  getSummary(cellId: string): { status: string; translated: string; laneStatus?: string } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
   /**
@@ -35,6 +36,12 @@ export interface ChapterHealthReaders {
    * otherwise costs.
    */
   audioStage?(cellId: string): AudioCellStage | undefined
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It overrides the file's evidence about which unit the chapters are drawn
+   * in (`deliversView`).
+   */
+  delivers?: LaneDelivers | null
 }
 
 /** AQU-2112: a line's audio state, strongest first. */
@@ -59,7 +66,14 @@ interface ChapterEntry {
   cells: CellEntry[]
 }
 
-function cellStage(summary: { status: string; translated: string }): BookHealthCell["stage"] {
+function cellStage(summary: { status: string; translated: string; laneStatus?: string }): BookHealthCell["stage"] {
+  // Media redesign slice 2: a language that counts its recordings draws each
+  // square by the line's status in that language (recorded, approved).
+  if (summary.laneStatus) {
+    return summary.laneStatus === "validated"
+      ? "validated"
+      : summary.laneStatus === "empty" ? "untranslated" : "automatic"
+  }
   return summary.status === "validated"
     ? "validated"
     : summary.status === "empty" || !summary.translated.trim()
@@ -118,13 +132,15 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
         : null
       // The rule itself is AQU-2110's, shared so the sidebar and the chapter
       // picker can never disagree about which unit a file is measured in.
+      // What the language delivers wins where someone has chosen (media
+      // redesign).
       const progressView: MilestoneProgressView | undefined = audioCounts
-        ? progressViewFor(chapters.map((source, index) => ({
+        ? deliversView(readers.delivers, progressViewFor(chapters.map((source, index) => ({
             translated: source.translated,
             validated: source.validated,
             total: source.total,
             ...audioCounts[index],
-          })))
+          }))))
         : undefined
 
       const result = chapters.map((source, chapterIndex) => {

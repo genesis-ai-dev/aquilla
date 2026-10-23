@@ -119,6 +119,21 @@ export interface CellData {
    * it — notably the empty-target check.
    */
   hasOwnTake?: boolean
+  /**
+   * Media redesign slice 2: in a language that counts its recordings (Audio,
+   * or Text and audio), this line's recording has the project's required
+   * audio validators. Absent in a Text language and wherever audio is not
+   * loaded.
+   */
+  audioApproved?: boolean
+  /**
+   * Media redesign slice 2: the line's PROGRESS status by what its language
+   * delivers (src/lib/lanes/lane-delivers.ts `laneLineStatus`) — recorded and
+   * approved in an Audio language, both halves in Text and audio. Set only in
+   * a language that counts its recordings; in a Text language progress reads
+   * `status`, exactly as before. `status` itself always stays the text's.
+   */
+  laneStatus?: "empty" | "unvalidated" | "validated"
   selectedGeneratedVoiceAudioId?: string
   /**
    * AQU-646 stage 3: the active clip in EVERY slot, keyed by slot.

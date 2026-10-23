@@ -12,6 +12,7 @@ import {
   parseLaneDelivers,
   type LaneLineState,
   type LaneTallies,
+  deliversView,
 } from "./lane-delivers"
 
 const line = (overrides: Partial<LaneLineState> = {}): LaneLineState => ({
@@ -149,5 +150,22 @@ describe("the stored choice", () => {
     expect(laneRowDelivers({ recordsAudio: true })).toBeNull()
     expect(laneRowDelivers({ recordsAudio: true, delivers: "audio" })).toBe("audio")
     expect(laneRowDelivers({ recordsAudio: false, delivers: null })).toBeNull()
+  })
+})
+
+describe("deliversView: which figures a surface shows (media redesign + AQU-2110)", () => {
+  it("what someone chose wins over what the work holds", () => {
+    for (const evidence of ["text", "audio", "both"] as const) {
+      expect(deliversView("text", evidence)).toBe("text")
+      expect(deliversView("audio", evidence)).toBe("audio")
+      expect(deliversView("text_and_audio", evidence)).toBe("both")
+    }
+  })
+
+  it("a language nobody has chosen for is judged by its evidence", () => {
+    for (const evidence of ["text", "audio", "both"] as const) {
+      expect(deliversView(null, evidence)).toBe(evidence)
+      expect(deliversView(undefined, evidence)).toBe(evidence)
+    }
   })
 })

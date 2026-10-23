@@ -7,6 +7,7 @@
 // the sidebar's FileStats shape and merges it with the live, per-cell-derived
 // stats for whichever file is currently open.
 import type { FileSummary } from "@/lib/sync/cells-read-types"
+import { deliversView, type DeliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 export interface FileStats {
   translated: number
@@ -24,6 +25,20 @@ export interface FileStats {
    */
   recorded?: number
   audioValidated?: number
+  /**
+   * Media redesign slice 2: what the open language delivers, when someone has
+   * chosen. Audio and Text and audio re-read `translated` as the lines STARTED
+   * (recorded, for Audio; text or recording, for Text and audio) and
+   * `validated` as the lines DONE (src/lib/lanes/lane-delivers.ts); Audio fills
+   * `recorded` / `audioValidated` with the same lines. Text keeps the text
+   * figures and draws no audio. Absent: nobody chose, and the figures show
+   * what the file holds (AQU-2110), exactly as AQU-2111 draws them.
+   */
+  delivers?: LaneDelivers | null
+  /** Text and audio: lines whose text still needs validating. */
+  needsText?: number
+  /** Text and audio: lines whose recording still needs approving. */
+  needsAudio?: number
 }
 
 /** Does this file have audio worth drawing? Undefined counts never do. */
@@ -41,6 +56,18 @@ export function hasAudioProgress(stats: Pick<FileStats, "recorded"> | undefined)
  */
 export function isAudioOnlyProgress(stats: FileStats | undefined): boolean {
   return hasAudioProgress(stats) && (stats?.translated ?? 0) === 0
+}
+
+/**
+ * Which figures a file shows: its text, its audio, or both side by side. What
+ * the open language delivers decides when someone has chosen (`deliversView`);
+ * otherwise what the file holds, by the AQU-2110 rule above.
+ */
+export function fileProgressView(stats: FileStats | undefined): DeliversView {
+  return deliversView(
+    stats?.delivers,
+    isAudioOnlyProgress(stats) ? "audio" : hasAudioProgress(stats) ? "both" : "text",
+  )
 }
 
 /** Maps server file rollups (GET /projects/:id/files) to the sidebar's FileStats shape. */

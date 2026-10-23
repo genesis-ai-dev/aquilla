@@ -206,6 +206,7 @@ import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-valid
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { takePlayWindow } from "@/lib/audio/kept-window"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { PericopeSuggestions } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
@@ -825,6 +826,18 @@ interface EditorTableProps {
    */
   activeLane?: string
   /**
+   * Media redesign slice 2: the open language delivers Audio and no text. Its
+   * validation column shows only the audio check — on every line, recorded or
+   * not — and no text check mark (P2.3).
+   */
+  audioOnlyLane?: boolean
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * The chapter picker draws in that unit (`deliversView`); absent, the
+   * file's own evidence decides (AQU-2110).
+   */
+  laneDelivers?: LaneDelivers | null
+  /**
    * AQU-602: all selectable target lanes, default lane FIRST as `''` (callers
    * build `['', ...targetLanes]`). When at least one is offered AND
    * `onLaneChange` is provided, the TARGET language tag in the column header
@@ -1197,7 +1210,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  project, cellStore, fileType, username, activeLane = "", audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -1704,11 +1717,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // pulses on every line.
   const audioMemoryKey = audioFileId ? `${project.id}/${audioFileId}` : null
   const hasAudio = fileHasAudio(audioLoaded ? audioByCellId : null, heardLinesLoading ? null : linkedTakesByCell)
-  const audioColumn = audioColumnFor({
+  const fileAudioColumn = audioColumnFor({
     hasAudio,
     checking: audioChecking,
     expectAudio: heardLinesLoading || (audioMemoryKey !== null && fileLastSeenWithAudio(audioMemoryKey)),
   })
+  // Media redesign slice 2: an Audio language's lines are its recordings, so
+  // its audio check is drawn on every line from the first, recorded or not.
+  const audioColumn = audioOnlyLane && fileAudioColumn === "off" ? "on" : fileAudioColumn
   useEffect(() => {
     if (audioMemoryKey && !audioChecking) rememberFileAudio(audioMemoryKey, hasAudio)
   }, [audioMemoryKey, audioChecking, hasAudio])
@@ -2896,6 +2912,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cell={cell}
           linkedTakes={linkedTakes}
           audioColumn={audioColumn}
+          audioOnlyLane={audioOnlyLane}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -3175,6 +3192,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
+                delivers={laneDelivers}
               />
             </div>
             {/* AQU-515 — renders nothing unless the file addresses scripture
@@ -3242,6 +3260,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
+                delivers={laneDelivers}
               />
             </div>,
             stripNavSlot,
@@ -3326,7 +3345,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
                 check in both (Sam, 2026-09-28; the Text and Audio views). */}
-            {(audioLens || !castGutter) && <CheckMarks audioColumn={audioColumn} />}
+            {(audioLens || !castGutter) && <CheckMarks audioColumn={audioColumn} textColumn={!audioOnlyLane} />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -4061,6 +4080,8 @@ interface MemoizedRowProps {
   linkedTakes?: LinkedTake[]
   /** What the audio column shows — see `audioColumn` on the table. */
   audioColumn: AudioColumn
+  /** Media redesign slice 2: see `audioOnlyLane` on the table. */
+  audioOnlyLane: boolean
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -4261,7 +4282,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, audioColumn, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
+    cell, linkedTakes, audioColumn, audioOnlyLane, cellExamples, exampleOriginFor, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, versePart, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -4386,6 +4407,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         cell={cell}
         linkedTakes={linkedTakes}
         audioColumn={audioColumn}
+        audioOnlyLane={audioOnlyLane}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -4516,6 +4538,8 @@ interface EditorRowProps {
   /** The file's audio column: absent on a file with no audio, a placeholder
    *  while its recordings are read, else the line's audio check. */
   audioColumn: AudioColumn
+  /** Media redesign slice 2: no text check mark in an Audio language. */
+  audioOnlyLane?: boolean
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -5553,7 +5577,7 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, audioColumn, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioColumn, audioOnlyLane = false, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -7811,7 +7835,8 @@ function EditorRow({
   // Human references help people and DOM agents identify a cell.
   const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
-  const validationControl = (
+  // Media redesign slice 2 (P2.3): an Audio language has no text to validate.
+  const validationControl = audioOnlyLane ? null : (
     <TargetValidationControl
       cellRef={cellRef}
       hasContent={hasContent}
@@ -8290,6 +8315,7 @@ function EditorRow({
               username={audioLens.username}
               targetLang={activeLane || undefined}
               canEdit={editable}
+              voiceFromText={!audioOnlyLane}
               onRecord={editable && onOpenRecording ? () => onOpenRecording(cell.id) : undefined}
               recordUnavailable={getUnsupportedReason()}
               onAfterGenerate={audioLens.onAfterGenerate}
@@ -9120,6 +9146,9 @@ function EditorRow({
               // so it costs at most one extra button on a minority of rows.
               primary={
                 <>
+                  {/* Media redesign slice 2 (P2.3): no AI drafting in a
+                      language that delivers Audio and no text. */}
+                  {!audioOnlyLane && (
                   <TargetDraftActions
                     targetText={visibleTranslated}
                     status={cell.status}
@@ -9135,6 +9164,7 @@ function EditorRow({
                     onDragEnter={onDragEnter}
                     onConfirmOpenChange={setShowGenerateConfirm}
                   />
+                  )}
 
                   {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
                       the whole paragraph as one model call. ALL of the gates below
@@ -9151,6 +9181,7 @@ function EditorRow({
                       on `isLoading` alone would let a second click re-fire
                       completeParagraph mid-fan-out). */}
                   {cell.paragraphStart === true &&
+                    !audioOnlyLane &&
                     editable &&
                     !isAnonymous &&
                     isCompletionConfigured &&

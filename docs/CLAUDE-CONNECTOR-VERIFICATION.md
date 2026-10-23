@@ -1,6 +1,6 @@
 # Claude connector verification
 
-Issue: AQU-2127. Checked on 2026-10-23, Asia/Singapore.
+Issue: AQU-2127. Checked through 2026-10-24, Asia/Singapore.
 
 ## Completed checks
 
@@ -183,11 +183,28 @@ use existing permissions and no approval URL. Readback returns the two
 new rows at indexes 4 and 5; concatenating their values preserves the exact
 original text. Server sequence advances from 10 to 11 to 13.
 
+After explicit human approval on 2026-10-24 (Asia/Singapore),
+`prepare_delete_cell` and `discard_changeset` pass. We stage deletion of
+only the second synthetic row, discard proposal
+`01a16aae-6d60-7eed-9db0-425b8566c75d`, and verify status `discarded`,
+no receipt, and no content change at server sequence 13.
+
+Fresh deletion proposals `01a16aae-d5a8-7a9f-9de6-d97a7b5b0eb1` and
+`01a16aaf-2c28-7c53-8355-ab97962e5c08` remove the second and first
+synthetic rows respectively. Each confirmation applies one event with
+zero stale cells and no warnings. Receipt events are
+`01a16aae-dac5-7d8c-845d-a2bb91741e64` and
+`01a16aaf-316c-7f35-b2ef-7130db22dd3f`. Server sequence reaches 15.
+Final readback returns the original four source rows in their original
+order and the unchanged MAT 1:1 Spanish target, still unvalidated.
+No other project or permission changes occur.
+
 These checks remain pending:
 
 - `preview_import` and `prepare_import`: the read fixtures expose no
   existing agent source-artifact ID. No identifier is invented.
-- Deletion, draft, media, transcription, and discard operations.
+- `prepare_draft_cells`, `prepare_link_media`, `transcribe_audio`, and
+  `transcription_status`.
   Import and media tool descriptions require REST artifact uploads.
   `artifacts-route.ts` authenticates ordinary REST requests, while
   `db/shared/api-credentials.ts:299` accepts only REST-audience OAuth tokens
@@ -196,8 +213,8 @@ These checks remain pending:
 - Excluded-organization rejection and connection revocation in hosted Claude.
 - Complete tool-inventory coverage and private delivery of reviewer credentials.
 
-Successful authenticated coverage currently includes 32 distinct tools:
-23 read tools and nine write tools. Failed binary export and pre-creation
+Successful authenticated coverage currently includes 34 distinct tools:
+23 read tools and eleven write tools. Failed binary export and pre-creation
 reads are recorded separately from successful text export and changeset reads.
 Do not interpret package validation or UI fixture setup as all-tool testing.
 

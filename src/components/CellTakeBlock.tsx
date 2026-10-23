@@ -44,9 +44,7 @@ import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { laneLanguage } from "@/lib/lanes/lane-display"
-import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
-import { learnFromTranscriptCorrection } from "@/lib/store/transcript-corrections-store"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { saveTranscript } from "@/lib/transcript-cleanup/save"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -54,7 +52,7 @@ import { fmtShortCalendarDate } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import type { CodexCell } from "@/lib/codex-editor/types"
+import type { CodexCell, WordTiming } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
@@ -381,36 +379,16 @@ function CellTakeBlockView({
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
-      if (!selectedAudioId || !timings || timings.length === 0) return
-      const nextTimings = remapTranscriptTimings(timings as never, corrected)
-      if (nextTimings.length === 0) return
-      if (!attachment?.url) return
-
-      // AQU-463: the same edit that fixes THIS transcript teaches the project
-      // how ASR gets that word wrong, so the next transcription arrives already
-      // fixed. Learning is best-effort and deliberately non-blocking — the
-      // user's correction is committed below whatever happens here.
-      try {
-        const before = (timings as ReadonlyArray<{ word: string }>).map((t) => t.word).join(" ")
-        learnFromTranscriptCorrection(project.id, before, corrected)
-      } catch (err) {
-        console.warn("[transcript] learning from correction failed:", err)
-      }
-      void emitCellAudioAttach({
+      if (!selectedAudioId || !timings || timings.length === 0 || !attachment) return
+      // AQU-463 learning, the timing remap and the attach live in
+      // saveTranscript, shared with the Transcribe lens.
+      saveTranscript({
         projectId: project.id,
-        fileId: owner.fileId,
-        cellId: owner.id,
+        owner,
         audioId: selectedAudioId,
-        url: attachment.url,
-        // AQU-646: the clip's own slot, inferred only when it is absent (a
-        // hand-built stub). This attach assigns `slot` outright and deselects
-        // the clip's siblings in that slot, so guessing it moves the take.
-        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
-        timings: nextTimings,
-        ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
-        ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
-        ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
-        ...(isSourceSegmentSelected(owner) ? { transcription: corrected } : {}),
+        attachment,
+        timings: timings as WordTiming[],
+        text: corrected,
         ...(targetLang ? { targetLang } : {}),
         author: username,
       }).catch((err) => {

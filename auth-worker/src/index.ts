@@ -90,6 +90,7 @@ import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiTranscriptCleanupRoutes from "./routes/ai-transcript-cleanup"
 import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
@@ -449,6 +450,7 @@ app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // (memory → Jev verify). Same session auth and per-user window as the seam
 // route; never fails its caller.
 app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+app.route("/api/v1/ai/transcript-cleanup", aiTranscriptCleanupRoutes)
 // Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
 // first). One batched Jev call per passage; never fails its caller.
 app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)

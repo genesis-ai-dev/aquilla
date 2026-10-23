@@ -8,9 +8,9 @@ import { PGlite } from "@electric-sql/pglite"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { loadProjectSettings, patchProjectSettingsShared } from "../db/shared/projects"
 import { PostgresDb, type AquillaDb, type PgExecutor } from "../db/shim/postgres"
-import { characterCastKey } from "../src/lib/audio/voices"
+import { assignedCastVoiceId, characterCastKey } from "../src/lib/audio/voices"
 import type { ProjectTtsSettings, Voice } from "../src/lib/parsers/types"
-import { listFoldCandidates, loadCastLines, planProjectFold } from "./cast-by-character-fold"
+import { listFoldCandidates, loadCastLines, planLineNames, planProjectFold, writeLineNames } from "./cast-by-character-fold"
 
 const SCHEMA = `
   CREATE TABLE project_settings (
@@ -44,8 +44,19 @@ const SCHEMA = `
   );
   CREATE TABLE cells (
     project_id TEXT NOT NULL, file_id TEXT NOT NULL, cell_id TEXT NOT NULL,
-    side TEXT NOT NULL, metadata JSONB, sequence_index DOUBLE PRECISION,
+    side TEXT NOT NULL, metadata JSONB, sequence_index DOUBLE PRECISION, tombstoned_at TIMESTAMPTZ,
+    camera_state TEXT,
     PRIMARY KEY (project_id, file_id, cell_id, side)
+  );
+  CREATE TABLE events (
+    id TEXT PRIMARY KEY, schema_version INTEGER, project_id TEXT, file_id TEXT, cell_id TEXT,
+    kind TEXT, author TEXT, payload TEXT, client_ts BIGINT, server_ts BIGINT, parent_id TEXT,
+    server_seq BIGINT, provenance JSONB
+  );
+  CREATE TABLE project_seq_counters (project_id TEXT PRIMARY KEY, last_seq BIGINT NOT NULL);
+  CREATE TABLE seq_allocations (
+    project_id TEXT NOT NULL, first_seq BIGINT NOT NULL, last_seq BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
 `
 
@@ -182,5 +193,99 @@ describe("planProjectFold + the versioned write", () => {
   it("declines a project with nothing to fold", async () => {
     expect(await planProjectFold(db, { project_id: "small", project_name: null })).toBeNull()
     expect(await planProjectFold(db, { project_id: "no-tts", project_name: null })).toBeNull()
+  })
+})
+
+describe("--name-lines: projects cast before imports wrote the speaker (AQU-2125 follow-up)", () => {
+  // "tagged": cast from a subtitle file's speaker tags — one entry per line, no
+  // character on any line. Two episodes, three speakers, one line recast by
+  // hand to the built-in Narrator, one line deleted, one already named.
+  const mary: Voice = { id: "v-mary", name: "MARY", color: "#7c3aed" }
+  const idNamed: Voice = { id: "v-x", name: "a89dec11-d60e-48c1-9f3a-2b5f0c1d7e44", color: "#000" }
+  async function seedTagged(): Promise<Record<string, string>> {
+    const cast: Record<string, string> = {}
+    const who = [jesus, peter, mary]
+    for (const ep of ["t1", "t2"]) {
+      for (let i = 0; i < 120; i++) {
+        const id = `${ep}-l${i}`
+        await seedCell("tagged", ep, id, "source", null, i)
+        cast[id] = who[i % 3].id
+      }
+    }
+    cast["t1-l5"] = narrator.id
+    cast["t1-l7"] = idNamed.id
+    await pg.query(`UPDATE cells SET tombstoned_at = now() WHERE cell_id = 't2-l9'`)
+    await pg.query(`UPDATE cells SET metadata = '{"cast_name":"PETER"}' WHERE cell_id = 't2-l1'`)
+    await seedProject("tagged", "Come and See — speaker tags", {
+      voices: [narrator, jesus, peter, mary, idNamed],
+      defaultVoiceId: narrator.id,
+      castAssignments: cast,
+    })
+    return cast
+  }
+
+  it("names each line with its voice's name, and nothing that is not a person's name", async () => {
+    await seedTagged()
+    const loaded = await loadProjectSettings(db, "tagged")
+    const { results } = await db
+      .prepare(`SELECT cell_id, file_id, metadata ->> 'cast_name' AS cast_name, (tombstoned_at IS NOT NULL) AS gone FROM cells WHERE project_id = ? ORDER BY file_id, sequence_index`)
+      .bind("tagged")
+      .all<{ cell_id: string; file_id: string; cast_name: string | null; gone: boolean }>()
+    const names = planLineNames(loaded.settings.ttsSettings as ProjectTtsSettings, results)
+    const byId = new Map(names.map((n) => [n.cellId, n.castName]))
+    expect(byId.get("t1-l0")).toBe("JESUS")
+    expect(byId.get("t1-l1")).toBe("PETER")
+    expect(byId.get("t1-l2")).toBe("MARY")
+    expect(byId.has("t1-l5")).toBe(false) // the built-in Narrator
+    expect(byId.has("t1-l7")).toBe(false) // a voice named by its id
+    expect(byId.has("t2-l9")).toBe(false) // deleted
+    expect(byId.has("t2-l1")).toBe(false) // already named
+    expect(names).toHaveLength(240 - 4)
+  })
+
+  it("leaves a project alone whose voices are one per line, not a cast", () => {
+    const rows = Array.from({ length: 20 }, (_, i) => ({ cell_id: `c${i}`, file_id: "f", cast_name: null, gone: false }))
+    const voices = rows.map((_, i) => ({ id: `v${i}`, name: `Person ${String.fromCharCode(65 + i)}`, color: "#000" }))
+    const castAssignments = Object.fromEntries(rows.map((r, i) => [r.cell_id, `v${i}`]))
+    expect(planLineNames({ voices, castAssignments }, rows)).toEqual([])
+  })
+
+  it("plans the names and the fold together, and every line keeps its voice", async () => {
+    const cast = await seedTagged()
+    // Without naming, only the one line that already names PETER can fold.
+    const plain = await planProjectFold(db, { project_id: "tagged", project_name: null })
+    expect(plain!.report).toMatchObject({ linesToName: 0, entriesBefore: 240, entriesAfter: 240 })
+    const plan = await planProjectFold(db, { project_id: "tagged", project_name: null }, { nameLines: true })
+    expect(plan!.report).toMatchObject({ linesToName: 236, entriesBefore: 240 })
+    expect(plan!.report.entriesAfter).toBeLessThanOrEqual(7)
+    const before = { voices: [narrator, jesus, peter, mary, idNamed], castAssignments: cast }
+    const after = { voices: before.voices, castAssignments: plan!.nextTts.castAssignments }
+    const nameOf = new Map(plan!.names.map((n) => [n.cellId, n.castName]))
+    for (const id of Object.keys(cast)) {
+      const castName = id === "t2-l1" ? "PETER" : nameOf.get(id) ?? null
+      expect(assignedCastVoiceId(after, { id, castName })).toBe(assignedCastVoiceId(before, id))
+    }
+  })
+
+  it("writes each name as a cast.assign event with a server_seq, onto the source row, once", async () => {
+    await seedTagged()
+    const plan = await planProjectFold(db, { project_id: "tagged", project_name: null }, { nameLines: true })
+    const written = await writeLineNames(db, "tagged", plan!.names, "maintenance")
+    expect(written).toBe(236)
+    const events = await pg.query<{ kind: string; author: string; payload: string; server_seq: number; cell_id: string }>(
+      `SELECT kind, author, payload, server_seq, cell_id FROM events ORDER BY server_seq`,
+    )
+    expect(events.rows).toHaveLength(236)
+    expect(new Set(events.rows.map((e) => e.kind))).toEqual(new Set(["cast.assign"]))
+    expect(events.rows[0]).toMatchObject({ author: "maintenance", payload: JSON.stringify({ castName: "JESUS" }) })
+    expect(events.rows.map((e) => Number(e.server_seq))).toEqual(events.rows.map((_, i) => i + 1))
+    const named = await pg.query<{ cast_name: string }>(`SELECT metadata ->> 'cast_name' AS cast_name FROM cells WHERE cell_id = 't1-l2'`)
+    expect(named.rows[0].cast_name).toBe("MARY")
+    expect((await pg.query(`SELECT * FROM seq_allocations`)).rows).toHaveLength(0)
+    // A re-run writes no second copy, and the fold now needs no naming.
+    await writeLineNames(db, "tagged", plan!.names, "maintenance")
+    expect((await pg.query(`SELECT count(*)::int AS n FROM events`)).rows[0]).toEqual({ n: 236 })
+    const again = await planProjectFold(db, { project_id: "tagged", project_name: null }, { nameLines: true })
+    expect(again!.report.linesToName).toBe(0)
   })
 })

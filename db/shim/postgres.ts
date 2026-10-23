@@ -163,6 +163,11 @@ export const LONG_OPERATION_TIMEOUTS = {
    *  nobody is waiting on it. No transaction is held across the R2 writes — see
    *  the consistency check in events/projection-snapshot.ts. */
   "projection-snapshot": 120_000,
+  /** Progress self-heal sweep (AQU-2145, the nightly sweep and the admin
+   *  route). The selector probes every file holding audio and each repair is a
+   *  full per-file aggregate — on a whole-Bible file that is import-finalize
+   *  work, and it runs unattended with nobody waiting on a page. */
+  "progress-selfheal": 120_000,
   /** D1→Postgres migration finalize (`/migrate/projects/:id/finalize`). Runs
    *  the same project-wide counter recompute as a rebuild, across a whole
    *  project's file set, at the end of a bulk ingest. */

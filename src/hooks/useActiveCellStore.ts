@@ -657,7 +657,28 @@ export class CellStore {
   }
 
   reset(projectId: string | null, fileId: string | null): void {
+    // AQU-2132: a DIFFERENT file's recorded / audio-validated lines say nothing
+    // about this one, exactly as `hiddenCellIds` and `removedCellIds` below say
+    // nothing about it. Both sets are handed in from the attachment read
+    // (`setOwnTakeCellIds` / `setAudioProgressCellIds`), which re-asserts per
+    // file, so keeping them across a switch let file B count file A's takes
+    // until that read landed — the footer, the chapter picker and the sidebar's
+    // chapter grid all read this rollup.
+    //
+    // Scoped to a file CHANGE on purpose. `reset()` also runs on every full
+    // re-read of the SAME file, where the sets are still the truth and the
+    // hand-off has nothing new to re-assert: clearing there would blank the
+    // three surfaces on a refetch and leave them blank, which is the defect
+    // this ticket is about rather than a fix for it.
+    const fileChanged = (this.ctx.fileId ?? null) !== (fileId ?? null)
     this.ctx = { ...this.ctx, projectId, fileId }
+    if (fileChanged) {
+      this.ctx = {
+        ...this.ctx,
+        ownTakeCellIds: EMPTY_TAKES,
+        audioProgressCellIds: EMPTY_AUDIO_PROGRESS_CELL_IDS,
+      }
+    }
     // Rows still subscribed to the outgoing cells must hear about the reset —
     // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
     // and a per-cell subscriber left unnotified keeps rendering the old file's

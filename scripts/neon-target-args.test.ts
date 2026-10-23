@@ -32,6 +32,10 @@ describe("neon-target hands the backfill its flags", () => {
     // AQU-1775: --dry-run must reach the scrub, or a rehearsal deletes for real.
     expect(childArgs("scrub-integrations", ["--dry-run"]))
       .toEqual(["scripts/neon-scrub-integrations.ts", "--dry-run"])
+    // AQU-2114: --project names the one project to copy and --dry-run keeps the
+    // rehearsal read-only; dropping either copies the wrong thing, for real.
+    expect(childArgs("copy-dev-audio", ["--project", "p1", "--dry-run"]))
+      .toEqual(["scripts/neon-copy-dev-audio.ts", "--project", "p1", "--dry-run"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

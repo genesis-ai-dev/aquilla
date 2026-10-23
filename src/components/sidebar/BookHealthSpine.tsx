@@ -5,6 +5,7 @@ import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { healthRibbonColor, healthRibbonOpacity } from "@/lib/health/health-ribbon"
 import { PROGRESS_COLOR, progressColorAt } from "@/lib/progress/progress-palette"
+import type { MilestoneProgressView } from "@/lib/progress/milestone-progress-view"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -17,7 +18,7 @@ export interface BookHealthCell {
    * the entire point of the setting: a chapter title left alone is finished
    * business, not an outstanding task.
    */
-  stage: "untranslated" | "automatic" | "validated" | "excluded"
+  stage: "untranslated" | "automatic" | "validated" | "excluded" | "recorded" | "audioValidated"
   health?: number
   hasIssue?: boolean
 }
@@ -31,6 +32,23 @@ export interface BookHealthChapter {
   cells?: BookHealthCell[]
   /** True when the backend supplied percentages rather than raw cell counts. */
   percentagesOnly?: boolean
+  /**
+   * AQU-2112: the audio pair, in the same unit as `translated`/`validated` —
+   * `audioRecorded` is lines carrying a take of their own, `audioValidated`
+   * those whose every chosen take meets the project's audio requirement.
+   *
+   * OPTIONAL, and absent means "audio is not counted here": a text-only file
+   * carries neither key and reads exactly as it did before. A fabricated 0
+   * would instead claim nothing is recorded.
+   */
+  audioRecorded?: number
+  audioValidated?: number
+  /**
+   * Which figures this chapter shows, decided once for the WHOLE file by
+   * whoever built these chapters (AQU-2110's rule, shared). Absent is "text",
+   * so every existing caller is unchanged.
+   */
+  progressView?: MilestoneProgressView
 }
 
 interface ChapterVisual {
@@ -68,7 +86,51 @@ function automaticScores(chapter: BookHealthChapter): number[] {
  * are: those are about quality, not progress.
  */
 
+/** Nothing recorded, nothing translated: the faint slate every surface uses. */
+const UNTOUCHED_VISUAL: ChapterVisual = Object.freeze({
+  color: "rgb(148 163 184 / 0.22)",
+  opacity: 0.22,
+  measured: false,
+})
+
+/** AQU-2112: a chapter's view — absent means text, as it always did. */
+function viewOf(chapter: BookHealthChapter): MilestoneProgressView {
+  return chapter.progressView ?? "text"
+}
+
+/*
+ * AQU-2112: THE AUDIO TWIN OF `chapterVisual`, in the palette's magenta
+ * tones. Same shape of decision — fully signed off, then "there is a take
+ * here but it has not passed", then a partial share — with no health step at
+ * all: health scores a translation's TEXT, and an audio-only chapter has
+ * none. A chapter whose takes are all validated reads complete here, where
+ * the text rule held it at the untranslated slate however many were signed
+ * off, because the only flag it ever consulted was the text one.
+ */
+function audioChapterVisual(chapter: BookHealthChapter): ChapterVisual {
+  const recorded = chapter.audioRecorded ?? 0
+  const validated = chapter.audioValidated ?? 0
+  if (chapter.total > 0 && validated >= chapter.total) {
+    return { color: PROGRESS_COLOR.audioValidated, score: 100, opacity: 1, measured: true }
+  }
+  if (recorded > validated) {
+    // Recorded and not yet signed off — the recorded tone says a take exists
+    // without claiming it passed.
+    return { color: PROGRESS_COLOR.audioRecorded, opacity: 1, measured: false }
+  }
+  if (validated > 0) {
+    const ratio = chapter.total > 0 ? validated / chapter.total : 0
+    const opacity = 0.28 + (0.52 * ratio)
+    return { color: progressColorAt(PROGRESS_COLOR.audioValidated, opacity), opacity, measured: false }
+  }
+  return UNTOUCHED_VISUAL
+}
+
 function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
+  // A file with recordings and no target text is measured in audio alone.
+  // "both" keeps the text colour: the text figures there are unchanged and
+  // the audio ones stand beside them.
+  if (viewOf(chapter) === "audio") return audioChapterVisual(chapter)
   if (chapter.total > 0 && chapter.validated >= chapter.total) {
     return { color: PROGRESS_COLOR.textValidated, score: 100, opacity: 1, measured: true }
   }
@@ -99,7 +161,22 @@ function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
     return { color: progressColorAt(PROGRESS_COLOR.textValidated, opacity), opacity, measured: false }
   }
 
-  return { color: "rgb(148 163 184 / 0.22)", opacity: 0.22, measured: false }
+  return UNTOUCHED_VISUAL
+}
+
+/**
+ * AQU-2112: the colour of a bucket holding audio squares, or null when it
+ * holds none. Read before health and before the text stages, because an audio
+ * square has no text under it to score or to call untranslated.
+ */
+function audioBucketColor(cells: BookHealthCell[]): string | null {
+  if (!cells.some((cell) => cell.stage === "audioValidated" || cell.stage === "recorded")) return null
+  const validated = cells.filter((cell) => cell.stage === "audioValidated").length
+  if (validated === cells.length) return PROGRESS_COLOR.audioValidated
+  if (validated > 0) {
+    return progressColorAt(PROGRESS_COLOR.audioValidated, 0.25 + (0.55 * validated / cells.length))
+  }
+  return PROGRESS_COLOR.audioRecorded
 }
 
 function matrixColumns(cellCount: number): number {
@@ -108,6 +185,9 @@ function matrixColumns(cellCount: number): number {
 }
 
 function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: boolean } {
+  const audio = audioBucketColor(cells)
+  if (audio) return { color: audio, issue: cells.some((cell) => cell.hasIssue) }
+
   const automatic = cells
     .filter((cell) => cell.stage === "automatic" && cell.health !== undefined)
     .map((cell) => cell.health!)
@@ -158,6 +238,10 @@ function cellDescription(cell: BookHealthCell, index: number): string {
   // Says WHY it is grey. Without this the square is indistinguishable from a
   // faint untranslated one to anyone reading it with a screen reader.
   if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
+  // AQU-2112: an audio square announces the TAKE. Without this a signed-off
+  // recording was read out as "untranslated", which is the bug in words.
+  if (cell.stage === "audioValidated") return `${prefix}: audio validated${warning}`
+  if (cell.stage === "recorded") return `${prefix}: recorded, awaiting audio validation${warning}`
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
   if (cell.stage === "automatic") {
     return cell.health === undefined
@@ -167,19 +251,71 @@ function cellDescription(cell: BookHealthCell, index: number): string {
   return `${prefix}: untranslated${warning}`
 }
 
+/**
+ * AQU-2112: the figure beside a chapter's name — the share that is SIGNED
+ * OFF, in whichever unit the file is measured in. An audio-only chapter reads
+ * its audio-validated share, where it used to read a text figure that can
+ * never move on a language with no written form; a chapter with both reads
+ * the text figure it always did, with the audio one beside it.
+ */
+function chapterFigures(chapter: BookHealthChapter): { text: string | null; audio: string | null } {
+  const view = viewOf(chapter)
+  const figure = (part: number) => chapter.percentagesOnly ? `${part}%` : `${part}/${chapter.total}`
+  return {
+    text: view === "audio" ? null : figure(chapter.validated),
+    audio: view === "text" ? null : figure(chapter.audioValidated ?? 0),
+  }
+}
+
+/**
+ * The "x translated · y recorded" line under a chapter with no square map.
+ *
+ * AQU-2112: both halves are keyed. The translated half was two unkeyed
+ * literals in the JSX above (carried as suppressed i18n debt); it had to be
+ * touched to make room for the audio half, and a word a reader sees is not
+ * made translatable by moving it into a function, so it got a key instead.
+ */
+function chapterProgressWords(chapter: BookHealthChapter, t: TFunction): string {
+  const view = viewOf(chapter)
+  const parts: string[] = []
+  if (view !== "audio") {
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentTranslated", { translated: chapter.translated })
+      : t("agentWorkspace.chapterCountTranslated", { translated: chapter.translated, total: chapter.total }))
+  }
+  if (view !== "text") {
+    const recorded = chapter.audioRecorded ?? 0
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentRecorded", { recorded })
+      : t("agentWorkspace.chapterCountRecorded", { recorded, total: chapter.total }))
+  }
+  return parts.join(" · ")
+}
+
 function chapterTooltip(chapter: BookHealthChapter, visual: ChapterVisual, t: TFunction) {
   const issueCount = chapter.cells?.filter((cell) => cell.hasIssue).length ?? 0
   const untranslated = Math.max(0, chapter.total - chapter.translated)
   const automatic = Math.max(0, chapter.translated - chapter.validated)
+  const view = viewOf(chapter)
+  const audioRecorded = chapter.audioRecorded ?? 0
+  const audioValidated = chapter.audioValidated ?? 0
   return (
     <div className="space-y-1">
       <p className="font-medium">{chapter.label}</p>
-      {chapter.percentagesOnly ? (
+      {view === "audio" ? null : chapter.percentagesOnly ? (
         <p>{t("agentWorkspace.chapterPercentProgress", { validated: chapter.validated, translated: chapter.translated })}</p>
       ) : (
         <p>{t("agentWorkspace.chapterCountProgress", { validated: chapter.validated, automatic, untranslated })}</p>
       )}
-      {visual.score !== undefined && visual.score < 100 ? (
+      {view === "text" ? null : chapter.percentagesOnly ? (
+        <p>{t("agentWorkspace.chapterAudioPercentProgress", { validated: audioValidated, recorded: audioRecorded })}</p>
+      ) : (
+        <p>{t("agentWorkspace.chapterAudioCountProgress", { validated: audioValidated, recorded: audioRecorded, total: chapter.total })}</p>
+      )}
+      {/* AQU-2112: health scores a translation's TEXT, so an audio-only
+          chapter gets no health line rather than a line about text it does
+          not have. A chapter with both keeps the line it had. */}
+      {view === "audio" ? null : visual.score !== undefined && visual.score < 100 ? (
         <p>{t("agentWorkspace.chapterMedianHealth", { score: Math.round(visual.score) })}</p>
       ) : visual.score === 100 ? (
         <p>{t("agentWorkspace.chapterAllValidated")}</p>
@@ -225,6 +361,7 @@ export function BookHealthSpine({
 
   function renderChapter(chapter: BookHealthChapter) {
         const visual = chapterVisual(chapter)
+        const figures = chapterFigures(chapter)
         const chapterCells = chapter.cells ?? []
         const isLong = chapterCells.length > COLLAPSED_CELL_LIMIT
         const isExpanded = expandedChapters.has(chapter.key)
@@ -250,8 +387,16 @@ export function BookHealthSpine({
               >
                 <span className="flex min-w-0 items-baseline justify-between gap-2">
                   <span className="truncate font-medium text-foreground">{chapter.label}</span>
-                  <span className="shrink-0 tabular-nums">
-                    {chapter.percentagesOnly ? `${chapter.validated}%` : `${chapter.validated}/${chapter.total}`}
+                  <span className="flex shrink-0 items-baseline gap-1 tabular-nums">
+                    {figures.text !== null && <span data-progress-figure="text">{figures.text}</span>}
+                    {figures.audio !== null && (
+                      // AQU-2112: the audio figure is drawn in the palette's
+                      // audio-validated tone, so a glance tells which unit a
+                      // number is in when a file carries both.
+                      <span data-progress-figure="audio" style={{ color: PROGRESS_COLOR.audioValidated }}>
+                        {figures.audio}
+                      </span>
+                    )}
                   </span>
                 </span>
 
@@ -290,9 +435,7 @@ export function BookHealthSpine({
                   </span>
                 ) : (
                   <span className="mt-0.5 block truncate text-[9px] text-muted-foreground/80">
-                    {chapter.percentagesOnly
-                      ? `${chapter.translated}% translated`
-                      : `${chapter.translated}/${chapter.total} translated`}
+                    {chapterProgressWords(chapter, t)}
                     {visual.measured && visual.score !== undefined && visual.score < 100
                       ? ` · health ${Math.round(visual.score)}`
                       : ""}

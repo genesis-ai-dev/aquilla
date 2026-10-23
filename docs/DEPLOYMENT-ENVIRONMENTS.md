@@ -71,7 +71,16 @@ refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
-count first).
+count first). **The restore copies rows, not blobs**, so every audio take it
+brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
+playback on `dev.aquilla.app` 404s;
+`pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
+referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
+what the nightly cleanup protects — the same reference queries, shared in
+`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
+`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+(`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
+refuses any destination but the dev bucket and any database but the dev branch.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare

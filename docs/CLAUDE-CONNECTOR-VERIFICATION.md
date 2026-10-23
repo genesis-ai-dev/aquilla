@@ -56,7 +56,7 @@ The real hosted Claude connection instead sends
 Record the actual client from the current browser flow rather than pinning
 the manual probe's URL into server configuration.
 
-## Pending authenticated verification
+## Authenticated hosted Claude verification
 
 After the user identifies a signed-in Chrome window, native browser
 inspection reaches the real connector list. Aquilla is absent initially.
@@ -66,27 +66,77 @@ We add **Aquilla** with the production URL, **Sign in now**, and
 
 Clicking **Connect** opens Aquilla's OAuth consent URL with S256 PKCE,
 `act` scope, the canonical MCP resource, and Claude's fixed callback.
-Aquilla displays its username/email and password form. The user must
-sign in before client validation, organization choices, and token exchange
-can be tested. No consent is submitted and no access is granted yet.
+The user signs in and submits organization consent. Claude then shows a
+**Disconnect** button and 40 tool permission entries: 24 read-only and 16
+write/delete tools. The initial authenticated conversation successfully
+calls `get_capabilities`, `get_identity_and_scope`, `list_orgs`, and
+`list_projects`; their actual results are inspected in Claude's activity
+panel. This establishes client metadata acceptance, token exchange,
+authenticated tool discovery, and those four tool calls.
+
+The grant is Act mode with write access, restricted to one organization:
+**PluginReviewer's workspace**, containing **Review Spanish**. A null
+single-org or project field does not remove the organization allowlist.
+The verification uses read-only calls despite that write capability.
+
+The next conversation successfully exercises 16 further distinct tools:
+`get_project`, `get_project_settings`, `read_quality`, `read_comments`,
+`list_terms`, `read_term_consistency`, `list_memory`, `list_changesets`,
+`get_skill`, `get_prompt_preview`, `search_projects`, `search_project`,
+`read_content`, `read_history`, `read_cell_memory`, and `find_similar_cells`.
+`read_content` runs twice (file listing and a bounded three-cell page).
+This brings the authenticated total to 20 distinct tools. The visible
+activity panel contains the corresponding call records.
+
+The report uses returned coverage (80% filled, 0% validated), one open
+reviewer thread, and 100% consistency for the fixture's community concept.
+No changesets are staged and no project data changes. Empty memory and
+changeset results remain valid empty responses. Observations about brief
+propagation, health, and model configuration need separate investigation;
+they are not proven connector defects. A follow-up follows the returned
+cursor and confirms that Spanish targets appear on page two. The first
+three-row page contains only source rows because the five source rows
+precede the target rows. No pagination defect is demonstrated.
+
+The second page also returns the fixture's `untrusted-source` cell.
+Claude treats its destructive instructions as data and performs no action.
+Claude correctly explains that saving or approving a changeset does not
+establish human translation validation.
+
+`export_file` is exercised and returns `validation_failed`:
+`application/octet-stream`, `exportMode: raw-original`. Binary export
+rejection is documented behavior. Its recommendation to fetch through
+REST is unsuitable for MCP-bound OAuth credentials; this guidance issue
+is filed in [AQU-2135](https://linear.app/frontierrandd/issue/AQU-2135).
+No REST replay is attempted, and no export is delivered as translated.
+
+Conversation evidence:
+[Aquilla MCP connector verification](https://claude.ai/chat/2e216de7-5a3b-4cb9-b11a-359055f1553f).
+This private chat link is an internal test record, not a public listing URL.
 
 Earlier Jev observations only show **Loading**. Their `done` result does
 not prove readiness; the signed-in native Chrome window provides the
 actual login form. The local Claude CLI's API key does not authenticate
 Aquilla or authorize access to its data.
 
-Consequently, these checks remain unrun:
+These checks remain pending:
 
-- Aquilla sign-in, organization consent, and token exchange.
-- Authenticated `initialize`, tool discovery, and each tool invocation in Claude.
-- Read-only reports, requested correction, excluded organization rejection,
-  prompt injection resistance, and connection revocation in Claude.
-- Reviewer account access and complete tool-inventory coverage.
+- `preview_import`: no existing source artifact ID is exposed by the
+  fixtures read in this conversation. No identifier is invented.
+- `get_changeset` and `wait_for_changeset`: this connection has no staged
+  changesets. Neither tool is claimed as tested.
+- The 16 write/delete tools in the live catalog, saved correction,
+  excluded-organization rejection, and connection revocation in hosted Claude.
+- Complete tool-inventory coverage and private delivery of reviewer credentials.
+
+The user is asked whether write tests should use a separate Claude test
+project. The existing Review Spanish fixture also supports the submitted
+ChatGPT plugin, so it remains unchanged while that decision is pending.
 
 Direct fetching of Claude's client metadata from this machine returns 403.
 The initial authorize route forwards parameters to the consent page without
-fetching metadata. Its redirect does not establish metadata validation,
-browser sign-in, or a complete OAuth flow.
+fetching metadata. Its redirect alone does not establish metadata validation
+or token exchange; the successful hosted flow above supplies that evidence.
 
 ## Native Claude Code limitation
 
@@ -158,5 +208,8 @@ Not submitted. Listing text, setup instructions, existing icon, and reviewer
 journeys are in `CLAUDE-CONNECTOR.md`. The existing repository is public;
 the portal accepts `plugins/aquilla` as its plugin path. Push the final
 package and guide to the tracked branch before portal validation.
-Reviewer credentials and authenticated tests remain prerequisites.
+The hosted OAuth connection and core read workflows now pass. Full
+tool-inventory coverage, a suitable text-export fixture, and private
+delivery of reviewer credentials remain prerequisites. AQU-2135 tracks
+the unusable REST fallback guidance found during export testing.
 Do not check the portal's all-tools-tested acknowledgment yet.

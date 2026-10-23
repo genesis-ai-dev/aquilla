@@ -1,4 +1,4 @@
--- 0187_edit_histories.sql — decision 11: the undo history follows the person.
+-- 0188_edit_histories.sql — decision 11: the undo history follows the person.
 --
 -- Each person keeps ONE undo history per project, whatever language they are
 -- in, and it goes with them to any computer or browser. Until now it lived

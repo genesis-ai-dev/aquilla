@@ -1,5 +1,5 @@
 // The server's copy of a person's undo history for one project (decision 11:
-// the history follows the person between devices). Migration 0187.
+// the history follows the person between devices). Migration 0188.
 //
 // The document is the client's (src/lib/history/history-merge.ts) and stays
 // opaque here: this module stores it and enforces ONE rule, the revision. A

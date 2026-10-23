@@ -45,6 +45,7 @@ describe("IDML re-import style alignment", () => {
       provider: "frontier",
       sourceLanguage: "en",
       targetLanguage: "pt",
+      targetLang: "",
     })
     expect(commit?.cellId).toBe("cell-1")
     expect(commit?.parentId).toBe("target-event")

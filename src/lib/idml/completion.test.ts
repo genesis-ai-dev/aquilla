@@ -332,6 +332,14 @@ describe("IDML wording integrity", () => {
       "Reino Nova",
       "Reino Nova",
     )).toBe("<reflowed>")
+    // Both spell the translation. The reflow only moved the period between runs.
+    expect(chooseIdmlHtmlMatchingTranslation(
+      "<current>",
+      "<reflowed>",
+      "Davi. O rei de Israel.",
+      "Davi. O rei de Israel.",
+      "Davi. O rei de Israel.",
+    )).toBe("<reflowed>")
   })
 })
 

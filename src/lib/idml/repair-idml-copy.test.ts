@@ -277,6 +277,7 @@ describe("IDML repair copy", () => {
       unchanged: 0,
       failed: 0,
       skipped: 0,
+      manual: [],
     })
 
     const result = await repairIdmlFileAsCopy({
@@ -356,6 +357,7 @@ describe("IDML repair copy", () => {
       unchanged: 0,
       failed: 0,
       skipped: 0,
+      manual: [],
     })
 
     const result = await repairIdmlFileAsCopy({

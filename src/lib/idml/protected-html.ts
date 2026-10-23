@@ -123,8 +123,10 @@ export function idmlPlainMatchesTranslation(actual: string, expected: string): b
 }
 
 /**
- * Keep the HTML whose editable text is already the stored translation.
- * Partner reflow may still replace HTML that does not match that translation.
+ * Keep a partner reflow when it still spells the stored translation. Moving a
+ * period from a bold run into the following plain run does not change the
+ * words. Keep the current HTML only when that reflow would drop a character
+ * the translation still has.
  */
 export function chooseIdmlHtmlMatchingTranslation(
   currentHtml: string,
@@ -133,8 +135,8 @@ export function chooseIdmlHtmlMatchingTranslation(
   reflowedText: string,
   translation: string,
 ): string {
-  if (idmlPlainMatchesTranslation(currentText, translation)) return currentHtml
   if (idmlPlainMatchesTranslation(reflowedText, translation)) return reflowedHtml
+  if (idmlPlainMatchesTranslation(currentText, translation)) return currentHtml
   return reflowedHtml
 }
 

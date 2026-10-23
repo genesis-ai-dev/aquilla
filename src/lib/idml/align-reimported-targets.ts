@@ -198,7 +198,8 @@ export function commitsForAlignedIdmlTargets(
     provider: string
     sourceLanguage: string
     targetLanguage: string
-    targetLang?: string
+    /** Lane tag. `""` is the project's default lane, which is a real address. */
+    targetLang: string
   },
 ): CellCommitInput[] {
   const commits: CellCommitInput[] = []
@@ -225,7 +226,7 @@ export function commitsForAlignedIdmlTargets(
       cellId: cell.id,
       parentId,
       sourceEventId: cell.sourceEventId ?? null,
-      ...(meta.targetLang ? { targetLang: meta.targetLang } : {}),
+      targetLang: meta.targetLang,
       ...(cell.laneId ? { laneId: cell.laneId } : {}),
       value: completion.value,
       ...(completion.valueHtml !== undefined ? { valueHtml: completion.valueHtml } : {}),
@@ -267,7 +268,7 @@ export async function alignReimportedIdmlFile(args: {
     provider: args.host.provider,
     sourceLanguage: args.sourceLanguage,
     targetLanguage: args.targetLanguage,
-    targetLang: args.lane,
+    targetLang: args.lane ?? "",
   })
   const eventIds: string[] = []
   try {

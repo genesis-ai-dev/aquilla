@@ -410,7 +410,7 @@ export interface Voice {
    */
   referenceTakeKey?: string
   /**
-   * A pre-built character voice from the Voice library (src/lib/audio/voice-library.ts),
+   * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
    * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
    * take into it through the voice forge instead of Seed-VC (sync-worker POST
    * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's

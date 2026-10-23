@@ -165,10 +165,10 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * implemented but not ready to expose in the UI yet. Keep the code — flip this
  * flag to `true` when we want it back in settings nav + main content.
  *
- * Also re-enable the skipped smoke specs:
- *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
- *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
- *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ * Smoke coverage has to be written, not un-skipped: the three specs this note
+ * used to name (project-settings-termbase-sharing, -publish-toggle,
+ * termbase-subscribe-unsubscribe) are not in e2e/specs/projects/, and no
+ * termbase sharing spec exists anywhere under e2e/ today.
  *
  * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
  * entry points are gated here.

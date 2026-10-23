@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 // Tests for DraftCells (AQU-1186) — the external Agent API command that asks
 // the project's OWN copilot to draft named cells and stages the result as one
 // changeset for human approval.
@@ -27,6 +28,7 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
+import { handleExternalMcpRequest } from '../external/mcp-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { validateCommands } from '../external/commands'
 import { mintApiToken } from '../../../db/shared/api-credentials'
@@ -142,6 +144,7 @@ function draftEverything(model = 'test/model') {
   })
 }
 
+const databases = new Set<TestDb>()
 let tdb: TestDb
 
 async function seed(cellCount: number, settings: Record<string, unknown> | null) {
@@ -175,6 +178,7 @@ async function seed(cellCount: number, settings: Record<string, unknown> | null)
      VALUES ('deflane1', $1, 'target', '', 1)`,
     [PROJECT],
   )
+  databases.add(db)
   return db
 }
 
@@ -183,13 +187,50 @@ beforeEach(() => {
   nextCred = 0
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.unstubAllGlobals()
+  for (const database of databases) await database.close()
+  databases.clear()
 })
 
 // ── validation: explicit cell ids only ───────────────────────────────────────
 
 describe('DraftCells — validation', () => {
+  it('binds each deployed AI bridge to the matching identity environment', async () => {
+    const { unstable_readConfig } = await import('wrangler')
+    for (const environment of ['production', 'development']) {
+      const identity = unstable_readConfig({ config: fileURLToPath(new URL('../../../auth-worker/wrangler.toml', import.meta.url).href), env: environment })
+      const sync = unstable_readConfig({ config: fileURLToPath(new URL('../../wrangler.toml', import.meta.url).href), env: environment })
+      expect(sync.services.find((service: { binding: string; service: string }) => service.binding === 'AUTH_WORKER')?.service).toBe(identity.name)
+    }
+  })
+
+  it('prefers the identity service binding for the actual drafting request', async () => {
+    tdb = await seed(1, null)
+    const { token, userId } = await memberToken(tdb, 400)
+    const calls = draftEverything()
+    const serviceFetch = fetch
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('public route must not be used') }))
+    const env = { ...makeEnv(tdb.db), AUTH_WORKER: { fetch: serviceFetch } }
+    const resource = 'https://w/api/v1/external/mcp'
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE user_id = $2', [resource, String(userId)])
+    async function call(name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request(resource, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { projectId: PROJECT, ...args } } }),
+      }), env)
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      expect(body.result.isError, body.result.content[0].text).not.toBe(true)
+      return JSON.parse(body.result.content[0].text)
+    }
+    const plan = await call('prepare_draft_cells', { updates: [{ fileId: FILE, cellIds: ['c1'], laneId: 'deflane1' }] })
+    await call('confirm_changeset', { changesetId: plan.changesetId, digest: plan.digest })
+    const content = await call('read_content', { fileId: FILE, lane: 'deflane1' })
+    expect(content.data).toEqual(expect.arrayContaining([expect.objectContaining({ side: 'target', value: 'draft:c1', aiDrafted: true, validated: false })]))
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ url: `${AUTH_URL}/api/v1/ai/agent/internal/draft-cells`, auth: `Bearer ${SECRET}`, body: { projectId: PROJECT, userId: String(userId), fileId: FILE, cellIds: ['c1'] } })
+  })
+
   it('rejects a wildcard cell id, naming the rule', () => {
     for (const wildcard of ['*', 'all', '**', '%']) {
       const result = validateCommands([{ kind: 'DraftCells', fileId: FILE, cellIds: [wildcard] }])

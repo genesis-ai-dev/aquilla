@@ -1,5 +1,6 @@
 // Shared types for the changeset engine.
 
+import type { IdentityTransport } from './identity-bridge'
 import type { TextDirection } from '../../../db/shared/text-direction'
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
@@ -8,7 +9,7 @@ import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
  *  (the compiled events are routed back through handleEventsWriteRequest). */
-export type ExternalEnv = EventsRouteEnv & {
+export type ExternalEnv = EventsRouteEnv & IdentityTransport & {
   /** AQU-730 read wall. Unset locally and in e2e. */
   /** Request-local trusted MCP delegation factory, never a network header. */
   mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request

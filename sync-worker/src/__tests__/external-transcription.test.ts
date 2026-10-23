@@ -121,7 +121,7 @@ beforeEach(async () => {
     return reply(body)
   }))
 })
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(async () => { vi.unstubAllGlobals(); await tdb.close() })
 
 describe('credentials', () => {
   it('refuses an unscoped credential, a read-only one, and a viewer before any spend', async () => {
@@ -244,6 +244,22 @@ describe('read-only output', () => {
       expect(after[table] ?? [], table).toEqual(before[table] ?? [])
     }
   })
+})
+
+describe('identity service transport', () => {
+  it('prefers the identity service binding for the actual transcription request', async () => {
+    const token = await credToken({ userId: 2 })
+    const serviceFetch = fetch
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('public route must not be used') }))
+    const response = await handleExternalTranscriptionRequest(new Request(`https://w/api/v1/external/projects/${PROJECT}/transcriptions`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: { data: wav(1), format: 'wav' }, language: 'luo', model: 'omni-ctc' }),
+    }), { ...makeEnv(), AUTH_WORKER: { fetch: serviceFetch } })
+    expect(response!.status).toBe(200)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ auth: `Bearer ${SECRET}`, body: { projectId: PROJECT, userId: '2', language: 'luo' } })
+  })
+
 })
 
 describe('transcription_status', () => {

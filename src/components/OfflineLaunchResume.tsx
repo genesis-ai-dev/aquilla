@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { useAccounts } from "@/hooks/useAccounts"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { isLaunchLandingPath, readLastWorkspace } from "@/lib/offline/last-workspace"
+import { settleOfflineLaunchResume as settle } from "@/lib/offline/launch-resume"
 
 /** How long to wait for the first connectivity reading before giving up. */
 const FIRST_READING_TIMEOUT_MS = 15_000
@@ -23,9 +24,9 @@ export function OfflineLaunchResume() {
   useEffect(() => {
     if (attempted || !username || !isTauriRuntime()) return
     attempted = true
-    if (!isLaunchLandingPath(window.location.pathname)) return
+    if (!isLaunchLandingPath(window.location.pathname)) return settle(false)
     const last = readLastWorkspace(username)
-    if (!last) return
+    if (!last) return settle(false)
 
     void (async () => {
       const [{ desktopConnectivity }, { getOfflineStore }, { isProjectOfflineReady }] = await Promise.all([
@@ -33,14 +34,16 @@ export function OfflineLaunchResume() {
         import("@/lib/offline/store"),
         import("@/lib/offline/offline-reads"),
       ])
-      if ((await firstReading(desktopConnectivity)) !== false) return
+      if ((await firstReading(desktopConnectivity)) !== false) return false
       const store = await getOfflineStore()
-      if (!isProjectOfflineReady(store, last.projectId)) return
+      if (!isProjectOfflineReady(store, last.projectId)) return false
       // The user may have moved on while the probe and store were coming up.
-      if (!isLaunchLandingPath(window.location.pathname)) return
+      if (!isLaunchLandingPath(window.location.pathname)) return false
       navigate(last.path, { replace: true })
-    })().catch((error) => {
+      return true
+    })().then(settle, (error) => {
       console.warn("[offline] couldn't reopen the last project", error)
+      settle(false)
     })
   }, [username, navigate])
 

@@ -89,6 +89,8 @@ export interface OfflineSyncAdapterOptions {
   minFlushRetryMs?: number
   /** Ceiling the retry delay backs off to. */
   maxFlushRetryMs?: number
+  /** How long live event.applied frames are buffered so a burst lands as one commit. */
+  frameCoalesceMs?: number
   /** Test seam for the catch-up pull's HTTP reads (catch-up.ts). */
   catchUpDeps?: CatchUpDeps
   /** While this reports offline, nothing is attempted; coming online flushes. Defaults to the Rust probe. */
@@ -157,6 +159,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const flushDebounceMs = options.flushDebounceMs ?? 250
   const minFlushRetryMs = options.minFlushRetryMs ?? 2_000
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
+  const frameCoalesceMs = options.frameCoalesceMs ?? 100
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -219,23 +222,50 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return existing?.laneKey ?? localLaneKey(null, targetLang)
   }
 
-  /** Dequeue a locally queued write once the server has resolved it (accepted
-   *  or permanently rejected) — a no-op if `id` isn't in the queue. */
-  function dequeueIfQueued(id: string): void {
-    const queued = store.query(tables.eventQueue.select().where({ id }).first())
-    if (!queued) return
-    store.commit(events.eventDequeued({ id }))
-    recordOfflineUpload(projectId)
+  // Live frames are buffered for a beat and landed together: the server
+  // broadcasts one event.applied per event it applies, so a flush (or a peer's
+  // bulk edit) arrives as hundreds of frames in a row — one commit each left
+  // the leader the same backlog the flush batching removed.
+  let bufferedFrames: AppliedFrame[] = []
+  let frameTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Takes the buffered frames, as the commits that land them: their writes
+   *  leave the queue, their rows land. Empty when there is nothing to do. */
+  function takeBufferedFrames(): { dequeued: string[]; frames: AppliedFrame[] } {
+    if (frameTimer !== null) {
+      clearTimeout(frameTimer)
+      frameTimer = null
+    }
+    const frames = bufferedFrames
+    bufferedFrames = []
+    // Only ids still queued: a frame for someone else's event (or one the
+    // flush response already resolved) has nothing to dequeue.
+    const dequeued = frames
+      .map((f) => f.id)
+      .filter((id) => store.query(tables.eventQueue.select("id").where({ id }).first()) !== undefined)
+    return { dequeued, frames }
+  }
+
+  function landBufferedFrames(): void {
+    const { dequeued, frames } = takeBufferedFrames()
+    const toCommit = [
+      ...(dequeued.length > 0 ? [events.eventsDequeued({ ids: dequeued })] : []),
+      ...syncedRowsEvents(frames),
+    ]
+    if (toCommit.length > 0) store.commit(...toCommit)
+    // Resolved writes count as uploads, as they do from the flush response.
+    if (dequeued.length > 0) recordOfflineUpload(projectId)
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {
     if (msg.t === "event.applied") {
-      dequeueIfQueued(msg.id)
-      const synced = syncedRowsEvents([msg])
-      if (synced.length > 0) store.commit(...synced)
+      bufferedFrames.push(msg)
+      frameTimer ??= setTimeout(landBufferedFrames, frameCoalesceMs)
       return
     }
     if (msg.t === "event.stale") {
+      // Keep frames in arrival order.
+      landBufferedFrames()
       const queued = store.query(tables.eventQueue.select().where({ id: msg.id }).first())
       if (!queued) return
       store.commit(events.eventDequeued({ id: msg.id }))
@@ -420,10 +450,15 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       ? body.applied.map(parseAppliedEventFrame).filter((f): f is AppliedFrame => f !== null)
       : []
 
+    // Live frames still buffered arrived before this response: they land
+    // first in the same commit, so an older frame can't overwrite a row the
+    // response just landed.
+    const buffered = takeBufferedFrames()
+    const allDequeued = [...new Set([...buffered.dequeued, ...dequeued])]
     const toCommit = [
-      ...(dequeued.length > 0 ? [events.eventsDequeued({ ids: dequeued })] : []),
+      ...(allDequeued.length > 0 ? [events.eventsDequeued({ ids: allDequeued })] : []),
       ...failed.map((id) => events.eventQueueStatusSet({ id, status: "failed" })),
-      ...syncedRowsEvents(frames),
+      ...syncedRowsEvents([...buffered.frames, ...frames]),
     ]
     if (toCommit.length > 0) store.commit(...toCommit)
     if (accepted > 0) recordOfflineUpload(projectId)
@@ -565,6 +600,10 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       // Removed offline copy (or manager teardown): stop warning about it.
       markProjectAvailable(projectId)
       cancelFlushTimer()
+      // Dropped, not landed: close() follows removing the offline copy, and
+      // landing its rows now would bring cells back.
+      if (frameTimer !== null) clearTimeout(frameTimer)
+      bufferedFrames = []
       unsubscribeQueue()
       unsubscribeConnectivity()
       reconciler.close()

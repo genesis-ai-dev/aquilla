@@ -77,6 +77,10 @@ import {
   PROJECTION_SNAPSHOT_CRON,
   runProjectionSnapshotSweep,
 } from "./projection-snapshot-cron"
+import {
+  PROGRESS_SELFHEAL_CRON,
+  runProgressSelfHealSweep,
+} from "./progress-selfheal-cron"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
@@ -266,6 +270,14 @@ declare global {
        * next rebuild replays further back.
        */
       PROJECTION_SNAPSHOT_MODE?: string
+      /**
+       * AQU-2145 progress self-heal sweep (progress-selfheal-cron.ts): `off`
+       * skips it, unset/anything else runs it. A var so the sweep can be
+       * stopped without waiting on a release — a skipped night only means a
+       * file whose progress rows fell behind its audio events stays wrong one
+       * more day.
+       */
+      PROGRESS_SELFHEAL_MODE?: string
     }
   }
 }
@@ -720,12 +732,13 @@ export default {
     return response
   },
 
-  // Two crons on this worker: the AQU-1856 nightly R2 orphan sweep and the
-  // AQU-1833 projection-snapshot sweep. Unlike `fetch` above, each builds its
-  // own Postgres handle (r2-gc-cron.ts / projection-snapshot-cron.ts), since
-  // the scheduled entrypoint never passes through that wrapper.
+  // Three crons on this worker: the AQU-1856 nightly R2 orphan sweep, the
+  // AQU-1833 projection-snapshot sweep, and the AQU-2145 progress self-heal
+  // sweep. Unlike `fetch` above, each builds its own Postgres handle
+  // (r2-gc-cron.ts / projection-snapshot-cron.ts / progress-selfheal-cron.ts),
+  // since the scheduled entrypoint never passes through that wrapper.
   //
-  // Both are bounded and resumable, so a cron that throws is logged and
+  // All three are bounded and resumable, so a cron that throws is logged and
   // swallowed: the runtime's retry would otherwise thrash on a bad night, and
   // a missed night costs only progress, never correctness.
   async scheduled(
@@ -747,6 +760,14 @@ export default {
         await runProjectionSnapshotSweep(env)
       } catch (err) {
         console.error("[projection-snapshot] sweep failed:", err)
+      }
+      return
+    }
+    if (controller.cron === PROGRESS_SELFHEAL_CRON) {
+      try {
+        await runProgressSelfHealSweep(env)
+      } catch (err) {
+        console.error("[progress-selfheal] sweep failed:", err)
       }
       return
     }

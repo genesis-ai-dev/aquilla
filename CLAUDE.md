@@ -121,12 +121,16 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   Durable Object (presence, focus-lock leases, `event.applied`/`event.stale` broadcast —
   hibernatable sockets; its only durable state is two DO-storage keys for leases and the
   member-removed denylist, no Postgres/R2 writes), comments (+ email notifications via CF
-  Email Service), `/audio/*`, diarization, voice-convert, this worker's two crons — the
+  Email Service), `/audio/*`, diarization, voice-convert, this worker's three crons — the
   nightly R2 orphan sweep (AQU-1856, `src/r2-gc-cron.ts`; `POST /admin/r2-gc?dryRun=1` for
-  an on-demand report) and the nightly projection-snapshot sweep (AQU-1833,
+  an on-demand report), the nightly projection-snapshot sweep (AQU-1833,
   `src/projection-snapshot-cron.ts`; `POST /admin/projection-snapshot?projectId=…` on
   demand) that keeps `/admin/projects/:id/rebuild-projection` from having to replay a
-  project's whole history — and the external **Agent API** under `/api/v1/external/*`
+  project's whole history, and the nightly progress self-heal sweep (AQU-2145,
+  `src/progress-selfheal-cron.ts`; `POST /admin/progress-selfheal?projectId=…` on demand)
+  that re-projects files whose progress rows fell behind their own audio events — its
+  `repaired=N` log line is the alarm for a write-path regression — and the external
+  **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and
   auth-worker preview (`aquilla-sync-preview` / `aquilla-auth-preview`, deployed by

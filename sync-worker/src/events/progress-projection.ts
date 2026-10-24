@@ -135,6 +135,106 @@ export const UNREFERENCED_LINES_STALE_FILES_SQL = `WITH candidates AS MATERIALIZ
                   IS DISTINCT FROM (st.section_key, st.place_ref, st.depth)`
 
 /**
+ * The `cell.audio.*` kinds that can move a progress row's audio numbers:
+ * whether a cell has a selected dub take, and how many validators that take
+ * carries. They are what `audioStaleProgressFilesSql` compares against a row's
+ * revision.
+ *
+ * Deliberately NOT every `cell.audio.*` kind. `rename`, `trim`, `place` and
+ * `measure` change a take's metadata, its window or its timing and leave every
+ * counted fact alone, so a file whose newest audio event is one of those has a
+ * row that is behind but not WRONG. Including them would hand the nightly sweep
+ * a file to re-project after every drag of a clip's edge, which costs a full
+ * per-file recompute to write the numbers that are already there.
+ */
+export const AUDIO_COUNTING_EVENT_KINDS = [
+  'cell.audio.attach',
+  'cell.audio.select',
+  'cell.audio.remove',
+  'cell.audio.cut',
+  'cell.audio.validate',
+  'cell.audio.unvalidate',
+] as const
+
+/**
+ * AQU-2143's defect class: a file's progress rows left behind their own audio
+ * events. The events are the log, the rows are derived, so the rows are simply
+ * wrong until something re-projects the file — and nothing did. AQU-2144 repairs
+ * today's rows once; AQU-2145 runs this same selector nightly
+ * (`sync-worker/src/progress-selfheal-cron.ts`) so the next occurrence lasts a
+ * night instead of the weeks this one did.
+ *
+ * Stale = the newest COUNT-AFFECTING audio event for the file sits above the
+ * `revision` its file-scope progress row stores, or the file has no such row at
+ * all. That works because `revision` is the recompute's own watermark
+ * (`fileProgressRecomputeStmt`: GREATEST(MAX(server_seq) for the file,
+ * project rebuilt_seq)), so a row written after an event is never below it.
+ * Selects (project_id, id) — the shape `fullProgressRecomputeStmts` consumes.
+ * Called with no options it is the whole-database form and binds nothing (what
+ * a maintenance script over the whole log wants); `byProject` narrows it to one
+ * project and is then its only bound value. That filter belongs in the
+ * `cell_audio` CTE rather than around the result, so an on-demand run for one
+ * project never scans every other project's takes. The SQL starts with WITH, so
+ * a caller combining it with another query must parenthesise it.
+ *
+ * Why it is self-terminating, which is what makes it safe to run every night:
+ * the repair's watermark covers EVERY event of the file, not just the audio
+ * ones, so a repaired file is above its audio high-water mark and is not
+ * selected again until a new audio event arrives. A healthy database therefore
+ * costs one selector run and no writes.
+ *
+ * Three narrowings, each of which a night would otherwise pay for forever:
+ *
+ *  • Candidates are files that HOLD audio (`cell_audio`, live takes only), not
+ *    every file. A text-only project has no candidate rows, so it is never read
+ *    past this CTE, let alone rewritten.
+ *  • The event probe is per candidate file, so it rides
+ *    `idx_events_file_seq (project_id, file_id, server_seq)` instead of
+ *    aggregating `events` by `kind` — which has no index and would scan the one
+ *    table on this database it is least affordable to scan.
+ *  • A file needs a visible, live source cell. The recompute's file row comes
+ *    from a summary over exactly those cells, so a file with none (a deleted
+ *    file whose takes outlive its cells) gets no row written — and without this
+ *    clause would be selected, "repaired", and selected again every night.
+ *
+ * `COALESCE(revision, -1)` is the "no row at all" arm: `server_seq` starts at 1,
+ * so any audio event clears -1.
+ */
+export function audioStaleProgressFilesSql(
+  opts: { byProject?: boolean } = {},
+): string {
+  return `WITH audio_files AS MATERIALIZED (
+             SELECT DISTINCT ca.project_id, ca.file_id
+               FROM cell_audio ca
+              WHERE ca.deleted = 0${opts.byProject ? ' AND ca.project_id = ?' : ''}
+           ), probed AS (
+             SELECT af.project_id, af.file_id,
+                    (SELECT MAX(e.server_seq) FROM events e
+                      WHERE e.project_id = af.project_id
+                        AND e.file_id = af.file_id
+                        AND e.kind IN (${AUDIO_COUNTING_EVENT_KINDS.map((k) => `'${k}'`).join(', ')})
+                    ) AS audio_seq,
+                    (SELECT MAX(p.revision) FROM file_section_progress p
+                      WHERE p.project_id = af.project_id
+                        AND p.file_id = af.file_id
+                        AND p.scope = 'file' AND p.section_key = ''
+                    ) AS revision
+               FROM audio_files af
+              WHERE EXISTS (
+                SELECT 1 FROM cells s
+                 WHERE s.project_id = af.project_id AND s.file_id = af.file_id
+                   AND s.side = 'source'
+                   AND ${visibleSourceSql('s')}
+                   AND ${liveSourceSql('s')}
+              )
+           )
+           SELECT project_id, file_id AS id
+             FROM probed
+            WHERE audio_seq IS NOT NULL
+              AND audio_seq > COALESCE(revision, -1)`
+}
+
+/**
  * The per-cell audio facts each statement's `paired` CTE takes from the CTE
  * above. Shared rather than copied three times for the same reason the
  * structural fragments below are: file, section and book rows must not be able

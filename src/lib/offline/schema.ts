@@ -1,7 +1,7 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 3
+export const OFFLINE_DATA_GENERATION = 4
 
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
@@ -383,6 +383,14 @@ const events = {
     name: "v1.EventDequeued",
     schema: Schema.Struct({ id: Schema.String }),
   }),
+  // Batched eventDequeued: a flush resolves up to MAX_FLUSH_BATCH writes per
+  // POST, and one event per write left the leader a backlog it took seconds to
+  // persist between batches (and every one of them stays in the eventlog that
+  // a state rebuild replays).
+  eventsDequeued: Events.clientOnly({
+    name: "v1.EventsDequeued",
+    schema: Schema.Struct({ ids: Schema.Array(Schema.String) }),
+  }),
   offlineProjectStatusSet: Events.clientOnly({
     name: "v1.OfflineProjectStatusSet",
     schema: Schema.Struct({
@@ -492,6 +500,7 @@ const materializers = State.SQLite.materializers(events, {
     }),
   "v1.EventQueueStatusSet": ({ id, status }) => tables.eventQueue.update({ status }).where({ id }),
   "v1.EventDequeued": ({ id }) => tables.eventQueue.delete().where({ id }),
+  "v1.EventsDequeued": ({ ids }) => ids.map((id) => tables.eventQueue.delete().where({ id })),
 
   "v1.OfflineProjectStatusSet": ({ projectId, status, syncedAt, queueDepth }) =>
     tables.offlineProjects.insert({ projectId, status, syncedAt, queueDepth }).onConflict("projectId", "update", {

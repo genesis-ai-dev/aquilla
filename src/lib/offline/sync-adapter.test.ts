@@ -973,6 +973,101 @@ describe("long offline stretches", () => {
     adapter.close()
   })
 
+  const appliedRow = (i: number, eventId: string) => ({
+    cellId: `GEN 1:${i + 1}`,
+    side: "target" as const,
+    value: `v${i}`,
+    valueHtml: null,
+    eventId,
+    sourceEventId: null,
+    validated: false,
+    aiDrafted: false,
+    sequenceIndex: i,
+    canonicalRef: null,
+  })
+
+  /** Accepts every event and returns its projected row, like the real POST /events. */
+  const acceptAllWithRows = async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { events: Array<{ id: string }> }
+    return new Response(
+      JSON.stringify({
+        accepted: body.events.map((e) => ({ id: e.id })),
+        applied: body.events.map((e) => ({
+          t: "event.applied",
+          id: e.id,
+          kind: "target.cell.commit",
+          project: "proj1",
+          file: "file1",
+          rows: [appliedRow(Number(e.id.slice(1)), e.id)],
+        })),
+      }),
+      { status: 200 },
+    )
+  }
+
+  it("lands everything one POST resolves in a single commit of batched events", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAllWithRows)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      connectivity,
+    })
+    queueMany(250)
+    const commit = vi.spyOn(store, "commit")
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0, 5_000)
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const names = commit.mock.calls.map((args) => args.map((e) => (e as { name: string }).name))
+    expect(names).toEqual([
+      ["v1.EventsDequeued", "v2.CellsSynced"],
+      ["v1.EventsDequeued", "v2.CellsSynced"],
+    ])
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", side: "target" }))).toHaveLength(250)
+
+    adapter.close()
+  })
+
+  it("writes nothing for a live echo of rows the flush already landed", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: vi.fn(acceptAllWithRows) as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    const [id] = queueMany(1)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+    const commit = vi.spyOn(store, "commit")
+
+    const echo = { t: "event.applied", id, kind: "target.cell.commit", project: "proj1", file: "file1" }
+    ws.receive({ ...echo, rows: [appliedRow(0, id)] })
+    expect(commit).not.toHaveBeenCalled()
+
+    // A row that did change still lands.
+    ws.receive({ ...echo, id: "peer-1", rows: [{ ...appliedRow(0, "peer-1"), value: "peer edit" }] })
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(
+      store.query(tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first()),
+    ).toMatchObject({ value: "peer edit", eventId: "peer-1" })
+
+    adapter.close()
+  })
+
   it(`sends a big backlog oldest first, at most ${MAX_FLUSH_BATCH} per POST`, async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const connectivity = fakeConnectivity(false)

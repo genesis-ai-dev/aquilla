@@ -182,15 +182,26 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    * flush response already landed.
    */
   function syncedRowsEvents(frames: readonly AppliedFrame[]): ReturnType<typeof events.cellsSynced>[] {
-    // Last frame wins per row: frames arrive in apply order.
+    // Newest server write wins per row. Arrival order is not apply order: a
+    // flush response lands after live frames buffered while it was being
+    // read, and a peer's frame buffered then may have been applied after our
+    // batch. So a frame's `serverSeq` decides when the row already has one;
+    // a frame without it (older workers) falls back to arrival order.
     const byFile = new Map<string, Map<string, ReturnType<typeof toCellSyncedArgs>>>()
+    const seqByRow = new Map<string, number>()
     for (const frame of frames) {
       if (!frame.file || !frame.rows) continue
       let rows = byFile.get(frame.file)
       if (!rows) byFile.set(frame.file, (rows = new Map()))
       for (const row of frame.rows) {
         const args = toCellSyncedArgs(projectId, frame.file, row)
-        rows.set(cellRowId(projectId, frame.file, args.cellId, args.side, localLaneKey(args.laneId, args.targetLang)), args)
+        const id = cellRowId(projectId, frame.file, args.cellId, args.side, localLaneKey(args.laneId, args.targetLang))
+        const seen = seqByRow.get(id)
+        if (frame.serverSeq !== undefined) {
+          if (seen !== undefined && frame.serverSeq < seen) continue
+          seqByRow.set(id, frame.serverSeq)
+        }
+        rows.set(id, args)
       }
     }
     const out: ReturnType<typeof events.cellsSynced>[] = []
@@ -390,6 +401,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     } catch {
       return "retry"
     }
+    // Closed while the POST was out (offline copy removed): landing its rows
+    // now would bring cells back. The server has the writes either way.
+    if (closed) return "retry"
 
     const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
     // 403 and every other 4xx but 401 (schema, unknown lane, …) won't
@@ -450,9 +464,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       ? body.applied.map(parseAppliedEventFrame).filter((f): f is AppliedFrame => f !== null)
       : []
 
-    // Live frames still buffered arrived before this response: they land
-    // first in the same commit, so an older frame can't overwrite a row the
-    // response just landed.
+    // Live frames still buffered land in the same commit; syncedRowsEvents
+    // orders them against the response's frames by serverSeq.
     const buffered = takeBufferedFrames()
     const allDequeued = [...new Set([...buffered.dequeued, ...dequeued])]
     const toCommit = [

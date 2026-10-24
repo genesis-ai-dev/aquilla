@@ -271,11 +271,14 @@ export function planQuoteSplits(input: {
  */
 export function voiceAssignmentsForSplits(
   splits: readonly Pick<PlannedQuoteSplit, "cellId" | "sameKindAsFirst">[],
-  castAssignments: Readonly<Record<string, string>> | undefined,
+  // The row's voice: a cast map read by line id, or — since AQU-2125, when a
+  // row may be cast by its character rather than by its own entry — a lookup.
+  castAssignments: Readonly<Record<string, string>> | ((cellId: string) => string | undefined) | undefined,
 ): Record<string, string> | null {
+  const voiceOf = typeof castAssignments === "function" ? castAssignments : (id: string) => castAssignments?.[id]
   const added: Record<string, string> = {}
   for (const split of splits) {
-    const voiceId = castAssignments?.[split.cellId]
+    const voiceId = voiceOf(split.cellId)
     if (!voiceId) continue
     for (const cellId of split.sameKindAsFirst) added[cellId] = voiceId
   }

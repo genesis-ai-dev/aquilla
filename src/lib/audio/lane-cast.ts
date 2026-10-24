@@ -23,7 +23,7 @@
 // means exactly that.
 
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
-import { getVoiceLibrary } from "./voices"
+import { NO_CAST_VOICE, getVoiceLibrary } from "./voices"
 
 /**
  * Stored where a lane has deliberately gone back to its default: "no voice",
@@ -68,13 +68,16 @@ export function laneTtsSettings(
   if (legacy || own) {
     castAssignments = {}
     // The project-wide cast first — but only where this lane can see the voice.
+    // A "no voice" entry is kept as it is (AQU-2125): it is what stops a
+    // character's entry from recasting that line.
     for (const [cellId, voiceId] of Object.entries(legacy ?? {})) {
-      if (visible.has(voiceId)) castAssignments[cellId] = voiceId
+      if (voiceId === NO_CAST_VOICE || visible.has(voiceId)) castAssignments[cellId] = voiceId
     }
-    // Then this lane's own answers, which always win.
+    // Then this lane's own answers, which always win. A lane sent back to its
+    // default stays in the view as "no voice" rather than being deleted, so a
+    // character cast elsewhere cannot take the line back (AQU-2125).
     for (const [cellId, voiceId] of Object.entries(own ?? {})) {
-      if (voiceId === LANE_CAST_DEFAULT) delete castAssignments[cellId]
-      else castAssignments[cellId] = voiceId
+      castAssignments[cellId] = voiceId === LANE_CAST_DEFAULT ? NO_CAST_VOICE : voiceId
     }
   }
 

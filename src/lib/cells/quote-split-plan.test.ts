@@ -172,6 +172,12 @@ describe("voiceAssignmentsForSplits", () => {
     expect(voiceAssignmentsForSplits(splits, { v5: "narrator", other: "jesus" })).toEqual({ "v5-c": "narrator" })
     expect(voiceAssignmentsForSplits(splits, {})).toBeNull()
   })
+
+  it("takes a lookup, so a row cast by its character still passes its voice on (AQU-2125)", () => {
+    const splits = [{ cellId: "v5", sameKindAsFirst: ["v5-c"] }]
+    expect(voiceAssignmentsForSplits(splits, (id) => (id === "v5" ? "jesus" : undefined))).toEqual({ "v5-c": "jesus" })
+    expect(voiceAssignmentsForSplits(splits, () => undefined)).toBeNull()
+  })
 })
 
 describe("quoteSplitCandidates", () => {

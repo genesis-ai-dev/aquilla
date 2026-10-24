@@ -22,6 +22,7 @@ export type NeonTargetCommand =
   | "backfill-lane-batch"
   | "repair-lane-grants"
   | "prune-phantom-voices"
+  | "fold-cast-by-character"
   | "verify-lanes"
   | "seed-extract"
   | "scrub-integrations"
@@ -35,6 +36,8 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
+  // AQU-2125: fold line-by-line voice casting into one entry per character.
+  if (command === "fold-cast-by-character") return "scripts/neon-fold-cast-by-character.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
   // AQU-1953: the dev-DB seed extract runs under neon-target so the source
   // branch is explicit and recorded (AQUILLA_NEON_TARGET) in seed.meta.json.
@@ -60,6 +63,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
     command === "prune-phantom-voices" ||
+    command === "fold-cast-by-character" ||
     command === "seed-extract" ||
     command === "scrub-integrations" ||
     command === "copy-dev-audio"

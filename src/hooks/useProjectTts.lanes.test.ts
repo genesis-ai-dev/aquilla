@@ -11,7 +11,7 @@ vi.mock("@/lib/store/project-index", () => ({ patchProject: vi.fn(async () => {}
 
 import { useProjectTts } from "./useProjectTts"
 import { loadProjectTts } from "@/lib/store/project-tts-store"
-import { PRESET_VOICES } from "@/lib/audio/voices"
+import { PRESET_VOICES, assignedCastVoiceId } from "@/lib/audio/voices"
 
 const PROJECT = "proj-voice-lanes"
 const LANE_A = "lane-samoan"
@@ -186,7 +186,9 @@ describe("useProjectTts lane cast and default (AQU-2038)", () => {
     const whole = server({ voices: [narrator, sam, ara, shared], castAssignments: { "cell-1": "v-old" } })
     const { result, rerender } = renderLane(whole, LANE_A, TAG_A)
     await act(async () => { result.current.assignCells(["cell-1"], null) })
-    expect(result.current.laneSettings?.castAssignments?.["cell-1"]).toBeUndefined()
+    // AQU-2125: the view keeps it as "no voice" rather than deleting it, so a
+    // character's entry cannot take the line back; it still resolves to nothing.
+    expect(assignedCastVoiceId(result.current.laneSettings, "cell-1")).toBeUndefined()
     rerender({ laneId: LANE_B, tag: TAG_B })
     expect(result.current.laneSettings?.castAssignments?.["cell-1"]).toBe("v-old")
   })

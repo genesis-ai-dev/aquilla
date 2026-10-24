@@ -293,14 +293,14 @@ export function CellVoicePanel({
   // computed upstream. Same three-part rule the picker uses, so the card's
   // Generate names exactly the voice the picker shows.
   const active = useMemo(
-    () => resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId),
-    [settings, cell.id, cell.ttsSettings?.voiceId],
+    () => resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId),
+    [settings, cell, cell.ttsSettings?.voiceId],
   )
   // Nobody chose a character: Generate falls back to the default voice and
   // says so in its tooltip.
   const explicitVoice = useMemo(
-    () => Boolean(findVoice(settings, assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId)),
-    [settings, cell.id, cell.ttsSettings?.voiceId],
+    () => Boolean(findVoice(settings, assignedCastVoiceId(settings, cell) ?? cell.ttsSettings?.voiceId)),
+    [settings, cell, cell.ttsSettings?.voiceId],
   )
 
   const status = useTtsStatus(ttsStatusKey(cell.id))

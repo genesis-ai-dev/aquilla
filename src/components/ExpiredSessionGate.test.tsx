@@ -16,6 +16,11 @@ vi.mock("@/hooks/useAccounts", () => ({
 vi.mock("@/lib/frontier/session-store", () => ({
   loadActiveSession: () => Promise.resolve(accountsValue.active),
 }))
+// Outside the desktop app the launch resume settles false at once.
+let offlineResume: Promise<boolean> = Promise.resolve(false)
+vi.mock("@/lib/offline/launch-resume", () => ({
+  whenOfflineLaunchResumeSettled: () => offlineResume,
+}))
 
 /** Fake JWT with an `exp` claim `secondsFromNow` out. */
 function fakeJwt(secondsFromNow: number): string {
@@ -47,6 +52,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   accountsValue = { active: null, loading: false }
+  offlineResume = Promise.resolve(false)
 })
 
 describe("ExpiredSessionGate (AQU-885)", () => {
@@ -92,6 +98,34 @@ describe("ExpiredSessionGate (AQU-885)", () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
     renderAt("/join/abc123")
     expect(screen.getByText("app shell")).toBeInTheDocument()
+  })
+
+  it("holds sign-in while a desktop launch reopens the downloaded project offline", async () => {
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    let settle: (resumed: boolean) => void = () => {}
+    offlineResume = new Promise((resolve) => { settle = resolve })
+    renderAt("/")
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText("app shell")).toBeInTheDocument()
+    settle(true)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText(/^login page/)).not.toBeInTheDocument()
+  })
+
+  it("sends a desktop launch to sign-in when it doesn't reopen a project", async () => {
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    let settle: (resumed: boolean) => void = () => {}
+    offlineResume = new Promise((resolve) => { settle = resolve })
+    renderAt("/")
+    settle(false)
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
+  })
+
+  it("only waits on the launch resume from a launch landing page", async () => {
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    offlineResume = new Promise(() => {})
+    renderAt("/orgs/7/members")
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
   })
 
   it("does not evict an expired session from the offline-capable project workspace", () => {

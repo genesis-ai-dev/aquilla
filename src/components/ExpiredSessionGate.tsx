@@ -21,6 +21,9 @@
  *  - Every route under `/project/:id/...`, including settings, stays available
  *    offline. Project settings hydrate from IDB and deliberately permit local
  *    edits while disconnected; these surfaces keep the expiry banner instead.
+ *  - Desktop: a launch waits for OfflineLaunchResume first. Sign-in can't work
+ *    offline, so a user whose session lapsed in the field is taken to their
+ *    downloaded project instead; their edits queue until they sign in again.
  */
 
 import { useEffect, useState } from "react"
@@ -29,6 +32,14 @@ import { useAccounts } from "@/hooks/useAccounts"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { loadActiveSession } from "@/lib/frontier/session-store"
 import { loginPath } from "@/lib/navigation/login-path"
+import { isLaunchLandingPath } from "@/lib/offline/last-workspace"
+import { whenOfflineLaunchResumeSettled } from "@/lib/offline/launch-resume"
+
+/**
+ * How long a desktop launch holds the redirect for OfflineLaunchResume. Past
+ * this (a store that never opens), the user gets sign-in as before.
+ */
+const OFFLINE_RESUME_WAIT_MS = 30_000
 
 /** Signed-in routes whose whole purpose is server-backed account/org/project data. */
 const GUARDED_EXACT = new Set(["/", "/app", "/shared", "/admin"])
@@ -53,29 +64,40 @@ export function ExpiredSessionGate() {
   return (
     <ConfirmedExpiredRedirect
       jwt={candidateJwt}
+      pathname={location.pathname}
       next={location.pathname + location.search}
     />
   )
 }
 
-function ConfirmedExpiredRedirect({ jwt, next }: { jwt: string; next: string }) {
+function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathname: string; next: string }) {
   const [confirmed, setConfirmed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
-    void loadActiveSession().then((stored) => {
-      if (!cancelled && stored?.jwt === jwt && isJwtExpired(stored.jwt)) {
-        setConfirmed(true)
-      }
+    void loadActiveSession().then(async (stored) => {
+      if (cancelled || stored?.jwt !== jwt || !isJwtExpired(stored.jwt)) return
+      // If the launch reopens the last project, this gate unmounts as the
+      // route leaves the guarded set; otherwise send the user to sign-in.
+      if (isLaunchLandingPath(pathname) && (await offlineResumeWithin(OFFLINE_RESUME_WAIT_MS))) return
+      if (!cancelled) setConfirmed(true)
     }).catch(() => {
       if (!cancelled) setConfirmed(true)
     })
     return () => { cancelled = true }
-  }, [jwt])
+  }, [jwt, pathname])
 
   if (!confirmed) return null
   // A locally expired JWT does not need an explicit reauth override: Login
   // already shows the form for it. Omitting the flag lets a token refreshed by
   // another tab between confirmation and navigation recover automatically.
   return <Navigate to={loginPath({ next })} replace />
+}
+
+function offlineResumeWithin(ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms)
+  })
+  return Promise.race([whenOfflineLaunchResumeSettled(), timeout]).finally(() => clearTimeout(timer))
 }

@@ -5,8 +5,13 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { isLaunchLandingPath, readLastWorkspace } from "@/lib/offline/last-workspace"
 import { settleOfflineLaunchResume as settle } from "@/lib/offline/launch-resume"
 
-/** How long to wait for the first connectivity reading before giving up. */
-const FIRST_READING_TIMEOUT_MS = 15_000
+/**
+ * How long to wait for the first connectivity reading before giving up. Rust's
+ * first probe lands within ~3.5s (250ms wait for the URL + a 3s request
+ * timeout), and an online launch with an expired session waits on this before
+ * going to sign-in, so don't hold it much past that.
+ */
+const FIRST_READING_TIMEOUT_MS = 5_000
 
 // Once per page load: a user who goes back to the org page offline stays there.
 let attempted = false

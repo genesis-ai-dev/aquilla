@@ -16,10 +16,11 @@ vi.mock("@/hooks/useAccounts", () => ({
 vi.mock("@/lib/frontier/session-store", () => ({
   loadActiveSession: () => Promise.resolve(accountsValue.active),
 }))
-// Outside the desktop app the launch resume settles false at once.
-let offlineResume: Promise<boolean> = Promise.resolve(false)
+// The launch's decision while pending; null once it has settled (as outside
+// the desktop app, where it settles false at once).
+let offlineResume: Promise<boolean> | null = null
 vi.mock("@/lib/offline/launch-resume", () => ({
-  whenOfflineLaunchResumeSettled: () => offlineResume,
+  pendingOfflineLaunchResume: () => offlineResume,
 }))
 
 /** Fake JWT with an `exp` claim `secondsFromNow` out. */
@@ -52,7 +53,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   accountsValue = { active: null, loading: false }
-  offlineResume = Promise.resolve(false)
+  offlineResume = null
 })
 
 describe("ExpiredSessionGate (AQU-885)", () => {
@@ -118,6 +119,15 @@ describe("ExpiredSessionGate (AQU-885)", () => {
     offlineResume = new Promise((resolve) => { settle = resolve })
     renderAt("/")
     settle(false)
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
+  })
+
+  it("sends a later visit to the org page to sign-in after the launch already resumed", async () => {
+    // The launch reopened the project, then the user came back to `/` —
+    // that visit is not the launch, so the past resume must not hold sign-in.
+    accountsValue = { active: session(fakeJwt(-60)), loading: false }
+    offlineResume = null
+    renderAt("/")
     expect(await screen.findByText(/^login page/)).toBeInTheDocument()
   })
 

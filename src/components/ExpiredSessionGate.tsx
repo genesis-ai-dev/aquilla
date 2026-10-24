@@ -33,7 +33,7 @@ import { isJwtExpired } from "@/lib/frontier/auth"
 import { loadActiveSession } from "@/lib/frontier/session-store"
 import { loginPath } from "@/lib/navigation/login-path"
 import { isLaunchLandingPath } from "@/lib/offline/last-workspace"
-import { whenOfflineLaunchResumeSettled } from "@/lib/offline/launch-resume"
+import { pendingOfflineLaunchResume } from "@/lib/offline/launch-resume"
 
 /**
  * How long a desktop launch holds the redirect for OfflineLaunchResume. Past
@@ -79,7 +79,9 @@ function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathna
       if (cancelled || stored?.jwt !== jwt || !isJwtExpired(stored.jwt)) return
       // If the launch reopens the last project, this gate unmounts as the
       // route leaves the guarded set; otherwise send the user to sign-in.
-      if (isLaunchLandingPath(pathname) && (await offlineResumeWithin(OFFLINE_RESUME_WAIT_MS))) return
+      // Only the launch itself waits: once it has decided, this is just a visit.
+      const pending = isLaunchLandingPath(pathname) ? pendingOfflineLaunchResume() : null
+      if (pending && (await within(pending, OFFLINE_RESUME_WAIT_MS))) return
       if (!cancelled) setConfirmed(true)
     }).catch(() => {
       if (!cancelled) setConfirmed(true)
@@ -94,10 +96,10 @@ function ConfirmedExpiredRedirect({ jwt, pathname, next }: { jwt: string; pathna
   return <Navigate to={loginPath({ next })} replace />
 }
 
-function offlineResumeWithin(ms: number): Promise<boolean> {
+function within(decision: Promise<boolean>, ms: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<boolean>((resolve) => {
     timer = setTimeout(() => resolve(false), ms)
   })
-  return Promise.race([whenOfflineLaunchResumeSettled(), timeout]).finally(() => clearTimeout(timer))
+  return Promise.race([decision, timeout]).finally(() => clearTimeout(timer))
 }

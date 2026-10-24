@@ -171,6 +171,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   let flushRetryDelay = minFlushRetryMs
 
   type AppliedFrame = Extract<ProjectWsServerMessage, { t: "event.applied" }>
+  /** The newest `serverSeq` each local cell row has landed at this session. */
+  const landedSeqByRow = new Map<string, number>()
   type CommitInput = Parameters<typeof events.cellsSynced>[0]
 
   /**
@@ -183,10 +185,11 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    */
   function syncedRowsEvents(frames: readonly AppliedFrame[]): ReturnType<typeof events.cellsSynced>[] {
     // Newest server write wins per row. Arrival order is not apply order: a
-    // flush response lands after live frames buffered while it was being
-    // read, and a peer's frame buffered then may have been applied after our
-    // batch. So a frame's `serverSeq` decides when the row already has one;
-    // a frame without it (older workers) falls back to arrival order.
+    // flush response lands after live frames that arrived while it was being
+    // read — some still buffered, some already landed — and a peer's frame
+    // among them may have been applied after our batch. So a frame's
+    // `serverSeq` decides against any seq this row already landed with; a
+    // frame without it (older workers) falls back to arrival order.
     const byFile = new Map<string, Map<string, ReturnType<typeof toCellSyncedArgs>>>()
     const seqByRow = new Map<string, number>()
     for (const frame of frames) {
@@ -196,7 +199,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       for (const row of frame.rows) {
         const args = toCellSyncedArgs(projectId, frame.file, row)
         const id = cellRowId(projectId, frame.file, args.cellId, args.side, localLaneKey(args.laneId, args.targetLang))
-        const seen = seqByRow.get(id)
+        const seen = seqByRow.get(id) ?? landedSeqByRow.get(id)
         if (frame.serverSeq !== undefined) {
           if (seen !== undefined && frame.serverSeq < seen) continue
           seqByRow.set(id, frame.serverSeq)
@@ -204,6 +207,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         rows.set(id, args)
       }
     }
+    // Callers commit what this returns straight away.
+    for (const [id, seq] of seqByRow) landedSeqByRow.set(id, seq)
     const out: ReturnType<typeof events.cellsSynced>[] = []
     for (const [fileId, rows] of byFile) {
       const changed: CommitInput["rows"][number][] = []

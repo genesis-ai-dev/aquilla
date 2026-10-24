@@ -1193,6 +1193,49 @@ describe("long offline stretches", () => {
     adapter.close()
   })
 
+  it("keeps a peer's newer row that already landed while a slow flush response was out", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const { fetchImpl, release } = heldFetch(5)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      frameCoalesceMs: 1,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    queueMany(1)
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+
+    // The peer's frame (seq 6) is landed by the coalesce timer before our
+    // response (seq 5) comes back.
+    ws.receive({
+      t: "event.applied",
+      id: "peer-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      serverSeq: 6,
+      rows: [{ ...appliedRow(0, "peer-1"), value: "peer edit" }],
+    })
+    const rowId = cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY)
+    await waitFor(() => store.query(tables.cells.select().where({ id: rowId }).first())?.eventId === "peer-1")
+    release()
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+
+    expect(store.query(tables.cells.select().where({ id: rowId }).first())).toMatchObject({
+      value: "peer edit",
+      eventId: "peer-1",
+    })
+
+    adapter.close()
+  })
+
   it("lands nothing from a flush response that arrives after close", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const { fetchImpl, release } = heldFetch()

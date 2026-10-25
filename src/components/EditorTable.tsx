@@ -2491,6 +2491,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [clearChapterNavigationSelection])
 
+  // AQU-2158: the book the translator actually has on screen. Keyed on the book
+  // code rather than the cell, so scrolling inside one book never re-walks the
+  // file. A file that addresses more than one book offers passages from this
+  // book, not from whichever book its first cell happens to name.
+  const viewportBook = useMemo(() =>
+    readAtVersion(cellStoreVersion, () =>
+      parseRef(cellStore.getCellView(viewportCellId ?? "")?.group ?? "")?.book ?? null),
+  [cellStore, cellStoreVersion, viewportCellId])
   // AQU-515: where this translator left off in the book, and the two-to-four
   // ranges surveyed Bibles break at from there. Both collapse to nothing for a
   // file with no scripture addresses, which is what keeps the control off the
@@ -2500,8 +2508,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const view = cellStore.getCellView(cellId)
       if (!view) return null
       return { canonicalRef: view.group, translated: view.translated.trim().length > 0 }
-    })),
-  [cellStore, cellStoreVersion, fileCellIds])
+    }, { preferBook: viewportBook })),
+  [cellStore, cellStoreVersion, fileCellIds, viewportBook])
   const pericopeSuggestions = usePericopeSuggestions(pericopeResume)
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {

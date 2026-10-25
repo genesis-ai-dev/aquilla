@@ -28,13 +28,18 @@ export function PiecesApproved({
     <span
       data-testid={testId}
       data-all-approved={all ? "true" : "false"}
+      // Gives way before the take's name does in a narrow row (the recorder),
+      // with the whole sentence on hover.
+      title={t("editor.recordingTab.piecesApproved", { approved: counted.approved, count: counted.total })}
       className={cn(
-        "flex shrink-0 items-center gap-1 text-[11px]",
+        "flex min-w-0 items-center gap-1 text-[11px]",
         all ? "text-green-600 dark:text-green-500" : "text-muted-foreground",
       )}
     >
-      {all && <CheckCheck className="h-3 w-3" />}
-      {t("editor.recordingTab.piecesApproved", { approved: counted.approved, count: counted.total })}
+      {all && <CheckCheck className="h-3 w-3 shrink-0" />}
+      <span className="truncate">
+        {t("editor.recordingTab.piecesApproved", { approved: counted.approved, count: counted.total })}
+      </span>
     </span>
   )
 }

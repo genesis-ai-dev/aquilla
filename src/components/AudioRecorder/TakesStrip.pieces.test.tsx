@@ -113,6 +113,21 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
     expect(within(takeRow).getByTestId(`take-pieces-approved-${P1}`)).toHaveTextContent("1 of 3 pieces approved")
   })
 
+  // Slice 3A evidence (Oct 25): at the recorder's width the cut take's name
+  // was squeezed to "T." by the count beside it. jsdom has no layout, so this
+  // pins the rule instead: the name keeps a minimum width, and the count and
+  // "cut into" are the ones allowed to shrink (with the count's whole
+  // sentence on hover).
+  it("keeps the cut take's name readable in a narrow row", () => {
+    draw(cutTake(), P1)
+    expect(screen.getByTestId(`take-label-${P1}`).className).toMatch(/\bmin-w-\[7ch\]/)
+    const count = screen.getByTestId(`take-pieces-approved-${P1}`)
+    expect(count.className).toMatch(/\bmin-w-0\b/)
+    expect(count.className).not.toMatch(/\bshrink-0\b/)
+    expect(count).toHaveAttribute("title", "1 of 3 pieces approved")
+    expect(screen.getByTestId(`take-split-${P1}`).className).not.toMatch(/\bshrink-0\b/)
+  })
+
   it("gives each piece its own vote, showing only its own votes", () => {
     draw(cutTake(), P1)
     expect(voteOn(pieceRow(P2)).getAttribute("aria-label")).toMatch(/^Audio validated/)

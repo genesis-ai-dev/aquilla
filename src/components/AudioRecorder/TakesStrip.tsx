@@ -795,11 +795,15 @@ export function TakesStrip({
                   />
                 ) : (
                   <>
-                    <span data-testid={`take-label-${rowKey}`} className="truncate font-medium">
+                    {/* Slice 3A evidence (Oct 25): a cut take's row also says how many
+                        pieces are approved, and at the recorder's width the name
+                        was squeezed to "T.". It keeps room for "Take 12"; the
+                        quieter "· cut into 3" and the count give way first. */}
+                    <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
                       {isSplit ? splitLabel(pieces) : shownLabel(att)}
                     </span>
                     {isSplit && (
-                      <span data-testid={`take-split-${att.audioId}`} className="shrink-0 text-muted-foreground/70">
+                      <span data-testid={`take-split-${att.audioId}`} className="min-w-0 truncate text-muted-foreground/70">
                         · {t("editor.recordingTab.splitInto", { count: pieces.length })}
                       </span>
                     )}

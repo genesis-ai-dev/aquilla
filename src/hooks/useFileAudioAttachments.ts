@@ -368,8 +368,15 @@ export function useFileAudioAttachments(
     // events before the first read of the session, or a recording made just
     // before a refresh "vanishes" until the flusher delivers it. Idempotent
     // (once per file per session, keyed inside the bus).
-    await rehydrateShadowsFromOutbox(projectId, fileId).catch(() => { /* best-effort */ })
+    //
+    // AQU-2160: claim the turn BEFORE awaiting. On a direct link the editor
+    // reads the default lane and then the lane it opens in, back to back; a
+    // turn claimed after the await went to whichever rehydrate finished last,
+    // so the default lane's read could supersede the right one and settle
+    // under the wrong key.
     const gen = ++generationRef.current
+    await rehydrateShadowsFromOutbox(projectId, fileId).catch(() => { /* best-effort */ })
+    if (gen !== generationRef.current) return // a newer fetch superseded us
     const key = `${projectId}/${fileId}/${laneKey}`
     // A fresh read supersedes any pending retry, and owns the attempt budget.
     cancelRetry()

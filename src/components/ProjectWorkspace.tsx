@@ -182,6 +182,7 @@ import {
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
   canRestructureTracks,
+  resolveTakeLine,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -2006,6 +2007,10 @@ export function ProjectWorkspace() {
     // in. Unscoped, "validate all recordings" reached into every language.
     activeLane,
   )
+  // Slice 13 (P13.8): the take lookup the undo history's guards read falls
+  // back to this map, which (unlike the workspace's) loads in every lens.
+  const audioValidationByCellIdRef = useRef(audioValidationByCellId)
+  audioValidationByCellIdRef.current = audioValidationByCellId
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
   // a load that failed, and the no-file-open case must all release the gate
@@ -12678,13 +12683,15 @@ export function ProjectWorkspace() {
       const cue = audioCueCells.find((c) => c.id === cellId)
       if (cue) return { fileId: audioCueSibling.id, cell: cue }
     }
-    if (!activeFileId) return null
-    // Raw store cells carry no attachments; reading them unmerged is what made
-    // every timeline trim a silent no-op before the fortify pass.
-    const cell = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current).find(
-      (c) => c.id === cellId,
-    )
-    return cell ? { fileId: activeFileId, cell } : null
+    // Slice 13 (P13.8): falls back to the lane's always-loaded read of the
+    // takes, so a take step undone from the Text view finds its take.
+    return resolveTakeLine({
+      cellId,
+      fileId: activeFileId ?? null,
+      cells: getActiveCells(),
+      workspaceAudio: workspaceAudioByCellIdRef.current,
+      laneAudio: audioValidationByCellIdRef.current,
+    })
   }
   // Pre-merge round: takes that predate duration capture (duration_ms NULL).
   // The timeline shows a deliberate fix-it notice; the count and the batch's

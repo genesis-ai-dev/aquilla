@@ -15,6 +15,9 @@ import type { Concept } from "@/lib/terminology/types"
 import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
 import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import type { CellData } from "@/hooks/useCells"
+import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 
 /**
  * Returns true iff the completion-settings save should actually patch
@@ -601,4 +604,35 @@ export function pushedRollupProgress(
   const merged = new Map(current)
   merged.set(push.file, next)
   return merged
+}
+
+/**
+ * Media redesign slice 13 (P13.8): the line a take lookup reads, with its
+ * takes merged in.
+ *
+ * Every take step in the undo history asks "does the take still read the way
+ * this step left it?" through this lookup. It used to merge only the
+ * workspace's audio map, which is fetched in the audio lenses (or for someone
+ * who may restructure lines). In the Text view that map is empty, so undoing a
+ * rename or a recording's validation there reported "what it changed no longer
+ * exists" for a take plainly on screen. The lane's ungated read of the same
+ * takes (one shared fetch) is always loaded; the lookup falls back to it when
+ * the workspace map does not have the line.
+ */
+export function resolveTakeLine(args: {
+  cellId: string
+  fileId: string | null
+  cells: CellData[]
+  workspaceAudio: Map<string, CellAudioEntry>
+  laneAudio: Map<string, CellAudioEntry>
+}): { fileId: string; cell: CellData } | null {
+  const { cellId, fileId, cells, workspaceAudio, laneAudio } = args
+  if (!fileId) return null
+  const own = cells.find((c) => c.id === cellId)
+  if (!own) return null
+  const audio = workspaceAudio.has(cellId) ? workspaceAudio : laneAudio
+  // Raw store cells carry no attachments; reading them unmerged is what made
+  // every timeline trim a silent no-op before the fortify pass.
+  const cell = mergeCellsWithAudio([own], audio)[0] ?? own
+  return { fileId, cell }
 }

@@ -1939,6 +1939,9 @@ export const editor = defineNamespace({
       "Audio validated by others — {ref}. Click to add your validation.",
     "editor.audioValidation.ariaValidatedNoAction": "Audio validated — {ref}.",
     "editor.audioValidation.validateThisTake": "Validate this take",
+    "editor.audioValidation.validateThisPiece": "Validate this piece",
+    "editor.audioValidation.ariaPiecesOneByOne":
+      "You have validated {done} of {total} pieces — {ref}. Open the list to validate each piece.",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
     "editor.audioValidation.ariaOthersValidated": plural({
@@ -7430,6 +7433,18 @@ export const editor = defineNamespace({
         placeholders: {
           done: "How many of the line's takes have reached the required number of validators.",
           total: "How many takes the line has, one per track.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaPiecesOneByOne": {
+        description:
+          "Screen-reader name of a line's audio check when its take was cut into pieces " +
+          "and more than one piece still needs this person's validation. Each piece is " +
+          "validated on its own, so pressing the check opens the list of pieces rather " +
+          "than validating them all.",
+        placeholders: {
+          done: "How many of the take's pieces this person has validated.",
+          total: "How many pieces the take was cut into.",
           ref: "The line's reference, e.g. 'GEN 1:1'.",
         },
       },

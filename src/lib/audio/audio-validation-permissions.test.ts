@@ -172,6 +172,20 @@ describe("takeVoteState", () => {
     }
   })
 
+  // Slice 3A: the line's control needs to know a cut take's pieces, so a
+  // press opens them one by one instead of approving them all.
+  it("marks each piece of a cut take with its group, and a take never cut not at all", () => {
+    const withTrack = entry(
+      {
+        ...(cut.attachments as Record<string, unknown>),
+        n: { audioId: "n", slot: "track-2", validatorCount: 0, validators: [] },
+      },
+      { recording: "p1", "track-2": "n" },
+    )
+    const marks = Object.fromEntries(audioValidationTakes(withTrack, {}, policy(), () => "").map((t) => [t.audioId, t.pieceOf]))
+    expect(marks).toEqual({ n: undefined, p1: "p1", p2: "p1", p3: "p1" })
+  })
+
   it("answers for a take never cut exactly as before", () => {
     const whole = entry({ a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["ana"] } }, { recording: "a" })
     expect(takeVoteState(whole, {}, policy(), "a")).toEqual({ canVote: true, voted: true })

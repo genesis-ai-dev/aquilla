@@ -10,6 +10,7 @@
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { AudioValidationTake } from "@/components/cell/AudioValidationControl"
 import {
+  pieceGroupOf,
   selectedDubTakes,
   type AudioAttachmentOut,
   type CellAudioEntry,
@@ -168,10 +169,20 @@ export function audioValidationTakes(
   const scope = audioValidationScope(project, policy)
   // AQU-1767: a piece goes by its take's name, numbered by where it sits.
   const names = pieceNames(Object.values(entry.attachments))
-  return selectedDubTakes(entry).map((take) => {
+  const selected = selectedDubTakes(entry)
+  // Slice 3A: which of them are pieces of a cut take (a group with more than
+  // one member), so a surface can keep each piece's approval its own.
+  const groupSize = new Map<string, number>()
+  for (const take of selected) {
+    const group = pieceGroupOf(take, take.audioId)
+    groupSize.set(group, (groupSize.get(group) ?? 0) + 1)
+  }
+  return selected.map((take) => {
     const verdict = canValidateTake(take, project, scope, policy.username)
+    const group = pieceGroupOf(take, take.audioId)
     return {
       audioId: take.audioId,
+      ...((groupSize.get(group) ?? 0) > 1 ? { pieceOf: group } : {}),
       label: names.get(take.audioId) ?? take.label ?? null,
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,

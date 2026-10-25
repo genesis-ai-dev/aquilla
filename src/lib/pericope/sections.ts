@@ -1,3 +1,4 @@
+import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import { usfmFromOsis } from "./osis"
 
 /**
@@ -40,10 +41,15 @@ export function formatRef(book: string, address: VerseAddress): string {
  * Tolerates the sub-verse suffixes importers sometimes attach (`"GEN 2:4a"`,
  * `"GEN 2:4-5"`) by taking the leading integer — a suggestion only needs to
  * know which verse a cell sits at, not how the importer split it.
+ *
+ * AQU-2158: the leading token has to be a real USFM book code, not merely two
+ * to four alphanumerics. A label such as `"CH 4:21"` used to parse as the book
+ * `"CH"`, and whatever it set the resume point to then decided which book the
+ * whole file was offered passages from.
  */
 export function parseRef(ref: string): { book: string; address: VerseAddress } | undefined {
   const match = /^([A-Z0-9]{2,4})\s+(\d+):(\d+)/.exec(ref.trim().toUpperCase())
-  if (!match) return undefined
+  if (!match || !isKnownBookCode(match[1]!)) return undefined
   return {
     book: match[1]!,
     address: { chapter: Number(match[2]), verse: Number(match[3]) },

@@ -348,8 +348,6 @@ export const nav = defineNamespace({
     "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
     "nav.fileRow.progressWithAudioAriaLabel":
       "{translated}% translated, {validated}% validated, {recorded}% recorded, {audioValidated}% audio validated",
-    // Media redesign: the same slot for a language that delivers Text and audio.
-    "nav.fileRow.bothProgressAriaLabel": "{done} of {total} lines done on text and audio, {started} started",
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
@@ -1432,16 +1430,6 @@ export const nav = defineNamespace({
         placeholders: {
           name: "The file's current display name (user content).",
           originalName: "The file's original imported name (user content).",
-        },
-      },
-      "nav.fileRow.bothProgressAriaLabel": {
-        description:
-          "Accessible label for a file row's progress meter in a language that delivers " +
-          "text and audio: lines done on both halves, and lines with either half started.",
-        placeholders: {
-          done: "Already-formatted count of lines with validated text AND an approved recording.",
-          total: "Already-formatted count of the file's lines.",
-          started: "Already-formatted count of lines with text or a recording.",
         },
       },
       "nav.fileRow.progressAriaLabel": {

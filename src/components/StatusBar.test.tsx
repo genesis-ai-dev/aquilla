@@ -244,7 +244,7 @@ describe("StatusBar in a language that counts its recordings", () => {
   function AudioFooter({ cells: rows, delivers, extra }: {
     cells: readonly CellSummary[]
     delivers: "audio" | "text_and_audio"
-    extra?: { needsText: number; needsAudio: number }
+    extra?: { needsText: number; needsAudio: number; textTranslated?: number; textValidated?: number; recorded?: number; audioValidated?: number }
   }) {
     const { fileProgress } = useHealth(new Map([["active", rows]]), [], { enabled: false })
     const progress = { ...fileProgress.get("active")!, delivers, ...extra }
@@ -294,5 +294,25 @@ describe("StatusBar in a language that counts its recordings", () => {
     expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
     expect(screen.getByTestId("status-bar-text-left").textContent).toMatch(/Text left: .*3/)
     expect(screen.getByTestId("status-bar-audio-left").textContent).toMatch(/Audio left: .*4/)
+  })
+
+  it("Text and audio: the file row's two halves leave the footer's done figure alone (Sam, Oct 24)", () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `d${i}`, status: "validated", laneStatus: "validated" })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, status: "validated", laneStatus: "unvalidated" })),
+      { id: "x", status: "empty", laneStatus: "empty" },
+    ] as CellSummary[]
+    render(
+      <AudioFooter
+        cells={rows}
+        delivers="text_and_audio"
+        extra={{ needsText: 3, needsAudio: 4, textTranslated: 9, textValidated: 9, recorded: 6, audioValidated: 6 }}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
   })
 })

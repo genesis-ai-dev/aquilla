@@ -39,6 +39,15 @@ export interface FileStats {
   needsText?: number
   /** Text and audio: lines whose recording still needs approving. */
   needsAudio?: number
+  /**
+   * Text and audio: the text half on its own — lines with target text, and
+   * lines whose text is validated. The file row draws these and `recorded` /
+   * `audioValidated` as two bars, exactly as a not-chosen file holding both is
+   * drawn (Sam, Oct 24); `translated` / `validated` stay the lines started /
+   * done, which the footer reads.
+   */
+  textTranslated?: number
+  textValidated?: number
 }
 
 /** Does this file have audio worth drawing? Undefined counts never do. */

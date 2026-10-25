@@ -11022,12 +11022,25 @@ export function ProjectWorkspace() {
     if (activeLaneDelivers !== "text_and_audio") return { ...statusBarProgress, delivers: activeLaneDelivers }
     let needsText = 0
     let needsAudio = 0
+    // The two halves on their own, for the file row's two bars; the footer
+    // keeps reading the lines started / done above.
+    let textTranslated = 0
+    let textValidated = 0
+    let recorded = 0
+    let audioValidated = 0
     for (const cell of cellSummaries) {
       if (!countStructuralCells && isStructuralCell(cell.type)) continue
       if (cell.status !== "validated") needsText++
       if (!cell.audioApproved) needsAudio++
+      if (cell.status !== "empty") textTranslated++
+      if (cell.status === "validated") textValidated++
+      if (cell.hasOwnTake) recorded++
+      if (cell.audioApproved) audioValidated++
     }
-    return { ...statusBarProgress, delivers: activeLaneDelivers, needsText, needsAudio }
+    return {
+      ...statusBarProgress, delivers: activeLaneDelivers, needsText, needsAudio,
+      textTranslated, textValidated, recorded, audioValidated,
+    }
   }, [laneCountsRecordings, laneTakes, statusBarProgress, activeLaneDelivers, cellSummaries, countStructuralCells])
 
   /**

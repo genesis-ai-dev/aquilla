@@ -145,6 +145,10 @@ describe("the other files' bars come from the Plan's own read", () => {
       [unit({ totalCount: 10, filledCount: 9, validatedCount: 7, audioCount: 6, audioValidatedCount: 6, bothValidatedCount: 4 })],
       "text_and_audio",
     )
-    expect(map.get("ruth")).toEqual({ total: 10, translated: 9, validated: 4, delivers: "text_and_audio" })
+    expect(map.get("ruth")).toEqual({
+      total: 10, translated: 9, validated: 4, delivers: "text_and_audio",
+      // …and the two halves on their own, for the file row's two bars.
+      textTranslated: 9, textValidated: 7, recorded: 6, audioValidated: 6,
+    })
   })
 })

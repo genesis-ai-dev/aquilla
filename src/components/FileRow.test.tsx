@@ -297,10 +297,34 @@ describe("FileRow progress in a language that counts its recordings", () => {
     expect(getByTestId("file-row-progress-slot").getAttribute("aria-label")).not.toMatch(/recorded/)
   })
 
-  it("Text and audio: the bar says lines done on both halves", () => {
-    const { getByTestId } = renderRow({ progress: { total: 10, translated: 9, validated: 4, delivers: "text_and_audio" } })
+  it("Text and audio: drawn exactly like a not-chosen file that holds both (Sam, Oct 24)", () => {
+    // The language's own row: started / done in translated / validated (what
+    // the footer reads), the two halves beside them.
+    const chosen = renderRow({
+      progress: {
+        total: 10, translated: 9, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 5, audioValidated: 3,
+      },
+    })
+    const chosenSlot = chosen.getByTestId("file-row-progress-slot")
+    // The same file, nobody having chosen: text and audio figures as they are.
+    const unchosen = renderRow({ progress: { total: 10, translated: 6, validated: 4, recorded: 5, audioValidated: 3 } })
+    const unchosenSlot = unchosen.getAllByTestId("file-row-progress-slot")[1]
+    expect(chosenSlot.getAttribute("aria-label")).toBe("60% translated, 40% validated, 50% recorded, 30% audio validated")
+    expect(chosenSlot.getAttribute("aria-label")).toBe(unchosenSlot.getAttribute("aria-label"))
+    expect(chosenSlot.innerHTML).toBe(unchosenSlot.innerHTML)
+    expect(chosenSlot.getAttribute("title")).toBeNull()
+  })
+
+  it("Text and audio: the audio bar shows before the first recording, since the language owes it", () => {
+    const { getByTestId } = renderRow({
+      progress: {
+        total: 10, translated: 6, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 0, audioValidated: 0,
+      },
+    })
     expect(getByTestId("file-row-progress-slot").getAttribute("aria-label"))
-      .toBe("4 of 10 lines done on text and audio, 9 started")
+      .toBe("60% translated, 40% validated, 0% recorded, 0% audio validated")
   })
 
   it("Text: exactly as before", () => {

@@ -156,6 +156,16 @@ export function planUnitsToFileProgress(
       ...(delivers === "audio"
         ? { recorded: (prev?.recorded ?? 0) + started, audioValidated: (prev?.audioValidated ?? 0) + m.done }
         : {}),
+      // Text and audio's row draws its two halves on their own, as a file
+      // holding both is drawn when nobody has chosen (Sam, Oct 24).
+      ...(delivers === "text_and_audio"
+        ? {
+            textTranslated: (prev?.textTranslated ?? 0) + Math.min(u.filledCount, m.total),
+            textValidated: (prev?.textValidated ?? 0) + Math.min(u.validatedCount, m.total),
+            recorded: (prev?.recorded ?? 0) + Math.min(u.audioCount, m.total),
+            audioValidated: (prev?.audioValidated ?? 0) + Math.min(u.audioValidatedCount, m.total),
+          }
+        : {}),
       delivers: delivers ?? null,
     })
   }

@@ -589,6 +589,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       code?: string | null
       /** AQU-1784: the section already warned about the duplicate inline. */
       allowDuplicateName?: boolean
+      /** Media redesign: the add form's Delivers choice. */
+      delivers?: LaneDelivers
     },
   ) => {
     const jwt = session?.jwt
@@ -2244,6 +2246,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
             onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+            startAdding={focusTarget === "add-lane"}
           />
         )}
         {/* AQU-1688: facts about the target language that Bible data checks

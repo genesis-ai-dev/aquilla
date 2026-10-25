@@ -168,6 +168,38 @@ describe("BookHealthSpine", () => {
     expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet")
   })
 
+  it("says which part a Text and audio line holds, so a recording alone is not called translated", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 5,
+          cells: [
+            { id: "rec", stage: "automatic", lineParts: { text: "none", audio: "recorded" } },
+            { id: "rec-ok", stage: "automatic", lineParts: { text: "none", audio: "approved" } },
+            { id: "typed", stage: "automatic", lineParts: { text: "typed", audio: "none" } },
+            { id: "text-ok", stage: "automatic", lineParts: { text: "validated", audio: "recorded" } },
+            { id: "done", stage: "validated", lineParts: { text: "validated", audio: "approved" } },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [rec, recOk, typed, textOk, done] = screen.getAllByTestId("book-health-cell")
+    expect(rec).toHaveAccessibleName("Cell 1: recorded, not validated yet; no text yet")
+    expect(rec).toHaveAttribute("title", "Cell 1: recorded, not validated yet; no text yet")
+    expect(recOk).toHaveAccessibleName("Cell 2: recording approved; no text yet")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet; not recorded yet")
+    expect(textOk).toHaveAccessibleName("Cell 4: text validated; recorded, not validated yet")
+    expect(done).toHaveAccessibleName("Cell 5: text validated; recording approved")
+    // The colours are today's: the label is the only change.
+    expect(rec.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(done.style.backgroundColor).toBe("var(--progress-text-validated)")
+  })
+
   it("navigates by chapter label", () => {
     const onChapterClick = vi.fn()
     render(<BookHealthSpine chapters={chapters} onChapterClick={onChapterClick} />)

@@ -5,6 +5,9 @@ interface Summary {
   status: string
   translated: string
   aiDrafted?: boolean
+  laneStatus?: string
+  hasOwnTake?: boolean
+  audioApproved?: boolean
 }
 
 function harness() {
@@ -111,6 +114,27 @@ describe("createChapterHealthBuilder", () => {
     h.issues.add("c")
     const cells = h.builder.build(h.chapters, h.readers)[0].cells ?? []
     expect(cells.map((cell) => cell.hasIssue)).toEqual([true, false, false])
+  })
+
+  it("carries what a line holds when its square comes from a language that counts recordings", () => {
+    const h = harness()
+    // A Text and audio language: "c" has a recording and no text, "b" typed text and no recording.
+    h.summaries.set("c", { status: "empty", translated: "", laneStatus: "unvalidated", hasOwnTake: true })
+    h.summaries.set("b", { status: "unvalidated", translated: "draft", laneStatus: "unvalidated" })
+    h.summaries.set("a", { status: "validated", translated: "done", laneStatus: "validated", hasOwnTake: true, audioApproved: true })
+    const [chapter] = h.builder.build(h.chapters, h.readers)
+    expect(chapter.cells?.[2]).toMatchObject({ id: "c", stage: "automatic", lineParts: { text: "none", audio: "recorded" } })
+    expect(chapter.cells?.[1]).toMatchObject({ id: "b", stage: "automatic", lineParts: { text: "typed", audio: "none" } })
+    expect(chapter.cells?.[0]).toMatchObject({ id: "a", stage: "validated", lineParts: { text: "validated", audio: "approved" } })
+    // A Text language's line carries nothing extra.
+    const plain = harness()
+    expect(plain.builder.build(plain.chapters, plain.readers)[0].cells?.[1]).not.toHaveProperty("lineParts")
+    // A recording approved later replaces the square's object.
+    const before = chapter.cells?.[2]
+    h.summaries.set("c", { status: "empty", translated: "", laneStatus: "unvalidated", hasOwnTake: true, audioApproved: true })
+    const after = h.builder.build(h.chapters, h.readers)[0].cells?.[2]
+    expect(after).not.toBe(before)
+    expect(after).toMatchObject({ lineParts: { text: "none", audio: "approved" } })
   })
 
   it("reflects an issue appearing on a cell", () => {

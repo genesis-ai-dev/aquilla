@@ -13,7 +13,14 @@ export interface ChapterHealthSource {
 }
 
 export interface ChapterHealthReaders {
-  getSummary(cellId: string): { status: string; translated: string; laneStatus?: string; aiDrafted?: boolean } | null | undefined
+  getSummary(cellId: string): {
+    status: string
+    translated: string
+    laneStatus?: string
+    aiDrafted?: boolean
+    hasOwnTake?: boolean
+    audioApproved?: boolean
+  } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
   /**
@@ -79,6 +86,24 @@ function cellStage(summary: { status: string; translated: string; laneStatus?: s
     : summary.status === "empty" || !summary.translated.trim()
       ? "untranslated"
       : "automatic"
+}
+
+/**
+ * What a line holds, for a square drawn from its status in a language that
+ * counts its recordings. That square is light blue for any line that is
+ * started, so on its own it cannot say whether the text, the recording or
+ * both are there; its label reads this instead.
+ */
+function linePartsOf(summary: {
+  status: string
+  translated: string
+  hasOwnTake?: boolean
+  audioApproved?: boolean
+}): NonNullable<BookHealthCell["lineParts"]> {
+  return {
+    text: !summary.translated.trim() ? "none" : summary.status === "validated" ? "validated" : "typed",
+    audio: summary.audioApproved ? "approved" : summary.hasOwnTake ? "recorded" : "none",
+  }
 }
 
 /**
@@ -177,11 +202,23 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
           // stripes. Carried only when true, so every other square is the
           // object it always was.
           const aiDrafted = stage === "automatic" && summary.aiDrafted === true
+          // A square drawn from the line's status in a language that counts its
+          // recordings carries what the line holds, so a line with only a
+          // recording is not announced as translated text.
+          const lineParts = !excluded && !audioCellStage && summary.laneStatus ? linePartsOf(summary) : undefined
           const prev = cellsById.get(cellId)
           const entry = prev && prev.stage === stage && prev.health === health && prev.hasIssue === hasIssue
             && (prev.aiDrafted ?? false) === aiDrafted
+            && prev.lineParts?.text === lineParts?.text && prev.lineParts?.audio === lineParts?.audio
             ? prev
-            : { id: cellId, stage, health, hasIssue, ...(aiDrafted ? { aiDrafted } : {}) }
+            : {
+              id: cellId,
+              stage,
+              health,
+              hasIssue,
+              ...(aiDrafted ? { aiDrafted } : {}),
+              ...(lineParts ? { lineParts } : {}),
+            }
           if (entry !== prevChapter?.cells[cells.length]) cellsChanged = true
           if (cellId !== prevChapter?.cells[cells.length]?.id) membershipChanged = true
           if (entry !== prev) cellsById.set(cellId, entry)

@@ -28,6 +28,17 @@ export interface BookHealthCell {
    * translated blue. Absent on every other square.
    */
   aiDrafted?: boolean
+  /**
+   * What the line holds, on a square drawn from its status in a language that
+   * counts its recordings (Text and audio, or a language that delivers
+   * nothing chosen yet but has recordings). The square only says started or
+   * done; this lets its label say which part is there, so a line with only a
+   * recording is not read out as translated. Absent on every other square.
+   */
+  lineParts?: {
+    text: "none" | "typed" | "validated"
+    audio: "none" | "recorded" | "approved"
+  }
 }
 
 export interface BookHealthChapter {
@@ -271,6 +282,19 @@ function cellBucketVisual(cells: BookHealthCell[]): CellBucketVisual {
   return { color: "rgb(148 163 184 / 0.2)", stripes: false, issue }
 }
 
+/** Both halves of a line, the part that is there first. */
+function linePartsLabel(parts: NonNullable<BookHealthCell["lineParts"]>, aiDrafted: boolean): string {
+  const text = parts.text === "validated"
+    ? "text validated"
+    : parts.text === "typed"
+      ? (aiDrafted ? "AI draft, not validated yet" : "translated, not validated yet")
+      : "no text yet"
+  const audio = parts.audio === "approved"
+    ? "recording approved"
+    : parts.audio === "recorded" ? "recorded, not validated yet" : "not recorded yet"
+  return parts.text === "none" ? `${audio}; ${text}` : `${text}; ${audio}`
+}
+
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
   // AQU-2159: announced in exactly the places the amber ring is drawn, so
@@ -283,6 +307,9 @@ function cellDescription(cell: BookHealthCell, index: number): string {
   // recording was read out as "untranslated", which is the bug in words.
   if (cell.stage === "audioValidated") return `${prefix}: audio validated${warning}`
   if (cell.stage === "recorded") return `${prefix}: recorded, awaiting audio validation${warning}`
+  if (cell.lineParts && (cell.stage === "validated" || cell.stage === "automatic")) {
+    return `${prefix}: ${linePartsLabel(cell.lineParts, cell.aiDrafted === true)}${warning}`
+  }
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
   // AQU-2159: says what the square shows. It read out a health score the
   // square no longer draws, and never said the line was an AI draft.

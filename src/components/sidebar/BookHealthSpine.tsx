@@ -184,57 +184,76 @@ function matrixColumns(cellCount: number): number {
   return Math.min(MAX_MATRIX_COLUMNS, cellCount)
 }
 
-function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: boolean } {
-  const audio = audioBucketColor(cells)
-  if (audio) return { color: audio, issue: cells.some((cell) => cell.hasIssue) }
+interface CellBucketVisual {
+  /** The inline fill, or null when the square is drawn with the AI stripes. */
+  color: string | null
+  /**
+   * AQU-2159: draw the shared `bg-progress-ai` stripes instead of a fill.
+   * Stripes are a background-image, so a striped square takes no inline
+   * background colour at all.
+   */
+  stripes: boolean
+  issue: boolean
+}
 
-  const automatic = cells
-    .filter((cell) => cell.stage === "automatic" && cell.health !== undefined)
-    .map((cell) => cell.health!)
-  const score = median(automatic)
-  if (score !== undefined) {
-    const opacity = healthRibbonOpacity({
-      stage: "automatic",
-      rawScore: score,
-      smoothedScore: score,
-      evidenceWeight: 1,
-    })
-    return {
-      color: healthRibbonColor(score, opacity),
-      issue: cells.some((cell) => cell.hasIssue),
-    }
-  }
+/**
+ * AQU-2159: does this square have TEXT under it? The amber "an automatic
+ * check flagged this line" ring only says something true where there is a
+ * translation to have flagged. An untranslated line carrying an infraction
+ * drew an amber ring around an empty slate square, which reads as "this
+ * blank is wrong"; an excluded heading is not being checked at all (it
+ * carries no health score for the same reason); and an audio square reports
+ * a take, not the text under it.
+ */
+function hasText(cell: BookHealthCell): boolean {
+  return cell.stage === "automatic" || cell.stage === "validated"
+}
+
+/*
+ * AQU-2159: THE GRID CARRIES PROGRESS, NOT QUALITY. A drafted line nobody
+ * had validated was tinted by its health score, and at 7px a low score reads
+ * as pink — near enough to the magenta of a recorded take that a Text
+ * language's weak drafts and an Audio language's recordings looked alike
+ * (Sam, Oct 24). Such a line is now drawn with the same stripes the Progress
+ * card and the progress bars already use for AI drafts, which leaves the
+ * grid three colour families — blue for text, magenta for audio, grey for
+ * nothing yet — and no score-dependent colour anywhere in it.
+ *
+ * The score is not lost, it has moved: it stays in the chapter's "N
+ * automatic warnings" line, in the chapter tooltip's median, and in the
+ * check drawer. Note there is deliberately NO branch on `health` here —
+ * drawing a scored draft differently from an unscored one is exactly what
+ * made the colour mean quality.
+ */
+function cellBucketVisual(cells: BookHealthCell[]): CellBucketVisual {
+  const issue = cells.some((cell) => cell.hasIssue && hasText(cell))
+  const audio = audioBucketColor(cells)
+  if (audio) return { color: audio, stripes: false, issue }
 
   const validated = cells.filter((cell) => cell.stage === "validated").length
   if (validated === cells.length) {
-    return {
-      color: PROGRESS_COLOR.textValidated,
-      issue: cells.some((cell) => cell.hasIssue),
-    }
+    return { color: PROGRESS_COLOR.textValidated, stripes: false, issue }
   }
   if (validated > 0) {
     // A bucket of several cells, partly validated: the validated blue at the
     // validated share's strength.
     return {
       color: progressColorAt(PROGRESS_COLOR.textValidated, 0.25 + (0.55 * validated / cells.length)),
-      issue: cells.some((cell) => cell.hasIssue),
+      stripes: false,
+      issue,
     }
   }
   if (cells.some((cell) => cell.stage === "automatic")) {
-    return {
-      color: PROGRESS_COLOR.textTranslated,
-      issue: cells.some((cell) => cell.hasIssue),
-    }
+    return { color: null, stripes: true, issue }
   }
-  return {
-    color: "rgb(148 163 184 / 0.2)",
-    issue: cells.some((cell) => cell.hasIssue),
-  }
+  return { color: "rgb(148 163 184 / 0.2)", stripes: false, issue }
 }
 
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
-  const warning = cell.hasIssue ? " · automatic warning" : ""
+  // AQU-2159: announced in exactly the places the amber ring is drawn — a
+  // line that has text — so the label and the square cannot disagree.
+  const warning = cell.hasIssue && hasText(cell) ? " · automatic warning" : ""
   // Says WHY it is grey. Without this the square is indistinguishable from a
   // faint untranslated one to anyone reading it with a screen reader.
   if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
@@ -243,11 +262,10 @@ function cellDescription(cell: BookHealthCell, index: number): string {
   if (cell.stage === "audioValidated") return `${prefix}: audio validated${warning}`
   if (cell.stage === "recorded") return `${prefix}: recorded, awaiting audio validation${warning}`
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
-  if (cell.stage === "automatic") {
-    return cell.health === undefined
-      ? `${prefix}: automatic health awaiting evidence${warning}`
-      : `${prefix}: automatic health ${Math.round(cell.health)}%${warning}`
-  }
+  // AQU-2159: no score in here either. The square is the AI-draft stripes
+  // whatever its health, and a label still reading out a percentage would be
+  // describing a colour the grid no longer draws.
+  if (cell.stage === "automatic") return `${prefix}: drafted, awaiting validation${warning}`
   return `${prefix}: untranslated${warning}`
 }
 
@@ -415,20 +433,25 @@ export function BookHealthSpine({
                       // fainter point on it — exactly the wrong message. An
                       // outline is visibly not on the scale at all.
                       const excluded = cell.stage === "excluded"
+                      // AQU-2159: the hollow heading wins over the stripes —
+                      // an excluded cell is an outline with no fill at all.
+                      const aiDraft = tick.stripes && !excluded
                       return (
                         <span
                           key={cell.id}
                           data-testid="book-health-cell"
                           data-excluded={excluded || undefined}
+                          data-ai-draft={aiDraft || undefined}
                           role="img"
                           aria-label={cellDescription(cell, cellIndex)}
                           title={cellDescription(cell, cellIndex)}
                           className={cn(
                             "size-[7px] rounded-[1px]",
+                            aiDraft && "bg-progress-ai",
                             excluded && "ring-1 ring-inset ring-slate-400/50 dark:ring-slate-500/50",
                             tick.issue && "ring-1 ring-inset ring-amber-500",
                           )}
-                          style={{ backgroundColor: excluded ? "transparent" : tick.color }}
+                          style={aiDraft ? undefined : { backgroundColor: excluded ? "transparent" : tick.color ?? undefined }}
                         />
                       )
                     })}

@@ -15749,6 +15749,7 @@ export function ProjectWorkspace() {
       )}
       translateAsReadActive={translateAsReadActiveCellId !== null}
       onTranslateAsReadChange={setTranslateAsReadEnabled}
+      audioLane={activeLaneDelivers === "audio"}
     />
   ) : null
 

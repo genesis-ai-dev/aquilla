@@ -21,7 +21,7 @@ import {
 } from "@/lib/parsers/spreadsheet"
 import { importFile, type ImportResult, type ImportContext } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { v7 as uuidv7 } from "uuid"
@@ -82,7 +82,7 @@ export function SpreadsheetImportPanel({
   const consumedInitialFile = useRef<File | null>(null)
   const commitCheckpoint = useRef<{
     refs: FileReference[]
-    speakerPairs: { cellId: string; speaker: string | undefined }[]
+    speakerPairs: SpeakerAssignment[]
     castApplied: boolean
   } | null>(null)
 
@@ -200,14 +200,9 @@ export function SpreadsheetImportPanel({
       // Apply cast additions if any speaker/cast column was mapped
       if (!checkpoint.castApplied) {
         if (onCastUpdated && checkpoint.speakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(checkpoint.speakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(checkpoint.speakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
         // Replace the checkpoint rather than mutating it in place, so a retry
         // still sees the cast as applied without an in-place write to a value

@@ -7634,8 +7634,6 @@ export const es: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "Dibujado más corto en reposo para que el doblaje anterior siga accesible",
   "workspace.targetAudioLane.drawnShortNextDubStays": "Dibujado más corto en reposo para que el doblaje siguiente siga accesible",
   "workspace.dataTable.noResults": "No hay resultados.",
-  "workspace.castGutterVoice.applyToAllLines": "Aplicar a todas las líneas de «{name}»",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"one":"Aplicar a la {count} línea de «{name}»","many":"Aplicar a todas las {count} líneas de «{name}»","other":"Aplicar a todas las {count} líneas de «{name}»"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "Abriendo proyecto",
   "workspace.fileSort.lastUpdated": "Última actualización",
   "workspace.fileSort.canonical": "Orden canónico",

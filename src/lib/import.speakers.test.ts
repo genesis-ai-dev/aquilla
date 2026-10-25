@@ -156,3 +156,51 @@ describe("import — speakerPairs cellId consistency (single-parse invariant)", 
     expect(withSpeaker.map((p) => p.speaker)).toEqual(["Alice", "Bob"])
   })
 })
+
+describe("import — a fresh import names each line with its speaker (AQU-2125)", () => {
+  it("writes the speaker onto the uploaded line as its character, and says so in the pairs", async () => {
+    const vttContent = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:02.000",
+      "<v JESUS>It's the why of this sermon.</v>",
+      "",
+      "00:00:03.000 --> 00:00:04.000",
+      "<v PHILIP>The volume.</v>",
+      "",
+      "00:00:05.000 --> 00:00:06.000",
+      "No speaker",
+      "",
+    ].join("\n")
+    const file = new File([vttContent], "scene.vtt", { type: "text/vtt" })
+    const { speakerPairs } = await importFile(file, { projectId: "p-named", author: "tester", getToken })
+
+    const uploaded = captured.flatMap((b) => b.cells) as Array<{ cellId: string; metadata?: Record<string, unknown> }>
+    const byId = new Map(uploaded.map((c) => [c.cellId, c]))
+    const named = speakerPairs.filter((p) => p.speaker)
+    expect(named.map((p) => [p.speaker, p.castNamed])).toEqual([["JESUS", true], ["PHILIP", true]])
+    expect(named.map((p) => byId.get(p.cellId)?.metadata?.cast_name)).toEqual(["JESUS", "PHILIP"])
+    const silent = speakerPairs.find((p) => !p.speaker)!
+    expect(silent.castNamed).toBeUndefined()
+    expect(byId.get(silent.cellId)?.metadata?.cast_name).toBeUndefined()
+  })
+
+  it("leaves a re-imported file's characters alone: no name is sent and the pairs say so", async () => {
+    const result = {
+      name: "scene.vtt",
+      strings: [
+        { id: "cue-1", original: "Hello", translated: "", context: "0:00:01", group: "g1", type: "cue" as const, start: 1, end: 2, speaker: "JESUS" },
+      ],
+    }
+    const { speakerPairs } = await emitParsedFile(result, "vtt", {
+      projectId: "p-re",
+      author: "tester",
+      getToken,
+      reimportFileIds: new Map([["scene.vtt", "existing-file"]]),
+    })
+    const sent = JSON.stringify(captured)
+    expect(sent).toContain("Hello")
+    expect(sent).not.toContain("cast_name")
+    expect(speakerPairs[0].castNamed).toBeUndefined()
+  })
+})

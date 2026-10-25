@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest"
 import {
   buildCharacterCastWrite,
   castLinesOf,
+  castPickPatch,
   expandCharacterCast,
   foldCastByCharacter,
   setLaneCharacterCast,
   type CastLine,
+  type CastScope,
 } from "./character-cast"
 import { LANE_CAST_DEFAULT, laneTtsSettings } from "./lane-cast"
 import { laneScopedTtsSettings } from "./voice-lanes"
@@ -328,5 +330,64 @@ describe("folding a real-sized dubbing project keeps every line's voice (AQU-212
     const view = expandCharacterCast(laneTtsSettings({ ...settings, castAssignments: fold.castAssignments }, ""), lines)
     const byIdOnly = (cell: FixtureCell) => resolveCastVoice(view, cell.id, cell.ttsSettings?.voiceId).id
     expect(differing(cells, byIdOnly, oldVoices(settings, ""))).toEqual([])
+  })
+})
+
+describe("castPickPatch: how far a pick reaches (Sam, Oct 23)", () => {
+  const narr: Voice = { id: "narr", name: "Narrator", color: "#475569", builtIn: true }
+  const jesusV: Voice = { id: "v-jesus", name: "JESUS", color: "#0e7490" }
+  const alt: Voice = { id: "v-alt", name: "Jesus (Pedro)", color: "#7c3aed" }
+  // Episode A is open; episode B is another file of the same project.
+  const A = ["a1", "a2"]
+  const B = ["b1", "b2"]
+  const lines = [...A, ...B].map((id) => ({ id, castName: "JESUS" }))
+  const view = (s: ProjectTtsSettings) => laneTtsSettings(laneScopedTtsSettings(s, null), "")
+  const voiceOf = (s: ProjectTtsSettings, id: string) => assignedCastVoiceId(view(s), { id, castName: "JESUS" })
+  const apply = (s: ProjectTtsSettings, scope: CastScope, voiceId = alt.id): ProjectTtsSettings => ({
+    ...s,
+    ...castPickPatch(s, "", null, { scope, lineId: "a1", castName: "JESUS", fileLineIds: A, voiceId }),
+  })
+  // What a maintainer's save does next: fold the project-wide map over every line.
+  const fold = (s: ProjectTtsSettings): ProjectTtsSettings => ({
+    ...s,
+    castAssignments: foldCastByCharacter(s.castAssignments, lines).castAssignments,
+  })
+  const castByCharacter: ProjectTtsSettings = { voices: [narr, jesusV, alt], castAssignments: { [characterCastKey("JESUS")]: jesusV.id } }
+  const castLineByLine: ProjectTtsSettings = { voices: [narr, jesusV, alt], castAssignments: Object.fromEntries([...A, ...B].map((id) => [id, jesusV.id])) }
+  const neverCast: ProjectTtsSettings = { voices: [narr, jesusV, alt], castAssignments: {} }
+
+  it("this line: only the line the picker was opened on", () => {
+    const s = apply(castByCharacter, "line")
+    expect([...A, ...B].map((id) => voiceOf(s, id))).toEqual([alt.id, jesusV.id, jesusV.id, jesusV.id])
+  })
+
+  it.each([
+    ["cast by character", castByCharacter, jesusV.id],
+    ["cast line by line", castLineByLine, jesusV.id],
+    ["never cast", neverCast, undefined],
+  ] as const)("this file: every line of the character in the open file, other episodes untouched, through a fold too (%s)", (_label, start, otherEpisode) => {
+    const s = apply(start, "file")
+    expect([...A, ...B].map((id) => voiceOf(s, id))).toEqual([alt.id, alt.id, otherEpisode, otherEpisode])
+    const folded = fold(s)
+    expect([...A, ...B].map((id) => voiceOf(folded, id))).toEqual([alt.id, alt.id, otherEpisode, otherEpisode])
+  })
+
+  it("every episode: the character itself, so another episode's lines follow", () => {
+    const s = apply(castByCharacter, "everywhere")
+    expect([...A, ...B].map((id) => voiceOf(s, id))).toEqual([alt.id, alt.id, alt.id, alt.id])
+    expect(s.laneCastAssignments?.[""]).toEqual({ [characterCastKey("JESUS")]: alt.id })
+  })
+
+  it("a this-file pick in another episode survives a later every-episode pick", () => {
+    const inB = { ...castByCharacter, ...castPickPatch(castByCharacter, "", null, { scope: "file", lineId: "b1", castName: "JESUS", fileLineIds: B, voiceId: narr.id }) }
+    const s = apply(inB, "everywhere")
+    expect([...A, ...B].map((id) => voiceOf(s, id))).toEqual([alt.id, alt.id, narr.id, narr.id])
+  })
+
+  it("a line without a character is only ever this line, whatever the scope", () => {
+    for (const scope of ["file", "everywhere"] as const) {
+      const patch = castPickPatch(castByCharacter, "", null, { scope, lineId: "x1", castName: null, fileLineIds: ["x1", "x2"], voiceId: alt.id })
+      expect(patch.laneCastAssignments?.[""]).toEqual({ x1: alt.id })
+    }
   })
 })

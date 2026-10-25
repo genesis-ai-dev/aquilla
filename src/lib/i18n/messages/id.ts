@@ -6524,8 +6524,6 @@ export const id: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "Digambar pendek saat diam agar sulih suara sebelumnya tetap terjangkau",
   "workspace.targetAudioLane.drawnShortNextDubStays": "Digambar pendek saat diam agar sulih suara berikutnya tetap terjangkau",
   "workspace.dataTable.noResults": "Tidak ada hasil.",
-  "workspace.castGutterVoice.applyToAllLines": "Terapkan ke semua baris «{name}»",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"Terapkan ke semua {count} baris «{name}»"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "Membuka proyek",
   "workspace.fileSort.lastUpdated": "Terakhir diperbarui",
   "workspace.fileSort.canonical": "Urutan kanonis",

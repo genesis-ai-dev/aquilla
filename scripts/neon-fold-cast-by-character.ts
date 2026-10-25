@@ -15,6 +15,12 @@
 //   pnpm neon:fold-cast-by-character:prod -- --only <projectId>
 //   pnpm neon:fold-cast-by-character:prod -- --apply --production --only <projectId>
 //
+// --name-lines also reaches projects cast from a subtitle file's speaker tags,
+// a spreadsheet's cast column or speaker detection before those imports wrote
+// the speaker onto the line: each such line gets the name of the voice it is
+// cast with as its character (a `cast.assign` event, as a character sheet
+// writes), and is then folded. The dry run counts them and writes nothing.
+//
 // Do not pass --apply until a person has read the dry-run report. A line that
 // names a character but was never given a voice (for example because its save
 // was refused at the cap) picks up its character's voice; the report counts
@@ -26,7 +32,8 @@
 // the change reaches open clients without a reload.
 //
 // Flags: --apply  --production  --only <id>  --limit <n>  --min-entries <n>
-//        --keep-uncast-lines  --out <file>  --backup-dir <dir>  --as-user <id>
+//        --keep-uncast-lines  --name-lines  --author <name>  --out <file>
+//        --backup-dir <dir>  --as-user <id>
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { patchProjectSettingsShared } from "../db/shared/projects"
@@ -36,6 +43,7 @@ import {
   listFoldCandidates,
   planProjectFold,
   settingsBackupPath,
+  writeLineNames,
   PRODUCTION_FLAG,
   type ProjectFoldReport,
 } from "./cast-by-character-fold"
@@ -85,7 +93,7 @@ function reportLine(r: ProjectFoldReport): string {
   return (
     `  ${r.projectId} ${r.projectName ?? "(unnamed)"}: cast entries ${r.entriesBefore} -> ${r.entriesAfter} ` +
     `(${r.characterEntries} characters added, ${r.droppedLineEntries} line entries dropped), ` +
-    `${r.linesWithCharacter} lines name a character, ` +
+    `${r.linesWithCharacter} lines name a character${r.linesToName ? ` (${r.linesToName} named from their voice)` : ""}, ` +
     `${r.newlyVoicedLines} newly voiced, ${r.markedLines} held voiceless, ` +
     `bytes ${r.settingsBytesBefore} -> ${r.settingsBytesAfter}, ` +
     `version ${r.versionBefore}${r.versionAfter === null ? " (unchanged)" : ` -> ${r.versionAfter}`}` +
@@ -97,6 +105,9 @@ async function main(): Promise<void> {
   const apply = process.argv.includes("--apply")
   const production = process.argv.includes(PRODUCTION_FLAG)
   const keepUncastLines = process.argv.includes("--keep-uncast-lines")
+  const nameLines = process.argv.includes("--name-lines")
+  // Who the line-naming events are authored by, as a line's history shows it.
+  const author = flagValue("--author") ?? "maintenance"
   const onlyProject = flagValue("--only")
   const outPath = flagValue("--out")
   const limit = positiveInt("--limit")
@@ -126,7 +137,7 @@ async function main(): Promise<void> {
     }
 
     for (const row of candidates) {
-      const planned = await planProjectFold(db, row, { keepUncastLines })
+      const planned = await planProjectFold(db, row, { keepUncastLines, nameLines })
       if (!planned) {
         console.log(`  ${row.project_id}: nothing to fold (${row.entries} entries, none repeats its character) — untouched`)
         continue
@@ -135,6 +146,13 @@ async function main(): Promise<void> {
       if (apply) {
         report.backupPath = writeBackup(backupDir, report.projectId, planned.version, planned.settings)
         console.log(`  backup: ${report.backupPath}`)
+        if (planned.names.length > 0) {
+          // Names first: the folded cast relies on them. A failure after this
+          // leaves named lines and the old cast, which still speak the same;
+          // re-running finds nothing left to name and finishes the fold.
+          const named = await writeLineNames(db, report.projectId, planned.names, author)
+          console.log(`  named ${named} line${named === 1 ? "" : "s"} from their voice`)
+        }
         const written = await patchProjectSettingsShared(db, {
           projectId: report.projectId,
           ops: [{ key: "ttsSettings", value: planned.nextTts }],

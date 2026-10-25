@@ -25,6 +25,7 @@ import { formatByteLimit } from "./i18n/format"
 import { normalizeLocale } from "./i18n/locales"
 import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
+import type { SpeakerAssignment } from "./import/cast-from-speakers"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
@@ -682,7 +683,7 @@ export interface ImportFileResult {
   refs: FileReference[]
   /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
    *  the uploaded cells (single parse). Empty for non-subtitle formats. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
   skipped?: { book: string; reason: string }[]
 }
 
@@ -1565,7 +1566,7 @@ function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
  */
 export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1575,10 +1576,11 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    speakerAsCastName?: boolean
   },
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1588,10 +1590,18 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    /**
+     * AQU-2125: write each string's speaker onto its line as the line's
+     * character (`metadata.cast_name`), so the import can cast the character
+     * once instead of every line. Only for a fresh import: on a re-import the
+     * incoming metadata wins the reconcile merge, so sending a name would
+     * overwrite a character someone has since corrected.
+     */
+    speakerAsCastName?: boolean
   } = {},
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 } {
   const normalizedFile = options.normalizedFile ?? normalizeTranslatableStrings(strings, {
     fileName: options.fileName ?? "import",
@@ -1605,14 +1615,17 @@ export function buildBulkCellsWithSpeakers(
     throw new Error("Normalized import unit count does not match parsed string count")
   }
   const cells: BulkImportCell[] = []
-  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
+  const speakerPairs: SpeakerAssignment[] = []
   let prevCellId: string | null = null
   for (let seq = 0; seq < strings.length; seq++) {
     const str = strings[seq]
     const unit = normalizedFile.units[seq]
     const cellId = str.id || uuidv7()
+    const speaker = str.speaker?.trim()
+    const castNamed = Boolean(options.speakerAsCastName && speaker)
     const metadata = {
       ...(str.metadata ?? {}),
+      ...(castNamed ? { cast_name: speaker } : {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
     }
@@ -1636,7 +1649,7 @@ export function buildBulkCellsWithSpeakers(
       // into the bulk POST body verbatim → cells.metadata JSONB on the server.
       metadata,
     })
-    speakerPairs.push({ cellId, speaker: str.speaker })
+    speakerPairs.push({ cellId, speaker: str.speaker, ...(castNamed ? { castNamed: true } : {}) })
     prevCellId = cellId
   }
   return { cells, speakerPairs }
@@ -1679,7 +1692,7 @@ export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
    *  that produced the uploaded cells — cellIds are guaranteed to match. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 
 /**
@@ -1717,6 +1730,7 @@ export async function emitParsedFile(
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
+    speakerAsCastName: !existingFileId,
   })
 
   // AQU-1859: a fresh import runs inside a resumable session, so a chunk that

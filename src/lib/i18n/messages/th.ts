@@ -6437,8 +6437,6 @@ export const th: Catalog = {
   "workspace.targetAudioLane.drawnShortPreviousDubStays": "วาดสั้น ๆ ขณะพัก เพื่อให้ dub ก่อนหน้าอยู่ในระยะเข้าถึง",
   "workspace.targetAudioLane.drawnShortNextDubStays": "วาดสั้น ๆ ขณะพัก เพื่อให้ dub ต่อไปอยู่ในระยะเข้าถึง",
   "workspace.dataTable.noResults": "ไม่พบผลลัพธ์.",
-  "workspace.castGutterVoice.applyToAllLines": "ใช้กับบรรทัด «{name}» ทั้งหมด",
-  "workspace.castGutterVoice.applyToAllLinesCount": {"forms":{"other":"ใช้กับทั้ง {count} บรรทัดของ «{name}»"},"countVar":"count"},
   "workspace.openWorkspace.openingProject": "กำลังเปิดโครงการ",
   "workspace.fileSort.lastUpdated": "อัปเดตล่าสุด",
   "workspace.fileSort.canonical": "ลำดับบัญญัติ",

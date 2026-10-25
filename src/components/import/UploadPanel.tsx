@@ -12,7 +12,7 @@ import { t as tStandalone } from "@/lib/i18n/standalone"
 import { formatNumber } from "@/lib/i18n/format"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -295,7 +295,7 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
       const allRefs: FileReference[] = []
       const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
-      const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      const allSpeakerPairs: SpeakerAssignment[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
       // cell count/percentage that "feels stalled" on large partner imports.
       // Totals come from the real File.size; within a file we scale by the cell
@@ -308,14 +308,9 @@ export function UploadPanel({ variant = "upload", projectId, username, sourceLan
       const persistCastAdditions = async () => {
         castAttempted = true
         if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
       }
       try {

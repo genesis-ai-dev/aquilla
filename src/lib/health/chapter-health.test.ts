@@ -4,6 +4,7 @@ import { chapterHealthBuilderFor, createChapterHealthBuilder, type ChapterHealth
 interface Summary {
   status: string
   translated: string
+  aiDrafted?: boolean
 }
 
 function harness() {
@@ -86,6 +87,30 @@ describe("createChapterHealthBuilder", () => {
     expect(second[0]).not.toBe(first[0])
     expect(second[0].translated).toBe(3)
     expect(second[1]).toBe(first[1])
+  })
+
+  it("marks an AI draft nobody has validated, and only that (AQU-2159)", () => {
+    const h = harness()
+    h.summaries.set("b", { status: "unvalidated", translated: "draft", aiDrafted: true })
+    // Validated AI text is validated: the stripes are for drafts awaiting a person.
+    h.summaries.set("a", { status: "validated", translated: "done", aiDrafted: true })
+    const first = h.builder.build(h.chapters, h.readers)
+    expect(first[0].cells?.[0]).toEqual({ id: "a", stage: "validated", health: 100, hasIssue: false })
+    expect(first[0].cells?.[1]).toEqual({ id: "b", stage: "automatic", health: 55, hasIssue: false, aiDrafted: true })
+
+    // A person rewrites the draft: same stage, same score, a new square.
+    h.summaries.set("b", { status: "unvalidated", translated: "rewritten", aiDrafted: false })
+    const second = h.builder.build(h.chapters, h.readers)
+    expect(second[0].cells?.[1]).toEqual({ id: "b", stage: "automatic", health: 55, hasIssue: false })
+    expect(second[0]).not.toBe(first[0])
+  })
+
+  it("carries a check's flag only on a line that has text (AQU-2159)", () => {
+    const h = harness()
+    h.issues.add("a")
+    h.issues.add("c")
+    const cells = h.builder.build(h.chapters, h.readers)[0].cells ?? []
+    expect(cells.map((cell) => cell.hasIssue)).toEqual([true, false, false])
   })
 
   it("reflects an issue appearing on a cell", () => {

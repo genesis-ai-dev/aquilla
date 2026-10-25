@@ -13,7 +13,7 @@ export interface ChapterHealthSource {
 }
 
 export interface ChapterHealthReaders {
-  getSummary(cellId: string): { status: string; translated: string; laneStatus?: string } | null | undefined
+  getSummary(cellId: string): { status: string; translated: string; laneStatus?: string; aiDrafted?: boolean } | null | undefined
   health(cellId: string): number | undefined
   hasIssue(cellId: string): boolean
   /**
@@ -168,11 +168,20 @@ export function createChapterHealthBuilder(): ChapterHealthBuilder {
           const health = excluded || audioCellStage
             ? undefined
             : stage === "validated" ? 100 : readers.health(cellId)
-          const hasIssue = readers.hasIssue(cellId)
+          // AQU-2159: a check's flag is drawn only on a line with text — an
+          // empty line is flagged for being empty, which its square already
+          // says. Read from the text itself, not the stage, because an audio
+          // square's stage says nothing about whether text sits under it.
+          const hasIssue = !excluded && Boolean(summary.translated.trim()) && readers.hasIssue(cellId)
+          // AQU-2159: an AI draft nobody has validated is drawn in the AI
+          // stripes. Carried only when true, so every other square is the
+          // object it always was.
+          const aiDrafted = stage === "automatic" && summary.aiDrafted === true
           const prev = cellsById.get(cellId)
           const entry = prev && prev.stage === stage && prev.health === health && prev.hasIssue === hasIssue
+            && (prev.aiDrafted ?? false) === aiDrafted
             ? prev
-            : { id: cellId, stage, health, hasIssue }
+            : { id: cellId, stage, health, hasIssue, ...(aiDrafted ? { aiDrafted } : {}) }
           if (entry !== prevChapter?.cells[cells.length]) cellsChanged = true
           if (cellId !== prevChapter?.cells[cells.length]?.id) membershipChanged = true
           if (entry !== prev) cellsById.set(cellId, entry)

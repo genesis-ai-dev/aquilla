@@ -59,8 +59,8 @@ describe("BookHealthSpine", () => {
           total: 5,
           cells: [
             { id: "v", stage: "validated", health: 100 },
-            { id: "t", stage: "automatic" },
-            { id: "s", stage: "automatic", health: 20, hasIssue: true },
+            { id: "t", stage: "automatic", aiDrafted: true },
+            { id: "s", stage: "automatic", health: 20, hasIssue: true, aiDrafted: true },
             { id: "u", stage: "untranslated" },
             { id: "x", stage: "excluded" },
           ],
@@ -134,7 +134,38 @@ describe("BookHealthSpine", () => {
         onChapterClick={vi.fn()}
       />,
     )
-    expect(screen.getByTestId("book-health-cell")).toHaveAccessibleName("Cell 1: drafted, awaiting validation")
+    expect(screen.getByTestId("book-health-cell")).toHaveAccessibleName("Cell 1: translated, not validated yet")
+  })
+
+  it("stripes only an AI draft: a line a person typed stays the translated blue (AQU-2164)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 3,
+          cells: [
+            { id: "low", stage: "automatic", health: 12, aiDrafted: true },
+            { id: "unscored", stage: "automatic", aiDrafted: true },
+            { id: "typed", stage: "automatic", health: 12 },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [low, unscored, typed] = screen.getAllByTestId("book-health-cell")
+    for (const square of [low, unscored]) {
+      expect(square).toHaveClass("bg-progress-ai")
+      expect(square).toHaveAttribute("data-ai-draft", "true")
+      // No inline fill at all, so nothing red sits over the stripes.
+      expect(square.style.backgroundColor).toBe("")
+      expect(square).toHaveAccessibleName(/AI draft, not validated yet/)
+    }
+    expect(typed).not.toHaveClass("bg-progress-ai")
+    expect(typed.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet")
   })
 
   it("navigates by chapter label", () => {

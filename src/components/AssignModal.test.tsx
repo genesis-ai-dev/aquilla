@@ -220,6 +220,19 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
   })
 
+  it("leaves a project with nobody on any language to the line that already says so", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        lanes={[{ legacyTag: "ha", label: "Hausa", laneId: "lane-ha" }]}
+        staffedLaneIds={[]}
+      />,
+    )
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toBeTruthy()
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
   it("leaves self-assign mode to its own explanation", () => {
     render(
       <AssignModal

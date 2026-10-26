@@ -374,17 +374,6 @@ export function AssignModal({
     [members, isLaneDelegate],
   )
 
-  // AQU-2194: with nobody but the caller on the project, the picker above
-  // holds one name and nothing says why: people who only reach the project
-  // through the organisation are left out (AQU-676), and a newly added
-  // language has nobody staffed on it yet. Say so, and where people are
-  // added (the language's Staff… on the project Overview). Self-assign mode
-  // and a missing roster have their own lines.
-  const showStaffHint =
-    !isSelfAssignMode &&
-    !rosterUnavailable &&
-    !eligibleMembers.some((m) => m.userId !== effectiveCallerUserId)
-
   // AQU-497: group the books-scope file list by corpusMarker (real season/
   // testament grouping — see file banner) so a whole season can be selected
   // in one click via the per-group "Select all".
@@ -417,6 +406,17 @@ export function AssignModal({
   // up with nothing to choose, and that is a different sentence.
   const noStaffedLanes =
     Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
+  // AQU-2194: with nobody but the caller on the project, the picker holds one
+  // name and nothing says why: people who only reach the project through the
+  // organisation are left out (AQU-676), and nobody has been staffed on the
+  // new language yet. Say so, and where people are added (the language's
+  // Staff… on the project Overview). Self-assign mode, a missing roster and
+  // the no-staffed-lanes line above already say their own piece.
+  const showStaffHint =
+    !isSelfAssignMode &&
+    !rosterUnavailable &&
+    !noStaffedLanes &&
+    !eligibleMembers.some((m) => m.userId !== effectiveCallerUserId)
   // AQU-1977: given the project's own lanes, a pick that names none of them —
   // an empty default on a project that has no '' lane — reads as the first.
   const laneValue =

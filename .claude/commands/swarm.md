@@ -86,6 +86,9 @@ owner is stranded work, and an agent that "could not finish" must not leave it t
 1. `list_issues` for the project. **Eligible = status `Todo` only** (`a3c6383f-3893-4691-a75a-b4add1ff1ce1`) —
    this is the agent-ready (AFK) queue and the swarm's sole intake (see `AGENTS.md` → "Agent-ready vs.
    human-in-the-loop").
+   - **Skip anything labelled `HITL`**, even in `Todo`. The label is a veto on top of status (see
+     `AGENTS.md`). Do not swarm, decompose, re-status, or de-label it; list it in the report so a
+     human can re-home it.
    - **NEVER touch `Triage`** (`086173c5-…`). That is the human / HITL queue — decisions, reviews, and
      human-implementation work live there and are out of scope for the swarm. Do not pick up, decompose,
      or re-status a Triage issue. If a `Todo` issue turns out to actually need a human decision, move it

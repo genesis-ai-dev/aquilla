@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ImportSubtitlesDialog } from "./ImportSubtitlesDialog"
+import { framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 const VTT = `WEBVTT
 
@@ -142,5 +143,41 @@ untimed
     // than as an untimed row — the silent-loss case the parser's strictness
     // creates and `repairShortFormCueTimestamps` exists to narrow.
     expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent("1")
+  })
+})
+
+describe("times written as frame numbers in hundredths (AQU-2197)", () => {
+  it("warns, and imports the times converted at the suggested 24 fps", async () => {
+    const { onConfirm } = open()
+    pick(framesAsHundredthsVtt(), "ep101.vtt")
+    await waitFor(() => expect(screen.getByTestId("frames-as-hundredths")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("import-subtitles-confirm"))
+    const parsed = onConfirm.mock.calls[0][0]
+    const cue = parsed.cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+    expect(parsed.report.spanStartMs).toBe(60000)
+  })
+
+  it("keeps them when asked", async () => {
+    const { onConfirm } = open()
+    pick(framesAsHundredthsVtt(), "ep101.vtt")
+    await waitFor(() => expect(screen.getByTestId("frames-as-hundredths")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    fireEvent.click(screen.getByTestId("import-subtitles-confirm"))
+    const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.start, 6)
+  })
+
+  it("covers SRT too", async () => {
+    open()
+    pick(framesAsHundredthsVtt(24, { srt: true }), "ep101.srt")
+    await waitFor(() => expect(screen.getByTestId("frames-as-hundredths")).toBeInTheDocument())
+  })
+
+  it("stays quiet on a properly timed file", async () => {
+    open()
+    pick(properlyTimedVtt(), "ok.vtt")
+    await waitFor(() => expect(screen.getByTestId("import-subtitles-summary")).toBeInTheDocument())
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
   })
 })

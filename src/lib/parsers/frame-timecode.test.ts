@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest"
 import {
   convertFramesAsHundredths,
+  convertFramesAsHundredthsSeconds,
   detectFramesAsHundredths,
   frameRateFor,
   parseTimecode,
@@ -84,6 +85,11 @@ describe("noticing frames written as hundredths", () => {
 })
 
 describe("converting at a frame rate", () => {
+  it("converts one time, for rows that carry times outside a cue", () => {
+    expect(convertFramesAsHundredthsSeconds(66.15, "24")).toBeCloseTo(66.625, 6)
+    expect(convertFramesAsHundredthsSeconds(66.15, "25")).toBeCloseTo(66.6, 6)
+  })
+
   it("moves each time to the frame's real place, and keeps everything else", () => {
     const cue: TranslatableString = {
       id: "a", original: "You should be sleeping, little one.", translated: "", group: "g", type: "cue",

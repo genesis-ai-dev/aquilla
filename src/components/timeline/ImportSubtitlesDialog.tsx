@@ -13,7 +13,7 @@
 // is nothing to reconcile against and no take to strand. Re-importing over
 // existing cues is `import-file-target.ts`'s problem, not this one's.
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -30,6 +30,10 @@ import {
   SUBTITLE_SIDECAR_ACCEPT,
   type ParsedSubtitleSidecar,
 } from "@/lib/timeline/subtitle-source-import"
+import {
+  FramesAsHundredthsNotice,
+  useFramesAsHundredths,
+} from "@/components/import/FramesAsHundredthsNotice"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fmtClock } from "./format"
 
@@ -89,8 +93,26 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
     }
   }
 
-  const report = picked?.parsed.report
-  const span = picked ? cueSpan(picked.parsed) : null
+  // AQU-2197: the same frames-as-hundredths check, notice and conversion as
+  // every other VTT import; `fixed` is what the import writes.
+  const frames = useFramesAsHundredths(picked?.parsed.cues)
+  const fixed = useMemo<ParsedSubtitleSidecar | null>(() => {
+    if (!picked) return null
+    if (frames.cues === picked.parsed.cues) return picked.parsed
+    const starts = frames.cues.flatMap((c) => (typeof c.start === "number" ? [c.start] : []))
+    const ends = frames.cues.flatMap((c) => (typeof c.end === "number" ? [c.end] : []))
+    return {
+      cues: [...frames.cues],
+      report: {
+        ...picked.parsed.report,
+        ...(starts.length ? { spanStartMs: Math.round(Math.min(...starts) * 1000) } : {}),
+        ...(ends.length ? { spanEndMs: Math.round(Math.max(...ends) * 1000) } : {}),
+      },
+    }
+  }, [picked, frames.cues])
+
+  const report = fixed?.report
+  const span = fixed ? cueSpan(fixed) : null
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
@@ -131,6 +153,15 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
               <p className="text-xs text-muted-foreground" data-testid="import-subtitles-untimed">
                 {t("editor.timeline.subtitleSourceUntimedCues", { count: report.untimedCues })}
               </p>
+            )}
+            {frames.finding && (
+              <div className="mt-2">
+                <FramesAsHundredthsNotice
+                  finding={frames.finding}
+                  choice={frames.choice}
+                  onChange={frames.setChoice}
+                />
+              </div>
             )}
           </div>
         ) : (
@@ -173,8 +204,8 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
             data-testid="import-subtitles-confirm"
             disabled={!picked}
             onClick={() => {
-              if (!picked) return
-              onConfirm(picked.parsed)
+              if (!fixed) return
+              onConfirm(fixed)
             }}
           >
             {picked

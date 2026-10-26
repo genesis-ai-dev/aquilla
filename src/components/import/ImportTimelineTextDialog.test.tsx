@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { t } from "@/lib/i18n/standalone"
-import { extractSrtStrings } from "@/lib/parsers/subtitle"
+import { extractSrtStrings, extractVttStrings } from "@/lib/parsers/subtitle"
+import { prepareImportFile } from "@/lib/import"
+import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 import { ImportTimelineTextDialog } from "./ImportTimelineTextDialog"
 
 const text = "1\n00:00:00,500 --> 00:00:01,500\nSupplied wording"
@@ -110,5 +112,28 @@ describe("adding captions as a linked video's rows", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Someone already added rows to this file. They're showing now.")
     expect(cancel).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Caption 1 wording")).toHaveValue("Supplied wording")
+  })
+})
+
+// AQU-2197: Attach captions gets the same frames-as-hundredths warning,
+// choice and conversion as every other VTT import.
+describe("attaching captions whose times are frame numbers in hundredths (AQU-2197)", () => {
+  it("warns, and saves the times converted at the suggested 24 fps", async () => {
+    const vtt = framesAsHundredthsVtt()
+    vi.mocked(prepareImportFile).mockResolvedValueOnce({
+      fileType: "vtt", results: [{ name: "ep101.vtt", strings: extractVttStrings(vtt), rawBytes: new TextEncoder().encode(vtt).buffer }],
+    } as never)
+    const confirm = vi.fn(async () => {})
+    render(<ImportTimelineTextDialog projectId="p" mediaName="Film" tracks={tracks}
+      onConfirm={confirm} onCancel={() => {}} />)
+    fireEvent.change(screen.getByLabelText("Caption file"), { target: {
+      files: [new File([vtt], "ep101.vtt", { type: "text/vtt" })],
+    } })
+    expect(await screen.findByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    fireEvent.click(screen.getByRole("button", { name: "Add caption track" }))
+    await waitFor(() => expect(confirm).toHaveBeenCalled())
+    const { source } = (confirm.mock.calls[0] as unknown as [{ source: { cues: { original: string; start: number }[] } }])[0]
+    const cue = source.cues.find((c) => c.original === SAMPLE_CUE.text)!
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
   })
 })

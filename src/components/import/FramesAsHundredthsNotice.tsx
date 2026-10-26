@@ -1,12 +1,47 @@
+import { useMemo, useState } from "react"
 import { AlertTriangle, Info } from "lucide-react"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { FrameRateLabel, FramesAsHundredths } from "@/lib/parsers/frame-timecode"
+import {
+  convertFramesAsHundredths,
+  detectFramesAsHundredths,
+  type FrameRateLabel,
+  type FramesAsHundredths,
+} from "@/lib/parsers/frame-timecode"
+import type { TranslatableString } from "@/lib/parsers/types"
 
 /** What the person chose for one file: a frame rate to convert at, or keep. */
 export type FramesAsHundredthsChoice = FrameRateLabel | "keep"
+
+/**
+ * The one check every VTT import runs on the cues it is about to write
+ * (AQU-2197): the finding (null when the times look fine), the person's
+ * choice — the suggested rate until they change it, and back to the
+ * suggestion when a different file is picked — and the cues with that choice
+ * applied, which is what the import should write. Pair it with
+ * `FramesAsHundredthsNotice` so every path says and offers the same thing.
+ */
+export function useFramesAsHundredths<T extends TranslatableString>(
+  cues: readonly T[] | null | undefined,
+): {
+  finding: FramesAsHundredths | null
+  choice: FramesAsHundredthsChoice
+  setChoice: (choice: FramesAsHundredthsChoice) => void
+  cues: readonly T[]
+} {
+  const finding = useMemo(() => (cues?.length ? detectFramesAsHundredths(cues) : null), [cues])
+  const [picked, setPicked] = useState<{ cues: unknown; choice: FramesAsHundredthsChoice } | null>(null)
+  const choice: FramesAsHundredthsChoice = !finding
+    ? "keep"
+    : picked && picked.cues === cues ? picked.choice : finding.suggested
+  const fixed = useMemo(
+    () => (!cues ? [] : choice === "keep" ? cues : convertFramesAsHundredths(cues, choice)),
+    [cues, choice],
+  )
+  return { finding, choice, setChoice: (next) => setPicked({ cues, choice: next }), cues: fixed }
+}
 
 /**
  * The import preview's warning for a subtitle file whose every cue time is a

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import { detectFileType } from "@/lib/parsers/types"
 import type { MediaTextSource } from "@/lib/import/media-cues"
 import type { ImportTimelineTextTrackArgs } from "@/lib/import/timeline-text"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
+import { FramesAsHundredthsNotice, useFramesAsHundredths } from "./FramesAsHundredthsNotice"
 
 export interface CaptionTrackDestination {
   id: string
@@ -53,7 +54,14 @@ export function ImportTimelineTextDialog(props: Props) {
   const rows = props.mode === "rows"
   const tracks = props.mode === "rows" ? NO_TRACKS : props.tracks
   const t = useT()
-  const [source, setSource] = useState<MediaTextSource>()
+  const [fileSource, setSource] = useState<MediaTextSource>()
+  // AQU-2197: the same frames-as-hundredths check, notice and conversion as
+  // every other VTT import. The review and the save see the chosen times.
+  const frames = useFramesAsHundredths(fileSource?.cues)
+  const source = useMemo<MediaTextSource | undefined>(
+    () => (fileSource && frames.cues !== fileSource.cues ? { ...fileSource, cues: [...frames.cues] } : fileSource),
+    [fileSource, frames.cues],
+  )
   const [name, setName] = useState("")
   const [destination, setDestination] = useState(NEW_TRACK)
   const [consentSnapshot, setConsentSnapshot] = useState<{
@@ -143,6 +151,8 @@ export function ImportTimelineTextDialog(props: Props) {
     confirmLabel={t(rows ? "importExport.captionTrack.addAsRows"
       : replacing ? "importExport.captionTrack.replace" : "importExport.captionTrack.add")}
     canConfirm={canConfirm} busy={busy} onConfirm={reviewed => void confirm(reviewed)} onCancel={cancel}>
+    {frames.finding && <FramesAsHundredthsNotice finding={frames.finding} choice={frames.choice}
+      onChange={frames.setChoice} />}
     {!rows && <>
       <Field><FieldLabel htmlFor="caption-destination">{t("importExport.captionTrack.destination")}</FieldLabel>
         <select id="caption-destination" value={destination} disabled={busy}

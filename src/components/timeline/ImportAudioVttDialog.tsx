@@ -36,6 +36,10 @@ import {
   type TimebaseVerdict,
 } from "@/lib/import/timebase"
 import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import {
+  FramesAsHundredthsNotice,
+  useFramesAsHundredths,
+} from "@/components/import/FramesAsHundredthsNotice"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { fmtClock } from "./format"
@@ -80,9 +84,9 @@ interface Props {
 }
 
 /** The span the cues cover, read off the first and last cue. */
-function cueSpan(parsed: ParsedAudioVtt): string {
-  const first = parsed.cues[0]?.start ?? 0
-  const last = parsed.cues[parsed.cues.length - 1]?.end ?? 0
+function cueSpan(cues: readonly { start?: number; end?: number }[]): string {
+  const first = cues[0]?.start ?? 0
+  const last = cues[cues.length - 1]?.end ?? 0
   return `${fmtClock(first)} – ${fmtClock(last)}`
 }
 
@@ -115,11 +119,17 @@ export function ImportAudioVttDialog({
     }
   }, [open])
 
+  /** AQU-2197: the same check, notice and conversion as every other VTT
+   *  import. `fileCues` has the chosen frame rate applied, before anything
+   *  else (the timebase check, the reconcile) looks at the cues. */
+  const frames = useFramesAsHundredths(picked?.parsed.cues)
+  const fileCues = frames.cues
+
   const verdict = useMemo<TimebaseVerdict | null>(() => {
     if (!picked || !referenceLines?.length) return null
     const cueTimes: number[] = []
     let lastCueSec = 0
-    for (const cue of picked.parsed.cues) {
+    for (const cue of fileCues) {
       if (typeof cue.start === "number") cueTimes.push(cue.start)
       if (typeof cue.end === "number") {
         cueTimes.push(cue.end)
@@ -135,10 +145,10 @@ export function ImportAudioVttDialog({
       cueTimes,
       referenceTimes,
       lastCueSec,
-      cueLines: picked.parsed.cues.map((c) => ({ startTime: c.start, original: c.original })),
+      cueLines: fileCues.map((c) => ({ startTime: c.start, original: c.original })),
       referenceLines,
     })
-  }, [picked, referenceLines])
+  }, [picked, fileCues, referenceLines])
 
   /** The correction to APPLY, or null when there is nothing to apply. Keeps
    *  every downstream caller on the shape it already understands. */
@@ -160,8 +170,8 @@ export function ImportAudioVttDialog({
    *  import was about to undo anyway. */
   const incomingCues = useMemo(() => {
     if (!picked) return []
-    return timebase ? scaleCueTimes(picked.parsed.cues, timebase.scale) : picked.parsed.cues
-  }, [picked, timebase])
+    return timebase ? scaleCueTimes(fileCues, timebase.scale) : fileCues
+  }, [picked, fileCues, timebase])
 
   /**
    * Same cues, different timings? Then this is not a replacement.
@@ -236,7 +246,7 @@ export function ImportAudioVttDialog({
             <p className="text-muted-foreground">
               {t("editor.timeline.audioVttCueSummary", {
                 count: report.totalCues,
-                span: cueSpan(picked.parsed),
+                span: cueSpan(fileCues),
               })}
             </p>
             {report.repairedShortForm > 0 && (
@@ -257,6 +267,15 @@ export function ImportAudioVttDialog({
               <p className="text-xs text-muted-foreground">
                 {t("editor.timeline.audioVttDroppedCues", { count: report.droppedCues })}
               </p>
+            )}
+            {frames.finding && (
+              <div className="mt-2">
+                <FramesAsHundredthsNotice
+                  finding={frames.finding}
+                  choice={frames.choice}
+                  onChange={frames.setChoice}
+                />
+              </div>
             )}
           </div>
         ) : (
@@ -500,7 +519,7 @@ export function ImportAudioVttDialog({
                 onReconcile(plan)
                 return
               }
-              onConfirm(picked.parsed, picked.fileName, timebase)
+              onConfirm({ ...picked.parsed, cues: [...fileCues] }, picked.fileName, timebase)
             }}
           >
             {!picked

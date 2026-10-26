@@ -148,7 +148,13 @@ export function detectFramesAsHundredths(
   return { times: times.length, maxFrame, suggested, rates }
 }
 
-/** One of those times, read back as the timecode it came from, at `rate`. */
+/** One of those times, read back as the timecode it came from, at `rate`:
+ *  `66.15` (frame 15 written as hundredths) is 66.625 s at 24 fps. Exported
+ *  for import paths whose rows carry times outside a `TranslatableString`. */
+export function convertFramesAsHundredthsSeconds(t: number, label: FrameRateLabel): number {
+  return framesAsHundredthsToSeconds(t, frameRateFor(label))
+}
+
 function framesAsHundredthsToSeconds(t: number, rate: FrameRate): number {
   const whole = Math.floor(t + 1e-9)
   const frames = Math.round((t - whole) * 100)

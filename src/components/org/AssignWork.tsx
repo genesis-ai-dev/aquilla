@@ -193,6 +193,9 @@ export function AssignWork({
   }
   // AQU-1308: why the roster is empty, when it is empty for a reason.
   const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
+  // AQU-2194: whether the roster fetch for this opening has answered, so the
+  // "nobody else is on this project" line never flashes before it does.
+  const [rosterLoaded, setRosterLoaded] = useState(false)
 
   // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
   // Revelation) rather than the incoming prop order, matching the sidebar and
@@ -220,10 +223,12 @@ export function AssignWork({
     if (!open) return
     let cancelled = false
     setRosterError(null)
+    setRosterLoaded(false)
     fetchProjectRoster(jwt, projectId)
       .then((r) => {
         if (cancelled) return
         setMembers(r.kind === "ok" ? r.members : [])
+        setRosterLoaded(true)
         if (r.kind === "roster-hidden") setRosterError("hidden")
         else if (r.kind === "no-access") setRosterError("load-failed")
       })
@@ -231,6 +236,7 @@ export function AssignWork({
         if (cancelled) return
         setMembers([])
         setRosterError("load-failed")
+        setRosterLoaded(true)
         setError(e instanceof Error ? e.message : String(e))
       })
     return () => { cancelled = true }
@@ -247,6 +253,13 @@ export function AssignWork({
   )
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
+  // AQU-2194: nobody but the caller on the project leaves the picker with one
+  // name and no word why (see AssignModal's showStaffHint, the same rule).
+  const showStaffHint =
+    rosterLoaded &&
+    !isSelfAssignMode &&
+    !rosterError &&
+    !eligibleMembers.some((m) => m.userId !== effectiveCallerUserId)
 
   useEffect(() => {
     if (isSelfAssignMode && effectiveCallerUserId != null) {
@@ -494,6 +507,11 @@ export function AssignWork({
             {isSelfAssignMode && (
               <FieldDescription>
                 {t("org.assignWork.selfAssignNote")}
+              </FieldDescription>
+            )}
+            {showStaffHint && (
+              <FieldDescription data-testid="assign-work-staff-hint">
+                {t("dialog.assign.onlyProjectMembersHint")}
               </FieldDescription>
             )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}

@@ -374,6 +374,17 @@ export function AssignModal({
     [members, isLaneDelegate],
   )
 
+  // AQU-2194: with nobody but the caller on the project, the picker above
+  // holds one name and nothing says why: people who only reach the project
+  // through the organisation are left out (AQU-676), and a newly added
+  // language has nobody staffed on it yet. Say so, and where people are
+  // added (the language's Staff… on the project Overview). Self-assign mode
+  // and a missing roster have their own lines.
+  const showStaffHint =
+    !isSelfAssignMode &&
+    !rosterUnavailable &&
+    !eligibleMembers.some((m) => m.userId !== effectiveCallerUserId)
+
   // AQU-497: group the books-scope file list by corpusMarker (real season/
   // testament grouping — see file banner) so a whole season can be selected
   // in one click via the per-group "Select all".
@@ -935,6 +946,11 @@ export function AssignModal({
             </Select>
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
+            )}
+            {showStaffHint && (
+              <FieldDescription data-testid="assign-modal-staff-hint">
+                {t("dialog.assign.onlyProjectMembersHint")}
+              </FieldDescription>
             )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (

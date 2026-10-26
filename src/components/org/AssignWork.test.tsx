@@ -211,6 +211,27 @@ describe("AssignWork", () => {
     expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("targetLang")
   })
 
+  it("AQU-2194: says why nobody else can be picked once the roster has loaded", async () => {
+    // wendi is the only one on the project; kofi reaches it only through the
+    // organisation, so AQU-676 leaves him out of the picker.
+    rosterOk([
+      { userId: 5, username: "wendi", role: { level: 600, name: "maintainer", source: "creator" }, secondarySources: [] },
+      { userId: 7, username: "kofi", role: { level: 400, name: "contributor", source: "org" }, secondarySources: [] },
+    ])
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const hint = await screen.findByTestId("assign-work-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+  })
+
+  it("AQU-2194: stays quiet when someone else is on the project", async () => {
+    rosterOk()
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    expect(screen.queryByTestId("assign-work-staff-hint")).toBeNull()
+  })
+
   it("opens, loads members, and emits a book-scope assignment.create", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-new")

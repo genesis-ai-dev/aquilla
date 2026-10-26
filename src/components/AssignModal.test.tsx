@@ -191,6 +191,49 @@ describe("project-member-only assignee picker (AQU-676)", () => {
   })
 })
 
+describe("nobody else on the project yet (AQU-2194)", () => {
+  // Come and See, Oct 26: a PM added a target language and opened Assign work
+  // to give it to a linguist. The linguist was in the organisation but not on
+  // the project, so (AQU-676) the picker held only the PM, with no word why.
+  const CREATOR = {
+    userId: 5,
+    username: "wendi",
+    role: { level: 600, name: "maintainer", source: "creator" as const },
+    secondarySources: [],
+  }
+  const LINGUIST_IN_ORG_ONLY = {
+    userId: 7,
+    username: "kofi",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+
+  it("says why only the caller can be picked, and where to add people", () => {
+    render(<AssignModal {...BASE_PROPS} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+    expect(hint.textContent).toMatch(/Staff…/)
+  })
+
+  it("says nothing once someone else is on the project", () => {
+    render(<AssignModal {...BASE_PROPS} members={[CREATOR, ...BASE_PROPS.members, LINGUIST_IN_ORG_ONLY]} />)
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves self-assign mode to its own explanation", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        roleLevel={ROLE.CONTRIBUTOR}
+        allowSelfAssignment
+        callerUserId={5}
+      />,
+    )
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled popup.
 // The shared helper drives the pointer sequence Base UI requires to commit a
 // choice (see src/test-utils/select.tsx); here we additionally hold it to

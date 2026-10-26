@@ -278,6 +278,12 @@ export const org = defineNamespace({
     "org.orgHome.table.validatedHeaderLabel": "Validated",
     "org.orgHome.table.validatedHeaderDescription":
       "Validated: percentage of cells marked validated by a reviewer.",
+    // AQU-2178: the project overview's Languages table splits that one heading
+    // in two — a language's validated TEXT under this one, its approved
+    // recordings under org.projectOverview.audioValidated, whose tile on the
+    // same page shows the very same figure. Title case follows those tiles, so
+    // the pair reads alike wherever both are on screen.
+    "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
     "org.orgHome.table.audioHeaderDescription":
       "Audio: percentage of cells with at least one recording attached.",
@@ -935,6 +941,10 @@ export const org = defineNamespace({
     "org.overviewLaneTable.addLanguageAction": "Add language",
     "org.overviewLaneTable.archivedGroup": "Archived ({count})",
     "org.overviewLaneTable.archivedBadge": "Archived",
+    // AQU-2178: an archived language's row sits under no column headings, so
+    // each validation figure says which half it is.
+    "org.overviewLaneTable.pctTextValidated": "{pct}% text validated",
+    "org.overviewLaneTable.pctAudioValidated": "{pct}% audio validated",
 
     // -- ProjectLaneSubRows: expanded per-lane detail for an OrgHome project row --
     "org.projectLaneSubRows.noActivity": "No activity",
@@ -2767,6 +2777,27 @@ export const org = defineNamespace({
           "on the project overview, marking that language lane as archived (retired). It " +
           "describes the lane, so where the word must agree with a noun it agrees with " +
           "the word used for a language lane.",
+      },
+      "org.overviewLaneTable.pctTextValidated": {
+        description:
+          "An archived language's validated-TEXT figure inside the expanded Archived " +
+          "group on the project overview. Those rows sit under no column headings, so " +
+          "unlike the table's 'Text Validated' header this one names itself in a short " +
+          "lower-case phrase after the percentage. 'text' distinguishes it from the " +
+          "audio figure beside it (org.overviewLaneTable.pctAudioValidated) — the share " +
+          "of the language's lines whose TRANSLATION a reviewer has signed off, not its " +
+          "recordings.",
+        placeholders: { pct: "Whole-number text-validated percentage, e.g. 20." },
+      },
+      "org.overviewLaneTable.pctAudioValidated": {
+        description:
+          "An archived language's approved-RECORDINGS figure inside the expanded " +
+          "Archived group on the project overview, the twin of " +
+          "org.overviewLaneTable.pctTextValidated and shown only for a language that " +
+          "owes audio. 'audio' distinguishes it from the text figure beside it — the " +
+          "share of the language's lines whose RECORDING a reviewer has approved, not " +
+          "its translations.",
+        placeholders: { pct: "Whole-number audio-validated percentage, e.g. 20." },
       },
       "org.orgProjectsDataTable.unitsColumn": {
         description:

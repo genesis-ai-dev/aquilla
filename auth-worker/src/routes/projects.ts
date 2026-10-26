@@ -92,6 +92,7 @@ import {
   parseScopeLanes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
@@ -2381,6 +2382,14 @@ projects.post(
         403,
       )
     }
+    // AQU-1579: the match above is only a string compare. Refuse before the
+    // invite is claimed so an unverified account cannot spend it.
+    const unverified = await emailBoundInviteUnverified(
+      c.env.AQUILLA_PG,
+      user.id,
+      invite.email,
+    )
+    if (unverified) return c.json(unverified, 403)
 
     // Guard: can't join an archived project via invite.
     const project = await c.env.AQUILLA_PG.prepare(

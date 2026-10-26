@@ -497,6 +497,10 @@ describe("accept-invite: email-bound enforcement (AQU-283)", () => {
   it("allows redeem when redeemer email matches invite email (case-insensitive)", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob") // email: bob@example.com
+    // AQU-1579: a matching address redeems only after email_verified_at is set.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 2",
+    ).run()
     await seedProject("p-email-ok", 1)
     await env.AQUILLA_PG.prepare(
       "INSERT INTO project_invites (token, project_id, role_level, created_by, email, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1045,6 +1049,10 @@ describe("AQU-364: magic-link invite accept — real redeem path via JoinPage's 
   it("accepts a freshly-minted email-bound single-project invite via the multi accept endpoint immediately", async () => {
     await seedUser(20, "lead20") // project_lead, mints the invite
     await seedUser(21, "invitee21") // email: invitee21@example.com
+    // AQU-1579: a matching address redeems only after email_verified_at is set.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 21",
+    ).run()
 
     await env.AQUILLA_PG.prepare(
       "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 20)",

@@ -269,3 +269,112 @@ describe("team writes — lane grants (AQU-1801)", () => {
     })
   })
 })
+
+// AQU-1818: revoking a direct membership used to leave lane scopes and grant
+// rows behind. A later team path then re-levelled that one lane, so someone
+// who rejoined through a team did not get the lanes the team grants.
+describe("a removed member who returns through a team (AQU-1818)", () => {
+  async function addScoped(lane = "lane0002") {
+    return app.request(
+      "/api/v2/projects/p1/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ username: "carol", role: CONTRIBUTOR, scopeLanes: [lane] }),
+      },
+      env,
+    )
+  }
+
+  async function revokeAll() {
+    return app.request(
+      "/api/v2/projects/p1/members/3/revoke-all",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: "{}" },
+      env,
+    )
+  }
+
+  async function scopesFor(): Promise<string[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT value FROM project_member_scopes
+        WHERE project_id = 'p1' AND user_id = 3 AND kind = 'lane' ORDER BY value`,
+    ).all<{ value: string }>()
+    return (results ?? []).map((row) => row.value)
+  }
+
+  const bothLanes = [
+    { lane: "lane0001", level: CONTRIBUTOR },
+    { lane: "lane0002", level: CONTRIBUTOR },
+  ]
+
+  it("revoke then attach grants every current lane and leaves no scope", async () => {
+    await seedOrg({ attach: false })
+    await onTeam(3)
+    expect((await addScoped()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+
+    expect((await revokeAll()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopesFor()).toEqual([])
+
+    expect((await attachProject(CONTRIBUTOR)).status).toBe(200)
+    expect(await grantsFor(3)).toEqual(bothLanes)
+    expect(await scopesFor()).toEqual([])
+  })
+
+  it("revoke then add-to-team grants every current lane and leaves no scope", async () => {
+    await seedOrg()
+    expect((await addScoped()).status).toBe(200)
+    expect((await revokeAll()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([])
+    expect(await scopesFor()).toEqual([])
+
+    expect((await addToTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual(bothLanes)
+    expect(await scopesFor()).toEqual([])
+  })
+
+  it("revoking only the direct membership leaves the team's lanes in place", async () => {
+    await seedOrg()
+    expect((await addToTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual(bothLanes)
+    // The direct add narrows her to one lane. Revoking that membership must
+    // restore the lanes the team already conferred, not keep the old limit.
+    expect((await addScoped()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+
+    expect((await revokeAll()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual(bothLanes)
+    expect(await scopesFor()).toEqual([])
+  })
+
+  it("a current lane-scoped member who also joins the team keeps those lanes", async () => {
+    await seedOrg()
+    expect((await addScoped()).status).toBe(200)
+    expect((await addToTeam()).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([{ lane: "lane0002", level: CONTRIBUTOR }])
+    expect(await scopesFor()).toEqual(["lane0002"])
+  })
+
+  it("a team role change ignores a scope left by a membership that has ended", async () => {
+    await seedOrg()
+    await onTeam(3)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_member_scopes (project_id, user_id, kind, value, created_by, created_at)
+       VALUES ('p1', 3, 'lane', 'lane0002', '1', 0)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level, granted_by)
+       VALUES ('p1', 3, 'lane0002', ?, 1)`,
+    )
+      .bind(CONTRIBUTOR)
+      .run()
+
+    expect((await setAttachmentRole(VIEWER)).status).toBe(200)
+    expect(await grantsFor(3)).toEqual([
+      { lane: "lane0001", level: VIEWER },
+      { lane: "lane0002", level: VIEWER },
+    ])
+    expect(await scopesFor()).toEqual([])
+  })
+})

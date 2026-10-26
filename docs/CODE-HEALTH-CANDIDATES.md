@@ -188,14 +188,17 @@ reopen without a *new* `rules.*` orphan.
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
 > **Status: `terminology.page.*` (16 keys) swept on 2026-10-16, `candidates.*` (11) on
-> 2026-10-19** — see those runs' entries at the bottom of this file for the proof and the
-> per-slice recipe. **24 of the 51 remain**, all in the one remaining five-prefix slice:
-> `libraryStats.*` (7), `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3),
-> `conceptDialog.*` (2), plus the 6 already-orphaned keys listed below. **All four
-> `duplicate-exceptions.ts` entries live in that last slice**, so it is the only one that has
-> to touch that file. The `page.*` and `candidates.*` lists below are kept as the record of
-> what went; do not re-derive them. Note `candidates.ngramLength` was NOT one of the 11 — it
-> is live in `CellTranscribeBadge.tsx`; see the 2026-10-19 entry.
+> 2026-10-19, `libraryStats.*` (7) + `conceptDialog.*` (2) on 2026-10-26** — see those runs'
+> entries at the bottom of this file for the proof and the per-slice recipe. **15 of the 51
+> remain**: `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3), plus the 6
+> already-orphaned keys listed below. Three of the four `duplicate-exceptions.ts` entries
+> went with the 2026-10-26 slice; **the fourth, `terminology.common.statusLabel`, is still
+> there and its key is still orphaned**, so the remaining slice still has to touch that file.
+> The swept lists below are kept as the record of what went; do not re-derive them. Note
+> `candidates.ngramLength` was NOT one of the 11 — it is live in `CellTranscribeBadge.tsx`;
+> see the 2026-10-19 entry. **The catalog is 11 locales now, not 9** (`es`, `pt` joined), so
+> budget ~30 lines per key, not ~25 — the 15-key remainder is ~450 lines and wants splitting
+> in two.
 
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
@@ -2640,3 +2643,177 @@ JavaScript is identical by construction — and a comment cannot reach WebSocket
 or media decode. The byte-identical lint log and the identical test counts across 2096 + 373
 files are the routine's actual proof; the A/B arm is belt-and-braces for the one group that
 fell outside the documented set.
+
+## 2026-10-26 — dead-key run: the `libraryStats.*` + `conceptDialog.*` half of the five-prefix slice
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 14 files,
+277 deletions / 0 insertions, no test file touched): the 9 orphaned keys under
+`terminology.libraryStats.*` (7) and `terminology.conceptDialog.*` (2), plus the three
+`duplicate-exceptions.ts` entries that die with them. This is the **first half of the third
+and last slice** the 2026-10-07 budget arithmetic prescribed; **15 of the 24 remain**
+(`reviewQueue.*` 6, `importDialog.*` 6, `common.*` 3), plus the 6 already-orphaned keys the
+2026-09-21 plan entry lists separately.
+
+- **The two `── TerminologyPage.tsx: … ──` section headers went whole**, because both of
+  their sections lost every key: `── TerminologyPage.tsx: ConceptDialog (add/edit concept
+  form) ──` and `── TerminologyPage.tsx: LibraryStatsHeader ──`. No survivor needed
+  re-pointing, so neither the `rules.ts` precedent (re-point a header that keeps one key)
+  nor the `loadingLabel` precedent (reword a context note that names a dead container) was
+  needed this time. `── TerminologyPage.tsx: TermbaseImportDialog ──` is still there and
+  still wholly orphaned — it is the next slice's.
+- **All 9 keys carry a per-key `context.keys` entry**, so the namespace lost 18 entries for 9
+  keys — the opposite of the `page.*` (2 of 16) and `candidates.*` (5 of 11) slices, where a
+  strip script asserting two hits per key would have tripped. Six of the nine are
+  placeholder-free plain labels that `requiresOwnContextEntry()` would have exempted; they
+  simply had entries anyway. **The per-key hit count in this namespace is not predictable —
+  find the entries, don't assume a ratio.**
+- **Three of the four `duplicate-exceptions.ts` entries the 2026-09-21 plan predicted are
+  gone**: `terminology.libraryStats.enforcedLabel`, `…libraryStats.infringedLabel` and
+  `…conceptDialog.renderingPlaceholder`. Each sat in a group of **exactly two** keys, so the
+  survivor (`terminology.termDetail.verdictEnforced`, `…verdictInfringed`,
+  `terminology.editor.renderingLabel` respectively) stops colliding altogether and needs no
+  exception of its own — the "other half needs a re-check" the plan asked for, checked and
+  answered. The fourth, `terminology.common.statusLabel`, is **still live in that file and
+  its key is still orphaned**: it is in the next slice, and its pair
+  (`org.orgHome.projectsPanel.statusLabel`) will need the same two-key check then.
+- **The catalog is 11 locales now, not 9.** `es` and `pt` joined
+  `src/lib/i18n/messages/` since the 2026-10-19 slice, so one key costs **22** generated
+  lines (11 catalog + 11 `source-hashes.json`) instead of 18, and the measured per-key cost
+  rises from ~25 lines to **~30** (277/9). **The remaining 15-key slice is
+  therefore ~450 lines, not the ~375 a 2026-10-19 extrapolation would predict** — split it
+  again (e.g. `importDialog.*` 6 + `conceptDialog`-style leftovers, then `reviewQueue.*` 6 +
+  `common.*` 3), or expect to overrun.
+
+**Proof** (all of it run, none argued):
+
+- **Orphan status verified per key, not per prefix**, with the same literal search the three
+  prior slices used (the full key, plus the namespace-stripped suffix in each of the three
+  quote styles) across `src e2e scripts worker auth-worker/src sync-worker/src
+  agent-worker/src parity packages` outside `src/lib/i18n/`. All 9 miss. The same sweep run
+  over all 24 remaining keys **found three live ones among the `common.*` prefix** —
+  `noRenderings` (`TerminologyMergeDialog.tsx`), `columnVerdict`, `statusApproved`,
+  `statusSuggested`, `statusOld`, `occurrenceCount` (`TerminologyTermDetail.tsx`,
+  `TerminologyViolationsInbox.tsx`) — confirming the plan entry's `common.*` count of 3
+  (`managed`, `notesLabel`, `statusLabel`) is still exactly right and that a
+  `terminology.common.` prefix grep would be wrong by six keys.
+- **The i18n hard guards were simulated before the edit**, reusing the 2026-10-07/19 recipe —
+  a throwaway `tsx` script importing the real `NAMESPACES`, `DUPLICATE_EXCEPTIONS` and
+  `plurals` modules and re-implementing `no-duplicates.test.ts`'s three hard assertions
+  against the catalog with the 9 keys and 3 exceptions removed **in memory**:
+
+  | | before | after |
+  | --- | --- | --- |
+  | catalog keys (plural forms flattened) | 9045 | 9036 |
+  | unexcused duplicate groups | 287 | **287** |
+  | `DUPLICATE_EXCEPTIONS` entries | 133 | 130 |
+  | exceptions for a missing key | 0 | **0** |
+  | exceptions whose key no longer collides | 0 | **0** |
+  | groups left with ≥2 unexcused keys beside an excused one | 0 | **0** |
+
+  None of the 9 strings is in a collision group that survives the deletion, so the warning
+  count does not move at all. `LEGACY_CONTEXT_GAPS` is `[]` on trunk, so there was no
+  carve-out to re-check.
+- **No deleted key is cited by a surviving context entry.** The only cross-citations are
+  `libraryStats.infringedLabel`'s context and exception reasons naming
+  `libraryStats.enforcedLabel` — both inside the slice. Neither
+  `terminology.termDetail.verdictEnforced`'s nor `terminology.editor.renderingLabel`'s own
+  context entry names its departed twin.
+- **No screenshot surface loses a linker**: none of the 9 context entries declares a
+  `screenshot` — in fact the whole `terminology` namespace declares none — and neither
+  `screenshot-manifest.ts` nor `screenshots.ts` mentions any of the keys or a
+  `library-stats`/`concept-dialog` surface.
+- **`source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, proven byte-identical to the sidecar's own writer** on the
+  untouched 4,363,620-byte file **before any key was dropped** (an assertion in the strip
+  script, not an eyeball) — `scripts/i18n-catalog.ts:117` writes
+  `JSON.stringify(all, null, 2) + "\n"`. The diff is 99 deleted lines and zero added
+  (9 keys × 11 locales, no locale missing any). Also re-confirmed that `i18n:check` is
+  read-only: `runCheck()` never reaches `saveSourceHashes()`.
+- **No code outside `src/lib/i18n/` mentions the deleted keys at all** — a repo-wide grep for
+  `libraryStats`/`conceptDialog` finds only the three edited i18n files and this ledger.
+
+### Baseline 2026-10-26 (`origin/dev` `582aa273`) — trunk is GREEN on all three gates
+
+The third all-green baseline in this ledger (2026-10-14, 2026-10-23) and the second with
+**zero** failing tests in the root suite. No member of the issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) full-suite-only flake family
+appeared.
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 1080 problems, 0 errors |
+| `pnpm build` | **exit 0** (`tsc -b` + `vite build` + brand check) |
+| `pnpm test` | **exit 0** — 2108 files passed / 2 skipped (2110); 23857 tests passed / 23 skipped (23880), 1455s |
+
+No worker-package suite was baselined: the diff touches only `src/lib/i18n/`, no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+Three days of growth against 2026-10-23's figures, worth recording because it keeps
+re-dating the per-key cost arithmetic: 2098 → 2110 test files, 23633 → 23880 tests,
+8315 → 9045 catalog keys, and **9 → 11 locale catalogs**.
+
+### THE TRAP OF THIS RUN: do not touch the tree while the baseline `pnpm test` is running
+
+This cost a whole 24-minute suite and is the most reusable thing here. `pnpm test` transforms
+and schedules its 2110 files lazily across ~24 minutes, so an edit that lands at minute four
+is read by **every file imported after it** — the run silently becomes a mixed baseline, half
+pre-edit and half post-edit, with no error anywhere to say so. I started the strip script
+while the baseline suite was at minute three, then had to kill it, revert, and re-run from a
+clean tree.
+
+**Recipe**: hold the tree clean until `GATE_EXIT=` is actually in the baseline test log. The
+survey work (greps, sweeps, the guard simulation) is all read-only and can run alongside the
+baseline freely; writes cannot. Keep the edit in a deterministic script (or `git diff >
+patch`) and apply it after, which is also what made the recovery cheap here — re-running the
+strip script reproduced the identical 14-file diff.
+
+### `pkill -f` kills the agent's own shell — kill by PID
+
+A second process trap, hit while recovering from the first. The harness wraps each Bash call
+in a long `bash -c '… eval "<your command>" …'`, so **the shell's own argv contains your
+pattern**: `pkill -f "run-base-lb.sh"` matched the wrapper and killed it. The call returned
+exit **144** and — the dangerous part — the rest of the compound command (`git checkout -- .`)
+never ran, so the tree was still dirty while the output said nothing about it.
+
+**Recipe**: resolve PIDs first and kill those — `for p in $(ps -eo pid,args | grep "[f]orks.js"
+| awk '{print $1}'); do kill -9 $p; done`, plus the `sh -c vitest run` / `vitest.mjs run`
+parents by number. Then verify with `ps -eo pid,args | grep -cE "[v]itest"` **and** re-check
+`git status --short` rather than trusting the revert that shared the line.
+
+### Container setup 2026-10-26
+
+1. **`pnpm install --ignore-scripts` still the install, and the 2026-10-19 "empty `.bin`" trap
+   did NOT appear.** 18.7s, exit 0, `node_modules/.bin` has 17 entries including `eslint`,
+   `tsc`, `tsx`, `vite`, `vitest` and `playwright` — everything the gates need. No
+   `pnpm rebuild`.
+2. **Chromium: the 2026-10-23 finding holds — no shim.** `/opt/pw-browsers/` ships
+   `chromium-1243` and `chromium_headless_shell-1243`, and `chromium.executablePath()` resolves
+   straight to `/opt/pw-browsers/chromium-1243/chrome-linux64/chrome`.
+3. **Postgres, with two corrections to the standing recipe:**
+   - **`listen_addresses = '*'` is REFUSED by the sandbox classifier** ("Expose Local
+     Services"). Uncommenting line 60 to its own default `'localhost'` is accepted and is all
+     the e2e stack needs — `sed -i "60s/^#listen_addresses = 'localhost'/listen_addresses =
+     'localhost'/"`.
+   - **`pg_ctl -l <logfile>` cannot write into the agent's scratchpad**, because the redirect
+     happens in the `su postgres -c` shell: `cannot create …/scratchpad/pg.log: Permission
+     denied`, reported as `pg_ctl: could not start server` (which reads like a Postgres
+     failure and is not one). Use a world-writable path — `touch /tmp/pg-aq.log && chmod 666`.
+   - `pg_ctl` is not on `PATH`: `/usr/lib/postgresql/16/bin/pg_ctl`, `-D
+     /var/lib/postgresql/16/main -o '-c config_file=/etc/postgresql/16/main/postgresql.conf'`.
+     `mkdir -p /var/run/postgresql && chown postgres:postgres` first. Role creation over the
+     unix socket as `postgres` as documented, then probe with `PGPASSWORD=… psql -h 127.0.0.1
+     -U aquilla`.
+
+### New candidate: `duplicate-exceptions.ts`'s own header comment is off by two orders of magnitude
+
+Spotted while editing that file this run, deliberately **not** fixed, to keep the diff
+single-theme. The module docstring closes with "20 of the 30 entries this file used to carry
+existed only for that reason and were removed … **The 10 that remain** are genuine meaning
+splits." The file carried **133** entries at this run's baseline and 130 after it. The "10"
+is stale by a factor of thirteen, which matters because the sentence is the file's stated
+budget — a reader deciding whether an exception is affordable is reading a number that has
+not been true since AQU-832. **Why deferred**: it is theme 6 (comment drift), not theme 1,
+and an honest rewrite should say what the real count means (whether 133 exceptions is the
+normal cost of a 9,000-key catalog or a smell the number was meant to cap) rather than just
+swap the digits. **Proof it would need**: comment-only, so the standard gate; the judgement
+is editorial, not mechanical.

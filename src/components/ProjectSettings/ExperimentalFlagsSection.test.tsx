@@ -5,6 +5,7 @@ import * as projectIndex from "@/lib/store/project-index"
 import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
 import { FLAGS, isAutopilotVisible, isFlagEnabled } from "@/lib/features/flags"
 import { ROLE } from "@/lib/frontier/roles"
+import { en } from "@/lib/i18n/messages/en"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 vi.mock("@/components/checking/CheckingLinkCreator", () => ({ CheckingLinkCreator: () => <div>Checking link creator</div> }))
@@ -330,5 +331,50 @@ describe("ExperimentalFlagsSection — Smart Extensions switch (AQU-1937)", () =
     const toggle = await screen.findByRole("switch", EXTENSIONS_SWITCH)
     expect(toggle).toBeChecked()
     expect(toggle).toHaveAttribute("aria-disabled", "true")
+  })
+})
+
+describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () => {
+  function rowText(name: string): string {
+    const toggle = screen.getByRole("switch", { name, exact: true })
+    const row = toggle.closest("div.flex")
+    expect(row).not.toBeNull()
+    return row?.textContent ?? ""
+  }
+
+  it("says a switch stays on this device only when that switch really does", async () => {
+    await createProject(makeProject())
+    render(
+      <ExperimentalFlagsSection
+        projectId="p1"
+        roleLevel={ROLE.OWNER}
+        onSetAutopilotEnabled={() => {}}
+        onSetSmartExtensionsEnabled={() => {}}
+      />,
+    )
+
+    expect(en["projectSettings.group.experimentalDescription"]).toBe(
+      "Autopilot, extensions, and other early features",
+    )
+    expect(en["autopilot.settings.experimentalDescription"]).toBe(
+      "Early features still in development.",
+    )
+    expect(await screen.findByText("Early features still in development.")).toBeVisible()
+    expect(screen.queryByText(/this device only/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/stays on this device/i)).not.toBeInTheDocument()
+
+    for (const name of ["Try Autopilot", "Smart Extensions"]) {
+      expect(rowText(name)).not.toMatch(/this device/i)
+    }
+    for (const name of [
+      "Community checking (WIP)",
+      "Agent modes",
+      "Smart edits",
+      "Harmonizer",
+      "Smart edits: AI wording",
+      "Bible data enrichments",
+    ]) {
+      expect(rowText(name)).toMatch(/Only on this device/)
+    }
   })
 })

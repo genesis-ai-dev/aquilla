@@ -11,8 +11,8 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { hasTiming, sortByLens } from "@/lib/timeline/derive"
-import { buildProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { buildProgramme, programmeLines, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { standInEstimator } from "@/lib/timeline/stand-in"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -921,24 +921,25 @@ function progRebuild(): void {
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
-  // drawing would disagree about where a verse is: same filter, same sort.
-  const mediaCells = sortByLens(
-    ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
-    "time",
-  )
-  // AQU-1704: a video-less subtitle import has no media cells, so its cues are
-  // the verses. TimelineEditor's layout falls back to the subtitle lane the same way.
-  const dialogue =
-    mediaCells.length > 0
-      ? mediaCells
-      : sortByLens(
-          ctx.cells.filter((c) => hasTiming(c)),
-          "time",
-        )
+  // drawing would disagree about where a verse is: ONE shared answer
+  // (programmeLines). AQU-1704: a video-less subtitle import's cues are the
+  // verses. AQU-2204: a file with no times at all lays its lines out in order,
+  // an unrecorded one at a stand-in length that playback steps over.
+  const { lines: dialogue, untimed } = programmeLines(ctx.cells)
+  const built = buildProgramme(dialogue, untimed ? { standInLenSec: standInEstimator(dialogue) } : undefined)
+  // A take whose length was never measured (a generated voice nobody has
+  // played yet) has no window the programme can play. On a file with times
+  // that is today's rule — the verse is silent — but a file with NO times only
+  // reaches the programme through AQU-2204's stand-ins, so there it keeps the
+  // plain line-by-line path it always had rather than going quiet.
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
+    programme = null
+    return
+  }
   // Hidden lines keep their place (the timeline draws them there, faded) but
   // their takes are taken out of what plays: a hidden verse sounds only its
   // original, and one with no original is skipped.
-  programme = withoutHiddenTakes(buildProgramme(dialogue), new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
+  programme = withoutHiddenTakes(built, new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
   setProgress({ duration: programme.totalSec })
 }
 

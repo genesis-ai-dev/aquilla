@@ -339,6 +339,27 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     }
   })
 
+  // ── AQU-2173 regression guard ──────────────────────────────────────────────
+  //
+  // The rail is chrome. Every footnote action lives behind the `⋯` (AQU-200),
+  // so if pressing `⋯` lets the browser move focus off the cell editor, the
+  // text selection — and with it the footnote's anchor — is gone before the
+  // menu even paints: the marker lands at the end of the cell with nothing
+  // prefilled. Cancelling the mouse-down is what keeps the caret where it is.
+  it("AQU-2173: pressing ⋯ cancels its mouse-down so the cell keeps the caret", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+
+    // fireEvent returns false when a cancelable event was preventDefault()ed.
+    expect(fireEvent.mouseDown(trigger)).toBe(false)
+
+    // …and the menu still opens on the click that follows.
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+  })
+
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
     const onOpenComments = vi.fn()
     renderTable({ onOpenComments })

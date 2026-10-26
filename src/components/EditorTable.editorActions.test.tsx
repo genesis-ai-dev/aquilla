@@ -360,6 +360,50 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
   })
 
+  // The other half of AQU-2173: because the caret stays in the cell, an Escape
+  // aimed at the open menu starts inside the editor. The row has to swallow it
+  // there, or the editor's own Escape (AQU-297 — commit and exit to the grid)
+  // would fire on the way out and take the caret with it.
+  it("AQU-2173: the open ⋯ menu leaves the caret in the cell, and Escape closes only the menu", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    // Click into the cell so the editor is mounted and holds the caret — the
+    // state this guard is about.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const editorSurface = document.querySelector(".ProseMirror") as HTMLElement
+    fireEvent.focus(editorSurface)
+    const row = editorSurface.closest("[data-grid-row]") as HTMLElement
+
+    // A pointer open, not a bare click: base-ui reads the interaction type to
+    // decide whether to pull focus into the popup, and only a keyboard open
+    // should (otherwise the menu is unreachable from the `⋯`).
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+
+    // The menu is open and the cell still has the caret — the selection the
+    // menu's actions act on is still there to act on.
+    expect(document.activeElement).toBe(editorSurface)
+
+    fireEvent.keyDown(editorSurface, { key: "Escape" })
+
+    // Escape closed the menu…
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
+    })
+    // …and did nothing else. Let it through to the editor and ProseMirror's own
+    // handler blurs it and hands focus back to the grid row (AQU-297), losing
+    // the caret with it.
+    expect(document.activeElement).toBe(editorSurface)
+  })
+
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
     const onOpenComments = vi.fn()
     renderTable({ onOpenComments })

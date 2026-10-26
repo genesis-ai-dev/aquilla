@@ -8143,6 +8143,20 @@ function EditorRow({
         onPointerDownCapture={handleRowPointerDownCapture}
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
+        // AQU-2173: the `⋯` menu now opens without taking the caret off this
+        // row's editor, so an Escape meant to dismiss the menu would otherwise
+        // reach the editor's own Escape (AQU-297 — commit and exit to the grid)
+        // on its way out of the row. While the menu is open, Escape closes the
+        // menu and nothing else: the caret and selection stay put, so typing
+        // carries on where it left off. A keyboard-opened menu holds focus
+        // inside its own popup, which portals out of this row — that Escape
+        // never reaches here and base-ui dismisses it as before.
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape" || !railOverflowOpen) return
+          event.preventDefault()
+          event.stopPropagation()
+          setRailOverflowOpen(false)
+        }}
       >
         {/* AQU-1333: caret park for the activation window. Inert and invisible
             the rest of the time — it only becomes editable because the row it

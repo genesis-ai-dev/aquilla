@@ -195,6 +195,20 @@ invites.post(
 invites.get("/mine", authMiddleware, async (c) => {
   const user = c.get("user")
 
+  // [Pen test] Auth & session mgmt (2026-10-26): registration never verifies
+  // the email, so anyone could register an invitee's address first and list
+  // (then accept) the invites sent to it. Email-matched discovery only trusts
+  // an address the account has proven it controls. Invite-link accept (the
+  // token holder path) is unchanged, so legit invitees see no new friction.
+  const verified = await c.env.AQUILLA_PG.prepare(
+    "SELECT email_verified_at FROM users WHERE id = ?",
+  )
+    .bind(user.id)
+    .first<{ email_verified_at: string | null }>()
+  if (!verified?.email_verified_at) {
+    return c.json({ invites: [] })
+  }
+
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT pi.token AS token,
             pi.project_id AS project_id,

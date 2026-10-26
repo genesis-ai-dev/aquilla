@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, portfolioShowsText, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -406,5 +406,32 @@ describe("attentionRank", () => {
     const now = Date.now()
     const neverEdited = project({ id: "n", name: "Never", totalCells: 100, validatedCells: 100, lastEditAt: null })
     expect(attentionRank(neverEdited, now)).toBeGreaterThanOrEqual(1000)
+  })
+})
+
+describe("portfolioShowsText (AQU-2116 + media redesign)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 100, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  it("keeps AQU-2116's evidence answer to the letter when nobody has chosen", () => {
+    const lanes = [lane({ lane: "", audioCells: 60 })]
+    const p = project({ totalCells: 100, filledCells: 0, audioCells: 60, lanes })
+    expect(portfolioShowsText(p, null)).toBe(!isAudioOnlyView(p, null))
+    expect(portfolioShowsText(p, lanes[0])).toBe(!isAudioOnlyView(p, lanes[0]))
+  })
+
+  it("a language set to Text shows its text even with recordings and no text yet", () => {
+    const sw = lane({ lane: "", audioCells: 60, delivers: "text" })
+    expect(portfolioShowsText(project({ totalCells: 100, audioCells: 60, lanes: [sw] }), sw)).toBe(true)
+  })
+
+  it("a language set to Audio hides the text tiles even with some text in it", () => {
+    const sw = lane({ lane: "", filledCells: 5, audioCells: 60, delivers: "audio" })
+    expect(portfolioShowsText(project({ totalCells: 100, filledCells: 5, audioCells: 60, lanes: [sw] }), sw)).toBe(false)
+  })
+
+  it("on All, an Audio language beside one nobody chose that holds text keeps the text tiles", () => {
+    const sw = lane({ lane: "", audioCells: 60, delivers: "audio" })
+    const fr = lane({ lane: "fr", filledCells: 40, audioCells: 0 })
+    expect(portfolioShowsText(project({ totalCells: 200, filledCells: 40, audioCells: 60, lanes: [sw, fr] }), null)).toBe(true)
   })
 })

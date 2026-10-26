@@ -4,6 +4,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { BookHealthSpine, type BookHealthChapter } from "./BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressViewFor } from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 interface Props {
   projectId: string
@@ -31,10 +32,16 @@ interface Props {
    * multi-lane project.
    */
   lane?: string
+  /**
+   * Media redesign: what that language delivers, when someone has chosen. It
+   * decides the unit the chapters are drawn in (`deliversView`); absent, the
+   * file's own evidence does, as below.
+   */
+  delivers?: LaneDelivers | null
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch, lane }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, getChapters, deferFetch, lane, delivers }: Props) {
   const t = useT()
   const chapters = useMemo(() => getChapters?.(), [getChapters])
   // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
@@ -71,9 +78,10 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
   // per-chapter progress, which carries the audio pair — so the chapter list
   // shows it, in the same unit the chapter picker would. The view is decided
   // over the whole file by AQU-2110's shared rule, so a file never shows a
-  // patchwork of chapters measured in different things.
+  // patchwork of chapters measured in different things — and what the
+  // language delivers overrides it where someone has chosen.
   const serverChapters = sections ?? []
-  const serverView = progressViewFor(serverChapters.map((section) => ({
+  const serverView = deliversView(delivers, progressViewFor(serverChapters.map((section) => ({
     translated: Math.round(section.textCompleted),
     validated: Math.round(section.textValidated),
     total: 100,
@@ -82,7 +90,7 @@ export function FileSectionGrid({ projectId, fileId, validationCount, countStruc
     textTranslated: Math.round(section.textCompleted),
     audioRecorded: Math.round(section.audioCompleted),
     audioValidated: Math.round(section.audioValidated),
-  })))
+  }))))
   const spineChapters: BookHealthChapter[] = chapters ?? serverChapters.map((section) => ({
     key: section.label,
     label: section.label,

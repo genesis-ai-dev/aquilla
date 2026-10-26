@@ -134,7 +134,10 @@ type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
 // deadlineStatus stub — we control it per test via module-level variable
 let _deadlineStatusResult: "overdue" | "soon" | "ok" | null = null
 const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProject[]> => Promise.resolve([]))
-vi.mock("@/lib/frontier/portfolio", () => ({
+vi.mock("@/lib/frontier/portfolio", async (importActual) => ({
+  // Media redesign slice 1: the real language-by-language measures
+  // (portfolioMeasure, laneStartedPct, …), which the stubs below never touch.
+  ...(await importActual<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
   // AQU-1566: audio is measured against the server's audio total (a dubbing
@@ -873,6 +876,75 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     const card = await screen.findByTestId("progress-card")
     await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
     expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
+  })
+
+  // Media redesign slice 1 (P1.4): a language that delivers Audio has no text
+  // to translate, so its project shows no Translated or Validated tile at 0%.
+  it("an Audio language's project shows its recordings and no text tiles", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 45,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioTotalCells: 45, audioCells: 17, validatedAudioCells: 9, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 1,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 17, validatedAudioCells: 9, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("Audio Validated").length).toBeGreaterThan(0)
+    // 9 of 45 lines approved: 20%. 17 of 45 recorded: 38%.
+    expect(screen.getAllByText("20%").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("38%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument()
+  })
+
+  // Sam, Oct 22: on "All", a Text language beside an Audio one reads its
+  // validated text over its own lines, as Translated does; the Audio
+  // language's approvals read only in the audio tiles.
+  it("counts only the text languages in the All tab's Validated, beside an Audio language", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 90,
+      filledCells: 30, validatedCells: 20, aiDraftedCells: 0,
+      audioTotalCells: 90, audioCells: 15, validatedAudioCells: 6, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "fr", role: "target", name: "French", laneId: "ln-fr", position: 1,
+        totalCells: 45, filledCells: 30, validatedCells: 20, lastEditAt: null,
+        audioCells: 5, validatedAudioCells: 0, audioTotalCells: 45, recordsAudio: false,
+        delivers: "text", bothValidatedCells: 0,
+      }, {
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 2,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 10, validatedAudioCells: 6, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Validated").length).toBeGreaterThan(0))
+    // 20 of 45: 44%. The old mix, 26 of 90, would read 29%.
+    expect(screen.getAllByText("44%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("29%")).not.toBeInTheDocument()
   })
 
   // AQU-489: a PM who has never seen the dashboard must be able to name what

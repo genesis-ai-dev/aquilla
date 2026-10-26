@@ -59,8 +59,8 @@ describe("BookHealthSpine", () => {
           total: 5,
           cells: [
             { id: "v", stage: "validated", health: 100 },
-            { id: "t", stage: "automatic" },
-            { id: "s", stage: "automatic", health: 20, hasIssue: true },
+            { id: "t", stage: "automatic", aiDrafted: true },
+            { id: "s", stage: "automatic", health: 20, hasIssue: true, aiDrafted: true },
             { id: "u", stage: "untranslated" },
             { id: "x", stage: "excluded" },
           ],
@@ -134,7 +134,70 @@ describe("BookHealthSpine", () => {
         onChapterClick={vi.fn()}
       />,
     )
-    expect(screen.getByTestId("book-health-cell")).toHaveAccessibleName("Cell 1: drafted, awaiting validation")
+    expect(screen.getByTestId("book-health-cell")).toHaveAccessibleName("Cell 1: translated, not validated yet")
+  })
+
+  it("stripes only an AI draft: a line a person typed stays the translated blue (AQU-2164)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 3,
+          cells: [
+            { id: "low", stage: "automatic", health: 12, aiDrafted: true },
+            { id: "unscored", stage: "automatic", aiDrafted: true },
+            { id: "typed", stage: "automatic", health: 12 },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [low, unscored, typed] = screen.getAllByTestId("book-health-cell")
+    for (const square of [low, unscored]) {
+      expect(square).toHaveClass("bg-progress-ai")
+      expect(square).toHaveAttribute("data-ai-draft", "true")
+      // No inline fill at all, so nothing red sits over the stripes.
+      expect(square.style.backgroundColor).toBe("")
+      expect(square).toHaveAccessibleName(/AI draft, not validated yet/)
+    }
+    expect(typed).not.toHaveClass("bg-progress-ai")
+    expect(typed.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet")
+  })
+
+  it("says which part a Text and audio line holds, so a recording alone is not called translated", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 5,
+          cells: [
+            { id: "rec", stage: "automatic", lineParts: { text: "none", audio: "recorded" } },
+            { id: "rec-ok", stage: "automatic", lineParts: { text: "none", audio: "approved" } },
+            { id: "typed", stage: "automatic", lineParts: { text: "typed", audio: "none" } },
+            { id: "text-ok", stage: "automatic", lineParts: { text: "validated", audio: "recorded" } },
+            { id: "done", stage: "validated", lineParts: { text: "validated", audio: "approved" } },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [rec, recOk, typed, textOk, done] = screen.getAllByTestId("book-health-cell")
+    expect(rec).toHaveAccessibleName("Cell 1: recorded, not validated yet; no text yet")
+    expect(rec).toHaveAttribute("title", "Cell 1: recorded, not validated yet; no text yet")
+    expect(recOk).toHaveAccessibleName("Cell 2: recording approved; no text yet")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet; not recorded yet")
+    expect(textOk).toHaveAccessibleName("Cell 4: text validated; recorded, not validated yet")
+    expect(done).toHaveAccessibleName("Cell 5: text validated; recording approved")
+    // The colours are today's: the label is the only change.
+    expect(rec.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(done.style.backgroundColor).toBe("var(--progress-text-validated)")
   })
 
   it("navigates by chapter label", () => {

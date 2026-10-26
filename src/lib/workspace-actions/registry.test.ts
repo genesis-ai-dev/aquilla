@@ -567,3 +567,26 @@ describe("split-quotes", () => {
     expect(confirm.canConfirm!(at(0, 0))).toBe(false)
   })
 })
+
+// Media redesign slice 2 (P2.3): a language that delivers Audio and no text
+// has no AI drafting, no text validation and no voice generated from text in
+// its file menu; its audio actions stay, and a Text language keeps them all.
+describe("an Audio language's file menu", () => {
+  const fileProgress = new Map([["f1", { total: 10, translated: 4, validated: 1 }]])
+  const ids = (overrides: Partial<WorkspaceActionContext>) =>
+    getVisibleActions(workspaceActions, ctx({ activeFileId: "f1", fileProgress, ...overrides })).map((a) => a.id)
+  const audioCounts = { untranscribed: 2, unsynthesized: 3, voiceChangeable: 1 }
+
+  it("drops the text-only actions", () => {
+    const audio = ids({ audioOnlyLane: true, audioCounts })
+    for (const id of ["run-completions", "complete-all", "batch-validate", "synth-all"]) {
+      expect(audio, id).not.toContain(id)
+    }
+    expect(audio).toEqual(expect.arrayContaining(["transcribe-all", "change-voice-all"]))
+  })
+
+  it("leaves a Text language's menu as it was", () => {
+    expect(ids({ audioCounts })).toEqual(ids({ audioOnlyLane: false, audioCounts }))
+    expect(ids({ audioCounts })).toEqual(expect.arrayContaining(["run-completions", "complete-all", "batch-validate", "synth-all"]))
+  })
+})

@@ -235,6 +235,21 @@ export function audioStaleProgressFilesSql(
 }
 
 /**
+ * Media redesign slice 1: the files whose progress rows predate the joint
+ * text × audio histogram (migration 0187) — a recording counted in the audio
+ * histogram and nothing in the joint one, which a recompute by this code can
+ * never write. `scripts/neon-backfill-progress.ts --text-and-audio` re-projects
+ * exactly these, so a language set to "Text and audio" counts its finished
+ * lines from the day it is chosen. Every recompute after the deploy writes the
+ * column, so the set only shrinks. Selects (project_id, id); binds nothing.
+ */
+export const TEXT_AUDIO_STALE_FILES_SQL = `SELECT DISTINCT p.project_id, p.file_id AS id
+             FROM file_section_progress p
+            WHERE p.scope = 'file' AND p.section_key = ''
+              AND p.audio_validator_histogram <> '{}'::jsonb
+              AND p.text_audio_validator_histogram = '{}'::jsonb`
+
+/**
  * The per-cell audio facts each statement's `paired` CTE takes from the CTE
  * above. Shared rather than copied three times for the same reason the
  * structural fragments below are: file, section and book rows must not be able
@@ -315,6 +330,26 @@ const AUDIO_HISTOGRAM_SQL = `jsonb_object_agg(audio_validator_bucket::text, buck
                 FILTER (WHERE structural_bucket_count > 0) AS structural_audio_validator_histogram`
 
 /**
+ * Media redesign slice 1: the JOINT text × audio histogram, so a language that
+ * delivers "Text and audio" counts a line done only when both halves are, on
+ * the SAME line (src/lib/lanes/lane-delivers.ts). One key per
+ * (text bucket, audio bucket) pair, `"<text>:<audio>"`, over the lines that
+ * have a recording — the cells the audio histogram counts, so the two always
+ * hold the same number of lines. Read at the project's two thresholds by
+ * `bothApprovedFromHistogram`, like every other histogram here.
+ *
+ * Its own bucket CTE for the reason the audio pair has one: grouping the text
+ * CTE by a second bucket would hand `jsonb_object_agg` the same key twice.
+ * Built for every lane, whatever it delivers, so changing a language's choice
+ * needs no reprojection.
+ */
+const TEXT_AUDIO_KEY_SQL = `validator_bucket::text || ':' || audio_validator_bucket::text`
+
+const TEXT_AUDIO_HISTOGRAM_SQL = `jsonb_object_agg(text_audio_key, bucket_count) AS text_audio_validator_histogram,
+              jsonb_object_agg(text_audio_key, structural_bucket_count)
+                FILTER (WHERE structural_bucket_count > 0) AS structural_text_audio_validator_histogram`
+
+/**
  * AQU-1599: the project's REAL lanes — one row each, the SOURCE lane included.
  *
  * This replaced `SELECT DISTINCT target_lang FROM cells UNION SELECT ''`, which
@@ -367,7 +402,9 @@ const PROGRESS_UPSERT_SET_SQL = `total_count = excluded.total_count,
        structural_audio_count = excluded.structural_audio_count,
        structural_audio_validated_count = excluded.structural_audio_validated_count,
        audio_validator_histogram = excluded.audio_validator_histogram,
-       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram`
+       structural_audio_validator_histogram = excluded.structural_audio_validator_histogram,
+       text_audio_validator_histogram = excluded.text_audio_validator_histogram,
+       structural_text_audio_validator_histogram = excluded.structural_text_audio_validator_histogram`
 
 // AQU-1278 appended the structural audio pair at the TAIL rather than beside
 // the audio columns it belongs with, and that is load-bearing: three of the six
@@ -385,7 +422,8 @@ const PROGRESS_INSERT_COLUMNS_SQL = `project_id, file_id, scope, section_key, la
        structural_validator_histogram, revision, updated_at,
        audio_count, audio_validated_count, last_edit_at,
        structural_audio_count, structural_audio_validated_count,
-       audio_validator_histogram, structural_audio_validator_histogram`
+       audio_validator_histogram, structural_audio_validator_histogram,
+       text_audio_validator_histogram, structural_text_audio_validator_histogram`
 
 /**
  * Recompute the file-level progress row from authoritative source/target
@@ -447,6 +485,11 @@ export function fileProgressRecomputeStmt(
          FROM paired
         WHERE audio_validator_bucket IS NOT NULL
         GROUP BY lane_id, lane, audio_validator_bucket
+     ), text_audio_buckets AS (
+       SELECT lane_id, lane, ${TEXT_AUDIO_KEY_SQL} AS text_audio_key, ${AUDIO_BUCKET_SQL}
+         FROM paired
+        WHERE audio_validator_bucket IS NOT NULL
+        GROUP BY lane_id, lane, validator_bucket, audio_validator_bucket
      ), summary AS (
        SELECT lane_id, lane,
               COUNT(*)::integer AS total_count,
@@ -493,6 +536,17 @@ export function fileProgressRecomputeStmt(
               (SELECT jsonb_object_agg(audio_validator_bucket::text, structural_bucket_count)
                  FROM audio_buckets
                 WHERE audio_buckets.lane_id = summary.lane_id AND structural_bucket_count > 0),
+              '{}'::jsonb
+            ),
+            COALESCE(
+              (SELECT jsonb_object_agg(text_audio_key, bucket_count)
+                 FROM text_audio_buckets WHERE text_audio_buckets.lane_id = summary.lane_id),
+              '{}'::jsonb
+            ),
+            COALESCE(
+              (SELECT jsonb_object_agg(text_audio_key, structural_bucket_count)
+                 FROM text_audio_buckets
+                WHERE text_audio_buckets.lane_id = summary.lane_id AND structural_bucket_count > 0),
               '{}'::jsonb
             )
        FROM summary CROSS JOIN watermark
@@ -661,6 +715,24 @@ export function sectionsProgressRecomputeStmt(
               ${AUDIO_HISTOGRAM_SQL}
          FROM audio_bucket_counts
         GROUP BY lane_id, lane, scope, section_key
+     ), text_audio_bucket_counts AS (
+       SELECT lane_id, lane, 'section'::text AS scope, section_key, ${TEXT_AUDIO_KEY_SQL} AS text_audio_key,
+              ${AUDIO_BUCKET_SQL}
+         FROM paired
+        WHERE section_key <> '' AND audio_validator_bucket IS NOT NULL ${sectionFilter}
+        GROUP BY lane_id, lane, section_key, validator_bucket, audio_validator_bucket
+       UNION ALL
+       SELECT lane_id, lane, 'book'::text, book_key, ${TEXT_AUDIO_KEY_SQL},
+              ${AUDIO_BUCKET_SQL}
+         FROM paired
+        WHERE book_key <> '' AND audio_validator_bucket IS NOT NULL
+          AND (SELECT v FROM has_books) ${bookFilter}
+        GROUP BY lane_id, lane, book_key, validator_bucket, audio_validator_bucket
+     ), text_audio_histograms AS (
+       SELECT lane_id, lane, scope, section_key,
+              ${TEXT_AUDIO_HISTOGRAM_SQL}
+         FROM text_audio_bucket_counts
+        GROUP BY lane_id, lane, scope, section_key
      ), watermark AS (
        SELECT GREATEST(
          COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -679,7 +751,9 @@ export function sectionsProgressRecomputeStmt(
             summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at,
             summaries.structural_audio_count, summaries.structural_audio_validated_count,
             COALESCE(audio_histograms.audio_validator_histogram, '{}'::jsonb),
-            COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb)
+            COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb),
+            COALESCE(text_audio_histograms.text_audio_validator_histogram, '{}'::jsonb),
+            COALESCE(text_audio_histograms.structural_text_audio_validator_histogram, '{}'::jsonb)
        FROM summaries
        LEFT JOIN histograms
          ON histograms.lane_id = summaries.lane_id
@@ -689,6 +763,10 @@ export function sectionsProgressRecomputeStmt(
          ON audio_histograms.lane_id = summaries.lane_id
         AND audio_histograms.scope = summaries.scope
         AND audio_histograms.section_key = summaries.section_key
+       LEFT JOIN text_audio_histograms
+         ON text_audio_histograms.lane_id = summaries.lane_id
+        AND text_audio_histograms.scope = summaries.scope
+        AND text_audio_histograms.section_key = summaries.section_key
        CROSS JOIN watermark
      ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
        ${PROGRESS_UPSERT_SET_SQL}`,
@@ -844,6 +922,32 @@ export function fullProgressRecomputeStmts(
                 ${AUDIO_HISTOGRAM_SQL}
            FROM audio_bucket_counts
           GROUP BY lane_id, lane, scope, section_key
+       ), text_audio_bucket_counts AS (
+         SELECT lane_id, lane, 'file'::text AS scope, ''::text AS section_key,
+                ${TEXT_AUDIO_KEY_SQL} AS text_audio_key, ${AUDIO_BUCKET_SQL}
+           FROM paired
+          WHERE audio_validator_bucket IS NOT NULL
+          GROUP BY lane_id, lane, validator_bucket, audio_validator_bucket
+         UNION ALL
+         SELECT lane_id, lane, 'section'::text, section_key, ${TEXT_AUDIO_KEY_SQL},
+                ${AUDIO_BUCKET_SQL}
+           FROM paired
+          WHERE section_key <> '' AND audio_validator_bucket IS NOT NULL
+          GROUP BY lane_id, lane, section_key, validator_bucket, audio_validator_bucket
+         UNION ALL
+         SELECT lane_id, lane, 'book'::text, book_key, ${TEXT_AUDIO_KEY_SQL},
+                ${AUDIO_BUCKET_SQL}
+           FROM paired
+          WHERE book_key <> '' AND audio_validator_bucket IS NOT NULL
+            AND (SELECT v FROM has_books)
+          GROUP BY lane_id, lane, book_key, validator_bucket, audio_validator_bucket
+       ), text_audio_histograms AS (
+         SELECT lane_id, lane,
+                scope,
+                section_key,
+                ${TEXT_AUDIO_HISTOGRAM_SQL}
+           FROM text_audio_bucket_counts
+          GROUP BY lane_id, lane, scope, section_key
        ), watermark AS (
          SELECT GREATEST(
            COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ? AND file_id = ?), 0),
@@ -862,7 +966,9 @@ export function fullProgressRecomputeStmts(
               summaries.audio_count, summaries.audio_validated_count, summaries.last_edit_at,
               summaries.structural_audio_count, summaries.structural_audio_validated_count,
               COALESCE(audio_histograms.audio_validator_histogram, '{}'::jsonb),
-              COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb)
+              COALESCE(audio_histograms.structural_audio_validator_histogram, '{}'::jsonb),
+              COALESCE(text_audio_histograms.text_audio_validator_histogram, '{}'::jsonb),
+              COALESCE(text_audio_histograms.structural_text_audio_validator_histogram, '{}'::jsonb)
          FROM summaries
          LEFT JOIN histograms
            ON histograms.lane_id = summaries.lane_id
@@ -872,6 +978,10 @@ export function fullProgressRecomputeStmts(
            ON audio_histograms.lane_id = summaries.lane_id
           AND audio_histograms.scope = summaries.scope
           AND audio_histograms.section_key = summaries.section_key
+         LEFT JOIN text_audio_histograms
+           ON text_audio_histograms.lane_id = summaries.lane_id
+          AND text_audio_histograms.scope = summaries.scope
+          AND text_audio_histograms.section_key = summaries.section_key
          CROSS JOIN watermark
        ON CONFLICT (project_id, file_id, scope, section_key, lane_id) DO UPDATE SET
          ${PROGRESS_UPSERT_SET_SQL}`,

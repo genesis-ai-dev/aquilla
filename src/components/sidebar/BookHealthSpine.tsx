@@ -21,6 +21,24 @@ export interface BookHealthCell {
   stage: "untranslated" | "automatic" | "validated" | "excluded" | "recorded" | "audioValidated"
   health?: number
   hasIssue?: boolean
+  /**
+   * AQU-2159: the text under an `automatic` square is an AI draft nobody has
+   * validated (the target's `ai_suggestion`). Drawn in the progress palette's
+   * AI stripes; a line a person typed and nobody has validated yet is the
+   * translated blue. Absent on every other square.
+   */
+  aiDrafted?: boolean
+  /**
+   * What the line holds, on a square drawn from its status in a language that
+   * counts its recordings (Text and audio, or a language that delivers
+   * nothing chosen yet but has recordings). The square only says started or
+   * done; this lets its label say which part is there, so a line with only a
+   * recording is not read out as translated. Absent on every other square.
+   */
+  lineParts?: {
+    text: "none" | "typed" | "validated"
+    audio: "none" | "recorded" | "approved"
+  }
 }
 
 export interface BookHealthChapter {
@@ -79,11 +97,18 @@ function automaticScores(chapter: BookHealthChapter): number[] {
 /*
  * AQU-1764: WHERE THE SQUARES SAY PROGRESS, THEY USE THE SHARED PROGRESS
  * PALETTE. A validated square is the text-validated blue and a translated
- * square with no health score the translated blue (it was amber at 0.28,
- * which said "in review" in a colour that means Due soon elsewhere). A square
- * WITH a score keeps the red-amber-green health tint, and the untranslated
- * slate, the hollow excluded heading and the amber issue ring stay as they
- * are: those are about quality, not progress.
+ * square the translated blue (it was amber at 0.28, which said "in review" in
+ * a colour that means Due soon elsewhere).
+ *
+ * AQU-2159: and a square says ONLY progress. An AI draft nobody has validated
+ * is the palette's AI stripes, the ones the Progress card and every progress
+ * bar draw for AI drafts. It used to take the red-amber-green health tint of
+ * its score, and a low score read as pink: the same family as a recorded
+ * line in an audio language's grid, so the two grids side by side said "AI
+ * draft" and "recorded" in one colour. Blue is text, magenta is audio, slate
+ * is nothing yet. The score still reads out in the chapter tooltip, and the
+ * amber ring still marks a line an automatic check flagged — on a line that
+ * has text (`showsIssue`).
  */
 
 /** Nothing recorded, nothing translated: the faint slate every surface uses. */
@@ -190,23 +215,25 @@ interface CellBucketVisual {
   /**
    * AQU-2159: draw the shared `bg-progress-ai` stripes instead of a fill.
    * Stripes are a background-image, so a striped square takes no inline
-   * background colour at all.
+   * background colour at all. AQU-2164: only an AI draft is striped.
    */
   stripes: boolean
   issue: boolean
 }
 
 /**
- * AQU-2159: does this square have TEXT under it? The amber "an automatic
- * check flagged this line" ring only says something true where there is a
- * translation to have flagged. An untranslated line carrying an infraction
- * drew an amber ring around an empty slate square, which reads as "this
- * blank is wrong"; an excluded heading is not being checked at all (it
- * carries no health score for the same reason); and an audio square reports
- * a take, not the text under it.
+ * AQU-2159: whether a square draws the amber "an automatic check flagged
+ * this line" ring. Only a line with text has anything to flag: an
+ * untranslated line is flagged for being empty, which its slate already
+ * says, and ringing every one of them buried the few flags worth reading.
+ * Whether text sits under the line is decided where the flag is read
+ * (`chapter-health.ts` sets `hasIssue` only on a line whose text is not
+ * empty), not from the stage here: an audio square's stage reports a take,
+ * so a recorded line with text can still carry a flag. The stage check below
+ * keeps an untranslated or excluded square clear whoever builds the cells.
  */
-function hasText(cell: BookHealthCell): boolean {
-  return cell.stage === "automatic" || cell.stage === "validated"
+function showsIssue(cell: BookHealthCell): boolean {
+  return Boolean(cell.hasIssue) && cell.stage !== "untranslated" && cell.stage !== "excluded"
 }
 
 /*
@@ -214,10 +241,16 @@ function hasText(cell: BookHealthCell): boolean {
  * had validated was tinted by its health score, and at 7px a low score reads
  * as pink — near enough to the magenta of a recorded take that a Text
  * language's weak drafts and an Audio language's recordings looked alike
- * (Sam, Oct 24). Such a line is now drawn with the same stripes the Progress
- * card and the progress bars already use for AI drafts, which leaves the
- * grid three colour families — blue for text, magenta for audio, grey for
- * nothing yet — and no score-dependent colour anywhere in it.
+ * (Sam, Oct 24). An AI draft nobody has validated is now drawn with the same
+ * stripes the Progress card and the progress bars already use for AI
+ * drafts, which leaves the grid three colour families — blue for text,
+ * magenta for audio, grey for nothing yet — and no score-dependent colour
+ * anywhere in it.
+ *
+ * AQU-2164: ONLY an AI draft. The `automatic` stage means "has text, nobody
+ * has validated it", whoever wrote it, so striping every such square drew a
+ * person's own typed translation as an AI draft. A line a person typed is
+ * the translated blue, as the Progress card and the bars already say.
  *
  * The score is not lost, it has moved: it stays in the chapter's "N
  * automatic warnings" line, in the chapter tooltip's median, and in the
@@ -226,7 +259,7 @@ function hasText(cell: BookHealthCell): boolean {
  * made the colour mean quality.
  */
 function cellBucketVisual(cells: BookHealthCell[]): CellBucketVisual {
-  const issue = cells.some((cell) => cell.hasIssue && hasText(cell))
+  const issue = cells.some(showsIssue)
   const audio = audioBucketColor(cells)
   if (audio) return { color: audio, stripes: false, issue }
 
@@ -243,17 +276,30 @@ function cellBucketVisual(cells: BookHealthCell[]): CellBucketVisual {
       issue,
     }
   }
-  if (cells.some((cell) => cell.stage === "automatic")) {
-    return { color: null, stripes: true, issue }
-  }
+  const automatic = cells.filter((cell) => cell.stage === "automatic")
+  if (automatic.some((cell) => cell.aiDrafted)) return { color: null, stripes: true, issue }
+  if (automatic.length > 0) return { color: PROGRESS_COLOR.textTranslated, stripes: false, issue }
   return { color: "rgb(148 163 184 / 0.2)", stripes: false, issue }
+}
+
+/** Both halves of a line, the part that is there first. */
+function linePartsLabel(parts: NonNullable<BookHealthCell["lineParts"]>, aiDrafted: boolean): string {
+  const text = parts.text === "validated"
+    ? "text validated"
+    : parts.text === "typed"
+      ? (aiDrafted ? "AI draft, not validated yet" : "translated, not validated yet")
+      : "no text yet"
+  const audio = parts.audio === "approved"
+    ? "recording approved"
+    : parts.audio === "recorded" ? "recorded, not validated yet" : "not recorded yet"
+  return parts.text === "none" ? `${audio}; ${text}` : `${text}; ${audio}`
 }
 
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
-  // AQU-2159: announced in exactly the places the amber ring is drawn — a
-  // line that has text — so the label and the square cannot disagree.
-  const warning = cell.hasIssue && hasText(cell) ? " · automatic warning" : ""
+  // AQU-2159: announced in exactly the places the amber ring is drawn, so
+  // the label and the square cannot disagree.
+  const warning = showsIssue(cell) ? " · automatic warning" : ""
   // Says WHY it is grey. Without this the square is indistinguishable from a
   // faint untranslated one to anyone reading it with a screen reader.
   if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
@@ -261,11 +307,17 @@ function cellDescription(cell: BookHealthCell, index: number): string {
   // recording was read out as "untranslated", which is the bug in words.
   if (cell.stage === "audioValidated") return `${prefix}: audio validated${warning}`
   if (cell.stage === "recorded") return `${prefix}: recorded, awaiting audio validation${warning}`
+  if (cell.lineParts && (cell.stage === "validated" || cell.stage === "automatic")) {
+    return `${prefix}: ${linePartsLabel(cell.lineParts, cell.aiDrafted === true)}${warning}`
+  }
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
-  // AQU-2159: no score in here either. The square is the AI-draft stripes
-  // whatever its health, and a label still reading out a percentage would be
-  // describing a colour the grid no longer draws.
-  if (cell.stage === "automatic") return `${prefix}: drafted, awaiting validation${warning}`
+  // AQU-2159: says what the square shows. It read out a health score the
+  // square no longer draws, and never said the line was an AI draft.
+  if (cell.stage === "automatic") {
+    return cell.aiDrafted
+      ? `${prefix}: AI draft, not validated yet${warning}`
+      : `${prefix}: translated, not validated yet${warning}`
+  }
   return `${prefix}: untranslated${warning}`
 }
 
@@ -311,7 +363,7 @@ function chapterProgressWords(chapter: BookHealthChapter, t: TFunction): string 
 }
 
 function chapterTooltip(chapter: BookHealthChapter, visual: ChapterVisual, t: TFunction) {
-  const issueCount = chapter.cells?.filter((cell) => cell.hasIssue).length ?? 0
+  const issueCount = chapter.cells?.filter(showsIssue).length ?? 0
   const untranslated = Math.max(0, chapter.total - chapter.translated)
   const automatic = Math.max(0, chapter.translated - chapter.validated)
   const view = viewOf(chapter)

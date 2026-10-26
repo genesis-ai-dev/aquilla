@@ -500,8 +500,16 @@ import { fetchCellsByIds, fetchDeletedFiles, fetchProjectFiles } from "@/lib/syn
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import { fileSummariesToProgress, mergeFileProgress, withAudioProgress, type FileStats } from "@/lib/progress/file-summary-progress"
 import { liveAudioProgress } from "@/lib/progress/live-audio-progress"
+import {
+  editorLaneTakes,
+  isUnfinishedLine,
+  NO_LANE_TAKES,
+  planUnitsToFileProgress,
+} from "@/lib/progress/editor-lane-progress"
+import { laneCountsAudio, laneRowDelivers } from "@/lib/lanes/lane-delivers"
+import { useProjectPlan } from "@/hooks/useProjectPlan"
 import { applyPushedFileProgress, invalidateFileProgress, invalidateProjectFileProgress, setLocalFileProgress } from "@/lib/progress/file-progress-resource"
-import { applyStructuralPolicy } from "@/lib/cells/structural"
+import { applyStructuralPolicy, isStructuralCell } from "@/lib/cells/structural"
 import { isExcludedFromWork } from "@/lib/health/excluded-cell"
 import type { AudioCellStage } from "@/lib/health/chapter-health"
 import { Button } from "@/components/ui/button"
@@ -514,7 +522,7 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
-import { audioProgressCellIds } from "@/lib/progress/audio-progress-cells"
+import { audioProgressCellIds, EMPTY_AUDIO_PROGRESS_CELL_IDS } from "@/lib/progress/audio-progress-cells"
 import {
   detectStrongTextDirection,
   projectSettingTextDirection,
@@ -1828,6 +1836,18 @@ export function ProjectWorkspace() {
   // long-lived socket handler below sees it.
   const activeLaneRef = useRef(activeLane)
   activeLaneRef.current = activeLane
+  /**
+   * Media redesign slice 2: what the open language delivers. A language that
+   * delivers Audio — or Text and audio — is counted by its recordings in the
+   * status bar, the file bars, the chapter list and grid, the Details window
+   * and "Next unfinished", and the text-only tools leave an Audio language.
+   * Text, and a language nobody has chosen for, run exactly today's code.
+   */
+  const activeLaneDelivers = useMemo(() => {
+    const row = laneRows.find((lane) => lane.id === activeLaneId)
+    return row ? laneRowDelivers(row) : null
+  }, [laneRows, activeLaneId])
+  const laneCountsRecordings = laneCountsAudio(activeLaneDelivers)
   // AQU-1326: opening a file used to fan out every workspace data hook at
   // mount — audit stats, comments, per-file audio attachments, the project-wide
   // progress rollup — all racing the cell stream for the same connection pool.
@@ -2509,7 +2529,20 @@ export function ProjectWorkspace() {
     ],
   )
 
-  const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(cellSummaries, validationCount)
+  // Media redesign slice 2: in a language that counts its recordings, a line
+  // is unfinished until it is done by what the language delivers; on a dubbing
+  // file a subtitle line no heard line performs is never a stop. The performed
+  // set is settled with the heard lines, far below, and handed up here.
+  const [dubbingPerformed, setDubbingPerformed] = useState<ReadonlySet<string> | null>(null)
+  const nextUnfinishedRule = useMemo(
+    () => (laneCountsRecordings
+      ? (cell: CellSummary) => isUnfinishedLine(cell, dubbingPerformed)
+      : undefined),
+    [laneCountsRecordings, dubbingPerformed],
+  )
+  const { hasAny: hasUnfinished, findNext: findNextUnfinished } = useNextUnfinished(
+    cellSummaries, validationCount, nextUnfinishedRule,
+  )
   const handleJumpNextUnfinished = useCallback(() => {
     const currentIndex = editorRef.current?.getCurrentIndex?.() ?? 0
     const next = findNextUnfinished(currentIndex)
@@ -5769,7 +5802,7 @@ export function ProjectWorkspace() {
     // override it either way). OFF until the org's answer is known.
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
   } = projectPolicy
-  const { rules } = useRules(
+  const { rules: laneRules } = useRules(
     project ?? null,
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
@@ -5781,6 +5814,15 @@ export function ProjectWorkspace() {
     // active lane's cell view, so lane-scoped rules for other lanes drop here.
     activeLane,
     laneLocalConcepts,
+  )
+  // Media redesign slice 2 (P2.3): a language that delivers Audio has no text
+  // deliverable, so no line is ever an "Empty translation". Every other rule
+  // still runs; a Text language keeps the list untouched.
+  const rules = useMemo(
+    () => (activeLaneDelivers === "audio"
+      ? laneRules.filter((rule) => !(rule.check.type === "builtin" && rule.check.checkId === "empty-target"))
+      : laneRules),
+    [laneRules, activeLaneDelivers],
   )
 
   // AQU-934: style-rule library + applicability graph. The resolver answers
@@ -9758,6 +9800,11 @@ export function ProjectWorkspace() {
    */
   const ensureTargetRowForTake = useCallback(async (cellId: string) => {
     if (!project?.id || laneWriteFrozen) return
+    // Media redesign slice 2 (P2.4): a language that delivers Audio has no
+    // text deliverable, so recording writes no hidden empty text row — its
+    // takes are approved on their own and counted from `cell_audio`. Text and
+    // audio still writes it (gap 9): the text row there is real work to do.
+    if (activeLaneDelivers === "audio") return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell) return
@@ -9786,6 +9833,7 @@ export function ProjectWorkspace() {
     getActiveCell,
     getPendingTargetEventId,
     activeLane,
+    activeLaneDelivers,
     resolveTargetCommitParentId,
     rememberPendingTargetCommit,
     currentUsername,
@@ -9813,6 +9861,9 @@ export function ProjectWorkspace() {
    */
   const resetTargetRowAfterLastTake = useCallback(async (cellId: string) => {
     if (!project?.id || laneWriteFrozen) return
+    // Media redesign slice 2 (P2.4): nor does deleting the last take write to
+    // the text of an Audio language.
+    if (activeLaneDelivers === "audio") return
     if (!canPerform("target.cell.commit", project.syncRole?.level ?? null)) return
     const cell = getActiveCell(cellId)
     if (!cell || cell.translated?.trim()) return
@@ -9841,6 +9892,7 @@ export function ProjectWorkspace() {
     laneWriteFrozen,
     getActiveCell,
     activeLane,
+    activeLaneDelivers,
     resolveTargetCommitParentId,
     rememberPendingTargetCommit,
     currentUsername,
@@ -9851,6 +9903,8 @@ export function ProjectWorkspace() {
 
   const translateAsReadAvailable = translateAsReadEnabled
     && lens === "text"
+    // Media redesign slice 2: no AI drafting in an Audio language.
+    && activeLaneDelivers !== "audio"
     && !laneWriteFrozen
     && isConfigured
     && isCompletionAvailable
@@ -10945,9 +10999,122 @@ export function ProjectWorkspace() {
     }
     return ids
   }, [workspaceAudioByCellId])
+  /**
+   * Media redesign slice 2: which lines are recorded and approved in the open
+   * language, from the lane-scoped read (the one bulk validation uses, loaded
+   * in every lens) and, on a dubbing file, from the heard lines performing
+   * them. Only a language that counts its recordings asks.
+   */
+  const laneTakes = useMemo(
+    () => laneCountsRecordings
+      ? editorLaneTakes({
+          delivers: activeLaneDelivers,
+          ownAudio: audioValidationByCellId,
+          cueIds: audioCueSibling && audioCues ? audioCues.map((cue) => cue.id) : null,
+          cueAudio: audioCueSibling ? cueAudioByCellId : null,
+          cuesForText: cueLinks.cuesForText,
+          audioThreshold: project ? readValidationCountAudio(project) : 1,
+        })
+      : NO_LANE_TAKES,
+    [laneCountsRecordings, activeLaneDelivers, audioValidationByCellId, audioCueSibling, audioCues,
+      cueAudioByCellId, cueLinks.cuesForText, project],
+  )
   useEffect(() => {
-    cellStore.setOwnTakeCellIds(ownTakeCellIds)
-  }, [cellStore, ownTakeCellIds])
+    // In a language that counts its recordings, "carries a take of its own"
+    // is the lane's recorded set, so every reader of `hasOwnTake` agrees with
+    // the counts. A Text language keeps the attachment rule above.
+    cellStore.setOwnTakeCellIds(laneCountsRecordings ? laneTakes.recorded : ownTakeCellIds)
+  }, [cellStore, ownTakeCellIds, laneCountsRecordings, laneTakes])
+  useEffect(() => {
+    setDubbingPerformed(laneTakes.performed)
+  }, [laneTakes.performed])
+  useEffect(() => {
+    cellStore.setLaneAudio({
+      delivers: activeLaneDelivers,
+      recorded: laneTakes.recorded,
+      approved: laneTakes.approved,
+    })
+  }, [cellStore, activeLaneDelivers, laneTakes])
+
+  /**
+   * Media redesign slice 2: the footer's figures in a language that counts its
+   * recordings. The store already counted each line by the shared rule
+   * (`laneStatus`), so the live numbers are recorded / approved for Audio and
+   * started / done for Text and audio; a dubbing file is counted by its HEARD
+   * lines instead (gap 6). A Text language reads `statusBarProgress` as is.
+   */
+  const editorStatusBarProgress = useMemo((): FileStats => {
+    // A Text language says so, and draws no audio however much is recorded.
+    if (!laneCountsRecordings) return activeLaneDelivers ? { ...statusBarProgress, delivers: activeLaneDelivers } : statusBarProgress
+    if (laneTakes.heard) {
+      return {
+        total: laneTakes.heard.total,
+        translated: laneTakes.heard.recorded,
+        validated: laneTakes.heard.approved,
+        recorded: laneTakes.heard.recorded,
+        audioValidated: laneTakes.heard.approved,
+        delivers: activeLaneDelivers,
+      }
+    }
+    if (activeLaneDelivers !== "text_and_audio") return { ...statusBarProgress, delivers: activeLaneDelivers }
+    let needsText = 0
+    let needsAudio = 0
+    // The two halves on their own, for the file row's two bars; the footer
+    // keeps reading the lines started / done above.
+    let textTranslated = 0
+    let textValidated = 0
+    let recorded = 0
+    let audioValidated = 0
+    for (const cell of cellSummaries) {
+      if (!countStructuralCells && isStructuralCell(cell.type)) continue
+      if (cell.status !== "validated") needsText++
+      if (!cell.audioApproved) needsAudio++
+      if (cell.status !== "empty") textTranslated++
+      if (cell.status === "validated") textValidated++
+      if (cell.hasOwnTake) recorded++
+      if (cell.audioApproved) audioValidated++
+    }
+    return {
+      ...statusBarProgress, delivers: activeLaneDelivers, needsText, needsAudio,
+      textTranslated, textValidated, recorded, audioValidated,
+    }
+  }, [laneCountsRecordings, laneTakes, statusBarProgress, activeLaneDelivers, cellSummaries, countStructuralCells])
+
+  /**
+   * Media redesign slice 2: every file's bar in a language that counts its
+   * recordings comes from the Plan's own read for that language, so the
+   * sidebar, the Details window and the Plan cannot disagree; the open file's
+   * entry is the live footer figure above. The project-wide files list it
+   * replaces counts one lane's TEXT, which is no answer for this language.
+   */
+  const lanePlanToken = useMemo(
+    () => (progressSnapshotTokenFileId ? () => getTokenForFile(progressSnapshotTokenFileId) : null),
+    [getTokenForFile, progressSnapshotTokenFileId],
+  )
+  const lanePlan = useProjectPlan({
+    projectId: project?.id ?? null,
+    lane: activeLane,
+    getToken: lanePlanToken,
+    enabled: laneCountsRecordings && editorFirstPaint,
+  })
+  // A file switch is the moment the file just left stops being live: re-read
+  // the language's plan so its bar shows what was done in it.
+  const refreshLanePlan = lanePlan.refresh
+  useEffect(() => {
+    if (laneCountsRecordings) refreshLanePlan()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- on a file switch only
+  }, [activeFileId])
+  const editorFileProgress = useMemo(() => {
+    if (!laneCountsRecordings) {
+      if (!activeLaneDelivers) return fileProgress
+      const stamped = new Map<string, FileStats>()
+      for (const [fileId, stats] of fileProgress) stamped.set(fileId, { ...stats, delivers: activeLaneDelivers })
+      return stamped
+    }
+    const merged = planUnitsToFileProgress(lanePlan.units, activeLaneDelivers)
+    if (activeFileId && editorStatusBarProgress.total > 0) merged.set(activeFileId, editorStatusBarProgress)
+    return merged
+  }, [laneCountsRecordings, fileProgress, lanePlan.units, activeLaneDelivers, activeFileId, editorStatusBarProgress])
 
   // AQU-2110: and which of those lines are AUDIO VALIDATED, so the chapter
   // picker's rollup can show the audio pair — a chapter on an audio-only
@@ -10965,9 +11132,19 @@ export function ProjectWorkspace() {
   // declared above (AQU-2111): the project's audio one, resolved project → org
   // → 1 — the same threshold the cell's audio validation control and the
   // server's progress counts apply.
+  //
+  // Media redesign: a language that counts its recordings has already worked
+  // these out per line (`laneTakes`, which also reads a dubbing file's heard
+  // lines), and the picker must count the lines the footer and "Next
+  // unfinished" count — so it gets those two sets, and nothing derives them
+  // twice.
   const audioProgressIds = useMemo(
-    () => audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
-    [audioValidationByCellId, audioValidationRequirement],
+    () => laneCountsRecordings
+      ? laneTakes.recorded.size === 0
+        ? EMPTY_AUDIO_PROGRESS_CELL_IDS
+        : { recorded: laneTakes.recorded, audioValidated: laneTakes.approved }
+      : audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
+    [laneCountsRecordings, laneTakes, audioValidationByCellId, audioValidationRequirement],
   )
   useEffect(() => {
     cellStore.setAudioProgressCellIds(audioProgressIds)
@@ -11036,9 +11213,12 @@ export function ProjectWorkspace() {
         // forever. Undefined on a project with no recordings — see
         // `audioChapterStage`.
         audioStage: audioChapterStage,
+        // Media redesign: what the open language delivers decides the unit
+        // where someone has chosen; the file's evidence otherwise.
+        delivers: activeLaneDelivers,
       })
     })
-  }, [activeFileId, audioChapterStage, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
+  }, [activeFileId, activeLaneDelivers, audioChapterStage, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, countStructuralCells, effectiveHealthMap, infractions])
 
   /** The link index in the shape every cue-aware resolver takes. */
   const cueLinkArgs = useMemo(
@@ -11197,6 +11377,7 @@ export function ProjectWorkspace() {
   const actionCtx = useMemo(() => ({
     project: project!,
     activeFileId,
+    audioOnlyLane: activeLaneDelivers === "audio",
     fileProgress,
     canExportByOrgPolicy,
     // The registry reads one shape; the two halves are counted apart only
@@ -11205,7 +11386,7 @@ export function ProjectWorkspace() {
     batchValidateSummary,
     canSplitAtQuotes,
     quoteSplitSummary,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
+  }), [project, activeFileId, activeLaneDelivers, fileProgress, canExportByOrgPolicy, audioCounts, validatableTakes, batchValidateSummary, canSplitAtQuotes, quoteSplitSummary])
 
   // AQU-481: source import emits `file.create` (+ N `source.cell.create`), and
   // `file.create` sits at PROJECT_LEAD (500) server-side. Read the role from
@@ -15605,6 +15786,7 @@ export function ProjectWorkspace() {
       )}
       translateAsReadActive={translateAsReadActiveCellId !== null}
       onTranslateAsReadChange={setTranslateAsReadEnabled}
+      audioLane={activeLaneDelivers === "audio"}
     />
   ) : null
 
@@ -15710,7 +15892,7 @@ export function ProjectWorkspace() {
                   projectId={projectId!}
                   files={project.files}
                   activeFileId={activeFileId}
-                  fileProgress={fileProgress}
+                  fileProgress={editorFileProgress}
                   lane={activeLane}
                   hasActiveChapters={hasActiveChapters}
                   getActiveChapterHealth={getActiveChapterHealth}
@@ -15721,6 +15903,7 @@ export function ProjectWorkspace() {
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   countStructural={countStructuralCells}
+                  delivers={activeLaneDelivers}
                   getTokenForFile={getTokenForFile}
                   onSelectFile={workspaceTabs.openFile}
                   onShowDetails={setDetailsFileId}
@@ -15947,6 +16130,7 @@ export function ProjectWorkspace() {
                   prepareBulkRepetitions={prepareBulkRepetitions}
                   bulkRepetitionToastExtras={bulkToastExtras}
                   audioMode={lens === "audio"}
+                  audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
                   mediaLayer={!!audioLens}
                   onVoiceTogether={async (sel) => {
@@ -16826,6 +17010,8 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            audioOnlyLane={activeLaneDelivers === "audio"}
+            laneDelivers={activeLaneDelivers}
             lanes={availableLanes}
             scopedLanes={scopedLanes}
             archivedLanes={archivedLaneTags}
@@ -17336,7 +17522,7 @@ export function ProjectWorkspace() {
             const fileStats = showFileStats ? (
               <StatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                progress={statusBarProgress}
+                progress={editorStatusBarProgress}
                 getHealthByCell={getStatusBarHealth}
                 projectHealth={projectHealth}
                 staleSourceCount={staleCellIds.size}
@@ -17480,6 +17666,8 @@ export function ProjectWorkspace() {
           timelineTracks={serverTimelineTracks}
           username={currentUsername}
           readAloudFor={audioCueCells ? resolveCueReadAloud : undefined}
+          // Media redesign slice 2: an Audio language reads the source.
+          deliversAudioOnly={activeLaneDelivers === "audio"}
           // The take goes to the cue sibling; the PICTURE belongs to the file
           // on screen. Always passed, not just in the cue arrangement, so the
           // two can never drift apart again.
@@ -17916,7 +18104,7 @@ export function ProjectWorkspace() {
         open={detailsFileId !== null}
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
         file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
-        progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
+        progress={detailsFileId ? editorFileProgress.get(detailsFileId) : undefined}
       />
       <RenameDialog
         open={renameFileId !== null}

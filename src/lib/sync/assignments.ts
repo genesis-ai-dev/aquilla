@@ -12,6 +12,7 @@ import { fetchWithTimeout } from "../frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
 import { laneTagForAssignment } from "./assignment-lane"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
@@ -187,6 +188,11 @@ export async function getAssignmentsGivenByMe(jwt: string, projectId: string): P
 /** An inbox assignment with its project name, from the org-wide read. */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers. Null when
+   * nobody has chosen; absent from an older server. Both read as Text.
+   */
+  laneDelivers?: LaneDelivers | null
 }
 
 /**

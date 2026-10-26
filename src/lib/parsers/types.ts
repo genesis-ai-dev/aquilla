@@ -628,6 +628,13 @@ export interface ProjectRecord {
     legacyTag: string | null
     position: number
     archivedAt: string | null
+    /** AQU-1954: the row's "Records audio" switch. */
+    recordsAudio?: boolean
+    /**
+     * Media redesign slice 1: what the language delivers, or null when nobody
+     * has chosen yet. Read it through `laneRowDelivers`.
+     */
+    delivers?: import("@/lib/lanes/lane-delivers").LaneDelivers | null
   }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings

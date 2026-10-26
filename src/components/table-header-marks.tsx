@@ -61,14 +61,20 @@ export function GutterMarks({ numbers }: { numbers: "verse" | "cell" | null }) {
  *  mark follows the rows' audio column (AQU-1495): a file with no audio has no
  *  column, and a mark over nothing would push the heading off the rows'
  *  target boxes. */
-export function CheckMarks({ audioColumn }: { audioColumn: AudioColumn }) {
+export function CheckMarks({ audioColumn, textColumn = true }: {
+  audioColumn: AudioColumn
+  /** Media redesign slice 2: false in an Audio language, which has no text check. */
+  textColumn?: boolean
+}) {
   const t = useT()
   return (
     // -ms-3: the rows' two checks start 12px before the heading's text.
     <span data-testid="table-check-marks" className="hidden items-center gap-1.5 md:-ms-3 md:flex">
-      <Mark label={t("editor.gutter.textChecks")} className="w-6">
-        <PROGRESS_ICON.text className="h-3 w-3" />
-      </Mark>
+      {textColumn && (
+        <Mark label={t("editor.gutter.textChecks")} className="w-6">
+          <PROGRESS_ICON.text className="h-3 w-3" />
+        </Mark>
+      )}
       {audioColumn !== "off" && (
         <Mark label={t("editor.gutter.audioChecks")} className="w-6">
           <PROGRESS_ICON.audio className="h-3 w-3" />

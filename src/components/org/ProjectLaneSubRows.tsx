@@ -16,7 +16,8 @@ import { TableCell, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import {
-  laneTranslatedPct,
+  laneDeliversAudioOnly,
+  laneStartedPct,
   laneValidatedPct,
   type PortfolioLane,
 } from "@/lib/frontier/portfolio"
@@ -65,7 +66,8 @@ export function ProjectLaneSubRows({
         <div className="divide-y">
           {lanes.map((lane) => {
             const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
-            const tpct = safePct(laneTranslatedPct(lane))
+            // Media redesign slice 1: an Audio language reads its recorded share.
+            const tpct = safePct(laneStartedPct(lane))
             const vpct = safePct(laneValidatedPct(lane))
             const lastEdit = lane.lastEditAt
             return (
@@ -85,7 +87,14 @@ export function ProjectLaneSubRows({
                     height={6}
                     className="w-full max-w-[8rem]"
                   />
-                  <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}>
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    aria-label={
+                      laneDeliversAudioOnly(lane)
+                        ? t("org.orgHome.pctRecorded", { pct: tpct })
+                        : t("org.orgHome.pctTranslated", { pct: tpct })
+                    }
+                  >
                     {tpct}%
                   </span>
                 </span>

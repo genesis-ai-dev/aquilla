@@ -42,7 +42,7 @@ export class ProjectSettings {
   }
 
   private laneRow(tag: string): Locator {
-    return this.page.getByTestId("target-lanes-list").locator("li").filter({ hasText: tag })
+    return this.page.getByTestId("target-lanes-list").getByRole("row").filter({ hasText: tag })
   }
 
   async enableTimelineTracks(projectId: string): Promise<void> {
@@ -62,8 +62,10 @@ export class ProjectSettings {
     await expect(setting).toBeChecked()
   }
 
-  /** Add a target lane via the Languages section's add-lane form. */
+  /** Add a target lane via the Languages section's "Add language" form. */
   async addTargetLanguage(tag: string): Promise<void> {
+    const open = this.page.getByTestId("add-lane-open")
+    if (await open.isVisible()) await open.click()
     const input = this.page.getByTestId("add-target-lang-input")
     await expect(input).toBeVisible({ timeout: 10_000 })
     await input.fill(tag)

@@ -55,6 +55,7 @@ import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 // AQU-2111: the shared shape, which now carries the audio pair too — a local
 // re-declaration would have dropped it silently on the way to FileRow.
 import type { FileStats } from "@/lib/progress/file-summary-progress"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** What the Reset-order confirmation needs to remember while it is open: which
  *  group is being reset, how to label it, and the writes that will clear it. */
@@ -127,6 +128,12 @@ interface Props {
   /** AQU-1083: the project's effective structural-cell policy, forwarded to
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
+  /**
+   * Media redesign: what the open language (`lane`) delivers, when someone has
+   * chosen. The expanded files' chapter grids draw in that unit; absent, each
+   * file's own evidence decides (AQU-2110).
+   */
+  delivers?: LaneDelivers | null
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
@@ -217,7 +224,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -670,6 +677,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               countStructural={countStructural}
+                              delivers={delivers}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}

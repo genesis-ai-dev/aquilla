@@ -45,6 +45,7 @@ import {
   type MilestoneProgress,
   type MilestoneProgressView,
 } from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** AQU-2110: the figures a row carries, and the per-file choice of which to show. */
 export type { MilestoneProgress, MilestoneProgressView }
@@ -597,6 +598,7 @@ export function MilestoneNavigator({
   onSelect,
   compact = false,
   pageByMilestone = false,
+  delivers = null,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
@@ -609,6 +611,12 @@ export function MilestoneNavigator({
    * The picker still lists those ranges so a long section stays searchable.
    */
   pageByMilestone?: boolean
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It decides the unit the rows are drawn in (`deliversView`); absent, the
+   * file's own evidence decides.
+   */
+  delivers?: LaneDelivers | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -619,7 +627,8 @@ export function MilestoneNavigator({
   const pickerCentered = useMinWidthLg()
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
   // AQU-2110: decided over the whole file, once, so every row agrees.
-  const progressView = useMemo(() => progressViewFor(items), [items])
+  // Media redesign: what the language delivers wins where someone has chosen.
+  const progressView = useMemo(() => deliversView(delivers, progressViewFor(items)), [delivers, items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]

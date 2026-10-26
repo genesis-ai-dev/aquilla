@@ -106,8 +106,10 @@ import {
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
+  setTargetLaneDelivers,
   setTargetLaneRecordsAudio,
 } from "../../../db/shared/lanes"
+import { LANE_DELIVERS } from "../../../src/lib/lanes/lane-delivers"
 import {
   filterSettingsToVisibleLanes,
   READ_WALL_MAINTAINER,
@@ -786,6 +788,11 @@ const createLaneSchema = z.object({
    * popover, the sibling merge) still gets.
    */
   allowDuplicateName: z.boolean().optional(),
+  /**
+   * Media redesign slice 1: what the new language delivers. The create dialog
+   * sends each language's choice; absent (every other caller) is Text.
+   */
+  delivers: z.enum(LANE_DELIVERS).optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -794,6 +801,10 @@ const archiveLaneSchema = z.object({
 
 const laneRecordsAudioSchema = z.object({
   recordsAudio: z.boolean(),
+})
+
+const laneDeliversSchema = z.object({
+  delivers: z.enum(LANE_DELIVERS),
 })
 
 /**
@@ -927,6 +938,7 @@ projectSettings.post(
         language: body.language,
         code: body.code,
         allowDuplicateName: body.allowDuplicateName === true,
+        ...(body.delivers ? { delivers: body.delivers } : {}),
         targetLanguage,
         existing: (current.lanes ?? []).map((lane) => ({
           id: lane.id,
@@ -1055,6 +1067,37 @@ projectSettings.post(
     if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
+
+// Media redesign slice 1: the "Delivers" choice on one language row — Text,
+// Audio, or Text and audio — which replaced "Records audio" above. It decides
+// how that language's lines are counted everywhere (src/lib/lanes/
+// lane-delivers.ts), so the dashboard, the plan board and a linked Monday or
+// Airtable board all move with it: the boards are pushed like any other lane
+// change. Gated like every other change to the Languages card. Nothing is
+// deleted; switching back restores every number.
+projectSettings.post(
+  "/:projectId/lanes/:laneId/delivers",
+  authMiddleware,
+  zValidator("json", laneDeliversSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await setTargetLaneDelivers(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").delivers,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
   },
 )

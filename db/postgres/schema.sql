@@ -872,6 +872,12 @@ CREATE TABLE file_section_progress (
     -- recorded, which is a different state from recorded-and-unvalidated.
     audio_validator_histogram            JSONB NOT NULL DEFAULT '{}'::jsonb,
     structural_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- 0187 (media redesign slice 1): the joint text × audio histogram, keyed
+    -- "<text votes>:<audio votes>" over the lines that have a recording, so a
+    -- "Text and audio" language counts a line done only when BOTH halves are,
+    -- on the same line, at any pair of thresholds. And its structural share.
+    text_audio_validator_histogram            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    structural_text_audio_validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
     -- Identity is lane_id (AQU-1420). Projection target_lang dropped in 0155.
@@ -1623,6 +1629,13 @@ CREATE TABLE IF NOT EXISTS lanes (
     -- 0173 (AQU-1954): does every file owe audio in this language? Off, a file
     -- counts this language's audio only once it has a recording in it.
     records_audio BOOLEAN NOT NULL DEFAULT false,
+    -- 0187 (media redesign slice 1): what the language delivers — 'text',
+    -- 'audio' or 'text_and_audio' — and so how its lines are counted
+    -- (src/lib/lanes/lane-delivers.ts). NULL is NOT CHOSEN YET and counts as
+    -- before: migration 0187 leaves every "Records audio" language there until
+    -- its owner picks. Choosing writes records_audio too.
+    delivers TEXT DEFAULT 'text'
+        CHECK (delivers IS NULL OR delivers IN ('text', 'audio', 'text_and_audio')),
     PRIMARY KEY (project_id, id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_lanes_id

@@ -36,6 +36,12 @@ import {
 } from "../../../src/lib/frontier/portfolio-metrics"
 import { effectiveThresholdSql } from "../../../db/shared/validation-threshold"
 import {
+  bothApprovedFromHistogram,
+  laneCountsAudio,
+  parseLaneDelivers,
+  type LaneDelivers,
+} from "../../../src/lib/lanes/lane-delivers"
+import {
   loadOrgProjectVisibilityOverrides,
   loadProjectVisibilityOverride,
   loadProjectVisibilityOverrides,
@@ -1324,6 +1330,20 @@ export interface PortfolioLane {
   audioTotalCells: number
   /** AQU-1954: the language row's "Records audio" switch. */
   recordsAudio: boolean
+  /**
+   * Media redesign slice 1: what the language delivers — Text, Audio, or Text
+   * and audio — or null when nobody has chosen yet (counts as Text). The
+   * client measures each language by it (`portfolioMeasure`,
+   * src/lib/frontier/portfolio-metrics.ts).
+   */
+  delivers: LaneDelivers | null
+  /**
+   * Media redesign slice 1: lines whose text is validated AND whose recording
+   * is approved, at the project's two thresholds — what a "Text and audio"
+   * language counts as done. From the joint histogram of the same rows as
+   * `validatedCells`.
+   */
+  bothValidatedCells: number
 }
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioTotalCells: number; recordsAudio: boolean; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
@@ -1476,6 +1496,9 @@ interface LaneDbRow {
   audio_validator_histogram: Record<string, number> | string | null
   structural_audio_count: number | string | null
   structural_audio_validator_histogram: Record<string, number> | string | null
+  /** Media redesign slice 1: the joint text × audio histogram, and its structural share. */
+  text_audio_validator_histogram: Record<string, number> | string | null
+  structural_text_audio_validator_histogram: Record<string, number> | string | null
   /**
    * AQU-1951: 1 when the row's file counts as TEXT work, else 0. The query admits
    * every file whose RECORDINGS count, a superset that adds the cue sheet, so
@@ -1570,6 +1593,8 @@ async function fetchPortfolioLanes(
               fsp.audio_validator_histogram AS audio_validator_histogram,
               fsp.structural_audio_count AS structural_audio_count,
               fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
+              fsp.text_audio_validator_histogram AS text_audio_validator_histogram,
+              fsp.structural_text_audio_validator_histogram AS structural_text_audio_validator_histogram,
               CASE WHEN ${inCountedFileSql('fsp')} THEN 1 ELSE 0 END AS text_counted,
               fsp.file_id AS file_id, fr.role AS file_role, fr.anchor_file_id AS anchor_file_id
          FROM file_section_progress fsp
@@ -1606,7 +1631,8 @@ async function fetchPortfolioLanes(
     env.AQUILLA_PG.prepare(
       `SELECT l.project_id AS project_id, l.id AS id, ${laneDisplayNameSql("l")} AS name,
               l.role AS role, l.legacy_tag AS legacy_tag, l.position AS position,
-              l.archived_at AS archived_at, l.records_audio AS records_audio
+              l.archived_at AS archived_at, l.records_audio AS records_audio,
+              l.delivers AS delivers
          FROM lanes l
          JOIN projects p ON p.id = l.project_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
@@ -1619,6 +1645,7 @@ async function fetchPortfolioLanes(
       archived_at: string | null
       role: string
       records_audio: boolean | null
+      delivers: string | null
     }>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
@@ -1630,10 +1657,20 @@ async function fetchPortfolioLanes(
       .filter((row) => row.count_structural === "false")
       .map((row) => row.project_id),
   )
+  // Media redesign slice 1: what each language delivers, per (project, tag),
+  // so a language that counts its recordings takes its activity clock from
+  // its cue sheets too (below).
+  const deliversOf = new Map<string, LaneDelivers | null>()
+  for (const row of nameRows.results ?? []) {
+    if (row.role === "target") deliversOf.set(`${row.project_id}\u0000${row.legacy_tag ?? ""}`, parseLaneDelivers(row.delivers))
+  }
   // Accumulate one lane entry per (project, lane tag).
   const acc = new Map<string, Map<string, PortfolioLane>>()
   // AQU-1951: each lane's recordings, per (project, lane tag).
-  const audioAcc = new Map<string, Map<string, { audioCells: number; validatedAudioCells: number }>>()
+  const audioAcc = new Map<
+    string,
+    Map<string, { audioCells: number; validatedAudioCells: number; lastEditAt: number | null }>
+  >()
   // AQU-1599: the project's source-cell count, summed over the SOURCE lane's
   // file rows. The lane-independent denominator every lane without progress
   // rows of its own borrows, and the number that used to be read off the ''
@@ -1722,7 +1759,10 @@ async function fetchPortfolioLanes(
     let audioLanes = audioAcc.get(row.project_id)
     if (!audioLanes) { audioLanes = new Map(); audioAcc.set(row.project_id, audioLanes) }
     let audioEntry = audioLanes.get(lane)
-    if (!audioEntry) { audioEntry = { audioCells: 0, validatedAudioCells: 0 }; audioLanes.set(lane, audioEntry) }
+    if (!audioEntry) {
+      audioEntry = { audioCells: 0, validatedAudioCells: 0, lastEditAt: null }
+      audioLanes.set(lane, audioEntry)
+    }
     const audioThreshold = audioThresholds.get(row.project_id) ?? 1
     const structuralAudio = drop ? Number(row.structural_audio_count) || 0 : 0
     const structuralAudioValidated = drop
@@ -1740,6 +1780,16 @@ async function fetchPortfolioLanes(
       0,
       validatedFromHistogram(row.audio_validator_histogram, audioThreshold) - structuralAudioValidated,
     )
+    // Media redesign slice 1: recording and approving are activity. A dubbing
+    // project records on its cue sheet, whose rows the text clock below never
+    // reads, so a language that counts its recordings reads them here. A Text
+    // language's clock is exactly what it was.
+    if (laneCountsAudio(deliversOf.get(`${row.project_id}\u0000${lane}`))) {
+      const audioUpdated = row.updated_at == null ? null : Number(row.updated_at)
+      if (audioUpdated != null && Number.isFinite(audioUpdated)) {
+        audioEntry.lastEditAt = audioEntry.lastEditAt == null ? audioUpdated : Math.max(audioEntry.lastEditAt, audioUpdated)
+      }
+    }
     // A cue sheet's row carries recordings, not text work.
     if (!textCounted) continue
     let lanes = acc.get(row.project_id)
@@ -1749,6 +1799,7 @@ async function fetchPortfolioLanes(
       entry = {
         lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null,
         audioCells: 0, validatedAudioCells: 0, audioTotalCells: 0, recordsAudio: false,
+        delivers: null, bothValidatedCells: 0,
       }
       lanes.set(lane, entry)
     }
@@ -1761,6 +1812,13 @@ async function fetchPortfolioLanes(
     entry.validatedCells += Math.max(
       0,
       validatedFromHistogram(row.validator_histogram, threshold) - structuralValidated,
+    )
+    const structuralBoth = drop
+      ? bothApprovedFromHistogram(row.structural_text_audio_validator_histogram, threshold, audioThreshold)
+      : 0
+    entry.bothValidatedCells += Math.max(
+      0,
+      bothApprovedFromHistogram(row.text_audio_validator_histogram, threshold, audioThreshold) - structuralBoth,
     )
     const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
     if (updatedAt != null && Number.isFinite(updatedAt)) {
@@ -1799,6 +1857,8 @@ async function fetchPortfolioLanes(
     const tag = role === "target" ? (row.legacy_tag ?? "") : ""
     const progress = role === "target" ? acc.get(row.project_id)?.get(tag) : undefined
     const borrowed = role === "target" && !progress ? laneIndependentTotal(row.project_id) : 0
+    const delivers = role === "target" ? parseLaneDelivers(row.delivers) : null
+    const recordings = role === "target" ? audioAcc.get(row.project_id)?.get(tag) : undefined
     const entry: PortfolioLane = {
       lane: tag,
       role,
@@ -1808,7 +1868,11 @@ async function fetchPortfolioLanes(
       totalCells: progress?.totalCells ?? borrowed,
       filledCells: progress?.filledCells ?? 0,
       validatedCells: progress?.validatedCells ?? 0,
-      lastEditAt: progress?.lastEditAt ?? null,
+      lastEditAt: laneCountsAudio(delivers)
+        ? laterEdit(progress?.lastEditAt ?? null, recordings?.lastEditAt ?? null)
+        : progress?.lastEditAt ?? null,
+      delivers,
+      bothValidatedCells: progress?.bothValidatedCells ?? 0,
       audioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.audioCells ?? 0 : 0,
       validatedAudioCells: role === "target" ? audioAcc.get(row.project_id)?.get(tag)?.validatedAudioCells ?? 0 : 0,
       audioTotalCells: role === "target" ? laneAudioTotal(row.project_id, tag, row.records_audio === true) : 0,

@@ -126,6 +126,12 @@ interface CellVoicePanelProps {
   /** The line's voice picker, for the row under the waveform. The host owns
    *  it — it is the Media view gutter's picker, in its field form. */
   voicePicker?: ReactNode
+  /**
+   * Media redesign slice 2 (P2.3): false in a language that delivers Audio and
+   * no text — there is no text to speak, so the card offers no "Generate"
+   * (or "Generate audio from text"); Record, Change voice and the rest stay.
+   */
+  voiceFromText?: boolean
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
@@ -284,6 +290,7 @@ export function CellVoicePanel({
   targetLang,
   voicePicker,
   place = null,
+  voiceFromText = true,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -308,7 +315,7 @@ export function CellVoicePanel({
   const failure = status.kind === "error" ? status.message : null
 
   const isParatext = cell.type === "paratext"
-  const canGenerate = Boolean(cell.translated?.trim()) && !isParatext
+  const canGenerate = voiceFromText && Boolean(cell.translated?.trim()) && !isParatext
 
   // Preferred playable attachment: a real recording wins over generated voice.
   const playableId = useMemo(() => {
@@ -535,7 +542,7 @@ export function CellVoicePanel({
         (playableId === cell.selectedAudioId && audioIdSeededWith(playableId, cell.id))
       ),
     )
-    const missingGenerate = !missingOwnTake || !canEdit ? undefined : (
+    const missingGenerate = !missingOwnTake || !canEdit || !voiceFromText ? undefined : (
       <div
         className="flex max-w-[calc(100%-2.5rem)] flex-wrap items-center justify-center gap-x-2 gap-y-1"
         onPointerDown={(e) => e.stopPropagation()}
@@ -750,7 +757,10 @@ export function CellVoicePanel({
     </AppTooltip>
   ) : null
 
-  const state = isVoicing ? "generating" : failure ? "failed" : !canGenerate ? "notext" : offlineGate.kind !== "ok" ? "offline" : "ready"
+  // Media redesign slice 2: an Audio language's empty card offers Record only.
+  const state = isVoicing ? "generating"
+    : !voiceFromText ? "record-only"
+    : failure ? "failed" : !canGenerate ? "notext" : offlineGate.kind !== "ok" ? "offline" : "ready"
   return (
     <div className="min-w-0" dir="ltr" data-voice-card="">
       <div data-testid="voice-card-empty" data-state={state} className={slotClass} style={trackVars}>

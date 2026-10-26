@@ -217,14 +217,18 @@ export const nav = defineNamespace({
       one:
         "{count} line in this file holds more than one speaker. Split at its quotation " +
         "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. A translation that splits the same way is " +
-        "divided; any other stays whole on the first line and is marked for review.",
+        "language shares the new lines. Every existing translation is marked for review, " +
+        "so it has to be done again. A translation that splits the same way is divided " +
+        "between the new lines. Any other stays whole on the first line.",
       other:
         "{count} lines in this file hold more than one speaker. Split at their quotation " +
         "marks they become {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. A translation that splits the same way is " +
-        "divided; any other stays whole on the first line and is marked for review.",
+        "language shares the new lines. Every existing translation is marked for review, " +
+        "so it has to be done again. A translation that splits the same way is divided " +
+        "between the new lines. Any other stays whole on the first line.",
     }),
+    "nav.workspaceActions.splitQuotes.multiLaneWarning":
+      "Splitting changes the source all lanes share. Each lane's translations of these lines are marked so they have to be done again, and each lane keeps the voice it already gave a line on that line's new narration.",
     "nav.workspaceActions.splitQuotes.none":
       "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
     "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
@@ -1003,6 +1007,13 @@ export const nav = defineNamespace({
       "nav.workspaceActions.splitQuotes.confirmLabel": {
         description: "Confirm button of that dialog. Imperative.",
         maxLength: 24,
+      },
+      "nav.workspaceActions.splitQuotes.multiLaneWarning": {
+        description:
+          "Extra paragraph on that dialog when the project has two or more target " +
+          "lanes. Says the split changes the source all lanes share, without saying how " +
+          "many lanes there are, marks each lane's translations to be done again, and " +
+          "keeps each lane's existing voice on the new narration lines.",
       },
       "nav.workspaceActions.confirmAttribution": {
         description:

@@ -67,6 +67,19 @@ async function storedSettings(): Promise<Record<string, unknown>> {
   return JSON.parse(row?.settings ?? "{}") as Record<string, unknown>
 }
 
+function splitOrigin(from: string): string {
+  return JSON.stringify({ aquillaOrigin: { version: 1, kind: "user-insert", splitFrom: from } })
+}
+
+async function seedSplitPieces(): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id, metadata)
+     VALUES
+       ('p1', 'f1', 'guide-b', 'source', 'b', 'e-guide-b', 1, (SELECT aquilla_test_resolve_source_lane('p1')), ?::text::jsonb),
+       ('p1', 'f1', 'hero-b', 'source', 'b', 'e-hero-b', 1, (SELECT aquilla_test_resolve_source_lane('p1')), ?::text::jsonb)`,
+  ).bind(splitOrigin("guide"), splitOrigin("hero")).run()
+}
+
 async function getSettings(username: string): Promise<{ version: number; settings: Record<string, unknown> }> {
   const res = await app.request(
     "/api/v2/projects/p1/settings",
@@ -156,6 +169,125 @@ describe("project leads managing voices (AQU-2041)", () => {
     const save = await patchSettings("carla", renameSpanish(contributor.settings, "Español"), contributor.version)
     expect(save.status).toBe(403)
     expect(await storedSettings()).toEqual(stored(true))
+  })
+
+  it("copies every lane's cast onto the new narration pieces, including a lane the lead cannot see", async () => {
+    await seed(false)
+    await seedSplitPieces()
+    env.LANE_READ_WALL = "1"
+    const body = JSON.stringify({
+      fileId: "f1",
+      splits: [
+        { cellId: "guide", sameKindAsFirst: ["guide-b"] },
+        { cellId: "hero", sameKindAsFirst: ["hero-b"] },
+      ],
+    })
+    const res = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      { method: "POST", headers: authHeader(await jwtFor("dan")), body },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changed: true })
+    const saved = await storedSettings()
+    const lanes = (saved.ttsSettings as {
+      laneCastAssignments: Record<string, Record<string, string>>
+    }).laneCastAssignments
+    expect(lanes.es).toEqual({ guide: "es-1", "guide-b": "es-1" })
+    expect(lanes.de).toEqual({ hero: "de-1", "hero-b": "de-1" })
+    const again = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      { method: "POST", headers: authHeader(await jwtFor("dan")), body },
+      env,
+    )
+    expect(again.status).toBe(200)
+    expect(await again.json()).toEqual({ changed: false })
+    const denied = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      { method: "POST", headers: authHeader(await jwtFor("carla")), body },
+      env,
+    )
+    expect(denied.status).toBe(403)
+    expect(await storedSettings()).toEqual(saved)
+  })
+
+  it("copies a character's voice when the row has no entry of its own", async () => {
+    await seed(false)
+    await seedSplitPieces()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id, metadata)
+       VALUES ('p1', 'f1', 'guide', 'source', 'a', 'e-guide', 1, (SELECT aquilla_test_resolve_source_lane('p1')), ?::text::jsonb)`,
+    ).bind(JSON.stringify({ cast_name: "Guide" })).run()
+    const settings = await storedSettings()
+    const tts = settings.ttsSettings as {
+      laneCastAssignments: Record<string, Record<string, string>>
+      castAssignments?: Record<string, string>
+    }
+    tts.castAssignments = { "character:Guide": "narrator" }
+    tts.laneCastAssignments = {
+      ...tts.laneCastAssignments,
+      es: { "character:Guide": "es-1" },
+    }
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_settings SET settings = ? WHERE project_id = 'p1'",
+    ).bind(JSON.stringify(settings)).run()
+    env.LANE_READ_WALL = "1"
+    const res = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("dan")),
+        body: JSON.stringify({
+          fileId: "f1",
+          splits: [{ cellId: "guide", sameKindAsFirst: ["guide-b"], castName: "Someone Else" }],
+        }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ changed: true })
+    const saved = await storedSettings()
+    const savedTts = saved.ttsSettings as {
+      castAssignments: Record<string, string>
+      laneCastAssignments: Record<string, Record<string, string>>
+    }
+    expect(savedTts.castAssignments["guide-b"]).toBe("narrator")
+    expect(savedTts.laneCastAssignments.es["guide-b"]).toBe("es-1")
+    expect(savedTts.laneCastAssignments.de).toEqual({ hero: "de-1" })
+  })
+
+  it("refuses a cell that was not split from the named row, and leaves the cast alone", async () => {
+    await seed(false)
+    await seedSplitPieces()
+    env.LANE_READ_WALL = "1"
+    const before = await storedSettings()
+    const forged = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("dan")),
+        body: JSON.stringify({
+          fileId: "f1",
+          splits: [{ cellId: "guide", sameKindAsFirst: ["guide-b", "other"] }],
+        }),
+      },
+      env,
+    )
+    expect(forged.status).toBe(422)
+    const wrongParent = await app.request(
+      "/api/v2/projects/p1/split-casts",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("dan")),
+        body: JSON.stringify({
+          fileId: "f1",
+          splits: [{ cellId: "guide", sameKindAsFirst: ["hero-b"] }],
+        }),
+      },
+      env,
+    )
+    expect(wrongParent.status).toBe(422)
+    expect(await storedSettings()).toEqual(before)
   })
 
   it("lets a maintainer turn the switch off", async () => {

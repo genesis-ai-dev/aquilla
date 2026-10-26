@@ -941,3 +941,51 @@ export async function patchProjectSettings(
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: errorMessageFrom(text) }
 }
+
+/**
+ * AQU-2101: what the voice copy did.
+ * `saved` — the server accepted it. Apply the same copy locally.
+ * `unsaved` — the request never landed (network, 5xx, version conflict)
+ * after a few tries. Do not paint a local copy the server does not have.
+ * `refused` — the server rejected the body or the role. Same: leave local alone.
+ */
+export type SplitCastCopyStatus = "saved" | "unsaved" | "refused"
+
+const SPLIT_CAST_ATTEMPTS = 3
+
+function splitCastRefused(status: number): boolean {
+  return status === 400 || status === 403 || status === 422
+}
+
+/**
+ * AQU-2101: ask the server to copy each lane's cast of these rows onto the new
+ * narration pieces. The server holds every lane, including ones this client
+ * was not shown. `fileId` is how it checks the new pieces really were split
+ * from those rows.
+ */
+export async function postSplitCastCopies(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<SplitCastCopyStatus> {
+  const body = JSON.stringify({ fileId, splits })
+  for (let attempt = 0; attempt < SPLIT_CAST_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/split-casts`,
+        {
+          method: "POST",
+          headers: authHeaders(jwt),
+          body,
+        },
+      )
+      if (res.ok) return "saved"
+      if (splitCastRefused(res.status)) return "refused"
+    } catch {
+      // A dropped request is worth another try. A refusal is not.
+    }
+  }
+  return "unsaved"
+}

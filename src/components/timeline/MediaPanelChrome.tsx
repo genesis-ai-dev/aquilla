@@ -9,7 +9,7 @@
 // No chevrons and no rails: a folded panel leaves nothing behind, and the
 // Panels button above the view is the way back.
 
-import { useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ArrowRightLeft, Expand, FileText, Film, Minus, MoreHorizontal, Shrink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -292,30 +292,47 @@ export function MediaAreaStrip({ dock, area }: { dock: MediaDock; area: DockArea
   )
 }
 
-/** The drop side of a tab drag: the whole area, outlined while a tab is over it. */
+/**
+ * The drop side of a tab drag: the whole area, outlined while a tab is over it.
+ *
+ * NATIVE LISTENERS, NOT React props, and that is forced: the film and the text
+ * render through portals, and React bubbles a portal's events through the
+ * React tree — to where the portal was called, in the workspace — never
+ * through the area's DOM box they physically sit in. A drag over the text
+ * would never reach an `onDragOver` here.
+ */
 export function useAreaDrop(dock: MediaDock, area: DockArea) {
   const [over, setOver] = useState(false)
-  const carries = (e: React.DragEvent) => e.dataTransfer.types.includes(DRAG_TYPE)
-  return {
-    over,
-    props: {
-      onDragOver: (e: React.DragEvent) => {
-        if (!carries(e)) return
-        e.preventDefault()
-        e.dataTransfer.dropEffect = "move"
-        if (!over) setOver(true)
-      },
-      onDragLeave: (e: React.DragEvent) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false)
-      },
-      onDrop: (e: React.DragEvent) => {
-        setOver(false)
-        const panel = e.dataTransfer.getData(DRAG_TYPE)
-        if (panel !== "film" && panel !== "text") return
-        e.preventDefault()
-        dock.move(panel, area)
-      },
-    },
-    className: cn(over && "ring-2 ring-inset ring-sky-500/60"),
-  }
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  const move = useRef(dock.move)
+  move.current = dock.move
+  useEffect(() => {
+    if (!el) return
+    const carries = (e: DragEvent) => Boolean(e.dataTransfer && Array.from(e.dataTransfer.types).includes(DRAG_TYPE))
+    const onOver = (e: DragEvent) => {
+      if (!carries(e)) return
+      e.preventDefault()
+      e.dataTransfer!.dropEffect = "move"
+      setOver(true)
+    }
+    const onLeave = (e: DragEvent) => {
+      if (!el.contains(e.relatedTarget as Node | null)) setOver(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      setOver(false)
+      const panel = e.dataTransfer?.getData(DRAG_TYPE)
+      if (panel !== "film" && panel !== "text") return
+      e.preventDefault()
+      move.current(panel, area)
+    }
+    el.addEventListener("dragover", onOver)
+    el.addEventListener("dragleave", onLeave)
+    el.addEventListener("drop", onDrop)
+    return () => {
+      el.removeEventListener("dragover", onOver)
+      el.removeEventListener("dragleave", onLeave)
+      el.removeEventListener("drop", onDrop)
+    }
+  }, [el, area])
+  return { ref: setEl, className: cn(over && "ring-2 ring-inset ring-sky-500/60") }
 }

@@ -34,7 +34,7 @@ function MediaArea({ dock, area, stacked, first }: { dock: MediaDock; area: Dock
       <div
         data-media-region={area}
         data-testid={`dock-area-${area}`}
-        {...(stacked ? drop.props : {})}
+        ref={stacked ? drop.ref : undefined}
         className={cn(
           "flex h-full min-h-0 min-w-0 flex-col",
           // The line between the two areas, on the right-hand one.

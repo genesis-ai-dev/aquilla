@@ -16729,7 +16729,12 @@ export function ProjectWorkspace() {
                       fileName={fileDisplayName(activeFile)}
                       kind={mediaKind}
                       filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
-                      status={mediaStatusSync}
+                      status={
+                        <div className="flex flex-col gap-1.5 text-sm text-muted-foreground [&_footer]:flex-wrap">
+                          {mediaStatusSync}
+                          {showFileStats ? mediaStatusStats : null}
+                        </div>
+                      }
                     />
                   </>
                 }

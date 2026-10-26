@@ -10,6 +10,7 @@ import {
   isVideoTimedSubtitleFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
+  isFilmTimedFile,
   resolveFileTimingMode,
   type FileType,
 } from "./types"
@@ -260,11 +261,23 @@ describe("resolveFileTimingMode", () => {
     expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
   })
 
-  it("but keeps a Free timing chosen on the file itself", () => {
-    const opts = { timedToLinkedVideo: true }
-    expect(resolveFileTimingMode({ type: "video", timingMode: "audioFirst" }, null, opts)).toBe("audioFirst")
-    expect(resolveFileTimingMode({ type: "video", timingMode: "dubbing" }, { audioTimingMode: "audioFirst" }, opts))
-      .toBe("dubbing")
+  // AQU-2204 (Sam, Oct 26): a file timed to a film ONLY follows its source —
+  // the Free timing it could once pick through the video-stays-hidden warning
+  // is gone, and a stored choice from then no longer re-flows it.
+  it("a file with any footage linked follows its source, whatever it stored (AQU-2204)", () => {
+    const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    expect(
+      resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null, { timedToLinkedVideo: true }),
+    ).toBe("dubbing")
+    expect(
+      resolveFileTimingMode({ type: "audio", coreMediaUrl: "https://cdn.test/ep1/master.m3u8", timingMode: "audioFirst" }, null),
+    ).toBe("dubbing")
+  })
+
+  it("a file carrying an audio cue file follows its source, with no footage linked (AQU-2204)", () => {
+    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" }, null, { hasAudioCues: true })).toBe("dubbing")
+    // …and without the cue file, the same video-less subtitle file keeps its choice (LOTE).
+    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" }, null, { hasAudioCues: false })).toBe("audioFirst")
   })
 
   it("without the flag a video file keeps Free timing exactly as before", () => {
@@ -272,5 +285,17 @@ describe("resolveFileTimingMode", () => {
     expect(
       resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, { timedToLinkedVideo: false }),
     ).toBe("audioFirst")
+  })
+})
+
+describe("isFilmTimedFile (AQU-2204)", () => {
+  it("is any file with footage linked, or with an audio cue file", () => {
+    expect(isFilmTimedFile({ coreMediaUrl: "https://cdn.test/ep1/master.m3u8" })).toBe(true)
+    expect(isFilmTimedFile({ coreMediaUrl: null }, { hasAudioCues: true })).toBe(true)
+  })
+
+  it("is not a file with neither (a LOTE sermon, a Bible book)", () => {
+    expect(isFilmTimedFile({ coreMediaUrl: null })).toBe(false)
+    expect(isFilmTimedFile(null)).toBe(false)
   })
 })

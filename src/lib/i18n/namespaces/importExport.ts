@@ -1277,6 +1277,29 @@ export const importExport = defineNamespace({
     "importExport.preview.commitFailed": "Import failed: {error}",
     "importExport.preview.confidencePercent": "{percent}% confidence",
     "importExport.preview.confirmImport": "Confirm import",
+    "importExport.reimport.title": "Re-import {name}",
+    "importExport.reimport.oneFile": "Choose one file to re-import.",
+    "importExport.reimport.oneDocument": "Re-import takes one document, not a project or a set of books.",
+    "importExport.reimport.update": "Update this file",
+    "importExport.reimport.updatedCopy": "Make updated copy",
+    "importExport.reimport.blankCopy": "Make a blank copy",
+    "importExport.reimport.nameUpdated": "updated",
+    "importExport.reimport.nameBlank": "blank",
+    "importExport.reimport.hint": "Translations already in the file are kept. A changed source line is marked for review until it is validated.",
+    "importExport.reimport.added": plural({
+      one: "{count} cell added",
+      other: "{count} cells added",
+    }),
+    "importExport.reimport.updated": plural({
+      one: "{count} cell updated",
+      other: "{count} cells updated",
+    }),
+    "importExport.reimport.analysis": "Analysis",
+    "importExport.reimport.noChanges": "Nothing in this file has changed.",
+    "importExport.reimport.more": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
     "importExport.preview.epubChaptersTitle": "Chapters in this book",
     "importExport.preview.epubRoleChapter": "Chapter",
     "importExport.preview.epubRoleNavigation": "Table of contents",
@@ -3572,6 +3595,80 @@ export const importExport = defineNamespace({
           "Primary button in the footer of the preview screen that commits the " +
           "previewed lines into the project and starts the upload. Imperative verb " +
           "plus noun; it is the point of no return, so it should read as decisive.",
+      },
+      "importExport.reimport.title": {
+        description:
+          "Dialog title while re-importing one file chosen from the sidebar. Names the file being updated.",
+        placeholders: {
+          name: "The file's current name in the project. Do not translate.",
+        },
+      },
+      "importExport.reimport.oneFile": {
+        description:
+          "Error shown when the re-import dialog is given more than one file. One short sentence.",
+      },
+      "importExport.reimport.oneDocument": {
+        description:
+          "Error shown when the chosen upload is a multi-book project or otherwise not a single document.",
+      },
+      "importExport.reimport.update": {
+        description:
+          "Primary button after the preview. Writes the new source into the file that was chosen in the sidebar.",
+        maxLength: 28,
+      },
+      "importExport.reimport.updatedCopy": {
+        description:
+          "Button that leaves the current file alone and creates a copy with the new source and the kept translations.",
+        maxLength: 28,
+      },
+      "importExport.reimport.blankCopy": {
+        description:
+          "Button that imports the uploaded file as a new file with empty translations.",
+        maxLength: 28,
+      },
+      "importExport.reimport.nameUpdated": {
+        description:
+          "Word placed in parentheses after a copied file's name when that name is already in the project. Lowercase noun.",
+        maxLength: 16,
+      },
+      "importExport.reimport.nameBlank": {
+        description:
+          "Word placed in parentheses after a blank copy's name when that name is already in the project. Lowercase adjective.",
+        maxLength: 16,
+      },
+      "importExport.reimport.hint": {
+        description:
+          "One sentence under the three re-import buttons explaining that existing translations stay and changed lines need review.",
+      },
+      "importExport.reimport.added": {
+        description:
+          "Count shown above the re-import choices: how many cells in the uploaded document are not already in the file. Shown next to the updated count.",
+        placeholders: {
+          count: "Number of new cells; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updated": {
+        description:
+          "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
+        placeholders: {
+          count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.analysis": {
+        description:
+          "Title of the box above the re-import buttons that lists cells the uploaded file would add or change.",
+        maxLength: 24,
+      },
+      "importExport.reimport.noChanges": {
+        description:
+          "Shown in the re-import Analysis window when the uploaded file matches the original cell for cell.",
+      },
+      "importExport.reimport.more": {
+        description:
+          "Line under a truncated list in the re-import Analysis window, saying how many further cells are not shown.",
+        placeholders: {
+          count: "Number of cells left off the list; also selects the plural form.",
+        },
       },
       "importExport.preview.epubChaptersTitle": {
         description:

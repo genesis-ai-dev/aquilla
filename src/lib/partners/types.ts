@@ -18,6 +18,7 @@ import type { ComponentType } from "react"
 import type { LucideIcon } from "lucide-react"
 import type { IdmlFormatMetadataV2, IdmlProgress } from "@aquilla/idml-roundtrip"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { ReimportCountedCell } from "@/lib/import/reimport-diff"
 import type { FileReference, TranslatableString } from "@/lib/parsers/types"
 
 /** Progress phases reported while a partner package is read and saved. */
@@ -87,6 +88,22 @@ export interface PartnerImportPanelProps {
   targetLanguage?: string
   getToken: (fileId: string) => Promise<string | null>
   onImported: (ref: FileReference) => void | Promise<void>
+  /**
+   * Sidebar re-import of a file this partner already imported. The panel keeps
+   * its own file chooser and edition, then commits through the three choices
+   * instead of creating a fresh file.
+   */
+  reimport?: {
+    fileId: string
+    profileId?: string
+    corpusMarker?: string
+    existingNames: readonly string[]
+    /**
+     * Source cells already in the file. Present once they have loaded, so the
+     * panel can say how many cells the upload would add or update.
+     */
+    existingSource?: readonly ReimportCountedCell[]
+  }
 }
 
 /**
@@ -178,4 +195,15 @@ export interface PartnerIntegration {
    * synchronous and cheap — it runs once per rendered row.
    */
   isScriptureCell?: (cellMetadata: unknown) => boolean
+  /**
+   * Profile ids this partner's importer stamps on `parserVersion`. Generic
+   * re-import uses them to reopen this partner's panel instead of the general
+   * file upload. Absent on a partner that has no import of its own.
+   */
+  importProfileIds?: readonly string[]
+  /**
+   * Sidebar folder names this partner stamps at import. Used only when the
+   * file's profile id has not been loaded yet. A renamed folder does not match.
+   */
+  importCorpusMarkers?: readonly string[]
 }

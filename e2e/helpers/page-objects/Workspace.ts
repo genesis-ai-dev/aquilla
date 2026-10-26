@@ -455,6 +455,41 @@ export class Workspace {
     }
   }
 
+  /** Sidebar Re-import → Update this file. The file was already chosen. */
+  async sidebarReimportUpdate(filePath: string): Promise<void> {
+    const row = this.page.locator('[data-showcase="sidebar.file"]').filter({ hasText: /genesis\.usfm/i }).first()
+    await row.hover()
+    await row.getByRole("button", { name: /^File actions$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Re-import$/i }).click()
+
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 10_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    const update = this.page.getByRole("button", { name: /^Update this file$/i })
+    await expect(update).toBeVisible({ timeout: 30_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await update.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Sidebar re-import failed (${response.status()}): ${await response.text()}`)
+    }
+    await expect(this.page.getByRole("button", { name: /^Update this file$/i })).toBeHidden({ timeout: 30_000 })
+  }
+
+  /** Index of the editor row whose source contains this text. */
+  async cellIndexBySource(text: string): Promise<number> {
+    const count = await this.cellRows().count()
+    for (let index = 0; index < count; index += 1) {
+      const source = await this.cellRow(index).locator('[data-cell-type="source"]').innerText()
+      if (source.includes(text)) return index
+    }
+    throw new Error(`No source cell contains ${JSON.stringify(text)}`)
+  }
+
   private uploadFilesCard(): Locator {
     return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }

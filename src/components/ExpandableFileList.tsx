@@ -156,6 +156,8 @@ interface Props {
   assignedFileIds?: ReadonlySet<string>
   /** Opens the Segmentation dialog for the given file (rendered by the caller). */
   onSegmentation?: (fileId: string) => void
+  /** Opens the single-file re-import dialog for the given file. */
+  onReimport?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -224,7 +226,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -651,6 +653,7 @@ export function ExpandableFileList({
                             onExport={onExport ? () => onExport(file.id) : undefined}
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
+                            onReimport={onReimport ? () => onReimport(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)

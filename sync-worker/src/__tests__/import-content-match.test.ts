@@ -34,6 +34,11 @@ describe('normalizeForMatch', () => {
     expect(normalizeForMatch('  The\n  Lord   said ')).toBe('The Lord said')
     expect(normalizeForMatch('the lord said')).not.toBe(normalizeForMatch('The Lord said'))
   })
+
+  it('folds apostrophe lookalikes and soft hyphens', () => {
+    expect(normalizeForMatch('Israel\u02BCs covenant history')).toBe("Israel's covenant history")
+    expect(normalizeForMatch('cove\u00adn\u00adant')).toBe('covenant')
+  })
 })
 
 describe('orderSourceCellsByAnchor', () => {

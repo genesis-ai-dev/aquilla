@@ -153,6 +153,11 @@ export const LONG_OPERATION_TIMEOUTS = {
    *  recomputes every per-file and per-section counter for a freshly imported
    *  file in one transaction — a full Bible is ~31k cells. */
   "import-finalize": 120_000,
+  /** Sidebar re-import (`POST /import/reconcile`). One transaction holds the
+   *  cell writes and the same full-file counter scan as import finalize. On a
+   *  study-Bible file that scan's index-only read falls back to tens of
+   *  thousands of heap fetches and exceeds the 15s request-path cap. */
+  "import-reconcile": 120_000,
   /** Projection rebuild (`/admin/projects/:id/rebuild-projection`). An admin
    *  one-off that replays a project's entire event log; minutes are the
    *  expected cost, and nobody is waiting on a page. */

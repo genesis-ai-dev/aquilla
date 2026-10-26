@@ -230,6 +230,11 @@ export interface ReconcileImportResult {
 export interface ReconcileSourceArgs extends Omit<BulkUploadArgs, "fileId"> {
   /** Existing file whose stable units are being reconciled. */
   fileId: string
+  /** Sidebar review apply. Off for the collision "Update existing" path. */
+  reviewChangedSource?: boolean
+  /** Clone onto fileId, then apply. sourceFileId is the untouched original. */
+  fork?: boolean
+  sourceFileId?: string
 }
 
 function sourceArtifactInput(args: Pick<BulkUploadArgs, "rawBytes" | "rawSource" | "rawSourceFormat">): {
@@ -261,6 +266,10 @@ function sourceArtifactInput(args: Pick<BulkUploadArgs, "rawBytes" | "rawSource"
  * sidecar pointer. The reconcile transaction switches the pointer only after
  * unit matching and all projections succeed, so a failed parse/upload never
  * leaves new cells paired with an old source artifact (or vice versa).
+ *
+ * A fork is the exception: the destination file does not exist until reconcile
+ * creates it, and the source upload refuses a missing file. The copy is written
+ * first, then the original is stored against that new file.
  */
 export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<ReconcileImportResult> {
   const fetchFn = args.fetchImpl ?? fetch
@@ -271,27 +280,28 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
   if (args.signal?.aborted) throw new Error("Import cancelled")
 
   const fileEventId = args.file.id
-  const artifactId = uuidv7()
   const { bytes: sourceBytes, format: sourceFormat } = sourceArtifactInput(args)
+  const deferArtifact = args.fork === true
+  const uploadOriginal = (updateSourceSidecar: boolean) => uploadSourceOriginal({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    artifactId: uuidv7(),
+    bytes: sourceBytes!,
+    format: sourceFormat!,
+    artifactName: args.file.name,
+    bindingRole: args.artifactBindingRole ?? "source",
+    targetLang: args.artifactTargetLang,
+    profileId: args.file.parserVersion?.split("@")[0],
+    profileVersion: args.file.parserVersion?.split("@")[1],
+    fidelity: args.artifactFidelity,
+    updateSourceSidecar,
+    getToken: args.getToken,
+    fetchFn,
+    signal: args.signal,
+  })
   let uploadedArtifactId: string | undefined
-  if (sourceBytes && sourceFormat) {
-    const uploaded = await uploadSourceOriginal({
-      projectId: args.projectId,
-      fileId: args.fileId,
-      artifactId,
-      bytes: sourceBytes,
-      format: sourceFormat,
-      artifactName: args.file.name,
-      bindingRole: args.artifactBindingRole ?? "source",
-      targetLang: args.artifactTargetLang,
-      profileId: args.file.parserVersion?.split("@")[0],
-      profileVersion: args.file.parserVersion?.split("@")[1],
-      fidelity: args.artifactFidelity,
-      updateSourceSidecar: false,
-      getToken: args.getToken,
-      fetchFn,
-      signal: args.signal,
-    })
+  if (sourceBytes && sourceFormat && !deferArtifact) {
+    const uploaded = await uploadOriginal(false)
     uploadedArtifactId = uploaded.artifactId
   }
 
@@ -308,6 +318,8 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
     ...(uploadedArtifactId && sourceFormat
       ? { artifactId: uploadedArtifactId, rawSourceFormat: sourceFormat }
       : {}),
+    ...(args.reviewChangedSource ? { reviewChangedSource: true } : {}),
+    ...(args.fork && args.sourceFileId ? { fork: true, sourceFileId: args.sourceFileId } : {}),
     clientTs: Date.now(),
   }
 
@@ -329,6 +341,9 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
 
     if (response) {
       if (response.ok) {
+        if (deferArtifact && sourceBytes && sourceFormat) {
+          await uploadOriginal(true)
+        }
         args.onProgress?.(args.cells.length, args.cells.length)
         return await response.json() as ReconcileImportResult
       }

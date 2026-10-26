@@ -455,16 +455,22 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     clearStoredMediaSections(fileId)
     clearStoredTimelinePaneHeight(fileId ?? "")
     clearStoredVideoPaneWidth(fileId)
-    flushSync(() => {
-      setCollapsed(NONE)
-      setBodyFolded(false)
-      setFullscreen(null)
-    })
+    if (bodyFoldedNow) flushSync(() => setBodyFolded(false))
+    // One section at a time, through the ordinary `expand`: reopening them all
+    // in one commit leaves the second still at zero while the first is being
+    // resized, and the library's layout report for that resize reads it as a
+    // fresh fold and shuts it again (seen in the browser). `expand` already
+    // does the flushSync, the resize and the "it would not fit" check, and the
+    // storage is cleared, so each comes back at this file's starting size.
+    for (const id of ["timeline", "video", "text"] as const) {
+      if (effective.includes(id)) expand(id)
+    }
+    flushSync(() => setFullscreen(null))
     frozenRef.current = {}
     lastOpenRef.current = {}
     applySize("timeline", start.timelineHeight)
     if (present.includes("video")) applySize("video", start.videoWidth)
-  }, [applySize, fileId, present, start.timelineHeight, start.videoWidth])
+  }, [applySize, bodyFoldedNow, effective, expand, fileId, present, start.timelineHeight, start.videoWidth])
 
   /**
    * Fed from every panel's `onResize`. It only RECORDS. It must not decide

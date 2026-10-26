@@ -2,6 +2,27 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `hi` (Hindi) — 2026-10-23
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,190 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Hindi speaker has read it.** The menu
+> endonym is हिन्दी; the wording uses आप and the polite imperative for buttons
+> (सहेजें, रद्द करें). Glossary: cell → कक्ष, lane → लेन, changeset →
+> परिवर्तन-समूह, termbase → शब्दावली आधार, back-translation → प्रतिअनुवाद,
+> source → स्रोत, target → लक्ष्य, draft → मसौदा. Hindi plurals are one and other
+> only (`one` covers 0 and 1). Identical wording on both forms is correct when the
+> noun does not change, as with कक्ष.
+>
+> Import report: 8,575/8,682 keys. The leaves the importer dropped were identical to
+> English (formats, product names, placeholder-only templates, and labels the UI
+> still draws in English, such as Source text, Source audio, Speaker, and Camera).
+> Mechanical check before import: 0 missing leaves and 0 `{placeholder}` drift.
+> `common.datePlaceholder` stays `June 01, 2025` because the date parser only
+> accepts that en-US shape. The Monday "make a new board" strings were already in
+> this packet and are included. Role names inside
+> `org.membersPage.orgTable.projectAccessNote` stay English because that sentence
+> is matched against the hardcoded English role labels.
+
 > ## All locales topped up from `pnpm i18n:todo` — 2026-10-03
 >
 > The 14,590 untranslated or stale leaves in `th`, `my`, `ms`, `id`, `ar`, `zh-Hans`,

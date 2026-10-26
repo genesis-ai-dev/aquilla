@@ -152,7 +152,7 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
   const callerUsername = session?.username ?? null
   const jwt = session?.jwt ?? null
 
-  const { members, isLoading, error, add, addMany, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, rosterHidden, add, addMany, remove } = useProjectMembers(projectId)
 
   // AQU-672 parity for the Share modal: offer org colleagues as checkbox rows
   // before any search fires. Eligibility mirrors the members page — org
@@ -172,9 +172,10 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
     : null
   const visibleOrgMembers = loadedRosterKey === rosterKey ? orgMembers : null
   useEffect(() => {
-    if (!jwt || rosterOrgId == null) {
+    if (!jwt || rosterOrgId == null || rosterHidden) {
       setOrgMembers(null)
       setLoadedRosterKey(null)
+      if (rosterHidden) setSuggestionsError(null)
       return
     }
     let alive = true
@@ -196,7 +197,7 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
         }
       })
     return () => { alive = false }
-  }, [jwt, rosterKey, rosterOrgId])
+  }, [jwt, rosterKey, rosterOrgId, rosterHidden])
 
   const projectGrantUserIds = useMemo(
     () => new Set(partitionMembers(members).projectMembers.map((m) => m.userId)),
@@ -433,6 +434,9 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
           scopeConfig={scopeConfig}
           suggestions={suggestions}
           emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
+          searchDisabledReason={
+            rosterHidden ? t("org.membersPage.rosterHiddenBody") : undefined
+          }
           grantScope={{
             kind: "project",
             projectName: grantProjectName(t, projectName),

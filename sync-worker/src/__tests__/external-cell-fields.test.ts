@@ -227,9 +227,10 @@ describe('cell-field commands — role floors', () => {
     expect(
       requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, cellId: 'c', startMs: 0, endMs: 1 }),
     ).toBe(ROLE.CONTRIBUTOR)
-    // timingMode is a FILE-level structural change — it pulls the floor up.
+    // timingMode is a FILE-level change — it pulls the floor up to project
+    // lead (AQU-2204: leads and above choose a file's timing).
     expect(requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, timingMode: 'dubbing' })).toBe(
-      ROLE.MAINTAINER,
+      ROLE.PROJECT_LEAD,
     )
     expect(
       requiredRoleForCommand({ kind: 'SetTrackOverride', fileId: FILE, trackId: 't', patch: null }),

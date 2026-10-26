@@ -1680,6 +1680,11 @@ export const editor = defineNamespace({
     "editor.timeline.charactersFilledByPosition":
       "{count} rows do not quite match their line; the lines either side pin them, " +
       "so they are matched by position.",
+    "editor.timeline.charactersTimecodeRate":
+      "The sheet's times are video timecode, read at {rate} frames a second.",
+    "editor.timeline.charactersTimecodeNoRate":
+      "The sheet's times are video timecode that doesn't line up with this file's lines " +
+      "at any common frame rate, so its rows were matched by their words.",
     "editor.timeline.charactersCameraDisagreements":
       "In {count} rows the Camera column and the angle written into the name " +
       "disagree. The column wins.",
@@ -9433,6 +9438,15 @@ export const editor = defineNamespace({
           "Note in the go-ahead summary for a SUBTITLE sheet: lines the " +
           "spreadsheet says nothing about are left exactly as they are.",
         placeholders: { count: "Number of lines absent from the sheet." },
+      },
+      "editor.timeline.charactersTimecodeRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode (hours:minutes:seconds:frame), and Aquilla found the frame rate at which they line up with the file's lines.",
+        placeholders: { rate: "The frame rate, as a number such as 24, 25 or 23.976. Do not translate it." },
+      },
+      "editor.timeline.charactersTimecodeNoRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode, but at no common frame rate do they line up with the file's lines (the file may have been re-timed or converted wrongly), so the rows were matched by their wording instead.",
       },
       "editor.timeline.charactersFilledByPosition": {
         description:

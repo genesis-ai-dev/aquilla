@@ -346,3 +346,44 @@ describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
     expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 Before → After")
   })
 })
+
+describe("PreviewPanel — subtitle times that are frames written as hundredths (AQU-2197)", () => {
+  const cue = (i: number, start: number, end: number) => ({
+    id: `c${i}`, original: `Line ${i}`, translated: "", group: `g${i}`, type: "cue",
+    context: `00:01:${String(Math.floor(start) - 60).padStart(2, "0")}.${String(Math.round((start % 1) * 1000)).padStart(3, "0")} --> 00:01:${String(Math.floor(end) - 60).padStart(2, "0")}.${String(Math.round((end % 1) * 1000)).padStart(3, "0")}`,
+    start, end,
+  })
+  const strings = [cue(0, 66.15, 67.18), cue(1, 68.21, 69.05)]
+  const RESULT = [{
+    name: "TheChosen_101_en_AUDIO_ONLY.vtt",
+    strings,
+    framesAsHundredths: { times: 4, maxFrame: 23, suggested: "24", rates: ["23.976", "24", "25", "29.97", "30"] },
+  }] as unknown as ImportResult[]
+
+  it("warns, shows the converted times, and converts at the suggested rate on confirm", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    expect(screen.getByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    // The cue list shows the times the import will write: frame 15 of 24 is .625.
+    expect(screen.getByText(/00:01:06\.625 --> 00:01:07\.750/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    const options = onConfirm.mock.calls[0][0]
+    expect([...options.frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "24"]])
+  })
+
+  it("keeps the times as they are when the person says so", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    expect(screen.getByText(/00:01:06\.150 --> 00:01:07\.180/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    expect(onConfirm.mock.calls[0][0]?.frameRates).toBeUndefined()
+  })
+
+  it("says nothing for an ordinary subtitle file", () => {
+    render(<PreviewPanel results={[{ name: "ok.vtt", strings }] as unknown as ImportResult[]} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+})

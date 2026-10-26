@@ -80,6 +80,7 @@ import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { filterEpubStrings } from "@/lib/parsers/epub"
+import { convertFramesAsHundredths } from "@/lib/parsers/frame-timecode"
 import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
@@ -2614,6 +2615,19 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           // Hand off to parent to show the preview screen.
           // The commit closure does the actual upload.
           onPreview(remainingResults, async (options) => {
+            // AQU-2197: re-time the subtitle files whose cue times the person
+            // chose to read as frame numbers, at the rate they picked.
+            if (options?.frameRates && options.frameRates.size > 0) {
+              for (const [file, prepared] of preparedByFile) {
+                preparedByFile.set(file, {
+                  ...prepared,
+                  results: prepared.results.map((result) => {
+                    const rate = result.framesAsHundredths ? options.frameRates!.get(result.name) : undefined
+                    return rate ? { ...result, strings: convertFramesAsHundredths(result.strings, rate) } : result
+                  }),
+                })
+              }
+            }
             if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
               for (const [file, prepared] of preparedByFile) {
                 preparedByFile.set(file, {

@@ -1061,6 +1061,25 @@ export const importExport = defineNamespace({
       other: "{count} cue times could not be read, so their wording is not in this import.",
     }),
 
+    // — Frames written as hundredths (AQU-2197): src/components/import/
+    //   FramesAsHundredthsNotice.tsx, in the import preview. A subtitle file
+    //   whose every cue time is a video frame number written as hundredths of
+    //   a second, with the choice to convert it at a frame rate or keep it.
+    "importExport.framesAsHundredths.warning":
+      "This file's times look like video frame numbers written as hundredths of a second, " +
+      "so lines may start up to 0.7 s early.",
+    "importExport.framesAsHundredths.infoLabel": "Why these times look wrong",
+    "importExport.framesAsHundredths.explain":
+      "Film and video tools write times as timecode, where the last part is a frame number: " +
+      "00:01:06:15 is frame 15 of that second. A converter that forgets the frame rate writes " +
+      "that frame as hundredths of a second, 00:01:06.150, instead of the real time, 00:01:06.625 " +
+      "at 24 frames a second. Every time in this file looks like that: always in steps of ten, " +
+      "and never past .{max}0.",
+    "importExport.framesAsHundredths.convertAt": "Convert at",
+    "importExport.framesAsHundredths.rateLabel": "Frame rate",
+    "importExport.framesAsHundredths.fps": "frames a second",
+    "importExport.framesAsHundredths.keep": "Keep the times as they are",
+
     // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
     //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
     //   yet surfaced by any panel (the array is currently read only for its
@@ -1613,6 +1632,38 @@ export const importExport = defineNamespace({
           count:
             "Number of cue timestamp lines that produced no cue; also governs the plural form.",
         },
+      },
+
+      // Frames written as hundredths (AQU-2197) — the import preview's warning
+      // for a subtitle file converted from video timecode without its frame
+      // rate, and the choice to fix it.
+      "importExport.framesAsHundredths.warning": {
+        description:
+          "Warning at the top of the import preview for a subtitle file whose every cue time looks like a video frame number written as hundredths of a second (00:01:06:15 written as 00:01:06.150). Says the consequence plainly: lines start early, by up to 0.7 seconds.",
+      },
+      "importExport.framesAsHundredths.infoLabel": {
+        description:
+          "Accessible name of the small (i) button beside that warning, which shows the longer explanation.",
+      },
+      "importExport.framesAsHundredths.explain": {
+        description:
+          "The longer explanation behind the (i): what timecode is, how a converter that forgets the frame rate turns a frame number into hundredths of a second, and the pattern that gives this file away. The times (00:01:06:15, 00:01:06.150, 00:01:06.625) are literal examples; keep them as written.",
+        placeholders: {
+          max: "The highest frame number seen, as one or two digits; shown after a decimal point with a trailing 0 (for 23 the text reads '.230').",
+        },
+      },
+      "importExport.framesAsHundredths.convertAt": {
+        description:
+          "Label of the first choice, followed by a frame-rate picker and the words 'frames a second': convert the file's times as if they were frame numbers at that rate.",
+      },
+      "importExport.framesAsHundredths.rateLabel": {
+        description: "Accessible name of the frame-rate picker (23.976, 24, 25, 29.97 or 30).",
+      },
+      "importExport.framesAsHundredths.fps": {
+        description: "Unit after the frame-rate picker: 'Convert at [24] frames a second'.",
+      },
+      "importExport.framesAsHundredths.keep": {
+        description: "The second choice: import the file's times unchanged.",
       },
 
       // Timeline media import (AQU-1431) — the three dialogs that review segments

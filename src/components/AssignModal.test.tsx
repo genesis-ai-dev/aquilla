@@ -208,8 +208,8 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     secondarySources: [],
   }
 
-  it("says why only the caller can be picked, and links to where people are added", () => {
-    render(<AssignModal {...BASE_PROPS} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
+  it("says why only the caller can be picked, and links a maintainer to where people are added", () => {
+    render(<AssignModal {...BASE_PROPS} roleLevel={ROLE.MAINTAINER} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
     const hint = screen.getByTestId("assign-modal-staff-hint")
     expect(hint.textContent).toMatch(/only people on this project/i)
     const link = screen.getByRole("link", { name: /add someone to this project/i })
@@ -221,7 +221,10 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     // is a Project lead, and the linguist isn't on the project.
     const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
     render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
-    expect(screen.getByTestId("assign-modal-staff-hint").textContent).toMatch(/add someone to this project/i)
+    // A Project lead can't open the Members settings, so no link: who to ask.
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/ask a project maintainer/i)
+    expect(screen.queryByRole("link", { name: /add someone to this project/i })).toBeNull()
   })
 
   it("says nothing once someone else is on the project", () => {

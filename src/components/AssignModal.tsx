@@ -950,7 +950,7 @@ export function AssignModal({
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
             )}
             {showStaffHint && (
-              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" />
+              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
             )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (

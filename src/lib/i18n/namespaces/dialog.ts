@@ -39,6 +39,7 @@ export const dialog = defineNamespace({
       "maintainers can assign work to someone else.",
     "dialog.assign.onlyProjectMembersHint": "Only people on this project can be given work.",
     "dialog.assign.addPeopleLink": "Add someone to this project",
+    "dialog.assign.askMaintainerToAdd": "Ask a project maintainer to add the person to this project first.",
     "dialog.assign.deadlineLabel": "Deadline (optional)",
     "dialog.assign.deadlineBatchDescription":
       "Applies to every file selected above — one deadline for the whole batch.",
@@ -236,6 +237,13 @@ export const dialog = defineNamespace({
         description:
           "Link after the 'Only people on this project can be given work.' helper text; " +
           "opens the project's Members settings, where people are added to the project.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.askMaintainerToAdd": {
+        description:
+          "Follows 'Only people on this project can be given work.' for someone below " +
+          "maintainer, who can't open the project's Members settings: tells them who can add " +
+          "the person they want to assign.",
         screenshot: "assign-modal",
       },
       "dialog.assign.deadlineLabel": {

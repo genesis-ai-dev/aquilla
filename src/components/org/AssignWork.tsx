@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { ROLE } from "@/lib/frontier/roles"
 import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
@@ -511,7 +512,7 @@ export function AssignWork({
               </FieldDescription>
             )}
             {showStaffHint && (
-              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" />
+              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
             )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}
             {rosterError && (

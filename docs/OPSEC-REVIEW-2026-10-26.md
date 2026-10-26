@@ -283,6 +283,11 @@ standard decisive check:
   package is not installed in this environment — same as 09-28, 10-05, 10-12 and
   10-19).
 * `npx eslint` clean on all four changed files.
+* Full `auth-worker` suite (`npx vitest run`): **378 files, 4447 passing, 2
+  expected-fail, 0 failures** (1139 s). Nothing red remains in this package to
+  distinguish from the change under review — the condition that makes a suite
+  run worth anything as evidence — and it is clean for the second pass running,
+  after 10-19 recorded the three files 10-12 had found red as repaired.
 
 Environment note, for whoever re-runs this: **no dependencies were installed in
 this container at session start.** `pnpm install` in `auth-worker` (its own pnpm

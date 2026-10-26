@@ -149,6 +149,12 @@ function ToastItem({
 }) {
   const [pulsing, setPulsing] = React.useState(false)
   const updateKey = toastItem.updateKey ?? 0
+  const secondaryAction = secondaryActionFromToast(toastItem.data)
+  // AQU-2175: a button keeps its full width, so sharing the row with the
+  // message crushed the message into a one-word column. The buttons get their
+  // own row underneath — rendered only when there is one, so a plain notice
+  // keeps today's single row with no trailing gap.
+  const hasActions = toastItem.actionProps != null || secondaryAction != null
 
   React.useEffect(() => {
     // First paint is updateKey 0 — skip. Only upserts pulse, and only repeats:
@@ -163,14 +169,23 @@ function ToastItem({
     <Toast toast={toastItem}>
       <ToastPulse pulsing={pulsing}>
         <ToastContent>
-          <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <ToastTitle />
-            <ToastDescription />
+          <div className="flex items-start gap-3">
+            <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <ToastTitle />
+              <ToastDescription />
+            </div>
+            <ToastClose className="-mt-1" />
           </div>
-          <ToastSecondaryAction toastId={toastItem.id} action={secondaryActionFromToast(toastItem.data)} />
-          <ToastAction />
-          <ToastClose />
+          {hasActions && (
+            <div
+              data-slot="toast-actions"
+              className="flex flex-wrap items-center justify-end gap-2"
+            >
+              <ToastSecondaryAction toastId={toastItem.id} action={secondaryAction} />
+              <ToastAction />
+            </div>
+          )}
         </ToastContent>
       </ToastPulse>
     </Toast>
@@ -289,7 +304,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full items-center gap-3 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
         className
       )}
       {...props}
@@ -400,7 +415,7 @@ function ToastIcon({ type, icon }: { type: string | undefined; icon?: React.Reac
   return (
     <span
       data-slot="toast-icon"
-      className="shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
+      className="mt-0.5 shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
     >
       {glyph}
     </span>

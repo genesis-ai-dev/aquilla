@@ -3208,7 +3208,6 @@ export const fr: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "Organisations invitées",
   "org.switcher.guestRole": "Invité",
   "org.switcher.personalWorkspace": "Personnel",
-  "org.overviewLaneTable.sectionDescription": "Progression, personnes et actions pour chaque langue cible de ce projet.",
   "org.projectOverview.archiveDialogTitle": "Archiver le projet",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Filtrer la progression par langue",
   "org.projectOverview.plan.laneMenuAria": "Langue affichée : {language}. Choisissez-en une autre.",

@@ -3711,7 +3711,6 @@ export const pt: Catalog = {
   "org.switcher.guestRole": "Convidado",
   "org.switcher.personalWorkspace": "Pessoal",
   "org.overviewLaneTable.peopleCellAriaLabel": "Pessoas em {lane}",
-  "org.overviewLaneTable.sectionDescription": "Progresso, pessoas e ações de cada idioma de destino neste projeto.",
   "org.projectOverview.chapterAbbrevLabel": "Cap. {chapter}",
   "org.projectOverview.archiveDialogTitle": "Arquivar projeto",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Filtrar o progresso por idioma",

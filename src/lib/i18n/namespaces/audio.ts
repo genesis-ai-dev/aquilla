@@ -211,6 +211,9 @@ export const audio = defineNamespace({
     "audio.playbackBar.previousLine": "Previous line",
     "audio.playbackBar.nextLine": "Next line",
     "audio.playbackBar.playAll": "Play all",
+    // Media redesign, layout: the same button in the media view's top bar,
+    // whose tooltip names its key.
+    "audio.playbackBar.playAllSpace": "Play all (Space)",
     "audio.playbackBar.playbackSpeed": "Playback speed",
     "audio.playbackBar.unmute": "Unmute",
     "audio.playbackBar.mute": "Mute",
@@ -1611,6 +1614,12 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the central play/pause button, shown " +
           "while audio is stopped or paused (pressing it plays every line in " +
           "sequence, not just one).",
+      },
+      "audio.playbackBar.playAllSpace": {
+        description:
+          "Tooltip of the same play button in the media view's top bar, naming " +
+          "the key that does the same (the space bar). Keep the key's name as " +
+          "the keyboard labels it.",
       },
       "audio.playbackBar.playbackSpeed": {
         description:

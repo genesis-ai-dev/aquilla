@@ -1173,12 +1173,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
-    // AQU-1119: the section heading over the dialogue table, opposite the
-    // Video header. It says "Text" and not "Source text" because SOURCE and
-    // TARGET are the two columns underneath it — the section holds both, and
-    // naming it after one of its columns read as a mislabel. Deliberately not
-    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
-    // text" / "Target text", which is right, because a track IS one side.
+    // The media view's Text panel: its tab, and its name in the Panels menu.
+    // (AQU-1119 named it, as a heading over the dialogue table.) It says
+    // "Text" and not "Source text" because SOURCE and TARGET are the two
+    // columns inside it — the panel holds both, and naming it after one of its
+    // columns read as a mislabel. Deliberately not the track row's name:
+    // `TRACK_KIND_LABELS` still calls those "Source text" / "Target text",
+    // which is right, because a track IS one side.
     "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
@@ -1241,7 +1242,6 @@ export const editor = defineNamespace({
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
     "editor.timeline.linkVideoClear": "Clear video",
-    "editor.timeline.chipHeadingDialogue": "Dialogue",
     "editor.timeline.chipHeadingSubtitle": "Subtitle",
     "editor.timeline.chipSpeaker": "Speaker",
     "editor.timeline.chipCamera": "Camera",
@@ -1252,33 +1252,72 @@ export const editor = defineNamespace({
       "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
     // AQU-646 stage 2: folders in the track gutter. (Stage 4b retired the
     // "N tracks" sublabel — a slim folder heading has no room for a second
-    // line, and the summary band says what is inside better.)
-    "editor.timeline.gutterCollapseAria": "Narrow the track names",
+    // line, and the summary band says what is inside better.) Since the media
+    // redesign's layout this is a checkbox in the timeline's settings: the
+    // track names shown in full, or narrowed to their icons.
     "editor.timeline.gutterExpandAria": "Show the track names",
-    // AQU-1119: hiding a whole section of the media lens. Since the media
-    // redesign's layout a hidden section takes no room at all; the Panels menu
-    // above the lens brings it back.
-    "editor.timeline.collapseVideoAria": "Hide the video",
-    "editor.timeline.collapseTimelineAria": "Hide the timeline",
-    "editor.timeline.collapseTextAria": "Hide the text",
-    // AQU-1119: the other control beside each body section's chevron. Where
-    // the chevron folds ITS OWN section, this one folds the others so this
-    // section has the lens to itself — one button in two states.
-    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
-    "editor.timeline.restoreVideoAria": "Put the video back in its column",
-    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
-    "editor.timeline.restoreTextAria": "Put the text back in its column",
-    // Media redesign, layout: the timeline takes the lens too (the video and
-    // text row folds as one unit), its ⋯ menu, and the Panels menu above the
-    // lens that shows and hides each panel.
-    "editor.timeline.fullscreenTimelineAria": "Fill the lens with the timeline",
-    "editor.timeline.restoreTimelineAria": "Restore the other panels",
-    "editor.timeline.timelineMenuAria": "Timeline layout",
-    "editor.timeline.menuFullscreen": "Full screen",
-    "editor.timeline.menuRestorePanels": "Restore the other panels",
-    "editor.timeline.resetLayout": "Reset layout",
-    "editor.timeline.panelsMenu": "Panels",
-    "editor.timeline.panelsTextOnlyReason": "On a file without a video, the text is the only panel below the timeline, so it stays.",
+    // Media redesign, layout (canvas board 23, "Lean chrome: your mix"): the
+    // media view's panels — the timeline, the Film and the Text — their 24 px
+    // strips with Full screen, Fold and ⋯, the one 40 px top bar, its status
+    // ring, and the Panels menu that brings back whatever is folded.
+    "editor.dock.film": "Film",
+    "editor.dock.bottomLeft": "Bottom left",
+    "editor.dock.bottomRight": "Bottom right",
+    "editor.dock.fullScreenTip": "Full screen: fold everything else ({keys})",
+    "editor.dock.restoreTip": "Restore the other panels ({keys})",
+    "editor.dock.fullScreen": "Full screen: fold everything else",
+    "editor.dock.restore": "Restore the other panels",
+    "editor.dock.foldAreaTip": "Fold this area ({keys}). Nothing is left behind; the Panels button brings it back.",
+    "editor.dock.foldTimelineTip": "Fold the timeline ({keys}). Nothing is left behind; the Panels button brings it back.",
+    "editor.dock.foldArea": "Fold this area",
+    "editor.dock.foldTimeline": "Fold the timeline",
+    "editor.dock.moreTip": "Move this panel, or more",
+    "editor.dock.timelineMoreTip": "Timeline layout and settings",
+    "editor.dock.menuHeading": "{panel} · in {area}",
+    "editor.dock.moveTo": "Move to {area}",
+    "editor.dock.dragNote": "You can also drag the tab to another area, or double-click it for full screen.",
+    "editor.dock.tabTip": "{panel} · {keys} · click to show · double-click for full screen",
+    "editor.dock.tracks": "Tracks",
+    "editor.dock.timelineSettings": "Timeline settings",
+    "editor.dock.zoom": "Zoom",
+    "editor.dock.rowHeight": "Row height",
+    "editor.dock.timing": "Timing",
+    "editor.dock.panels": "Panels",
+    "editor.dock.panelsTip": "Panels · {keys}",
+    "editor.dock.panelsOnFile": "Panels on this file",
+    "editor.dock.whereTimeline": "The centre, always",
+    "editor.dock.stateFolded": "folded",
+    "editor.dock.stateShowing": "showing",
+    "editor.dock.stateBehind": "a tab behind {panel}",
+    "editor.dock.stateFull": "full screen",
+    "editor.dock.show": "Show",
+    "editor.dock.filmHiddenByTiming": "Hidden in Free timing",
+    "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
+    "editor.dock.foldedTimeline": "the timeline",
+    "editor.dock.foldedBottomLeft": "the bottom left",
+    "editor.dock.foldedBottomRight": "the bottom right",
+    "editor.dock.foldedLeftPanel": "the left panel",
+    "editor.dock.resetLayout": "Reset layout",
+    "editor.dock.resetInfoAria": "About your layout",
+    "editor.dock.rememberedNote": "Remembered for you, for this file. Your teammates keep their own arrangement of {file}.",
+    "editor.dock.startDub":
+      "Reset layout returns to the starting layout for a dubbing episode: the film large beside the text, the timeline at its usual height.",
+    "editor.dock.startSubtitles":
+      "Reset layout returns to the starting layout for a subtitles file: the text large beside a smaller film, the timeline shorter.",
+    "editor.dock.startScripture":
+      "Reset layout returns to the starting layout for a scripture book: the timeline tall above the text.",
+    "editor.dock.startPlain":
+      "Reset layout returns to the starting layout: the timeline above the film and the text, at their usual sizes.",
+    "editor.dock.keysHint": "Panels {panels} · Full screen {full} · Fold {fold} · Restore {restore}",
+    "editor.dock.statusTip": "Status: click for the details",
+    "editor.dock.statusTitle": "{file} · status",
+    "editor.dock.lastSaved": "Last saved {when}",
+    "editor.dock.statusCloseNote": "Esc or a click elsewhere closes this.",
+    "editor.dock.filmTip": "The film this file links: change, hide or clear",
+    "editor.dock.filmLabel": "Film: {name}",
+    "editor.dock.filmChange": "Change or clear the video…",
+    "editor.dock.filmHide": "Fold the film",
+    "editor.dock.filmShow": "Show the film panel",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -2722,120 +2761,276 @@ export const editor = defineNamespace({
           "dialog. The new track's chips are positioned against the chosen " +
           "track's lines, and that choice is made once, at creation.",
       },
-      "editor.timeline.gutterCollapseAria": {
-        description:
-          "Screen-reader name and tooltip of the button that narrows the " +
-          "timeline's whole track-name column to a strip of icons, giving the " +
-          "space to the tracks themselves. Affects every row at once. Doubles " +
-          "as the button's hover tooltip, so it is read as well as heard.",
-      },
       "editor.timeline.gutterExpandAria": {
         description:
-          "Screen-reader name and tooltip of the button that widens the " +
-          "timeline's track-name column back out, so every track's full name " +
-          "and description are readable again. Affects every row at once. " +
-          "Doubles as the button's hover tooltip.",
+          "Checkbox in the timeline's 'Timeline settings' menu: ticked, the " +
+          "timeline's track-name column shows every track's full name; " +
+          "unticked, it narrows to a strip of icons and gives the space to the " +
+          "tracks. Affects every row at once.",
       },
-      "editor.timeline.collapseVideoAria": {
+      "editor.dock.film": {
         description:
-          "Screen-reader name and tooltip of the button in the video's own " +
-          "header that hides the whole video section, giving its width to the " +
-          "text beside it; the Panels menu above the lens brings it back. " +
-          "Doubles as the button's hover tooltip.",
+          "Name of the panel in the media view that shows the linked video (the " +
+          "film being dubbed or subtitled). Used on its tab, in the Panels menu " +
+          "and in the panel's ⋯ menu.",
+        maxLength: 14,
       },
-      "editor.timeline.fullscreenVideoAria": {
+      "editor.dock.bottomLeft": {
         description:
-          "Screen-reader name and tooltip of the button beside the video " +
-          "header's collapse chevron, which folds the OTHER sections — the " +
-          "timeline and the text — so the picture has the whole media lens " +
-          "to itself. Not browser fullscreen: the app window is unchanged. " +
-          "Pairs with restoreVideoAria, which is the same button pressed.",
+          "Name of the area below the timeline on the left, where a panel (the " +
+          "film or the text) can sit. Used in 'Move to …' and the Panels menu.",
       },
-      "editor.timeline.restoreVideoAria": {
+      "editor.dock.bottomRight": {
         description:
-          "Screen-reader name and tooltip of that same button once the video " +
-          "already has the lens to itself: pressing it puts the sections that " +
-          "were folded to make room back the way they were. 'Its column' is " +
-          "the video's normal place beside the text, not a table column.",
+          "Name of the area below the timeline on the right, where a panel (the " +
+          "film or the text) can sit. Used in 'Move to …' and the Panels menu.",
       },
-      "editor.timeline.fullscreenTextAria": {
+      "editor.dock.fullScreenTip": {
         description:
-          "Screen-reader name and tooltip of the button beside the text " +
-          "header's collapse chevron, which folds the OTHER sections — the " +
-          "timeline and the video — so the cells have the whole media lens " +
-          "to themselves. Not browser fullscreen: the app window is " +
-          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+          "Tooltip and screen-reader name of a panel's full-screen button: it " +
+          "folds every other panel (and the left sidebar) so this one fills the " +
+          "media view. Not browser full screen — the window does not change.",
+        placeholders: { keys: "A keyboard shortcut as this computer writes it, e.g. ⌘⇧F on a Mac or Ctrl+Shift+F elsewhere. Never translate." },
       },
-      "editor.timeline.restoreTextAria": {
+      "editor.dock.restoreTip": {
         description:
-          "Screen-reader name and tooltip of that same button once the text " +
-          "already has the lens to itself: pressing it puts the sections that " +
-          "were folded to make room back the way they were. 'Its column' is " +
-          "the text's normal place beside the video.",
+          "Tooltip and screen-reader name of that same button while its panel is " +
+          "full screen: it unfolds exactly the panels full screen folded.",
+        placeholders: { keys: "The key that does the same, 'Esc'. Never translate." },
       },
-      "editor.timeline.fullscreenTimelineAria": {
+      "editor.dock.fullScreen": {
         description:
-          "Screen-reader name and tooltip of the button beside the timeline's " +
-          "heading that folds the video-and-text row below it, so the tracks " +
-          "have the whole media lens. Not browser fullscreen: the app window " +
-          "is unchanged. Pairs with restoreTimelineAria, the same button pressed.",
+          "Menu item in a panel's ⋯ menu that makes the panel fill the media view " +
+          "by folding everything else. The shortcut is shown beside it.",
       },
-      "editor.timeline.restoreTimelineAria": {
+      "editor.dock.restore": {
         description:
-          "Screen-reader name and tooltip of that same button once the " +
-          "timeline already fills the lens: pressing it brings back the video " +
-          "and the text below it, the way they were.",
+          "Menu item and button that unfold the panels full screen folded, " +
+          "putting the media view back as it was. Appears in a panel's ⋯ menu " +
+          "and the Panels menu.",
       },
-      "editor.timeline.timelineMenuAria": {
+      "editor.dock.foldAreaTip": {
         description:
-          "Screen-reader name of the '…' button beside the timeline's heading, " +
-          "which opens a short menu of layout moves for the timeline panel: " +
-          "full screen, hide it, reset the layout.",
+          "Tooltip and screen-reader name of an area's fold button (a minus " +
+          "sign): the area disappears completely, and the Panels button at the " +
+          "top right of the media view brings it back.",
+        placeholders: { keys: "A keyboard shortcut as this computer writes it, e.g. ⌘⇧F on a Mac or Ctrl+Shift+F elsewhere. Never translate." },
       },
-      "editor.timeline.menuFullscreen": {
+      "editor.dock.foldTimelineTip": {
         description:
-          "Item in the timeline's '…' layout menu that makes the timeline fill " +
-          "the media lens by folding the video and text below it. A layout " +
-          "move inside the app window, not browser full screen.",
+          "Tooltip and screen-reader name of the timeline's fold button (a minus " +
+          "sign beside 'Tracks'): the timeline disappears completely, and the " +
+          "Panels button brings it back.",
+        placeholders: { keys: "A keyboard shortcut as this computer writes it, e.g. ⌘⇧F on a Mac or Ctrl+Shift+F elsewhere. Never translate." },
       },
-      "editor.timeline.menuRestorePanels": {
-        description:
-          "The same item in the timeline's '…' layout menu once the timeline " +
-          "fills the lens: it brings back the panels that were folded to make " +
-          "room (the video and the text).",
+      "editor.dock.foldArea": {
+        description: "Menu item in an area's ⋯ menu that folds the area away completely.",
       },
-      "editor.timeline.resetLayout": {
-        description:
-          "Menu item that puts this file's media layout back to how this kind " +
-          "of file starts: every panel shown, no full screen, the starting " +
-          "panel sizes. Appears in the timeline's '…' menu and the Panels menu.",
+      "editor.dock.foldTimeline": {
+        description: "Menu item in the timeline's ⋯ menu that folds the timeline away completely.",
       },
-      "editor.timeline.panelsMenu": {
+      "editor.dock.moreTip": {
         description:
-          "Label of the menu button above the media lens that lists its panels " +
-          "(Timeline, Video, Text) with a tick beside each one on screen; " +
-          "choosing one shows or hides it. Also holds Reset layout.",
+          "Tooltip and screen-reader name of the ⋯ button on a panel's strip, " +
+          "which opens a menu to move the panel to the other area, make it full " +
+          "screen or fold it.",
       },
-      "editor.timeline.panelsTextOnlyReason": {
+      "editor.dock.timelineMoreTip": {
         description:
-          "Hover reason on the greyed-out 'Text' item in the Panels menu, on a " +
-          "file with no linked video: the text table is then the only panel " +
-          "below the timeline, so it cannot be hidden.",
+          "Tooltip and screen-reader name of the ⋯ button in the timeline's " +
+          "corner, which opens full screen, fold and the timeline's settings.",
       },
-      "editor.timeline.collapseTimelineAria": {
-        description:
-          "Screen-reader name and tooltip of the button in the timeline's " +
-          "toolbar that hides the whole timeline, giving its height to the " +
-          "video and text below it; the Panels menu brings it back. Doubles as " +
-          "the button's hover tooltip and as an item in the timeline's '…' menu.",
+      "editor.dock.menuHeading": {
+        description: "Heading of a panel's ⋯ menu, saying which panel it is and where it sits.",
+        placeholders: {
+          panel: "The panel's name: 'Film' or 'Text'.",
+          area: "Where it sits: 'Bottom left' or 'Bottom right'.",
+        },
       },
-      "editor.timeline.collapseTextAria": {
+      "editor.dock.moveTo": {
+        description: "Menu item that moves the panel to the other area below the timeline.",
+        placeholders: { area: "The area it moves to: 'Bottom left' or 'Bottom right'." },
+      },
+      "editor.dock.dragNote": {
         description:
-          "Screen-reader name and tooltip of the button in the text section's " +
-          "header that hides the dialogue table, giving its width to the video " +
-          "beside it; the Panels menu brings it back. 'Text' here is the " +
-          "section holding the source and target columns, not one of them. " +
-          "Doubles as the button's hover tooltip.",
+          "Small note at the bottom of a panel's ⋯ menu: the same moves can be " +
+          "made by dragging the panel's tab, or double-clicking it.",
+      },
+      "editor.dock.tabTip": {
+        description:
+          "Tooltip of a panel's tab on its strip: its name, its keyboard " +
+          "shortcut, and what a click and a double-click do.",
+        placeholders: {
+          panel: "The panel's name: 'Film' or 'Text'.",
+          keys: "The panel's shortcut, e.g. ⌥2 or Alt+2. Never translate.",
+        },
+      },
+      "editor.dock.tracks": {
+        description:
+          "Small label in the timeline's top-left corner, above the column of " +
+          "track names; the timeline's layout buttons sit beside it.",
+        maxLength: 12,
+      },
+      "editor.dock.timelineSettings": {
+        description:
+          "Submenu in the timeline's ⋯ menu holding its settings: original " +
+          "quality, snapping, following the playhead, track names, zoom and row height.",
+      },
+      "editor.dock.zoom": {
+        description: "Label of the horizontal zoom stepper (−, a reading like 1.0×, +) in the timeline's settings.",
+      },
+      "editor.dock.rowHeight": {
+        description: "Label of the track row-height stepper (shorter, a reading in px, taller) in the timeline's settings.",
+      },
+      "editor.dock.timing": {
+        description:
+          "Label of the button in the media view's top bar that opens the file's " +
+          "timing mode (Original's timing or Free timing).",
+        maxLength: 14,
+      },
+      "editor.dock.panels": {
+        description:
+          "Label of the button at the top right of the media view that lists its " +
+          "panels, shows any that are folded, and resets the layout.",
+        maxLength: 14,
+      },
+      "editor.dock.panelsTip": {
+        description: "Tooltip of the Panels button, with its keyboard shortcut.",
+        placeholders: { keys: "The shortcut, e.g. ⌘\\ or Ctrl+\\. Never translate." },
+      },
+      "editor.dock.panelsOnFile": {
+        description: "Heading over the list of panels in the Panels menu (Timeline, Film, Text).",
+      },
+      "editor.dock.whereTimeline": {
+        description:
+          "Where the timeline is, in the Panels menu: it is always in the middle " +
+          "of the layout and never moves (it can only be folded).",
+      },
+      "editor.dock.stateFolded": {
+        description:
+          "Lower-case word joined after a place with ' · ' in the Panels menu " +
+          "(e.g. 'Bottom left · folded'): the panel is folded away.",
+      },
+      "editor.dock.stateShowing": {
+        description:
+          "Lower-case word joined after a place with ' · ' in the Panels menu " +
+          "(e.g. 'Bottom right · showing'): the panel is on screen.",
+      },
+      "editor.dock.stateBehind": {
+        description:
+          "Joined after a place with ' · ' in the Panels menu: the panel shares " +
+          "its area with another and is the tab not currently shown.",
+        placeholders: { panel: "The panel that is shown in front: 'Film' or 'Text'." },
+      },
+      "editor.dock.stateFull": {
+        description:
+          "Lower-case words joined after a place with ' · ' in the Panels menu: " +
+          "this panel is full screen, everything else folded.",
+      },
+      "editor.dock.show": {
+        description: "Button on a folded or hidden panel's row in the Panels menu that brings it back on screen.",
+        maxLength: 10,
+      },
+      "editor.dock.filmHiddenByTiming": {
+        description:
+          "Where the film is, in the Panels menu and the film button's menu, while " +
+          "the file is in Free timing — which hides the film, because the " +
+          "re-flowed audio no longer follows the original footage.",
+      },
+      "editor.dock.fullNote": {
+        description:
+          "Note at the top of the Panels menu while a panel is full screen: what " +
+          "full screen folded, and that restoring unfolds only those.",
+        placeholders: {
+          folded:
+            "A comma-separated list built from 'the timeline', 'the bottom left', " +
+            "'the bottom right' and 'the left panel'.",
+        },
+      },
+      "editor.dock.foldedTimeline": {
+        description: "One entry in the list of what full screen folded (see editor.dock.fullNote).",
+      },
+      "editor.dock.foldedBottomLeft": {
+        description: "One entry in the list of what full screen folded (see editor.dock.fullNote): the bottom-left area.",
+      },
+      "editor.dock.foldedBottomRight": {
+        description: "One entry in the list of what full screen folded (see editor.dock.fullNote): the bottom-right area.",
+      },
+      "editor.dock.foldedLeftPanel": {
+        description:
+          "One entry in the list of what full screen folded (see editor.dock.fullNote): " +
+          "the app's left sidebar (files, search, voices…), folded to its icons.",
+      },
+      "editor.dock.resetLayout": {
+        description:
+          "Button in the Panels menu that puts this file's media layout back to " +
+          "how this kind of file starts: every panel shown in its usual place and size.",
+      },
+      "editor.dock.resetInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button beside Reset layout, whose " +
+          "tooltip explains that the layout is remembered per person and per file.",
+      },
+      "editor.dock.rememberedNote": {
+        description:
+          "Tooltip text behind the (i) beside Reset layout: the arrangement is " +
+          "kept for this person on this file, and colleagues have their own.",
+        placeholders: { file: "The open file's name. Content, never translate." },
+      },
+      "editor.dock.startDub": {
+        description: "Tooltip text behind the (i) beside Reset layout, for a dubbing episode with a film.",
+      },
+      "editor.dock.startSubtitles": {
+        description: "Tooltip text behind the (i) beside Reset layout, for a subtitles file with a film.",
+      },
+      "editor.dock.startScripture": {
+        description: "Tooltip text behind the (i) beside Reset layout, for a scripture book.",
+      },
+      "editor.dock.startPlain": {
+        description: "Tooltip text behind the (i) beside Reset layout, for any other kind of file.",
+      },
+      "editor.dock.keysHint": {
+        description: "Footer line of the Panels menu listing the layout's keyboard shortcuts.",
+        placeholders: {
+          panels: "Shortcut, e.g. ⌘\\. Never translate.",
+          full: "Shortcut, e.g. ⌘⇧F. Never translate.",
+          fold: "Shortcut, e.g. ⌘⇧H. Never translate.",
+          restore: "Shortcut, 'Esc'. Never translate.",
+        },
+      },
+      "editor.dock.statusTip": {
+        description:
+          "Tooltip and screen-reader name of the small progress ring in the media " +
+          "view's top bar; clicking it opens the file's full status.",
+      },
+      "editor.dock.statusTitle": {
+        description: "Heading of the status popover opened from the progress ring.",
+        placeholders: { file: "The open file's name. Content, never translate." },
+      },
+      "editor.dock.lastSaved": {
+        description: "Line in the status popover saying when this project last saved its changes.",
+        placeholders: { when: "A relative time such as '2 minutes ago', or the word for never." },
+      },
+      "editor.dock.statusCloseNote": {
+        description: "Small note at the bottom of the status popover saying how to close it.",
+      },
+      "editor.dock.filmTip": {
+        description:
+          "Tooltip of the film button in the media view's top bar, which opens a " +
+          "menu to change the linked video, clear it, or fold the film's panel.",
+      },
+      "editor.dock.filmLabel": {
+        description: "Label of the film button in the media view's top bar.",
+        placeholders: { name: "The linked video's name, taken from its address. Content, never translate." },
+      },
+      "editor.dock.filmChange": {
+        description: "Item in the film button's menu that opens the dialog to change or clear the linked video.",
+      },
+      "editor.dock.filmHide": {
+        description: "Item in the film button's menu that folds the film's panel away.",
+      },
+      "editor.dock.filmShow": {
+        description: "Item in the film button's menu that brings the folded film panel back.",
       },
       "editor.timeline.folderExpandAria": {
         description:

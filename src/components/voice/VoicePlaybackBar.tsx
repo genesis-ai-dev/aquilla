@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
+  ChevronDown, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Spinner } from "@/components/ui/spinner"
@@ -66,6 +66,12 @@ interface Props {
    *  (plus the shared programme audio), so a line voiced only in another
    *  language reads as unvoiced here, which is what it is. */
   lane?: string
+  /**
+   * Media redesign, layout: "toolbar" lays the same transport out inline at
+   * the left of the media view's 40 px top bar — previous, play, next, the
+   * time, speed and volume. That view has no footer; this is its play bar.
+   */
+  variant?: "bar" | "toolbar"
 }
 
 function fmtTime(s: number): string {
@@ -78,7 +84,7 @@ function fmtTime(s: number): string {
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
   videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, freeTiming = false, below,
-  lane,
+  lane, variant = "bar",
 }: Props) {
   const t = useT()
 
@@ -251,6 +257,61 @@ export function VoicePlaybackBar({
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
+  if (variant === "toolbar") {
+    // The same controls as the bar below, wired identically (the comments on
+    // each are there), laid out inline: previous, play, next, the time, speed
+    // and volume. No scrubber — the timeline under the bar is the scrubber.
+    return (
+      <div className="flex shrink-0 items-center gap-1.5" data-testid="top-transport">
+        <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
+          <SkipBack className="h-4 w-4" />
+        </IconButton>
+        <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAllSpace")}>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="default"
+            onClick={onPlayPause}
+            disabled={!canPlay}
+            aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
+            data-testid="transport-play"
+            className="bg-foreground text-background hover:bg-foreground/90"
+          >
+            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
+          </Button>
+        </AppTooltip>
+        <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
+          <SkipForward className="h-4 w-4" />
+        </IconButton>
+        <span className="shrink-0 text-[11.5px] tabular-nums text-muted-foreground" data-testid="transport-time">
+          {fmtTime(currentTime)} / {fmtTime(duration)}
+        </span>
+        <SpeedButton
+          compact
+          rate={rate}
+          onChange={(r) => {
+            setQueueRate(r)
+            if (drivesVideo) videoController?.setRate(r)
+          }}
+        />
+        <VolumeControl
+          compact
+          volume={volume}
+          muted={drivesVideo ? !sourceAudible : volume === 0}
+          what={drivesVideo ? "the film's own sound" : "playback"}
+          onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
+          onToggleMute={() => {
+            if (drivesVideo && fileId) {
+              toggleAudibility(fileId, "source")
+              return
+            }
+            setQueueVolume(volume === 0 ? 1 : 0)
+          }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
@@ -418,7 +479,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   )
 }
 
-function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) => void }) {
+function SpeedButton({ rate, onChange, compact = false }: { rate: number; onChange: (r: number) => void; compact?: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   return (
@@ -426,17 +487,31 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
       <AppTooltip content={t("audio.playbackBar.playbackSpeed")}>
         <PopoverTrigger
           render={
-            <Button
-              type="button"
-              variant="ghost"
-              className="min-w-9 px-1.5 tabular-nums"
-            >
-              {rate}x
-            </Button>
+            compact ? (
+              // The top bar's outlined "1× ⌄", 26 px tall.
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="h-[26px] gap-0.5 px-1.5 tabular-nums"
+                data-testid="transport-speed"
+              >
+                {rate}×
+                <ChevronDown className="size-3" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-w-9 px-1.5 tabular-nums"
+              >
+                {rate}x
+              </Button>
+            )
           }
         />
       </AppTooltip>
-      <PopoverContent align="center" side="top" className="w-24 p-1">
+      <PopoverContent align="center" side={compact ? "bottom" : "top"} className="w-24 p-1">
         {SPEEDS.map((s) => (
           <button
             key={s}
@@ -472,6 +547,7 @@ function VolumeControl({
   what,
   onChange,
   onToggleMute,
+  compact = false,
 }: {
   volume: number
   muted: boolean
@@ -482,10 +558,12 @@ function VolumeControl({
   what: string
   onChange: (v: number) => void
   onToggleMute: () => void
+  /** The media view's top bar: the speaker alone, opening these two controls. */
+  compact?: boolean
 }) {
   const t = useT()
   const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
-  return (
+  const controls = (
     <div className="flex items-center gap-2">
       <AppTooltip content={label}>
         <Button
@@ -513,8 +591,25 @@ function VolumeControl({
           if (muted && v > 0) onToggleMute()
         }}
         aria-label={t("common.volume")}
-        className="hidden w-24 sm:block"
+        className={compact ? "w-28" : "hidden w-24 sm:block"}
       />
     </div>
+  )
+  if (!compact) return controls
+  return (
+    <Popover>
+      <AppTooltip content={t("common.volume")}>
+        <PopoverTrigger
+          render={
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("common.volume")} data-testid="transport-volume">
+              {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <PopoverContent align="start" side="bottom" className="w-auto p-1.5">
+        {controls}
+      </PopoverContent>
+    </Popover>
   )
 }

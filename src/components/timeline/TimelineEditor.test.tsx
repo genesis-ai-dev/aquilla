@@ -11,6 +11,21 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 
+/**
+ * Media redesign, layout: the timeline's settings (snap, follow, original
+ * quality, track names, zoom, row height) live in its corner ⋯, under
+ * "Timeline settings". Finds the control, opening that submenu if need be.
+ */
+function inTimelineSettings<T>(find: () => T): T {
+  try {
+    return find()
+  } catch {
+    fireEvent.click(screen.getByTestId("dock-more-tl"))
+    fireEvent.click(screen.getByTestId("tl-settings"))
+    return find()
+  }
+}
+
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
 // playback without any Audio element.
@@ -158,7 +173,7 @@ describe("TimelineEditor", () => {
       />,
     )
     const before = parseFloat(screen.getByTestId("tl-card-d1").style.width)
-    fireEvent.click(screen.getByLabelText("Zoom in"))
+    fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
     const after = parseFloat(screen.getByTestId("tl-card-d1").style.width)
     expect(after).toBeGreaterThan(before)
   })
@@ -555,10 +570,10 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    const btn = screen.getByTestId("tl-snap-toggle")
-    expect(btn).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(btn)
-    expect(btn).toHaveAttribute("aria-pressed", "false")
+    const item = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
+    expect(item()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(item())
+    expect(item()).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
     localStorage.removeItem("aquilla:timelineSnap")
   })
@@ -567,10 +582,11 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    const btn = screen.getByLabelText("Follow playhead")
-    expect(btn).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(btn)
-    expect(btn).toHaveAttribute("aria-pressed", "false")
+    const item = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
+    expect(item()).toHaveTextContent("Follow playhead")
+    expect(item()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(item())
+    expect(item()).toHaveAttribute("aria-checked", "false")
   })
 
   // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
@@ -1337,6 +1353,7 @@ describe("TimelineEditor — audio-first mode", () => {
     // renders as plain text — same testids, so browser passes read the mode
     // identically either way — and the (i) says who can change it.
     renderAt("audioFirst")
+    expect(inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))).toBeInTheDocument()
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
@@ -1625,7 +1642,7 @@ describe("TimelineEditor — audio-first mode", () => {
     const { container } = renderAt("dubbing")
     const v2 = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v2"]')!
     expect(px(v2, "left")).toBeCloseTo(px(container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!, "width"), 5)
-    expect(screen.getByTestId("tl-snap-toggle")).toBeInTheDocument()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))).toBeInTheDocument()
   })
 })
 
@@ -3386,8 +3403,10 @@ describe("TimelineEditor — pairing in progress", () => {
     )
 
   it("says it is pairing rather than offering to", () => {
+    // The Check square carries a spinner while pairing runs (its name is in
+    // its tooltip since the media redesign put it in the 40 px top bar).
     renderPairing({ cueLinksPending: true })
-    expect(screen.getByTestId("tl-check-menu")).toHaveTextContent("Check")
+    expect(within(screen.getByTestId("tl-check-menu")).getByRole("status")).toBeInTheDocument()
   })
 
   it("goes back to offering once the pairings have landed", () => {
@@ -3586,40 +3605,20 @@ describe("the Sources menu disappears when nothing in it is yours", () => {
 // sibling are "Audio cues" a few inches away. These cells are the subtitles,
 // so they say so.
 
-describe("the heading over the text column", () => {
-  const editor = (extra: Record<string, unknown>) => (
-    <TimelineEditor
-      fileId="heading" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} {...extra}
-    />
-  )
-
-  // AQU-1119 made this one word, unconditionally. It used to borrow the track
-  // gutter's own label — "Source text" — which was right while it named a
-  // column and wrong the moment it named the whole collapsible SECTION: source
-  // and target are the two columns inside it, so the gutter's word mislabels
-  // half of what it now sits over. The gutter's rows are untouched.
-
-  it("says Text with no video linked", () => {
-    render(editor({ coreMediaUrl: null }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
-  })
-
-  it("says Text with a video linked too", () => {
-    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
-  })
-
-  it("no longer borrows the gutter's column name", () => {
-    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
+describe("the text panel's row has no heading of its own", () => {
+  // Media redesign, layout: the Text panel's strip names it ("Text") and
+  // carries its controls, so the context row under it says only what the
+  // current line says about itself — and nothing at all for no selection.
+  it("names nothing, with or without a video", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="heading" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Text")
+    rerender(
+      <TimelineEditor fileId="heading" coreMediaUrl="https://example.test/master.m3u8" editable cells={[]} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Text")
     expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Source text")
-  })
-
-  it("says the same thing on every kind of project, not just a subtitle import", () => {
-    // It used to depend on how the file was imported, which meant an
-    // audio-first project fell through to a per-cell derivation and the
-    // heading changed as you clicked around.
-    render(editor({}))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
   })
 })
 
@@ -3846,7 +3845,9 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
   const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
   const names = () =>
     Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
-  const toggle = () => screen.getByTestId("tl-gutter-toggle")
+  // Media redesign, layout: the « » in the corner became "Show the track
+  // names" in the timeline's settings (no chevrons in the layout any more).
+  const toggle = () => inTimelineSettings(() => screen.getByTestId("tl-gutter-toggle"))
 
   // `onReorderTrack` throughout, because that is the gate on `data-tl-track-row`
   // — a viewer's rows carry no attribute at all, and asserting over them would
@@ -3922,14 +3923,23 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
     expect(gutter().querySelectorAll("[data-tl-track-row]").length).toBe(before)
   })
 
-  it("puts its button outside the layout, where the ruler's height is set", () => {
+  it("puts the corner's controls outside the layout, where the ruler's height is set", () => {
     // The gutter's header and the ruler beside it are both h-7, and that shared
     // height IS the vertical coordinate frame every drop line and lift offset
-    // is measured in. A button in the normal flow would grow the header and put
-    // all of them out by its height.
+    // is measured in. Controls in the normal flow would grow the header and put
+    // all of them out by their height.
     render(editor())
-    expect(toggle().className).toContain("absolute")
-    expect((toggle().parentElement as HTMLElement).className).toContain("h-7")
+    const corner = screen.getByTestId("tl-corner")
+    expect(corner.className).toContain("absolute")
+    expect((corner.parentElement as HTMLElement).className).toContain("h-7")
+    expect(corner).toHaveTextContent("Tracks")
+  })
+
+  it("is a setting, ticked while the names show", () => {
+    render(editor())
+    expect(toggle()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(toggle())
+    expect(toggle()).toHaveAttribute("aria-checked", "false")
   })
 
   it("remembers the choice against the file it was made on", () => {
@@ -5154,7 +5164,7 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
       check(0)
       for (let i = 1; i <= 3; i++) {
         const before = laneWidthPx()
-        fireEvent.click(screen.getByLabelText("Zoom in"))
+        fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
         flush()
         expect(laneWidthPx()).toBeGreaterThan(before)
         check(i)

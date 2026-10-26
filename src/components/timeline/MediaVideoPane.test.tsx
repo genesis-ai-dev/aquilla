@@ -434,13 +434,12 @@ describe("MediaVideoPane", () => {
     expect(onVideoTime).toHaveBeenCalled()
   })
 
-  it("heads its column with a Video label and the linked file's name", () => {
+  it("has no header row: the panel's strip names it, the top bar names the film", () => {
+    // Media redesign, layout: the Film panel's 24 px strip carries its name
+    // and controls, and the film's name is on the top bar's Film button.
     renderPane()
-    const header = screen.getByTestId("video-pane-header")
-    expect(header).toHaveTextContent("Video")
-    expect(header).toHaveTextContent("episode.webm")
-    // Never the full URL — the pill is a name, not an address.
-    expect(header).not.toHaveTextContent("https://")
+    expect(screen.queryByTestId("video-pane-header")).toBeNull()
+    expect(screen.getByTestId("tl-video-pane")).not.toHaveTextContent("episode.webm")
   })
 
   it("keeps the caption controls on the picture, revealed while playback starts", () => {

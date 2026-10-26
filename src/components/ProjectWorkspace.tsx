@@ -5060,6 +5060,7 @@ export function ProjectWorkspace() {
         cellsWithoutRow: 0,
         cameraDisagreements: 0,
         filledByPosition: 0,
+        matchedByWords: 0,
         distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
       })
     },

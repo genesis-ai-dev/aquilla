@@ -2692,8 +2692,11 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
     // AQU-1764: one dimmed two-part bar, and the validated figure names itself
-    // since an archived row has no column headings.
-    expect(sw).toHaveTextContent("8% validated")
+    // since an archived row has no column headings. AQU-2178: it names which
+    // half it is, and a Text language that has recorded nothing shows only the
+    // text one — no audio phrase, rather than "0% audio validated".
+    expect(sw).toHaveTextContent("8% text validated")
+    expect(sw).not.toHaveTextContent("audio validated")
     const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
     expect(archivedBars).toHaveLength(1)
     expect(archivedBars[0].className).toContain("opacity-70")

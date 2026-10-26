@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, portfolioShowsText, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioAggregates, getPortfolioPage, getPortfolios, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneAudioValidatedPct, laneOwesAudio, laneTextValidatedPct, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, portfolioShowsText, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -180,6 +180,64 @@ describe("lane helpers (AQU-538)", () => {
     const result = await getPortfolio("jwt", 1)
     expect(result[0].lanes).toHaveLength(2)
     expect(result[0].lanes?.[0].lane).toBe("")
+  })
+})
+
+describe("lane validation halves (AQU-2178)", () => {
+  const lane = (over: Partial<PortfolioLane>): PortfolioLane => ({ lane: "", totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null, ...over })
+
+  // The Languages table prints these two side by side where the single
+  // "Validated" column (laneValidatedPct) used to print one DONE share whose
+  // meaning changed with what the language delivers.
+  it("laneTextValidatedPct is validated text alone, whatever the language delivers", () => {
+    const counts = {
+      totalCells: 10, filledCells: 6, validatedCells: 3,
+      audioTotalCells: 10, audioCells: 4, validatedAudioCells: 1, bothValidatedCells: 1,
+    }
+    // Text and audio: validating a line's text without approving its recording
+    // moves this figure. laneValidatedPct counts only both-approved lines, so
+    // it stays at the 1 line that is.
+    expect(laneTextValidatedPct(lane({ ...counts, delivers: "text_and_audio" }))).toBe(0.3)
+    expect(laneValidatedPct(lane({ ...counts, delivers: "text_and_audio" }))).toBe(0.1)
+    // A Text language's figure is the number the old column showed, to the cell.
+    expect(laneTextValidatedPct(lane({ ...counts, delivers: "text" })))
+      .toBe(laneValidatedPct(lane({ ...counts, delivers: "text" })))
+    expect(laneTextValidatedPct(lane({ totalCells: 0, validatedCells: 0 }))).toBe(0)
+  })
+
+  it("laneOwesAudio needs a positive audio total the server actually sent", () => {
+    const owed = { totalCells: 10, audioTotalCells: 10, audioCells: 4, validatedAudioCells: 1 }
+    expect(laneOwesAudio(lane(owed))).toBe(true)
+    // AQU-1954: a Text language nobody has recorded in is measured against 0.
+    expect(laneOwesAudio(lane({ ...owed, audioTotalCells: 0, audioCells: 0 }))).toBe(false)
+    // Pre-AQU-1951: no per-language audio at all. Answering "yes" here would
+    // mean measuring against the project's denominator, the one way this could
+    // disagree with the Progress card's tile for the same language.
+    expect(laneOwesAudio(lane({ totalCells: 10 }))).toBe(false)
+    expect(laneOwesAudio(lane({ totalCells: 10, audioCells: 4 }))).toBe(false)
+  })
+
+  it("laneAudioValidatedPct is approved recordings over the language's own audio total, clamped", () => {
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 4 }))).toBe(0.4)
+    // A dubbing language is measured against its cue sheet, not its lines.
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 40, audioCells: 20, validatedAudioCells: 10 }))).toBe(0.25)
+    // Audio left on a re-imported file counts in the numerator and not the
+    // denominator — the clamp keeps a tile off "140%" (AQU-1566).
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
+    expect(laneAudioValidatedPct(lane({ totalCells: 10, audioTotalCells: 0, audioCells: 0 }))).toBe(0)
+  })
+
+  it("agrees with the Progress card's Audio Validated tile for the same language", () => {
+    // The card narrows the project to the lane's own counts and runs
+    // audioValidatedPct over it (ProjectOverview's `audioOnTab`). Same number.
+    const target = lane({ lane: "fr", role: "target", totalCells: 10, filledCells: 6, validatedCells: 3, audioTotalCells: 40, audioCells: 20, validatedAudioCells: 7, delivers: "text_and_audio" })
+    const onTab = project({
+      totalCells: 10,
+      audioCells: target.audioCells ?? 0,
+      validatedAudioCells: target.validatedAudioCells ?? 0,
+      audioTotalCells: target.audioTotalCells,
+    })
+    expect(laneAudioValidatedPct(target)).toBe(audioValidatedPct(onTab))
   })
 })
 

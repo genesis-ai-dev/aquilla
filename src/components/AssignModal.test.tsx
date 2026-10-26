@@ -215,6 +215,14 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     expect(hint.textContent).toMatch(/Staff…/)
   })
 
+  it("still says it when the only others are the project's maintainers or owners", () => {
+    // The real shape: the project's creator (an org owner) is listed, the PM
+    // is a Project lead, and the linguist isn't on the project.
+    const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
+    render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
+    expect(screen.getByTestId("assign-modal-staff-hint").textContent).toMatch(/Staff…/)
+  })
+
   it("says nothing once someone else is on the project", () => {
     render(<AssignModal {...BASE_PROPS} members={[CREATOR, ...BASE_PROPS.members, LINGUIST_IN_ORG_ONLY]} />)
     expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()

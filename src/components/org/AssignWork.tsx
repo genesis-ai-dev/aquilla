@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
-import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import {
@@ -253,13 +253,13 @@ export function AssignWork({
   )
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
-  // AQU-2194: nobody but the caller on the project leaves the picker with one
-  // name and no word why (see AssignModal's showStaffHint, the same rule).
+  // AQU-2194: nobody on the project to give language work to leaves the picker
+  // without a linguist and no word why (AssignModal's showStaffHint, same rule).
   const showStaffHint =
     rosterLoaded &&
     !isSelfAssignMode &&
     !rosterError &&
-    !eligibleMembers.some((m) => m.userId !== effectiveCallerUserId)
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
 
   useEffect(() => {
     if (isSelfAssignMode && effectiveCallerUserId != null) {

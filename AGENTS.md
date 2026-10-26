@@ -198,11 +198,9 @@ Whether an agent may pick an issue up is read off the **status**, with one veto:
 **`HITL` label**. There are no `ready-for-agent`/`ready-for-human` labels.
 
 - **`HITL` label = never agent work, whatever the status.** The label means a person owns the
-  issue (production data, live partner projects, a security perimeter, a decision). An agent
-  that finds a `HITL` issue in `Todo` skips it and reports it; it does not work it, re-status
-  it, or remove the label. Removing the label is a human call. A `HITL` issue does not belong
-  in `Todo`: once it leaves `Triage`, a human-owned issue goes to `Dev Shaped Task` (or
-  `In Progress` once its owner starts).
+  issue (production data, live partner projects, a security perimeter, a decision). Agents
+  leave `HITL` issues alone: they do not work them, re-status them, or remove the label.
+  Removing the label is a human call.
 
 - **`Triage` = the human queue, and the default birthplace of new issues.** Anything that
   needs a human *first* — an architectural or design decision, a review, external access, or
@@ -213,10 +211,12 @@ Whether an agent may pick an issue up is read off the **status**, with one veto:
   automation — is created in `Triage`, never in `Todo`.** The one exception is `to-issues`:
   it classifies each slice itself, filing **HITL** slices in `Triage` and **AFK** slices
   (acceptance criteria present, no human call outstanding) straight into `Todo`. `/triage`
-  moves an issue out of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or
-  explicitly a human's to implement.
-- **`Todo` = agent-ready (AFK).** Fully specified, acceptance criteria present, no human
-  decision outstanding, no `HITL` label. This is the **only** queue `/issue next` and `/swarm` draw from — and
+  moves an issue out of `Triage` only once it is ready to pick up (→ `Todo`), keeping the
+  `HITL` label if a human must do it.
+- **`Todo` = the pickup lane, for humans and agents alike.** Fully specified, acceptance
+  criteria present, no human decision outstanding. Agents take only issues without the `HITL`
+  label; a `HITL` issue in `Todo` waits for a person. This is the **only** queue `/issue next`
+  and `/swarm` draw from — and
   issues enter it **only by human promotion** (via `/triage` or an explicit human instruction)
   or as a `to-issues` **AFK** slice; no other automation creates issues in `Todo`. `Backlog`
   is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
@@ -254,9 +254,9 @@ Status pipeline:
 
 | Status | Meaning | Who/when |
 | --- | --- | --- |
-| **Triage** | Human queue — needs review/decision, or not yet vetted. **New issues are created here (except `to-issues` AFK slices); HITL work lives here.** | agents NEVER pick up from here |
+| **Triage** | Human queue — needs review/decision, or not yet vetted. **New issues are created here (except `to-issues` AFK slices); work awaiting a human decision lives here.** | agents NEVER pick up from here |
 | **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
-| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria, no `HITL` label. Entered by human promotion, or at creation only as a `to-issues` AFK slice | the ONLY queue `/issue next` & `/swarm` pull from |
+| **Todo** | Pickup lane for humans and agents — fully specified w/ acceptance criteria. `HITL`-labelled issues here wait for a human. Entered by human promotion, or at creation only as a `to-issues` AFK slice | the ONLY queue `/issue next` & `/swarm` pull from; agents skip `HITL` |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Fix committed on the ticket branch and verified locally; **not on `dev` yet** | set the moment the fix is committed |
 | **Ready for QA** | PR open against **`dev`** with a bot walk **PASS** at its head sha | set when the walk passes |

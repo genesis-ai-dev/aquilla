@@ -40,7 +40,7 @@ With `--dry-run`, list the planned moves and apply none.
 1. `list_issues` with status `Todo` (this includes anything Step 2 just reverted to `Todo`). Drop every
    issue labelled `HITL`: the label vetoes agent pickup whatever the status (`AGENTS.md` → "the pickup
    contract"). If nothing is left, **stop**: there is no work. Do not invent any. Report each `HITL`
-   issue you dropped by id, so a human can move it out of `Todo`.
+   issue you dropped by id, so an empty run says why it is empty; leave them in `Todo` for a human.
 2. Take the highest-priority, lowest-numbered issue. Skip (and report) any whose primary file has
    uncommitted or conflicting changes in the checkout, for example `src/components/ProjectCreateDialog.tsx`.
 3. **Immediately** move it to `Dispatched` so no concurrent run double-picks it. Keep the existing

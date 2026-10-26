@@ -25,7 +25,8 @@ success state. **Do not manufacture work.**
   (`docs/DEPLOYMENT-ENVIRONMENTS.md` → "Cutting a release"). `main` is retired — never target it.
   - **`Triage`** (id `086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) = the **human / HITL queue** (decisions,
     reviews, human-implementation, un-vetted issues). **The swarm never touches it** — intake is `Todo` only.
-  - **`Todo`** (id `a3c6383f-3893-4691-a75a-b4add1ff1ce1`) = agent-ready (AFK), the swarm's only intake.
+  - **`Todo`** (id `a3c6383f-3893-4691-a75a-b4add1ff1ce1`) = the pickup lane for humans and agents, the
+    swarm's only intake. `HITL`-labelled issues in it are a human's; the swarm skips them.
   - **`Dispatched`** (id `539bcf69-8c7a-4282-93d0-5631430b66ed`) = "Dev/AI has begun work; if it
     stalls it may be eligible to be picked up again." It is the swarm's **claim/lock**: an issue in
     `Dispatched` is owned by a live agent and MUST NOT be picked up by another agent or a `/swarm` re-run
@@ -87,8 +88,8 @@ owner is stranded work, and an agent that "could not finish" must not leave it t
    this is the agent-ready (AFK) queue and the swarm's sole intake (see `AGENTS.md` → "Agent-ready vs.
    human-in-the-loop").
    - **Skip anything labelled `HITL`**, even in `Todo`. The label is a veto on top of status (see
-     `AGENTS.md`). Do not swarm, decompose, re-status, or de-label it; list it in the report so a
-     human can re-home it.
+     `AGENTS.md`). Do not swarm, decompose, re-status, or de-label it; it waits in `Todo` for a human.
+     List it in the report so an empty intake says why.
    - **NEVER touch `Triage`** (`086173c5-…`). That is the human / HITL queue — decisions, reviews, and
      human-implementation work live there and are out of scope for the swarm. Do not pick up, decompose,
      or re-status a Triage issue. If a `Todo` issue turns out to actually need a human decision, move it

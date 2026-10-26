@@ -2817,3 +2817,60 @@ and an honest rewrite should say what the real count means (whether 133 exceptio
 normal cost of a 9,000-key catalog or a smell the number was meant to cap) rather than just
 swap the digits. **Proof it would need**: comment-only, so the standard gate; the judgement
 is editorial, not mechanical.
+
+### Final gate 2026-10-26
+
+- `pnpm lint` — exit 0, 1080 problems (0 errors). The raw log is **byte-identical** to the
+  baseline log (`diff` on both with the `GATE_EXIT=` sentinel stripped): not one warning
+  shifted a line number, because no file this diff touches carries a warning at all — a
+  baseline grep for the 14 edited paths in the lint log returns nothing. (`rm -rf
+  packages/idml-roundtrip/dist` before this lint, per the 2026-10-14 gate-ordering trap.)
+- `pnpm build` — exit 0.
+- `pnpm test` — exit 0, `Test Files 2108 passed | 2 skipped (2110)`,
+  `Tests 23857 passed | 23 skipped (23880)`, 1525s — **counts identical to baseline**,
+  green-to-green on all 23857.
+- Pre-gate fast checks, run before the full gate to buy early signal cheaply: `npx tsc -b`
+  exit 0; `pnpm i18n:check` exit 0 reporting **9036 message key(s) covered** (exactly the
+  simulation's post-deletion figure, down from 9045); `npx vitest run src/lib/i18n` 17 files
+  / 210 tests green in 19s.
+- `pnpm run test:e2e:guard` — exit 0, 7 files / 67 tests, first attempt.
+- Smoke (`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`) — **98 passed,
+  4 failed, 15.8m**, both groups accounted for below. **98/102 is the best figure recorded in
+  this container** (95/102 on 2026-10-23).
+
+### Smoke 2026-10-26: the media set held at 3, and `commit-chain-linear:155` A/B'd again
+
+- **The three media failures are exactly 2026-10-23's set**: `import-and-edit.smoke.spec.ts:338`
+  × 3, the YouTube srt/vtt/sbv caption exports, at the documented line. Two runs at the same
+  three confirms the 2026-10-23 prediction that these are **not** revision-gap artifacts (they
+  survive the correct rev-1243 Chromium) and still want their own look.
+- **The fourth, `collab/commit-chain-linear.smoke.spec.ts:155`** (`ProjectSync socket failed
+  before it was ready: WebSocket is closed before the connection is established`), is the
+  family 2026-10-16 flagged **at this exact line**. **A/B'd rather than argued**, reusing the
+  2026-10-23 recipe: `git checkout --detach origin/dev` in place (same container, same
+  `node_modules`), then `npx tsx scripts/e2e-shard.ts 1 -- collab/commit-chain-linear.smoke.spec`
+  → **2 failed / 8 passed in 2.0m**, and `:155` is one of the two, same error verbatim. It
+  reproduces with **zero diff**. The second dev-arm failure (`:373`) passed on the branch,
+  and `:373`'s sibling test passed on dev — the moving line set is itself the signature of
+  boot/timing instability this ledger has recorded since 2026-10-16.
+- **Why none of the 4 can be this diff, independent of the A/B**: all 9 deleted keys were
+  verified to have no reader anywhere in the tree, so nothing in the emitted bundle reads a
+  string that changed; `pnpm test`'s 23857 assertions and 2110 files are identical on both
+  sides; and a catalog key cannot reach WebSocket establishment or media decode.
+
+### The worker packages need `npm ci` even when the diff does not touch them
+
+A new trap, and a correction to how this run read the 2026-10-23 recipe. I skipped the
+"`npm ci --legacy-peer-deps` in all three worker packages" step on the reasoning that the diff
+is confined to `src/lib/i18n/` and no worker suite needed baselining. **The e2e stack still
+needs those installs**: the first smoke attempt died at `[boot 3/8]` with
+`[e2e-up] fatal: Error: timed out waiting for http://127.0.0.1:10460/healthz`, and the real
+cause is only in `.e2e-logs/mock-legacy-migration.log` —
+`ERR_MODULE_NOT_FOUND: Cannot find package 'bcryptjs' imported from
+auth-worker/src/utils/password.ts`, because `auth-worker/node_modules` was empty and
+`bcryptjs` is an auth-worker dependency, not a root one. The boot message names a port and a
+timeout and says nothing about a missing package, so **read `.e2e-logs/` before re-trying a
+boot failure.** After `npm ci --legacy-peer-deps` in all three packages (72 / 65 / 64 entries,
+all three `package-lock.json` files md5-verified untouched afterwards) the stack booted on the
+next attempt. Treat the three installs as part of the container recipe unconditionally, not as
+a step that only a worker-touching diff needs.

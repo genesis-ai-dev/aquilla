@@ -930,16 +930,37 @@ export const editor = defineNamespace({
     "editor.timeline.unmuteTargetAudio": "Unmute target audio",
     "editor.timeline.targetAudioAudible": "Target audio is audible — click to mute",
     "editor.timeline.targetAudioMuted": "Target audio is muted — click to unmute",
-    "editor.timeline.timingModeDubbing": "Original's timing",
+    // AQU-2204 (Sam, Oct 26): the two timing modes are named for what the
+    // file FOLLOWS. Stored values are unchanged ("dubbing" / "audioFirst").
+    "editor.timeline.timingModeDubbing": "Follows source",
     "editor.timeline.timingModeDubbingHint":
-      "The translation is fitted to the original recording's timing.",
+      "Lines keep their times from the source, and its pauses stay.",
     "editor.timeline.timingModeDubbingHintLocked":
-      "The translation is fitted to the original recording's timing. Only a maintainer can change this.",
-    "editor.timeline.timingModeFree": "Free timing",
+      "Lines keep their times from the source, and its pauses stay. Only a project lead or above can change this.",
+    "editor.timeline.timingModeFree": "Follows recordings",
     "editor.timeline.timingModeFreeHint":
-      "Verses are laid end to end — each takes as much room as its longer side.",
+      "Lines play back to back, each as long as its recording, or its source if that runs longer.",
     "editor.timeline.timingModeFreeHintLocked":
-      "Verses are laid end to end — each takes as much room as its longer side. Only a maintainer can change this.",
+      "Lines play back to back, each as long as its recording, or its source if that runs longer. Only a project lead or above can change this.",
+    "editor.timeline.timingLabel": "Timing:",
+    "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
+    "editor.timeline.timingInfoAria": "About timing",
+    "editor.timeline.timingInfo":
+      "Follows source keeps every line where the source puts it, with its pauses, so the " +
+      "translation is fitted to the original. Follows recordings plays the lines back to back " +
+      "at their recordings' length, and the source's own times aren't shown. Switching changes " +
+      "no recordings and no times, and applies for everyone on this file.",
+    "editor.timeline.timingInfoReadOnly":
+      "Follows source keeps every line where the source puts it, with its pauses. Follows " +
+      "recordings plays the lines back to back at their recordings' length. Only a project " +
+      "lead or above can change this file's timing.",
+    "editor.timeline.timingLockedFilm":
+      "This file's lines are timed to the film, so it always follows its source.",
+    "editor.timeline.standInInfoAria": "Why some lines show no times",
+    "editor.timeline.standInInfo":
+      "A line with no times of its own and no recording yet still takes room on the timeline, " +
+      "at a stand-in length worked out from its text at the language's reading pace. It has no " +
+      "real time, so it shows none. Recording the line replaces the stand-in with the recording's length.",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -955,7 +976,7 @@ export const editor = defineNamespace({
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
     "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
-    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
+    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available while the file follows its recordings yet",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
@@ -2013,6 +2034,9 @@ export const editor = defineNamespace({
     "editor.cellMenu.trigger": "Cell actions",
     "editor.cellMenu.editTimestamps": "Edit timestamps",
     "editor.cellMenu.timingLocked": "Timing is locked for this project.",
+    // AQU-2204: the source's times aren't shown while a file follows its recordings.
+    "editor.cellMenu.timestampsFollowsRecordings":
+      "This file follows its recordings, so the source's times aren't shown. Switch its Timing to Follows source to edit them.",
     "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
     "editor.cellMenu.startLabel": "Start time",
     "editor.cellMenu.endLabel": "End time",
@@ -6227,44 +6251,84 @@ export const editor = defineNamespace({
       },
       "editor.timeline.timingModeDubbing": {
         description:
-          "Name of one of the two timing modes, shown on a small segmented control in " +
-          "the timeline toolbar. In this mode the translated audio has to fit inside " +
-          "the original recording's timing — the possessive is the point: the timing " +
-          "belongs to the original, not to the translation.",
-        maxLength: 20,
+          "Name of one of the two timing choices, shown in the timeline's Timing dropdown " +
+          "and after 'Timing:'. The file's lines keep the times the SOURCE gives them (the " +
+          "film, the original recording or the cue file), so the translation is fitted to " +
+          "the original. 'Follows' = takes its timing from.",
+        maxLength: 24,
       },
       "editor.timeline.timingModeDubbingHint": {
         description:
-          "Hover title of that mode's button, explaining what the mode does to the " +
-          "timeline: every translated line is placed to match where the original " +
-          "recording says it.",
+          "One-line description under 'Follows source' in the Timing dropdown: every line " +
+          "stays where the source puts it, and the silences between lines stay too.",
       },
       "editor.timeline.timingModeDubbingHintLocked": {
         description:
           "The same sentence as editor.timeline.timingModeDubbingHint plus the note " +
-          "that the mode is read-only for this user, shown when their role is below " +
-          "maintainer so the control renders as a plain label. Kept as one key so the " +
+          "that the choice is read-only for this user, shown when their role is below " +
+          "project lead so the control renders as plain text. Kept as one key so the " +
           "two sentences can be ordered naturally in the target language.",
       },
       "editor.timeline.timingModeFree": {
         description:
-          "Name of the other timing mode, on the same segmented control: the " +
-          "translation sets its own pace instead of fitting the original's timing. " +
-          "'Free' means unconstrained by the original, not 'free of charge'.",
-        maxLength: 20,
+          "Name of the other timing choice in the same dropdown: the lines take their " +
+          "timing from the RECORDINGS (the translation's own audio) and play back to back, " +
+          "instead of keeping the source's times. Use the same word for 'Follows' as in " +
+          "editor.timeline.timingModeDubbing.",
+        maxLength: 24,
       },
       "editor.timeline.timingModeFreeHint": {
         description:
-          "Hover title of that mode's button. 'Verses' are the numbered lines of the " +
-          "text; 'laid end to end' means each one starts where the previous ends, and " +
-          "each gets as much room as whichever side (original or translation) runs " +
-          "longer.",
+          "One-line description under 'Follows recordings' in the Timing dropdown. 'Back to " +
+          "back' means each line starts where the previous one ends; each line lasts as long " +
+          "as its recording, or as its source line when that is longer.",
       },
       "editor.timeline.timingModeFreeHintLocked": {
         description:
           "The same sentence as editor.timeline.timingModeFreeHint plus the note that " +
-          "only a maintainer can change the mode, shown when this user's role is " +
+          "only a project lead or above can change it, shown when this user's role is " +
           "below that floor. One key so the two sentences can be ordered naturally.",
+      },
+      "editor.timeline.timingLabel": {
+        description:
+          "Label before the file's current timing choice in the timeline header, as in " +
+          "'Timing: Follows source'. Keep the colon (or your language's equivalent).",
+        maxLength: 16,
+      },
+      "editor.timeline.timingMenuAria": {
+        description:
+          "Accessible name of the Timing dropdown's button. {mode} is the current choice " +
+          "(editor.timeline.timingModeDubbing or editor.timeline.timingModeFree).",
+        placeholders: { mode: "The file's current timing choice, e.g. 'Follows source'." },
+      },
+      "editor.timeline.timingInfoAria": {
+        description: "Accessible name of the small (i) button beside the Timing dropdown.",
+      },
+      "editor.timeline.timingInfo": {
+        description:
+          "Tooltip of that (i): the longer explanation of the two timing choices, for " +
+          "someone who can change it. Use the same names as the dropdown.",
+      },
+      "editor.timeline.timingInfoReadOnly": {
+        description:
+          "The same (i) tooltip for someone below project lead, who sees the timing as " +
+          "plain text: the two choices in brief, then who can change it.",
+      },
+      "editor.timeline.timingLockedFilm": {
+        description:
+          "Tooltip of the (i) beside 'Timing: Follows source' on a file whose lines are " +
+          "timed to a film (a linked video, or an audio cue file): why it cannot follow its " +
+          "recordings.",
+      },
+      "editor.timeline.standInInfoAria": {
+        description:
+          "Accessible name of an (i) button on the timeline, shown when some lines have no " +
+          "times of their own and are drawn with a dashed outline.",
+      },
+      "editor.timeline.standInInfo": {
+        description:
+          "Tooltip of that (i): why a line with no times and no recording still takes room " +
+          "on the timeline (a stand-in length from its text) and why it shows no time.",
       },
       "editor.timeline.qualityToggleAria": {
         description:
@@ -6324,9 +6388,9 @@ export const editor = defineNamespace({
       },
       "editor.timeline.bladeFreeTiming": {
         description:
-          "Tooltip of the disabled blade button when the file is in 'Free timing' " +
-          "(the mode where lines are laid out end to end). Use the same name for Free timing " +
-          "as the timing-mode picker does.",
+          "Tooltip of the disabled blade button while the file's timing is 'Follows " +
+          "recordings' (lines laid out back to back). Use the same wording for that choice " +
+          "as the Timing dropdown does.",
       },
       "editor.timeline.takeMenuSplit": {
         description:
@@ -7748,6 +7812,12 @@ export const editor = defineNamespace({
           "times. Only on files that run on a clock (subtitles, cue sheets). " +
           "Imperative.",
         maxLength: 24,
+      },
+      "editor.cellMenu.timestampsFollowsRecordings": {
+        description:
+          "Why a line's 'Edit timestamps' entry is unavailable: the file's Timing is 'Follows " +
+          "recordings', where the source's own times aren't shown. Use the same names as the " +
+          "timeline's Timing dropdown.",
       },
       "editor.cellMenu.timingLocked": {
         description:

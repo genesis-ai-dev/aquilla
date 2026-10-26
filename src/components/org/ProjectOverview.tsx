@@ -1622,12 +1622,15 @@ export function ProjectOverview() {
   // former default target also uses lane "", opened two staff popovers.
   const projectLanes: PortfolioLane[] = (audio?.lanes ?? []).filter((lane) => lane.role !== "source")
   // AQU-1458: an archived lane is not another active language. The progress
-  // tabs stay hidden for a single active lane, and the Languages section
-  // still renders when an archived lane needs a place to live.
+  // tabs stay hidden for a single active lane.
+  // AQU-2194: the Languages section, though, renders for ANY target language,
+  // one included. Its row's ⋯ → Staff… is where a person is put on a language,
+  // and a one-language project needs that as much as a five-language one
+  // (Come and See, Oct 26). It still renders when only an archived lane is left.
   const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
   const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
   const showLaneTabs = activeProjectLanes.length > 1
-  const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
+  const showLanguages = activeProjectLanes.length > 0 || archivedProjectLanes.length > 0
   // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
   // key and can be the opaque lane id, which read as gibberish on a PM's tabs.
   const laneTabOptions = [
@@ -2613,8 +2616,8 @@ export function ProjectOverview() {
               )}
 
               {/* ── Languages / lane table (AQU-538 §3.3, AQU-1458) ── */}
-              {/* Hidden for a single active lane with nothing archived.
-                  An archived lane keeps the section visible so it can be found. */}
+              {/* Shown for every project with a target language (AQU-2194), one
+                  included; an archived lane keeps it visible so it can be found. */}
               {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}

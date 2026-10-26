@@ -341,6 +341,15 @@ export function OverviewLaneTable({
   // is the "Text Validated" heading. Read off the rows this table draws;
   // archived rows label their own figures and need no column.
   const showAudioValidated = useMemo(() => targetLanes.some(laneOwesAudio), [targetLanes])
+  // AQU-2194: and the other way round. Now that a one-language project shows
+  // this table too, an Audio language on its own would read "Translated 0%"
+  // and "Text Validated —" for text it never delivers. With no language that
+  // delivers text, those two columns are left out; the Audio Validated column
+  // carries the row.
+  const showText = useMemo(
+    () => targetLanes.length === 0 || targetLanes.some((lane) => !laneDeliversAudioOnly(lane)),
+    [targetLanes],
+  )
 
   // Stable across renders so the column definitions below, which now name a
   // lane in the People cell's accessible name, don't rebuild on every render.
@@ -361,32 +370,36 @@ export function OverviewLaneTable({
           <span className="text-sm font-medium text-foreground">{laneLabel(row.original)}</span>
         ),
       },
-      {
-        id: "translated",
-        accessorFn: (l) => laneStartedPct(l),
-        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
-        meta: { className: "w-[9rem]" },
-        cell: ({ row }) => <LaneProgressBar lane={row.original} />,
-      },
-      {
-        id: "textValidated",
-        // A language with nothing to validate sorts below every real figure
-        // rather than alongside a genuine 0% (same for audio below).
-        accessorFn: (l) => (laneDeliversAudioOnly(l) ? -1 : laneTextValidatedPct(l)),
-        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.textValidatedHeaderLabel")} />,
-        meta: { className: "w-[9rem]" },
-        // The figure only, no bar of its own. The Translated column's bar draws
-        // the dark part at the language's DONE share (AQU-1764,
-        // `laneValidatedPct`), which is this figure for a Text language but the
-        // both-approved share for a Text and audio one — so for that language
-        // the bar matches neither of these two columns, by design.
-        cell: ({ row }) => (
-          <LaneFigure
-            testId={`overview-lane-text-validated-${laneTagId(row.original.lane)}`}
-            pct={laneDeliversAudioOnly(row.original) ? null : laneTextValidatedPct(row.original)}
-          />
-        ),
-      },
+      ...(showText
+        ? ([
+          {
+            id: "translated",
+            accessorFn: (l) => laneStartedPct(l),
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
+            meta: { className: "w-[9rem]" },
+            cell: ({ row }) => <LaneProgressBar lane={row.original} />,
+          },
+          {
+            id: "textValidated",
+            // A language with nothing to validate sorts below every real figure
+            // rather than alongside a genuine 0% (same for audio below).
+            accessorFn: (l) => (laneDeliversAudioOnly(l) ? -1 : laneTextValidatedPct(l)),
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.textValidatedHeaderLabel")} />,
+            meta: { className: "w-[9rem]" },
+            // The figure only, no bar of its own. The Translated column's bar draws
+            // the dark part at the language's DONE share (AQU-1764,
+            // `laneValidatedPct`), which is this figure for a Text language but the
+            // both-approved share for a Text and audio one — so for that language
+            // the bar matches neither of these two columns, by design.
+            cell: ({ row }) => (
+              <LaneFigure
+                testId={`overview-lane-text-validated-${laneTagId(row.original.lane)}`}
+                pct={laneDeliversAudioOnly(row.original) ? null : laneTextValidatedPct(row.original)}
+              />
+            ),
+          },
+          ] satisfies ColumnDef<PortfolioLane>[])
+        : []),
       ...(showAudioValidated
         ? [{
             id: "audioValidated",
@@ -492,6 +505,7 @@ export function OverviewLaneTable({
       membersByLane,
       laneLabel,
       showAudioValidated,
+      showText,
       onChanged,
       orgId,
       projectId,

@@ -1145,7 +1145,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversNeedsChoiceAriaLabel": "Why {lane} needs a choice",
     "projectSettings.languages.renameLaneAriaLabel": "Rename {lane}",
     "projectSettings.languages.rowMenuAriaLabel": "More for {lane}",
-    "projectSettings.languages.languageAndCodeAction": "Language and code…",
     "projectSettings.languages.sameNameMarker": "Same name as another language",
     "projectSettings.languages.duplicateBannerTwo":
       "Two languages are both named \"{lane}\", so they are hard to tell apart in the " +

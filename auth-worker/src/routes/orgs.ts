@@ -72,6 +72,7 @@ import {
   applyTeamProjectLaneGrants,
   applyTeamRosterLaneChecks,
   reconcileMemberProjectLanes,
+  relevelTeamMemberLaneGrants,
   resolveTeamLaneSelection,
   saveTeamLaneSelection,
 } from "../services/lane-grants"
@@ -949,6 +950,9 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
     return c.json({ error: "cannot change the team role of someone at or above you" }, 403)
   }
   await setTeamMemberRole(c.env, groupId, targetUserId, roleLevel)
+  // AQU-1809: the team-scope role is part of the effective project role.
+  // Rows this member already holds move to that level; their lanes do not.
+  await relevelTeamMemberLaneGrants(c.env.AQUILLA_PG, groupId, targetUserId)
   await auditMembershipChange(c.env, user, {
     action: "team.member.role",
     where: { scope: "team", orgId, groupId },

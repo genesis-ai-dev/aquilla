@@ -35,6 +35,7 @@ import { entitleProjectAiCall, releaseQuietly, settleQuietly } from "./ai-meteri
 import { isAbortTimeout } from "./inworld-tts"
 import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../db/shared/rate-limit"
+import { customVoiceBelongsTo, isCustomVoiceId } from "./custom-voice"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -330,6 +331,12 @@ export async function handleVoiceConvertRequest(
   if (verified.claims.role < WRITE_ROLE_LEVEL) {
     return new Response("insufficient role", { status: 403 })
   }
+  // A custom voice is a real person's voice, trained under one project's consent
+  // record (custom-voice.ts). It is usable only from that project.
+  if (libraryVoiceId && isCustomVoiceId(libraryVoiceId)
+    && !(await customVoiceBelongsTo(env, projectId, libraryVoiceId))) {
+    return new Response("voice not found in this project", { status: 404 })
+  }
 
   // AQU-1854: per-user throttle. Unlike TTS this route had no volumetric
   // control of any kind, so one contributor looping requests could hold open
@@ -448,8 +455,9 @@ export async function handleVoiceConvertRequest(
     } else {
       await settleQuietly(grant, gpuCost(startedAt), "voice-convert")
     }
+    // A custom voice still training is the caller's to wait out, not an outage.
     return new Response(`voice conversion failed (${modalRes.status}): ${detail}`.trim(), {
-      status: 502,
+      status: modalRes.status === 409 ? 409 : 502,
     })
   }
   const convertedBytes = await modalRes.arrayBuffer()

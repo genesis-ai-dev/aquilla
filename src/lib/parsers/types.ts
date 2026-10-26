@@ -417,6 +417,21 @@ export interface Voice {
    * words, pronunciation, timing and intonation are kept; only the timbre changes.
    */
   libraryVoiceId?: string
+  /**
+   * Set when `libraryVoiceId` is a custom voice trained from the organization's own
+   * recordings of a real speaker (src/lib/audio/custom-voice.ts). A display copy of
+   * the consent confirmation; the authoritative audit record lives server-side
+   * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
+   */
+  customVoice?: {
+    speakerName: string
+    /** ISO time the maintainer confirmed the consent statement. */
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+    /** ISO time training was queued, for the "ready in ~N min" hint. */
+    trainingStartedAt: string
+  }
 }
 
 export interface ProjectTtsSettings {

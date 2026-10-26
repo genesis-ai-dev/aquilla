@@ -43,6 +43,7 @@ import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { voicesForLane } from "@/lib/audio/voice-lanes"
 import { formatVoiceLanguageName, languageForVoiceDescription } from "@/lib/audio/inworld-languages"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { useCustomVoiceStatus } from "@/hooks/useCustomVoiceStatus"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
@@ -326,6 +327,9 @@ export function VoiceLibraryPanel({
                     onEdit={() => setEditing({ kind: "edit", voice })}
                     onMakeDefault={() => makeDefault(voice)}
                     onDelete={() => deleteVoice(voice)}
+                    projectId={projectId}
+                    fileId={fileId}
+                    session={session}
                   />
                 </div>
               )
@@ -422,6 +426,7 @@ function VoiceActionMenu({
  *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
   voice, projectProvider, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
+  projectId, fileId, session,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
@@ -439,14 +444,25 @@ function VoiceRow({
   onEdit: () => void
   onMakeDefault: () => void
   onDelete: () => void
+  /** For polling a custom voice's training state. */
+  projectId?: string
+  fileId?: string | null
+  session?: FrontierSession | null
 }) {
   const t = useT()
   const { locale } = useI18n()
+  const customState = useCustomVoiceStatus(voice, { projectId, fileId, session })
   const actionsMenu = useMemo(() => createMenuHandle(), [])
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
-  const engineLabel = voice.libraryVoiceId
+  const engineLabel = voice.customVoice
+    ? customState === "ready"
+      ? t("audio.library.customEngineLabel")
+      : customState === "failed"
+        ? t("audio.library.trainingFailedLabel")
+        : t("audio.library.trainingEngineLabel")
+    : voice.libraryVoiceId
     ? t("audio.library.characterEngineLabel")
     : voice.referenceAudioId
       ? t("audio.library.cloneEngineLabel")

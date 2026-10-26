@@ -28,22 +28,24 @@ import {
 export type MediaSectionId = "timeline" | "video" | "text"
 
 /**
- * How thick a collapsed section's rail is.
+ * How much room a folded section keeps: none.
  *
- * 40 is the app's rail width, not a new number: AppShell calls the collapsed
- * dock "Collapsed rail (40)" and LeftDock draws it as `w-10`. The Parallel
- * Bibles edge tab is 36 because it carries a line of vertical text; these rails
- * are icon-only (Sam's call), so they match the dock instead.
+ * Media redesign, layout (Sam, Oct 24): "folded areas take zero space". A
+ * folded section used to keep a 40px rail that was also its only way back;
+ * now it gets out of the way entirely and the Panels menu (and the timeline's
+ * ⋯ menu) brings it back. The section stays MOUNTED — frozen, clipped and
+ * inert at zero size — for every reason AQU-1119 kept it mounted behind the
+ * rail.
  */
-export const MEDIA_RAIL_PX = 40
+export const MEDIA_FOLDED_PX = 0
 
 /**
- * Slack when deciding "is this panel sitting at its rail?" from a measured
- * size. The library reports pixels it derived from a percentage, so the value
- * can land a hair either side of 40. Two pixels is plenty and cannot collide
- * with a real expanded size — the smallest floor in the lens is 130.
+ * Slack when deciding "is this panel sitting folded?" from a measured size.
+ * The library reports pixels it derived from a percentage, so a folded panel
+ * can measure a hair above zero. Two pixels is plenty and cannot collide with
+ * a real expanded size — the smallest floor in the lens is 130.
  */
-const RAIL_TOLERANCE_PX = 2
+const FOLD_TOLERANCE_PX = 2
 
 /**
  * Collapsed sections, OLDEST FIRST — the tail is the most recently collapsed.
@@ -83,50 +85,16 @@ export function isSectionCollapsed(collapsed: CollapsedSections, id: MediaSectio
 }
 
 /**
- * Is a measured panel size the rail rather than a real width?
+ * Is a measured panel size folded rather than a real width?
  *
- * Zero is NOT the rail. A ResizeObserver reports 0 for a subtree that has been
- * hidden by an ancestor, and treating that as "the user collapsed this" would
- * collapse sections behind the reader's back on any such transition.
+ * Only ever used to decide what NOT to record (a folded size is never a size
+ * the reader chose) and whether a pin still needs driving home — never to
+ * commit a fold, which only the library's own `isCollapsed()` may do. That is
+ * why zero can count here: a ResizeObserver also reports 0 for a subtree an
+ * ancestor has hidden, and that is equally not a size to remember.
  */
-export function isRailSized(px: number): boolean {
-  return px > 0 && px <= MEDIA_RAIL_PX + RAIL_TOLERANCE_PX
-}
-
-/**
- * Which sections the pointer is currently holding at rail size, mid-drag.
- *
- * Dragging a divider past a section's snap point shrinks that panel to 40px
- * immediately, but the fold is not COMMITTED until the pointer is released —
- * that ordering is load-bearing and is why the rail was invisible until then
- * (see the note on `onLayoutChanged` in useMediaSectionCollapse). In the gap
- * the section was still rendering its real content, crushed into a 40px
- * sliver: the text column's header and chips squeezed edge to edge, the
- * picture reduced to a black stripe. Sam, 2026-09-03.
- *
- * So this is presentation only. It decides what to PAINT, never what is
- * folded: nothing here writes state, freezes a box, or persists a size, and
- * dragging back out clears it on the next pointer move.
- *
- * Returns `prev` unchanged when the answer has not moved, so a drag that never
- * reaches a snap point costs no renders at all.
- */
-export function railPreviewSections(
-  sizes: Partial<Record<MediaSectionId, number | null>>,
-  collapsed: CollapsedSections,
-  present: MediaSectionId[],
-  prev: CollapsedSections = EMPTY,
-): CollapsedSections {
-  const next = ALL.filter((id) => {
-    if (!present.includes(id)) return false
-    // Already folded: the real rail is up, and a preview over it would be a
-    // second copy of the same strip.
-    if (collapsed.includes(id)) return false
-    const px = sizes[id]
-    return typeof px === "number" && isRailSized(px)
-  })
-  const same = next.length === prev.length && next.every((id, i) => prev[i] === id)
-  return same ? prev : next
+export function isFoldSized(px: number): boolean {
+  return px >= 0 && px <= MEDIA_FOLDED_PX + FOLD_TOLERANCE_PX
 }
 
 /**
@@ -219,27 +187,34 @@ export function isSectionFullscreen(
   collapsed: CollapsedSections,
   id: MediaSectionId,
   present: MediaSectionId[],
+  bodyFolded = false,
 ): boolean {
   if (!present.includes(id) || collapsed.includes(id)) return false
+  // The timeline takes the lens by folding the body ROW as one unit, which
+  // leaves the film and the text exactly as they were inside it — so with the
+  // body folded, the timeline is the only thing on screen and nothing in the
+  // body is.
+  if (bodyFolded) return id === "timeline"
   return present.every((s) => s === id || collapsed.includes(s))
 }
 
 /**
  * May this section take the whole lens?
  *
- * Not the timeline. Its full screen would mean folding BOTH body sections at
- * once, and the body is a flex row that something has to fill — the one
- * arrangement the layout cannot hold (see `bodyOpenAfter`). Folding the body
- * row as a single unit is a real feature and a separate ticket; until then the
- * timeline simply has no such control, rather than one that fails. Sam,
- * 2026-09-03.
+ * The timeline does it by folding the body ROW as one unit (`bodyFolded`),
+ * never by folding both body sections — the body is a flex row that something
+ * has to fill, the one arrangement the layout cannot hold (see
+ * `bodyOpenAfter`). That was the "separate ticket" AQU-1119 left open; the
+ * media redesign's layout closes it (Sam, Oct 24: full screen for every panel,
+ * by real folds).
  */
 export function canFullscreen(
   collapsed: CollapsedSections,
   id: MediaSectionId,
   present: MediaSectionId[],
+  bodyFolded = false,
 ): boolean {
-  if (id === "timeline") return false
+  if (bodyFolded) return false
   if (!present.includes(id) || collapsed.includes(id)) return false
   return present.length > 1
 }
@@ -257,7 +232,8 @@ export function sectionsToFoldForFullscreen(
   id: MediaSectionId,
   present: MediaSectionId[],
 ): MediaSectionId[] {
-  if (!canFullscreen(collapsed, id, present)) return []
+  // The timeline folds the body row instead of anything in it.
+  if (id === "timeline" || !canFullscreen(collapsed, id, present)) return []
   return ALL.filter((s) => s !== id && present.includes(s) && !collapsed.includes(s))
 }
 
@@ -307,13 +283,13 @@ export interface MediaPanelConstraints {
   collapsedSize?: number
 }
 
-/** A collapsed section is pinned to the rail: one size, and nothing can move it. */
-const RAIL_PINNED: MediaPanelConstraints = { minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX }
+/** A collapsed section is pinned folded: one size (none), and nothing can move it. */
+const FOLD_PINNED: MediaPanelConstraints = { minSize: MEDIA_FOLDED_PX, maxSize: MEDIA_FOLDED_PX }
 
 /**
  * The four panels' constraints for a given collapsed set.
  *
- * A COLLAPSED SECTION IS PINNED (`min === max === MEDIA_RAIL_PX`), NOT
+ * A COLLAPSED SECTION IS PINNED (`min === max === MEDIA_FOLDED_PX`), NOT
  * `collapsible`. That is the whole mechanism and it is worth writing down why,
  * because `collapsible` + `collapsedSize` is the obvious reading of the
  * library's API and it does not work here:
@@ -352,6 +328,8 @@ export function mediaPanelConstraints(input: {
   collapsed: CollapsedSections
   timelineStacked: boolean
   hasVideo: boolean
+  /** The timeline has the lens: the whole body row is folded as one unit. */
+  bodyFolded?: boolean
 }): Record<"timeline" | "body" | "video" | "table", MediaPanelConstraints> {
   if (!input.timelineStacked) {
     // The text lens renders this same subtree as a bare full-height table in
@@ -362,23 +340,26 @@ export function mediaPanelConstraints(input: {
   const timelineCollapsed = input.collapsed.includes("timeline")
   const videoCollapsed = input.collapsed.includes("video")
   const textCollapsed = input.collapsed.includes("text")
+  const bodyFolded = Boolean(input.bodyFolded) && !timelineCollapsed
   return {
     timeline: timelineCollapsed
-      ? RAIL_PINNED
+      ? FOLD_PINNED
       : {
           minSize: TIMELINE_PANE_MIN_HEIGHT,
-          maxSize: TIMELINE_PANE_MAX_SHARE,
+          // Its 70% cap is what keeps the body usable; with the body folded
+          // there is nothing below to protect, so it may take the whole lens.
+          maxSize: bodyFolded ? "100%" : TIMELINE_PANE_MAX_SHARE,
           collapsible: true,
-          collapsedSize: MEDIA_RAIL_PX,
+          collapsedSize: MEDIA_FOLDED_PX,
         },
-    body: { minSize: MEDIA_BODY_MIN_HEIGHT },
+    body: bodyFolded ? FOLD_PINNED : { minSize: MEDIA_BODY_MIN_HEIGHT },
     video: videoCollapsed
-      ? RAIL_PINNED
+      ? FOLD_PINNED
       : {
           minSize: VIDEO_PANE_MIN_WIDTH,
           maxSize: "100%",
           collapsible: true,
-          collapsedSize: MEDIA_RAIL_PX,
+          collapsedSize: MEDIA_FOLDED_PX,
         },
     // The table folds by drag like the other two: it holds at its floor and
     // snaps to the rail once the pointer is past the midpoint between floor
@@ -388,11 +369,11 @@ export function mediaPanelConstraints(input: {
     // takes the residual, which is how "collapsing the video gives its space
     // to the text" happens without a rule for it.
     table: textCollapsed
-      ? RAIL_PINNED
+      ? FOLD_PINNED
       : {
           minSize: VIDEO_PANE_TABLE_MIN_WIDTH,
           collapsible: true,
-          collapsedSize: MEDIA_RAIL_PX,
+          collapsedSize: MEDIA_FOLDED_PX,
         },
   }
 }
@@ -410,9 +391,11 @@ export function mediaPanelConstraints(input: {
 export function shouldPersistSize(
   collapsed: CollapsedSections,
   id: MediaSectionId,
+  bodyFolded = false,
 ): boolean {
-  if (id === "timeline") return !collapsed.includes("timeline")
-  return !collapsed.includes("video") && !collapsed.includes("text")
+  // A full-screen timeline fills the lens; that is not the height anyone chose.
+  if (id === "timeline") return !collapsed.includes("timeline") && !bodyFolded
+  return !bodyFolded && !collapsed.includes("video") && !collapsed.includes("text")
 }
 
 /**
@@ -425,9 +408,10 @@ export function shouldPersistSize(
 export function isSeparatorDisabled(
   collapsed: CollapsedSections,
   between: "timeline-body" | "video-table",
+  bodyFolded = false,
 ): boolean {
   return between === "timeline-body"
-    ? collapsed.includes("timeline")
+    ? collapsed.includes("timeline") || bodyFolded
     : collapsed.includes("video") || collapsed.includes("text")
 }
 
@@ -538,4 +522,38 @@ export function writeStoredFullscreen(
   } catch {
     /* private mode — just won't persist */
   }
+}
+
+// The timeline's full screen folds the body row, and that fold is its own key:
+// the folded set above is a list of SECTIONS with years of browsers holding it,
+// and the body is not a section anyone can see on its own.
+const BODY_FOLDED_PREFIX = "aquilla:mediaBodyFolded:"
+
+export function readStoredBodyFolded(fileId: string | null | undefined): boolean {
+  if (!fileId) return false
+  try {
+    return localStorage.getItem(`${BODY_FOLDED_PREFIX}${fileId}`) === "1"
+  } catch {
+    return false
+  }
+}
+
+export function writeStoredBodyFolded(fileId: string | null | undefined, folded: boolean): void {
+  if (!fileId) return
+  try {
+    if (folded) localStorage.setItem(`${BODY_FOLDED_PREFIX}${fileId}`, "1")
+    else localStorage.removeItem(`${BODY_FOLDED_PREFIX}${fileId}`)
+  } catch {
+    /* private mode — just won't persist */
+  }
+}
+
+/**
+ * Forget this file's arrangement: what is folded, the full-screen memory and
+ * the body fold. "Reset layout" — the sizes are cleared by their own modules.
+ */
+export function clearStoredMediaSections(fileId: string | null | undefined): void {
+  writeStoredCollapsedSections(fileId, EMPTY)
+  writeStoredFullscreen(fileId, null)
+  writeStoredBodyFolded(fileId, false)
 }

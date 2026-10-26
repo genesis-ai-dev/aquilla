@@ -1255,16 +1255,12 @@ export const editor = defineNamespace({
     // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
-    // AQU-1119: collapsing a whole section of the media lens down to a rail of
-    // one icon, and bringing it back. Each pair is one button in two states —
-    // the collapse control lives in the section's own header, the expand
-    // control IS the rail.
+    // AQU-1119: hiding a whole section of the media lens. Since the media
+    // redesign's layout a hidden section takes no room at all; the Panels menu
+    // above the lens brings it back.
     "editor.timeline.collapseVideoAria": "Hide the video",
-    "editor.timeline.expandVideoAria": "Show the video",
     "editor.timeline.collapseTimelineAria": "Hide the timeline",
-    "editor.timeline.expandTimelineAria": "Show the timeline",
     "editor.timeline.collapseTextAria": "Hide the text",
-    "editor.timeline.expandTextAria": "Show the text",
     // AQU-1119: the other control beside each body section's chevron. Where
     // the chevron folds ITS OWN section, this one folds the others so this
     // section has the lens to itself — one button in two states.
@@ -1272,6 +1268,17 @@ export const editor = defineNamespace({
     "editor.timeline.restoreVideoAria": "Put the video back in its column",
     "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
     "editor.timeline.restoreTextAria": "Put the text back in its column",
+    // Media redesign, layout: the timeline takes the lens too (the video and
+    // text row folds as one unit), its ⋯ menu, and the Panels menu above the
+    // lens that shows and hides each panel.
+    "editor.timeline.fullscreenTimelineAria": "Fill the lens with the timeline",
+    "editor.timeline.restoreTimelineAria": "Restore the other panels",
+    "editor.timeline.timelineMenuAria": "Timeline layout",
+    "editor.timeline.menuFullscreen": "Full screen",
+    "editor.timeline.menuRestorePanels": "Restore the other panels",
+    "editor.timeline.resetLayout": "Reset layout",
+    "editor.timeline.panelsMenu": "Panels",
+    "editor.timeline.panelsTextOnlyReason": "On a file without a video, the text is the only panel below the timeline, so it stays.",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -2732,16 +2739,9 @@ export const editor = defineNamespace({
       "editor.timeline.collapseVideoAria": {
         description:
           "Screen-reader name and tooltip of the button in the video's own " +
-          "header that collapses the whole video section to a 40px rail of one " +
-          "icon, giving its width to the text beside it. Doubles as the " +
-          "button's hover tooltip. Pairs with expandVideoAria.",
-      },
-      "editor.timeline.expandVideoAria": {
-        description:
-          "Screen-reader name and tooltip of the collapsed video rail — the " +
-          "strip of one icon that is all that remains of the video section, " +
-          "and which is itself the button that brings the picture back. The " +
-          "name is only ever seen on hover, so it carries the whole label.",
+          "header that hides the whole video section, giving its width to the " +
+          "text beside it; the Panels menu above the lens brings it back. " +
+          "Doubles as the button's hover tooltip.",
       },
       "editor.timeline.fullscreenVideoAria": {
         description:
@@ -2773,34 +2773,69 @@ export const editor = defineNamespace({
           "were folded to make room back the way they were. 'Its column' is " +
           "the text's normal place beside the video.",
       },
+      "editor.timeline.fullscreenTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the timeline's " +
+          "heading that folds the video-and-text row below it, so the tracks " +
+          "have the whole media lens. Not browser fullscreen: the app window " +
+          "is unchanged. Pairs with restoreTimelineAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the " +
+          "timeline already fills the lens: pressing it brings back the video " +
+          "and the text below it, the way they were.",
+      },
+      "editor.timeline.timelineMenuAria": {
+        description:
+          "Screen-reader name of the '…' button beside the timeline's heading, " +
+          "which opens a short menu of layout moves for the timeline panel: " +
+          "full screen, hide it, reset the layout.",
+      },
+      "editor.timeline.menuFullscreen": {
+        description:
+          "Item in the timeline's '…' layout menu that makes the timeline fill " +
+          "the media lens by folding the video and text below it. A layout " +
+          "move inside the app window, not browser full screen.",
+      },
+      "editor.timeline.menuRestorePanels": {
+        description:
+          "The same item in the timeline's '…' layout menu once the timeline " +
+          "fills the lens: it brings back the panels that were folded to make " +
+          "room (the video and the text).",
+      },
+      "editor.timeline.resetLayout": {
+        description:
+          "Menu item that puts this file's media layout back to how this kind " +
+          "of file starts: every panel shown, no full screen, the starting " +
+          "panel sizes. Appears in the timeline's '…' menu and the Panels menu.",
+      },
+      "editor.timeline.panelsMenu": {
+        description:
+          "Label of the menu button above the media lens that lists its panels " +
+          "(Timeline, Video, Text) with a tick beside each one on screen; " +
+          "choosing one shows or hides it. Also holds Reset layout.",
+      },
+      "editor.timeline.panelsTextOnlyReason": {
+        description:
+          "Hover reason on the greyed-out 'Text' item in the Panels menu, on a " +
+          "file with no linked video: the text table is then the only panel " +
+          "below the timeline, so it cannot be hidden.",
+      },
       "editor.timeline.collapseTimelineAria": {
         description:
           "Screen-reader name and tooltip of the button in the timeline's " +
-          "toolbar that collapses the whole timeline to a 40px rail of one " +
-          "icon, giving its height to the video and text below it. Doubles as " +
-          "the button's hover tooltip. Pairs with expandTimelineAria.",
-      },
-      "editor.timeline.expandTimelineAria": {
-        description:
-          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
-          "strip of one icon that is all that remains of the timeline, and " +
-          "which is itself the button that brings it back. The name is only " +
-          "ever seen on hover, so it carries the whole label.",
+          "toolbar that hides the whole timeline, giving its height to the " +
+          "video and text below it; the Panels menu brings it back. Doubles as " +
+          "the button's hover tooltip and as an item in the timeline's '…' menu.",
       },
       "editor.timeline.collapseTextAria": {
         description:
           "Screen-reader name and tooltip of the button in the text section's " +
-          "header that collapses the dialogue table to a 40px rail of one " +
-          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "header that hides the dialogue table, giving its width to the video " +
+          "beside it; the Panels menu brings it back. 'Text' here is the " +
           "section holding the source and target columns, not one of them. " +
-          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
-      },
-      "editor.timeline.expandTextAria": {
-        description:
-          "Screen-reader name and tooltip of the collapsed text rail — the " +
-          "strip of one icon that is all that remains of the dialogue table, " +
-          "and which is itself the button that brings it back. The name is " +
-          "only ever seen on hover, so it carries the whole label.",
+          "Doubles as the button's hover tooltip.",
       },
       "editor.timeline.folderExpandAria": {
         description:

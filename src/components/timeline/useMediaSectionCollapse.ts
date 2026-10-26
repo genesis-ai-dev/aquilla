@@ -28,39 +28,59 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { usePanelRef } from "react-resizable-panels"
 import {
+  canCollapseSection,
   canFullscreen,
+  clearStoredMediaSections,
   collapseSection,
   expandSection,
-  isRailSized,
+  isFoldSized,
   isSectionFullscreen,
   isSeparatorDisabled,
-  MEDIA_RAIL_PX,
+  MEDIA_FOLDED_PX,
   mediaPanelConstraints,
   presentSections,
-  railPreviewSections,
+  readStoredBodyFolded,
   readStoredCollapsedSections,
   readStoredFullscreen,
   reconcilePresence,
   sectionsToFoldForFullscreen,
   shouldPersistSize,
+  writeStoredBodyFolded,
   writeStoredCollapsedSections,
   writeStoredFullscreen,
   type CollapsedSections,
   type FullscreenMemory,
   type MediaSectionId,
 } from "./media-section-layout"
-import { readStoredTimelinePaneHeight, writeStoredTimelinePaneHeight } from "./timeline-pane-layout"
-import { readStoredVideoPaneWidth, writeStoredVideoPaneWidth } from "./video-pane-layout"
+import type { StartingLayout } from "./media-layout-start"
+import {
+  clearStoredTimelinePaneHeight,
+  readStoredTimelinePaneHeight,
+  TIMELINE_PANE_DEFAULT_HEIGHT,
+  writeStoredTimelinePaneHeight,
+} from "./timeline-pane-layout"
+import {
+  clearStoredVideoPaneWidth,
+  readStoredVideoPaneWidth,
+  VIDEO_PANE_DEFAULT_WIDTH,
+  writeStoredVideoPaneWidth,
+} from "./video-pane-layout"
 
-/** A section's last known real size, kept so the collapsed content can be
- *  frozen at it rather than re-laid-out at 40px. */
+/** A section's last known real size, kept so the folded content can be
+ *  frozen at it rather than re-laid-out at zero. */
 interface FrozenBox {
   width: number
   height: number
 }
 
-/** Nothing being previewed, as one shared reference so clearing is free. */
-const NO_PREVIEW: CollapsedSections = []
+/** Nothing folded, as one shared reference so clearing is free. */
+const NONE: CollapsedSections = []
+
+/** Today's sizes, for a caller that does not pass a starting layout. */
+const DEFAULT_START: StartingLayout = {
+  timelineHeight: TIMELINE_PANE_DEFAULT_HEIGHT,
+  videoWidth: VIDEO_PANE_DEFAULT_WIDTH,
+}
 
 export interface UseMediaSectionCollapseInput {
   fileId: string | null
@@ -73,19 +93,27 @@ export interface UseMediaSectionCollapseInput {
    * never fires blur — which is what strands a collaboration lease.
    */
   onBeforeCollapseText?: () => void
+  /**
+   * The sizes this file starts from when it has none of its own — by its kind
+   * (media-layout-start.ts). Also where "Reset layout" goes back to.
+   */
+  start?: StartingLayout
 }
 
 export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   const { fileId, timelineStacked, hasVideo, onBeforeCollapseText } = input
+  const start = input.start ?? DEFAULT_START
 
   const [collapsed, setCollapsed] = useState<CollapsedSections>(() =>
     timelineStacked ? readStoredCollapsedSections(fileId) : [],
   )
   /**
-   * Sections the pointer is holding at rail size but has not committed. Purely
-   * what to paint; never read by any decision. See `railPreviewSections`.
+   * The timeline has the lens: the body row (film and text) is folded as ONE
+   * unit, leaving the arrangement inside it untouched. Per file, its own key.
    */
-  const [previewRail, setPreviewRail] = useState<CollapsedSections>(NO_PREVIEW)
+  const [bodyFolded, setBodyFolded] = useState<boolean>(() =>
+    timelineStacked ? readStoredBodyFolded(fileId) : false,
+  )
   /**
    * The arrangement to come back to when a section stops being full screen,
    * and whose press it belongs to. NOT what makes a section full screen —
@@ -100,6 +128,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   const timelinePanelRef = usePanelRef()
   const videoPanelRef = usePanelRef()
   const tablePanelRef = usePanelRef()
+  const bodyPanelRef = usePanelRef()
   const panelRefs = {
     timeline: timelinePanelRef,
     video: videoPanelRef,
@@ -113,6 +142,9 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   // timeline is collapsed, then the film is unlinked — leaving the table as
   // the only section, collapsed, and the workspace empty.
   const effective = reconcilePresence(collapsed, present)
+  // A folded body needs a timeline to fill the lens; with the timeline folded
+  // too there would be nothing on screen, so the body fold gives way.
+  const bodyFoldedNow = timelineStacked && bodyFolded && !effective.includes("timeline")
 
   // A memory naming a section that has gone — the film was unlinked under a
   // full-screen video — is ignored rather than acted on. Storage is left
@@ -125,6 +157,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   useEffect(() => {
     if (!timelineStacked) return
     setCollapsed(readStoredCollapsedSections(fileId))
+    setBodyFolded(readStoredBodyFolded(fileId))
     setFullscreen(readStoredFullscreen(fileId, presentSections({ timelineStacked, hasVideo })))
     frozenRef.current = {}
   }, [fileId, hasVideo, timelineStacked])
@@ -134,8 +167,9 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   useEffect(() => {
     if (!timelineStacked) return
     writeStoredCollapsedSections(fileId, effective)
+    writeStoredBodyFolded(fileId, bodyFoldedNow)
     writeStoredFullscreen(fileId, memory)
-  }, [fileId, timelineStacked, effective, memory])
+  }, [fileId, timelineStacked, effective, bodyFoldedNow, memory])
 
   /**
    * The last size each section measured while OPEN, kept from every resize
@@ -150,9 +184,9 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     const el = contentRefs.current[id]
     if (!el) return
     const rect = el.getBoundingClientRect()
-    // A drag has already squeezed the panel to its rail by the time the
-    // gesture ends, so along the collapsing axis the box is 40px — use the
-    // last size it measured open instead. The other axis is still honest.
+    // A drag has already squeezed the panel shut by the time the gesture
+    // ends, so along the collapsing axis the box is ~0 — use the last size it
+    // measured open instead. The other axis is still honest.
     const open = lastOpenRef.current[id] ?? 0
     const width = id === "timeline" ? rect.width : Math.max(rect.width, open)
     const height = id === "timeline" ? Math.max(rect.height, open) : rect.height
@@ -186,7 +220,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    *
    * `isCollapsed()` cannot answer this once a section is folded: it requires
    * the panel to still be `collapsible`, and a folded one is pinned instead
-   * (min === max === 40), so it reports `false` for every rail we have made.
+   * (min === max === 0), so it reports `false` for every fold we have made.
    * The pixel size is read live off the element and stays true either way.
    * Throws before the group has laid out, like every other panel method.
    */
@@ -198,46 +232,6 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
   }, [])
-
-  /**
-   * A layout report from a drag that is still in progress — this fires on
-   * every pointer move, where `noteLayoutSettled` fires once at the release.
-   *
-   * All it does is decide what to paint. The fold itself still commits at
-   * pointer-up and nowhere else, which is the round-2 rule and the reason
-   * this is a separate handler rather than a second caller of the same one.
-   */
-  const pointerFrameRef = useRef<number | null>(null)
-
-  const notePointerLayout = useCallback(() => {
-    if (typeof window === "undefined") return
-    // One read per frame, and on the NEXT frame rather than this one. The
-    // library reports a layout from inside the pointermove handler, straight
-    // after writing it to its own store — but the panel's width comes from a
-    // style React has not rendered yet, so measuring here returns the size
-    // from the move BEFORE this one. That lag is invisible in the middle of a
-    // drag and fatal at the end of one: the move that snaps a panel to the
-    // rail is usually the last, and its correction would never be read.
-    if (pointerFrameRef.current !== null) return
-    pointerFrameRef.current = window.requestAnimationFrame(() => {
-      pointerFrameRef.current = null
-      const sizes: Partial<Record<MediaSectionId, number | null>> = {}
-      for (const id of present) {
-        if (effective.includes(id)) continue
-        sizes[id] = safeSizePx(id)
-      }
-      setPreviewRail((prev) => railPreviewSections(sizes, effective, present, prev))
-    })
-  }, [effective, present, safeSizePx])
-
-  useEffect(
-    () => () => {
-      if (pointerFrameRef.current !== null && typeof window !== "undefined") {
-        window.cancelAnimationFrame(pointerFrameRef.current)
-      }
-    },
-    [],
-  )
 
   const collapse = useCallback(
     (id: MediaSectionId) => {
@@ -256,6 +250,10 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // frame in which the partner still measures 40px and could be misread
       // as folded. Verified against the library's solver, not assumed.
       setCollapsed((prev) => collapseSection(prev, id, present))
+      // Folding the timeline while it has the lens would leave nothing on
+      // screen, so the body comes back with it — the fold reads as "hide the
+      // timeline", which is what was asked.
+      if (id === "timeline") setBodyFolded(false)
       // Any fold that is not part of entering full screen ends it: the memory
       // belongs to that one gesture. Entering re-sets it after its own loop,
       // and React's batching makes that last write win.
@@ -279,9 +277,9 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   const restoreTargetFor = useCallback(
     (id: MediaSectionId): { panel: MediaSectionId; px: number } =>
       id === "timeline"
-        ? { panel: "timeline", px: readStoredTimelinePaneHeight(fileId ?? "") }
-        : { panel: "video", px: readStoredVideoPaneWidth() },
-    [fileId],
+        ? { panel: "timeline", px: readStoredTimelinePaneHeight(fileId ?? "", start.timelineHeight) }
+        : { panel: "video", px: readStoredVideoPaneWidth(fileId, start.videoWidth) },
+    [fileId, start.timelineHeight, start.videoWidth],
   )
 
   /**
@@ -307,6 +305,18 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
   }, [])
 
+  /**
+   * Drive a pinned panel to zero. `applySize` refuses zero on purpose (a
+   * remembered size is never zero); this is the one caller that means it.
+   */
+  const applyFold = useCallback((panel: { current: { resize: (size: number) => void } | null }) => {
+    try {
+      panel.current?.resize(MEDIA_FOLDED_PX)
+    } catch {
+      /* group not laid out yet — the pin covers the next commit */
+    }
+  }, [])
+
   /** Re-apply a section's remembered size — used on a file switch. */
   const restoreStoredSize = useCallback(
     (id: MediaSectionId) => {
@@ -323,8 +333,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // open constraints BEFORE it is told what size to be, and a passive
       // effect from this commit would run a render too early — resizing a
       // still-pinned panel, which does nothing at all.
+      const wasBodyFolded = bodyFoldedNow
       flushSync(() => {
         setCollapsed((prev) => expandSection(prev, id))
+        // Showing the film or the text brings the body row back, which ends a
+        // full-screen timeline.
+        if (id !== "timeline") setBodyFolded(false)
         // Opening anything ends full screen. The derived glyph would say so
         // anyway — this section being open means its neighbour is no longer
         // alone — but the memory goes too, so a later press captures the
@@ -332,6 +346,14 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
         setFullscreen(null)
       })
       delete frozenRef.current[id]
+      // The timeline has been filling the lens; give it back its own height so
+      // the body row has room again.
+      if (wasBodyFolded && id !== "timeline") {
+        const tl = restoreTargetFor("timeline")
+        applySize(tl.panel, tl.px)
+        delete frozenRef.current.video
+        delete frozenRef.current.text
+      }
       const { panel, px } = restoreTargetFor(id)
       applySize(panel, px)
       // `resize()` reports the settled layout SYNCHRONOUSLY, so this is the
@@ -349,7 +371,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // case — so `expand()` would reopen the section at its bare minimum
       // rather than the size the reader left it at.
     },
-    [applySize, present, restoreTargetFor, safeIsCollapsed],
+    [applySize, bodyFoldedNow, present, restoreTargetFor, safeIsCollapsed],
   )
 
   /**
@@ -367,12 +389,24 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    */
   const enterFullscreen = useCallback(
     (id: MediaSectionId) => {
+      if (id === "timeline") {
+        // The body row folds as one unit; the film and the text inside it keep
+        // exactly the arrangement they had, so coming back needs nothing but
+        // the unfold. Their boxes are frozen first, as any fold freezes.
+        if (!canFullscreen(effective, "timeline", present, bodyFoldedNow)) return
+        onBeforeCollapseText?.()
+        if (!effective.includes("video")) freeze("video")
+        if (!effective.includes("text")) freeze("text")
+        setBodyFolded(true)
+        setFullscreen({ section: "timeline", restore: effective })
+        return
+      }
       const fold = sectionsToFoldForFullscreen(effective, id, present)
       if (fold.length === 0) return
       for (const s of fold) collapse(s)
       setFullscreen({ section: id, restore: effective })
     },
-    [collapse, effective, present],
+    [bodyFoldedNow, collapse, effective, freeze, onBeforeCollapseText, present],
   )
 
   /**
@@ -390,8 +424,19 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    */
   const exitFullscreen = useCallback(
     (id: MediaSectionId) => {
+      if (id === "timeline" && bodyFoldedNow) {
+        flushSync(() => {
+          setBodyFolded(false)
+          setFullscreen(null)
+        })
+        delete frozenRef.current.video
+        delete frozenRef.current.text
+        const tl = restoreTargetFor("timeline")
+        applySize(tl.panel, tl.px)
+        return
+      }
       const target = reconcilePresence(
-        memory && memory.section === id ? memory.restore : NO_PREVIEW,
+        memory && memory.section === id ? memory.restore : NONE,
         present,
       )
       for (const s of ["timeline", "video", "text"] as const) {
@@ -399,8 +444,27 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       }
       setFullscreen(null)
     },
-    [effective, expand, memory, present],
+    [applySize, bodyFoldedNow, effective, expand, memory, present, restoreTargetFor],
   )
+
+  /**
+   * "Reset layout": forget this file's arrangement and go back to the one its
+   * kind starts from — nothing folded, no full screen, the starting sizes.
+   */
+  const resetLayout = useCallback(() => {
+    clearStoredMediaSections(fileId)
+    clearStoredTimelinePaneHeight(fileId ?? "")
+    clearStoredVideoPaneWidth(fileId)
+    flushSync(() => {
+      setCollapsed(NONE)
+      setBodyFolded(false)
+      setFullscreen(null)
+    })
+    frozenRef.current = {}
+    lastOpenRef.current = {}
+    applySize("timeline", start.timelineHeight)
+    if (present.includes("video")) applySize("video", start.videoWidth)
+  }, [applySize, fileId, present, start.timelineHeight, start.videoWidth])
 
   /**
    * Fed from every panel's `onResize`. It only RECORDS. It must not decide
@@ -416,7 +480,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    *   made the rail look like it did nothing.
    */
   const noteResize = useCallback((id: MediaSectionId, px: number) => {
-    if (!isRailSized(px)) lastOpenRef.current[id] = px
+    if (!isFoldSized(px)) lastOpenRef.current[id] = px
   }, [])
 
   /**
@@ -450,16 +514,6 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // measurement is that full-row width. Persisting in the same pass, before
       // the fold has been seen, would remember 1386px as the width the reader
       // chose, and the rail would then reopen the picture to fill the row.
-      // The gesture is over, so nothing is being previewed any more. Batched
-      // with the commit below, so the real rail replaces the preview in one
-      // paint rather than flashing the crushed content between them. Any frame
-      // still owing is dropped: its measurement predates this commit.
-      if (pointerFrameRef.current !== null && typeof window !== "undefined") {
-        window.cancelAnimationFrame(pointerFrameRef.current)
-        pointerFrameRef.current = null
-      }
-      setPreviewRail((prev) => (prev.length === 0 ? prev : NO_PREVIEW))
-
       const foldedNow = new Set<MediaSectionId>()
       for (const id of ["timeline", "video", "text"] as const) {
         if (effective.includes(id) || !safeIsCollapsed(id)) continue
@@ -481,12 +535,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
         const partner = partnerOf(id)
         if (partner && foldedNow.has(partner)) continue
         const px = lastOpenRef.current[id]
-        if (!px || !shouldPersistSize(effective, id)) continue
+        if (!px || !shouldPersistSize(effective, id, bodyFoldedNow)) continue
         if (id === "timeline") writeStoredTimelinePaneHeight(fileId ?? "", px)
-        else writeStoredVideoPaneWidth(px)
+        else writeStoredVideoPaneWidth(fileId, px)
       }
     },
-    [collapse, effective, fileId, safeIsCollapsed],
+    [bodyFoldedNow, collapse, effective, fileId, safeIsCollapsed],
   )
 
   /**
@@ -524,15 +578,28 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    * collapsed. It cannot fire mid-drag, because `effective` does not change
    * until the pointer is released.
    */
-  const repairsRef = useRef<Partial<Record<MediaSectionId, number>>>({})
+  const repairsRef = useRef<Partial<Record<MediaSectionId | "body", number>>>({})
   useEffect(() => {
     for (const id of effective) {
       const px = safeSizePx(id)
-      if (px === null || isRailSized(px)) continue
+      if (px === null || isFoldSized(px)) continue
       repairsRef.current[id] = (repairsRef.current[id] ?? 0) + 1
-      applySize(id, MEDIA_RAIL_PX)
+      applyFold(panelRefs[id])
     }
-  }, [applySize, effective, safeSizePx])
+    if (bodyFoldedNow) {
+      let px: number | null = null
+      try {
+        px = bodyPanelRef.current?.getSize().inPixels ?? null
+      } catch {
+        px = null
+      }
+      if (px !== null && !isFoldSized(px)) {
+        repairsRef.current.body = (repairsRef.current.body ?? 0) + 1
+        applyFold(bodyPanelRef)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
+  }, [applyFold, bodyFoldedNow, effective, safeSizePx])
 
   /**
    * The console seam, in the shape of `__aqQueueState` and
@@ -554,7 +621,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       fileId,
       present,
       collapsed: [...effective],
-      previewing: [...previewRail],
+      bodyFolded: bodyFoldedNow,
       sections: Object.fromEntries(
         present.map((id) => {
           let size: { asPercentage: number; inPixels: number } | null = null
@@ -567,8 +634,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
             id,
             {
               collapsed: effective.includes(id),
-              previewing: previewRail.includes(id),
-              railed: size ? isRailSized(size.inPixels) : null,
+              folded: size ? isFoldSized(size.inPixels) : null,
               // How many times this section's size was driven to the rail
               // rather than left to the group's own clamp. One per fold is
               // normal — the effect runs before the remount that would have
@@ -588,40 +654,54 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       delete win.__aqMediaSections
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
-  }, [effective, fileId, present, previewRail])
+  }, [effective, fileId, present, bodyFoldedNow])
+
+  /** Is this section on screen at all — not folded, and not inside a folded body? */
+  const isVisible = (id: MediaSectionId) =>
+    present.includes(id) && !effective.includes(id) && !(bodyFoldedNow && id !== "timeline")
 
   return {
     collapsed: effective,
-    constraints: mediaPanelConstraints({ collapsed: effective, timelineStacked, hasVideo }),
+    /** The timeline has the lens: the film and text row is folded as one unit. */
+    bodyFolded: bodyFoldedNow,
+    present,
+    constraints: mediaPanelConstraints({
+      collapsed: effective,
+      timelineStacked,
+      hasVideo,
+      bodyFolded: bodyFoldedNow,
+    }),
     isCollapsed: (id: MediaSectionId) => effective.includes(id),
+    isVisible,
+    /**
+     * Is this section's content frozen and clipped right now — folded itself,
+     * or inside the folded body? What the workspace inerts and pins.
+     */
+    isFrozen: (id: MediaSectionId) => effective.includes(id) || (bodyFoldedNow && id !== "timeline"),
+    /** May the Panels menu hide this section? */
+    canCollapse: (id: MediaSectionId) =>
+      id === "timeline" ? present.includes("timeline") && !effective.includes("timeline") : canCollapseSection(effective, id, present),
     separatorDisabled: (between: "timeline-body" | "video-table") =>
-      isSeparatorDisabled(effective, between),
+      isSeparatorDisabled(effective, between, bodyFoldedNow),
     frozen: frozenRef.current,
     panelRefs,
+    bodyPanelRef,
     registerContent: (id: MediaSectionId) => (el: HTMLElement | null) => {
       contentRefs.current[id] = el
     },
-    /** Painted like a rail, but not folded — a drag is still holding it. */
-    isPreviewingRail: (id: MediaSectionId) => previewRail.includes(id),
-    /** Is this section alone on screen, its neighbours all folded? */
-    isFullscreen: (id: MediaSectionId) => isSectionFullscreen(effective, id, present),
-    /** May it be? False for the timeline, which cannot empty the body. */
-    canFullscreen: (id: MediaSectionId) => canFullscreen(effective, id, present),
+    /** Is this section alone on screen, everything else folded? */
+    isFullscreen: (id: MediaSectionId) => isSectionFullscreen(effective, id, present, bodyFoldedNow),
+    /** May it take the lens? */
+    canFullscreen: (id: MediaSectionId) => canFullscreen(effective, id, present, bodyFoldedNow),
     enterFullscreen,
     exitFullscreen,
-    /**
-     * Is a rail painted over this section, folded or merely held there? The
-     * two look identical, which is the point; only `isCollapsed` decides
-     * anything, and only it freezes, inerts or persists.
-     */
-    showsRail: (id: MediaSectionId) => effective.includes(id) || previewRail.includes(id),
     collapse,
     expand,
+    resetLayout,
     noteResize,
-    notePointerLayout,
     noteLayoutSettled,
     restoreStoredSize,
     /** Should this measurement be written back as the section's size? */
-    canPersist: (id: MediaSectionId) => shouldPersistSize(effective, id),
+    canPersist: (id: MediaSectionId) => shouldPersistSize(effective, id, bodyFoldedNow),
   }
 }

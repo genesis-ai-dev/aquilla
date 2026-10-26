@@ -1,5 +1,6 @@
-// AQU-1119. Everything the media lens's collapse rules decide, tested where a
-// unit test can actually reach it.
+// AQU-1119, and the media redesign's layout (zero-space folds, the timeline's
+// full screen). Everything the media lens's collapse rules decide, tested where
+// a unit test can actually reach it.
 //
 // This file carries more weight than usual: NOTHING in the suite renders
 // ProjectWorkspace, so the panel group these constraints feed is only ever
@@ -8,23 +9,25 @@
 
 import { beforeEach, describe, expect, it } from "vitest"
 import {
-  MEDIA_RAIL_PX,
+  MEDIA_FOLDED_PX,
   canCollapseSection,
+  clearStoredMediaSections,
   collapseSection,
   expandSection,
-  isRailSized,
+  isFoldSized,
   isSeparatorDisabled,
   mediaPanelConstraints,
   canFullscreen,
   isSectionFullscreen,
   presentSections,
-  railPreviewSections,
+  readStoredBodyFolded,
   readStoredFullscreen,
   sectionsToFoldForFullscreen,
   writeStoredFullscreen,
   readStoredCollapsedSections,
   reconcilePresence,
   shouldPersistSize,
+  writeStoredBodyFolded,
   writeStoredCollapsedSections,
   type CollapsedSections,
 } from "./media-section-layout"
@@ -110,84 +113,26 @@ describe("reconcilePresence", () => {
   })
 })
 
-describe("isRailSized", () => {
-  it("accepts the rail and a couple of pixels of rounding", () => {
-    expect(isRailSized(MEDIA_RAIL_PX)).toBe(true)
-    expect(isRailSized(MEDIA_RAIL_PX + 2)).toBe(true)
+describe("isFoldSized", () => {
+  it("is a folded panel: zero, and a couple of pixels of rounding", () => {
+    expect(MEDIA_FOLDED_PX).toBe(0)
+    expect(isFoldSized(0)).toBe(true)
+    expect(isFoldSized(2)).toBe(true)
   })
 
   it("rejects every real expanded size", () => {
-    expect(isRailSized(MEDIA_RAIL_PX + 3)).toBe(false)
+    expect(isFoldSized(3)).toBe(false)
     // The smallest floor in the lens, so nothing legitimate comes near.
-    expect(isRailSized(TIMELINE_PANE_MIN_HEIGHT)).toBe(false)
-  })
-
-  it("rejects zero, which is a hidden subtree rather than a collapse", () => {
-    // A ResizeObserver reports 0 for a subtree an ancestor has hidden. Reading
-    // that as a collapse would shut sections behind the reader's back.
-    expect(isRailSized(0)).toBe(false)
-  })
-})
-
-describe("railPreviewSections", () => {
-  const preview = (
-    sizes: Partial<Record<"timeline" | "video" | "text", number | null>>,
-    collapsed: CollapsedSections = [],
-    present: readonly ("timeline" | "video" | "text")[] = ALL,
-    prev: CollapsedSections = [],
-  ) => railPreviewSections(sizes, collapsed, [...present], prev)
-
-  it("marks a section the drag has already shrunk to the rail", () => {
-    // The panel is at 40px but the pointer is still down, so nothing is folded
-    // yet — this is the gap where the crushed content used to show.
-    expect(preview({ video: 288, text: MEDIA_RAIL_PX })).toEqual(["text"])
-  })
-
-  it("says nothing while a drag is still above the snap point", () => {
-    expect(preview({ video: 288, text: VIDEO_PANE_TABLE_MIN_WIDTH })).toEqual([])
-  })
-
-  it("leaves an already folded section alone", () => {
-    // Its real rail is up. A preview over it would be a second copy of the
-    // same strip, and the preview is not a control.
-    expect(preview({ text: MEDIA_RAIL_PX }, ["text"])).toEqual([])
-  })
-
-  it("ignores a section that is not on screen", () => {
-    expect(preview({ video: MEDIA_RAIL_PX }, [], NO_VIDEO)).toEqual([])
-  })
-
-  it("ignores a size it could not read", () => {
-    // The panel throws before its group has laid out, and the hook turns that
-    // into null rather than a number.
-    expect(preview({ text: null })).toEqual([])
-  })
-
-  it("ignores zero, which is a hidden subtree rather than a rail", () => {
-    expect(preview({ text: 0 })).toEqual([])
-  })
-
-  it("returns the same array when the answer has not moved", () => {
-    // A drag fires this on every pointer move. Holding the reference is what
-    // keeps a gesture that never reaches a snap point free of re-renders.
-    const prev = preview({ text: MEDIA_RAIL_PX })
-    expect(preview({ text: MEDIA_RAIL_PX }, [], ALL, prev)).toBe(prev)
-    const none = preview({ text: 900 })
-    expect(preview({ text: 900 }, [], ALL, none)).toBe(none)
-  })
-
-  it("gives a fresh array when the drag crosses the snap point", () => {
-    const prev = preview({ text: 900 })
-    expect(preview({ text: MEDIA_RAIL_PX }, [], ALL, prev)).toEqual(["text"])
+    expect(isFoldSized(TIMELINE_PANE_MIN_HEIGHT)).toBe(false)
   })
 })
 
 describe("full screen", () => {
   type Id = "timeline" | "video" | "text"
-  const full = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL) =>
-    isSectionFullscreen(collapsed, id, [...present])
-  const can = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL) =>
-    canFullscreen(collapsed, id, [...present])
+  const full = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL, bodyFolded = false) =>
+    isSectionFullscreen(collapsed, id, [...present], bodyFolded)
+  const can = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL, bodyFolded = false) =>
+    canFullscreen(collapsed, id, [...present], bodyFolded)
 
   it("is full screen only when everything else on screen is folded", () => {
     expect(full(["timeline", "text"], "video")).toBe(true)
@@ -213,12 +158,29 @@ describe("full screen", () => {
     expect(full(["text", "timeline"], "video")).toBe(true)
   })
 
-  it("refuses the timeline, which cannot empty the body", () => {
-    // Its full screen would fold both body sections at once, and a flex row
-    // has to be filled by something. Its own ticket.
-    expect(can([], "timeline")).toBe(false)
+  it("lets the timeline take the lens by folding the body row as one unit", () => {
+    // Media redesign, layout: full screen for every panel. The timeline never
+    // folds the two body sections (a flex row has to be filled by something);
+    // it folds the row they sit in.
+    expect(can([], "timeline")).toBe(true)
     expect(can([], "video")).toBe(true)
     expect(can([], "text")).toBe(true)
+    expect(can(["timeline"], "timeline")).toBe(false)
+  })
+
+  it("is the timeline that has the lens while the body row is folded", () => {
+    expect(full([], "timeline", ALL, true)).toBe(true)
+    // The film and the text sit inside the folded row, untouched but unseen.
+    expect(full([], "video", ALL, true)).toBe(false)
+    expect(full(["timeline"], "text", ALL, false)).toBe(false)
+    // The body row is open, so the timeline is sharing the lens.
+    expect(full([], "timeline")).toBe(false)
+  })
+
+  it("offers nothing more while the body row is folded", () => {
+    // The only move from there is back.
+    expect(can([], "timeline", ALL, true)).toBe(false)
+    expect(can([], "video", ALL, true)).toBe(false)
   })
 
   it("refuses a folded section, and one with nothing to fold", () => {
@@ -233,7 +195,7 @@ describe("full screen", () => {
     expect(sectionsToFoldForFullscreen([], "text", [...NO_VIDEO])).toEqual(["timeline"])
   })
 
-  it("has nothing to fold for a section that cannot take the lens", () => {
+  it("folds no section for the timeline, which folds the row instead", () => {
     expect(sectionsToFoldForFullscreen([], "timeline", [...ALL])).toEqual([])
   })
 })
@@ -298,21 +260,28 @@ describe("shouldPersistSize", () => {
     expect(shouldPersistSize(["timeline"], "video")).toBe(true)
   })
 
-  it("refuses the video's width while the table is railed", () => {
+  it("refuses the video's width while the table is folded", () => {
     // With the table pinned the video measures the whole row, which clears its
     // 220px floor and would overwrite the width the reader chose.
     expect(shouldPersistSize(["text"], "video")).toBe(false)
   })
 
-  it("refuses a railed section's own size", () => {
+  it("refuses a folded section's own size", () => {
     expect(shouldPersistSize(["video"], "video")).toBe(false)
     expect(shouldPersistSize(["timeline"], "timeline")).toBe(false)
+  })
+
+  it("refuses the height of a timeline that fills the lens", () => {
+    // Full screen is not a height anyone chose; coming back must return the
+    // timeline to the one they had.
+    expect(shouldPersistSize([], "timeline", true)).toBe(false)
+    expect(shouldPersistSize([], "video", true)).toBe(false)
   })
 })
 
 describe("mediaPanelConstraints", () => {
-  const constraints = (collapsed: CollapsedSections, hasVideo = true) =>
-    mediaPanelConstraints({ collapsed, timelineStacked: true, hasVideo })
+  const constraints = (collapsed: CollapsedSections, hasVideo = true, bodyFolded = false) =>
+    mediaPanelConstraints({ collapsed, timelineStacked: true, hasVideo, bodyFolded })
 
   it("leaves every panel unconstrained outside the media lens", () => {
     const c = mediaPanelConstraints({ collapsed: [], timelineStacked: false, hasVideo: true })
@@ -337,7 +306,7 @@ describe("mediaPanelConstraints", () => {
     }
   })
 
-  it("pins a collapsed section to the rail instead of leaving it collapsible", () => {
+  it("pins a collapsed section folded — no room at all — instead of leaving it collapsible", () => {
     // min === max is the whole mechanism once a section is shut: it gives the
     // solver one fixed point, so drag, Enter, Home/End, arrow keys,
     // double-click and a window resize all become inert and cannot move the
@@ -345,28 +314,43 @@ describe("mediaPanelConstraints", () => {
     for (const section of ALL) {
       const key = section === "text" ? "table" : section
       const c = constraints([section])
-      expect(c[key]).toEqual({ minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX })
+      expect(c[key]).toEqual({ minSize: 0, maxSize: 0 })
       expect(c[key].collapsible).toBeUndefined()
     }
   })
 
-  it("leaves every open section collapsible, with a rail-sized collapsedSize", () => {
+  it("leaves every open section collapsible, folding to nothing", () => {
     // Dragging a divider shut is how you fold a section, so while open each
-    // keeps the flag and a rail-sized collapsedSize for the library to snap
-    // to. The table included: it holds at its floor and folds once the pointer
-    // is past the midpoint, exactly like the other two.
+    // keeps the flag and a zero collapsedSize for the library to snap to. The
+    // table included: it holds at its floor and folds once the pointer is past
+    // the midpoint, exactly like the other two.
     for (const section of ["timeline", "video", "table"] as const) {
       const c = constraints([])[section]
       expect(c.collapsible).toBe(true)
-      expect(c.collapsedSize).toBe(MEDIA_RAIL_PX)
+      expect(c.collapsedSize).toBe(0)
     }
   })
 
-  it("pins a railed video to the rail, ceiling and all", () => {
-    expect(constraints(["video"]).video.maxSize).toBe(MEDIA_RAIL_PX)
+  it("pins a folded video shut, ceiling and all", () => {
+    expect(constraints(["video"]).video.maxSize).toBe(0)
   })
 
-  it("leaves the table free to take the residual when the video is railed", () => {
+  it("folds the body row for a full-screen timeline, and lifts the timeline's cap", () => {
+    const c = constraints([], true, true)
+    expect(c.body).toEqual({ minSize: 0, maxSize: 0 })
+    expect(c.timeline.maxSize).toBe("100%")
+    // The film and the text inside the row keep their own constraints, so
+    // coming back needs nothing but the unfold.
+    expect(c.video.minSize).toBe(VIDEO_PANE_MIN_WIDTH)
+    expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
+  })
+
+  it("never folds the body under a folded timeline, which would empty the lens", () => {
+    const c = constraints(["timeline"], true, true)
+    expect(c.body.minSize).toBe(MEDIA_BODY_MIN_HEIGHT)
+  })
+
+  it("leaves the table free to take the residual when the video is folded", () => {
     const c = constraints(["video"])
     expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
     expect(c.table.maxSize).toBeUndefined()
@@ -383,6 +367,10 @@ describe("isSeparatorDisabled", () => {
   it("leaves a live handle alone", () => {
     expect(isSeparatorDisabled(["timeline"], "video-table")).toBe(false)
     expect(isSeparatorDisabled([], "timeline-body")).toBe(false)
+  })
+
+  it("disables the timeline's handle while it fills the lens", () => {
+    expect(isSeparatorDisabled([], "timeline-body", true)).toBe(true)
   })
 })
 
@@ -425,5 +413,29 @@ describe("per-file persistence", () => {
     writeStoredCollapsedSections(null, ["video"])
     expect(localStorage.getItem("aquilla:mediaSectionsCollapsed:null")).toBeNull()
     expect(readStoredCollapsedSections(undefined)).toEqual([])
+  })
+})
+
+describe("the folded body row, and Reset layout", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("round-trips per file and removes the key when unfolded", () => {
+    writeStoredBodyFolded("f1", true)
+    expect(readStoredBodyFolded("f1")).toBe(true)
+    expect(readStoredBodyFolded("f2")).toBe(false)
+    writeStoredBodyFolded("f1", false)
+    expect(localStorage.getItem("aquilla:mediaBodyFolded:f1")).toBeNull()
+  })
+
+  it("forgets a file's whole arrangement and leaves other files alone", () => {
+    writeStoredCollapsedSections("f1", ["video"])
+    writeStoredFullscreen("f1", { section: "text", restore: [] })
+    writeStoredBodyFolded("f1", true)
+    writeStoredCollapsedSections("f2", ["timeline"])
+    clearStoredMediaSections("f1")
+    expect(readStoredCollapsedSections("f1")).toEqual([])
+    expect(readStoredFullscreen("f1", [...ALL])).toBeNull()
+    expect(readStoredBodyFolded("f1")).toBe(false)
+    expect(readStoredCollapsedSections("f2")).toEqual(["timeline"])
   })
 })

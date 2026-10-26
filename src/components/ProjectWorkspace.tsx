@@ -475,7 +475,8 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { MediaSectionRail } from "@/components/timeline/MediaSectionRail"
+import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
+import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaSectionCollapse } from "@/components/timeline/useMediaSectionCollapse"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
@@ -13253,12 +13254,31 @@ export function ProjectWorkspace() {
     })
   }, [t])
 
+  // Media redesign, layout: the arrangement this file STARTS from, by its
+  // kind — a dubbing episode opens with the picture large, a subtitles file
+  // with the text large, a scripture book with the timeline tall. Only a
+  // fallback: each person's own arrangement of a file wins, and Reset layout
+  // comes back here.
+  const mediaStart = useMemo(
+    () =>
+      startingLayout(
+        mediaFileKind({
+          hasVideo: Boolean(activeFile?.coreMediaUrl),
+          isSubtitleFile,
+          hasAudioCues: audioCueSibling !== null,
+          isScripture:
+            ["usfm", "ebible", "helloao"].includes(activeFile?.type ?? "") || Boolean(activeFile?.corpusMarker),
+        }),
+      ),
+    [activeFile?.coreMediaUrl, activeFile?.type, activeFile?.corpusMarker, isSubtitleFile, audioCueSibling],
+  )
   // AQU-1119: which media-lens sections are collapsed, per file, plus the
   // panel handles and the constraint rows that follow from it.
   const mediaSections = useMediaSectionCollapse({
     fileId: activeFileId,
     timelineStacked,
     hasVideo: Boolean(activeFile?.coreMediaUrl),
+    start: mediaStart,
     // The rows stay mounted behind the rail — frozen and clipped, not
     // unmounted — so a cell being edited would keep focus and keep taking
     // keystrokes out of sight. Blurring runs the editor's real path: TipTap
@@ -13283,10 +13303,12 @@ export function ProjectWorkspace() {
     // lens.
     if (!activeFileId || !timelineStacked) return
     // `restoreStoredSize` skips a collapsed section — a height restored under
-    // its rail is exactly the desync the pin exists to prevent — and tolerates
+    // its fold is exactly the desync the pin exists to prevent — and tolerates
     // the first commit, where the group has not laid out yet and `resize`
-    // would throw rather than no-op.
-    mediaSections.restoreStoredSize("timeline")
+    // would throw rather than no-op. A full-screen timeline keeps the lens.
+    if (!mediaSections.bodyFolded) mediaSections.restoreStoredSize("timeline")
+    // The video's width is per file too now (media redesign, layout).
+    if (mediaSections.present.includes("video")) mediaSections.restoreStoredSize("video")
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
   }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
@@ -16626,6 +16648,17 @@ export function ProjectWorkspace() {
             )}
             {timelineStacked ? (
               <div className="relative flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background/90 p-2 backdrop-blur-xl">
+                {/* Media redesign, layout: folded panels take no room, and this
+                    is how they come back. */}
+                <MediaPanelsMenu
+                  present={mediaSections.present}
+                  isVisible={mediaSections.isVisible}
+                  canCollapse={mediaSections.canCollapse}
+                  collapse={mediaSections.collapse}
+                  expand={mediaSections.expand}
+                  resetLayout={mediaSections.resetLayout}
+                  className="me-auto"
+                />
                 {fileChapterToolbar}
               </div>
             ) : null}
@@ -16661,17 +16694,13 @@ export function ProjectWorkspace() {
                 // AQU-1119: fires once per gesture, at pointer-up. A drag that
                 // shut a section is heard here, after the group has settled.
                 onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
               >
               {timelineStacked && activeFile ? (
                 <>
                   <ResizablePanel
                     id="media-timeline"
                     panelRef={timelinePanelRef}
-                    defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
+                    defaultSize={readStoredTimelinePaneHeight(activeFile.id, mediaStart.timelineHeight)}
                     {...mediaSections.constraints.timeline}
                     groupResizeBehavior="preserve-pixel-size"
                     // The rail is positioned against this box.
@@ -16679,9 +16708,9 @@ export function ProjectWorkspace() {
                     // AQU-1119: a collapsed panel clips rather than reflows.
                     // The library's own content box is `overflow: auto` and
                     // spreads this after it, so without `hidden` the frozen
-                    // content would SCROLL inside the rail instead of being
-                    // hidden behind it.
-                    style={mediaSections.showsRail("timeline") ? { overflow: "hidden" } : undefined}
+                    // content would SCROLL in the sliver instead of being
+                    // hidden.
+                    style={mediaSections.isCollapsed("timeline") ? { overflow: "hidden" } : undefined}
                     // Records only. The remembered height is written once the
                     // gesture ENDS (the group's onLayoutChanged), so a drag that
                     // finishes collapsed never overwrites it on the way past
@@ -16854,6 +16883,17 @@ export function ProjectWorkspace() {
                           : undefined
                     }
                     isTextFullscreen={mediaSections.isFullscreen("text")}
+                    // Media redesign, layout: the timeline takes the lens by
+                    // folding the video-and-text row as one unit.
+                    onToggleTimelineFullscreen={
+                      mediaSections.isFullscreen("timeline")
+                        ? () => mediaSections.exitFullscreen("timeline")
+                        : mediaSections.canFullscreen("timeline")
+                          ? () => mediaSections.enterFullscreen("timeline")
+                          : undefined
+                    }
+                    isTimelineFullscreen={mediaSections.isFullscreen("timeline")}
+                    onResetLayout={mediaSections.resetLayout}
                     onOpenRecording={handleOpenRecording}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
@@ -16912,19 +16952,6 @@ export function ProjectWorkspace() {
                     linkingModeRequest={linkingModeRequest}
                   />
                   </div>
-                  {mediaSections.showsRail("timeline") && (
-                    <MediaSectionRail
-                      section="timeline"
-                      orientation="horizontal"
-                      // The one rail wide enough to keep its name. Its tools go
-                      // with its body — every one of them acts on tracks that
-                      // are no longer on screen — and the rail painting over
-                      // the toolbar is what takes them away.
-                      label={t("editor.timeline.title")}
-                      preview={mediaSections.isPreviewingRail("timeline")}
-                      onExpand={() => mediaSections.expand("timeline")}
-                    />
-                  )}
                   </ResizablePanel>
                   {/* A pinned panel cannot be dragged, so the handle beside it
                       must stop claiming it can: disabled drops its tab stop
@@ -16933,6 +16960,9 @@ export function ProjectWorkspace() {
                   <ResizableHandle
                     withHandle
                     disabled={mediaSections.separatorDisabled("timeline-body")}
+                    // Beside a folded panel there is nothing to drag: the
+                    // handle goes too, rather than floating at the edge.
+                    className={mediaSections.separatorDisabled("timeline-body") ? "invisible" : undefined}
                   />
                 </>
               ) : null}
@@ -16941,7 +16971,14 @@ export function ProjectWorkspace() {
                   is the mechanism behind an existing browser pass's floor check
                   (browser-verify-media-table-sync.mjs asserts the table clears
                   80px on a 1280x700 window). */}
-              <ResizablePanel id="media-body" {...mediaSections.constraints.body}>
+              <ResizablePanel
+                id="media-body"
+                panelRef={mediaSections.bodyPanelRef}
+                {...mediaSections.constraints.body}
+                // The timeline's full screen folds this whole row; clipped,
+                // like any folded panel, so nothing scrolls in the sliver.
+                style={mediaSections.bodyFolded ? { overflow: "hidden" } : undefined}
+              >
               {/* AQU-646: in the media lens a linked video docks to the LEFT of
                   the table, under the chip strip. Dragging the divider shut is
                   how you hide it; the table carries a pixel floor so a narrow
@@ -16951,17 +16988,13 @@ export function ProjectWorkspace() {
                 orientation="horizontal"
                 className="min-h-0 flex-1"
                 onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
               >
               {showVideoPane && activeFile?.coreMediaUrl ? (
                 <>
                   <ResizablePanel
                     id="media-video"
                     panelRef={mediaSections.panelRefs.video}
-                    defaultSize={readStoredVideoPaneWidth()}
+                    defaultSize={readStoredVideoPaneWidth(activeFile?.id, mediaStart.videoWidth)}
                     // 2026-08-08 (Sam): the divider travels well past half —
                     // the table's own pixel floor is what protects legibility.
                     // AQU-1119 moved the rest of these here: the pane is
@@ -16971,7 +17004,7 @@ export function ProjectWorkspace() {
                     {...mediaSections.constraints.video}
                     groupResizeBehavior="preserve-pixel-size"
                     className="relative"
-                    style={mediaSections.showsRail("video") ? { overflow: "hidden" } : undefined}
+                    style={mediaSections.isCollapsed("video") ? { overflow: "hidden" } : undefined}
                     // Records only; the width is remembered at pointer-up, and
                     // only if the gesture ended with the picture open — a drag
                     // that ends in the rail used to write 220 on its way past
@@ -16984,14 +17017,14 @@ export function ProjectWorkspace() {
                       data-media-section="video"
                       className="flex h-full min-h-0 w-full min-w-0 flex-col"
                       style={
-                        mediaSections.isCollapsed("video") && mediaSections.frozen.video
+                        mediaSections.isFrozen("video") && mediaSections.frozen.video
                           ? {
                               minWidth: mediaSections.frozen.video.width,
                               minHeight: mediaSections.frozen.video.height,
                             }
                           : undefined
                       }
-                      inert={mediaSections.isCollapsed("video") || undefined}
+                      inert={mediaSections.isFrozen("video") || undefined}
                     >
                     <MediaVideoPane
                       key={activeFile.id}
@@ -17029,19 +17062,11 @@ export function ProjectWorkspace() {
                       isFullscreen={mediaSections.isFullscreen("video")}
                     />
                     </div>
-                    {mediaSections.showsRail("video") && (
-                      <MediaSectionRail
-                        section="video"
-                        orientation="vertical"
-                        label={t("editor.timeline.videoPaneTitle")}
-                      preview={mediaSections.isPreviewingRail("video")}
-                        onExpand={() => mediaSections.expand("video")}
-                      />
-                    )}
                   </ResizablePanel>
                   <ResizableHandle
                     withHandle
                     disabled={mediaSections.separatorDisabled("video-table")}
+                    className={mediaSections.separatorDisabled("video-table") ? "invisible" : undefined}
                   />
                 </>
               ) : null}
@@ -17050,7 +17075,7 @@ export function ProjectWorkspace() {
                 panelRef={mediaSections.panelRefs.text}
                 {...mediaSections.constraints.table}
                 className="relative"
-                style={mediaSections.showsRail("text") ? { overflow: "hidden" } : undefined}
+                style={mediaSections.isCollapsed("text") ? { overflow: "hidden" } : undefined}
                 onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
               >
               <div
@@ -17058,14 +17083,14 @@ export function ProjectWorkspace() {
                 data-media-section="text"
                 className="flex h-full min-h-0 min-w-0 flex-col"
                 style={
-                  mediaSections.isCollapsed("text") && mediaSections.frozen.text
+                  mediaSections.isFrozen("text") && mediaSections.frozen.text
                     ? {
                         minWidth: mediaSections.frozen.text.width,
                         minHeight: mediaSections.frozen.text.height,
                       }
                     : undefined
                 }
-                inert={mediaSections.isCollapsed("text") || undefined}
+                inert={mediaSections.isFrozen("text") || undefined}
               >
               {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
                   TimelineEditor portals it here, and the video column carries
@@ -17280,7 +17305,7 @@ export function ProjectWorkspace() {
             // for lines nobody can see. Undefined short-circuits the whole
             // reporter, and its cleanup emits an empty set on the way in.
             onVisibleCellIdsChange={
-              mediaSections.isCollapsed("text") ? undefined : handleVisibleCellIdsChange
+              mediaSections.isFrozen("text") ? undefined : handleVisibleCellIdsChange
             }
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
@@ -17291,15 +17316,6 @@ export function ProjectWorkspace() {
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>
-              {mediaSections.showsRail("text") && (
-                <MediaSectionRail
-                  section="text"
-                  orientation="vertical"
-                  label={t("editor.timeline.textPaneTitle")}
-                  preview={mediaSections.isPreviewingRail("text")}
-                  onExpand={() => mediaSections.expand("text")}
-                />
-              )}
               </ResizablePanel>
               </ResizablePanelGroup>
               </ResizablePanel>

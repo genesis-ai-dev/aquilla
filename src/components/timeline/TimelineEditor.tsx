@@ -27,6 +27,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronsDownUp,
+  ChevronsUp,
   ChevronsUpDown,
   ClipboardCheck,
   Eye,
@@ -48,6 +49,9 @@ import {
   Users,
   Volume2,
   LockOpen,
+  Maximize2,
+  Minimize2,
+  RotateCcw,
   VolumeX,
   X,
 } from "lucide-react"
@@ -88,7 +92,7 @@ import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
-import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
+import { MEDIA_HEADER_ROW, MediaSectionCollapseButton, MediaSectionFullscreenButton } from "./MediaSectionRail"
 import {
   deriveTracksForFile,
   type TimelineTrack,
@@ -515,12 +519,19 @@ export interface TimelineEditorProps {
   /**
    * AQU-1119: the text section's full-screen toggle, threaded through for the
    * same reason its collapse control is — this component owns the header it
-   * portals into the table column's slot. The timeline itself gets no such
-   * control: its full screen would fold BOTH body sections, and the body is a
-   * flex row that something has to fill.
+   * portals into the table column's slot.
    */
   onToggleTextFullscreen?: () => void
   isTextFullscreen?: boolean
+  /**
+   * Media redesign, layout: the timeline's own full screen — the workspace
+   * folds the video-and-text row as one unit — and the ⋯ menu beside its
+   * heading (full screen, hide the timeline, reset layout). Absent outside the
+   * media lens, like the collapse control.
+   */
+  onToggleTimelineFullscreen?: () => void
+  isTimelineFullscreen?: boolean
+  onResetLayout?: () => void
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -1225,6 +1236,9 @@ export function TimelineEditor({
   onCollapseTextSection,
   onToggleTextFullscreen,
   isTextFullscreen,
+  onToggleTimelineFullscreen,
+  isTimelineFullscreen = false,
+  onResetLayout,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -4173,6 +4187,55 @@ export function TimelineEditor({
             act on. */}
         {onCollapseSection && (
           <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
+        )}
+        {onToggleTimelineFullscreen && (
+          <MediaSectionFullscreenButton
+            section="timeline"
+            isFullscreen={isTimelineFullscreen}
+            onToggle={onToggleTimelineFullscreen}
+          />
+        )}
+        {/* The timeline's ⋯ (Sam, Oct 24): its layout moves in one place. No
+            "Move" — the timeline is the anchor every other panel docks to. */}
+        {(onToggleTimelineFullscreen || onCollapseSection || onResetLayout) && (
+          <OverflowMenu
+            items={[
+              ...(onToggleTimelineFullscreen
+                ? [{
+                    id: "timeline-fullscreen",
+                    label: t(isTimelineFullscreen ? "editor.timeline.menuRestorePanels" : "editor.timeline.menuFullscreen"),
+                    icon: isTimelineFullscreen ? Minimize2 : Maximize2,
+                    testId: "tl-menu-fullscreen",
+                    onClick: onToggleTimelineFullscreen,
+                  }]
+                : []),
+              ...(onCollapseSection
+                ? [{
+                    id: "timeline-hide",
+                    label: t("editor.timeline.collapseTimelineAria"),
+                    icon: ChevronsUp,
+                    testId: "tl-menu-hide",
+                    onClick: onCollapseSection,
+                  }]
+                : []),
+              ...(onResetLayout
+                ? [
+                    { id: "timeline-layout-separator", type: "separator" as const },
+                    {
+                      id: "timeline-reset-layout",
+                      label: t("editor.timeline.resetLayout"),
+                      icon: RotateCcw,
+                      testId: "tl-menu-reset-layout",
+                      onClick: onResetLayout,
+                    },
+                  ]
+                : []),
+            ]}
+            triggerSize="icon-xs"
+            triggerClassName="text-muted-foreground"
+            ariaLabel={t("editor.timeline.timelineMenuAria")}
+            testId="tl-layout-menu"
+          />
         )}
         {/* AQU-2204: the file's one Timing control ("Follows source" /
             "Follows recordings"). Self-contained so the layout work can move

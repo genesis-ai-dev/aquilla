@@ -209,23 +209,33 @@ describe("SharePanel — member scopes wiring", () => {
     // useProjectOrgId (org-member suggestions), which runs for every caller.
   })
 
-  it("fetches scopes for scopable (sub-500) members and feeds scopesByUser", async () => {
+  it("fetches lane limits for everyone below maintainer, including a project lead", async () => {
+    mockMembers = [
+      ...leadMembers,
+      { userId: 9, username: "maya", role: { level: 600, name: "maintainer", source: "override" as const }, secondarySources: [] },
+    ]
     mockFetchMemberScopes.mockImplementation(async (_jwt: string, _projectId: string, userId: number) =>
-      userId === 2 ? [{ kind: "lane", value: "es" }] : [],
+      userId === 1 ? [{ kind: "lane", value: "es" }] : userId === 2 ? [{ kind: "lane", value: "de" }] : [],
     )
     renderPanel()
 
     await waitFor(() => {
+      expect(mockFetchMemberScopes).toHaveBeenCalledWith("test-jwt", "proj-1", 1)
       expect(mockFetchMemberScopes).toHaveBeenCalledWith("test-jwt", "proj-1", 2)
     })
-    // alice (userId 1) is project_lead (500) — never fetched/scoped.
-    expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("test-jwt", "proj-1", 1)
+    // maya (userId 9) is maintainer (600) — sees every lane, never fetched.
+    expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("test-jwt", "proj-1", 9)
 
     await waitFor(() => {
       // AQU-1607: a stored legacy tag is shown as the lane id once rows exist.
-      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[2]).toEqual([
+      // AQU-2054: the lead's limit is included, the same as the contributor's.
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[1]).toEqual([
         { kind: "lane", value: "lnes0001" },
       ])
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[2]).toEqual([
+        { kind: "lane", value: "lnde0001" },
+      ])
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[9]).toBeUndefined()
     })
   })
 

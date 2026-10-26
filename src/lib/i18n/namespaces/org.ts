@@ -1163,6 +1163,10 @@ export const org = defineNamespace({
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
     "org.membersPanel.scopesToggleLabel": "Scopes",
     "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
+    // AQU-2054: a project lead can be limited to lanes. Share shows those
+    // lanes and names where they are changed; it does not edit them.
+    "org.membersPanel.leadEveryLane": "Every lane",
+    "org.membersPanel.leadLaneChangeHint": "To change these lanes, use Staff… on the language.",
     "org.membersPanel.lanesLegend": "Lanes",
     "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)

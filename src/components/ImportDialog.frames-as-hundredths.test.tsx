@@ -8,7 +8,7 @@ import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
-import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
+import { filmFetch, framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 const VTT = framesAsHundredthsVtt()
 
@@ -117,6 +117,34 @@ describe("Upload files: times written as frame numbers in hundredths (AQU-2197)"
     await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
     expect(vi.mocked(importFile).mock.calls[0][1].reimportFileIds?.get("ep101.vtt")).toBe("existing-101")
     expect(sampleStartWritten()).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+  })
+
+  it("Update existing, into a file with a linked film: converts at the film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      render(<ImportDialog {...baseProps} existingFiles={[{
+        id: "existing-101", name: "ep101.vtt", coreMediaUrl: "https://cdn.example.test/videos/update-film/master.m3u8",
+      }]} />)
+      await drop()
+      await act(async () => {
+        fireEvent.click(await screen.findByRole("button", { name: /continue/i }))
+        await new Promise((r) => setTimeout(r, 0))
+      })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      await confirm()
+      await waitFor(() => expect(importFile).toHaveBeenCalledOnce())
+      expect(sampleStartWritten()).toBeCloseTo(SAMPLE_CUE.startAt23976, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("a new file says its rate came from the frame numbers", async () => {
+    render(<ImportDialog {...baseProps} />)
+    await drop()
+    expect(await screen.findByTestId("frames-as-hundredths-rate-source"))
+      .toHaveTextContent("Converted at 24 frames a second, from the frame numbers.")
   })
 
   it("keeping the times writes them as delivered", async () => {

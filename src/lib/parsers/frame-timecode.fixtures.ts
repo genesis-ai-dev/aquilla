@@ -7,13 +7,30 @@ const clock = (sec: number, frame: number) =>
   `${pad(Math.floor(sec / 3600))}:${pad(Math.floor((sec % 3600) / 60))}:${pad(sec % 60)}.${pad(frame)}0`
 
 /** The cue every path's test reads: frame 15 of 00:01:06 written as .150.
- *  At 24 fps it belongs at 66.625 s, ending at 67.75 s. */
+ *  At 24 fps it belongs at 66.625 s, ending at 67.75 s; at 23.976 the whole
+ *  label runs 0.1% slow, so frame 1,599 is at 66.692 s. */
 export const SAMPLE_CUE = {
   text: "You should be sleeping, little one.",
   start: 66.15,
   end: 67.18,
   startAt24: 66.625,
   endAt24: 67.75,
+  startAt23976: ((66 * 24 + 15) * 1001) / 24000,
+  startAt25: 66.6,
+}
+
+/** A linked film's HLS master playlist, stating `fps` on its video variant
+ *  the way the client's streams do (`FRAME-RATE=25.0`). */
+export function filmMaster(fps: string): string {
+  return "#EXTM3U\n#EXT-X-INDEPENDENT-SEGMENTS\n"
+    + `#EXT-X-STREAM-INF:BANDWIDTH=15965367,CODECS="avc1.4D401F,mp4a.40.2",RESOLUTION=1280x720,FRAME-RATE=${fps}\n`
+    + "video_h264_1280x720_fmp4.m3u8\n"
+}
+
+/** A `fetch` that serves `filmMaster(fps)` for any url, for tests that link a
+ *  film to the file being imported into. */
+export function filmFetch(fps: string) {
+  return async () => ({ ok: true, text: async () => filmMaster(fps) }) as unknown as Response
 }
 
 /** A VTT of `n` cues (n ≥ 20) whose every time is a frame (0–23) written as

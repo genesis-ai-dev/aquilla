@@ -42,6 +42,9 @@ interface Props {
   /** The time-ordered file the cues will land on — named so it is obvious
    *  which file is about to gain them. */
   textFileName: string
+  /** The file's linked film, if any. AQU-2197: its frame rate is the one to
+   *  read frame numbers written as hundredths at. */
+  filmUrl?: string | null
   onConfirm(parsed: ParsedSubtitleSidecar): void
   onCancel(): void
 }
@@ -53,7 +56,7 @@ function cueSpan(parsed: ParsedSubtitleSidecar): string | null {
   return `${fmtClock(spanStartMs / 1000)} – ${fmtClock(spanEndMs / 1000)}`
 }
 
-export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel }: Props) {
+export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, onCancel }: Props) {
   const t = useT()
   const [picked, setPicked] = useState<{
     parsed: ParsedSubtitleSidecar
@@ -95,7 +98,7 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
 
   // AQU-2197: the same frames-as-hundredths check, notice and conversion as
   // every other VTT import; `fixed` is what the import writes.
-  const frames = useFramesAsHundredths(picked?.parsed.cues)
+  const frames = useFramesAsHundredths(picked?.parsed.cues, { filmUrl })
   const fixed = useMemo<ParsedSubtitleSidecar | null>(() => {
     if (!picked) return null
     if (frames.cues === picked.parsed.cues) return picked.parsed
@@ -154,12 +157,11 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
                 {t("editor.timeline.subtitleSourceUntimedCues", { count: report.untimedCues })}
               </p>
             )}
-            {frames.finding && (
+            {frames.state && (
               <div className="mt-2">
                 <FramesAsHundredthsNotice
-                  finding={frames.finding}
-                  choice={frames.choice}
-                  onChange={frames.setChoice}
+                  state={frames.state}
+                  onChange={frames.setPick}
                 />
               </div>
             )}

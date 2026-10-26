@@ -214,8 +214,7 @@ export function YouTubeImportPanel({ ctx, onImported }: {
       </Button>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {shown && <>
-        {frames.finding && <FramesAsHundredthsNotice finding={frames.finding} choice={frames.choice}
-          onChange={frames.setChoice} />}
+        {frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
         {shown.strings.length === 0 ? <p className="font-medium">{shown.name}</p>
           : <div className="max-h-72 overflow-auto rounded-md border">
           <table className="w-full text-sm">

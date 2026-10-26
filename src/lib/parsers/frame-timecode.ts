@@ -148,6 +148,39 @@ export function detectFramesAsHundredths(
   return { times: times.length, maxFrame, suggested, rates }
 }
 
+/** The common rate a measured frame rate is, or null for any other
+ *  (50, 59.94, 60 — rates whose frames never fit in hundredths). */
+export function frameRateLabelFor(fps: number): FrameRateLabel | null {
+  if (!Number.isFinite(fps) || fps <= 0) return null
+  return FRAME_RATES.find((r) => Math.abs(r.fps - fps) < 0.01)?.label ?? null
+}
+
+/**
+ * Does a film's frame rate fit this file's frame numbers? It must reach the
+ * highest frame seen, and over a long file its own top frame must turn up:
+ * episode 101's film runs at 25 frames a second, but across 1,116 times its
+ * VTT never shows frame 24, so its timecode counts 24 a second (the chance of
+ * missing a frame that exists, uniformly, is (24/25)^1116 ≈ 10^-20). A short
+ * file proves nothing either way, so the film is believed.
+ */
+export function filmRateFits(finding: FramesAsHundredths, label: FrameRateLabel): boolean {
+  const rate = frameRateFor(label)
+  if (rate.nominal <= finding.maxFrame) return false
+  if (finding.maxFrame >= rate.nominal - 1) return true
+  return finding.times < rate.nominal * 5
+}
+
+/** Where the rate to convert at comes from: the linked film's own rate when it
+ *  fits the frame numbers, otherwise the rate the frame numbers imply. */
+export function settledRate(
+  finding: FramesAsHundredths,
+  filmRate: FrameRateLabel | null | undefined,
+): { rate: FrameRateLabel; from: "film" | "frames" } {
+  return filmRate && filmRateFits(finding, filmRate)
+    ? { rate: filmRate, from: "film" }
+    : { rate: finding.suggested, from: "frames" }
+}
+
 /** One of those times, read back as the timecode it came from, at `rate`:
  *  `66.15` (frame 15 written as hundredths) is 66.625 s at 24 fps. Exported
  *  for import paths whose rows carry times outside a `TranslatableString`. */

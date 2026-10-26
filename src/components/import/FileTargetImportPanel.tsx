@@ -64,7 +64,14 @@ import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
-import { FramesAsHundredthsNotice, type FramesAsHundredthsChoice } from "@/components/import/FramesAsHundredthsNotice"
+import {
+  FramesAsHundredthsNotice,
+  resolveFramesAsHundredths,
+  type FramesAsHundredthsChoice,
+  type FramesAsHundredthsPick,
+  type FramesAsHundredthsState,
+} from "@/components/import/FramesAsHundredthsNotice"
+import { filmFrameRateOf, useFilmFrameRates } from "@/hooks/useFilmFrameRate"
 import {
   convertFramesAsHundredthsSeconds,
   detectFramesAsHundredths,
@@ -114,6 +121,9 @@ export interface FileTargetImportPanelProps {
    *  target rows exclude book-name/title/TOC + intro-block cells, staying
    *  aligned with source cells imported under the same setting. */
   excludeFrontMatter?: boolean
+  /** AQU-2197: the destination file's linked film, whose frame rate settles a
+   *  subtitle file's frames-as-hundredths fix. */
+  filmUrl?: string | null
   /** Told where a back arrow should lead from the current step, or `null` on
    *  the first step. The host draws the arrow in its dialog title, the way the
    *  source import dialog does, so a wrong file is one click from the file
@@ -561,6 +571,7 @@ export function FileTargetImportPanel({
   onError,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  filmUrl,
   onBackChange,
   mode = "commit",
   jwt,
@@ -583,12 +594,17 @@ export function FileTargetImportPanel({
   // re-run the match with the shift on or off.
   const [subtitleRows, setSubtitleRows] = useState<{ rows: TargetRow[]; skippedCues: number } | null>(null)
   // AQU-2197: a subtitle file whose times are frame numbers written as
-  // hundredths — its rows as read, what was found, and the person's choice.
+  // hundredths — its rows as read, the person's pick, and what was applied.
+  // The destination's film is read up front, so its rate is usually known by
+  // the time a file is.
   const [frameRows, setFrameRows] = useState<{
     raw: TargetRow[]
-    finding: FramesAsHundredths
-    choice: FramesAsHundredthsChoice
+    skippedCues: number
+    pick: FramesAsHundredthsPick | null
+    state: FramesAsHundredthsState
   } | null>(null)
+  const filmRates = useFilmFrameRates([filmUrl])
+  const filmRate = filmFrameRateOf(filmRates, filmUrl)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
   // The shift tickbox's new value while the list re-matches under it; null
@@ -757,9 +773,24 @@ export function FileTargetImportPanel({
     return run === matchRun.current
   }, [])
 
+  /** Review a subtitle file's rows as timed by the frame check's settled
+   *  state (AQU-2197); without a finding, as they were read. */
+  const reviewTimedRows = useCallback((
+    raw: TargetRow[],
+    skippedCues: number,
+    frames: { finding: FramesAsHundredths; pick: FramesAsHundredthsPick | null } | null,
+  ) => {
+    const state = frames ? resolveFramesAsHundredths(frames.finding, frames.pick, filmRate) : null
+    setFrameRows(frames && state ? { raw, skippedCues, pick: frames.pick, state } : null)
+    const timed = state ? retimeRows(raw, state.choice) : raw
+    setSubtitleRows({ rows: timed, skippedCues })
+    showReview({ ...matchTargetRowsByOrder(timed, cells), skippedCues }, true)
+  }, [filmRate, cells, showReview])
+
   /** Review a subtitle file's rows, after the frames-as-hundredths check
    *  (AQU-2197): when its times look like frame numbers written as hundredths,
-   *  they are re-timed at the suggested rate until the person says otherwise. */
+   *  they are re-timed at the film's rate or the frame numbers' until the
+   *  person says otherwise. */
   const reviewSubtitleRows = useCallback((rows: TargetRow[], skippedCues: number) => {
     const finding = detectFramesAsHundredths(
       rows.map((r) => ({
@@ -767,19 +798,20 @@ export function FileTargetImportPanel({
         end: r.endMs === undefined ? undefined : r.endMs / 1000,
       })),
     )
-    setFrameRows(finding ? { raw: rows, finding, choice: finding.suggested } : null)
-    const timed = finding ? retimeRows(rows, finding.suggested) : rows
-    setSubtitleRows({ rows: timed, skippedCues })
-    showReview({ ...matchTargetRowsByOrder(timed, cells), skippedCues }, true)
-  }, [cells, showReview])
+    reviewTimedRows(rows, skippedCues, finding ? { finding, pick: null } : null)
+  }, [reviewTimedRows])
 
-  const changeFrameRate = useCallback((choice: FramesAsHundredthsChoice) => {
-    if (!frameRows || !subtitleRows) return
-    setFrameRows({ ...frameRows, choice })
-    const timed = retimeRows(frameRows.raw, choice)
-    setSubtitleRows({ rows: timed, skippedCues: subtitleRows.skippedCues })
-    showReview({ ...matchTargetRowsByOrder(timed, cells), skippedCues: subtitleRows.skippedCues }, true)
-  }, [frameRows, subtitleRows, cells, showReview])
+  const changeFrameRate = useCallback((pick: FramesAsHundredthsPick) => {
+    if (!frameRows) return
+    reviewTimedRows(frameRows.raw, frameRows.skippedCues, { finding: frameRows.state.finding, pick })
+  }, [frameRows, reviewTimedRows])
+
+  // The film's rate arrived after the file was read: settle on it, while the
+  // review is still the step on screen.
+  useEffect(() => {
+    if (step !== "review" || frameRows?.state.from !== "pending" || filmRate === "pending") return
+    reviewTimedRows(frameRows.raw, frameRows.skippedCues, { finding: frameRows.state.finding, pick: frameRows.pick })
+  }, [step, frameRows, filmRate, reviewTimedRows])
 
   const handleFile = useCallback(async (file: File) => {
     setError(null)
@@ -1351,11 +1383,7 @@ export function FileTargetImportPanel({
           )}
           {frameRows && (
             <div className="mt-2">
-              <FramesAsHundredthsNotice
-                finding={frameRows.finding}
-                choice={frameRows.choice}
-                onChange={changeFrameRate}
-              />
+              <FramesAsHundredthsNotice state={frameRows.state} onChange={changeFrameRate} />
             </div>
           )}
           {offsetLabel && subtitleRows && (

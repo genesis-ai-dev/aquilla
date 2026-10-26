@@ -343,7 +343,7 @@ interface ImportDialogProps {
    * ProjectWorkspace (AQU-272 glue); FileReference satisfies { name }.
    * Fresh projects (empty array or absent) skip the detection step.
    */
-  existingFiles?: { id?: string; name: string; bookCode?: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string; coreMediaUrl?: string | null }[]
   /** Sidebar re-import of one file already in the project. One upload, then
    *  the three choices; the collision panel is not shown. */
   reimportTarget?: { fileId: string; name: string; importProfile?: string; corpusMarker?: string } | null
@@ -531,6 +531,7 @@ export function ImportDialog({
     commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
     returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
+    filmUrls?: ReadonlyMap<string, string>
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
   // AQU-2120: the existing file the collision screen chose for the seed file.
@@ -1363,11 +1364,11 @@ export function ImportDialog({
               setCollisionState({ collisions, proceed })
               setScreen("collision")
             }}
-            onPreview={(results, commit) => {
+            onPreview={(results, commit, filmUrls) => {
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit, returnScreen: "upload" })
+              setPreviewState({ results, commit, returnScreen: "upload", filmUrls })
               setScreen("preview")
             }}
             onSpreadsheetFile={(file, reimportTarget) => {
@@ -1415,11 +1416,11 @@ export function ImportDialog({
               setCollisionState({ collisions, proceed })
               setScreen("collision")
             }}
-            onPreview={(results, commit) => {
+            onPreview={(results, commit, filmUrls) => {
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit, returnScreen: "gdrive" })
+              setPreviewState({ results, commit, returnScreen: "gdrive", filmUrls })
               setScreen("preview")
             }}
             onSpreadsheetFile={(file, reimportTarget) => {
@@ -1755,6 +1756,7 @@ export function ImportDialog({
             error={previewCommitError}
             reimport={reimportTarget != null}
             reimportChanges={reimportChanges}
+            filmUrls={previewState.filmUrls}
           />
         )}
 
@@ -1815,6 +1817,7 @@ export function ImportDialog({
               username={username}
               targetLang={targetLang}
               fileName={translationDestination?.name ?? ""}
+              filmUrl={translationDestination?.coreMediaUrl}
               cells={translation.activeFileCells}
               getToken={getToken}
               applyOptimisticTargetEdits={translation.applyOptimisticTargetEdits}
@@ -2198,14 +2201,20 @@ interface UploadPanelProps {
    * AQU-287: files already in the project. Passed to detectCollisions before
    * any import starts; on collision, onCollision is called instead of proceeding.
    */
-  existingFiles?: { id?: string; name: string; bookCode?: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string; coreMediaUrl?: string | null }[]
   /** AQU-287: called when collisions are detected; parent shows the collision screen. */
   onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
   /**
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
+   * AQU-2197: `filmUrls` names the linked film of the existing file a result
+   * updates (by result name), for the preview's frame check.
    */
-  onPreview?: (results: ImportResult[], commit: (options?: PreviewConfirmOptions) => Promise<void>) => void
+  onPreview?: (
+    results: ImportResult[],
+    commit: (options?: PreviewConfirmOptions) => Promise<void>,
+    filmUrls?: ReadonlyMap<string, string>,
+  ) => void
   /**
    * AQU-430: callbacks for the parent to receive upload progress while the
    * preview screen is shown (UploadPanel is unmounted during preview). The
@@ -2612,6 +2621,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             return
           }
 
+          // AQU-2197: an update of a file with a linked film reads that film's
+          // frame rate for the frame check.
+          const filmUrls = new Map(remainingResults.flatMap((result) => {
+            const id = reimportKeysFor(result).map((key) => fileIds?.get(key)).find(Boolean)
+            const url = id ? existingFiles?.find((file) => file.id === id)?.coreMediaUrl : null
+            return url ? [[result.name, url] as const] : []
+          }))
+
           // Hand off to parent to show the preview screen.
           // The commit closure does the actual upload.
           onPreview(remainingResults, async (options) => {
@@ -2642,7 +2659,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               }
             }
             await doCommit(files, preparedByFile, fileIds, reviewed.sources, options?.reimportChoice)
-          })
+          }, filmUrls)
         }
 
         // AQU-1365: before any cell exists, ask about an upload that looks

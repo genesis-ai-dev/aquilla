@@ -18269,6 +18269,7 @@ export function ProjectWorkspace() {
         referenceLines={anchorCueLines}
         existingCues={audioCues ?? undefined}
         takeCount={cueTakeCountRef.current()}
+        filmUrl={activeFile?.coreMediaUrl}
         // Deleting a file is PROJECT_LEAD, a step above the contributor floor
         // most of this dialog sits on, so the button is gated on its own kind
         // rather than on the import's.
@@ -18302,6 +18303,7 @@ export function ProjectWorkspace() {
           // so pressing again after a failure never writes twice.
           <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             onCancel={() => setCaptionDialogFileId(null)}
             onConfirm={async input => {
               if (!canManageSources) throw new Error(t("importExport.captionTrack.saveFailed"))
@@ -18335,6 +18337,7 @@ export function ProjectWorkspace() {
         ) : (
           <ImportTimelineTextDialog key={captionDialogFileId}
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             // AQU-1566: once the file has rows, its own Source text and Target
             // text rows are not something a caption file may replace.
             tracks={captionTrackDestinations(serverTimelineTracks.filter(track =>
@@ -18391,6 +18394,7 @@ export function ProjectWorkspace() {
         // about one file over a confirm button that would write to another.
         open={extractSubtitlesFileId !== null && extractSubtitlesFileId === activeFileId}
         textFileName={activeFile?.name ?? ""}
+        filmUrl={activeFile?.coreMediaUrl}
         onCancel={() => setExtractSubtitlesFileId(null)}
         onConfirm={(parsed) => {
           const fileId = extractSubtitlesFileId

@@ -37,7 +37,7 @@ import { applyEBibleTargetImport } from "@/lib/import"
 import { CATALOGS } from "@/lib/i18n/messages/all"
 import { translate } from "@/lib/i18n/translate"
 import { formatCount } from "@/lib/i18n/format"
-import { framesAsHundredthsVtt, properlyTimedVtt } from "@/lib/parsers/frame-timecode.fixtures"
+import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt } from "@/lib/parsers/frame-timecode.fixtures"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -280,6 +280,27 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     })
     expect(screen.getByText(/review matches/i)).toBeInTheDocument()
     expect(screen.getByTestId("frames-as-hundredths-keep")).toHaveAttribute("aria-checked", "true")
+  })
+
+  // The destination's film is read up front; when its rate is still on the
+  // way as the file is read, the review settles on it once it lands.
+  it("AQU-2197: converts at the destination's linked film's rate, even when it lands after the file", async () => {
+    let land!: () => void
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+      land = () => resolve(filmFetch("23.976")())
+    })))
+    try {
+      renderPanel({ filmUrl: "https://cdn.example.test/videos/target-film/master.m3u8" })
+      await selectFile(makeFile(framesAsHundredthsVtt(), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByTestId("frames-as-hundredths-rate-source")).toHaveAttribute("data-from", "pending")
+      await act(async () => { land() })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      expect(screen.getByText(/review matches/i)).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("AQU-2197: says nothing about a properly timed target subtitle file", async () => {

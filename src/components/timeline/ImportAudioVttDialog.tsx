@@ -80,6 +80,9 @@ interface Props {
   /** How many recordings hang off the current cues — quoted in the removal
    *  confirmation, because it is the number that decides it. */
   takeCount?: number
+  /** The text file's linked film, if any. AQU-2197: its frame rate is the one
+   *  to read frame numbers written as hundredths at. */
+  filmUrl?: string | null
   onCancel(): void
 }
 
@@ -101,6 +104,7 @@ export function ImportAudioVttDialog({
   onReconcile,
   onRemove,
   takeCount = 0,
+  filmUrl,
   onCancel,
 }: Props) {
   const t = useT()
@@ -122,7 +126,7 @@ export function ImportAudioVttDialog({
   /** AQU-2197: the same check, notice and conversion as every other VTT
    *  import. `fileCues` has the chosen frame rate applied, before anything
    *  else (the timebase check, the reconcile) looks at the cues. */
-  const frames = useFramesAsHundredths(picked?.parsed.cues)
+  const frames = useFramesAsHundredths(picked?.parsed.cues, { filmUrl })
   const fileCues = frames.cues
 
   const verdict = useMemo<TimebaseVerdict | null>(() => {
@@ -268,12 +272,11 @@ export function ImportAudioVttDialog({
                 {t("editor.timeline.audioVttDroppedCues", { count: report.droppedCues })}
               </p>
             )}
-            {frames.finding && (
+            {frames.state && (
               <div className="mt-2">
                 <FramesAsHundredthsNotice
-                  finding={frames.finding}
-                  choice={frames.choice}
-                  onChange={frames.setChoice}
+                  state={frames.state}
+                  onChange={frames.setPick}
                 />
               </div>
             )}

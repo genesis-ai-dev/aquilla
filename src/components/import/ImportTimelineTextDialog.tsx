@@ -29,6 +29,9 @@ interface CommonProps {
   projectId: string
   mediaName: string
   durationMs?: number
+  /** The linked film the captions are for. AQU-2197: its frame rate is the
+   *  one to read frame numbers written as hundredths at. */
+  filmUrl?: string | null
   onCancel(): void
 }
 type Props = CommonProps & ({
@@ -50,14 +53,14 @@ const NO_TRACKS: readonly CaptionTrackDestination[] = []
  * In rows mode the same pick-and-review flow ends in "Add captions as rows".
  */
 export function ImportTimelineTextDialog(props: Props) {
-  const { projectId, mediaName, durationMs, onCancel } = props
+  const { projectId, mediaName, durationMs, filmUrl, onCancel } = props
   const rows = props.mode === "rows"
   const tracks = props.mode === "rows" ? NO_TRACKS : props.tracks
   const t = useT()
   const [fileSource, setSource] = useState<MediaTextSource>()
   // AQU-2197: the same frames-as-hundredths check, notice and conversion as
   // every other VTT import. The review and the save see the chosen times.
-  const frames = useFramesAsHundredths(fileSource?.cues)
+  const frames = useFramesAsHundredths(fileSource?.cues, { filmUrl })
   const source = useMemo<MediaTextSource | undefined>(
     () => (fileSource && frames.cues !== fileSource.cues ? { ...fileSource, cues: [...frames.cues] } : fileSource),
     [fileSource, frames.cues],
@@ -151,8 +154,7 @@ export function ImportTimelineTextDialog(props: Props) {
     confirmLabel={t(rows ? "importExport.captionTrack.addAsRows"
       : replacing ? "importExport.captionTrack.replace" : "importExport.captionTrack.add")}
     canConfirm={canConfirm} busy={busy} onConfirm={reviewed => void confirm(reviewed)} onCancel={cancel}>
-    {frames.finding && <FramesAsHundredthsNotice finding={frames.finding} choice={frames.choice}
-      onChange={frames.setChoice} />}
+    {frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
     {!rows && <>
       <Field><FieldLabel htmlFor="caption-destination">{t("importExport.captionTrack.destination")}</FieldLabel>
         <select id="caption-destination" value={destination} disabled={busy}

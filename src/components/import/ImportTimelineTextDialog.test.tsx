@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { t } from "@/lib/i18n/standalone"
 import { extractSrtStrings, extractVttStrings } from "@/lib/parsers/subtitle"
 import { prepareImportFile } from "@/lib/import"
-import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
+import { filmFetch, framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 import { ImportTimelineTextDialog } from "./ImportTimelineTextDialog"
 
 const text = "1\n00:00:00,500 --> 00:00:01,500\nSupplied wording"
@@ -135,5 +135,30 @@ describe("attaching captions whose times are frame numbers in hundredths (AQU-21
     const { source } = (confirm.mock.calls[0] as unknown as [{ source: { cues: { original: string; start: number }[] } }])[0]
     const cue = source.cues.find((c) => c.original === SAMPLE_CUE.text)!
     expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+  })
+
+  it("converts at the linked film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const vtt = framesAsHundredthsVtt()
+      vi.mocked(prepareImportFile).mockResolvedValueOnce({
+        fileType: "vtt", results: [{ name: "ep101.vtt", strings: extractVttStrings(vtt), rawBytes: new TextEncoder().encode(vtt).buffer }],
+      } as never)
+      const confirm = vi.fn(async () => {})
+      render(<ImportTimelineTextDialog projectId="p" mediaName="Film" tracks={tracks}
+        filmUrl="https://cdn.example.test/videos/captions-film/master.m3u8"
+        onConfirm={confirm} onCancel={() => {}} />)
+      fireEvent.change(screen.getByLabelText("Caption file"), { target: {
+        files: [new File([vtt], "ep101.vtt", { type: "text/vtt" })],
+      } })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByRole("button", { name: "Add caption track" }))
+      await waitFor(() => expect(confirm).toHaveBeenCalled())
+      const { source } = (confirm.mock.calls[0] as unknown as [{ source: { cues: { original: string; start: number }[] } }])[0]
+      expect(source.cues.find((c) => c.original === SAMPLE_CUE.text)!.start).toBeCloseTo(SAMPLE_CUE.startAt23976, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

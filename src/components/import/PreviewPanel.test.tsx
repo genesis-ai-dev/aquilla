@@ -14,6 +14,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { ImportResult } from "@/lib/import"
 import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
+import { filmFetch } from "@/lib/parsers/frame-timecode.fixtures"
 
 const MB = 1024 * 1024
 
@@ -385,5 +386,22 @@ describe("PreviewPanel — subtitle times that are frames written as hundredths 
   it("says nothing for an ordinary subtitle file", () => {
     render(<PreviewPanel results={[{ name: "ok.vtt", strings }] as unknown as ImportResult[]} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+
+  // Update existing, into a file with a linked film: the film's rate wins.
+  it("converts an update at the existing file's linked film's rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const onConfirm = vi.fn()
+      render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()}
+        filmUrls={new Map([["TheChosen_101_en_AUDIO_ONLY.vtt", "https://cdn.example.test/videos/preview-film/master.m3u8"]])} />)
+      await vi.waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+      await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+      expect([...onConfirm.mock.calls[0][0].frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "23.976"]])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

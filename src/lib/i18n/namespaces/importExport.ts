@@ -1064,7 +1064,8 @@ export const importExport = defineNamespace({
     // — Frames written as hundredths (AQU-2197): src/components/import/
     //   FramesAsHundredthsNotice.tsx, in the import preview. A subtitle file
     //   whose every cue time is a video frame number written as hundredths of
-    //   a second, with the choice to convert it at a frame rate or keep it.
+    //   a second, with the choice to fix it or keep it. The frame rate is
+    //   worked out (the linked film's, else the frame numbers'), never asked.
     "importExport.framesAsHundredths.warning":
       "This file's times look like video frame numbers written as hundredths of a second, " +
       "so lines may start up to 0.7 s early.",
@@ -1074,11 +1075,16 @@ export const importExport = defineNamespace({
       "00:01:06:15 is frame 15 of that second. A converter that forgets the frame rate writes " +
       "that frame as hundredths of a second, 00:01:06.150, instead of the real time, 00:01:06.625 " +
       "at 24 frames a second. Every time in this file looks like that: always in steps of ten, " +
-      "and never past .{max}0.",
-    "importExport.framesAsHundredths.convertAt": "Convert at",
+      "and never past .{max}0. Fixing reads each one back as the frame it is, at the linked " +
+      "film's frame rate when it fits, and otherwise at the rate the highest frame number points to.",
+    "importExport.framesAsHundredths.fix": "Fix the times",
+    "importExport.framesAsHundredths.fixFilm": "Converted at {rate} frames a second, the film's rate.",
+    "importExport.framesAsHundredths.fixFrames": "Converted at {rate} frames a second, from the frame numbers.",
+    "importExport.framesAsHundredths.fixChosen": "Converted at {rate} frames a second, the rate you picked.",
+    "importExport.framesAsHundredths.fixPending": "Checking the film's frame rate…",
+    "importExport.framesAsHundredths.otherRate": "Use a different frame rate",
     "importExport.framesAsHundredths.rateLabel": "Frame rate",
-    "importExport.framesAsHundredths.fps": "frames a second",
-    "importExport.framesAsHundredths.keep": "Keep the times as they are",
+    "importExport.framesAsHundredths.keep": "Keep as is",
 
     // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
     //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
@@ -1636,7 +1642,8 @@ export const importExport = defineNamespace({
 
       // Frames written as hundredths (AQU-2197) — the import preview's warning
       // for a subtitle file converted from video timecode without its frame
-      // rate, and the choice to fix it.
+      // rate, and the choice to fix it or keep it. The rate the fix uses is
+      // worked out and stated, never asked for.
       "importExport.framesAsHundredths.warning": {
         description:
           "Warning at the top of the import preview for a subtitle file whose every cue time looks like a video frame number written as hundredths of a second (00:01:06:15 written as 00:01:06.150). Says the consequence plainly: lines start early, by up to 0.7 seconds.",
@@ -1647,20 +1654,39 @@ export const importExport = defineNamespace({
       },
       "importExport.framesAsHundredths.explain": {
         description:
-          "The longer explanation behind the (i): what timecode is, how a converter that forgets the frame rate turns a frame number into hundredths of a second, and the pattern that gives this file away. The times (00:01:06:15, 00:01:06.150, 00:01:06.625) are literal examples; keep them as written.",
+          "The longer explanation behind the (i): what timecode is, how a converter that forgets the frame rate turns a frame number into hundredths of a second, the pattern that gives this file away, and how the fix picks its frame rate (the linked film's when it fits, otherwise the one the highest frame number implies). The times (00:01:06:15, 00:01:06.150, 00:01:06.625) are literal examples; keep them as written.",
         placeholders: {
           max: "The highest frame number seen, as one or two digits; shown after a decimal point with a trailing 0 (for 23 the text reads '.230').",
         },
       },
-      "importExport.framesAsHundredths.convertAt": {
+      "importExport.framesAsHundredths.fix": {
         description:
-          "Label of the first choice, followed by a frame-rate picker and the words 'frames a second': convert the file's times as if they were frame numbers at that rate.",
+          "The first choice, selected to start with: convert the file's times back from frame numbers into real times.",
+      },
+      "importExport.framesAsHundredths.fixFilm": {
+        description:
+          "Line under 'Fix the times' when the rate comes from the video linked to the file, which states its own frame rate.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixFrames": {
+        description:
+          "Line under 'Fix the times' when there is no linked video (or its rate does not fit), so the rate is the one the file's highest frame number implies: a file that never goes past frame 23 counts 24 frames a second.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixChosen": {
+        description: "Line under 'Fix the times' once the person has picked a frame rate themselves.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixPending": {
+        description:
+          "Line under 'Fix the times' for the moment the linked video's frame rate is being read over the network.",
+      },
+      "importExport.framesAsHundredths.otherRate": {
+        description:
+          "Quiet link after that line. Clicking it shows a frame-rate picker, for someone who knows the file's rate is different.",
       },
       "importExport.framesAsHundredths.rateLabel": {
         description: "Accessible name of the frame-rate picker (23.976, 24, 25, 29.97 or 30).",
-      },
-      "importExport.framesAsHundredths.fps": {
-        description: "Unit after the frame-rate picker: 'Convert at [24] frames a second'.",
       },
       "importExport.framesAsHundredths.keep": {
         description: "The second choice: import the file's times unchanged.",

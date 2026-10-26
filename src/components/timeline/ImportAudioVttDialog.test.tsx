@@ -12,7 +12,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ImportAudioVttDialog } from "./ImportAudioVttDialog"
 import type { ReconcilableCue } from "@/lib/import/cue-reconcile"
-import { framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
+import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 /** Two cues, at 24fps-ish timings. */
 const VTT = (aStart: string, bStart: string) =>
@@ -370,5 +370,22 @@ describe("times written as frame numbers in hundredths (AQU-2197)", () => {
   it("says nothing about a properly timed file", async () => {
     await pick(properlyTimedVtt(), { existingCues: undefined, onReconcile: undefined })
     expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+
+  it("converts at the text file's linked film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const { onConfirm } = await pick(framesAsHundredthsVtt(), {
+        existingCues: undefined, onReconcile: undefined,
+        filmUrl: "https://cdn.example.test/videos/audio-vtt-film/master.m3u8",
+      })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+      const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+      expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt23976, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

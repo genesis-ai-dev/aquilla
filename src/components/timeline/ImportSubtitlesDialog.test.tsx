@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ImportSubtitlesDialog } from "./ImportSubtitlesDialog"
-import { framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
+import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 const VTT = `WEBVTT
 
@@ -166,6 +166,21 @@ describe("times written as frame numbers in hundredths (AQU-2197)", () => {
     fireEvent.click(screen.getByTestId("import-subtitles-confirm"))
     const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
     expect(cue.start).toBeCloseTo(SAMPLE_CUE.start, 6)
+  })
+
+  it("converts at the file's linked film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const { onConfirm } = open({ filmUrl: "https://cdn.example.test/videos/sidecar-film/master.m3u8" })
+      pick(framesAsHundredthsVtt(), "ep101.vtt")
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByTestId("import-subtitles-confirm"))
+      const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+      expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt23976, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("covers SRT too", async () => {

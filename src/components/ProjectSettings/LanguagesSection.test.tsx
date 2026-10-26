@@ -64,15 +64,16 @@ describe("LanguagesSection", () => {
     expect(screen.queryByText("Default target language")).toBeNull()
   })
 
-  it("renders the existing lanes list as a table with Name, Language and Code columns", () => {
+  it("renders the existing lanes list as a table with Language, Name and Code columns", () => {
     renderSection({ targetLanes: ["fr-CA", "fr-BE"] })
     const list = screen.getByTestId("target-lanes-list")
     expect(list).toHaveAttribute("role", "table")
     expect(list.textContent).toContain("fr-CA")
     expect(list.textContent).toContain("fr-BE")
+    // AQU-2174: the language leads.
     expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual([
-      "Name",
       "Language",
+      "Name",
       "Code",
       "Actions",
     ])
@@ -594,10 +595,26 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     return screen.getByTestId(`lane-edit-${laneId}`)
   }
 
+  // AQU-2174: the row's first cell is the language, at every width — the Name
+  // and Code columns are what fold away on a phone.
+  it("leads each row with the language, the name after it", () => {
+    renderIdentity([DEFAULT_LANE, { ...LANGUAGE_ONLY, name: "Yoruba team B", langCode: "yo-NG" }])
+    const row = screen.getByTestId("lane-identity-row-lane-yo")
+    const cells = [...row.querySelectorAll("[role=cell]")]
+    expect(cells[0].textContent).toContain("Yoruba")
+    expect(cells[0]).toContainElement(screen.getByTestId("lane-language-cell-lane-yo"))
+    expect(cells[1]).toContainElement(screen.getByTestId("lane-name-lane-yo"))
+    expect(screen.getByTestId("lane-name-lane-yo").textContent).toBe("Yoruba team B")
+    // The phone-width line under the language carries the name and the code.
+    expect(cells[0].textContent).toContain("Yoruba team B · yo-NG")
+  })
+
   it("shows a lane that carries only a language under its language, in every column", () => {
     renderIdentity()
     expect(screen.getByTestId("lane-name-lane-yo").textContent).toBe("Yoruba")
     expect(screen.getByTestId("lane-language-cell-lane-yo").textContent).toBe("Yoruba")
+    // Nothing to fold: the name IS the language, so it is not repeated.
+    expect(screen.getByTestId("lane-identity-row-lane-yo").textContent).not.toContain("Yoruba · Yoruba")
     // No pills: the name, language and code are plain text.
     expect(screen.getByTestId("target-lanes-list").querySelector("[data-slot=badge]")).toBeNull()
   })
@@ -618,6 +635,29 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(within(edit).getByLabelText("Code")).toBe(screen.getByTestId("lane-code-lane-yo"))
   })
 
+  // AQU-2174: the form reads the same way the table and the add form do.
+  it("orders the form's fields Language, Name, Code", () => {
+    renderIdentity()
+    const edit = openEdit("lane-yo")
+    expect(within(edit).getAllByRole("textbox").concat(within(edit).getAllByRole("combobox"))).toHaveLength(3)
+    expect([...edit.querySelectorAll("label")].map((l) => l.textContent)).toEqual([
+      "Language",
+      "Name",
+      "Code",
+    ])
+  })
+
+  it("orders the source language's form the same way, opened from Change", () => {
+    renderIdentity([SOURCE, DEFAULT_LANE, LANGUAGE_ONLY])
+    fireEvent.click(screen.getByTestId("source-language-change"))
+    const edit = screen.getByTestId("lane-edit-lane-source")
+    expect([...edit.querySelectorAll("label")].map((l) => l.textContent)).toEqual([
+      "Language",
+      "Name",
+      "Code",
+    ])
+  })
+
   it("renders the code derived from the language, which is not stored", () => {
     renderIdentity([
       DEFAULT_LANE,
@@ -633,17 +673,43 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect(field.getAttribute("role")).toBe("combobox")
   })
 
-  it("opens on the Language field from the row menu's Language and code…", () => {
+  // AQU-2174: "Rename" and "Language and code…" opened the same form and
+  // differed only in the focused field, so the menu offers one Edit item.
+  it("offers exactly Edit and Archive in the row menu", () => {
     renderIdentity()
     openRowMenu("lane-yo")
-    fireEvent.click(screen.getByTestId("lane-edit-language-lane-yo"))
-    expect(screen.getByTestId("lane-language-lane-yo")).toHaveFocus()
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Edit", "Archive"])
+    expect(screen.queryByTestId("lane-rename-lane-yo")).toBeNull()
+    expect(screen.queryByTestId("lane-edit-language-lane-yo")).toBeNull()
   })
 
-  it("opens on the Name field from the row menu's Rename", () => {
+  it("opens the whole form on the Language field from the row menu's Edit", () => {
     renderIdentity()
     openRowMenu("lane-yo")
-    fireEvent.click(screen.getByTestId("lane-rename-lane-yo"))
+    fireEvent.click(screen.getByTestId("lane-edit-action-lane-yo"))
+    const edit = screen.getByTestId("lane-edit-lane-yo")
+    expect(screen.getByTestId("lane-language-lane-yo")).toHaveFocus()
+    // One form, all three fields: nothing the two items did is lost.
+    expect(within(edit).getByLabelText("Language")).toBeTruthy()
+    expect(within(edit).getByLabelText("Name")).toBeTruthy()
+    expect(within(edit).getByLabelText("Code")).toBeTruthy()
+  })
+
+  it("saves a name and a code together from the one Edit form", async () => {
+    const { onRenameLane } = renderIdentity()
+    openRowMenu("lane-yo")
+    fireEvent.click(screen.getByTestId("lane-edit-action-lane-yo"))
+    fireEvent.change(screen.getByTestId("lane-name-input-lane-yo"), { target: { value: "Yoruba (Oyo)" } })
+    fireEvent.change(screen.getByTestId("lane-code-lane-yo"), { target: { value: "yo-NG" } })
+    fireEvent.click(screen.getByTestId("lane-save-lane-yo"))
+    await waitFor(() =>
+      expect(onRenameLane).toHaveBeenCalledWith("lane-yo", { name: "Yoruba (Oyo)", code: "yo-NG" }),
+    )
+  })
+
+  it("still opens on the Name field when the name itself is clicked", () => {
+    renderIdentity()
+    fireEvent.click(screen.getByTestId("lane-name-lane-yo"))
     expect(screen.getByTestId("lane-name-input-lane-yo")).toHaveFocus()
   })
 
@@ -756,6 +822,17 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     )
     expect(await screen.findByText(/not a valid language code/i)).toBeTruthy()
     expect(screen.getByTestId("lane-edit-lane-yo")).toBeTruthy()
+  })
+
+  // AQU-2174: language · name · code, the name only when it adds something.
+  it("reads the source line language first, naming the override after it", () => {
+    renderIdentity([{ ...SOURCE, name: "Greek NT", language: "Greek", langCode: "grc" }])
+    expect(screen.getByTestId("source-language-line").textContent).toContain("Greek · Greek NT · grc")
+  })
+
+  it("shows a source whose name is just its language once", () => {
+    renderIdentity([{ ...SOURCE, name: null, language: "Samoan", langCode: "sm" }])
+    expect(screen.getByTestId("source-language-line").textContent).toContain("Samoan · sm")
   })
 
   it("shows the source as one line and changes it with Change", async () => {
@@ -943,6 +1020,28 @@ describe("LanguagesSection — the former default lane archives like any other (
     fireEvent.click(item)
     fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
     await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-default", true))
+  })
+
+  // AQU-2174: the archived entries read language first too.
+  it("reads an archived lane's entry language first, then its name and code", () => {
+    renderLanes([
+      { ...DEFAULT_LANE, name: "French (Africa)", langCode: "fr-AF", archivedAt: "2026-10-03T00:00:00.000Z" },
+      SPANISH,
+    ])
+    openArchived()
+    expect(screen.getByTestId("archived-lanes-list").textContent).toContain(
+      "French · French (Africa) · fr-AF",
+    )
+  })
+
+  it("names an archived lane whose name is just its language once", () => {
+    renderLanes([
+      { ...DEFAULT_LANE, language: "Samoan", name: null, langCode: "sm", archivedAt: "2026-10-03T00:00:00.000Z" },
+      SPANISH,
+    ])
+    openArchived()
+    expect(screen.getByTestId("archived-lanes-list").textContent).toContain("Samoan · sm")
+    expect(screen.getByTestId("archived-lanes-list").textContent).not.toContain("Samoan · Samoan")
   })
 
   it("lists the archived former default lane with a restore control", () => {

@@ -196,6 +196,23 @@ describe("MembersSection", () => {
     fireEvent.click(screen.getByRole("tab", { name: /invite link/i }))
     expect(screen.getByRole("button", { name: /create invite link/i })).toBeTruthy()
   })
+
+  it("confirms Remove direct access by naming the direct membership it deletes", () => {
+    renderSection()
+    fireEvent.click(screen.getByRole("button", { name: "Actions for carol" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove direct access" }))
+    const dialog = screen.getByRole("dialog")
+    expect(
+      within(dialog).getByRole("heading", { name: "Remove direct access" }),
+    ).toBeTruthy()
+    expect(
+      within(dialog).getByText(
+        "This removes carol's direct Project lead membership on this project. Access through the organization, a team, or as the project creator stays.",
+      ),
+    ).toBeTruthy()
+    expect(within(dialog).queryByRole("heading", { name: "Remove member" })).toBeNull()
+    expect(within(dialog).queryByText(/revoke all/i)).toBeNull()
+  })
 })
 
 // AQU-853 — the in-project role control is present (this pane IS the "inside

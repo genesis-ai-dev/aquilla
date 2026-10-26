@@ -39,7 +39,7 @@ import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
 import {
-  ROLE, humanRoleName, resolveRoleName, roleDescription,
+  ROLE, resolveRoleName, roleDescription,
 } from "@/lib/frontier/roles"
 import {
   callerLevelFromRoster, canManageProjectMembers, grantableProjectRoles,
@@ -368,13 +368,16 @@ export function MembersSection({ projectId }: { projectId: string }) {
       <ConfirmActionDialog
         open={removeTarget !== null}
         onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title={t("org.membersPage.removeMemberTitle")}
+        title={t("projectSettings.members.removeDirectAccess")}
         description={
           removeTarget
-            ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`
+            ? t("projectSettings.members.removeDirectAccessDescription", {
+                username: removeTarget.username,
+                role: resolveRoleName(t, removeTarget.role.level),
+              })
             : ""
         }
-        confirmLabel="Remove"
+        confirmLabel={t("projectSettings.members.removeDirectAccess")}
         variant="destructive"
         onConfirm={() => {
           if (removeTarget) void remove(removeTarget.userId)

@@ -45,11 +45,16 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
  *    its original structure without a missing-source error.
  *  - Download original (AQU-656) returns the imported USFM bytes; the dialog's
  *    own download injects the committed translation into the same file.
+ *  - "Export to another format" → Web page (AQU-2182) turns a USFM book into
+ *    one self-contained HTML file: chapter index, superscript verse numbers,
+ *    the committed translation, and markup typed into a cell escaped rather
+ *    than rendered.
  *
  * What this does NOT cover:
  *  - USFM/PPTX reconstructed round-trips other than the original-vs-injected
  *    identity check below (need extra fixtures + server code path).
- *  - Format conversions (covered by export-format-switch.smoke.spec.ts).
+ *  - The other format conversions (txt, md, tsv, …) — unit-tested per
+ *    exporter under src/lib/export/exporters/.
  *  - Project-scope zip (different code path; covered by manual verification).
  */
 test("export dialog's primary action downloads the file back in its own format", async ({ alice }) => {
@@ -171,4 +176,52 @@ test("Download original returns imported USFM bytes, not the translation-injecte
   const injectedPath = await injectedDownload.path()
   expect(injectedPath).not.toBeNull()
   expect(await readFile(injectedPath!, "utf8")).toContain(marker)
+})
+
+test("Web page export writes the USFM book as one readable HTML file (AQU-2182)", async ({ alice }) => {
+  const dash = new Dashboard(alice)
+  await dash.goto()
+  const name = `HTML export ${Date.now()}`
+  await dash.createProject({ name, source: "en", target: "fr" })
+  await dash.openProject(name)
+
+  const ws = new Workspace(alice)
+  await ws.importFile(path.resolve(__dirname, "../../fixtures/sample.usfm"))
+  await ws.openFileBySubstring("sample")
+  await ws.waitForEditor()
+
+  // A translation that reads like markup must come out as characters, not as
+  // a tag the reviewer's browser would render (or run).
+  const marker = `AQU2182-${Date.now()} <b>bold</b>`
+  const verseIndex = await ws.cellIndexWithSource("In the beginning God created")
+  await ws.editCell(verseIndex, marker)
+
+  await ws.openExportDialog()
+  await ws.openExportFormatsSection()
+  const dialog = alice.getByRole("dialog", { name: "Export", exact: true })
+  // The radio's accessible name is its aria-label followed by the wrapping
+  // label's text (the description included), so match the prefix; `.first()`
+  // because the native input behind it can surface under the same name.
+  await dialog.getByRole("radio", { name: /^Web page \(\.html\)/ }).first().click()
+  const [download] = await Promise.all([
+    alice.waitForEvent("download", { timeout: 15_000 }),
+    dialog.getByRole("button", { name: /^Export$/i }).click(),
+  ])
+  expect(download.suggestedFilename()).toBe("sample.html")
+  const downloadedPath = await download.path()
+  expect(downloadedPath).not.toBeNull()
+  const html = await readFile(downloadedPath!, "utf8")
+
+  // One self-contained page: the book's name, a same-page chapter index, and
+  // the translated verse under its superscript number.
+  expect(html).toContain("<title>Genesis</title>")
+  expect(html).toContain('<a href="#ch-GEN-1">1</a>')
+  expect(html).toContain('<a href="#ch-GEN-2">2</a>')
+  expect(html).toContain('<sup class="verse-number">1</sup> AQU2182-')
+  expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;")
+  expect(html).not.toContain("<b>bold</b>")
+  // A verse nobody translated still reads — as its source text, marked.
+  expect(html).toContain('class="verse untranslated"')
+  expect(html).toContain("Thus the heavens and the earth were finished.")
+  await expect(dialog.getByText(/Downloaded sample\.html/i)).toBeVisible()
 })

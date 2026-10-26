@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
 import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
@@ -510,9 +511,7 @@ export function AssignWork({
               </FieldDescription>
             )}
             {showStaffHint && (
-              <FieldDescription data-testid="assign-work-staff-hint">
-                {t("dialog.assign.onlyProjectMembersHint")}
-              </FieldDescription>
+              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" />
             )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}
             {rosterError && (

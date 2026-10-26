@@ -61,6 +61,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
 import { hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
@@ -949,9 +950,7 @@ export function AssignModal({
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
             )}
             {showStaffHint && (
-              <FieldDescription data-testid="assign-modal-staff-hint">
-                {t("dialog.assign.onlyProjectMembersHint")}
-              </FieldDescription>
+              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" />
             )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (

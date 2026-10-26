@@ -208,11 +208,12 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     secondarySources: [],
   }
 
-  it("says why only the caller can be picked, and where to add people", () => {
+  it("says why only the caller can be picked, and links to where people are added", () => {
     render(<AssignModal {...BASE_PROPS} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
     const hint = screen.getByTestId("assign-modal-staff-hint")
     expect(hint.textContent).toMatch(/only people on this project/i)
-    expect(hint.textContent).toMatch(/Staff…/)
+    const link = screen.getByRole("link", { name: /add someone to this project/i })
+    expect(link.getAttribute("href")).toBe("/project/proj-1/settings/members")
   })
 
   it("still says it when the only others are the project's maintainers or owners", () => {
@@ -220,7 +221,7 @@ describe("nobody else on the project yet (AQU-2194)", () => {
     // is a Project lead, and the linguist isn't on the project.
     const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
     render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
-    expect(screen.getByTestId("assign-modal-staff-hint").textContent).toMatch(/Staff…/)
+    expect(screen.getByTestId("assign-modal-staff-hint").textContent).toMatch(/add someone to this project/i)
   })
 
   it("says nothing once someone else is on the project", () => {

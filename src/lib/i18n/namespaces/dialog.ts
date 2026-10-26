@@ -37,9 +37,8 @@ export const dialog = defineNamespace({
     "dialog.assign.selfAssignDescription":
       "Self-assignment is on — you can claim this work for yourself. Only leads and " +
       "maintainers can assign work to someone else.",
-    "dialog.assign.onlyProjectMembersHint":
-      "Only people on this project can be given work. To add a linguist, open the " +
-      "project's Overview and choose Staff… in the language's ⋯ menu.",
+    "dialog.assign.onlyProjectMembersHint": "Only people on this project can be given work.",
+    "dialog.assign.addPeopleLink": "Add someone to this project",
     "dialog.assign.deadlineLabel": "Deadline (optional)",
     "dialog.assign.deadlineBatchDescription":
       "Applies to every file selected above — one deadline for the whole batch.",
@@ -230,10 +229,13 @@ export const dialog = defineNamespace({
         description:
           "Helper text under the assignee field when nobody on the project besides the " +
           "person assigning (and its maintainers or owners) can be given language work, so " +
-          "the list holds no linguist. Explains that only " +
-          "project members can be given work and where to add people: the project " +
-          "Overview's language row menu (⋯) → 'Staff…' (use the same words as those UI " +
-          "labels in translation).",
+          "the list holds no linguist. Followed by the 'Add someone to this project' link.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.addPeopleLink": {
+        description:
+          "Link after the 'Only people on this project can be given work.' helper text; " +
+          "opens the project's Members settings, where people are added to the project.",
         screenshot: "assign-modal",
       },
       "dialog.assign.deadlineLabel": {

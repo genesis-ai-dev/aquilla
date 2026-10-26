@@ -1461,8 +1461,8 @@ export const org = defineNamespace({
     // the row's hidden popover anchor already carries that, and two buttons
     // with one name in a row tell a screen-reader user nothing apart.
     "org.overviewLaneTable.peopleCellAriaLabel": "People on {lane}",
-    "org.overviewLaneTable.sectionDescription":
-      "Progress, people, and actions for each target language on this project.",
+    // AQU-2180: the card's subtitle is gone — no sibling card on the project
+    // overview carries one, so its string went with it.
 
     // -- ProjectOverview: per-project overview page (most already i18n'd) --
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",

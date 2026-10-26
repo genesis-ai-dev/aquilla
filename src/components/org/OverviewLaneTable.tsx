@@ -506,8 +506,13 @@ export function OverviewLaneTable({
     <Section
       data-testid="overview-lane-table"
       title={t("fileDetails.languages")}
-      description={t("org.overviewLaneTable.sectionDescription")}
-      headerClassName={ADMIN_TABLE_SECTION_HEADER}
+      // AQU-2180: this card sits under the project overview's own cards, whose
+      // headings are small, semibold and muted (see the Progress card in
+      // ProjectOverview). The shared Section title is larger and in the
+      // foreground colour, which made "Languages" read as a different page —
+      // so restyle it here only, and drop the subtitle no sibling card has.
+      titleClassName="font-sans text-xs font-semibold text-muted-foreground"
+      headerClassName={`${ADMIN_TABLE_SECTION_HEADER} items-center`}
       contentClassName={ADMIN_TABLE_SECTION_CONTENT}
       action={
         canAddLanguage ? (

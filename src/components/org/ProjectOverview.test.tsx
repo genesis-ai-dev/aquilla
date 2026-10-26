@@ -2707,6 +2707,33 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
   })
 
+  // AQU-2180: the Languages card is the only overview card built on the shared
+  // Section, so it used to inherit that card's bigger foreground title plus a
+  // subtitle no sibling card has. Compared against Progress, the card next to
+  // it, because "same as the other headings" is the actual contract.
+  it("gives the Languages heading the same type scale as the Progress heading, with no subtitle", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const languages = within(table).getByRole("heading", { level: 2, name: "Languages" })
+    const progress = screen.getByRole("heading", { level: 2, name: "Progress" })
+
+    // happy-dom resolves no stylesheet, so the utility classes that decide
+    // size, weight and colour are what there is to compare.
+    const typeScale = (h: HTMLElement) =>
+      h.className
+        .split(/\s+/)
+        .filter((c) => /^(text-(xs|sm|base|lg)|font-(normal|medium|semibold|bold)|text-(muted-)?foreground)$/.test(c))
+        .sort()
+    expect(typeScale(languages)).toEqual(typeScale(progress))
+    expect(typeScale(languages)).toEqual(["font-semibold", "text-muted-foreground", "text-xs"])
+
+    // The subtitle went with the restyle — the card header is heading + action.
+    expect(within(table).queryByText(/each target language on this project/i)).not.toBeInTheDocument()
+  })
+
   it("does not render an archived group when every lane is active", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])

@@ -3231,7 +3231,6 @@ export const my: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "ဧည့်သည့် အဖွဲ့အစည်းများ",
   "org.switcher.guestRole": "ဧည့်သည်",
   "org.switcher.personalWorkspace": "ကိုယ်ပိုင်",
-  "org.overviewLaneTable.sectionDescription": "ဤပရောဂျက်မှ ပုံသဏ္ဍာန်ဘာသာစကား တစ်ခုစီအတည်း တိုးတက်မှု၊ လူများ နှင့် လုပ်ဆောင်ချက်များ။",
   "org.projectOverview.chapterAbbrevLabel": "အခန်း {chapter}",
   "org.projectOverview.archiveDialogTitle": "ပရောဂျက်သိမ်းဆည်းပါ",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "ပုံသဏ္ဍာန်ဘာသာစကားအားဖြင့် တိုးတက်မှုကို ခွင့်ပြုချက်",

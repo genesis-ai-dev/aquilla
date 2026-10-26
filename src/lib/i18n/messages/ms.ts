@@ -3219,7 +3219,6 @@ export const ms: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "Organisasi tetamu",
   "org.switcher.guestRole": "Tetamu",
   "org.switcher.personalWorkspace": "Peribadi",
-  "org.overviewLaneTable.sectionDescription": "Kemajuan, orang, dan tindakan untuk setiap bahasa sasaran dalam projek ini.",
   "org.projectOverview.chapterAbbrevLabel": "Bab {chapter}",
   "org.projectOverview.archiveDialogTitle": "Arkipkan projek",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Tapis kemajuan mengikut bahasa",

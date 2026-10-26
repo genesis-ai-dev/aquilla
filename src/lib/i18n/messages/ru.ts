@@ -3261,7 +3261,6 @@ export const ru: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "Гостевые организации",
   "org.switcher.guestRole": "Гость",
   "org.switcher.personalWorkspace": "Личное",
-  "org.overviewLaneTable.sectionDescription": "Прогресс, люди и действия по каждому языку перевода в этом проекте.",
   "org.projectOverview.chapterAbbrevLabel": "Гл. {chapter}",
   "org.projectOverview.archiveDialogTitle": "Отправить проект в архив",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Фильтровать прогресс по языку",

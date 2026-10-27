@@ -251,7 +251,7 @@ describe("Bengali (AQU-2201)", () => {
     expect(bn?.dir).toBe("ltr")
     expect(bn?.englishName).toBe("Bengali")
     // One catalog, worded as Bangladeshi standard colloquial. The menu stays
-    // the language endonym, the same honesty as Español.
+    // the language endonym, the same honesty as Português.
     expect(bn?.nativeName).toBe("বাংলা")
   })
   it("ships a populated catalog, not an empty stub", () => {

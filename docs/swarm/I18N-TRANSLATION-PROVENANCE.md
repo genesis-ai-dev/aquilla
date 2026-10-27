@@ -2,7 +2,7 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
-> ## `bn` (Bangladeshi Bengali) — AQU-2201, 2026-10-27
+> ## `bn` (Bangladeshi Bengali) — AQU-2201, 2026-10-26
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,565 leaves) and merged
 > with `scripts/i18n-catalog.ts import`. **No Bengali speaker has read it.** This is an

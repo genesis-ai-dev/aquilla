@@ -2844,6 +2844,14 @@ export function ProjectWorkspace() {
     hasAudioCues: fileHasAudioCues,
     nothingToFollow: timingNothingToFollow,
   })
+  // AQU-2204: the mode as the file's CHOICE resolves it, without the derived
+  // nothing-to-follow switch. "Timing changed" reads this: the derived switch
+  // flips the resolved mode the moment a file's lines load, and nobody changed
+  // anything.
+  const timingChoiceMode = resolveFileTimingMode(activeFile, project ?? undefined, {
+    timedToLinkedVideo,
+    hasAudioCues: fileHasAudioCues,
+  })
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
     if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
@@ -13446,9 +13454,12 @@ export function ProjectWorkspace() {
   // "dubbing" off the not-yet-loaded project and then read its own hydration
   // as a remote change — a false "Timing mode changed" modal on every reload.
   const timingAck = useTimingModeAck({
-    timingMode,
+    timingMode: timingChoiceMode,
     fileId: activeFileId,
+    // AQU-2204: a file with nothing to follow always follows its recordings,
+    // so nothing anyone stores changes what it shows — say nothing about it.
     eligible:
+      !timingNothingToFollow &&
       project != null &&
       settingsFetched &&
       centerSurface === "editor" &&

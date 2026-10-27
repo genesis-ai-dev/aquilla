@@ -1,9 +1,10 @@
 # AQU-2218: verified audio recovery
 
-This change is **qualified for controlled cutover**. The final complete smoke
-run passed all 104 tests without retries (14.9 minutes), after investigating the
-earlier failures described below. The recovery cutover must not be inferred
-from staged files; deployment and destination verification receipts are separate.
+The October 27 recovery cutover is **complete and verified** for the 77 audited
+objects below. The final complete smoke run passed all 104 tests without retries
+(14.9 minutes). The upgraded daemon resumed with the existing queue at 21:01 UTC.
+This is not a claim that archived, absent-source or permission-blocked projects
+were migrated; those exclusions remain visible.
 
 ## What is corrected
 
@@ -67,6 +68,10 @@ recovery audio, credentials or unrelated files.
 2. Recheck active Cloudflare versions, preserve every binding/secret/setting,
    and record rollback versions. Both Workers must expose
    `audio-history-attach-v1` and `audio-projection-repair-v1` before runner cutover.
+   Preserve the environment guard's version-tag prefix (`<worker>-production-...`),
+   not just bindings. Qualify the deployment metadata with the exact runtime
+   environment. Migration health probes need `x-migrate-runner` and must allow
+   bounded edge propagation before deciding a route is absent.
 3. Gracefully drain the one current writer. Preserve its stopped release and
    configuration, make a consistent SQLite queue/ledger backup, and verify the
    lease is free. Never delete a foreign lease or run parallel writers.
@@ -125,3 +130,55 @@ acceptance criteria in `05-user-stories/import-legacy-project.md` (commit
 After recovery events have been committed, retain compatible ingestion and replay
 consumers even if rolling back the runner. An older consumer that ignores the
 historical-attach contract is not a valid replay rollback.
+
+## Verified production result
+
+At 21:00 UTC on October 27, all 77 destination objects passed a fresh binary GET,
+expected-size check and SHA-256 comparison (27,620,322 bytes). The three scoped
+copy jobs finished in approximately 2 minutes 18 seconds. The guarded repair and
+final byte verification finished approximately 9 minutes 42 seconds after that
+run started, including operator verification corrections. The strict database
+comparison passed before the daemon resumed at 21:01 UTC.
+
+| GitLab project | New audio rows | New events | New validation votes |
+| --- | ---: | ---: | ---: |
+| Xiang (201) | 11 | 38 | 16 |
+| Pattani Malay Bible (713) | 65 | 67 | 2 |
+| Gan (263) | 1 | 1 | 0 |
+
+All 503 pre-existing audio events and 116 existing votes in the affected-cell
+scope were unchanged. Pattani's recovered history stayed unselected. Gan retained
+its original attach identity, timestamp, author and existing validation vote.
+Synthetic Xiang selection events use the audio stage's execution timestamp;
+attachment and validation provenance still matches the source. The daemon now
+reports current content and audio checkpoints for 498 of 505 tracked projects;
+checkpoint equality is not a byte-for-byte audit of every historical file.
+
+The old release and consistent queue/ledger databases remain backed up at
+`/var/backups/aquilla-migrate/audio-recovery-20261027` on Het5. The active daemon
+uses `audio-recovery-final-20261027/app` with the same service account, queue,
+configuration and lease. Production Worker versions are:
+
+- Public: `8a306b2a-c73c-4b11-be99-dbc109df0cc8`.
+- Private: `49ae70ba-77d9-402a-a399-ab66e9820d5b`.
+
+### Rollout incidents and corrections
+
+The first public deployment used a version tag without the required production
+prefix. Its environment guard returned 503. It was rolled back approximately
+1 minute 47 seconds after activation, before any recovery writes. The corrected
+metadata passed the actual guard and live identity/capability checks before the
+compatible versions were activated. No recovery data was written through the
+rejected deployment.
+
+The first post-copy verifier incorrectly called the R2 text reader for audio.
+It stopped before Gan's projection repair. Re-reading with `getObjectBytes`
+verified all 77 hashes and sizes, then the separately guarded repair completed.
+No destination audio was overwritten to address this verifier error.
+
+Operator evidence, including the original failed attempt, binary receipts,
+before/after database snapshots, strict comparisons and queue backup receipt,
+is saved outside Git in `aquilla-recovery-20261027/cutover` on the workstation.
+Gan's 15 unresolved references and 3 unavailable source objects remain logged
+historical gaps. Archives, placement/identity conflicts and a deleted source
+project remain separate from audio recovery success.

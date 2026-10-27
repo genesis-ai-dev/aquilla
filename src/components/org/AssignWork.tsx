@@ -24,7 +24,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   Select,
@@ -578,7 +577,7 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">
-              {t("dialog.assign.deadlineLabel")} <OptionalMark />
+              {t("dialog.assign.deadlineLabel")}
             </FieldLabel>
             <DatePicker
               id="assign-work-deadline"

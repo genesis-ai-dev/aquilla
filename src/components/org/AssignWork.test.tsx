@@ -79,6 +79,18 @@ describe("AssignWork", () => {
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
   })
 
+  it("AQU-2128: the deadline label says (optional) once", () => {
+    rosterOk()
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const label = screen.getByText((_, node) => {
+      return node?.tagName === "LABEL" && node.getAttribute("for") === "assign-work-deadline"
+    })
+    const text = (label.textContent ?? "").replace(/\s+/g, " ").trim()
+    expect(text).toBe("Deadline (optional)")
+    expect(text.match(/\(optional\)/g)).toEqual(["(optional)"])
+  })
+
   it("AQU-1969: sends Translate by default and Validate when chosen", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-kind")

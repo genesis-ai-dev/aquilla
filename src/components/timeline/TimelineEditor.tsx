@@ -57,7 +57,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
-import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -2071,9 +2071,8 @@ export function TimelineEditor({
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
-    const { lines } = programmeLines(cells)
-    // AQU-2204: following the recordings, an unrecorded line takes its stand-in.
-    const recorded = buildProgramme(lines, { standInLenSec: standInEstimator(lines) })
+    // AQU-1758: the same layout the transport plays and the bottom strip shows.
+    const recorded = layOutProgramme(cells).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
   }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing

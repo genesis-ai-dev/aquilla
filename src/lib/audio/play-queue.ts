@@ -11,8 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { buildProgramme, programmeLines, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
-import { standInEstimator } from "@/lib/timeline/stand-in"
+import { layOutProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -153,11 +152,13 @@ export function __setQueuePlaybackForTests(next: {
   cellId: string | null
   currentTime: number
   playing: boolean
+  /** The run's length; left as it was when absent. */
+  duration?: number
 }): void {
   state = next.playing && next.cellId
     ? { kind: "playing", cellIndex: 0, cellId: next.cellId }
     : IDLE
-  progress = { ...progress, currentTime: next.currentTime }
+  progress = { ...progress, currentTime: next.currentTime, ...(next.duration != null ? { duration: next.duration } : {}) }
   notify()
   notifyProgress()
 }
@@ -928,9 +929,9 @@ function progRebuild(): void {
   // (programmeLines). AQU-1704: a video-less subtitle import's cues are the
   // verses. AQU-2204: a file with no times at all lays its lines out in order,
   // an unrecorded one at a stand-in length that playback steps over.
-  const { lines: dialogue, untimed } = programmeLines(ctx.cells)
-  // AQU-2204: following the recordings, every unrecorded line takes its stand-in.
-  const built = buildProgramme(dialogue, { standInLenSec: standInEstimator(dialogue) })
+  // AQU-2204: following the recordings, every unrecorded line takes its
+  // stand-in (layOutProgramme passes the estimator for every file).
+  const { programme: built, lines: dialogue, untimed } = layOutProgramme(ctx.cells)
   // A take whose length was never measured (a generated voice nobody has
   // played yet) has no window the programme can play. On a file with times
   // that is today's rule — the verse is silent — but a file with NO times only

@@ -28,6 +28,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -76,11 +77,23 @@ interface Props {
   variant?: "bar" | "strip"
 }
 
+/** A running clock: the whole seconds gone by. */
 function fmtTime(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
   const m = Math.floor(s / 60)
   const sec = Math.floor(s % 60)
   return `${m}:${sec.toString().padStart(2, "0")}`
+}
+
+/**
+ * AQU-1758: a LENGTH, to the nearest second — the rounding the Timing control
+ * states it with ("1 min 28 s long"). Floored like the clock, an 87.6 s
+ * chapter read "1:27" here beside "1 min 28 s" there.
+ */
+function fmtLength(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "0:00"
+  const whole = Math.round(s)
+  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`
 }
 
 export function VoicePlaybackBar({
@@ -133,6 +146,16 @@ export function VoicePlaybackBar({
   const drivesVideo = transport.source !== "queue"
   const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
+  // AQU-1758: before anything plays, the queue has no length to report, and a
+  // book read "0:00 / 0:00". A file that follows its recordings shows how long
+  // its lines come out laid end to end — the layout the timeline draws and the
+  // Timing control states (`layOutProgramme`), which is also what the queue
+  // reports once it plays.
+  const laidOutSec = useMemo(
+    () => (freeTiming && transport.source === "queue" ? layOutProgramme(cells).programme.totalSec : 0),
+    [freeTiming, transport.source, cells],
+  )
+  const shownLengthSec = transport.source === "queue" && !transport.active && freeTiming ? laidOutSec : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving
@@ -269,7 +292,7 @@ export function VoicePlaybackBar({
         className="@container relative flex h-7 shrink-0 items-center border-t border-border bg-muted/30 px-2"
       >
         <span className="hidden shrink-0 text-[11.5px] tabular-nums text-muted-foreground @md:inline" data-testid="transport-time">
-          {fmtTime(currentTime)} / {fmtTime(duration)}
+          {fmtTime(currentTime)} / {fmtLength(shownLengthSec)}
         </span>
         <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1" data-testid="top-transport">
           <IconButton small title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
@@ -397,7 +420,7 @@ export function VoicePlaybackBar({
             <SkipForward className="h-4 w-4" />
           </IconButton>
           <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
-            {fmtTime(currentTime)} / {fmtTime(duration)}
+            {fmtTime(currentTime)} / {fmtLength(shownLengthSec)}
           </span>
         </div>
 

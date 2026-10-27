@@ -27,6 +27,7 @@ import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-a
 import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
+import { standInEstimator } from "./stand-in"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -268,6 +269,19 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
   const timed = cells.filter((c) => hasTiming(c))
   if (timed.length > 0) return { lines: sortByLens(timed, "time"), untimed: false }
   return { lines: sortByLens(cells, "sequence"), untimed: cells.length > 0 }
+}
+
+/**
+ * AQU-1758: a file's lines laid out end to end — `programmeLines`, then
+ * `buildProgramme` with the stand-in estimator (AQU-2204: following the
+ * recordings, every unrecorded line takes its stand-in, timed file or not).
+ * The ONE composition the timeline draws, the transport plays, the Timing
+ * control measures and the bottom strip shows before anything plays, so none
+ * of them can count a different length.
+ */
+export function layOutProgramme(cells: readonly CellData[]): { programme: Programme; lines: CellData[]; untimed: boolean } {
+  const { lines, untimed } = programmeLines(cells)
+  return { programme: buildProgramme(lines, { standInLenSec: standInEstimator(lines) }), lines, untimed }
 }
 
 /**

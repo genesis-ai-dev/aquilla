@@ -275,7 +275,7 @@ describe("step 3: confirm", () => {
     const { onLinked } = renderWizard()
     await toConfirm()
     expect(mocked.addMondayColumns).not.toHaveBeenCalled()
-    expect(screen.getByText(/aquilla will add 7 columns to your monday board and keep one row for this project up to date/i)).toBeTruthy()
+    expect(screen.getByText(/aquilla will add 7 columns to your monday board and keep one row for this project, with a subitem for each file, up to date/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: /add columns and connect/i }))
     await waitFor(() => expect(screen.getByTestId("monday-wizard-done")).toBeTruthy())
@@ -288,6 +288,8 @@ describe("step 3: confirm", () => {
     const config = mocked.putMondayLink.mock.calls[0][2].config
     expect(config.columns[0]).toEqual({ columnId: "numbers_1", columnType: "numbers", metric: "completion_pct" })
     expect(config.columns.map((c) => c.metric)).toContain("external_id")
+    // One row for the project lists the files as its subitems.
+    expect(config.fileSubitems).toEqual({ columns: [] })
     expect(config.columns).toHaveLength(8)
     // A link that pushes nothing is not "set up" — the push is part of confirm.
     expect(mocked.syncMondayNow).toHaveBeenCalledWith("tok", "p1")
@@ -305,7 +307,7 @@ describe("step 3: confirm", () => {
     )
     renderWizard()
     await toConfirm()
-    expect(screen.getByText(/keep one row for this project up to date on translation tracker/i)).toBeTruthy()
+    expect(screen.getByText(/keep one row for this project, with a subitem for each file, up to date on translation tracker/i)).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /^connect$/i }))
     await waitFor(() => expect(screen.getByTestId("monday-wizard-done")).toBeTruthy())
     expect(mocked.addMondayColumns).not.toHaveBeenCalled()

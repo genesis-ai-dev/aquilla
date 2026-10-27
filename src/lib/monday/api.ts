@@ -248,7 +248,7 @@ export async function putMondayLink(
 export async function patchMondayLink(
   jwt: string,
   projectId: string,
-  body: { enabled?: boolean; config?: MondayMapping },
+  body: { enabled?: boolean; config?: MondayMapping; fileSubitems?: boolean },
 ): Promise<{ link: MondayBoardLink; warnings: string[]; push?: MondaySyncResult }> {
   const res = await fetch(`${AUTH_BASE}/api/v2/monday/projects/${projectId}/link`, {
     method: "PATCH",

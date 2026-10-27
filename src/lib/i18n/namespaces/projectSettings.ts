@@ -1280,6 +1280,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.oneItemWithSubitemsLabel": "One item for the project, with a subitem per file.",
+    "projectSettings.monday.fileSubitemsLabel": "Files as subitems",
+    "projectSettings.monday.fileSubitemsDescription":
+      "Each file gets a subitem under the project's row on Monday, with its own progress.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
     "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
@@ -1318,7 +1322,7 @@ export const projectSettings = defineNamespace({
       "Couldn't list boards — an org maintainer can change the board later.",
     "projectSettings.monday.pickBoardPlaceholder": "Pick a board",
     "projectSettings.monday.boardItemsLabel": "Board items",
-    "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
+    "projectSettings.monday.granularityProjectLabel": "One item for the project, with a subitem per file",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
     "projectSettings.monday.columnPickerOnBoard": "On your board",
@@ -1359,14 +1363,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
     "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
     "projectSettings.monday.wizardConfirmAdds": plural({
-      one: "Aquilla will add {count} column to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
-      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
     }, "count"),
     "projectSettings.monday.wizardConfirmAddsPerFile": plural({
       one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
       other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
     }, "count"),
-    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project, with a subitem for each file, up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
     // AQU-2087: step 1's other choice, a clean board made by Aquilla.
@@ -2646,6 +2650,19 @@ export const projectSettings = defineNamespace({
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
         },
+      },
+      "projectSettings.monday.oneItemWithSubitemsLabel": {
+        description:
+          "Small note under the linked-board status row when the project is one Monday " +
+          "item and each of its files is a subitem under that item.",
+      },
+      "projectSettings.monday.fileSubitemsLabel": {
+        description:
+          "Label of a switch in the Monday.com project settings: when on, each file of the " +
+          "project is pushed as a Monday subitem under the project's row.",
+      },
+      "projectSettings.monday.fileSubitemsDescription": {
+        description: "Help text under the “Files as subitems” switch in the Monday.com project settings.",
       },
       "projectSettings.monday.lastPushOk": {
         description:

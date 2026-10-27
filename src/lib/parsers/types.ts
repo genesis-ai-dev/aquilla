@@ -671,11 +671,11 @@ export interface ProjectRecord {
    *  error, which is what keeps the two honest. */
   cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
-   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
-   *  on top of the maintainer floor, so with it off the write is refused even
-   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
-   *  to strand tracks that are already there. */
+   *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
+   *  SECOND gate on top of the maintainer floor, so with it off the write is
+   *  refused even to an owner. Rename and drag-to-reorder are NOT gated on it.
+   *  See ProjectWideSettings.allowTrackEditing for why switching it off is
+   *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup

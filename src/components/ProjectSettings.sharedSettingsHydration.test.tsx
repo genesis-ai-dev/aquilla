@@ -54,7 +54,10 @@ const STORED: ProjectWideSettings = {
   validationRoleFloorAudio: "maintainer",
   allowSelfValidationAudio: false,
   validationNamedUsersAudio: ["dev", "alice"],
-  allowTrackEditing: true,
+  // AQU-2214 flipped this default to ON, so the STORED value that differs from
+  // it is now `false`. Keeping `true` here would have left the field looking
+  // covered while proving nothing — the box reads ON either way.
+  allowTrackEditing: false,
   timingLocked: false,
   cellEditingFloor: "contributor",
   harmonize_min_role: "maintainer",
@@ -199,7 +202,7 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
   it("shows the stored timeline and cell-editing values on their panes", () => {
     currentSettings = STORED
     const { unmount } = render(tree("audio-media"))
-    expect(isOn(screen.getByTestId("settings-allow-track-editing"))).toBe(true)
+    expect(isOn(screen.getByTestId("settings-allow-track-editing"))).toBe(false)
     expect(isOn(screen.getByTestId("settings-timing-locked"))).toBe(false)
     expect(saveButton()).toBeNull()
     unmount()

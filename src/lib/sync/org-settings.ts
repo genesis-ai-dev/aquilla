@@ -108,8 +108,9 @@ export interface OrgWideSettings {
   /**
    * AQU-1768: org-wide defaults for the media settings. A project that sets
    * none of its own follows these; absent here, each reader keeps its
-   * built-in default (timing locked, track editing off, cell editing nobody,
-   * audio self-validation on, audio floor reviewer). Enforced on the server.
+   * built-in default (timing locked, track editing ON since AQU-2214, cell
+   * editing nobody, audio self-validation on, audio floor reviewer). Enforced
+   * on the server.
    */
   timingLocked?: boolean
   allowTrackEditing?: boolean

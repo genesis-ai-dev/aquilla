@@ -23,7 +23,7 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -140,6 +140,11 @@ export interface CellTakeBlockProps {
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
   takesHistory?: ReadonlyMap<string, RecordingTextDrift>
+  /**
+   * AQU-1758: "Make a character from this voice" — opens the New voice
+   * dialog, cloning, seeded with this take's line. Absent hides it.
+   */
+  onMakeCharacter?: () => void
 }
 
 type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
@@ -203,6 +208,7 @@ function CellTakeBlockView({
   trackFileId,
   pieces,
   takesHistory,
+  onMakeCharacter,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -574,6 +580,24 @@ function CellTakeBlockView({
               editable={editable}
               targetLang={targetLang}
             />
+          )}
+          {/* AQU-1758: the Audio view's voice card turned a take into a
+              character; this take does now (the timeline's take menu too). */}
+          {!isSection && selectedAudioId && attachment && onMakeCharacter && (
+            <AppTooltip content={t("editor.timeline.takeMenuMakeCharacter")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="cell-take-make-character"
+                aria-label={t("editor.timeline.takeMenuMakeCharacter")}
+                disabled={!editable}
+                onClick={onMakeCharacter}
+                className="rounded-md text-muted-foreground/60 hover:bg-background hover:text-foreground"
+              >
+                <CopyPlus className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
           )}
           {/* The one way into the recorder from here: it records, uploads
               and generates, and switches takes too. */}

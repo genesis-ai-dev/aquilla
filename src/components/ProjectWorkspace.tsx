@@ -356,6 +356,7 @@ import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage } from "@/lib/permissions/denial"
 import { canManageVoices } from "@/lib/audio/voice-permission"
+import { takeVoiceNote } from "@/lib/audio/take-voice"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -9717,6 +9718,23 @@ export function ProjectWorkspace() {
       `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
     )
   }, [navigate, projectId])
+  // AQU-1758: "Make a character from this voice" — the Audio view's voice
+  // card had it; a take's menu on the timeline and its Recording tab do now.
+  // Offered to someone who may make voices: the dialog would refuse the rest.
+  const mayMakeCharacter = canManageVoices(
+    project?.syncRole?.level ?? null, project?.projectLeadsManageVoices === true, activeLaneId != null,
+  )
+  const handleMakeCharacter = useCallback((cellId: string) => {
+    setMakeCharacterSeedCellId(cellId)
+    setMakeCharacterOpen(true)
+  }, [])
+  const makeCharacter = mayMakeCharacter ? handleMakeCharacter : undefined
+  // AQU-1758: a take's voice, when it is not the line's, named on its clip.
+  const timelineTakeVoice = useCallback(
+    (cell: CellData, audioId: string) => takeVoiceNote(cell, audioId, tts.laneSettings),
+    [tts.laneSettings],
+  )
+
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
@@ -9728,6 +9746,7 @@ export function ProjectWorkspace() {
     onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
+    onMakeCharacter: makeCharacter, // AQU-1758: the Recording tab's take
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
@@ -9755,7 +9774,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, makeCharacter, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -12519,6 +12538,12 @@ export function ProjectWorkspace() {
   const audioMergedCells = useMemo(
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
+  )
+  // AQU-1758: what the New voice dialog can clone from — a dubbing file's
+  // takes live on its audio cues, and the timeline's take menu seeds it with one.
+  const cloneVoiceCells = useMemo(
+    () => (audioCueCells && audioCueCells.length > 0 ? [...audioMergedCells, ...audioCueCells] : audioMergedCells),
+    [audioMergedCells, audioCueCells],
   )
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
@@ -16819,6 +16844,9 @@ export function ProjectWorkspace() {
                     onRegenerateVoice={handleRegenerateTimelineVoice}
                     onChangeVoice={handleChangeTimelineVoice}
                     changeVoiceStateFor={timelineChangeVoiceState}
+                    // AQU-1758: what the Audio view's voice card did for a take.
+                    onMakeCharacter={makeCharacter}
+                    takeVoiceFor={timelineTakeVoice}
                     onRenameTake={handleRenameTimelineTake}
                     onRemoveTake={handleRemoveTimelineTake}
                     onVoteTake={handleVoteTimelineTake}
@@ -18050,7 +18078,9 @@ export function ProjectWorkspace() {
           // AQU-1978: the live lanes' languages, from the lane rows — not the
           // retired `targetLanes` / `archivedLanes` keys (see VoiceSidebar).
           targetLanes={liveLaneLanguages}
-          cells={audioMergedCells}
+          // AQU-1758: a dubbing file's takes live on its audio cues, and the
+          // timeline's take menu seeds the dialog with one of those.
+          cells={cloneVoiceCells}
           roleLevel={project.syncRole?.level ?? null}
           leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />

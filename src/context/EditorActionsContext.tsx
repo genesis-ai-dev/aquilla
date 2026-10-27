@@ -53,6 +53,13 @@ export interface EditorActionsContextValue {
    *  absent) — the Recording tab's New take names its take's track. */
   onOpenRecording?: (cellId: string, slot?: string) => void
   /**
+   * AQU-1758: "Make a character from this voice" — the New voice dialog,
+   * cloning, seeded with this line's take (the Recording tab's take; the
+   * timeline's take menu reaches the same workspace handler). Absent for
+   * someone who may not make voices.
+   */
+  onMakeCharacter?: (cellId: string) => void
+  /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,
    * center the track, cue playback paused). The workspace's impl no-ops

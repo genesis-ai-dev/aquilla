@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -85,6 +85,12 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
+
+/** AQU-1758: the take's-voice label needs a full-height chip (46 px by
+ *  default) to sit under the sparkle, and room for a short name. */
+const TAKE_VOICE_LABEL_MIN_H_PX = 44
+const TAKE_VOICE_LABEL_MIN_W_PX = 56
 
 export interface TargetAudioItem {
   cell: CellData
@@ -162,6 +168,8 @@ export interface TargetAudioLaneProps {
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
   takeMenu?: TakeMenuActions
+  /** AQU-1758: a take's voice, when it is not the line's — named on its clip. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -255,6 +263,11 @@ export interface TakeMenuActions {
    * programme audio has nothing of its own to convert).
    */
   changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  /**
+   * AQU-1758: turn this line's take into a character — the New voice dialog,
+   * cloning, seeded with it. (The Audio view's voice card had this.)
+   */
+  makeCharacter?(cellId: string): void
   /** Ask for a new name; `current` is the take's own name, if it has one. */
   rename?(cellId: string, audioId: string, current: string | null): void
   /** Delete this take, or this piece of a cut take. */
@@ -304,6 +317,7 @@ function TargetAudioChip({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoice = null,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -364,6 +378,8 @@ function TargetAudioChip({
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   takeMenu?: TakeMenuActions
+  /** AQU-1758: the take's voice, when it is not the line's. */
+  takeVoice?: TakeVoiceNote | null
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -949,6 +965,16 @@ function TargetAudioChip({
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
+  // AQU-1758: the take was made in a voice the line no longer has.
+  if (takeVoice) {
+    tipLines.push(
+      <div key="take-voice" data-testid={`tl-target-${testKey}-tip-take-voice`}>
+        {takeVoice.takeVoiceName
+          ? t("editor.voice.takeVoiceDiffers", { takeVoice: takeVoice.takeVoiceName, lineVoice: takeVoice.lineVoiceName })
+          : t("editor.voice.takeVoiceRemoved", { lineVoice: takeVoice.lineVoiceName })}
+      </div>,
+    )
+  }
   // Decision 2026-08-05: a definitively 404'd clip says so, in red.
   if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
   // SUB-48: never let a guessed width read as a measured one.
@@ -1206,6 +1232,20 @@ function TargetAudioChip({
               A briefly-tried filled variant read as a blob at this size and is
               gone. */}
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
+        </span>
+      )}
+      {/* AQU-1758: the clip names the take's voice when it is not the line's
+          (a voice picked for the line only assigns it). The same small
+          readout a take's running time uses over a waveform; the sentence is
+          in the tooltip. Bottom left, past the sparkle (only a generated take
+          carries a voice), and only where the chip is tall and wide enough
+          to read it. */}
+      {takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
+        <span
+          data-testid={`tl-target-${testKey}-take-voice`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          {takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")}
         </span>
       )}
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
@@ -1510,6 +1550,14 @@ function TargetAudioChip({
             </ContextMenuSubContent>
           </ContextMenuSub>
         ))}
+        {/* AQU-1758: make a character from this take's voice — the Audio
+            view's voice card had this; the take's menu is its home now. */}
+        {takeMenu?.makeCharacter && !hiddenLine && (
+          <ContextMenuItem data-testid="tl-take-menu-make-character" onClick={() => takeMenu.makeCharacter?.(cell.id)}>
+            <CopyPlus className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuMakeCharacter")}
+          </ContextMenuItem>
+        )}
         {vote?.canVote && (
           <>
             <ContextMenuSeparator />
@@ -1570,6 +1618,7 @@ export function TargetAudioLane({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoiceFor,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1909,6 +1958,7 @@ export function TargetAudioLane({
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
             takeMenu={takeMenu}
+            takeVoice={takeVoiceFor ? takeVoiceFor(chip.item.cell, chip.item.audioId) : null}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

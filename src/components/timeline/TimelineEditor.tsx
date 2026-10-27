@@ -164,6 +164,7 @@ import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -258,6 +259,11 @@ export interface TimelineEditorProps {
    *  says what it may do (see `TakeMenuActions`). */
   onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+  /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
+   *  leaves it out (someone who may not make voices). */
+  onMakeCharacter?(cellId: string): void
+  /** AQU-1758: a take's voice, when it is not the line's — its clip names it. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
@@ -1173,6 +1179,8 @@ export function TimelineEditor({
   onRegenerateVoice,
   onChangeVoice,
   changeVoiceStateFor,
+  onMakeCharacter,
+  takeVoiceFor,
   onRenameTake,
   onRemoveTake,
   onVoteTake,
@@ -2653,6 +2661,7 @@ export function TimelineEditor({
           ...(onChangeVoice && changeVoiceStateFor
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
             : {}),
+          ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
           ...(onRenameTake
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
             : {}),
@@ -4037,6 +4046,7 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(RECORDING_SLOT)}
+            takeVoiceFor={takeVoiceFor}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -4110,6 +4120,7 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeVoiceFor={takeVoiceFor}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}

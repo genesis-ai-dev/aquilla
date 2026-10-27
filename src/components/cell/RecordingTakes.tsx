@@ -119,6 +119,8 @@ function OwnerTakes({
    *  than draw nothing (Sam, 2026-09-29 — a line split across heard lines). */
   offerWhenEmpty?: boolean
 }) {
+  // AQU-1758: the take's "Make a character from this voice", when offered.
+  const { onMakeCharacter } = useEditorActions()
   const t = useT()
   const shared: Shared = { ...rest, project, session }
   const { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, fileId, id: cellId } = owner
@@ -255,6 +257,7 @@ function OwnerTakes({
                 pieces={split}
                 takesHistory={history}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
+                onMakeCharacter={onMakeCharacter ? () => onMakeCharacter(owner.id) : undefined}
                 trackName={showTracks ? group.name || t("editor.recordingTab.addedTrack") : null}
                 trackFileId={trackFileId}
               />

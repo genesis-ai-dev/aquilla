@@ -16,8 +16,13 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
+// AQU-1758: what the table asked the probe for, render by render.
+const micProbe = vi.hoisted(() => ({ asked: [] as boolean[] }))
 vi.mock("@/hooks/useMicPermission", () => ({
-  useMicPermission: () => ({ micDenied: true }),
+  useMicPermission: (enabled = true) => {
+    micProbe.asked.push(enabled)
+    return { micDenied: true }
+  },
 }))
 
 // happy-dom has no layout engine — render every row (same stand-in as the
@@ -228,6 +233,23 @@ describe("EditorTable — character gutter", () => {
     expect(cellArg.id).toBe("cell-plain")
     expect(voiceId).toBe("v-john")
     expect(opts).toEqual({ scope: "line" })
+  })
+
+  // AQU-1758: the mic permission probe ran when the Audio view mounted. It
+  // runs in Media now (where the recorder opens from the rows and the
+  // timeline), and only for someone who may record.
+  it("probes the microphone in Media, and not in Text", async () => {
+    micProbe.asked.length = 0
+    const { unmount } = renderTable()
+    await screen.findByText("Mary's line")
+    expect(micProbe.asked.length).toBeGreaterThan(0)
+    expect(micProbe.asked.every(Boolean)).toBe(true)
+    unmount()
+    micProbe.asked.length = 0
+    renderTable({ castGutter: false })
+    await screen.findByText("Mary's line")
+    expect(micProbe.asked.length).toBeGreaterThan(0)
+    expect(micProbe.asked.some(Boolean)).toBe(false)
   })
 
   // AQU-1758: the Audio view, which put a voice card where the source text

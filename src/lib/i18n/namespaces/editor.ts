@@ -997,6 +997,7 @@ export const editor = defineNamespace({
     // thing differently. Only the reason the Audio tab has no equivalent of
     // is keyed here.
     "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
+    "editor.timeline.takeMenuMakeCharacter": "Make a character from this voice",
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
     "editor.timeline.takeMenuUnapprove": "Remove my approval",
@@ -6679,6 +6680,15 @@ export const editor = defineNamespace({
           "would change what that voice sounds like. It is left as it is.",
         maxLength: 40,
       },
+      "editor.timeline.takeMenuMakeCharacter": {
+        description:
+          "Item in a take's right-click menu on the timeline, and the tooltip of a button " +
+          "on the take in a line's Recording tab: opens the New voice dialog, cloning, " +
+          "seeded with this take, to make a new character (a reusable voice for the " +
+          "project's cast) that sounds like it. 'Character' is a cast member, as in the " +
+          "Voices tab.",
+        maxLength: 40,
+      },
       "editor.timeline.takeMenuDeletePiece": {
         description:
           "Item in a take's right-click menu when the take has been cut: deletes only this " +
@@ -7010,16 +7020,17 @@ export const editor = defineNamespace({
       },
       "editor.voice.removedVoice": {
         description:
-          "Small tag on a generated (synthetic) voice's waveform in the Audio view, " +
-          "where the tag normally shows the name of the voice the take was made in: " +
-          "that voice has since been removed from the project.",
+          "Small label on a generated (synthetic) take's clip on the timeline, where " +
+          "the label normally shows the name of the voice the take was made in: that " +
+          "voice has since been removed from the project.",
         maxLength: 16,
       },
       "editor.voice.takeVoiceDiffers": {
         description:
-          "Tooltip on a small tag on a generated (synthetic) voice's waveform, shown " +
-          "when the take was made in a different voice from the one the line now has " +
-          "(choosing a voice for a line does not regenerate its audio).",
+          "Tooltip of a generated (synthetic) take's clip on the timeline, whose small " +
+          "label names the voice it was made in, shown when that is a different voice " +
+          "from the one the line now has (choosing a voice for a line does not " +
+          "regenerate its audio).",
         placeholders: {
           takeVoice: "The name of the voice the take was made in (e.g. 'Mary').",
           lineVoice: "The name of the voice the line now has (e.g. 'Juan').",

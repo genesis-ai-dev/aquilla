@@ -222,8 +222,8 @@ describe('AQU-1424 — hidden cells are not searchable', () => {
     const project = makeVerifiedProjectId(claims)
     // Both sides: the flag lives on the source row, so a target-side match has
     // to be filtered by looking at the source row rather than at itself.
-    expect(await queryScopedSearch(t.db, project, 'quokka', {})).toEqual([])
-    expect(await queryScopedExact(t.db, project, 'quokka', {})).toEqual([])
+    expect(await queryScopedSearch(t.db, project, 'quokka', { laneIds: null })).toEqual([])
+    expect(await queryScopedExact(t.db, project, 'quokka', { laneIds: null })).toEqual([])
     // ...and Find & Replace, whose candidates are exactly these results, then has
     // nothing to rewrite in text the reviewer cannot see.
   })
@@ -238,7 +238,7 @@ describe('AQU-1424 — hidden cells are not searchable', () => {
       `UPDATE cells SET hidden_at = NULL WHERE project_id = $1 AND cell_id = 'c2' AND side = 'source'`,
       [PROJECT],
     )
-    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', {})
+    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', { laneIds: null })
     expect(hits.map((h) => `${h.cellId}:${h.side}`).sort()).toEqual(['c2:source', 'c2:target'])
   })
 
@@ -247,7 +247,7 @@ describe('AQU-1424 — hidden cells are not searchable', () => {
       source('c1', 'GEN 1:1'), target('c1', 'a visible rendering'),
       { ...source('c2', 'GEN 1:2'), value: 'quokka' },
     ])
-    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', {})
+    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', { laneIds: null })
     expect(hits.map((h) => h.cellId)).toEqual(['c2'])
   })
 })

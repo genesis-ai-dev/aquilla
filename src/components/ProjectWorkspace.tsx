@@ -738,6 +738,17 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
   }
 }
 
+/**
+ * AQU-2186: what a refused hand-set section write should say it failed to do.
+ * A table rather than a ternary so the three gestures stay visibly parallel,
+ * and module-level so it is not rebuilt per render.
+ */
+const MILESTONE_FAILED_TOAST: Record<"start" | "rename" | "remove", MessageKey> = {
+  start: "editor.startSection.failedToast",
+  rename: "editor.renameSection.failedToast",
+  remove: "editor.removeSection.failedToast",
+}
+
 export function ProjectWorkspace() {
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
@@ -1971,6 +1982,18 @@ export function ProjectWorkspace() {
   const sectionStartCellIds = useMemo(
     () => (maySetSectionsInProject
       ? readAtVersion(cellStoreVersion, () => cellStore.getCellIdsWhereSectionMayStart())
+      : undefined),
+    [maySetSectionsInProject, cellStore, cellStoreVersion],
+  )
+  /**
+   * AQU-2186: the cells that START one of those sections, with the name each
+   * carries — the rows whose menu offers Rename section… and Remove section in
+   * place of Start a section here. Same source, same gate and same
+   * `readAtVersion` as the set above; only the question differs.
+   */
+  const handSetSectionLabels = useMemo(
+    () => (maySetSectionsInProject
+      ? readAtVersion(cellStoreVersion, () => cellStore.getHandSetSectionLabels())
       : undefined),
     [maySetSectionsInProject, cellStore, cellStoreVersion],
   )
@@ -3698,7 +3721,8 @@ export function ProjectWorkspace() {
 
   /**
    * AQU-2185: set the name of a navigator division starting at this cell, or
-   * clear it.
+   * clear it. AQU-2186 renames and removes through the same call — the write
+   * is one event either way, so only the refusal's wording differs.
    *
    * Shaped on `applyCellHidden` above, and for the same reason: one
    * non-chain-mutating event moves one column on the source row, so there is no
@@ -3712,7 +3736,14 @@ export function ProjectWorkspace() {
    * would leave the team planning against a division that does not exist.
    */
   const applyCellMilestone = useCallback(
-    async (cellId: string, label: string | null): Promise<boolean> => {
+    async (
+      cellId: string,
+      label: string | null,
+      // AQU-2186: which of the three gestures this is, so a refusal says what
+      // did not happen. The write is identical for all three — only the words
+      // differ, which is why it is a parameter and not a second function.
+      intent: "start" | "rename" | "remove" = "start",
+    ): Promise<boolean> => {
       if (!project?.id || !activeFileId) return false
       const previous = cellStore.applyOptimisticCellMilestone(cellId, label)
       // `undefined` ⇒ no source row to mark. Nothing was done, so there is
@@ -3738,7 +3769,7 @@ export function ProjectWorkspace() {
         // can clear, with no message — the same note as in applyCellHidden.
         console.error("[applyCellMilestone] refused before enqueue:", err)
         restore()
-        toast.add({ type: "error", title: t("editor.startSection.failedToast") })
+        toast.add({ type: "error", title: t(MILESTONE_FAILED_TOAST[intent]) })
         return false
       }
       let refused = false
@@ -9749,6 +9780,17 @@ export function ProjectWorkspace() {
   const handleStartSectionStable = useCallback((cellId: string) => {
     startSectionRef.current(cellId)
   }, [])
+  // AQU-2186: the rename opener and the remove, same indirection and same
+  // reason — one opens the dialog whose state lives further down, and the
+  // other needs `applyCellMilestone`, which a dep array up here cannot name.
+  const renameSectionRef = useRef<(cellId: string) => void>(() => {})
+  const handleRenameSectionStable = useCallback((cellId: string) => {
+    renameSectionRef.current(cellId)
+  }, [])
+  const removeSectionRef = useRef<(cellId: string) => void>(() => {})
+  const handleRemoveSectionStable = useCallback((cellId: string) => {
+    removeSectionRef.current(cellId)
+  }, [])
 
   /**
    * Take a maintainer to the switch that locks timings, rather than flipping
@@ -9812,11 +9854,16 @@ export function ProjectWorkspace() {
     // DCS/live-linked reasons they share a menu entry with.
     onStartSection: handleStartSectionStable,
     sectionStartCellIds,
+    // AQU-2186: the pair that replaces it on a cell that already starts a
+    // section, and the map the row uses to tell those cells apart.
+    onRenameSection: handleRenameSectionStable,
+    onRemoveSection: handleRemoveSectionStable,
+    handSetSectionLabels,
     onRetimeCell: handleRetimeSubtitle,
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleStartSectionStable, sectionStartCellIds, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleStartSectionStable, sectionStartCellIds, handleRenameSectionStable, handleRemoveSectionStable, handSetSectionLabels, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -12750,8 +12797,41 @@ export function ProjectWorkspace() {
   // AQU-2185: which cell the open "Start a section here" dialog is about. The
   // id is held rather than passed through the dialog so the dialog stays a
   // name-one-thing form with no idea what it is naming.
-  const [startSectionCellId, setStartSectionCellId] = useState<string | null>(null)
-  startSectionRef.current = (cellId: string) => { setStartSectionCellId(cellId) }
+  //
+  // AQU-2186: the same slot carries a RENAME, with the name to open on. One
+  // piece of state for both because the dialog is one form and only one of it
+  // can be open; `initialName` is what tells the two apart ("" ⇒ starting).
+  //
+  // `open` is a FIELD rather than "is this null", so closing leaves the cell
+  // and the name in place. The render site keys the dialog on those two, and a
+  // key that changed as it closed would unmount the dialog mid-exit instead of
+  // letting it animate away.
+  const [sectionDialog, setSectionDialog] = useState<
+    { cellId: string; initialName: string; open: boolean } | null
+  >(null)
+  const closeSectionDialog = () => {
+    setSectionDialog((current) => (current ? { ...current, open: false } : null))
+  }
+  startSectionRef.current = (cellId: string) => {
+    setSectionDialog({ cellId, initialName: "", open: true })
+  }
+  renameSectionRef.current = (cellId: string) => {
+    // The SAME map the row's entry was drawn from — reassigned every render,
+    // so it closes over the current one. That is the name the navigator is
+    // showing, which is not always what the row's `milestoneLabel` column says
+    // (a label the derivation ignores makes no section at all). A miss means
+    // the row and the derivation have drifted, and opening a blank rename
+    // dialog would then quietly re-point the section, so it does nothing.
+    const current = handSetSectionLabels?.get(cellId)
+    if (current === undefined) return
+    setSectionDialog({ cellId, initialName: current, open: true })
+  }
+  // Removal asks nothing first. The division is derived from the label, so
+  // clearing it puts the file's own divisions back exactly as they were — see
+  // `applyCellMilestone` — and the section can be started again on the cell.
+  removeSectionRef.current = (cellId: string) => {
+    void applyCellMilestone(cellId, null, "remove")
+  }
 
   // AQU-1068: who may add and remove cells at all. ONE question, asked of the
   // project's configured tier — no rank clears it on its own, because the
@@ -18286,14 +18366,27 @@ export function ProjectWorkspace() {
         }}
       />
       {/* AQU-2185: name a navigator division of your own, starting at the cell
-          whose menu opened this. */}
+          whose menu opened this. AQU-2186: or correct the name of one.
+
+          KEYED BY WHAT IT IS NAMING, so each opening mounts a fresh field
+          seeded with `initialName` — the dialog reads that prop once, as
+          initial state, rather than letting an effect push it in and fight the
+          user's typing. */}
       <StartSectionDialog
-        open={startSectionCellId !== null}
-        onOpenChange={(open) => { if (!open) setStartSectionCellId(null) }}
+        key={sectionDialog ? `${sectionDialog.cellId}:${sectionDialog.initialName}` : "none"}
+        open={sectionDialog?.open === true}
+        mode={sectionDialog?.initialName ? "rename" : "start"}
+        initialName={sectionDialog?.initialName ?? ""}
+        onOpenChange={(open) => { if (!open) closeSectionDialog() }}
         onSubmit={(label) => {
-          const cellId = startSectionCellId
-          setStartSectionCellId(null)
-          if (cellId) void applyCellMilestone(cellId, label)
+          const pending = sectionDialog
+          closeSectionDialog()
+          if (!pending) return
+          void applyCellMilestone(
+            pending.cellId,
+            label,
+            pending.initialName ? "rename" : "start",
+          )
         }}
       />
       {/* A remote timing-mode change, acknowledged (2026-08-06). */}

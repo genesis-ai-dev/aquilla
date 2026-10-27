@@ -211,6 +211,31 @@ export interface EditorActionsContextValue {
    * derived yet, which reads as "not here" and is the safe way round.
    */
   sectionStartCellIds?: ReadonlySet<string>
+  /**
+   * AQU-2186: open the rename dialog for the hand-set section that starts at
+   * this cell. Same shape and same reason as `onStartSection` — the workspace
+   * owns the dialog and the emit, so the menu entry only says which cell.
+   */
+  onRenameSection?: (cellId: string) => void
+  /**
+   * AQU-2186: clear the hand-set section that starts at this cell. No
+   * confirmation and none wanted: the division is DERIVED from the label, so
+   * removing it puts back exactly the divisions the file had before it was set
+   * — no text, translation, recording, comment or validation is touched, and
+   * the section can be started again on the same cell.
+   */
+  onRemoveSection?: (cellId: string) => void
+  /**
+   * AQU-2186: the cells that START a hand-set section, mapped to its current
+   * name. A cell in here gets Rename/Remove; a cell in `sectionStartCellIds`
+   * but not in here gets "Start a section here".
+   *
+   * A MAP rather than a set because the rename dialog has to open on the name
+   * that is showing, and the row is where the two entries are chosen. One map
+   * for the file, like `sectionStartCellIds` beside it, so a marker landing
+   * anywhere does not hand every rendered row a fresh object.
+   */
+  handSetSectionLabels?: ReadonlyMap<string, string>
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

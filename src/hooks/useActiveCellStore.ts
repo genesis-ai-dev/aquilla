@@ -25,7 +25,7 @@ import {
   sameAudioProgressCellIds,
   type AudioProgressCellIds,
 } from "@/lib/progress/audio-progress-cells"
-import { deriveMilestoneNavigation, milestoneAcceptsHandSetSection, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
+import { deriveMilestoneNavigation, handSetSectionCellId, milestoneAcceptsHandSetSection, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -1002,6 +1002,36 @@ export class CellStore {
       for (const cellId of entry.cellIds) ids.add(cellId)
     }
     return ids
+  }
+
+  /**
+   * AQU-2186: the cells that START a hand-set section, each mapped to the name
+   * it currently carries — the cells whose menu offers **Rename section…** and
+   * **Remove section** in place of **Start a section here**.
+   *
+   * The companion of {@link getCellIdsWhereSectionMayStart}, which returns
+   * every cell a hand-set section COVERS. Only the marked one may be renamed or
+   * removed, so the two answers cannot be the same set, and a cell in both gets
+   * the rename/remove pair: starting a second section on the cell that already
+   * starts one would be a no-op that reads like a mistake.
+   *
+   * Read off the navigation index for the same reason its companion is: the
+   * answer has to be the one the navigator is showing. A row's own
+   * `milestoneLabel` is NOT that answer — a label on a cell inside a division
+   * the file supplied is ignored by the derivation (that is AQU-2190's slice),
+   * so trusting the column would offer Rename for a section nobody can see.
+   *
+   * The LABEL comes from the derived entry too, so it is the string the
+   * navigator is displaying, which is what the rename dialog must open with.
+   */
+  getHandSetSectionLabels(): ReadonlyMap<string, string> {
+    this.ensureDerivedIndexes()
+    const labels = new Map<string, string>()
+    for (const entry of this.navIndex) {
+      const cellId = handSetSectionCellId(entry)
+      if (cellId !== null) labels.set(cellId, entry.label)
+    }
+    return labels
   }
 
   getNavigationIndex(displayCellIds?: readonly string[]): readonly CellNavigationEntry[] {

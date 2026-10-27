@@ -279,12 +279,38 @@ function applyHandSetSections(
   return covered
 }
 
+/**
+ * The prefix AQU-2185 keys a hand-set division by. Stated once because both
+ * directions are needed: {@link handSetMilestone} writes the marked cell into
+ * the key, and {@link handSetSectionCellId} reads it back out.
+ */
+const HAND_SET_KEY_PREFIX = "handset:"
+
+/**
+ * AQU-2186: which cell's menu offers **Rename section…** and **Remove section**
+ * for this division — the cell a person marked, or null when the division is
+ * not a hand-set one.
+ *
+ * The inverse of the key AQU-2185 mints, and it has to be an inverse rather
+ * than "the division's first cell": the two agree today only because a label on
+ * a cell the derivation never sees produces no division at all. Reading the
+ * marker back out of the key says what is actually meant, and keeps saying it
+ * if that ever stops being true.
+ */
+export function handSetSectionCellId(
+  milestone: { key: string; kind: ImportMilestoneKind },
+): string | null {
+  if (milestone.kind !== "hand-set") return null
+  if (!milestone.key.startsWith(HAND_SET_KEY_PREFIX)) return null
+  return milestone.key.slice(HAND_SET_KEY_PREFIX.length) || null
+}
+
 function handSetMilestone(cellId: string, label: string): ImportMilestone {
   return {
     // Keyed by the cell the person marked, so the division's identity is the
     // marker rather than its name: renaming it (AQU-2186) keeps the navigator
     // selection, and two sections may legitimately share a name.
-    key: `handset:${cellId}`,
+    key: `${HAND_SET_KEY_PREFIX}${cellId}`,
     kind: "hand-set",
     // Shown EXACTLY as typed — a section name is content, not UI vocabulary, so
     // it is neither translated nor title-cased here. Not truncated either: the

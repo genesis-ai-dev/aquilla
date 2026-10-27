@@ -26,6 +26,7 @@ import {
   EyeOff,
   Blocks,
   Bookmark,
+  BookmarkX,
   BookOpenText,
   CloudOff,
   Quote,
@@ -3876,7 +3877,14 @@ function CellSourceMenu({
    *  cell for a reason that cannot change while you are in the file is
    *  furniture, not an explanation. */
   onStartSection,
-  startSectionDisabledReason,
+  /** AQU-2186: on the cell that STARTS a hand-set section, these two take the
+   *  place of the entry above — correcting a name, and taking the section
+   *  back out. Same gate, same reason string: they are the same decision as
+   *  setting it, made again. */
+  onRenameSection,
+  onRemoveSection,
+  sectionStarted,
+  sectionDisabledReason,
 }: {
   cellId: string
   onInsertBelow?: () => void
@@ -3898,7 +3906,24 @@ function CellSourceMenu({
   hiddenDisabledReason?: string | null
   /** AQU-2185: open the name dialog. Absent ⇒ not offered at all. */
   onStartSection?: () => void
-  startSectionDisabledReason?: string | null
+  /** AQU-2186: open the name dialog on the existing name. Absent ⇒ not
+   *  offered at all. */
+  onRenameSection?: () => void
+  /** AQU-2186: clear the section. Absent ⇒ not offered at all. */
+  onRemoveSection?: () => void
+  /**
+   * AQU-2186: does a hand-set section start on this cell? Chooses between the
+   * rename/remove pair and "start a section here".
+   *
+   * Its OWN flag rather than "are the two handlers here", because the DCS /
+   * live-linked pin takes the handlers away while leaving the entries to be
+   * shown disabled — and a marked cell offered a greyed-out "start a section
+   * here" would be describing an action that is not the one it has.
+   */
+  sectionStarted?: boolean
+  /** The DCS / live-linked refusal, shared by all three entries — only one of
+   *  which is ever rendered, so one reason covers the block. */
+  sectionDisabledReason?: string | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -3914,7 +3939,12 @@ function CellSourceMenu({
   // the structural block (it changes how the file is divided, not what a cell
   // says) but is gated on the source-edit permission rather than the
   // add/remove tier.
-  const sectionable = onStartSection !== undefined || Boolean(startSectionDisabledReason)
+  // AQU-2186: … and the rename/remove pair that replaces it on a marked cell.
+  // `sectionStarted` is what chooses between them: a cell that already starts a
+  // section is corrected, never re-started.
+  const sectionable = Boolean(sectionStarted)
+    || onStartSection !== undefined
+    || Boolean(sectionDisabledReason)
   // Nothing to offer at all: no menu. This is the PROJECT-level case the
   // corner already handled by not rendering — the tier does not admit you, or
   // the source is mirrored from upstream. Those never change while you are in
@@ -3979,15 +4009,35 @@ function CellSourceMenu({
           {(structural || parkable || sectionable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
             <DropdownMenuSeparator />
           )}
-          {sectionable && (
+          {sectionable && (sectionStarted ? (
+            // AQU-2186: the marked cell's pair. Rename first — correcting a
+            // typo is the common case, and putting the destructive-sounding
+            // entry second keeps it away from the pointer's resting place.
+            <>
+              <RowInsertItem
+                testId="cell-menu-rename-section"
+                icon={<Pencil className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                label={t("editor.row.renameSection")}
+                reason={sectionDisabledReason}
+                onSelect={onRenameSection}
+              />
+              <RowInsertItem
+                testId="cell-menu-remove-section"
+                icon={<BookmarkX className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                label={t("editor.row.removeSection")}
+                reason={sectionDisabledReason}
+                onSelect={onRemoveSection}
+              />
+            </>
+          ) : (
             <RowInsertItem
               testId="cell-menu-start-section"
               icon={<Bookmark className="mr-2 h-3.5 w-3.5 shrink-0" />}
               label={t("editor.row.startSection")}
-              reason={startSectionDisabledReason}
+              reason={sectionDisabledReason}
               onSelect={onStartSection}
             />
-          )}
+          ))}
           {parkable && (
             <RowInsertItem
               testId="cell-menu-toggle-hidden"
@@ -5699,7 +5749,7 @@ function EditorRow({
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
-    onStartSection, sectionStartCellIds,
+    onStartSection, sectionStartCellIds, onRenameSection, onRemoveSection, handSetSectionLabels,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -6049,10 +6099,31 @@ function EditorRow({
    * stretch the cell landed in.
    */
   const maySetSections = canPerform("source.cell.milestone.set", project.syncRole?.level ?? null)
-  const sectionMayStartHere = maySetSections && sectionStartCellIds?.has(cell.id) === true
-  const startSectionDisabledReason = canEditSource ? null : sourceReadOnlyReason
+  /**
+   * AQU-2186: does a hand-set section START here? If so this cell is corrected,
+   * not re-marked: **Rename section…** and **Remove section** take the place of
+   * **Start a section here**, which on this cell would be a no-op that reads
+   * like a mistake.
+   *
+   * `handSetSectionLabels` is keyed by the MARKED cell, while
+   * `sectionStartCellIds` holds every cell a hand-set section COVERS — so the
+   * marked cell is in both, and this check is what tells the two apart. The
+   * name comes along because the rename dialog opens on it.
+   */
+  const sectionStartsHere = maySetSections
+    && handSetSectionLabels?.has(cell.id) === true
+  const sectionMayStartHere = maySetSections
+    && !sectionStartsHere
+    && sectionStartCellIds?.has(cell.id) === true
+  const sectionDisabledReason = canEditSource ? null : sourceReadOnlyReason
   const onStartSectionHere = sectionMayStartHere && canEditSource && onStartSection
     ? () => onStartSection(cell.id)
+    : undefined
+  const onRenameSectionHere = sectionStartsHere && canEditSource && onRenameSection
+    ? () => onRenameSection(cell.id)
+    : undefined
+  const onRemoveSectionHere = sectionStartsHere && canEditSource && onRemoveSection
+    ? () => onRemoveSection(cell.id)
     : undefined
 
   // AQU-1068 item 5: the source cell's menu. The row's own reasons arrived as
@@ -8537,8 +8608,18 @@ function EditorRow({
               // the gate (absent ⇒ no entry at all), and the reason is the DCS
               // pin's, shown only to someone who would otherwise have the entry.
               onStartSection={onStartSectionHere}
-              startSectionDisabledReason={
-                sectionMayStartHere && onStartSection ? startSectionDisabledReason : null
+              // AQU-2186: the rename/remove pair, on the marked cell only.
+              onRenameSection={onRenameSectionHere}
+              onRemoveSection={onRemoveSectionHere}
+              sectionStarted={sectionStartsHere}
+              // Shown only to someone who would otherwise have one of the three
+              // entries — below the role gate, or on a cell no section may
+              // start in, there is nothing to explain.
+              sectionDisabledReason={
+                (sectionStartsHere && (onRenameSection || onRemoveSection))
+                  || (sectionMayStartHere && onStartSection)
+                  ? sectionDisabledReason
+                  : null
               }
             />
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)

@@ -279,6 +279,36 @@ describe("Swahili (AQU-2198)", () => {
   })
 })
 
+describe("Hindi", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const hi = LOCALES.find((l) => l.code === "hi")
+    expect(hi?.dir).toBe("ltr")
+    expect(hi?.englishName).toBe("Hindi")
+    // Devanagari is LTR. The menu stays the language endonym.
+    expect(hi?.nativeName).toBe("हिन्दी")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.hi ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Hindi to regional browser codes", () => {
+    expect(normalizeLocale("hi")).toBe("hi")
+    expect(normalizeLocale("hi-IN")).toBe("hi")
+    expect(detectInitialLocale(null, "hi-IN")).toBe("hi")
+  })
+  it("supplies Hindi's one/other forms for a count-governed key", () => {
+    // Hindi has two categories. `one` covers 0 and 1; the noun often does not
+    // change, so identical wording on one and other is grammatical.
+    const counted = CATALOGS.hi?.["common.cellCount"]
+    expect(counted, "common.cellCount must be count-governed in hi").toBeDefined()
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
 describe("Russian (AQU-1226)", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const ru = LOCALES.find((l) => l.code === "ru")

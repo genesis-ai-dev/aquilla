@@ -608,18 +608,21 @@ export function OverviewLaneTable({
                     </Link>
                     <Badge variant="outline">{t("org.overviewLaneTable.archivedBadge")}</Badge>
                     <LaneProgressBar lane={lane} dimmed />
-                    {/* No column headings here, so each figure names itself, as
-                        the org table's expanded lane rows do — and since
+                    {/* No column headings here, so each figure names itself,
+                        as the org table's expanded lane rows do — and since
                         AQU-2178 that is one phrase per half the language owes:
                         its text where it delivers text, its audio where it owes
                         audio. An archived language that owes neither prints no
-                        figure rather than a bare percentage of nothing. */}
+                        figure rather than a bare percentage of nothing. The two
+                        phrases are shared with those org rows (AQU-2179), so
+                        they live under org.orgHome.pct* beside the undivided
+                        "{pct}% validated" they replace. */}
                     {!laneDeliversAudioOnly(lane) && (
                       <span
                         className="text-sm tabular-nums text-muted-foreground"
                         data-testid={`overview-lane-archived-text-validated-${laneTagId(lane.lane)}`}
                       >
-                        {t("org.overviewLaneTable.pctTextValidated", {
+                        {t("org.orgHome.pctTextValidated", {
                           pct: progressPercentOfFraction(laneTextValidatedPct(lane)),
                         })}
                       </span>
@@ -629,7 +632,7 @@ export function OverviewLaneTable({
                         className="text-sm tabular-nums text-muted-foreground"
                         data-testid={`overview-lane-archived-audio-validated-${laneTagId(lane.lane)}`}
                       >
-                        {t("org.overviewLaneTable.pctAudioValidated", {
+                        {t("org.orgHome.pctAudioValidated", {
                           pct: progressPercentOfFraction(laneAudioValidatedPct(lane)),
                         })}
                       </span>

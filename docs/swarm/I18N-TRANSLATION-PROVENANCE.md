@@ -2,6 +2,32 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `ur` (Modern Standard Urdu) — AQU-2200, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> and merged with `scripts/i18n-catalog.ts import`. **No Urdu speaker has read it.**
+> The variety is Modern Standard Urdu (معیاری اردو): formal آپ, Perso-Arabic script,
+> polite imperative buttons, RTL. It was not derived from the Hindi catalog.
+> Glossary: cell → خانہ, lane → لین, changeset → مجموعۂ تبدیلی, termbase →
+> اصطلاحی ذخیرہ, back-translation → معکوس ترجمہ, source → ماخذ, target → ہدف,
+> draft → مسودہ.
+>
+> Plurals: `Intl.PluralRules("ur")` has `one` and `other`. `one` is only for 1;
+> 0 uses `other`. Identical wording on both forms is grammatical when the noun
+> does not change.
+>
+> Import report: 8,895/9,039 keys. The leaves the importer dropped were identical
+> to English on purpose (formats, product names, placeholder-only templates, and
+> the keep-English labels). Mechanical check before import: every todo leaf
+> present, no extra leaf, and no added `{placeholder}`. Non-plural leaves kept
+> the exact placeholder set. Plural leaves could drop `{count}` and did not add
+> any placeholder the English seed lacked. `common.datePlaceholder` stays
+> `June 01, 2025`. `org.projectOverview.deadlineDatePlaceholder` stays
+> `July 03, 2026`. Source text, Source audio, Target text, Target audio, Speaker,
+> Camera, Character Label, and Cast stay English when they are the product label.
+> Inside `org.membersPage.orgTable.projectAccessNote`, Contributor, Project lead,
+> Viewer, Maintainer, and Owner stay English.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

@@ -16,10 +16,11 @@ describe("locale registry", () => {
     expect(DEFAULT_LOCALE).toBe("en")
     expect(directionFor("en")).toBe("ltr")
   })
-  it("Arabic is the only RTL locale for now", () => {
+  it("Arabic and Urdu are the RTL locales", () => {
     expect(directionFor("ar")).toBe("rtl")
+    expect(directionFor("ur")).toBe("rtl")
     for (const l of LOCALES) {
-      if (l.code !== "ar") expect(l.dir).toBe("ltr")
+      if (l.code !== "ar" && l.code !== "ur") expect(l.dir).toBe("ltr")
     }
   })
   it("directionFor defaults unknown codes to LTR", () => {
@@ -213,6 +214,37 @@ describe("Spanish", () => {
         expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
       }
       expect(counted.forms.one).not.toBe(counted.forms.other)
+    }
+  })
+})
+
+describe("Urdu (AQU-2200)", () => {
+  it("is registered as a selectable RTL locale with its endonym", () => {
+    const ur = LOCALES.find((l) => l.code === "ur")
+    expect(ur?.dir).toBe("rtl")
+    expect(ur?.englishName).toBe("Urdu")
+    // One catalog, worded as Modern Standard Urdu. The menu stays the endonym.
+    expect(ur?.nativeName).toBe("اردو")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.ur ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Urdu to regional browser codes", () => {
+    expect(normalizeLocale("ur-PK")).toBe("ur")
+    expect(normalizeLocale("ur-IN")).toBe("ur")
+    expect(detectInitialLocale(null, "ur-PK")).toBe("ur")
+  })
+  it("supplies Urdu's one/other forms for a count-governed key", () => {
+    // `one` is only for 1. 0 uses `other`. The same wording on both forms is
+    // grammatical when the noun does not change.
+    const rules = new Intl.PluralRules("ur")
+    expect(rules.select(1)).toBe("one")
+    expect(rules.select(0)).toBe("other")
+    const counted = CATALOGS.ur?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      expect(counted.forms.one, "common.cellCount#one").toBeTruthy()
+      expect(counted.forms.other, "common.cellCount#other").toBeTruthy()
     }
   })
 })

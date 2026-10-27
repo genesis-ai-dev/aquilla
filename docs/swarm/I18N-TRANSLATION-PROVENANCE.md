@@ -2,6 +2,30 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `sw` (Kiswahili sanifu) — AQU-2198, 2026-10-26
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,566 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Swahili speaker has read it.** One
+> catalog, worded as Kiswahili sanifu — the written East African standard, not a
+> Kenyan or Tanzanian national dialect, not Sheng, and not Congolese Swahili
+> (Kingwana). The menu endonym stays Kiswahili. `sw-KE` and `sw-TZ` fold onto `sw`;
+> `swc` does not. Buttons use the imperative (Hifadhi, Ghairi, Futa). Glossary:
+> cell → seli, lane → njia, changeset → seti ya mabadiliko, termbase → hazina ya
+> istilahi, back-translation → tafsiri ya nyuma, source → chanzo, target → lengo,
+> draft → rasimu, project → mradi, organization → shirika.
+>
+> Import report: 8,913/9,040 keys. The leaves the importer dropped were identical to
+> English (formats, product names, placeholder-only templates, and the labels that
+> must stay English). Mechanical check before import: 9,566 leaves, 0 missing, and
+> 0 `{placeholder}` drift. Plural forms may omit `{count}` and add none.
+> `common.datePlaceholder` stays `June 01, 2025` and
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026` because the
+> date parser only accepts that en-US shape. The track labels Source text, Source
+> audio, Target text, and Target audio stay English, as do Speaker, Camera, and the
+> quoted column names Character Label, Cast, and Speaker. Role names inside
+> `org.membersPage.orgTable.projectAccessNote` stay English (Contributor, Project
+> lead, Viewer, Maintainer, Owner) so they match the role picker.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

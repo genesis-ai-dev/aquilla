@@ -1553,7 +1553,7 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttTimebaseFyi":
       "The timings will be adjusted slightly to line up with \"{fileName}\".",
     "editor.timeline.audioVttUnmeasurableFyi":
-      "The timings couldn't be checked against the subtitles — importing the file as delivered.",
+      "The timings couldn't be checked against the subtitles, so no drift correction is made.",
     "editor.timeline.audioVttReconcileNoop":
       "These are the {count} cues this file already has, on the same timings — " +
       "there is nothing to update.",

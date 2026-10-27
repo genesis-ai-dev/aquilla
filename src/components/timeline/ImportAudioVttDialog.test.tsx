@@ -298,8 +298,10 @@ describe("the timing note", () => {
     await waitFor(() =>
       expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toBeInTheDocument(),
     )
+    // AQU-2197: worded so it stays true when the frame check has fixed the
+    // times — no drift correction, rather than "as delivered".
     expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toHaveTextContent(
-      "as delivered",
+      "couldn't be checked against the subtitles, so no drift correction is made",
     )
   })
 

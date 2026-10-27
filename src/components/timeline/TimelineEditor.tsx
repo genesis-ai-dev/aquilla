@@ -2568,9 +2568,13 @@ export function TimelineEditor({
   }
 
   // ── AQU-1767: cutting takes ─────────────────────────────────────────────
-  // Free timing lays lines out end to end and computes every position, so a
-  // piece has nowhere of its own to be; cutting waits for phase 4 there.
-  const canCut = Boolean(onCutTargets) && editable && !audioFirst
+  // AQU-2213: cutting is offered on EVERY file, whichever clock it follows.
+  // Free timing held it back only until a piece had somewhere of its own to
+  // be, and it has had one since phase 4 (the programme sizes a line by all of
+  // the take's pieces and the layout lays them end to end in its slot, where
+  // the joined clip plays them) — an audio Bible book, which has no times and
+  // so can only follow its recordings, was left unable to split at all.
+  const canCut = Boolean(onCutTargets) && editable
   const bladeActive = bladeOn && canCut
   // AQU-1767 (Sam, 2026-10-14): S splits the SELECTED take at the PLAYHEAD,
   // and nothing else — "splitting should never take place where the mouse is
@@ -4293,11 +4297,9 @@ export function TimelineEditor({
             <>
               <AppTooltip
                 content={
-                  audioFirst
-                    ? t("editor.timeline.bladeFreeTiming")
-                    : bladeActive
-                      ? t("editor.timeline.bladeOnTooltip")
-                      : t("editor.timeline.bladeOffTooltip")
+                  bladeActive
+                    ? t("editor.timeline.bladeOnTooltip")
+                    : t("editor.timeline.bladeOffTooltip")
                 }
               >
                 <button

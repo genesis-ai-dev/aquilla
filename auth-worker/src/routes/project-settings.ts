@@ -79,7 +79,6 @@ import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
-  getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
   getProjectOrgPolicy,
   type ProjectOrgPolicy,
@@ -245,19 +244,17 @@ async function withOrgDefaults(
   response: ProjectSettingsResponse,
 ): Promise<ProjectSettingsResponse & {
   orgCountStructuralCells: boolean | null
-  orgAllowBulkValidateAiDrafts: boolean | null
   orgValidationCount: number | null
   orgValidationCountAudio: number | null
   orgPolicy: ProjectOrgPolicy
   visibilityFloors: VisibilityFloorsView
   orgMediaDefaults: MediaDefaults
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
+  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
-    getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
-    // here for the same reason as the two above: a project member who is not
-    // in the org cannot read the org settings route.
+    // here for the same reason as countStructuralCells: a project member who
+    // is not in the org cannot read the org settings route.
     loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
     // AQU-1771: and the rest of the org policy the project's own surfaces
     // need, for the same reason — plus the visibility floors this project
@@ -270,7 +267,6 @@ async function withOrgDefaults(
   return {
     ...response,
     orgCountStructuralCells,
-    orgAllowBulkValidateAiDrafts,
     orgValidationCount: orgThresholds.validationCount,
     orgValidationCountAudio: orgThresholds.validationCountAudio,
     orgPolicy: policy.orgPolicy,

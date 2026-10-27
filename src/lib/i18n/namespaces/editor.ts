@@ -2332,6 +2332,12 @@ export const editor = defineNamespace({
       one: "Validated {count} repeated row",
       other: "Validated {count} repeated rows",
     }, "count"),
+    // AQU-2176 — the dialog that names them.
+    "editor.repetition.validatedBody": plural({
+      one: "This row was signed off with yours. Choose it to go to it.",
+      other: "These rows were signed off with yours. Choose one to go to it.",
+    }, "count"),
+    "editor.repetition.validatedRowNumber": "Row {number}",
     "editor.repetition.unvalidatedRepeats": plural({
       one: "{count} repeated row has this text but isn't validated",
       other: "{count} repeated rows have this text but aren't validated",
@@ -2452,10 +2458,27 @@ export const editor = defineNamespace({
       },
       "editor.repetition.validated": {
         description:
-          "Toast confirming that the repeated rows were filled in and marked " +
-          "validated. Paired with an Undo action.",
+          "Title of the dialog confirming that the repeated rows were filled in " +
+          "and marked validated. The dialog lists those rows and carries Undo, " +
+          "Done, and sometimes 'Ask me each time'.",
         placeholders: {
           count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validatedBody": {
+        description:
+          "Body of that dialog, under the title. Explains that these rows were " +
+          "validated as a side effect of the row the reviewer validated " +
+          "themselves, and that each listed row is clickable and jumps the " +
+          "editor to it. 'Signed off' means 'marked as validated'.",
+      },
+      "editor.repetition.validatedRowNumber": {
+        description:
+          "Label for one listed row in that dialog: the row's position in the " +
+          "file, as the editor's left gutter numbers it. Sits beside the row's " +
+          "reference or timecode, so keep it very short.",
+        placeholders: {
+          number: "The row's number in the file, already formatted. Never empty.",
         },
       },
       "editor.repetition.unvalidatedRepeats": {

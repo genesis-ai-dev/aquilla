@@ -318,7 +318,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
-import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
+import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
@@ -6880,7 +6880,15 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${visibleTranslated ?? ""}${marker}`
+      // AQU-2206: no live editor to insert into (the dialog's text field took
+      // focus, which deactivated the cell and unmounted it), so commit the
+      // stored text ourselves — spliced at the anchor the dialog previewed, not
+      // appended to the end of the cell.
+      const next = insertFootnoteMarkerAtAnchor(
+        visibleTranslated ?? "",
+        marker,
+        pendingFootnoteAnchorRef.current,
+      )
       handleEditorCommit({ value: next, valueHtml: next })
     }
 

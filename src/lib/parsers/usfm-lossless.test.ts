@@ -555,3 +555,74 @@ describe("parseUsfmLossless — paragraphStart (D2)", () => {
     expect(doc.verses[1].paragraphStart).toBe(true)
   })
 })
+
+// ── AQU-2184: paragraphMarker ────────────────────────────────────────────────
+//
+// Intent: `paragraphStart` says a block opened; it cannot say WHICH block, and
+// `\p` vs `\q2` is the difference between prose and a poetry line indented two
+// levels on the HTML export's page. The bare marker sits BETWEEN verse spans,
+// so if it is not captured here nothing downstream can recover it.
+
+describe("parseUsfmLossless — paragraphMarker (AQU-2184)", () => {
+  it("records the marker that opened each verse's paragraph", () => {
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q2 who walks not in the counsel
+\\q1
+\\v 2 but his delight is in the law
+\\p
+\\v 3 He is like a tree
+\\m
+\\v 4 planted by the water`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses.map((v) => v.paragraphMarker)).toEqual(["q1", "q1", "p", "m"])
+  })
+
+  it("is absent on a continuation verse, which has no paragraph of its own", () => {
+    const raw = `\\id RUT
+\\c 1
+\\p
+\\v 1 Now it came to pass
+\\v 2 And the name of the man was Elimelech`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphMarker).toBe("p")
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+    expect(doc.verses[1].paragraphMarker).toBeUndefined()
+  })
+
+  it("is absent when only \\c opened the group — a chapter break has no paragraph style", () => {
+    const raw = `\\id JHN
+\\c 1
+\\v 1 In the beginning was the Word`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[0].paragraphMarker).toBeUndefined()
+  })
+
+  it("looks past a lone \\b for the marker that carries the style", () => {
+    // \\b is vertical space, not a paragraph style: `\\q1` then `\\b` then
+    // `\\v` is still a poetry line at level 1.
+    const raw = `\\id PSA
+\\c 119
+\\q1
+\\b
+\\v 9 How can a young man keep his way pure?`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[0].paragraphStart).toBe(true)
+    expect(doc.verses[0].paragraphMarker).toBe("q1")
+  })
+
+  it("an intra-verse content-bearing \\q2 does not become the NEXT verse's marker", () => {
+    const raw = `\\id PSA
+\\c 1
+\\q1
+\\v 1 Blessed is the man
+\\q2 nor stands in the way of sinners
+\\v 2 but his delight is in the law`
+    const doc = parseUsfmLossless(raw)
+    expect(doc.verses[1].paragraphStart).toBeUndefined()
+    expect(doc.verses[1].paragraphMarker).toBeUndefined()
+  })
+})

@@ -5061,6 +5061,7 @@ export function ProjectWorkspace() {
         cellsWithoutRow: 0,
         cameraDisagreements: 0,
         filledByPosition: 0,
+        matchedByWords: 0,
         distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
       })
     },
@@ -14740,6 +14741,16 @@ export function ProjectWorkspace() {
    * came from. See `useRepetitionValidation`.
    */
   const repetitionRoleLevel = project?.syncRole?.level ?? null
+  /**
+   * AQU-2176: an entry in the "these rows were signed off" dialog is a jump to
+   * that row. Repetitions are always in the OPEN file, so the editor usually
+   * has the row already; the park is for the case where it does not — the
+   * media lens, where no text editor is mounted to scroll.
+   */
+  const goToRepetitionRow = useCallback((cellId: string) => {
+    if (editorRef.current?.scrollToCellId(cellId, { flash: true })) return
+    pendingCellScrollRef.current = { cellId, flash: true, fileId: activeFileId, source: "link" }
+  }, [activeFileId])
   const {
     handleCellValidated,
     prepareBulkRepetitions,
@@ -14766,6 +14777,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     rememberPendingTargetCommit,
     afterWrite: flushRepetitionWrites,
+    goToCell: goToRepetitionRow,
   })
   // The "Batch validate text…" action is built above this point; it reaches
   // the bulk planner through this ref.

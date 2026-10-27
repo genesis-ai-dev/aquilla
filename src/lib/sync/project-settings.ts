@@ -523,13 +523,6 @@ export interface ProjectSettingsResponse {
    */
   orgMediaDefaults?: MediaDefaults
   /**
-   * Whether the org lets bulk text validation take untouched AI drafts. On
-   * this response for the same reason as the line above, and because a project
-   * member outside the org cannot read the org's settings at all. Null when
-   * the project has no org; optional on an older server.
-   */
-  orgAllowBulkValidateAiDrafts?: boolean | null
-  /**
    * AQU-1771: the rest of the org's policy this project's surfaces apply —
    * both visibility floors, assignment authority, the repetition default, the
    * export floor — carried here so a member outside the org gets the org's

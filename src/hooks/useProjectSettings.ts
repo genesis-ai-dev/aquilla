@@ -321,10 +321,6 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
-  /** The org's "Allow bulk validation of AI drafts", carried on the project's
-   *  own settings response so a member outside the org sees it too. Null when
-   *  the project has no org, or before the first response that carries it. */
-  orgAllowBulkValidateAiDrafts: boolean | null
   /**
    * AQU-1771: the org policy this project's surfaces apply, and the
    * visibility floors it enforces, from the same response. Null before the
@@ -560,7 +556,6 @@ export function useProjectSettings(
   // Either would otherwise blank the org default for a moment and flip the
   // project control's meaning while a save was in flight.
   const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
-  const [orgAllowBulkValidateAiDrafts, setOrgAllowBulkValidateAiDrafts] = useState<boolean | null>(null)
   const [orgValidationCount, setOrgValidationCount] = useState<number | null>(null)
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
@@ -572,9 +567,6 @@ export function useProjectSettings(
     setServer(next)
     if (next?.orgCountStructuralCells !== undefined) {
       setOrgCountStructuralCells(next.orgCountStructuralCells)
-    }
-    if (next?.orgAllowBulkValidateAiDrafts !== undefined) {
-      setOrgAllowBulkValidateAiDrafts(next.orgAllowBulkValidateAiDrafts)
     }
     if (next?.orgValidationCount !== undefined) setOrgValidationCount(next.orgValidationCount)
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
@@ -1121,7 +1113,6 @@ export function useProjectSettings(
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
     orgCountStructuralCells,
-    orgAllowBulkValidateAiDrafts,
     orgValidationCount,
     orgValidationCountAudio,
     orgPolicy,

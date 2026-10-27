@@ -51,6 +51,8 @@ interface Props {
   disabled?: boolean
   /** Optional id wired to a <label htmlFor="…"> in the parent. */
   inputId?: string
+  /** Element id of a visible reason, set on the input as aria-describedby. */
+  describedBy?: string
   /** Show the mode toggle (username / email). When false, the component
    * stays in `value.mode` permanently — useful for surfaces that don't
    * support email invites yet. */
@@ -99,6 +101,7 @@ export function UsernameTypeahead({
   onChange,
   disabled,
   inputId,
+  describedBy,
   showModeToggle = true,
   placeholder,
   excludedUserIds = [],
@@ -121,7 +124,7 @@ export function UsernameTypeahead({
   const containerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const { query, results, isLoading, lastFetchOk } = useUserSearch(
-    value.mode === "username" ? value.raw : "",
+    !disabled && value.mode === "username" ? value.raw : "",
     undefined,
     undefined,
     scopedSearch
@@ -291,6 +294,7 @@ export function UsernameTypeahead({
         <InputGroup className="flex-1">
           <InputGroupInput
             id={inputId}
+            aria-describedby={describedBy}
             type={value.mode === "email" ? "email" : "text"}
             inputMode={value.mode === "email" ? "email" : undefined}
             autoComplete="off"

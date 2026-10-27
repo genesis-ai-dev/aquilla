@@ -71,6 +71,7 @@ import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
+import { exportHtml } from "@/lib/export/exporters/html"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
@@ -115,7 +116,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -195,6 +196,16 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.md.label",
     ext: ".md",
     descriptionKey: "importExport.format.md.description",
+    lossy: true,
+  },
+  {
+    // AQU-2182: a USFM book as one readable, self-contained web page (chapter
+    // index, numbered verses, section headings) — what Codex's "Export as
+    // HTML" gave reviewers and printers. Only shown for files imported as USFM.
+    id: "html",
+    labelKey: "importExport.format.html.label",
+    ext: ".html",
+    descriptionKey: "importExport.format.html.description",
     lossy: true,
   },
   {
@@ -962,7 +973,8 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
+  // html is file-only for now: the whole-project zip of pages is AQU-2183.
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump", "html"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -981,7 +993,7 @@ export function ExportDialog({
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
    */
-  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
     (chapterScopeFormats as readonly string[]).includes(fmt)
 
@@ -1007,6 +1019,7 @@ export function ExportDialog({
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
       if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
+      if (f.id === "html") return activeFileType === "usfm" // AQU-2182: the readable page is a USFM book's
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1886,6 +1899,15 @@ export function ExportDialog({
             break
           case "md":
             blob = exportMarkdownStructured(filteredCells)
+            break
+          case "html":
+            // AQU-2182: scoped like the other text formats — hidden cells,
+            // validated-only and the chapter range are already applied above.
+            blob = exportHtml(filteredCells, {
+              fileName: activeFileName,
+              validatedOnly,
+              lang: targetLanguage,
+            })
             break
           case "tsv":
             blob = exportTsv(filteredCells)

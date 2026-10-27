@@ -1706,6 +1706,10 @@ export function TimelineEditor({
     target: TrackDropTarget | null
   } | null>(null)
   const clock = useTimelineClock()
+  // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
+  const playheadSecRef = useRef(0)
+  playheadSecRef.current = clock.currentSec
+  const getPlayheadSec = useCallback(() => playheadSecRef.current, [])
   const chipStripSlot = useUiSlot("media-chip-strip")
   // Media redesign, layout: the workspace's top bar, where the tools go.
   const topToolsSlot = useUiSlot("media-top-tools")
@@ -4046,6 +4050,7 @@ export function TimelineEditor({
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(RECORDING_SLOT)}
             takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -4120,6 +4125,7 @@ export function TimelineEditor({
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(slotForTrack(track.id))}
             takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}

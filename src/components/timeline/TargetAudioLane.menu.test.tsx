@@ -415,3 +415,91 @@ describe("TargetAudioLane — a take's voice on its clip (AQU-1758)", () => {
     expect(screen.queryByTestId("tl-target-c1-take-voice")).toBeNull()
   })
 })
+
+// AQU-1758 (Sam, decision 4): a ⋯ in the take's top-right corner, on hover,
+// opens the same menu as a right-click.
+describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
+  it("opens the take's menu, the same items as a right-click", async () => {
+    const makeCharacter = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        onOpenRecording={vi.fn()}
+        takeMenu={menuActions({ makeCharacter })}
+      />,
+    )
+    const more = screen.getByTestId("tl-target-c1-more")
+    expect(more).toHaveAttribute("aria-label", "More actions")
+    // To the right of the record button: the mic makes room for it.
+    expect(screen.getByTestId("tl-target-c1-record").className).toContain("right-[1.625rem]")
+    fireEvent.click(more)
+    for (const id of ["split", "rerecord", "regenerate", "make-character", "vote", "rename", "delete"]) {
+      expect(await screen.findByTestId(`tl-take-menu-${id}`), id).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByTestId("tl-take-menu-make-character"))
+    expect(makeCharacter).toHaveBeenCalledWith("c1")
+  })
+
+  it("splits at the playhead from there, when the playhead is on the take", async () => {
+    const onCutTarget = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={onCutTarget}
+        takeMenu={menuActions()}
+        getPlayheadSec={() => 11.5}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-c1-more"))
+    const split = await screen.findByTestId("tl-take-menu-split")
+    expect(split.textContent).toBe("Split at the playhead")
+    fireEvent.click(split)
+    const [cellId, audioId, atMs] = onCutTarget.mock.calls[0]
+    expect([cellId, audioId]).toEqual(["c1", TAKE])
+    expect(atMs).toBeCloseTo(1500)
+  })
+
+  it("cannot split from there when the playhead is off the take", async () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        takeMenu={menuActions()}
+        getPlayheadSec={() => 40}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-c1-more"))
+    expect(await screen.findByTestId("tl-take-menu-split")).toHaveAttribute("data-disabled")
+  })
+
+  it("gives a narrow take the same button", () => {
+    const narrow = cell({ [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 300 } })
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: narrow, kind: "take", audioId: TAKE }]}
+        onOpenRecording={vi.fn()}
+        takeMenu={menuActions()}
+      />,
+    )
+    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there.
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+    expect(screen.getByTestId("tl-target-c1-more").className).toContain("h-4 w-4")
+  })
+
+  it("is not there for someone who cannot change the take", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        editable={false}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        takeMenu={menuActions()}
+      />,
+    )
+    expect(screen.queryByTestId("tl-target-c1-more")).toBeNull()
+  })
+})

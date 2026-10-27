@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -170,6 +170,9 @@ export interface TargetAudioLaneProps {
   takeMenu?: TakeMenuActions
   /** AQU-1758: a take's voice, when it is not the line's — named on its clip. */
   takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
+  /** AQU-1758: where the playhead is on this lane's clock, read when a take's
+   *  ⋯ opens its menu (Split there splits at the playhead). */
+  getPlayheadSec?(): number
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -318,6 +321,7 @@ function TargetAudioChip({
   onCutTarget,
   takeMenu,
   takeVoice = null,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -380,6 +384,8 @@ function TargetAudioChip({
   takeMenu?: TakeMenuActions
   /** AQU-1758: the take's voice, when it is not the line's. */
   takeVoice?: TakeVoiceNote | null
+  /** AQU-1758: the playhead on this lane's clock, for the ⋯ menu's Split. */
+  getPlayheadSec?(): number
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -682,6 +688,25 @@ function TargetAudioChip({
     return { atMs, ok: canCutAt(chipTake, atMs), x }
   }
   const cutRef = useRef(false)
+  // AQU-1758: the menu opened from the ⋯, with Split at the playhead when the
+  // playhead is inside this take (null: Split is offered but cannot cut here).
+  const moreOpenRef = useRef<{ atMs: number | null } | null>(null)
+  const [menuFromMore, setMenuFromMore] = useState(false)
+  function openMenuFromMore(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const sec = getPlayheadSec?.()
+    let atMs: number | null = null
+    if (sec != null && Number.isFinite(sec) && sec > geom.start && sec < geom.end) {
+      const ms = (sec - geom.anchor) * 1000
+      if (canCutAt(chipTake, ms)) atMs = ms
+    }
+    moreOpenRef.current = { atMs }
+    const r = e.currentTarget.getBoundingClientRect()
+    chipRef.current?.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, button: 2, clientX: r.left + r.width / 2, clientY: r.bottom,
+    }))
+  }
   const canResize =
     !blade && editable && Boolean(onTrimTarget) && chip.resizable &&
     chipH >= MIN_CHIP_GRIP_H_PX &&
@@ -842,13 +867,18 @@ function TargetAudioChip({
   // nor take a new recording from here.
   const hiddenLine = isHiddenCell(cell)
   const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  // AQU-1758 (Sam, decision 4): the take's menu from a ⋯ in its top-right
+  // corner, on hover — the same menu a right-click opens. Like the other
+  // corner buttons it is one fixed size whatever the take's width, so a
+  // narrow take gets the same button; only a row too short for badges hides it.
+  const showMoreButton = hasMenu && fitsBadges
   const showRecordButton =
     !hiddenLine &&
     editable &&
     Boolean(onOpenRecording) &&
     fitsBadges &&
-    // Two corners want the width now, not one.
-    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28)
+    // Two corners want the width now, not one — and the ⋯ beside the mic.
+    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28) + (showMoreButton ? 18 : 0)
 
   async function togglePreview() {
     if (previewRef.current) {
@@ -1351,9 +1381,27 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className={chipCornerButtonClass("right")}
+          className={cn(chipCornerButtonClass("right"), showMoreButton && "right-[1.625rem]")}
         >
           <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {showMoreButton && (
+        <span
+          role="button"
+          tabIndex={0}
+          title={t("editor.rail.moreActions")}
+          aria-label={t("editor.rail.moreActions")}
+          aria-haspopup="menu"
+          data-testid={`tl-target-${testKey}-more`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={openMenuFromMore}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openMenuFromMore(e)
+          }}
+          className={chipCornerButtonClass("right")}
+        >
+          <Ellipsis className="h-2.5 w-2.5" />
         </span>
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
@@ -1465,6 +1513,14 @@ function TargetAudioChip({
     <ContextMenu
       onOpenChange={(open) => {
         if (!open) return
+        const fromMore = moreOpenRef.current
+        moreOpenRef.current = null
+        setMenuFromMore(fromMore != null)
+        if (fromMore) {
+          contextXRef.current = null
+          setMenuSplitAtMs(fromMore.atMs)
+          return
+        }
         const x = contextXRef.current
         contextXRef.current = null
         const at = x == null ? null : bladeAt(x)
@@ -1483,8 +1539,10 @@ function TargetAudioChip({
           >
             <Scissors className="h-3.5 w-3.5" />
             {/* No "S" hint: S splits the selected take at the PLAYHEAD; this
-                splits where you right-clicked (Sam, 2026-10-14). */}
-            {t("editor.timeline.takeMenuSplit")}
+                splits where you right-clicked (Sam, 2026-10-14). Opened from
+                the take's ⋯ there is no click point, so it splits at the
+                playhead (AQU-1758). */}
+            {t(menuFromMore ? "editor.timeline.takeMenuSplitAtPlayhead" : "editor.timeline.takeMenuSplit")}
           </ContextMenuItem>
         )}
         {takeMenu?.reRecord && !hiddenLine && (
@@ -1619,6 +1677,7 @@ export function TargetAudioLane({
   onCutTarget,
   takeMenu,
   takeVoiceFor,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1959,6 +2018,7 @@ export function TargetAudioLane({
             onCutTarget={onCutTarget}
             takeMenu={takeMenu}
             takeVoice={takeVoiceFor ? takeVoiceFor(chip.item.cell, chip.item.audioId) : null}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

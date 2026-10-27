@@ -998,6 +998,7 @@ export const editor = defineNamespace({
     // is keyed here.
     "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
     "editor.timeline.takeMenuMakeCharacter": "Make a character from this voice",
+    "editor.timeline.takeMenuSplitAtPlayhead": "Split at the playhead",
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
     "editor.timeline.takeMenuUnapprove": "Remove my approval",
@@ -6679,6 +6680,13 @@ export const editor = defineNamespace({
           "this take is the reference clip some cloned voice was made from, so converting it " +
           "would change what that voice sounds like. It is left as it is.",
         maxLength: 40,
+      },
+      "editor.timeline.takeMenuSplitAtPlayhead": {
+        description:
+          "Item in a take's menu when it is opened from the take's ⋯ button rather than by " +
+          "right-clicking: cuts the take in two where the playhead (the timeline's position " +
+          "line) crosses it. Greyed out when the playhead is not on this take.",
+        maxLength: 32,
       },
       "editor.timeline.takeMenuMakeCharacter": {
         description:

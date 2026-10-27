@@ -68,8 +68,7 @@ crons = ["* * * * *"]
 ENVIRONMENT_LABEL = "production"
 MONITOR_TARGETS = '''[
   {"id":"web","name":"Web app","url":"https://aquilla.app/login","expectBodyIncludes":"id=\"root\""},
-  {"id":"identity","name":"Identity API","url":"https://api.aquilla.app/identity/healthz","expectBodyIncludes":"\"ok\":true"},
-  {"id":"sync","name":"Sync API (Postgres + R2)","url":"https://api.aquilla.app/sync/health","expectBodyIncludes":"\"ok\":true"}
+  {"id":"identity","name":"Identity API","url":"https://api.aquilla.app/identity/healthz","expectBodyIncludes":"\"ok\":true"}
 ]'''
 FAILURE_THRESHOLD = "3"
 RECOVERY_THRESHOLD = "2"

@@ -53,8 +53,9 @@ the channel's notification settings, each person should choose "Only
 
 ## Deploy
 
-Deploy the sync-worker change first. Until `/sync/health` is live, the Sync
-API target answers 404 and the monitor reports it as down.
+Production initially checks web and identity only (AQU-2225). Add the Sync API
+target after its health route deploys and returns 200. Development includes the
+Sync API target but keeps its schedule disabled until that route deploys.
 
 ```bash
 cd monitor-worker
@@ -118,6 +119,17 @@ The channel ID is `1564766764347433001`.
 
 Both roles can view the channel. Neither grants server administration.
 Ryder (`ryderwishart`) belongs to both roles. Production mentions both roles.
+Its initial target list contains web and identity only. Add the following JSON
+entry to production `MONITOR_TARGETS` after QA verifies the sync health route:
+
+```json
+{
+  "id": "sync",
+  "name": "Sync API (Postgres + R2)",
+  "url": "https://api.aquilla.app/sync/health",
+  "expectBodyIncludes": "\"ok\":true"
+}
+```
 Development keeps mentions empty for routine checks. Set each person's channel
 notifications to **Only @mentions**. Recovery messages do not mention roles.
 

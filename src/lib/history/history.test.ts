@@ -12,6 +12,7 @@ import {
   resetHistoryForTests,
   setHistoryScope,
   setLaneSwitcher,
+  setFileNamer,
   setOpenFileProbe,
   undoLast,
   undoTo,
@@ -187,6 +188,24 @@ describe("edit history", () => {
     expect(log).toEqual([])
     setOpenFileProbe((id) => id === "file-1")
     expect((await undoLast())?.outcome.kind).toBe("done")
+  })
+
+  // Slice 13 evidence (Oct 27): a take renamed in Ruth's Recording tab, undone
+  // from another file, said "Open the file it was made in to undo …": the
+  // rename is recorded with its file's id and no name. The workspace's namer
+  // fills the name in; a step that brings its own name keeps it.
+  it("names a step's file from its id when the step brought no name", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    setFileNamer((id) => (id === "file-1" ? "Ruth" : null))
+    recordStep(step("c", { fileId: "file-9" }))
+    recordStep({ ...step("b", { fileId: "file-1" }), fileName: "Ruth 1" })
+    recordStep(step("a", { fileId: "file-1" }))
+    expect(historyView().undoSteps.map((s) => s.fileName)).toEqual([null, "Ruth 1", "Ruth"])
+    setOpenFileProbe((id) => id === "file-2")
+    const r = await undoLast()
+    expect(r?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
+    expect(r?.step.fileName).toBe("Ruth")
   })
 
   it("keeps one stack per project and person", async () => {

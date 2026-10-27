@@ -11,6 +11,7 @@ import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { FileSummary } from "@/lib/sync/cells-read-types"
 import type { FileStats } from "@/lib/progress/file-summary-progress"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { isHiddenTimelineFile, type FileReference } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
 import { conceptsForLaneTag } from "@/lib/terminology/rendering-lane"
@@ -635,4 +636,20 @@ export function resolveTakeLine(args: {
   // every timeline trim a silent no-op before the fortify pass.
   const cell = mergeCellsWithAudio([own], audio)[0] ?? own
   return { fileId, cell }
+}
+
+/**
+ * The name a history step gives its file (slice 13): the file a person opens.
+ * A hidden timeline companion (the audio cues, a caption track) is opened
+ * through the file it belongs to, so it is named by that one; a file this
+ * project does not list has no name.
+ */
+export function historyFileName(
+  files: ReadonlyArray<Pick<FileReference, "id" | "name" | "role" | "anchorFileId">>,
+  fileId: string,
+): string | null {
+  const file = files.find((f) => f.id === fileId)
+  if (!file) return null
+  if (!isHiddenTimelineFile(file)) return file.name
+  return file.anchorFileId ? files.find((f) => f.id === file.anchorFileId)?.name ?? null : null
 }

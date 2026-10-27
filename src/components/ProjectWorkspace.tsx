@@ -183,6 +183,7 @@ import {
   pushedRollupProgress,
   canRestructureTracks,
   resolveTakeLine,
+  historyFileName,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -272,7 +273,7 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
+import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
@@ -14792,6 +14793,14 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setOpenFileProbe((fileId) => openFileIdsRef.current.has(fileId))
     return () => setOpenFileProbe(null)
+  }, [])
+  // Slice 13: a step recorded without its file's name is named from the
+  // project's files, so "Open “Ruth” to undo …" can say which one.
+  const historyFilesRef = useRef<FileReference[]>([])
+  historyFilesRef.current = hydratedProject?.files ?? project?.files ?? []
+  useEffect(() => {
+    setFileNamer((fileId) => historyFileName(historyFilesRef.current, fileId))
+    return () => setFileNamer(null)
   }, [])
 
   // The transport speaks file seconds in dubbing and programme seconds in

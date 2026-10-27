@@ -557,6 +557,18 @@ export function setOpenFileProbe(probe: ((fileId: string) => boolean) | null): v
   openFileProbe = probe
 }
 
+/**
+ * Names a step's file from its id, for the many steps recorded without one
+ * (a take renamed or deleted from its Recording tab, a translation, a
+ * validation): without it a step held for another file could only say "Open
+ * the file it was made in", and the History panel showed no file under it
+ * (slice 13 evidence, Oct 27). The workspace registers it.
+ */
+let fileNamer: ((fileId: string) => string | null | undefined) | null = null
+export function setFileNamer(namer: ((fileId: string) => string | null | undefined) | null): void {
+  fileNamer = namer
+}
+
 // ── Recording ───────────────────────────────────────────────────────────────
 
 // Steps recorded when their action STARTED, with the action's own write still
@@ -576,7 +588,8 @@ function laneFor(key: string, input: Pick<StepInput, "kind" | "data" | "lane">):
 function toRecord<D>(input: StepInput<D>, key: string, now = Date.now()): StepRecord<D> {
   const { lane: _lane, ...rest } = input
   const lane = laneFor(key, input)
-  return { ...rest, id: newId(), at: input.at ?? now, ...(lane !== undefined ? { lane } : {}) }
+  const named = rest.fileName == null && rest.fileId && fileNamer ? fileNamer(rest.fileId) : null
+  return { ...rest, ...(named ? { fileName: named } : {}), id: newId(), at: input.at ?? now, ...(lane !== undefined ? { lane } : {}) }
 }
 
 /**
@@ -957,6 +970,7 @@ export function historyUser(): string | null {
 
 /** Tests only: forget everything (saved history included is the store's job). */
 export function resetHistoryForTests(): void {
+  fileNamer = null
   stacks.clear()
   handlers.clear()
   loaded.clear()

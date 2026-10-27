@@ -83,6 +83,11 @@ interface MemberMultiAddRowProps {
    */
   onBatchErrorMessage?: (e: unknown) => string | null;
   disabled?: boolean;
+  /**
+   * AQU-625: disables the row and shows this sentence. Used when the caller
+   * cannot see the member list, so the search field must not stay usable.
+   */
+  disabledReason?: string;
   buttonSize?: "sm" | "default";
   /**
    * AQU-1030: when set, a live sentence above Add states who will join as
@@ -115,11 +120,14 @@ export function MemberMultiAddRow({
   onAddStart,
   onBatchErrorMessage,
   disabled = false,
+  disabledReason,
   buttonSize = "default",
   grantScope,
   targetLanes = [],
 }: MemberMultiAddRowProps) {
   const { t, locale } = useI18n();
+  const searchDisabled = disabled || disabledReason != null;
+  const searchDisabledReasonId = "member-search-disabled-reason";
   // Typeahead-mode-only here. Email-mode is for project-link invites
   // (handled in MultiProjectInviteDialog / SharePanel), not direct grants —
   // granting requires a real Frontier user id, which we don't have for an
@@ -263,7 +271,7 @@ export function MemberMultiAddRow({
                   type="button"
                   aria-label={t("org.teamDetail.removeAriaLabel", { name: s.username })}
                   onClick={() => removeStaged(s.username)}
-                  disabled={adding || disabled}
+                  disabled={adding || searchDisabled}
                   className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="h-3 w-3" />
@@ -274,12 +282,18 @@ export function MemberMultiAddRow({
         </ul>
       )}
       {grantCopy && <GrantScopeNotice sentence={grantCopy.sentence} />}
+      {disabledReason && (
+        <p id={searchDisabledReasonId} className="text-xs text-muted-foreground">
+          {disabledReason}
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_max-content_max-content] sm:items-start">
         <div className="min-w-0">
           <UsernameTypeahead
             value={recipient}
             onChange={setRecipient}
-            disabled={adding || disabled}
+            disabled={adding || searchDisabled}
+            describedBy={disabledReason ? searchDisabledReasonId : undefined}
             showModeToggle={false}
             placeholder={{ username: "Aquilla username" }}
             excludedUserIds={excludedUserIds}
@@ -297,14 +311,14 @@ export function MemberMultiAddRow({
           options={roleOptions}
           value={role}
           onValueChange={setRole}
-          disabled={adding || disabled}
+          disabled={adding || searchDisabled}
           aria-label={t("common.roleLabel")}
         />
         <Button
           size={buttonSize}
           className="sm:whitespace-nowrap"
           onClick={() => void handleAdd()}
-          disabled={adding || disabled || !canAdd || !lanesChosen}
+          disabled={adding || searchDisabled || !canAdd || !lanesChosen}
         >
           {adding ? "Adding…" : grantCopy ? grantButtonLabel(t, t("common.add"), grantCopy.scopeEcho) : "Add"}
         </Button>
@@ -314,7 +328,7 @@ export function MemberMultiAddRow({
           lanes={targetLanes}
           value={laneChoice}
           onChange={setLaneChoice}
-          disabled={adding || disabled}
+          disabled={adding || searchDisabled}
         />
       )}
       {role >= ROLE.MAINTAINER && targetLanes.length > 0 && (

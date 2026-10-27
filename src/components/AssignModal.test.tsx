@@ -191,6 +191,74 @@ describe("project-member-only assignee picker (AQU-676)", () => {
   })
 })
 
+describe("nobody else on the project yet (AQU-2194)", () => {
+  // Come and See, Oct 26: a PM added a target language and opened Assign work
+  // to give it to a linguist. The linguist was in the organisation but not on
+  // the project, so (AQU-676) the picker held only the PM, with no word why.
+  const CREATOR = {
+    userId: 5,
+    username: "wendi",
+    role: { level: 600, name: "maintainer", source: "creator" as const },
+    secondarySources: [],
+  }
+  const LINGUIST_IN_ORG_ONLY = {
+    userId: 7,
+    username: "kofi",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+
+  it("says why only the caller can be picked, and links a maintainer to where people are added", () => {
+    render(<AssignModal {...BASE_PROPS} roleLevel={ROLE.MAINTAINER} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+    const link = screen.getByRole("link", { name: /add someone to this project/i })
+    expect(link.getAttribute("href")).toBe("/project/proj-1/settings/members")
+  })
+
+  it("still says it when the only others are the project's maintainers or owners", () => {
+    // The real shape: the project's creator (an org owner) is listed, the PM
+    // is a Project lead, and the linguist isn't on the project.
+    const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
+    render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
+    // A Project lead can't open the Members settings, so no link: who to ask.
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/ask a project maintainer/i)
+    expect(screen.queryByRole("link", { name: /add someone to this project/i })).toBeNull()
+  })
+
+  it("says nothing once someone else is on the project", () => {
+    render(<AssignModal {...BASE_PROPS} members={[CREATOR, ...BASE_PROPS.members, LINGUIST_IN_ORG_ONLY]} />)
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves a project with nobody on any language to the line that already says so", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        lanes={[{ legacyTag: "ha", label: "Hausa", laneId: "lane-ha" }]}
+        staffedLaneIds={[]}
+      />,
+    )
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toBeTruthy()
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves self-assign mode to its own explanation", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        roleLevel={ROLE.CONTRIBUTOR}
+        allowSelfAssignment
+        callerUserId={5}
+      />,
+    )
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled popup.
 // The shared helper drives the pointer sequence Base UI requires to commit a
 // choice (see src/test-utils/select.tsx); here we additionally hold it to

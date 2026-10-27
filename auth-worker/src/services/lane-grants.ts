@@ -16,6 +16,10 @@
 // the project with no readable target lane. All three now go through
 // applyTeamMemberLaneGrants / applyTeamProjectLaneGrants below.
 //
+// AQU-1809: changing one member's team-scope role
+// (PATCH .../groups/:groupId/members/:userId) does not open or close lanes.
+// relevelTeamMemberLaneGrants moves the rows that member already holds.
+//
 // AQU-1799 added a fourth: the Codex/GitLab account migration
 // (services/legacy-user-migration.ts) writes org, team and project
 // memberships in one transaction and wrote no grants either, so every account
@@ -37,6 +41,7 @@
 // nothing to point a grant at, and the AQU-730 backfill fills both tables
 // later.
 
+import { resolveProjectRoleViaGrants } from "../../../db/shared/access-grants"
 import { loadCurrentTargetLanes, loadTargetLaneIdentities } from "../../../db/shared/lane-visibility"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { planLaneGrants } from "../../../src/lib/lanes/grant-backfill"
@@ -334,6 +339,44 @@ export async function applyTeamMemberLaneGrants(
   const projectIds = await loadTeamProjectIds(db, groupId)
   for (const projectId of projectIds) {
     await reconcileMemberProjectLanes(db, projectId, userId, grantedBy)
+  }
+}
+
+/**
+ * AQU-1809 — a team-scope role change re-levels one member's existing grants.
+ *
+ * Called only from PATCH .../groups/:groupId/members/:userId. The lane set
+ * stays: a row that exists takes the role this member now holds, and a
+ * project with no rows is left empty. Lane scopes are not read and not
+ * written. Maintainer and above hold no rows. The statement is an update or
+ * a delete, so it cannot insert a duplicate.
+ *
+ * The level is the access_grants answer (max-wins across the direct, team
+ * and org paths, which is where a team-scope role counts). The flag-selected
+ * resolver still ignores that role; this does not change the flag.
+ */
+export async function relevelTeamMemberLaneGrants(
+  db: AquillaDb,
+  groupId: number,
+  userId: number,
+): Promise<void> {
+  const projectIds = await loadTeamProjectIds(db, groupId)
+  for (const projectId of projectIds) {
+    const role = await resolveProjectRoleViaGrants(db, { id: String(userId) }, projectId)
+    if (!role) continue
+    if (role.level >= MAINTAINER || role.level < VIEWER) {
+      await db
+        .prepare("DELETE FROM project_member_lane_roles WHERE project_id = ? AND user_id = ?")
+        .bind(projectId, userId)
+        .run()
+      continue
+    }
+    await db
+      .prepare(
+        "UPDATE project_member_lane_roles SET role_level = ? WHERE project_id = ? AND user_id = ?",
+      )
+      .bind(role.level, projectId, userId)
+      .run()
   }
 }
 

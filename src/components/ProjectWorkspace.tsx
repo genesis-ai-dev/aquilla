@@ -290,7 +290,7 @@ import {
 import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
+import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
@@ -309,7 +309,8 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
-import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow } from "@/lib/cells/quote-split-plan"
+import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
@@ -369,7 +370,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -5060,6 +5061,7 @@ export function ProjectWorkspace() {
         cellsWithoutRow: 0,
         cameraDisagreements: 0,
         filledByPosition: 0,
+        matchedByWords: 0,
         distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
       })
     },
@@ -9536,15 +9538,31 @@ export function ProjectWorkspace() {
         cellStore.rollbackOptimisticQuoteSplit(undo)
         toast.add({ type: "error", title: t(refusal) })
       } else {
-        // Narration after narration keeps the row's voice; quotations are left
-        // for casting — which is the whole point of splitting.
-        // AQU-2125: through the lookup, so a row cast by its character (no entry
-        // of its own) still hands its voice to its narration pieces.
-        const voices = voiceAssignmentsForSplits(
-          plan.splits,
-          (id) => assignedCastVoiceId(tts.settings, cellStore.getCellView(id) ?? id),
-        )
-        if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
+        // Narration after narration keeps the row's voice, on every lane that
+        // had cast it — the line's own entry, or its character's when it has
+        // none. The server writes the lanes this client cannot see; the local
+        // copy updates the ones it can, after the server accepts. Quotations
+        // are left for casting.
+        const castSplits = plan.splits
+          .filter((split) => split.sameKindAsFirst.length > 0)
+          .map((split) => {
+            const view = cellStore.getCellView(split.cellId)
+            const castName = view ? castNameOf(view) : null
+            return {
+              cellId: split.cellId,
+              sameKindAsFirst: split.sameKindAsFirst,
+              ...(castName ? { castName } : {}),
+            }
+          })
+        const jwt = jwtRef.current
+        let castFailed = false
+        if (castSplits.length > 0) {
+          const castStatus = jwt
+            ? await postSplitCastCopies(jwt, projectId, fileId, castSplits)
+            : "unsaved"
+          if (castStatus === "saved") tts.applySplitCastCopies(castSplits)
+          else castFailed = true
+        }
         const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
         const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
         toast.add({
@@ -9554,9 +9572,12 @@ export function ProjectWorkspace() {
             : t("editor.splitQuotes.doneManyToast", { rows: plan.splits.length, count: lines }),
           ...(kept > 0 ? { description: t("editor.splitQuotes.keptToast", { count: kept }) } : {}),
         })
-        // A translation kept whole now sits on changed source text: ask again
-        // which rows are stale, so its review marker shows without a reload.
-        if (kept > 0) staleSourceRefetchRef.current()
+        if (castFailed) {
+          toast.add({ type: "error", title: t("editor.splitQuotes.castFailedToast") })
+        }
+        // Every translation of a split row is pinned to the old source, so ask
+        // again which rows are stale and show the review marker without a reload.
+        if (plan.splits.some((split) => split.lanes.length > 0)) staleSourceRefetchRef.current()
       }
       revalidateCells()
     },
@@ -14720,6 +14741,16 @@ export function ProjectWorkspace() {
    * came from. See `useRepetitionValidation`.
    */
   const repetitionRoleLevel = project?.syncRole?.level ?? null
+  /**
+   * AQU-2176: an entry in the "these rows were signed off" dialog is a jump to
+   * that row. Repetitions are always in the OPEN file, so the editor usually
+   * has the row already; the park is for the case where it does not — the
+   * media lens, where no text editor is mounted to scroll.
+   */
+  const goToRepetitionRow = useCallback((cellId: string) => {
+    if (editorRef.current?.scrollToCellId(cellId, { flash: true })) return
+    pendingCellScrollRef.current = { cellId, flash: true, fileId: activeFileId, source: "link" }
+  }, [activeFileId])
   const {
     handleCellValidated,
     prepareBulkRepetitions,
@@ -14746,6 +14777,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     rememberPendingTargetCommit,
     afterWrite: flushRepetitionWrites,
+    goToCell: goToRepetitionRow,
   })
   // The "Batch validate text…" action is built above this point; it reaches
   // the bulk planner through this ref.
@@ -18041,9 +18073,11 @@ export function ProjectWorkspace() {
                 quality: t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality]),
               })
             : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
-          notice={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
-            ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
-            : undefined}
+          notice={pendingActionConfirm.id === "split-quotes" && project && openTargetLaneCount(project) >= 2
+            ? t("nav.workspaceActions.splitQuotes.multiLaneWarning")
+            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
+              ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
+              : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
@@ -18173,6 +18207,7 @@ export function ProjectWorkspace() {
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}
         hasRecordings={pendingQuoteSplit?.hasRecordings ?? false}
+        targetLaneCount={project ? openTargetLaneCount(project) : 1}
         onCancel={() => setPendingQuoteSplit(null)}
         onConfirm={() => {
           if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])

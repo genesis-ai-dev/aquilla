@@ -152,7 +152,7 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
   const callerUsername = session?.username ?? null
   const jwt = session?.jwt ?? null
 
-  const { members, isLoading, error, add, addMany, remove } = useProjectMembers(projectId)
+  const { members, isLoading, error, rosterHidden, add, addMany, remove } = useProjectMembers(projectId)
 
   // AQU-672 parity for the Share modal: offer org colleagues as checkbox rows
   // before any search fires. Eligibility mirrors the members page — org
@@ -172,9 +172,10 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
     : null
   const visibleOrgMembers = loadedRosterKey === rosterKey ? orgMembers : null
   useEffect(() => {
-    if (!jwt || rosterOrgId == null) {
+    if (!jwt || rosterOrgId == null || rosterHidden) {
       setOrgMembers(null)
       setLoadedRosterKey(null)
+      if (rosterHidden) setSuggestionsError(null)
       return
     }
     let alive = true
@@ -196,7 +197,7 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
         }
       })
     return () => { alive = false }
-  }, [jwt, rosterKey, rosterOrgId])
+  }, [jwt, rosterKey, rosterOrgId, rosterHidden])
 
   const projectGrantUserIds = useMemo(
     () => new Set(partitionMembers(members).projectMembers.map((m) => m.userId)),
@@ -236,9 +237,9 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
           : undefined,
   }))
 
-  // AQU-553: only leads+ can manage member scopes, and leads are themselves
-  // never scopable — so the fetches below are skipped entirely for anyone
-  // who wouldn't see the editor MembersPanel renders.
+  // AQU-553: only a project lead or above can manage member scopes, so the
+  // fetches below are skipped for anyone who would not see that UI.
+  // Who is readable is separate: everyone below maintainer (AQU-2054).
   const canManageScopes = callerMaxRole >= ROLE.PROJECT_LEAD
 
   const [scopeLanes, setScopeLanes] = useState<Array<{ value: string; label: string }>>([
@@ -322,10 +323,13 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
     return () => { alive = false }
   }, [canManageScopes, currentScopeKey, jwt, projectId])
 
-  // Members below project_lead are the only scopable rows (leads+ must stay
-  // unscoped). Recomputed whenever the roster changes.
+  // Lane limits apply to everyone below maintainer, project leads included
+  // (AQU-1813 / AQU-2054). Maintainers and above see every lane; the server
+  // refuses to scope them, so they are not fetched. A lead's lanes are shown
+  // here and changed in the lane Staff popover — this panel does not edit
+  // them. Recomputed whenever the roster changes.
   const scopableUserIds = useMemo(
-    () => members.filter((m) => m.role.level < ROLE.PROJECT_LEAD).map((m) => m.userId),
+    () => members.filter((m) => m.role.level < ROLE.MAINTAINER).map((m) => m.userId),
     [members],
   )
 
@@ -433,6 +437,9 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
           scopeConfig={scopeConfig}
           suggestions={suggestions}
           emptySuggestionsHint={t("projectSettings.share.emptySuggestionsHint")}
+          searchDisabledReason={
+            rosterHidden ? t("org.membersPage.rosterHiddenBody") : undefined
+          }
           grantScope={{
             kind: "project",
             projectName: grantProjectName(t, projectName),

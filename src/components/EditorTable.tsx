@@ -38,6 +38,8 @@ import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
 import { laneLanguageCodeForTag } from "@/lib/lanes/lane-language"
+import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
+import { SourceEditWarningDialog } from "@/components/SourceEditWarningDialog"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import type { CellData } from "@/hooks/useCells"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
@@ -316,7 +318,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
-import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
+import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
@@ -5800,6 +5802,19 @@ function EditorRow({
   // hold of the just-committed text (kept out of the target-only optimistic-shadow
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
+  const [sourceWarningOpen, setSourceWarningOpen] = useState(false)
+  const openTargets = openTargetLaneCount(project)
+  const toggleSourceEdit = () => {
+    if (sourceEditing) {
+      setSourceEditing(false)
+      return
+    }
+    if (openTargets >= 2) {
+      setSourceWarningOpen(true)
+      return
+    }
+    setSourceEditing(true)
+  }
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
   // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
   // stored value is the import FILENAME — an import record, not prose — so for
@@ -6865,7 +6880,15 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${visibleTranslated ?? ""}${marker}`
+      // AQU-2206: no live editor to insert into (the dialog's text field took
+      // focus, which deactivated the cell and unmounted it), so commit the
+      // stored text ourselves — spliced at the anchor the dialog previewed, not
+      // appended to the end of the cell.
+      const next = insertFootnoteMarkerAtAnchor(
+        visibleTranslated ?? "",
+        marker,
+        pendingFootnoteAnchorRef.current,
+      )
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
@@ -8444,10 +8467,19 @@ function EditorRow({
                 it costs no layout, rather than taking a slot in the context
                 line below — that line is reserved for column alignment and is
                 usually empty, so it has no room to spare. */}
+            {sourceWarningOpen && (
+              <SourceEditWarningDialog
+                onCancel={() => setSourceWarningOpen(false)}
+                onConfirm={() => {
+                  setSourceWarningOpen(false)
+                  setSourceEditing(true)
+                }}
+              />
+            )}
             <CellSourceMenu
               cellId={cell.id}
               sourceEditing={sourceEditing}
-              onToggleSourceEdit={canEditSourceForCell ? () => setSourceEditing((v) => !v) : undefined}
+              onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
               // The DCS pin used to show a padlock where the pencil sat, so the
               // affordance never silently vanished (AQU-615). It is the same
               // idea, now as the entry's own reason.

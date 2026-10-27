@@ -1,7 +1,8 @@
 // AQU-538 §3.2 — expanded per-lane detail for an OrgHome project row.
 //
-// One sub-row per lane: lane label | translated % (bar) | validated % | last
-// activity (short calendar date, datetime on hover) | actions. Actions:
+// One sub-row per lane: lane label | translated % (bar) | text validated % /
+// audio validated % (AQU-2179) | last activity (short calendar date, datetime
+// on hover) | actions. Actions:
 //   Open   → the workspace at that lane (/project/:id/editor?lane=<tag>)
 //   Assign → AssignModal pre-scoped to the lane (via OrgLaneAssignModal)
 //   Staff  → StaffLanePopover (put a person on the lane in one gesture, and
@@ -16,8 +17,11 @@ import { TableCell, TableRow } from "@/components/ui/table"
 import { Button } from "@/components/ui/button"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import {
+  laneAudioValidatedPct,
   laneDeliversAudioOnly,
+  laneOwesAudio,
   laneStartedPct,
+  laneTextValidatedPct,
   laneValidatedPct,
   type PortfolioLane,
 } from "@/lib/frontier/portfolio"
@@ -68,7 +72,14 @@ export function ProjectLaneSubRows({
             const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"), lane.name)
             // Media redesign slice 1: an Audio language reads its recorded share.
             const tpct = safePct(laneStartedPct(lane))
+            // The bar keeps the language's DONE share (AQU-2167), unchanged.
             const vpct = safePct(laneValidatedPct(lane))
+            // AQU-2179: the printed figure splits into the two halves the
+            // project overview's Languages table prints (AQU-2178), measured
+            // the same way, so the two surfaces cannot disagree about one
+            // language. A row shows only the halves its language owes.
+            const owesAudio = laneOwesAudio(lane)
+            const deliversText = !laneDeliversAudioOnly(lane)
             const lastEdit = lane.lastEditAt
             return (
               <div
@@ -99,9 +110,22 @@ export function ProjectLaneSubRows({
                   </span>
                 </span>
 
-                <span className="tabular-nums text-muted-foreground" aria-label={t("org.orgHome.pctValidated", { pct: vpct })}>
-                  {t("org.orgHome.pctValidated", { pct: vpct })}
-                </span>
+                {deliversText && (
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    data-testid={`project-lane-text-validated-${projectId}-${lane.lane}`}
+                  >
+                    {t("org.orgHome.pctTextValidated", { pct: safePct(laneTextValidatedPct(lane)) })}
+                  </span>
+                )}
+                {owesAudio && (
+                  <span
+                    className="tabular-nums text-muted-foreground"
+                    data-testid={`project-lane-audio-validated-${projectId}-${lane.lane}`}
+                  >
+                    {t("org.orgHome.pctAudioValidated", { pct: safePct(laneAudioValidatedPct(lane)) })}
+                  </span>
+                )}
 
                 <span className="min-w-[6rem] text-xs text-muted-foreground">
                   {lastEdit != null

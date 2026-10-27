@@ -189,7 +189,6 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
-  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,

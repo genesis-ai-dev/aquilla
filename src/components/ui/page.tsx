@@ -148,6 +148,7 @@ function Section({
   className,
   contentClassName,
   headerClassName,
+  titleClassName,
   children,
   ...props
 }: Omit<React.ComponentProps<"section">, "title"> & {
@@ -157,6 +158,8 @@ function Section({
   footer?: React.ReactNode
   contentClassName?: string
   headerClassName?: string
+  /** Restyle this card's own title — e.g. to match a host page's heading scale. */
+  titleClassName?: string
 }) {
   const hasHeader = Boolean(title || description || action)
   return (
@@ -173,7 +176,12 @@ function Section({
         >
           <div className="min-w-0 space-y-1">
             {title ? (
-              <h2 className="font-heading text-base leading-snug font-medium text-foreground">
+              <h2
+                className={cn(
+                  "font-heading text-base leading-snug font-medium text-foreground",
+                  titleClassName,
+                )}
+              >
                 {title}
               </h2>
             ) : null}

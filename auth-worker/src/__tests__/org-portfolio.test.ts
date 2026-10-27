@@ -1234,6 +1234,61 @@ describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount (AQU-1071)",
   })
 })
 
+/**
+ * AQU-1515 — below Maintainer, with the read wall on, the same count is only
+ * the active target lanes that caller may see. Maintainer and above still get
+ * the org-wide figure. The field stays on the response either way.
+ */
+describe("GET /api/v2/orgs/:orgId/portfolio — activeLanguageCount behind the read wall (AQU-1515)", () => {
+  it("counts only lanes a limited member can read, and every active lane for a maintainer", async () => {
+    await seedUser(1, "maintainer")
+    await seedUser(2, "translator")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1), (1, 2, 400, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Tok Pisin', 1, 1), ('pb', 'Bislama', 1, 1)",
+    ).run()
+    // The translator can open pa and holds a grant on one of its lanes. pb is
+    // a project they cannot open, so its lane is in the maintainer's org-wide
+    // count and not theirs. The archived lane is active for neither.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('pa', 2, 400)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, archived_at) VALUES
+        ('deflane1', 'pa', 'target', 'Spanish', '', NULL),
+        ('eslane01', 'pa', 'target', 'Spanish Team', 'es', NULL),
+        ('arclane1', 'pa', 'target', 'Songhai', 'son', '2026-01-01'),
+        ('frlane01', 'pb', 'target', 'French', 'fr', NULL)`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level) VALUES ('pa', 2, 'eslane01', 400)",
+    ).run()
+
+    async function countFor(username: string): Promise<number> {
+      const res = await app.request(
+        "/api/v2/orgs/1/portfolio",
+        { headers: authHeader(await jwtFor(username)) },
+        env,
+      )
+      expect(res.status).toBe(200)
+      const body = (await res.json()) as { activeLanguageCount?: number }
+      expect(body).toHaveProperty("activeLanguageCount")
+      return body.activeLanguageCount as number
+    }
+
+    env.LANE_READ_WALL = "1"
+    try {
+      expect(await countFor("translator")).toBe(1)
+      expect(await countFor("maintainer")).toBe(3)
+    } finally {
+      env.LANE_READ_WALL = undefined
+    }
+  })
+})
+
 describe("AQU-1421 portfolio lane visibility", () => {
   const sql = (q: string) => env.AQUILLA_PG.prepare(q).run()
 

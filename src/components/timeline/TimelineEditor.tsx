@@ -4013,9 +4013,14 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
             onSeek={laneProps.onSeek}
-            // SUB-53: a chip's position is computed in audio-first, so there
-            // is nothing to drag it to. Trimming stays — and re-flows.
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            // AQU-2215 (Sam, Oct 27): dragging a take is NOT withheld when the
+            // file follows its recordings any more. A chip's position is still
+            // computed there, but one part of it is a stored placement — the
+            // pause before the take (AQU-2204) — and that is what the drag
+            // changes. `TimelineLayout` inverts the gesture per mode and says
+            // which takes can hold a pause at all, so the mode question is
+            // answered in one module instead of by withholding the handler.
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4088,7 +4093,7 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}

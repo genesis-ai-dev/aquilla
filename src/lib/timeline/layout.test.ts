@@ -242,3 +242,77 @@ describe("audio-first layout — a split take", () => {
     expect(second.anchor).toBeCloseTo(1.3 - 2.5)
   })
 })
+
+// AQU-2215 (Sam, Oct 27, ETEN demo): a recorded take can still be moved when
+// the file follows its recordings. `retimeAnchorSec` is `targetGeom`'s inverse
+// for the one thing a drag may change, so what the chip was dropped on comes
+// back as the FILE-clock anchor that is actually stored.
+describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () => {
+  const placed = (offsetMs: number) => ({ durationMs: 3_000, targetOffsetMs: offsetMs }) as never
+
+  describe("dubbing — the layout's clock IS the file clock", () => {
+    const cells = [verse("v1", 0, 6, { durationMs: 11_000, trimStartMs: 500 })]
+    const layout = buildTimelineLayout("dubbing", cells, cells)
+
+    it("moves any chip, and stores the clip's sample zero a head-trim before the drop", () => {
+      expect(layout.canRetimeTarget(cells[0], attOf(cells[0]))).toBe(true)
+      expect(layout.retimeAnchorSec(cells[0], attOf(cells[0]), 4)).toBeCloseTo(3.5, 5)
+    })
+  })
+
+  describe("following the recordings — what moves is the pause before the take", () => {
+    // v1: original 0-2, take 3 s → slot 0-3. v2: original 2-4, take 3 s → slot 3-6.
+    const cells = [verse("v1", 0, 2, { durationMs: 3_000 }), verse("v2", 2, 4, { durationMs: 3_000 })]
+    const layout = buildTimelineLayout("audioFirst", cells, cells)
+
+    it("stores a pause measured from the LINE's start, not the programme second dropped on", () => {
+      // v2's line starts at programme second 3 and the file clock at 2. Dropped
+      // at 4.2 → a 1.2 s pause → anchor 3.2 on the file clock, which is the
+      // offset `targetOffsetMsFor` turns into +1200 ms.
+      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 4.2)).toBeCloseTo(3.2, 5)
+      // The programme second itself would have been stored as a 2.2 s pause —
+      // the bug this inverse exists to prevent.
+      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 4.2)).not.toBeCloseTo(4.2, 5)
+    })
+
+    it("dragging back to the line's start stores no pause at all", () => {
+      // Line start (programme 3) → the cell's own start on the file clock.
+      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 3)).toBeCloseTo(2, 5)
+      // And further left clamps there rather than going negative.
+      expect(layout.retimeAnchorSec(cells[1], attOf(cells[1]), 1)).toBeCloseTo(2, 5)
+    })
+
+    it("the pause it stores is the one the next layout draws the take at", () => {
+      const moved = [verse("v1", 0, 2, placed(1_200)), verse("v2", 2, 4, { durationMs: 3_000 })]
+      const after = buildTimelineLayout("audioFirst", moved, moved)
+      const geom = after.targetGeom(moved[0], attOf(moved[0]))!
+      expect(geom.start).toBeCloseTo(1.2, 5)
+      expect(geom.end).toBeCloseTo(4.2, 5)
+      // The line grew to hold the pause, so the line after it moved along.
+      expect(after.programme!.byCellId.get("v2")!.startSec).toBeCloseTo(4.2, 5)
+    })
+
+    it("a take of unknown length is not movable — it has no placement to store", () => {
+      const vague = [verse("v1", 0, 2, {})]
+      const l = buildTimelineLayout("audioFirst", vague, vague)
+      expect(l.canRetimeTarget(vague[0], attOf(vague[0]))).toBe(false)
+      expect(l.retimeAnchorSec(vague[0], attOf(vague[0]), 1.5)).toBeNull()
+    })
+
+    it("a split take's pieces are not movable — they sit end to end from the line's start", () => {
+      const TAKE = "audio-a-1700000000-take.wav"
+      const PIECE = "audio-a-1700000500-piece.wav"
+      const cell = {
+        id: "a", fileId: "f1", original: "", translated: "", medium: "media", startTime: 0, endTime: 2,
+        selectedAudioId: TAKE,
+        attachments: {
+          [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+          [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+        },
+      } as unknown as CellData
+      const l = buildTimelineLayout("audioFirst", [cell], [cell])
+      expect(l.canRetimeTarget(cell, cell.attachments![TAKE] as never)).toBe(false)
+      expect(l.retimeAnchorSec(cell, cell.attachments![PIECE] as never, 1.8)).toBeNull()
+    })
+  })
+})

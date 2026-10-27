@@ -4,7 +4,10 @@
 import { describe, expect, it } from "vitest"
 import {
   buildProgramme,
+  canCarryTargetLead,
   cellStartProgrammeSec,
+  leadSecForMove,
+  MIN_TARGET_LEAD_SEC,
   programmeLines,
   programmeToSource,
   programmeToTarget,
@@ -392,5 +395,89 @@ describe("buildProgramme — a pause before the take (AQU-2204)", () => {
     expect(prog.slots[0].targetLeadSec).toBeUndefined()
     expect(prog.slots[1].targetLeadSec).toBeUndefined()
     expect(prog.slots[0].slotLenSec).toBeCloseTo(3, 5)
+  })
+})
+
+// AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
+// move a recorded take around in the timeline." Following the recordings, what
+// moves is the PAUSE before the take, inside its own line.
+describe("moving a take inside its line (AQU-2215)", () => {
+  const placed = (offsetMs: number) => ({ durationMs: 3_000, targetOffsetMs: offsetMs }) as never
+  const slotOf = (cells: CellData[], id: string) => buildProgramme(cells).byCellId.get(id)!
+
+  describe("leadSecForMove", () => {
+    // v1's slot starts at 0 and v2's at 3 (v1: original 0-2, take 3 s).
+    const cells = [verse("v1", 0, 2, { durationMs: 3_000 }), verse("v2", 2, 4, { durationMs: 3_000 })]
+
+    it("is how far past its line's start the take was dragged — not the programme second", () => {
+      const slot = slotOf(cells, "v2")
+      expect(slot.startSec).toBeCloseTo(3, 5)
+      // Dropped at programme second 4.2 on a line that starts at 3 → a 1.2 s
+      // pause. Storing 4.2 would put the take on a second that nothing stores.
+      expect(leadSecForMove(slot, 4.2)).toBeCloseTo(1.2, 5)
+    })
+
+    it("shortens back to no pause at all on the left", () => {
+      const slot = slotOf(cells, "v2")
+      expect(leadSecForMove(slot, slot.startSec)).toBe(0)
+      // Past the line's start: a take never begins before the line it performs.
+      expect(leadSecForMove(slot, slot.startSec - 5)).toBe(0)
+    })
+
+    it("reads a nudge under the pause threshold as no pause, exactly as the layout does", () => {
+      const slot = slotOf(cells, "v1")
+      expect(leadSecForMove(slot, MIN_TARGET_LEAD_SEC / 2)).toBe(0)
+      expect(leadSecForMove(slot, MIN_TARGET_LEAD_SEC)).toBeCloseTo(MIN_TARGET_LEAD_SEC, 5)
+    })
+
+    it("round-trips: the pause a drag stores is the pause the next build reads back", () => {
+      const moved = [verse("v1", 0, 2, placed(1_400)), verse("v2", 2, 4, { durationMs: 3_000 })]
+      const prog = buildProgramme(moved)
+      expect(prog.slots[0].targetLeadSec).toBeCloseTo(1.4, 5)
+      // The line grew to hold the pause, so the line after it moved along.
+      expect(prog.slots[0].slotLenSec).toBeCloseTo(4.4, 5)
+      expect(prog.slots[1].startSec).toBeCloseTo(4.4, 5)
+    })
+  })
+
+  describe("canCarryTargetLead — only a take whose pause will be read back is movable", () => {
+    it("a timed line with a measured take can hold one", () => {
+      const cells = [verse("v1", 0, 2, { durationMs: 3_000 })]
+      expect(canCarryTargetLead(cells[0], slotOf(cells, "v1"))).toBe(true)
+    })
+
+    it("a take of unknown length cannot — it has no window to place", () => {
+      const cells = [verse("v1", 0, 2, {})]
+      expect(canCarryTargetLead(cells[0], slotOf(cells, "v1"))).toBe(false)
+    })
+
+    it("a split take cannot — its pieces sit end to end from the line's start", () => {
+      const TAKE = "audio-a-1700000000-take.wav"
+      const PIECE = "audio-a-1700000500-piece.wav"
+      const cells = [
+        verse("a", 0, 2, undefined, {
+          selectedAudioId: TAKE,
+          attachments: {
+            [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+            [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+            [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+          },
+        } as unknown as Partial<CellData>),
+      ]
+      const slot = slotOf(cells, "a")
+      expect(slot.targetPieces).toBeDefined()
+      expect(canCarryTargetLead(cells[0], slot)).toBe(false)
+    })
+
+    it("a line with no times of its own cannot — there is nothing to measure from", () => {
+      const takeId = "audio-u-1700000000-take.webm"
+      const cell = {
+        id: "u", fileId: "f1", original: "", translated: "", medium: "text",
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_000 } },
+      } as unknown as CellData
+      const prog = buildProgramme([cell], { standInLenSec: () => 2 })
+      expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(false)
+    })
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { MediaAreaStrip, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
+import { layoutGlyphRects, MediaAreaStrip, MediaLayoutGlyph, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
 import { filmLabelFor, MediaFilmButton } from "./MediaTopBar"
 import { dockView, foldRegion, movePanel, startDockLayout, type DockLayout } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
@@ -11,6 +11,7 @@ function fakeDock(layout: DockLayout, extra: Partial<MediaDock> = {}): MediaDock
     view: dockView(layout, { film: true }),
     fullRegion: null,
     canRestore: false,
+    leftOpen: true,
     activate: vi.fn(),
     toggleFull: vi.fn(),
     fold: vi.fn(),
@@ -95,5 +96,53 @@ describe("the top bar's Film button", () => {
     fireEvent.click(screen.getByTestId("top-film"))
     fireEvent.click(screen.getByTestId("top-film-hide"))
     expect(onHide).toHaveBeenCalled()
+  })
+})
+
+describe("the layout glyph on Move to <area>", () => {
+  const FILM = { film: true }
+  const roles = (rects: ReturnType<typeof layoutGlyphRects>) => Object.fromEntries(rects.map((r) => [r.region, r.role]))
+
+  it("draws the left panel, the timeline and both areas, the destination filled, the panel's own area dotted", () => {
+    render(<MediaLayoutGlyph view={dockView(startDockLayout(), FILM)} leftOpen target="ll" current="lr" />)
+    const glyph = screen.getByTestId("layout-glyph")
+    const rect = (region: string) => glyph.querySelector(`[data-region="${region}"]`)!
+    expect(Array.from(glyph.querySelectorAll("rect")).map((r) => r.getAttribute("data-region"))).toEqual(["left", "tl", "ll", "lr"])
+    expect(rect("ll")).toHaveAttribute("fill", "currentColor")
+    expect(rect("lr")).toHaveAttribute("fill", "none")
+    expect(rect("lr")).toHaveAttribute("stroke-dasharray")
+    expect(rect("tl")).not.toHaveAttribute("stroke-dasharray")
+    // Bottom left sits left of bottom right, both under the timeline.
+    expect(Number(rect("ll").getAttribute("x"))).toBeLessThan(Number(rect("lr").getAttribute("x")))
+    expect(Number(rect("ll").getAttribute("y"))).toBeGreaterThan(Number(rect("tl").getAttribute("y")))
+    expect(glyph).toHaveAttribute("aria-hidden", "true")
+  })
+
+  it("leaves out a folded timeline: the areas take its height", () => {
+    const rects = layoutGlyphRects(dockView(foldRegion(startDockLayout(), FILM, "tl"), FILM), true, "ll", "lr")
+    expect(rects.map((r) => r.region)).toEqual(["left", "ll", "lr"])
+    expect(rects.find((r) => r.region === "ll")!.y).toBe(3)
+  })
+
+  it("still draws a destination that is folded or empty now, since moving there opens it", () => {
+    // Both panels as tabs bottom left: bottom right does not exist yet.
+    const tabs = dockView(movePanel(startDockLayout(), "text", "ll"), FILM)
+    expect(roles(layoutGlyphRects(tabs, true, "lr", "ll"))).toEqual({ left: "plain", tl: "plain", ll: "current", lr: "target" })
+    // The film folded: moving the text there draws it, filled.
+    const folded = dockView(foldRegion(startDockLayout(), FILM, "ll"), FILM)
+    expect(roles(layoutGlyphRects(folded, true, "ll", "lr")).ll).toBe("target")
+  })
+
+  it("narrows the left strip while the left panel is folded to its icons", () => {
+    const v = dockView(startDockLayout(), FILM)
+    expect(layoutGlyphRects(v, true, "ll", "lr")[0].w).toBeGreaterThan(layoutGlyphRects(v, false, "ll", "lr")[0].w)
+  })
+
+  it("the menu item's name stays its text", () => {
+    render(<MediaAreaStrip dock={fakeDock(startDockLayout())} area="lr" />)
+    fireEvent.click(screen.getByTestId("dock-more-lr"))
+    const item = screen.getByTestId("dock-move-lr")
+    expect(item).toHaveAccessibleName("Move to Bottom left")
+    expect(item.querySelector('[data-testid="layout-glyph"] [data-region="ll"]')).toHaveAttribute("data-role", "target")
   })
 })

@@ -10,7 +10,7 @@
 // Panels button above the view is the way back.
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { ArrowRightLeft, Expand, FileText, Film, Minus, MoreHorizontal, Shrink } from "lucide-react"
+import { Expand, FileText, Film, Minus, MoreHorizontal, Shrink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -27,7 +27,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
 import { cn } from "@/lib/utils"
-import type { DockArea, DockPanel, DockRegion } from "./media-dock-layout"
+import { DOCK_AREAS, type DockArea, type DockPanel, type DockRegion, type DockView } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
 
 /** The keys, as this machine writes them. */
@@ -180,6 +180,94 @@ function LayoutItems({ controls, foldLabel, region }: { controls: RegionLayoutCo
   )
 }
 
+/** One rectangle of the layout glyph, in a 24 × 24 box like a lucide icon's. */
+export interface LayoutGlyphRect {
+  region: "left" | DockRegion
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Where the panel would go (filled), where it is now (dotted), or neither. */
+  role: "target" | "current" | "plain"
+}
+
+/**
+ * The media view as it is laid out right now, in miniature (Sam, Oct 27): the
+ * left panel's strip (wider while it is open), the timeline across the top
+ * unless it is folded, and the areas below, each where it really sits. Folded
+ * or empty areas are left out, as they take no room, except the one the panel
+ * would move to — moving there opens it — and the one it is in now.
+ */
+export function layoutGlyphRects(
+  view: DockView,
+  leftOpen: boolean,
+  target: DockArea,
+  current: DockArea | null,
+): LayoutGlyphRect[] {
+  const leftW = leftOpen ? 5 : 3
+  const rects: LayoutGlyphRect[] = [{ region: "left", x: 2, y: 3, w: leftW, h: 18, role: "plain" }]
+  const x0 = 2 + leftW + 2
+  const x1 = 22
+  const tl = view.isOpen("tl")
+  if (tl) rects.push({ region: "tl", x: x0, y: 3, w: x1 - x0, h: 7, role: "plain" })
+  const y0 = tl ? 12 : 3
+  const areas = DOCK_AREAS.filter((a) => view.isOpen(a) || a === target || a === current)
+  const gap = 2
+  const w = (x1 - x0 - gap * (areas.length - 1)) / areas.length
+  areas.forEach((a, i) =>
+    rects.push({
+      region: a,
+      x: x0 + i * (w + gap),
+      y: y0,
+      w,
+      h: 21 - y0,
+      role: a === target ? "target" : a === current ? "current" : "plain",
+    }),
+  )
+  return rects
+}
+
+/** The icon on "Move to <area>": the layout, the destination filled. Drawn in
+ *  the menu's own icon colour and stroke, so it sits beside the others. */
+export function MediaLayoutGlyph({
+  view,
+  leftOpen,
+  target,
+  current,
+}: {
+  view: DockView
+  leftOpen: boolean
+  target: DockArea
+  current: DockArea | null
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinejoin="round"
+      aria-hidden="true"
+      data-testid="layout-glyph"
+    >
+      {layoutGlyphRects(view, leftOpen, target, current).map((r) => (
+        <rect
+          key={r.region}
+          data-region={r.region}
+          data-role={r.role}
+          x={r.x}
+          y={r.y}
+          width={r.w}
+          height={r.h}
+          rx={1.5}
+          fill={r.role === "target" ? "currentColor" : "none"}
+          strokeDasharray={r.role === "current" ? "1.5 2" : undefined}
+        />
+      ))}
+    </svg>
+  )
+}
+
 /**
  * An area's ⋯: where the panel is, Move to the other area, Full screen, Fold,
  * and the note that a tab can also be dragged or double-clicked.
@@ -200,7 +288,7 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
             {t("editor.dock.menuHeading", { panel: names.panel(panel), area: names.area(area) })}
           </DropdownMenuLabel>
           <DropdownMenuItem onClick={() => dock.move(panel, other)} data-testid={`dock-move-${area}`}>
-            <ArrowRightLeft />
+            <MediaLayoutGlyph view={dock.view} leftOpen={dock.leftOpen} target={other} current={area} />
             {t("editor.dock.moveTo", { area: names.area(other) })}
           </DropdownMenuItem>
           <LayoutItems controls={controls} foldLabel={t("editor.dock.foldArea")} region={area} />

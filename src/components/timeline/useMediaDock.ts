@@ -631,6 +631,8 @@ export function useMediaDock(input: UseMediaDockInput) {
     noteLayoutSettled,
     panelsOpen,
     setPanelsOpen,
+    /** The left panel is open beside the view (not folded to its icons). */
+    leftOpen: left.isRail && left.tab !== null,
   }
 }
 

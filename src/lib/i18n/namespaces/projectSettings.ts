@@ -1199,6 +1199,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.members.filterProjectGrants": "Project grants",
     "projectSettings.members.filterViaOrg": "Via organization",
     "projectSettings.members.removeDirectAccess": "Remove direct access",
+    "projectSettings.members.removeDirectAccessDescription":
+      "This removes {username}'s direct {role} membership on this project. Access through the organization, a team, or as the project creator stays.",
     "projectSettings.members.revokeAllAccess": "Revoke all access…",
     "projectSettings.members.noActionsAvailable": "No actions available",
     "projectSettings.members.roleChangeNeedsRole":
@@ -2812,6 +2814,17 @@ export const projectSettings = defineNamespace({
         description:
           "Accessible name of the numeric minutes input beside the auto-sync toggle — " +
           "no separate visible label, just the enable switch, this input, and a trailing 'min' unit.",
+      },
+      "projectSettings.members.removeDirectAccessDescription": {
+        description:
+          "Body of the confirm dialog opened by Remove direct access on a project " +
+          "Members row. Confirming deletes only that person's direct project " +
+          "membership. Access they still have through the organization, a team, or " +
+          "as the project creator stays. This dialog does not revoke those paths.",
+        placeholders: {
+          username: "The member's username — not translated.",
+          role: "The direct membership's role name, already localized (for example 'Project lead').",
+        },
       },
       "projectSettings.members.actionsForRow": {
         description:

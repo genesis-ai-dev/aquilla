@@ -86,7 +86,7 @@
   },
   "src/components/ProjectSettings/MembersSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 3
     }
   },
   "src/components/ProjectSettings/MondayIntegrationSection.tsx": {

@@ -74,7 +74,11 @@ export function LaneDeliversSelect({
       >
         <SelectValue placeholder={t("projectSettings.languages.deliversChoose")} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent
+        alignItemWithTrigger={false}
+        style={{ maxHeight: "none" }}
+        className="[&_[data-slot=select-scroll-down-button]]:hidden [&_[data-slot=select-scroll-up-button]]:hidden"
+      >
         {LANE_DELIVERS.map((option) => (
           <SelectItem key={option} value={option}>
             {laneDeliversLabel(option, t)}

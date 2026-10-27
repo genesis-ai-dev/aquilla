@@ -91,5 +91,7 @@ environment's `[vars]` block in `auth-worker/wrangler.toml`. The secret stays
 ## CPU-only host
 
 On a host with no GPU, set `OMNI_CTC_DEVICE=cpu` (the default without CUDA).
-ZS is off, so ZS requests go to Modal. See
+ZS is off, so ZS requests go to Modal. On Blackfoot, CTC 300M was both
+faster and more accurate than 1B on CPU, and int8 saved 10–20%, so set
+`OMNI_CTC_MODEL=omniASR_CTC_300M OMNI_CTC_QUANTIZE=int8`. See
 `docs/benchmarks/omni-asr-cpu.md` for CPU speed and accuracy.

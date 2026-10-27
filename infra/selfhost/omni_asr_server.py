@@ -69,7 +69,8 @@ def quantize_int8(model: torch.nn.Module) -> torch.nn.Module:
                 if child.bias is not None:
                     lin.bias = child.bias
                 setattr(parent, name, lin)
-    return torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+    # inplace: the default deep copy fails on the weight-normed positional conv.
+    return torch.ao.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
 
 
 def _greedy_text(aligner: _Aligner, emis: torch.Tensor) -> str:

@@ -259,6 +259,7 @@ export async function replaceMemberLaneScopes(
 
 /** Lane-grant rows stop at contributor. A team may still confer project lead. */
 const LANE_GRANT_CAP = 400
+const PROJECT_LEAD = 500
 const MAINTAINER = 600
 const VIEWER = 100
 
@@ -324,9 +325,10 @@ export async function saveTeamLaneSelection(
  * AQU-1801 / AQU-1813 — grants for someone just added to a team.
  *
  * Each attached project contributes its stored lanes. Two teams union. A
- * direct membership keeps the lanes it already had and gains the team's.
- * Someone with no direct membership is rewritten to the teams they are on
- * now, which drops a lane scope left behind by an earlier removal.
+ * direct member who is not lane-scoped keeps the lanes they had and gains
+ * the team's. A member below project lead who is lane-scoped keeps exactly
+ * those lanes (AQU-1818). Someone with no direct membership is rewritten to
+ * the teams they are on now, which drops rows an earlier membership left.
  */
 export async function applyTeamMemberLaneGrants(
   db: AquillaDb,
@@ -384,6 +386,12 @@ export async function relevelTeamMemberLaneGrants(
  * Changing the team's role does not change which lanes are checked. A lane
  * grant is capped at contributor: the attachment may still confer project
  * lead, and that role is what the management actions read.
+ *
+ * AQU-1818: a lane scope with no direct membership is an earlier membership
+ * that has ended. Those rows are not the member's current lanes, so the
+ * team attachment replaces them. A grant set with no scope is left as it is
+ * and only re-levelled — that is a current team member whose lanes are
+ * narrower than the project's (AQU-1801).
  */
 export async function applyTeamProjectLaneGrants(
   db: AquillaDb,
@@ -399,13 +407,12 @@ export async function applyTeamProjectLaneGrants(
     const userId = Number(row.user_id)
     const role = await resolveProjectRoleShared(db, { id: String(userId) }, projectId)
     if (!role || role.level >= MAINTAINER || role.level < VIEWER) continue
-    await applyDirectAddLaneGrants(
-      db,
-      projectId,
-      userId,
-      Math.min(role.level, LANE_GRANT_CAP),
-      grantedBy,
-    )
+    const level = Math.min(role.level, LANE_GRANT_CAP)
+    if (await endedMembershipLeftScopes(db, projectId, userId)) {
+      await replaceLaneRows(db, projectId, userId, await teamLaneAccess(db, userId, projectId), level, grantedBy)
+      continue
+    }
+    await applyDirectAddLaneGrants(db, projectId, userId, level, grantedBy)
   }
 }
 
@@ -427,7 +434,32 @@ export async function reconcileMemberProjectLanes(
     await replaceLaneRows(db, projectId, userId, access, level, grantedBy)
     return
   }
+  // A current member below project lead who already has a lane scope keeps
+  // exactly those lanes. A team path must not widen them, and must not delete
+  // the scope. Project leads and unscoped members fall through.
+  if (role.level < PROJECT_LEAD && (await loadMemberLaneScopes(db, projectId, userId)).length > 0) {
+    return
+  }
   await unionTeamLanesIntoDirect(db, projectId, userId, access, level, grantedBy)
+}
+
+/**
+ * Lane scopes belong to a direct membership. Once that row is gone, any
+ * scope still stored is an earlier membership, unless an explicit team
+ * attachment wrote those exact lanes for the person it still reaches.
+ */
+async function endedMembershipLeftScopes(
+  db: AquillaDb,
+  projectId: string,
+  userId: number,
+): Promise<boolean> {
+  if (await hasDirectMembership(db, projectId, userId)) return false
+  const scopes = await loadMemberLaneScopes(db, projectId, userId)
+  if (scopes.length === 0) return false
+  const access = await teamLaneAccess(db, userId, projectId)
+  if (!access.explicit) return true
+  const team = new Set(access.laneIds)
+  return scopes.length !== team.size || scopes.some((id) => !team.has(id))
 }
 
 /** After a team is attached or its checks change, rewrite every member. */

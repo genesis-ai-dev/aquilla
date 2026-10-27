@@ -312,3 +312,28 @@ describe("resolveFileTimingMode — nothing to follow (AQU-2204, board 24)", () 
     ).toBe("dubbing")
   })
 })
+
+// AQU-2204 (Sam, Oct 27): board 23's LOTE row — "go with your recommendation".
+describe("resolveFileTimingMode — where each file starts (AQU-2204, board 23)", () => {
+  it("a new subtitle file with no film starts on Follows source", () => {
+    expect(resolveFileTimingMode({ type: "vtt" } as never, null)).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "srt", coreMediaUrl: null } as never, { audioTimingMode: "dubbing" } as never)).toBe("dubbing")
+  })
+
+  it("a new file with an audio cue file and no film starts on Follows source", () => {
+    expect(resolveFileTimingMode({ type: "vtt" } as never, null, { hasAudioCues: true })).toBe("dubbing")
+  })
+
+  it("a file on Free timing today keeps its choice and reads Follows recordings", () => {
+    expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" } as never, null)).toBe("audioFirst")
+  })
+
+  it("a file with a linked film only follows its source, whatever it stored", () => {
+    expect(
+      resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst", coreMediaUrl: "https://x.test/f.mp4" } as never, null),
+    ).toBe("dubbing")
+    expect(
+      resolveFileTimingMode({ type: "mp4", timingMode: "audioFirst", coreMediaUrl: "https://youtu.be/x" } as never, null),
+    ).toBe("dubbing")
+  })
+})

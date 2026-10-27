@@ -1184,6 +1184,11 @@ export function resolveFileTimingMode(
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
   if (opts?.timedToLinkedVideo) return "dubbing"
+  // AQU-2204 (Sam, Oct 27 — board 23's LOTE row): a NEW file with no linked
+  // film starts on "Follows source", subtitle and cue files included. A LOTE
+  // sermon's VTT and a Come and See audio-only project's base VTT look the same
+  // here, so neither is guessed into following its recordings; a lead switches
+  // a new LOTE file once. Files that chose Free timing keep that choice above.
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization

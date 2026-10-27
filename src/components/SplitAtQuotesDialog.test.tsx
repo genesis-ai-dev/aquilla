@@ -14,12 +14,13 @@ import { SplitAtQuotesDialog } from "./SplitAtQuotesDialog"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 
-function renderDialog(pieces: QuoteSplitPiece[], onConfirm = vi.fn()) {
+function renderDialog(pieces: QuoteSplitPiece[], onConfirm = vi.fn(), targetLaneCount = 1) {
   render(
     <I18nProvider>
       <SplitAtQuotesDialog
         pieces={pieces}
         hasRecordings={false}
+        targetLaneCount={targetLaneCount}
         onConfirm={onConfirm}
         onCancel={vi.fn()}
       />
@@ -74,5 +75,23 @@ describe("SplitAtQuotesDialog preview text (AQU-2089)", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1)
     expect(pieces[1].text).toBe(raw)
     expect(pieces[0].text).toBe("\\p A voice calling,")
+  })
+
+  it("warns about the other languages only when the project has two or more target lanes", () => {
+    const pieces: QuoteSplitPiece[] = [
+      { kind: "narration", text: "She said," },
+      { kind: "quote", text: "Come here." },
+    ]
+    const { unmount } = render(
+      <I18nProvider>
+        <SplitAtQuotesDialog pieces={pieces} hasRecordings={false} targetLaneCount={1} onConfirm={vi.fn()} onCancel={vi.fn()} />
+      </I18nProvider>,
+    )
+    expect(screen.queryByTestId("split-quotes-lane-warning")).toBeNull()
+    unmount()
+    renderDialog(pieces, vi.fn(), 2)
+    const warning = screen.getByTestId("split-quotes-lane-warning")
+    expect(warning).toHaveTextContent(/all lanes/i)
+    expect(warning.textContent ?? "").not.toMatch(/\d/)
   })
 })

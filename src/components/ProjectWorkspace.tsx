@@ -408,9 +408,9 @@ import { useFileFilterFocus } from "@/hooks/useFileFilterFocus"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import {
   computeRightRailSurfaces,
-  hasRightRailEdge,
-  hasRightRailPanel,
+  type RightRailPanel,
 } from "@/lib/editor/right-rail-panels"
+import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
@@ -15848,6 +15848,23 @@ export function ProjectWorkspace() {
     verseResourcesOpen,
     whosWhoOpen,
   })
+  // The rail's buttons act like tabs: opening one panel closes the other two,
+  // and `null` closes whichever is open.
+  const selectRightRailPanel = (panel: RightRailPanel | null) => {
+    const next = {
+      bibles: panel === "bibles",
+      resources: panel === "resources",
+      people: panel === "people",
+    }
+    setParallelBiblesOpen(next.bibles)
+    setVerseResourcesOpen(next.resources)
+    setWhosWhoOpen(next.people)
+    if (projectId) {
+      writeParallelBiblesOpen(projectId, next.bibles)
+      writeVerseResourcesOpen(projectId, next.resources)
+      writeWhosWhoOpen(projectId, next.people)
+    }
+  }
 
   return (
     <EditorScrollProvider>
@@ -17238,7 +17255,7 @@ export function ProjectWorkspace() {
         )}
         aside={(() => {
           const hasRightAside =
-            hasRightRailPanel(rightRail) ||
+            rightRail.openPanel !== null ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -17253,7 +17270,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {rightRail.biblesPanel && (
+              {rightRail.openPanel === "bibles" && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
@@ -17267,7 +17284,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {rightRail.resourcesPanel && (
+              {rightRail.openPanel === "resources" && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
@@ -17283,7 +17300,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-1689: Who's Who, the passage's cast — open panel only;
                   its "People" edge tab rides in asideEdge. */}
-              {rightRail.peoplePanel && (
+              {rightRail.openPanel === "people" && (
                 <WhosWhoSidebar
                   project={project!}
                   fileId={activeFile?.id ?? null}
@@ -17467,57 +17484,18 @@ export function ProjectWorkspace() {
             </>
           )
         })()}
-        asideEdge={(() => {
-          // AQU-461: collapsed tabs stack here — bibles, verse resources and
-          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
-          // AQU-1316: both flags come from `rightRail`, the same value `aside`
-          // reads, so a tab can never sit beside its own open panel.
-          if (!hasRightRailEdge(rightRail)) return null
-          return (
-            <>
-              {rightRail.biblesEdge && (
-                <ParallelBiblesSidebar
-                  key={`${activeFile!.id}-edge`}
-                  trackedRef={trackedCellRef}
-                  open={false}
-                  onToggle={() => {
-                    const next = !parallelBiblesOpen
-                    setParallelBiblesOpen(next)
-                    if (projectId) writeParallelBiblesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.resourcesEdge && (
-                <VerseResourcesSidebar
-                  key={`${activeFile!.id}-resources-edge`}
-                  projectId={project!.id}
-                  trackedRef={trackedCellRef}
-                  getJwt={() => jwtRef.current}
-                  open={false}
-                  onToggle={() => {
-                    const next = !verseResourcesOpen
-                    setVerseResourcesOpen(next)
-                    if (projectId) writeVerseResourcesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.peopleEdge && (
-                <WhosWhoSidebar
-                  project={project!}
-                  fileId={activeFile?.id ?? null}
-                  trackedRef={trackedCellRef}
-                  sourceLanguage={activeSourceLanguage}
-                  open={false}
-                  onToggle={() => {
-                    const next = !whosWhoOpen
-                    setWhosWhoOpen(next)
-                    if (projectId) writeWhosWhoOpen(projectId, next)
-                  }}
-                />
-              )}
-            </>
-          )
-        })()}
+        asideEdge={
+          // The Bibles / Helps / People buttons share one rail and switch
+          // between their panels, so at most one is open (AQU-1316's
+          // panel-or-tab rule now lives in `rightRail.openPanel`).
+          rightRail.tabs.length > 0 ? (
+            <ScriptureSideRail
+              tabs={rightRail.tabs}
+              openPanel={rightRail.openPanel}
+              onSelect={selectRightRailPanel}
+            />
+          ) : null
+        }
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on

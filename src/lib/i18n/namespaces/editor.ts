@@ -1942,6 +1942,8 @@ export const editor = defineNamespace({
     "editor.audioValidation.validateThisPiece": "Validate this piece",
     "editor.audioValidation.ariaPiecesOneByOne":
       "You have validated {done} of {total} pieces — {ref}. Open the list to validate each piece.",
+    "editor.audioValidation.ariaPiecesPartlyValidated":
+      "You have validated {done} of {total} pieces — {ref}. Click to validate the rest.",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
     "editor.audioValidation.ariaOthersValidated": plural({
@@ -1959,6 +1961,7 @@ export const editor = defineNamespace({
       other: "{count} more validators needed",
     }),
     "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.noValidatorsPiece": "Nobody has validated this piece",
     "editor.audioValidation.notRecorded": "Not recorded yet",
     "editor.audioValidation.partNotRecordedTooltip": "Part of this line is not recorded yet",
     "editor.audioValidation.ariaPartUnrecorded": "Part of this line is not recorded yet — {ref}.",
@@ -7436,6 +7439,17 @@ export const editor = defineNamespace({
           ref: "The line's reference, e.g. 'GEN 1:1'.",
         },
       },
+      "editor.audioValidation.ariaPiecesPartlyValidated": {
+        description:
+          "Screen-reader name of a line's audio check when its take was cut into pieces, " +
+          "this person has validated some of them, and pressing the check validates the " +
+          "one piece left. Each piece is validated on its own.",
+        placeholders: {
+          done: "How many of the take's pieces this person has validated.",
+          total: "How many pieces the take was cut into.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
       "editor.audioValidation.ariaPiecesOneByOne": {
         description:
           "Screen-reader name of a line's audio check when its take was cut into pieces " +
@@ -7508,6 +7522,12 @@ export const editor = defineNamespace({
       },
       "editor.audioValidation.noValidators": {
         description: "Shown for a take in the popover that nobody has validated yet.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.noValidatorsPiece": {
+        description:
+          "Shown for one piece of a cut take in the popover when nobody has validated " +
+          "that piece yet. Each piece is validated on its own.",
         maxLength: 36,
       },
       "editor.audioValidation.notRecorded": {

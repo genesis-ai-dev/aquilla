@@ -310,7 +310,11 @@ export function AudioValidationControl({
           ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
           : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
       : showFraction
-        ? t("editor.audioValidation.ariaPartlyValidated", {
+        // Slice 3A: a cut take's pieces are pieces, here too. With one piece
+        // left a press votes on it alone, so "the rest" is that piece.
+        ? t(recorded.every((take) => take.pieceOf != null)
+            ? "editor.audioValidation.ariaPiecesPartlyValidated"
+            : "editor.audioValidation.ariaPartlyValidated", {
             done: mineDone, total: recorded.length, ref: cellRef,
           })
         : state === "others"
@@ -456,7 +460,11 @@ export function AudioValidationControl({
               <li key={take.audioId} className="rounded px-1 py-1 text-xs">
                 {displayed.length > 1 && (
                   <div className="mb-0.5 flex items-center gap-1 font-medium">
-                    <span className="truncate">{trackLabel(take)}</span>
+                    {/* Wraps, never truncates: a piece's own name ends the
+                        label ("“I'm scared.” · Target audio · Take 2 · 1"),
+                        and cut off it left every piece's row reading the same
+                        (slice 3A evidence, Oct 27). */}
+                    <span data-testid="audio-validation-take-label" className="min-w-0 break-words">{trackLabel(take)}</span>
                     {short > 0 && (
                       <span className="ms-auto shrink-0 text-[10px] font-normal text-muted-foreground">
                         {t("editor.audioValidation.needsMore", { count: short })}
@@ -469,7 +477,11 @@ export function AudioValidationControl({
                     {t("editor.audioValidation.notRecorded")}
                   </div>
                 ) : take.validators.length === 0 ? (
-                  <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
+                  <div className="text-muted-foreground">
+                    {take.pieceOf != null
+                      ? t("editor.audioValidation.noValidatorsPiece")
+                      : t("editor.audioValidation.noValidators")}
+                  </div>
                 ) : (
                   <ul className="space-y-0.5">
                     {take.validators.map((validator) => (

@@ -270,6 +270,46 @@ describe("casting a vote", () => {
     expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("p2", true)
   })
 
+  // Slice 3A evidence (Oct 27): with one piece left the label fell back to
+  // "You have validated 2 of 3 takes", and in the list every piece's row read
+  // "“I'm scared.” · Target aud…" with its own name cut off, and "Nobody has
+  // validated this take". jsdom has no layout, so the row's title is pinned to
+  // wrap rather than truncate.
+  it("calls a cut take's pieces pieces, and names each one whole in the list", async () => {
+    const { onValidationChange } = draw([
+      take({ audioId: "p1", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 1", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "p2", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 2", validatorCount: 1, validators: ["ana"] }),
+      take({ audioId: "p3", pieceOf: "t2", label: "“I'm scared.” · Target audio · Take 2 · 3", validatorCount: 1, validators: ["bo"] }),
+    ], { validationRequirement: 2 })
+    expect(button()).toHaveAccessibleName(/validated 2 of 3 pieces/i)
+    expect(button()).not.toHaveAccessibleName(/takes/i)
+    await userEvent.hover(button()!)
+    const list = await screen.findByRole("dialog")
+    const labels = within(list).getAllByTestId("audio-validation-take-label")
+    expect(labels.map((l) => l.textContent)).toEqual([
+      "“I'm scared.” · Target audio · Take 2 · 1",
+      "“I'm scared.” · Target audio · Take 2 · 2",
+      "“I'm scared.” · Target audio · Take 2 · 3",
+    ])
+    for (const l of labels) {
+      expect(l.className).not.toMatch(/\btruncate\b/)
+      expect(l.className).toMatch(/\bbreak-words\b/)
+    }
+    await userEvent.unhover(button()!)
+    await userEvent.click(button()!)
+    expect(onValidationChange).toHaveBeenCalledExactlyOnceWith("p3", true)
+  })
+
+  it("says nobody has validated this piece, not this take", async () => {
+    draw([
+      take({ audioId: "p1", pieceOf: "t2", label: "Take 2 · 1", validatorCount: 1, validators: ["bo"] }),
+      take({ audioId: "p2", pieceOf: "t2", label: "Take 2 · 2" }),
+    ])
+    await userEvent.hover(button()!)
+    expect(await screen.findByText("Nobody has validated this piece")).toBeInTheDocument()
+    expect(screen.queryByText(/nobody has validated this take/i)).not.toBeInTheDocument()
+  })
+
   it("still votes in one press on a surface showing a single piece", async () => {
     const { onValidationChange } = draw([take({ audioId: "p2", pieceOf: "t2", label: "Take 2 · 2" })])
     await userEvent.click(button()!)

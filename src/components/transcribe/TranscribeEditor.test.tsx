@@ -1,7 +1,9 @@
-// The Transcribe lens. What matters: human work wins — "clean up all" never
-// touches a validated take or a transcript a person corrected — and a hand edit
-// saves as a correction (no AI mark), while the sparkle runs the two-step
-// cleanup on that one row.
+// The Transcribe lens. What matters: "Transcribe all" is speech recognition
+// only, on rows with nothing transcribed; the AI cleanup runs only on rows a
+// person picks (the sparkle, or the ticked rows), and never on a validated
+// take. A hand edit saves as a correction (no AI mark); emptying it goes back
+// to what ASR heard without teaching a word fix; clearing on the left removes
+// both.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createRef } from "react"
@@ -17,21 +19,32 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 const runCalls: string[] = []
+const asrCalls: string[] = []
 /** The clip each run was handed, by cell: the sparkle must transcribe the
  *  row's own take, not whatever the recording slot holds. */
 const runAudio: Record<string, string> = {}
 vi.mock("@/lib/transcript-cleanup/run", () => ({
+  rowLanguage: () => undefined,
   transcribeAndCleanUp: vi.fn(async ({ row }: { row: { cell: { id: string }; audioId: string } }) => {
     runCalls.push(row.cell.id)
     runAudio[row.cell.id] = row.audioId
     return { kind: "cleaned", changes: 1 }
   }),
+  transcribeRow: vi.fn(async ({ row }: { row: { cell: { id: string } } }) => {
+    asrCalls.push(row.cell.id)
+    return { kind: "transcribed" }
+  }),
 }))
 
-const saves: Array<{ cellId: string; text: string; ai: unknown }> = []
+const saves: Array<{ cellId: string; text: string; ai: unknown; learn?: boolean }> = []
+const clears: string[] = []
 vi.mock("@/lib/transcript-cleanup/save", () => ({
-  saveTranscript: vi.fn(async (args: { owner: { id: string }; text: string; ai?: unknown }) => {
-    saves.push({ cellId: args.owner.id, text: args.text, ai: args.ai })
+  saveTranscript: vi.fn(async (args: { owner: { id: string }; text: string; ai?: unknown; learn?: boolean }) => {
+    saves.push({ cellId: args.owner.id, text: args.text, ai: args.ai, ...(args.learn === false ? { learn: false } : {}) })
+    return true
+  }),
+  clearTranscript: vi.fn(async (args: { owner: { id: string } }) => {
+    clears.push(args.owner.id)
     return true
   }),
 }))
@@ -85,23 +98,60 @@ function voice(id: string): CellData {
 
 beforeEach(() => {
   runCalls.length = 0
+  asrCalls.length = 0
   saves.length = 0
+  clears.length = 0
   window.localStorage.clear()
+  window.confirm = vi.fn(() => true)
 })
 
 describe("TranscribeEditor", () => {
-  it("cleans up only rows nobody has signed off on or corrected by hand", async () => {
+  it("transcribes all without cleaning up, and only rows with nothing transcribed", async () => {
     const cells = [
       take("fresh"),
+      take("fresh2"),
       take("validated", { heard: "a b", transcript: "a b", validated: true }),
-      take("corrected", { heard: "eema akasema", transcript: "Yesu akasema" }),
       take("untouched", { heard: "x y", transcript: "x y" }),
     ]
     render(<TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable />)
     fireEvent.click(screen.getByTestId("transcribe-run-all"))
     // The button comes back when the run has finished every row it chose.
     await waitFor(() => expect(screen.queryByTestId("transcribe-progress")).toBeNull())
-    expect(runCalls).toEqual(["fresh", "untouched"])
+    expect(asrCalls.sort()).toEqual(["fresh", "fresh2"])
+    expect(runCalls).toEqual([])
+  })
+
+  it("cleans up the ticked rows — Shift-click ticks a range — and never a validated take", async () => {
+    const cells = [
+      take("a", { heard: "x", transcript: "x" }),
+      take("b", { heard: "x", transcript: "x", validated: true }),
+      take("c", { heard: "x", transcript: "x" }),
+      take("d", { heard: "x", transcript: "x" }),
+    ]
+    render(<TranscribeEditor project={project} cells={cells} session={session} concepts={[]} editable />)
+    const boxes = screen.getAllByTestId("transcribe-select")
+    fireEvent.click(boxes[0])
+    fireEvent.click(boxes[2], { shiftKey: true })
+    fireEvent.click(screen.getByTestId("transcribe-clean-selected"))
+    await waitFor(() => expect(screen.queryByTestId("transcribe-progress")).toBeNull())
+    expect(runCalls.sort()).toEqual(["a", "c"])
+    // The selection is used up by the run.
+    expect(screen.queryByTestId("transcribe-clean-selected")).toBeNull()
+  })
+
+  it("goes back to what ASR heard when the transcript is emptied, without learning from it", async () => {
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "Yesu" })]} session={session} concepts={[]} editable />)
+    const field = screen.getByTestId("transcribe-transcript")
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.blur(field)
+    await waitFor(() => expect(saves).toEqual([{ cellId: "c1", text: "eema", ai: undefined, learn: false }]))
+  })
+
+  it("clears what ASR heard and the transcript from the left side", async () => {
+    render(<TranscribeEditor project={project} cells={[take("c1", { heard: "eema", transcript: "Yesu" })]} session={session} concepts={[]} editable />)
+    fireEvent.click(screen.getByTestId("transcribe-clear"))
+    await waitFor(() => expect(clears).toEqual(["c1"]))
+    expect(saves).toEqual([])
   })
 
   it("saves a hand edit as a correction, without the AI mark", async () => {

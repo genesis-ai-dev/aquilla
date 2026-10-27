@@ -224,10 +224,24 @@ Built on `ryder/two-step-transcription`, 2026-10-23:
   are shared in `src/lib/transcript-cleanup/prompt.ts`.
 - **Pairs come from the open file**, not the whole lane: the rows the lens
   already has loaded. A lane-wide read is a P1 follow-up.
-- **Batch is a "Transcribe and clean up all" button** in the lens toolbar. It
-  runs the rows one at a time, skipping validated, AI-cleaned and
-  hand-corrected rows, and has Stop. It does not use the batch-draft modal and
-  shows no credit estimate yet.
+- **Batch is ASR only.** "Transcribe all" in the lens toolbar runs speech
+  recognition on every row with nothing transcribed yet (never a validated
+  take), three at a time, and waits out the per-user limit. It has Stop. The
+  cleanup stays a person's call: the sparkle on one row, or tick rows
+  (Shift-click ticks a range) and "Clean up N lines". A ticked row a person
+  corrected asks first. No batch-draft modal or credit estimate yet.
+- **Clear is on the left.** The eraser beside the Heard text clears what ASR
+  heard and the transcript built on it (an attach with an empty `asr` text and
+  `timings: []`; both columns COALESCE, so empty values, not NULL). Emptying the
+  transcript on the right goes back to the Heard text and teaches no word fix.
+- **A failure names its step** — "Transcription failed", "Cleanup failed",
+  "Couldn't save" — with the reason on hover, and goes to error tracking.
+  `transcribeCell` never throws, so the ASR step reads its error from the
+  transcribe-status store; before this, an ASR failure read "No speech heard".
+- **The lens warms Omnilingual CTC as it opens** when a row routes there, and
+  shows "Starting the speech model…" until `/status?model=ctc` says ready. The
+  Modal service tracks CTC state the way it tracks ZS, and CTC may run on an
+  A10G when no L4 is free.
 - **The Transcribe tab is always shown.** A file with no audio shows an empty
   state instead of hiding the tab.
 - Changed words are not underlined yet. The "Cleaned up · N changes" mark and

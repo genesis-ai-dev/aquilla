@@ -101,6 +101,7 @@ import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
+import { handleExternalStyleRulesReadRequest } from "./external/style-rules-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -540,6 +541,9 @@ const worker = {
     // suffix routes second matches the ordering convention above.
     const externalMemoryReadResponse = await handleExternalMemoryReadRequest(request, env)
     if (externalMemoryReadResponse) return withCors(externalMemoryReadResponse, request)
+    // AQU-2195: style-rule reads (the Rules page's Style rules section).
+    const externalStyleRulesResponse = await handleExternalStyleRulesReadRequest(request, env)
+    if (externalStyleRulesResponse) return withCors(externalStyleRulesResponse, request)
     // AQU-858: agent-callable round-trip export (the mirror of the artifact
     // import tools). Its path (.../files/:fileId/export) is disjoint from the
     // external read routes above, so ordering is for readability only.

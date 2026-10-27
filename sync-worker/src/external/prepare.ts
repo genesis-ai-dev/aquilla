@@ -61,6 +61,7 @@ import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
+import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
 import { isCellFieldCommand, CELL_FIELDS_MAX_COMMANDS, type CellFieldCommand } from './commands-cell-fields'
@@ -361,6 +362,16 @@ export async function prepareChangesetCore(
       )
     }
     return prepareMemoryCommand(db, cred, projectId, id, autonomyMode, memoryCommand, env)
+  }
+
+  // AQU-2195 ReviewStyleRules: sole command, receipt-only, its own PROJECT_LEAD
+  // check and live-state validation, so it skips the generic role gate below.
+  const styleRuleCommand = validated.commands.find(isStyleRuleCommand)
+  if (styleRuleCommand) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ReviewStyleRules must be the only command in a changeset')
+    }
+    return prepareStyleRuleCommand(db, cred, projectId, id, autonomyMode, styleRuleCommand, env)
   }
 
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every

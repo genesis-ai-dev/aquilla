@@ -1281,6 +1281,12 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  const [reimportTarget, setReimportTarget] = useState<{
+    fileId: string
+    name: string
+    importProfile?: string
+    corpusMarker?: string
+  } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -11453,6 +11459,7 @@ export function ProjectWorkspace() {
     // dialog itself greys out New source text below Project lead.
     const level = project.syncRole?.level ?? null
     if (!canPerform("file.create", level) && !canPerform("target.cell.commit", level)) return
+    setReimportTarget(null)
     setImportOpen(true)
   }, [project])
 
@@ -15970,6 +15977,17 @@ export function ProjectWorkspace() {
                     setAssignModalOpen(true)
                   } : undefined}
                   onSegmentation={setSegmentationFileId}
+                  onReimport={canImportSource ? (fileId) => {
+                    const file = project.files.find((entry) => entry.id === fileId)
+                    if (!file) return
+                    setReimportTarget({
+                      fileId,
+                      name: file.name,
+                      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
+                      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
+                    })
+                    setImportOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -17059,6 +17077,7 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            activeLaneId={activeLaneId}
             audioOnlyLane={activeLaneDelivers === "audio"}
             laneDelivers={activeLaneDelivers}
             lanes={availableLanes}
@@ -17742,6 +17761,7 @@ export function ProjectWorkspace() {
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
         <ImportDialog open={importOpen} onOpenChange={(next) => {
             setImportOpen(next)
+            if (!next) setReimportTarget(null)
             // AQU-693: when an import launched from the setup checklist closes
             // (success, cancel, or error), return the user to the still-live
             // checklist — step 1 now reflects its true state — instead of
@@ -17764,6 +17784,7 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
+          reimportTarget={reimportTarget}
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}

@@ -116,6 +116,7 @@ export const editor = defineNamespace({
       one: "{count} cell with stale source",
       other: "{count} cells with stale source",
     }),
+    "editor.reimport.sourceReview": "The source text changed in a re-import. The translation was kept. Validating this cell clears the highlight.",
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
@@ -2947,6 +2948,11 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      "editor.reimport.sourceReview": {
+        description:
+          "Tooltip on a cell outlined in yellow after a sidebar re-import changed its source " +
+          "text. Explains that the translation was kept and that validating the cell removes the outline.",
       },
       "editor.rail.moreActions": {
         description:

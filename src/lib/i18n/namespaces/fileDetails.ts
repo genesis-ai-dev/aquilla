@@ -21,6 +21,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} approved",
     "fileDetails.bothProgressValue": "{done} of {total} lines done on text and audio",
     "fileDetails.rename": "Rename",
+    "fileDetails.reimport": "Re-import",
     "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
     "fileDetails.downloadOriginal": "Download original",
@@ -159,6 +160,12 @@ export const fileDetails = defineNamespace({
         description:
           "Action button that closes the modal and starts inline renaming of the file " +
           "in the sidebar. Imperative verb.",
+        maxLength: 24,
+      },
+      "fileDetails.reimport": {
+        description:
+          "Overflow-menu item on a file row that opens a dialog to replace or copy " +
+          "that file from a newly chosen source file. Imperative verb with a hyphen.",
         maxLength: 24,
       },
       "fileDetails.renameDialogTitle": {

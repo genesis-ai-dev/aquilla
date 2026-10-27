@@ -42,6 +42,7 @@ import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import { SourceEditWarningDialog } from "@/components/SourceEditWarningDialog"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import type { CellData } from "@/hooks/useCells"
+import { cellNeedsSourceReview } from "@/lib/cells/source-review"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
@@ -835,6 +836,8 @@ interface EditorTableProps {
    * the emit helpers, so N=1 is byte-identical.
    */
   activeLane?: string
+  /** Lane row id for the open lane. Flags a re-imported source change on that lane. */
+  activeLaneId?: string | null
   /**
    * Media redesign slice 2: the open language delivers Audio and no text. Its
    * validation column shows only the audio check — on every line, recorded or
@@ -1220,7 +1223,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  project, cellStore, fileType, username, activeLane = "", activeLaneId = null, audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -2890,18 +2893,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // row itself, and the mark moves from row to row with playback. The
           // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
           const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
+          const needsSourceReview = cellNeedsSourceReview(cell.metadata, activeLaneId)
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
         data-cue-playing={cuePlayingRow ? "true" : undefined}
+        data-source-review={needsSourceReview ? "true" : undefined}
         aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
+        title={needsSourceReview ? t("editor.reimport.sourceReview") : undefined}
         className={cn(
           "relative",
+          needsSourceReview && "ring-2 ring-inset ring-yellow-400",
           // The hover group for the structural strip below. Named so it cannot
           // be caught by the row's other `group` users.
           sourceLineEditing && "group/rowstrip",

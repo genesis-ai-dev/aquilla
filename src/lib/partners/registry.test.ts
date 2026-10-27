@@ -15,6 +15,8 @@ import {
   integrationsFrom,
   isScriptureCellWith,
   normalizeIdmlTargetHtmlWith,
+  partnerIdForImportedFileWith,
+  partnerIdForImportProfileWith,
   partnerIntegrations,
 } from "./registry"
 import type { PartnerIntegration } from "./types"
@@ -38,6 +40,25 @@ describe("partner registry — stripped tree", () => {
 
   it("marks no cell as partner scripture when no partner is present", () => {
     expect(isScriptureCellWith([], { biblica: { contentType: "scripture" } })).toBe(false)
+  })
+
+  it("reopens a partner from its profile, and from its folder only when the profile is missing", () => {
+    expect(partnerIdForImportProfileWith([], "builtin:biblica-study-notes")).toBeNull()
+    expect(partnerIdForImportProfileWith(
+      [fake("biblica", { importProfileIds: ["builtin:biblica-study-notes"] })],
+      "builtin:idml-roundtrip",
+    )).toBeNull()
+    expect(partnerIdForImportedFileWith(
+      [fake("biblica", { importCorpusMarkers: ["Biblica Study Notes"] })],
+      { corpusMarker: "Biblica Study Notes" },
+    )).toBe("biblica")
+    expect(partnerIdForImportedFileWith(
+      [fake("biblica", {
+        importProfileIds: ["builtin:biblica-study-notes"],
+        importCorpusMarkers: ["Biblica Study Notes"],
+      })],
+      { importProfile: "builtin:idml-roundtrip", corpusMarker: "Biblica Study Notes" },
+    )).toBeNull()
   })
 
   it("skips a register module that exports no default rather than throwing", () => {

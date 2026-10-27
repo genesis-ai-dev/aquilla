@@ -914,6 +914,8 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /** Importer profile (`parserVersion` before `@`). Re-import reopens that importer. */
+  importProfile?: string
   /**
    * AQU-1569: hand-placed position within this file's sidebar corpus group,
    * from files.meta.sortIndex (set via the `file.reorder` event). Fractional

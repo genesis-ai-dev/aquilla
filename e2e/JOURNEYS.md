@@ -42,6 +42,7 @@ not a micro-spec farm.
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
 | Editor | Edit History on a slow, lossy (3G-like) connection: a history read whose first attempts fail retries with backoff and fills the panel without Retry; when every attempt fails without reaching the sync worker, the message names a network failure and Retry recovers (AQU-1248; full suite, not smoke — a failed read loses no data. Bounded retry, fail-fast 401/403 and network-vs-server classification are covered in unit `src/lib/sync/history-read.test.ts`, the drawer's messages in RTL `HistoryDrawer.error-state.test.tsx`) | `e2e/specs/editor/history-load-retry.spec.ts` |
 | Editor | Re-import updates source while preserving target | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` |
+| Editor | Sidebar re-import updates one file, flags a changed source, and hides a removed unit | `e2e/specs/editor/sidebar-reimport.smoke.spec.ts` |
 | Editor | eBible import persists across reload | `e2e/specs/editor/import-ebible-persists-reload.smoke.spec.ts` |
 | Editor | Comment writes through events | `e2e/specs/editor/comments.smoke.spec.ts` |
 | Editor | Export downloads (own-format, original blob vs injected USFM, a USFM book as one readable HTML page with numbered verses, escaped text and the verses of one USFM paragraph flowing together — AQU-2182 / AQU-2184) | `e2e/specs/editor/export.smoke.spec.ts` |

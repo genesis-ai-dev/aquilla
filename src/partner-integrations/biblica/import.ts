@@ -11,7 +11,8 @@
  * The signature is unchanged, so every existing caller and test reads the same.
  */
 
-import { importPartnerNotes, type ImportContext } from "@/lib/import"
+import { importPartnerNotes, readPartnerNoteStrings, type ImportContext } from "@/lib/import"
+import type { TranslatableString } from "@/lib/parsers/core-types"
 import { t } from "@/lib/i18n/standalone"
 import type { FileReference } from "@/lib/parsers/types"
 import type { PartnerImportProgress } from "@/lib/partners/types"
@@ -64,10 +65,26 @@ export async function importBiblicaStudyNotes(
   if (!/\.idml$/i.test(file.name)) {
     throw new Error(t("importExport.errors.biblicaExpectsIdml"))
   }
-  return importPartnerNotes(file, ctx, onProgress, {
+  return importPartnerNotes(file, ctx, onProgress, editionOptions(options))
+}
+
+/** Parse a Biblica package without saving it, so re-import can count changes first. */
+export async function previewBiblicaStudyNotes(
+  file: File,
+  options?: BiblicaImportOptions,
+): Promise<TranslatableString[]> {
+  if (!/\.idml$/i.test(file.name)) {
+    throw new Error(t("importExport.errors.biblicaExpectsIdml"))
+  }
+  const prepared = await readPartnerNoteStrings(file, editionOptions(options))
+  return prepared.strings
+}
+
+function editionOptions(options?: BiblicaImportOptions) {
+  return {
     edition: BIBLICA_EDITIONS[options?.edition ?? "study-notes"],
     ...(options?.splitSentences !== undefined
       ? { splitSentences: options.splitSentences }
       : {}),
-  })
+  }
 }

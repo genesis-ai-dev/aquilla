@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import { handleBulkImportRequest } from '../events/import-route'
+import { buildEventProjectionStmts } from '../events/event-projection'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import {
   handleImportReconcileRequest,
   planImportReconciliation,
   type ExistingImportCell,
 } from '../events/import-reconcile-route'
+import { decideReviewCell } from '../events/import-reconcile-review'
 import { makeTestToken } from './helpers/auth'
 import { makeTestDb } from './helpers/pg-test-db'
 
@@ -128,6 +130,31 @@ describe('planImportReconciliation', () => {
         shuffled,
       )
       expect(plan.cells.map((cell) => cell.matchBand)).toEqual(['ice', 'ice', 'ice'])
+    })
+
+    it('keeps a heading when the story id and the apostrophe both change', () => {
+      const existing = [paragraph(0, 'Israel\u02BCs covenant history')]
+      existing[0]!.metadata = importMetadata(
+        'idml:Stories/Story_u363.xml:/idPkg:Story[1]/Story[1]/ParagraphStyleRange[7]:0',
+        0,
+      )
+      const next = incoming(0, "Israel's covenant history")
+      next.metadata = importMetadata(
+        'idml:Stories/Story_u452.xml:/idPkg:Story[1]/Story[1]/ParagraphStyleRange[7]:0',
+        0,
+      )
+      const plan = planImportReconciliation([next], existing)
+      expect(plan.cells[0]).toMatchObject({
+        finalCellId: 'cell-0',
+        matchKind: 'content-ice',
+        parentId: 'event-0',
+      })
+      expect(plan.retainedMissing).toEqual([])
+      expect(decideReviewCell(plan.cells[0]!, existing[0]!)).toMatchObject({
+        writeSource: true,
+        textChanged: false,
+        repinQuiet: true,
+      })
     })
 
     it('leaves a genuinely new file entirely new', () => {
@@ -474,5 +501,251 @@ describe('POST /import/reconcile', () => {
     expect(target).toHaveLength(1)
     for (const row of source) expect(row.lane_id).toBe(sourceLaneId)
     for (const row of target) expect(row.lane_id).toBe(targetLaneId)
+  }, 120_000)
+
+  it('reviews a changed source, parks a removed unit, and leaves a move validated', async () => {
+    const auth = await token()
+    const { db } = await makeTestDb()
+    const targetLaneId = 'tgt00001'
+    await db.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+       VALUES (?, ?, 'target', 'French', 'fr', 'fr', 0)`,
+    ).bind(targetLaneId, PROJECT_ID).run()
+
+    const initial = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-genesis-event', name: 'Genesis', fileType: 'usfm', bookCode: 'GEN' },
+        cells: [{
+          id: 'source-old-1', cellId: 'durable-1', value: 'Old verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }, {
+          id: 'source-old-2', cellId: 'durable-2', anchorCellId: 'durable-1',
+          value: 'Verse two must stay', type: 'verse', canonicalRef: 'GEN 1:2', sequenceIndex: 1,
+          metadata: importMetadata('scripture:GEN 1:2', 1),
+        }, {
+          id: 'source-move', cellId: 'durable-move', anchorCellId: 'durable-2',
+          value: 'Neighbor sentence stays.', type: 'verse', canonicalRef: 'GEN 1:4', sequenceIndex: 2,
+          metadata: importMetadata('scripture:GEN 1:4', 2),
+        }],
+        targets: [{
+          id: 'target-old-1', cellId: 'durable-1', parentId: 'source-old-1',
+          value: 'Traduction existante', targetLang: 'fr',
+        }, {
+          id: 'target-move', cellId: 'durable-move', parentId: 'source-move',
+          value: 'Voisin inchangé', targetLang: 'fr',
+        }],
+      }),
+    }), env(db))
+    expect(initial?.status).toBe(200)
+    await db.prepare(
+      `UPDATE cells SET validated = 1
+        WHERE project_id = ? AND file_id = ? AND side = 'target' AND cell_id IN ('durable-1', 'durable-move')`,
+    ).bind(PROJECT_ID, FILE_ID).run()
+    for (const [cellId, eventId] of [['durable-1', 'target-old-1'], ['durable-move', 'target-move']] as const) {
+      await db.prepare(
+        `INSERT INTO cell_validators (project_id, file_id, cell_id, lane_id, event_id, username, decided_ts)
+         VALUES (?, ?, ?, ?, ?, 'alice', ?)`,
+      ).bind(PROJECT_ID, FILE_ID, cellId, targetLaneId, eventId, Date.now()).run()
+    }
+
+    const review = await handleImportReconcileRequest(new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        reviewChangedSource: true,
+        file: { id: 'file-review-event', name: 'Genesis', fileType: 'usfm', bookCode: 'GEN' },
+        cells: [{
+          id: 'source-new-1', cellId: 'parser-1', value: 'Updated verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }, {
+          id: 'source-new-3', cellId: 'parser-3', anchorCellId: 'parser-1',
+          value: 'New verse three', type: 'verse', canonicalRef: 'GEN 1:3', sequenceIndex: 1,
+          metadata: importMetadata('scripture:GEN 1:3', 1),
+        }, {
+          id: 'source-move-again', cellId: 'parser-move', anchorCellId: 'parser-3',
+          value: 'Neighbor sentence stays.', type: 'verse', canonicalRef: 'GEN 1:4', sequenceIndex: 2,
+          metadata: importMetadata('scripture:GEN 1:4', 2),
+        }],
+        targets: [{
+          id: 'target-should-not-land', cellId: 'parser-1', parentId: 'source-new-1',
+          value: 'Must not overwrite', targetLang: 'fr',
+        }],
+      }),
+    }), env(db))
+    if (review?.status !== 200) throw new Error(await review?.text() ?? 'no response')
+
+    const { results } = await db.prepare(
+      `SELECT cell_id, side, value, event_id, source_event_id, validated, hidden_at, metadata
+         FROM cells WHERE project_id = ? AND file_id = ?`,
+    ).bind(PROJECT_ID, FILE_ID).all<{
+      cell_id: string
+      side: string
+      value: string
+      event_id: string
+      source_event_id: string | null
+      validated: number
+      hidden_at: number | null
+      metadata: unknown
+    }>()
+    const sourceOf = (id: string) => results.find((row) => row.side === 'source' && row.cell_id === id)
+    const targetOf = (id: string) => results.find((row) => row.side === 'target' && row.cell_id === id)
+    const changed = sourceOf('durable-1')
+    const changedTarget = targetOf('durable-1')
+    const aquilla = (row: { metadata: unknown } | undefined) => {
+      const raw = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) as unknown : row?.metadata
+      const record = raw && typeof raw === 'object' ? raw as { aquillaImport?: { reviewLanes?: string[]; reimportHidden?: boolean } } : {}
+      return record.aquillaImport ?? {}
+    }
+    expect(changed?.value).toBe('Updated verse one')
+    expect(changedTarget).toMatchObject({
+      value: 'Traduction existante',
+      validated: 0,
+      source_event_id: changed?.event_id,
+    })
+    expect(aquilla(changed).reviewLanes).toContain(targetLaneId)
+    expect(await db.prepare(
+      `SELECT COUNT(*)::int AS n FROM cell_validators
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-1'`,
+    ).bind(PROJECT_ID, FILE_ID).first<{ n: number }>()).toMatchObject({ n: 0 })
+    expect(targetOf('parser-3')).toBeUndefined()
+
+    const parked = sourceOf('durable-2')
+    expect(parked?.hidden_at).not.toBeNull()
+    expect(aquilla(parked).reimportHidden).toBe(true)
+
+    const moved = sourceOf('durable-move')
+    const movedTarget = targetOf('durable-move')
+    expect(moved?.event_id).toBe('source-move')
+    expect(movedTarget).toMatchObject({
+      value: 'Voisin inchangé',
+      validated: 1,
+      source_event_id: 'source-move',
+    })
+    expect(aquilla(moved).reviewLanes).toBeUndefined()
+
+    const stmts: Parameters<AquillaDb['batch']>[0] = []
+    buildEventProjectionStmts(db, {
+      id: 'validate-review',
+      schemaVersion: 1,
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      cellId: 'durable-1',
+      parentId: null,
+      kind: 'cell.validate',
+      author: 'carol',
+      payload: { editEventId: changedTarget?.event_id ?? '', targetLang: 'fr' },
+      clientTs: Date.now(),
+      serverTs: Date.now(),
+    }, stmts, { validationCount: 1 })
+    await db.batch(stmts)
+    const cleared = await db.prepare(
+      `SELECT metadata FROM cells
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-1' AND side = 'source'`,
+    ).bind(PROJECT_ID, FILE_ID).first<{ metadata: unknown }>()
+    expect(aquilla(cleared ?? undefined).reviewLanes).toBeUndefined()
+
+    const returned = await handleImportReconcileRequest(new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        reviewChangedSource: true,
+        file: { id: 'file-review-again', name: 'Genesis', fileType: 'usfm' },
+        cells: [{
+          id: 'source-keep-1', cellId: 'keep-1', value: 'Updated verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }, {
+          id: 'source-back-2', cellId: 'parser-2', anchorCellId: 'keep-1',
+          value: 'Verse two must stay', type: 'verse', canonicalRef: 'GEN 1:2', sequenceIndex: 1,
+          metadata: importMetadata('scripture:GEN 1:2', 1),
+        }, {
+          id: 'source-keep-3', cellId: 'keep-3', anchorCellId: 'parser-2',
+          value: 'New verse three', type: 'verse', canonicalRef: 'GEN 1:3', sequenceIndex: 2,
+          metadata: importMetadata('scripture:GEN 1:3', 1),
+        }, {
+          id: 'source-keep-move', cellId: 'keep-move', anchorCellId: 'keep-3',
+          value: 'Neighbor sentence stays.', type: 'verse', canonicalRef: 'GEN 1:4', sequenceIndex: 3,
+          metadata: importMetadata('scripture:GEN 1:4', 2),
+        }],
+      }),
+    }), env(db))
+    if (returned?.status !== 200) throw new Error(await returned?.text() ?? 'no response')
+    const shown = await db.prepare(
+      `SELECT hidden_at, metadata FROM cells
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-2' AND side = 'source'`,
+    ).bind(PROJECT_ID, FILE_ID).first<{ hidden_at: number | null; metadata: unknown }>()
+    expect(shown?.hidden_at).toBeNull()
+    expect(aquilla(shown ?? undefined).reimportHidden).toBeUndefined()
+  }, 120_000)
+
+  it('forks an updated copy and leaves the original file untouched', async () => {
+    const auth = await token()
+    const { db } = await makeTestDb()
+    const initial = await handleBulkImportRequest(new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: { id: 'file-genesis-event', name: 'Genesis', fileType: 'usfm' },
+        cells: [{
+          id: 'source-old-1', cellId: 'durable-1', value: 'Old verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }],
+        targets: [{
+          id: 'target-old-1', cellId: 'durable-1', parentId: 'source-old-1',
+          value: 'Traduction existante', targetLang: 'fr',
+        }],
+      }),
+    }), env(db))
+    expect(initial?.status).toBe(200)
+
+    const copyId = 'file-copy'
+    const copyAuth = await makeTestToken(SECRET, { projectId: PROJECT_ID, fileId: copyId, role: 500 })
+    const fork = await handleImportReconcileRequest(new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${copyAuth}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: copyId,
+        sourceFileId: FILE_ID,
+        fork: true,
+        reviewChangedSource: true,
+        file: { id: 'file-copy-event', name: 'Genesis (updated)', fileType: 'usfm' },
+        cells: [{
+          id: 'source-new-1', cellId: 'parser-1', value: 'Updated verse one', type: 'verse',
+          canonicalRef: 'GEN 1:1', sequenceIndex: 0,
+          metadata: importMetadata('scripture:GEN 1:1', 0),
+        }],
+      }),
+    }), env(db))
+    if (fork?.status !== 200) throw new Error(await fork?.text() ?? 'no response')
+
+    const original = await db.prepare(
+      `SELECT value, event_id FROM cells
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-1' AND side = 'source'`,
+    ).bind(PROJECT_ID, FILE_ID).first<{ value: string; event_id: string }>()
+    expect(original).toMatchObject({ value: 'Old verse one', event_id: 'source-old-1' })
+    const copy = await db.prepare(
+      `SELECT value FROM cells
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-1' AND side = 'source'`,
+    ).bind(PROJECT_ID, copyId).first<{ value: string }>()
+    expect(copy).toMatchObject({ value: 'Updated verse one' })
+    const copyTarget = await db.prepare(
+      `SELECT value FROM cells
+        WHERE project_id = ? AND file_id = ? AND cell_id = 'durable-1' AND side = 'target'`,
+    ).bind(PROJECT_ID, copyId).first<{ value: string }>()
+    expect(copyTarget).toMatchObject({ value: 'Traduction existante' })
   }, 120_000)
 })

@@ -10,10 +10,10 @@
 // marker.
 //
 // Read off the NAVIGATION, never off the row's own `milestoneLabel`: a label
-// on a cell inside a division the file supplied is deliberately ignored by the
-// derivation (sub-entries are AQU-2190's slice), so the column can say
-// "section here" where the navigator shows none. Trusting it would offer a
-// rename for a section nobody can see.
+// the derivation placed nowhere would otherwise offer a rename for a section
+// nobody can see. Since AQU-2190 a label inside a division the file supplied
+// IS placed — as a sub-entry nested under it — and the pair is offered there
+// too, by the same rule and from the same answer.
 
 import { describe, expect, it } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -110,16 +110,23 @@ describe("AQU-2186 — which cells offer Rename section… and Remove section", 
     expect(s.getHandSetSectionLabels().size).toBe(0)
   })
 
-  it("offers nothing for a label the navigator is not showing", () => {
-    // A Scripture cell's label is ignored by the derivation, so there is no
-    // section to rename. Reading the column instead of the navigation would
-    // put a Rename entry on this row pointing at a division that does not
-    // exist.
+  it("offers the pair on a Scripture cell's marker, which AQU-2190 nests under the chapter", () => {
+    // AQU-2185 dropped a label here, so this used to offer nothing. AQU-2190
+    // makes it a sub-entry under Genesis 1 — a section a reader can see, so it
+    // is one they can rename, and the answer still comes from the navigation
+    // rather than from the row's own column.
     const s = store()
     s.replaceRows(scriptureFile({ 3: "The calming of the storm" }))
 
+    // The chapter itself is still the file's own single division.
     expect(s.getNavigationIndex().map((e) => e.kind)).toEqual(["chapter"])
-    expect(s.getHandSetSectionLabels().size).toBe(0)
+    expect([...s.getHandSetSectionLabels()]).toEqual([
+      ["gen-3", "The calming of the storm"],
+    ])
+    // A label the derivation placed NOWHERE is still offered nothing — the
+    // invariant this case used to stand for, covered on an id the navigation
+    // does not list (and again in useActiveCellStore.subEntries.test.ts).
+    expect(s.getHandSetSectionLabels().has("gen-99")).toBe(false)
   })
 })
 

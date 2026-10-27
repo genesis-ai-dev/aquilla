@@ -25,7 +25,7 @@ import {
   sameAudioProgressCellIds,
   type AudioProgressCellIds,
 } from "@/lib/progress/audio-progress-cells"
-import { deriveMilestoneNavigation, handSetSectionCellId, milestoneAcceptsHandSetSection, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
+import { deriveMilestoneNavigation, handSetSectionCellId, handSetSubsectionKey, handSetSubsectionSpans, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -238,6 +238,17 @@ export interface CellNavigationSubsection extends CellNavigationProgress {
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
+  /**
+   * AQU-2190: the cell someone marked with "Start a section here" inside the
+   * division this sub-entry nests under — so this sub-entry is a NAMED one,
+   * `label` is the name they typed, and that cell's menu renames or removes it.
+   *
+   * Absent on the automatic cell ranges of a long IDML story: nobody set those,
+   * nobody can rename them, and their label is a range rather than a name.
+   * Whether a division has any of these is also what decides if it lists
+   * sub-entries at all — see `listedSubsectionsFor`.
+   */
+  handSetCellId?: string
 }
 
 export const MILESTONE_SUBSECTION_SIZE = 50
@@ -981,24 +992,24 @@ export class CellStore {
   }
 
   /**
-   * AQU-2185: the cells where "Start a section here" may be offered — those
-   * whose CURRENT division the app made up ("Part N", a 5-minute bucket, an AI
-   * section) or that a hand-set section already covers, so a second marker can
-   * split one.
+   * AQU-2185: the cells where "Start a section here" may be offered.
    *
-   * Read off the navigation index rather than from the rows, deliberately: the
-   * answer must be the one the navigator is showing. A cell's own metadata
-   * cannot give it — whether a division came out of the file is a property of
-   * the stretch the cell landed in, which only the derivation knows.
+   * AQU-2190 made that every cell the navigator lists, so no kind is filtered
+   * out any more: a marker in a division the APP made up replaces it, and a
+   * marker in one the FILE supplied becomes a sub-entry nested under it. The
+   * answer used to exclude the second case, which is what kept the entry off a
+   * Scripture file's menu entirely.
    *
-   * Empty on a file whose every division came out of the file, which is the
-   * answer that takes the entry off a Scripture file's menu.
+   * Still read off the navigation index rather than from the rows, and still a
+   * set rather than a blanket "yes": the answer has to be the one the navigator
+   * is showing, so an id the derivation never placed in a division — a cell of
+   * another file, or one the open file's navigation does not list — is not
+   * somewhere a division can start.
    */
   getCellIdsWhereSectionMayStart(): ReadonlySet<string> {
     this.ensureDerivedIndexes()
     const ids = new Set<string>()
     for (const entry of this.navIndex) {
-      if (!milestoneAcceptsHandSetSection(entry.kind)) continue
       for (const cellId of entry.cellIds) ids.add(cellId)
     }
     return ids
@@ -1017,9 +1028,13 @@ export class CellStore {
    *
    * Read off the navigation index for the same reason its companion is: the
    * answer has to be the one the navigator is showing. A row's own
-   * `milestoneLabel` is NOT that answer — a label on a cell inside a division
-   * the file supplied is ignored by the derivation (that is AQU-2190's slice),
-   * so trusting the column would offer Rename for a section nobody can see.
+   * `milestoneLabel` is NOT that answer — a label the derivation did not place
+   * anywhere would offer Rename for a section nobody can see.
+   *
+   * AQU-2190: both shapes a marker can take are collected here, because both
+   * are renamed and removed the same way and by the same menu — the top-level
+   * division a marker makes in an app-invented stretch, and the sub-entry it
+   * makes inside a division the file supplied.
    *
    * The LABEL comes from the derived entry too, so it is the string the
    * navigator is displaying, which is what the rename dialog must open with.
@@ -1030,6 +1045,11 @@ export class CellStore {
     for (const entry of this.navIndex) {
       const cellId = handSetSectionCellId(entry)
       if (cellId !== null) labels.set(cellId, entry.label)
+      for (const subsection of entry.subsections) {
+        if (subsection.handSetCellId !== undefined) {
+          labels.set(subsection.handSetCellId, subsection.label)
+        }
+      }
     }
     return labels
   }
@@ -2707,9 +2727,8 @@ export class CellStore {
     const entryIndex = this.navIndex.findIndex(entry => entry.key === key)
     const entry = this.navIndex[entryIndex]
     if (!entry) return false
-    const position = entry.cellIds.indexOf(cellId)
-    if (position < 0) return false
-    const subsectionIndex = Math.floor(position / MILESTONE_SUBSECTION_SIZE)
+    const subsectionIndex = subsectionIndexFor(entry, cellId)
+    if (subsectionIndex < 0) return false
     const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
     this.fileProgressSnapshot = {
       ...snapshot,
@@ -2758,9 +2777,8 @@ export class CellStore {
     const entryIndex = this.navIndex.findIndex(entry => entry.key === key)
     const entry = this.navIndex[entryIndex]
     if (!entry) return false
-    const position = entry.cellIds.indexOf(cellId)
-    if (position < 0) return false
-    const subsectionIndex = Math.floor(position / MILESTONE_SUBSECTION_SIZE)
+    const subsectionIndex = subsectionIndexFor(entry, cellId)
+    if (subsectionIndex < 0) return false
     if (validatedDelta !== 0 || levels.some(delta => delta !== 0)) {
       const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
       const update = <T extends ProgressCounts>(counts: T): T => ({
@@ -3081,8 +3099,11 @@ export class CellStore {
         translated: 0, validated: 0, textTranslated: 0, audioRecorded: 0, audioValidated: 0, total: 0,
       }
       const subsections: CellNavigationSubsection[] = []
-      for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
-        const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+      const addSubsection = (
+        cellIds: readonly string[],
+        label: string,
+        handSetCellId?: string,
+      ): void => {
         const firstCellId = cellIds[0]
         const counts = progressFor(cellIds)
         progress.translated += counts.translated
@@ -3092,14 +3113,35 @@ export class CellStore {
         progress.audioValidated += counts.audioValidated
         progress.total += counts.total
         subsections.push({
-          key: `${group.milestone.key}:range:${firstCellId}`,
-          label: `${offset + 1}–${offset + cellIds.length}`,
+          key: handSetCellId === undefined
+            ? `${group.milestone.key}:range:${firstCellId}`
+            : handSetSubsectionKey(group.milestone.key, handSetCellId),
+          label,
           firstCellId,
           firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
           cellIds,
           ...counts,
+          ...(handSetCellId === undefined ? {} : { handSetCellId }),
         })
       }
+      // AQU-2190: a section someone named inside this division owns the cells
+      // from its marker to the next marker or the division's end, and the
+      // automatic cell ranges number only what sits ABOVE the first marker.
+      // Together those two loops still cover every cell of the division exactly
+      // once, which is what keeps the division's own figures — summed here from
+      // its sub-entries — the same as they were before any section was named.
+      //
+      // With nothing marked, `leading` is the whole division and this is the
+      // 50-cell chunking it has always been.
+      const { leading, spans } = handSetSubsectionSpans(
+        group.cellIds,
+        derived.handSetSubsectionLabels,
+      )
+      for (let offset = 0; offset < leading.length; offset += MILESTONE_SUBSECTION_SIZE) {
+        const cellIds = leading.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+        addSubsection(cellIds, `${offset + 1}–${offset + cellIds.length}`)
+      }
+      for (const span of spans) addSubsection(span.cellIds, span.label, span.cellId)
       return {
         key: group.milestone.key,
         label: group.milestone.label,
@@ -3958,6 +4000,23 @@ function symmetricChangedKeys<T>(
   }
   for (const key of b.keys()) if (!a.has(key)) changed.add(key)
   return changed
+}
+
+/**
+ * Which sub-entry of `entry` holds `cellId`, or -1.
+ *
+ * Found by looking rather than by dividing the cell's position by
+ * {@link MILESTONE_SUBSECTION_SIZE}: AQU-2190 lets a named sub-entry own an
+ * arbitrary stretch of a division, so the sub-entries are uniform 50-cell
+ * ranges only until someone sets a section inside one. Arithmetic would then
+ * name the wrong row, and an optimistic figure would land on it — showing a
+ * pericope a translated line it does not contain until the next full rebuild.
+ *
+ * -1 is the caller's signal to fall back to a rebuild rather than patch the
+ * wrong row, which is also what it already did for a cell outside the entry.
+ */
+function subsectionIndexFor(entry: CellNavigationEntry, cellId: string): number {
+  return entry.subsections.findIndex((subsection) => subsection.cellIds.includes(cellId))
 }
 
 function navigationStartMs(source: CellRow | undefined, target: CellRow | undefined): number | undefined {

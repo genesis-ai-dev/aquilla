@@ -8,9 +8,12 @@
 //     moment a marker lands — including when it arrives as one cell's row from
 //     a collaborator, with no reload;
 //   * `getCellIdsWhereSectionMayStart`, which is the UI gate. It has to be read
-//     off the navigation the navigator is actually showing: whether a division
-//     came out of the file is a property of the stretch a cell landed in, so no
-//     cell can answer it from its own row.
+//     off the navigation the navigator is actually showing, so a cell the
+//     derivation never placed is not somewhere a division can start.
+//
+// Where a marker lands INSIDE a division the file supplied, it becomes a
+// nested sub-entry rather than a division of its own — AQU-2190, covered in
+// useActiveCellStore.subEntries.test.ts.
 
 import { describe, expect, it } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -195,16 +198,17 @@ describe("AQU-2185 — where the action may be offered", () => {
     expect(ids.has("c100")).toBe(true)
   })
 
-  it("offers it nowhere in a file whose divisions came out of the file", () => {
-    // The AC: a Scripture file's cells do not offer the action, and its chapters
-    // are unchanged. Inside those, a marker becomes a sub-entry — AQU-2190's
-    // slice, not this one's.
+  it("offers it in a file whose divisions came out of the file too, since AQU-2190", () => {
+    // AQU-2185 offered it NOWHERE here, because a marker inside a chapter was
+    // dropped. AQU-2190 nests it under the chapter instead, so the action is
+    // offered — and the chapters themselves are still exactly what the file
+    // said, which is the part that must never change.
     const s = store()
     s.replaceRows(scriptureFile())
 
     expect(s.getNavigationIndex().map((e) => e.kind)).toEqual(
       new Array(1).fill("chapter"),
     )
-    expect(s.getCellIdsWhereSectionMayStart().size).toBe(0)
+    expect(s.getCellIdsWhereSectionMayStart().has("gen-1")).toBe(true)
   })
 })

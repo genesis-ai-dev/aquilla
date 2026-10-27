@@ -55,6 +55,18 @@ export interface DerivedMilestoneNavigation {
     firstIndex: number
     cellIds: readonly string[]
   }[]
+  /**
+   * AQU-2190: the markers that landed INSIDE a division the file supplied,
+   * as marked cell id → name. These become sub-entries nested under that
+   * division rather than divisions of their own, which is why they are
+   * reported beside `orderedMilestones` instead of appearing in it: the
+   * top-level list a Scripture file's chapters make up is exactly what must
+   * not change when someone names a pericope inside one.
+   *
+   * Cut into spans by {@link handSetSubsectionSpans}, which the caller owning
+   * the sub-entry list runs per division.
+   */
+  handSetSubsectionLabels: ReadonlyMap<string, string>
 }
 
 /** Read only the validated generic envelope; arbitrary metadata is ignored. */
@@ -167,7 +179,7 @@ export function deriveMilestoneNavigation(
   // a stretch this has claimed carries neither kind any more. `handSetCovered`
   // closes the one remaining door — a claimed cell whose RAW seed was a
   // persisted `part`, which `inheritedPart` would otherwise still offer up.
-  const handSetCovered = applyHandSetSections(cells, resolved)
+  const { covered: handSetCovered, subsectionLabels } = applyHandSetSections(cells, resolved)
   applyAiSections(
     cells,
     resolved,
@@ -201,6 +213,7 @@ export function deriveMilestoneNavigation(
   return {
     milestoneByCellId,
     orderedMilestones: [...groups.values()],
+    handSetSubsectionLabels: subsectionLabels,
   }
 }
 
@@ -212,8 +225,12 @@ export interface MilestonePageEntry {
 
 /**
  * Cells that belong on one navigator destination. Split-into-milestones view
- * always asks for the whole division. A subsection key is the picker jump
- * into a 50-cell range of a long IDML story, used only in continuous view.
+ * always asks for the whole division — which is why naming a section inside a
+ * chapter (AQU-2190) leaves that chapter a single page, and picking the
+ * sub-entry turns to that page and scrolls within it rather than paging to the
+ * sub-entry. A subsection key is the picker jump into part of a division, used
+ * only in continuous view: a 50-cell range of a long IDML story, or a section
+ * someone named inside the division.
  */
 export function cellIdsForMilestonePage(
   navigation: readonly MilestonePageEntry[],
@@ -231,7 +248,8 @@ export function cellIdsForMilestonePage(
 
 /**
  * Put a person's own divisions in place of the app-invented ones, in place.
- * Returns the indices a hand-set section now covers.
+ * Returns the indices a hand-set section now covers, and the markers that
+ * belong NESTED under a division instead of replacing one.
  *
  * AQU-2185. A marked cell starts a new top-level division that runs until the
  * next marker or the next division the FILE supplied, replacing the app-made
@@ -243,11 +261,15 @@ export function cellIdsForMilestonePage(
  *   - A second marker further down SPLITS the first section there, because the
  *     walk starts a fresh division whenever it meets one.
  *   - A division the file supplied is never moved or removed. Meeting one ends
- *     the hand-set run, and a label found ON a file-supplied cell is IGNORED
- *     here: inside those, a marker becomes a sub-entry, which is AQU-2190's
- *     slice and not offered by this one's menu. Ignoring it rather than
- *     honouring it is what keeps a Scripture file's chapters exactly as they
- *     were even if a label reaches such a cell by some other route.
+ *     the hand-set run.
+ *
+ * AQU-2190. A marker that lands INSIDE a file-supplied division — a Scripture
+ * chapter, a heading section, a slide, an IDML story — is no longer dropped.
+ * It is collected into `subsectionLabels` and becomes a sub-entry nested under
+ * that division, cut by {@link handSetSubsectionSpans}. Nothing about the
+ * top-level walk changes, and that is the point: the chapter stays one entry
+ * holding exactly the cells it held, so everything keyed by chapter (export
+ * scope, the sidebar list, assignment) cannot notice a pericope was named.
  *
  * "File-supplied" is read off the resolved kind rather than from a list of
  * parsers, so it stays true as formats are added: `part` and `time-range` are
@@ -258,25 +280,119 @@ export function cellIdsForMilestonePage(
 function applyHandSetSections(
   cells: readonly MilestoneNavigationCell[],
   resolved: ImportMilestone[],
-): ReadonlySet<number> {
+): { covered: ReadonlySet<number>; subsectionLabels: ReadonlyMap<string, string> } {
   const covered = new Set<number>()
+  const subsectionLabels = new Map<string, string>()
   let active: ImportMilestone | undefined
 
   for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index]
+    const label = cell?.milestoneLabel?.trim()
     // A division out of the file closes whatever section was running: a
-    // hand-set section may not straddle one.
+    // hand-set section may not straddle one. A marker sitting in one goes to
+    // the nested list instead (AQU-2190) — the division itself is left alone.
     if (!isAppInventedKind(resolved[index]?.kind)) {
       active = undefined
+      if (label) subsectionLabels.set(cell.id, label)
       continue
     }
-    const label = cells[index]?.milestoneLabel?.trim()
-    if (label) active = handSetMilestone(cells[index].id, label)
+    if (label) active = handSetMilestone(cell.id, label)
     if (!active) continue
     resolved[index] = active
     covered.add(index)
   }
 
-  return covered
+  return { covered, subsectionLabels }
+}
+
+/** One sub-entry nested under a file-supplied division (AQU-2190). */
+export interface HandSetSubsectionSpan {
+  /**
+   * The cell a person marked. The sub-entry's identity — so renaming it keeps
+   * the navigator selection, and two sub-entries may share a name — and the
+   * cell whose menu renames or removes it.
+   */
+  cellId: string
+  /** Shown exactly as typed, for the reasons {@link handSetMilestone} gives. */
+  label: string
+  cellIds: readonly string[]
+}
+
+/**
+ * Cut one division's cells into the sub-entries it should list (AQU-2190).
+ *
+ * `spans` is one entry per marker, running from the marked cell to the next
+ * marker or the END OF THE DIVISION — never past it, because the list handed in
+ * is a single division's cells, so a sub-section cannot reach into the next
+ * chapter or heading section however the cells are labelled.
+ *
+ * `leading` is what sits above the first marker: the cells the division still
+ * holds in its own right. The caller decides what to do with them — a long IDML
+ * story numbers them into automatic cell ranges as it always has, which is how
+ * "a hand-set sub-entry replaces the automatic ranges from its cell on, and the
+ * ranges before it remain" falls out without a rule of its own.
+ *
+ * With no marker, `leading` is the whole division and `spans` is empty, which
+ * is how every file that has never had a section set keeps exactly the
+ * navigation it had.
+ */
+export function handSetSubsectionSpans(
+  cellIds: readonly string[],
+  labels: ReadonlyMap<string, string>,
+): { leading: readonly string[]; spans: readonly HandSetSubsectionSpan[] } {
+  const leading: string[] = []
+  const spans: { cellId: string; label: string; cellIds: string[] }[] = []
+
+  for (const cellId of cellIds) {
+    const label = labels.get(cellId)
+    if (label !== undefined) {
+      spans.push({ cellId, label, cellIds: [cellId] })
+      continue
+    }
+    const open = spans[spans.length - 1]
+    if (open) open.cellIds.push(cellId)
+    else leading.push(cellId)
+  }
+
+  return { leading, spans }
+}
+
+/**
+ * Which of a division's sub-entries a file lists in its navigator (AQU-2190).
+ *
+ * `listsAutomaticRanges` is the long-IDML-story case, which has listed its
+ * numbered cell ranges since AQU-1083 and keeps doing so. Any other file lists
+ * sub-entries only for a division someone has named a section inside: every
+ * division has at least one automatic range, so listing them unconditionally
+ * would turn every 41-verse chapter into a row that expands instead of a row
+ * you can pick, for no gain.
+ *
+ * When a division does list them it lists them ALL, the range above the first
+ * marker included, because a listed division's sub-entries have to COVER it:
+ * selecting a division that has them expands it rather than navigating,
+ * previous/next steps sub-entry by sub-entry, and the active row is the one
+ * holding the viewport. Listing the named section alone would leave the cells
+ * above it in no row — unreachable from the picker, and mis-highlighted while
+ * someone reads them.
+ */
+export function listedSubsectionsFor<T extends { handSetCellId?: string }>(
+  subsections: readonly T[],
+  listsAutomaticRanges: boolean,
+): readonly T[] {
+  return listsAutomaticRanges
+    || subsections.some((subsection) => subsection.handSetCellId !== undefined)
+    ? subsections
+    : []
+}
+
+/**
+ * The key of a nested sub-entry (AQU-2190), scoped by the division it hangs
+ * under so the same marker could never collide across divisions, and distinct
+ * from the `:range:` keys the automatic cell ranges use so a stored navigator
+ * selection names one or the other and never both.
+ */
+export function handSetSubsectionKey(milestoneKey: string, cellId: string): string {
+  return `${milestoneKey}:${HAND_SET_KEY_PREFIX}${cellId}`
 }
 
 /**
@@ -361,30 +477,6 @@ function applyAiSections(
 /** Divisions the app made up when the file offered none. */
 function isAppInventedKind(kind: ImportMilestoneKind | undefined): boolean {
   return kind === "part" || kind === "time-range"
-}
-
-/**
- * AQU-2185: may "Start a section here" be offered on a cell sitting in a
- * division of this kind?
- *
- * The UI gate and {@link applyHandSetSections} must agree, so the rule lives
- * here once rather than as a kind list in a menu. True for every division the
- * APP made up, false for every division read out of the FILE — inside those, a
- * marker becomes a sub-entry (AQU-2190), which this slice does not offer.
- *
- * `ai-section` is in the list and `isAppInventedKind` does not mention it, which
- * looks like a disagreement and is not: the overlay runs AFTER
- * `applyHandSetSections`, so that function can never meet one, while this gate
- * reads the FINAL kind a reader is looking at — and an AI-cut section is as
- * app-made as the "Part N" it replaced.
- *
- * `hand-set` is in the list too, so a second marker further down splits a
- * section that is already hand-set.
- */
-export function milestoneAcceptsHandSetSection(
-  kind: ImportMilestoneKind | undefined,
-): boolean {
-  return isAppInventedKind(kind) || kind === "ai-section" || kind === "hand-set"
 }
 
 function replaceRun(

@@ -11,13 +11,13 @@
 //   * it runs to the next marker, or to the next division the FILE supplied;
 //   * app-made divisions BEFORE the first marker are untouched;
 //   * a division the file supplied is never moved or removed, and a label on
-//     such a cell is ignored (sub-entries are AQU-2190's slice);
+//     such a cell makes no top-level division — AQU-2190 nests it under that
+//     division instead, which milestone-navigation.subEntries.test.ts covers;
 //   * the AI-section overlay never re-cuts a hand-set section.
 
 import { describe, expect, it } from "vitest"
 import {
   deriveMilestoneNavigation,
-  milestoneAcceptsHandSetSection,
   type MilestoneNavigationCell,
 } from "./milestone-navigation"
 import { FALLBACK_MILESTONE_SIZE } from "./import/milestones"
@@ -145,14 +145,15 @@ describe("deriveMilestoneNavigation — hand-set sections (AQU-2185)", () => {
     ])
   })
 
-  it("leaves a Scripture file's chapters untouched, even if a label reaches one of its cells", () => {
+  it("leaves a Scripture file's chapters untouched when a label reaches one of its cells", () => {
     const chapter = (n: number): ImportMilestone => ({
       key: `scripture:GEN:${n}`, kind: "chapter", label: `Genesis ${n}`, shortLabel: String(n),
     })
     const cells = [
       persisted("gen1-1", chapter(1)),
-      // A label here is IGNORED: inside a division the file supplied, a marker
-      // becomes a sub-entry, which is AQU-2190's slice and not this one's.
+      // A label here makes NO top-level division. AQU-2190 nests it under
+      // Genesis 1 as a sub-entry instead, which is asserted just below and
+      // covered properly in milestone-navigation.subEntries.test.ts.
       persisted("gen1-2", chapter(1), { milestoneLabel: "The flood" }),
       persisted("gen2-1", chapter(2)),
     ]
@@ -160,6 +161,10 @@ describe("deriveMilestoneNavigation — hand-set sections (AQU-2185)", () => {
     expect(entries(cells)).toEqual([
       { label: "Genesis 1", kind: "chapter", firstCellId: "gen1-1", count: 2 },
       { label: "Genesis 2", kind: "chapter", firstCellId: "gen2-1", count: 1 },
+    ])
+    // The label is not dropped — it is reported for nesting, not for the list.
+    expect([...deriveMilestoneNavigation(cells).handSetSubsectionLabels]).toEqual([
+      ["gen1-2", "The flood"],
     ])
   })
 
@@ -225,22 +230,5 @@ describe("deriveMilestoneNavigation — hand-set sections (AQU-2185)", () => {
       { label: "Part 2", kind: "part", firstCellId: "c50", count: SIZE },
       { label: "Part 3", kind: "part", firstCellId: "c100", count: 20 },
     ])
-  })
-})
-
-describe("milestoneAcceptsHandSetSection (AQU-2185)", () => {
-  it("accepts the divisions the app made up, and a hand-set one so a second marker splits it", () => {
-    expect(milestoneAcceptsHandSetSection("part")).toBe(true)
-    expect(milestoneAcceptsHandSetSection("time-range")).toBe(true)
-    expect(milestoneAcceptsHandSetSection("ai-section")).toBe(true)
-    expect(milestoneAcceptsHandSetSection("hand-set")).toBe(true)
-  })
-
-  it("refuses every division read out of the file — those take sub-entries (AQU-2190), not markers", () => {
-    for (const kind of ["chapter", "chapter-range", "preface", "story", "slide", "section", "group"] as const) {
-      expect(milestoneAcceptsHandSetSection(kind)).toBe(false)
-    }
-    // And an unknown/absent kind reads as "not here", which is the safe way round.
-    expect(milestoneAcceptsHandSetSection(undefined)).toBe(false)
   })
 })

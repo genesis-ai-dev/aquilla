@@ -45,6 +45,8 @@ import type { CellData } from "@/hooks/useCells"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
+  type CellNavigationEntry,
+  type CellNavigationSubsection,
   type CellStore,
   readAtVersion,
   useCellIds,
@@ -214,7 +216,7 @@ import type { PericopeSuggestion } from "@/lib/pericope/suggest"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
 import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
 import { compareAddresses, parseRef } from "@/lib/pericope/sections"
-import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
+import { cellIdsForMilestonePage, listedSubsectionsFor } from "@/lib/milestone-navigation"
 import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { useUnresolvedCommentHighlight } from "@/lib/store/unresolved-comment-highlight-pref"
 import {
@@ -1511,16 +1513,29 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
     })),
   [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+  /**
+   * Which of a division's sub-entries this file lists — the rule, and why it is
+   * all of them or none, lives with the derivation in `listedSubsectionsFor`.
+   *
+   * One answer, used by everything downstream: the picker's rows, the key a
+   * stored navigator selection carries, and the sub-entry the viewport is in.
+   * They cannot disagree about what exists, which is what the three separate
+   * `idmlMilestoneNavigation` checks here used to risk.
+   */
+  const exposedSubsectionsFor = useCallback(
+    (entry: CellNavigationEntry): readonly CellNavigationSubsection[] =>
+      listedSubsectionsFor(entry.subsections, idmlMilestoneNavigation),
+    [idmlMilestoneNavigation],
+  )
   const subsectionKeyByCellId = useMemo(() => {
     const map = new Map<string, string>()
-    if (!idmlMilestoneNavigation) return map
     for (const entry of milestoneNavigation) {
-      for (const subsection of entry.subsections) {
+      for (const subsection of exposedSubsectionsFor(entry)) {
         for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
       }
     }
     return map
-  }, [idmlMilestoneNavigation, milestoneNavigation])
+  }, [exposedSubsectionsFor, milestoneNavigation])
   const displayCellIds = useMemo(() => {
     // AQU-1687: "Show every line by …" lists the speaker's lines across the
     // whole file, so it outranks the milestone page (as does AQU-1689's
@@ -1671,9 +1686,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (!splitByMilestone) return hiddenByVoiceFilter
     const key = milestoneKeyByCellId.get(cellId)
     if (!key) return false
-    const subsectionKey = idmlMilestoneNavigation
-      ? subsectionKeyByCellId.get(cellId)
-      : undefined
+    const subsectionKey = subsectionKeyByCellId.get(cellId)
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
@@ -1684,7 +1697,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [
     audioFileId,
     clearVoiceFilter,
-    idmlMilestoneNavigation,
     milestoneKeyByCellId,
     splitByMilestone,
     subsectionKeyByCellId,
@@ -2448,6 +2460,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ) && range
             ? `Verses ${range}`
             : `${entry.total} ${unitName}${entry.total === 1 ? "" : "s"}`
+        const subsectionsShown = exposedSubsectionsFor(entry)
         return {
           key: entry.key,
           kind: entry.kind,
@@ -2462,12 +2475,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           textTranslated: entry.textTranslated,
           audioRecorded: entry.audioRecorded,
           audioValidated: entry.audioValidated,
-          ...(idmlMilestoneNavigation
+          ...(subsectionsShown.length
             ? {
-                subsections: entry.subsections.map((subsection) => ({
+                subsections: subsectionsShown.map((subsection) => ({
                   key: subsection.key,
                   label: subsection.label,
                   firstCellId: subsection.firstCellId,
+                  // AQU-2190: a named section is shown as typed, a cell range
+                  // is framed as one.
+                  ...(subsection.handSetCellId === undefined ? {} : { handSet: true }),
                   translated: subsection.translated,
                   validated: subsection.validated,
                   total: subsection.total,
@@ -2480,7 +2496,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         }
       })
     }),
-  [cellStore, cellStoreVersion, idmlMilestoneNavigation, milestoneNavigation])
+  [cellStore, cellStoreVersion, exposedSubsectionsFor, milestoneNavigation])
   // A file of chapters numbers its lines by verse; anything else counts them.
   const scriptureNumbering = useMemo(() => milestoneNavigationItems.every((item) => (
     item.kind === "chapter"
@@ -2563,8 +2579,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = idmlMilestoneNavigation
-      ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+    const subsection = entry && subsectionKey
+      ? exposedSubsectionsFor(entry).find((candidate) => candidate.key === subsectionKey)
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
     if (!targetCellId) return
@@ -2589,7 +2605,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, clearVoiceFilter, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
+  }, [audioFileId, clearVoiceFilter, exposedSubsectionsFor, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
 
   /**
    * Open a suggested passage (AQU-515) — land on the first cell inside the
@@ -2655,9 +2671,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
     const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
     if (!key) return
-    const subsectionKey = idmlMilestoneNavigation && visibleId
-      ? subsectionKeyByCellId.get(visibleId)
-      : undefined
+    const subsectionKey = visibleId ? subsectionKeyByCellId.get(visibleId) : undefined
     if (visibleId) pendingJumpCellIdRef.current = visibleId
     setChapterNavigationSelection({
       fileId: audioFileId,
@@ -2670,7 +2684,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     chapterVisibleIndex,
     fileCellIds,
     firstVisibleIndex,
-    idmlMilestoneNavigation,
     milestoneKeyByCellId,
     milestoneNavigation,
     splitByMilestone,
@@ -3870,12 +3883,14 @@ function CellSourceMenu({
   onToggleHidden,
   hiddenDisabledReason,
   /** AQU-2185: name a navigator division of your own, starting at this cell.
-   *  Hidden entirely (not disabled) for anyone below the source-edit gate, and
-   *  on a cell sitting in a division the FILE supplied — exactly as the park
-   *  entry above is hidden, and for the same two reasons: a reader must not
-   *  learn that sections can be set, and an action that is inapplicable to this
-   *  cell for a reason that cannot change while you are in the file is
-   *  furniture, not an explanation. */
+   *  Hidden entirely (not disabled) for anyone below the source-edit gate —
+   *  exactly as the park entry above is hidden, and for the same reason: a
+   *  reader must not learn that sections can be set.
+   *
+   *  AQU-2190: offered on every cell the navigator lists, wherever it sits. In
+   *  a division the app made up the section replaces it; in one the file
+   *  supplied it becomes a sub-entry nested under it. The menu does not have to
+   *  tell the two apart — the derivation does. */
   onStartSection,
   /** AQU-2186: on the cell that STARTS a hand-set section, these two take the
    *  place of the entry above — correcting a name, and taking the section
@@ -6078,25 +6093,25 @@ function EditorRow({
   /**
    * AQU-2185: may this person start a division of their own HERE?
    *
-   * Three conditions, and the first two are different kinds of "no":
+   * Two conditions, and they are different kinds of "no":
    *
    *   - the ROLE gate, read from the same table the emitter and the server
    *     enforce, so the entry and the write cannot disagree. Below it the entry
    *     is ABSENT, not disabled — a reader must not learn that sections can be
    *     set, the same call `mayParkCells` above makes for hiding;
-   *   - WHERE THE CELL SITS. Inside a division the file supplied (a Scripture
-   *     chapter, a heading section, a slide) a marker would become a sub-entry,
-   *     which is AQU-2190's slice; this one does not offer it there. Absent
-   *     rather than disabled again, because this cannot change while you are in
-   *     the file — the menu's house rule is that a disabled entry explains an
-   *     inapplicable action, not one that is inapplicable forever;
    *   - the DCS / live-linked pin, which IS explained, because it is the same
    *     refusal Edit text and Hide cell already explain on that row.
    *
-   * `sectionStartCellIds` is computed once for the file from the navigation the
-   * navigator itself is showing — a cell cannot answer this from its own row,
-   * because whether a division came out of the file is a property of the
-   * stretch the cell landed in.
+   * WHERE THE CELL SITS was a third condition until AQU-2190: a marker inside a
+   * division the file supplied (a Scripture chapter, a heading section, a slide)
+   * used to be dropped, so the entry was hidden there. It now becomes a
+   * sub-entry nested under that division, so every cell the navigator lists
+   * offers it.
+   *
+   * `sectionStartCellIds` is still computed once for the file from the
+   * navigation the navigator itself is showing, rather than collapsing to a
+   * single boolean: the answer belongs to the open file's navigation, and a row
+   * the derivation placed in no division is not somewhere a section can start.
    */
   const maySetSections = canPerform("source.cell.milestone.set", project.syncRole?.level ?? null)
   /**

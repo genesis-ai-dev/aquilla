@@ -63,6 +63,13 @@ export interface MilestoneNavigationSubsection extends MilestoneProgress {
   key: string
   label: string
   firstCellId: string
+  /**
+   * AQU-2190: is `label` a NAME somebody typed, rather than the cell range this
+   * row would otherwise be? A named sub-entry is shown as typed; a range is
+   * framed ("Cells 51–100"), which would read as nonsense around a pericope
+   * title.
+   */
+  handSet?: boolean
 }
 
 /**
@@ -556,7 +563,9 @@ function VirtualizedMilestoneList({
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
                       <TruncatedLabel
-                        text={t("editor.milestone.cellRange", { range: subsection.label })}
+                        text={subsection.handSet
+                          ? subsection.label
+                          : t("editor.milestone.cellRange", { range: subsection.label })}
                       />
                     </span>
                     <ProgressSummary view={progressView} {...subsection} />
@@ -810,7 +819,9 @@ export function MilestoneNavigator({
             row.bookHeader
               ? row.bookHeader
               : row.subsection
-                ? t("editor.milestone.cellRange", { range: row.subsection.label })
+                ? row.subsection.handSet
+                  ? row.subsection.label
+                  : t("editor.milestone.cellRange", { range: row.subsection.label })
                 : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}

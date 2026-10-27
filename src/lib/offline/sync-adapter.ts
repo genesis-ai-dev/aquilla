@@ -48,7 +48,7 @@ import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import type { OutboxEventKind, OutboxPayloadFor, OutboxRawEvent } from "@/lib/sync/outbox-types"
 import { cellRowId, events, localLaneKey, tables, type schema } from "./schema"
 import { markConflict } from "./conflicts"
-import { catchUpProject, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
+import { catchUpProject, sameAsLocal, toCellSyncedArgs, type CatchUpDeps } from "./catch-up"
 import { markProjectAvailable, withAccessTracking } from "./project-access"
 import { desktopConnectivity, type ConnectivitySource } from "./connectivity"
 
@@ -89,6 +89,8 @@ export interface OfflineSyncAdapterOptions {
   minFlushRetryMs?: number
   /** Ceiling the retry delay backs off to. */
   maxFlushRetryMs?: number
+  /** How long live event.applied frames are buffered so a burst lands as one commit. */
+  frameCoalesceMs?: number
   /** Test seam for the catch-up pull's HTTP reads (catch-up.ts). */
   catchUpDeps?: CatchUpDeps
   /** While this reports offline, nothing is attempted; coming online flushes. Defaults to the Rust probe. */
@@ -157,6 +159,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   const flushDebounceMs = options.flushDebounceMs ?? 250
   const minFlushRetryMs = options.minFlushRetryMs ?? 2_000
   const maxFlushRetryMs = options.maxFlushRetryMs ?? 60_000
+  const frameCoalesceMs = options.frameCoalesceMs ?? 100
 
   const connectivity = options.connectivity ?? desktopConnectivity
   // Unknown (no probe yet, or web) counts as online: try, and let a failure back off.
@@ -167,13 +170,57 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   let flushTimer: ReturnType<typeof setTimeout> | null = null
   let flushRetryDelay = minFlushRetryMs
 
-  function applyRows(frame: Extract<ProjectWsServerMessage, { t: "event.applied" }>): void {
-    if (!frame.file || !frame.rows) return
-    // AQU-1614: every lane's row lands — the local row key carries the lane,
-    // so a second language no longer overwrites the default lane's row.
-    for (const row of frame.rows) {
-      store.commit(events.cellSynced(toCellSyncedArgs(projectId, frame.file, row)))
+  type AppliedFrame = Extract<ProjectWsServerMessage, { t: "event.applied" }>
+  /** The newest `serverSeq` each local cell row has landed at this session. */
+  const landedSeqByRow = new Map<string, number>()
+  type CommitInput = Parameters<typeof events.cellsSynced>[0]
+
+  /**
+   * The server rows `frames` carry, as one `v2.CellsSynced` per file, holding
+   * only rows that differ from the local copy. AQU-1614: every lane's row
+   * lands — the local row key carries the lane, so a second language no
+   * longer overwrites the default lane's row. Skipping unchanged rows matters
+   * after a flush: the socket echoes an event.applied for each write the
+   * flush response already landed.
+   */
+  function syncedRowsEvents(frames: readonly AppliedFrame[]): ReturnType<typeof events.cellsSynced>[] {
+    // Newest server write wins per row. Arrival order is not apply order: a
+    // flush response lands after live frames that arrived while it was being
+    // read — some still buffered, some already landed — and a peer's frame
+    // among them may have been applied after our batch. So a frame's
+    // `serverSeq` decides against any seq this row already landed with; a
+    // frame without it (older workers) falls back to arrival order.
+    const byFile = new Map<string, Map<string, ReturnType<typeof toCellSyncedArgs>>>()
+    const seqByRow = new Map<string, number>()
+    for (const frame of frames) {
+      if (!frame.file || !frame.rows) continue
+      let rows = byFile.get(frame.file)
+      if (!rows) byFile.set(frame.file, (rows = new Map()))
+      for (const row of frame.rows) {
+        const args = toCellSyncedArgs(projectId, frame.file, row)
+        const id = cellRowId(projectId, frame.file, args.cellId, args.side, localLaneKey(args.laneId, args.targetLang))
+        const seen = seqByRow.get(id) ?? landedSeqByRow.get(id)
+        if (frame.serverSeq !== undefined) {
+          if (seen !== undefined && frame.serverSeq < seen) continue
+          seqByRow.set(id, frame.serverSeq)
+        }
+        rows.set(id, args)
+      }
     }
+    // Callers commit what this returns straight away.
+    for (const [id, seq] of seqByRow) landedSeqByRow.set(id, seq)
+    const out: ReturnType<typeof events.cellsSynced>[] = []
+    for (const [fileId, rows] of byFile) {
+      const changed: CommitInput["rows"][number][] = []
+      for (const [id, args] of rows) {
+        const local = store.query(tables.cells.select().where({ id }).first())
+        if (local && sameAsLocal(local, args)) continue
+        const { projectId: _p, fileId: _f, ...row } = args
+        changed.push(row)
+      }
+      if (changed.length > 0) out.push(events.cellsSynced({ projectId, fileId, rows: changed }))
+    }
+    return out
   }
 
   /**
@@ -191,22 +238,50 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return existing?.laneKey ?? localLaneKey(null, targetLang)
   }
 
-  /** Dequeue a locally queued write once the server has resolved it (accepted
-   *  or permanently rejected) — a no-op if `id` isn't in the queue. */
-  function dequeueIfQueued(id: string): void {
-    const queued = store.query(tables.eventQueue.select().where({ id }).first())
-    if (!queued) return
-    store.commit(events.eventDequeued({ id }))
-    recordOfflineUpload(projectId)
+  // Live frames are buffered for a beat and landed together: the server
+  // broadcasts one event.applied per event it applies, so a flush (or a peer's
+  // bulk edit) arrives as hundreds of frames in a row — one commit each left
+  // the leader the same backlog the flush batching removed.
+  let bufferedFrames: AppliedFrame[] = []
+  let frameTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Takes the buffered frames, as the commits that land them: their writes
+   *  leave the queue, their rows land. Empty when there is nothing to do. */
+  function takeBufferedFrames(): { dequeued: string[]; frames: AppliedFrame[] } {
+    if (frameTimer !== null) {
+      clearTimeout(frameTimer)
+      frameTimer = null
+    }
+    const frames = bufferedFrames
+    bufferedFrames = []
+    // Only ids still queued: a frame for someone else's event (or one the
+    // flush response already resolved) has nothing to dequeue.
+    const dequeued = frames
+      .map((f) => f.id)
+      .filter((id) => store.query(tables.eventQueue.select("id").where({ id }).first()) !== undefined)
+    return { dequeued, frames }
+  }
+
+  function landBufferedFrames(): void {
+    const { dequeued, frames } = takeBufferedFrames()
+    const toCommit = [
+      ...(dequeued.length > 0 ? [events.eventsDequeued({ ids: dequeued })] : []),
+      ...syncedRowsEvents(frames),
+    ]
+    if (toCommit.length > 0) store.commit(...toCommit)
+    // Resolved writes count as uploads, as they do from the flush response.
+    if (dequeued.length > 0) recordOfflineUpload(projectId)
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {
     if (msg.t === "event.applied") {
-      dequeueIfQueued(msg.id)
-      applyRows(msg)
+      bufferedFrames.push(msg)
+      frameTimer ??= setTimeout(landBufferedFrames, frameCoalesceMs)
       return
     }
     if (msg.t === "event.stale") {
+      // Keep frames in arrival order.
+      landBufferedFrames()
       const queued = store.query(tables.eventQueue.select().where({ id: msg.id }).first())
       if (!queued) return
       store.commit(events.eventDequeued({ id: msg.id }))
@@ -331,6 +406,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     } catch {
       return "retry"
     }
+    // Closed while the POST was out (offline copy removed): landing its rows
+    // now would bring cells back. The server has the writes either way.
+    if (closed) return "retry"
 
     const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
     // 403 and every other 4xx but 401 (schema, unknown lane, …) won't
@@ -343,6 +421,11 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     const staleById = new Map((body.stale ?? []).map((s) => [s.id, s]))
     const rowById = new Map(pending.map((r) => [r.id, r]))
 
+    // Everything this response resolves lands in ONE commit: one transaction,
+    // and a handful of batched events rather than one per write and per row.
+    const dequeued: string[] = []
+    const failed: string[] = []
+    let accepted = 0
     for (const id of ids) {
       // Check stale FIRST: per CLAUDE.md's AD-2 head-CAS contract, a stale
       // sibling is "logged, 200-accepted, and reported in stale[]" — its id
@@ -352,7 +435,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       // had never modeled these two arrays overlapping).
       const stale = staleById.get(id)
       if (stale) {
-        store.commit(events.eventDequeued({ id }))
+        dequeued.push(id)
         const row = rowById.get(id)
         if (row?.fileId && row.cellId) {
           markConflict(
@@ -362,8 +445,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         continue
       }
       if (acceptedIds.has(id)) {
-        store.commit(events.eventDequeued({ id }))
-        recordOfflineUpload(projectId)
+        dequeued.push(id)
+        accepted += 1
         continue
       }
       const refusal = refused.get(id)
@@ -372,7 +455,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
         // stuck ("failed") rather than dequeuing (silent data loss) or
         // retrying forever (head-of-line blocking every future flush).
         console.warn(`[offline] server refused queued write ${id}: ${refusal.status} ${refusal.reason}`)
-        store.commit(events.eventQueueStatusSet({ id, status: "failed" }))
+        failed.push(id)
         continue
       }
       // 401 / 5xx / unacknowledged — transient: still "pending", so the next
@@ -382,12 +465,21 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     // Land the server's projected rows for our own accepted writes directly,
     // rather than waiting for the WS echo of each event.applied — the flush
     // already has them and the round trip may be slower than this response.
-    if (Array.isArray(body.applied)) {
-      for (const raw of body.applied) {
-        const frame = parseAppliedEventFrame(raw)
-        if (frame) applyRows(frame)
-      }
-    }
+    const frames = Array.isArray(body.applied)
+      ? body.applied.map(parseAppliedEventFrame).filter((f): f is AppliedFrame => f !== null)
+      : []
+
+    // Live frames still buffered land in the same commit; syncedRowsEvents
+    // orders them against the response's frames by serverSeq.
+    const buffered = takeBufferedFrames()
+    const allDequeued = [...new Set([...buffered.dequeued, ...dequeued])]
+    const toCommit = [
+      ...(allDequeued.length > 0 ? [events.eventsDequeued({ ids: allDequeued })] : []),
+      ...failed.map((id) => events.eventQueueStatusSet({ id, status: "failed" })),
+      ...syncedRowsEvents([...buffered.frames, ...frames]),
+    ]
+    if (toCommit.length > 0) store.commit(...toCommit)
+    if (accepted > 0) recordOfflineUpload(projectId)
     return "ok"
   }
 
@@ -498,8 +590,9 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   // is safe to retry — POST /events is idempotent on event id. Left as-is it
   // would never be sent (flushes only pick up "pending"), and catch-up would
   // skip its cell forever as a protected local edit.
-  for (const row of store.query(tables.eventQueue.select().where({ projectId, status: "flushing" }))) {
-    store.commit(events.eventQueueStatusSet({ id: row.id, status: "pending" }))
+  const interrupted = store.query(tables.eventQueue.select().where({ projectId, status: "flushing" }))
+  if (interrupted.length > 0) {
+    store.commit(...interrupted.map((row) => events.eventQueueStatusSet({ id: row.id, status: "pending" })))
   }
 
   // The network came back: send what queued up while it was gone, from a
@@ -525,6 +618,10 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
       // Removed offline copy (or manager teardown): stop warning about it.
       markProjectAvailable(projectId)
       cancelFlushTimer()
+      // Dropped, not landed: close() follows removing the offline copy, and
+      // landing its rows now would bring cells back.
+      if (frameTimer !== null) clearTimeout(frameTimer)
+      bufferedFrames = []
       unsubscribeQueue()
       unsubscribeConnectivity()
       reconciler.close()

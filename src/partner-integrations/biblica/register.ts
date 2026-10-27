@@ -14,7 +14,12 @@ import { BookOpen } from "lucide-react"
 import type { PartnerIntegration } from "@/lib/partners/types"
 import { clearBiblicaApostropheGlue } from "./apostrophe-glue"
 import { isBiblicaScriptureCell } from "./cell-kind"
-import { BIBLICA_NOTES_PROFILE_ID, TREASURE_HUNT_PROFILE_ID } from "./editions"
+import {
+  BIBLICA_NOTES_PROFILE_ID,
+  EBL_PROFILE_ID,
+  REACH4LIFE_PROFILE_ID,
+  TREASURE_HUNT_PROFILE_ID,
+} from "./editions"
 import { applyBiblicaProtectedHtmlReflow } from "./export-reflow"
 
 const biblica: PartnerIntegration = {
@@ -42,6 +47,21 @@ const biblica: PartnerIntegration = {
   // AQU-1285: a study-Bible volume carries its verses as cells next to the
   // notes; the editor marks those rows through this hook.
   isScriptureCell: isBiblicaScriptureCell,
+  // Repair has to cut cells the way a normal Biblica import does. The editions
+  // stay behind this thunk so the four readers are not in the initial bundle.
+  idmlImportEditions: () => import("./editions").then((mod) => Object.values(mod.BIBLICA_EDITIONS)),
+  importProfileIds: [
+    BIBLICA_NOTES_PROFILE_ID,
+    TREASURE_HUNT_PROFILE_ID,
+    REACH4LIFE_PROFILE_ID,
+    EBL_PROFILE_ID,
+  ],
+  importCorpusMarkers: [
+    "Biblica Study Notes",
+    "Treasure Hunt Bible",
+    "Reach 4 Life",
+    "Equipping Biblical Leaders",
+  ],
 }
 
 export default biblica

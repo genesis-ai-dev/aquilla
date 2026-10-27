@@ -1,7 +1,8 @@
 // AQU-1759. The events a split sends, and what each language's translation
-// becomes. The contract that matters most is the last test's: a translation is
-// only ever divided when it splits the same way, and is otherwise left exactly
-// where it was — never deleted, never rewritten on a guess.
+// becomes. A translation is divided only when it splits the same way. Any
+// other stays whole. Either way the words are kept, and the commit is pinned
+// to the source from before the split so the row is marked for review
+// (AQU-2101). Nothing is deleted, and a translation is never re-cut on a guess.
 
 import { describe, it, expect } from "vitest"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -47,7 +48,8 @@ describe("planQuoteSplits", () => {
               cellId: "v5", side: "target", targetLang: "fr", laneId: "lane-fr",
               value: "Jésus dit à Philippe : « Où achèterons-nous du pain ? » Il disait cela pour l’éprouver.",
             }),
-            // No quotation marks of its own: kept whole, untouched.
+            // No quotation marks of its own: kept whole. The words stay, and so
+            // does any formatting the split could not divide.
             row({ cellId: "v5", side: "target", targetLang: "es", value: "Jesús dijo a Felipe dónde comprar pan." }),
           ],
           successor: { cellId: "v6", eventId: "head-v6" },
@@ -69,17 +71,20 @@ describe("planQuoteSplits", () => {
 
     const [n2, n3] = split.newCellIds
     const shape = plan.events.map((e) => [e.kind, e.cellId, e.parentId])
-    const commitId = plan.events[0].id
     const [c2, c3] = [plan.events[1].id, plan.events[2].id]
+    const sourceBefore = "head-v5-source-"
     expect(shape).toEqual([
-      ["source.cell.commit", "v5", "head-v5-source-"],
+      ["source.cell.commit", "v5", sourceBefore],
       ["source.cell.create", n2, null],
       ["source.cell.create", n3, null],
       ["source.cell.reorder", "v6", "head-v6"],
-      // Only French: its translation of the row is cut at its own quotes.
+      // French splits the same way, so its words are divided. Spanish does
+      // not, so the whole sentence stays on the first line. Both commits pin
+      // the source from before the split.
       ["target.cell.commit", "v5", "head-v5-target-fr"],
       ["target.cell.commit", n2, c2],
       ["target.cell.commit", n3, c3],
+      ["target.cell.commit", "v5", "head-v5-target-es"],
     ])
     expect(plan.events[0].payload).toEqual({ value: "Jesus said to Philip," })
     expect(plan.events[1].payload).toMatchObject({
@@ -97,12 +102,17 @@ describe("planQuoteSplits", () => {
     expect(plan.events[3].payload).toEqual({ anchorCellId: n3 })
     expect(plan.events[4].payload).toEqual({
       value: "Jésus dit à Philippe :",
-      sourceEventId: commitId,
+      sourceEventId: sourceBefore,
       targetLang: "fr",
       laneId: "lane-fr",
     })
-    expect(plan.events[5].payload).toMatchObject({ value: "« Où achèterons-nous du pain ? »", sourceEventId: c2 })
-    expect(plan.events[6].payload).toMatchObject({ value: "Il disait cela pour l’éprouver.", sourceEventId: c3 })
+    expect(plan.events[5].payload).toMatchObject({ value: "« Où achèterons-nous du pain ? »", sourceEventId: sourceBefore })
+    expect(plan.events[6].payload).toMatchObject({ value: "Il disait cela pour l’éprouver.", sourceEventId: sourceBefore })
+    expect(plan.events[7].payload).toEqual({
+      value: "Jesús dijo a Felipe dónde comprar pan.",
+      sourceEventId: sourceBefore,
+      targetLang: "es",
+    })
   })
 
   it("chains a split follower's reorder on its own commit", () => {
@@ -130,6 +140,38 @@ describe("planQuoteSplits", () => {
     const v6Reorder = plan.events.find((e) => e.kind === "source.cell.reorder" && e.cellId === "v6")!
     expect(v6Reorder.parentId).toBe(v6Commit.id)
     expect(plan.events.indexOf(v6Reorder)).toBeGreaterThan(plan.events.indexOf(v6Commit))
+  })
+
+  it("keeps a translation's formatting when the line cannot be divided", () => {
+    const html = "<p>Jesús dijo <em>dónde</em> comprar pan.</p>"
+    const plan = planQuoteSplits({
+      projectId: "p",
+      fileId: "f",
+      author: "sam",
+      mintId: minter(),
+      rows: [
+        {
+          source: row({ cellId: "v5", side: "source", value: JHN_6_5 }),
+          targets: [
+            row({
+              cellId: "v5",
+              side: "target",
+              targetLang: "es",
+              value: "Jesús dijo dónde comprar pan.",
+              valueHtml: html,
+            }),
+          ],
+          successor: null,
+        },
+      ],
+    })
+    const commit = plan.events.find((e) => e.kind === "target.cell.commit")
+    expect(commit?.payload).toMatchObject({
+      value: "Jesús dijo dónde comprar pan.",
+      valueHtml: html,
+      sourceEventId: "head-v5-source-",
+      targetLang: "es",
+    })
   })
 
   it("refuses a row it cannot split, and touches nothing for it", () => {
@@ -171,6 +213,12 @@ describe("voiceAssignmentsForSplits", () => {
     ]
     expect(voiceAssignmentsForSplits(splits, { v5: "narrator", other: "jesus" })).toEqual({ "v5-c": "narrator" })
     expect(voiceAssignmentsForSplits(splits, {})).toBeNull()
+  })
+
+  it("takes a lookup, so a row cast by its character still passes its voice on (AQU-2125)", () => {
+    const splits = [{ cellId: "v5", sameKindAsFirst: ["v5-c"] }]
+    expect(voiceAssignmentsForSplits(splits, (id) => (id === "v5" ? "jesus" : undefined))).toEqual({ "v5-c": "jesus" })
+    expect(voiceAssignmentsForSplits(splits, () => undefined)).toBeNull()
   })
 })
 

@@ -180,19 +180,27 @@ export function isGeminiVoiceName(value: string | undefined): boolean {
   return Boolean(value && GEMINI_VOICE_NAMES.has(value.trim().toLowerCase()))
 }
 
+/** Shape of a live Inworld catalog id. Unicode-aware because the ids ARE
+ *  Inworld's own display names, and plenty of them carry non-ASCII letters
+ *  (fr `Étienne`, `Hélène`; pt `Maitê`) — combining marks included, since an
+ *  id can arrive NFD-decomposed. An ASCII-only pattern rejected every accented
+ *  stock voice, so the picker and the generate path both put `Dennis` back
+ *  (AQU-2152). */
+const INWORLD_CATALOG_ID = /^\p{L}[\p{L}\p{M}\p{N}_-]{0,127}$/u
+
 export function isInworldVoiceName(value: string | undefined): boolean {
   if (!value) return false
   const trimmed = value.trim()
   // Live catalog ids (Alex, Dennis, …) must not steal Gemini/MMS knobs, or
   // leftover Kokoro speaker ids (`af_bella`) that would otherwise match the
-  // generic `[A-Za-z][\w-]+` catalog pattern.
+  // generic catalog-id pattern.
   if (isGeminiVoiceName(trimmed) || isLegacyKokoroVoiceName(trimmed) || isMmsLanguageCode(trimmed)) {
     return false
   }
   if (INWORLD_VOICE_NAMES.has(trimmed.toLowerCase())) return true
   // Instant Voice Cloning ids look like `workspace__display_timestamp`.
   if (trimmed.includes("__")) return true
-  return /^[A-Za-z][\w-]{0,127}$/.test(trimmed)
+  return INWORLD_CATALOG_ID.test(trimmed)
 }
 
 /** Leftover Kokoro 82M speaker ids (`af_heart`, `bf_emma`, `zf_xiaoxiao`). */

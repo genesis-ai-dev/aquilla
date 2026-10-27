@@ -326,6 +326,26 @@ describe("audio columns", () => {
   })
 })
 
+// Media redesign slice 1 (P1.2): a language set to Audio shows its books with
+// an AUD bar only, and never asks for a translation.
+describe("a language that says what it delivers", () => {
+  const ruth = unit({ fileId: "ruth", fileName: "Ruth", sectionKey: "RUT", totalCount: 45 })
+
+  it("Audio: AUD bars only, no TXT bar, and \"to record\" rather than \"to translate\"", () => {
+    render(
+      <PlanBoard units={[ruth]} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} recordsAudio delivers="audio" />,
+    )
+    expect(screen.getAllByText("AUD")).toHaveLength(1)
+    expect(screen.queryByText("TXT")).toBeNull()
+    expect(screen.queryByText(/to translate/)).toBeNull()
+  })
+
+  it("Text: the same untouched book reads as a new text project does today", () => {
+    render(<PlanBoard units={[ruth]} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} delivers="text" />)
+    expect(screen.queryByText("AUD")).toBeNull()
+  })
+})
+
 describe("selection and keyboard", () => {
   it("reports the clicked unit by file and section", () => {
     const { onSelect } = renderBoard([unit({ sectionKey: "GEN" })])

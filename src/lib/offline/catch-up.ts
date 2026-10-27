@@ -79,7 +79,7 @@ export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow
   }
 }
 
-function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
+export function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
   return (
     local.targetLang === args.targetLang &&
     local.laneId === args.laneId &&

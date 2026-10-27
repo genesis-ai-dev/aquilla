@@ -129,3 +129,24 @@ export const AUDIO_CTE_SQL = `SELECT ca.cell_id,
        FROM cell_audio ca
       WHERE ca.project_id = ? AND ca.file_id = ? AND ca.deleted = 0
       GROUP BY ca.cell_id, ${audioLaneTagSql('ca')}`
+
+/**
+ * Media redesign slice 1: ONE line's audio votes, as a scalar subquery — the
+ * per-cell form of AUDIO_CTE_SQL's `dub_votes`, for a reader that counts lines
+ * one by one rather than through the progress rows (an assignment's done
+ * lines in a language that delivers audio). The MINIMUM over the line's
+ * selected dub takes that sound, one per track; NULL when the line has none,
+ * which compares false against any threshold, as unrecorded must.
+ *
+ * `cellAlias` names a row carrying project_id / file_id / cell_id; `laneTagExpr`
+ * is the lane's legacy tag, matched the way `audioLaneTagSql` reads a take's.
+ */
+export function cellAudioVotesSql(cellAlias: string, laneTagExpr: string): string {
+  return `(SELECT MIN(ca.validator_count) FILTER (WHERE ${takeSoundsOnItsTrackSql('ca')})
+             FROM cell_audio ca
+            WHERE ca.project_id = ${cellAlias}.project_id
+              AND ca.file_id = ${cellAlias}.file_id
+              AND ca.cell_id = ${cellAlias}.cell_id
+              AND ca.deleted = 0 AND ca.selected = 1 AND ca.role = 'dub'
+              AND ${audioLaneTagSql('ca')} = ${laneTagExpr})`
+}

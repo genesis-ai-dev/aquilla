@@ -9,7 +9,7 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { translatedPct, validatedPct } from "@/lib/frontier/portfolio"
+import { startedPct, validatedPct } from "@/lib/frontier/portfolio"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
@@ -221,7 +221,9 @@ export function OrgOverview() {
         cell: ({ row }) => (
           <ValidatedBar
             fraction={validatedPct(row.original.project)}
-            translatedFraction={translatedPct(row.original.project)}
+            // Media redesign slice 1: the lines with any work in them, by
+            // what each language delivers (the translated share for Text).
+            translatedFraction={startedPct(row.original.project)}
           />
         ),
       },

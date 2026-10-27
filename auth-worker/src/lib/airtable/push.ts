@@ -18,6 +18,7 @@ import type { Env } from "../../types"
 import { parseJsonColumn, type IntegrationConnectionRow, type IntegrationLinkRow } from "../monday/types"
 import { computeProjectMetrics, type MondayEntityMetrics } from "../monday/metrics"
 import { recordPushOutcome, type PushResult } from "../integrations/push-state"
+import { renderItemName, templateNamesFile } from "../integrations/item-name"
 import {
   airtableClient,
   createRecords,
@@ -109,14 +110,6 @@ function recordFields(
   return fields
 }
 
-function renderItemName(template: string | undefined, kind: PushEntity["kind"], projectName: string, fileName?: string): string {
-  const tpl = template ?? (kind === "file" ? "{projectName} — {fileName}" : "{projectName}")
-  return tpl
-    .replaceAll("{projectName}", projectName)
-    .replaceAll("{fileName}", fileName ?? "")
-    .trim()
-}
-
 /**
  * The mapped field an Airtable refusal names, if any: by id (we write by id),
  * or by its name from the saved table structure (some messages use names).
@@ -151,7 +144,7 @@ function entitiesFor(
   // the same, and a file-shaped one would leave the project's record ending in
   // a dash, so each kind of record only uses a template written for it.
   const template = mapping.itemNameTemplate
-  const namesFile = Boolean(template?.includes("{fileName}"))
+  const namesFile = templateNamesFile(template)
   const project: PushEntity = {
     kind: "project",
     id: summary.projectId,

@@ -279,3 +279,58 @@ describe("FileRow — AQU-894 unassigned de-emphasis", () => {
     expect(renderRow().container.querySelector(".sr-only")).toBeNull()
   })
 })
+
+// Media redesign slice 2 (P2.1): a language that counts its recordings
+// describes the file by them.
+describe("FileRow progress in a language that counts its recordings", () => {
+  it("Audio: the bar says recorded and approved, never translated", () => {
+    const { getByTestId } = renderRow({ progress: { total: 45, translated: 10, validated: 6, delivers: "audio" } })
+    const label = getByTestId("file-row-progress-slot").getAttribute("aria-label") ?? ""
+    expect(label).toMatch(/^\d+% recorded, \d+% audio validated$/)
+    expect(label).not.toMatch(/translated/)
+  })
+
+  it("Text: a language that delivers text draws its text alone, however much is recorded", () => {
+    const { getByTestId } = renderRow({
+      progress: { total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label")).not.toMatch(/recorded/)
+  })
+
+  it("Text and audio: drawn exactly like a not-chosen file that holds both (Sam, Oct 24)", () => {
+    // The language's own row: started / done in translated / validated (what
+    // the footer reads), the two halves beside them.
+    const chosen = renderRow({
+      progress: {
+        total: 10, translated: 9, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 5, audioValidated: 3,
+      },
+    })
+    const chosenSlot = chosen.getByTestId("file-row-progress-slot")
+    // The same file, nobody having chosen: text and audio figures as they are.
+    const unchosen = renderRow({ progress: { total: 10, translated: 6, validated: 4, recorded: 5, audioValidated: 3 } })
+    const unchosenSlot = unchosen.getAllByTestId("file-row-progress-slot")[1]
+    expect(chosenSlot.getAttribute("aria-label")).toBe("60% translated, 40% validated, 50% recorded, 30% audio validated")
+    expect(chosenSlot.getAttribute("aria-label")).toBe(unchosenSlot.getAttribute("aria-label"))
+    expect(chosenSlot.innerHTML).toBe(unchosenSlot.innerHTML)
+    expect(chosenSlot.getAttribute("title")).toBeNull()
+  })
+
+  it("Text and audio: the audio bar shows before the first recording, since the language owes it", () => {
+    const { getByTestId } = renderRow({
+      progress: {
+        total: 10, translated: 6, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 0, audioValidated: 0,
+      },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label"))
+      .toBe("60% translated, 40% validated, 0% recorded, 0% audio validated")
+  })
+
+  it("Text: exactly as before", () => {
+    const { getByTestId } = renderRow({ progress: { total: 10, translated: 5, validated: 2 } })
+    const slot = getByTestId("file-row-progress-slot")
+    expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
+    expect(slot.getAttribute("title")).toBeNull()
+  })
+})

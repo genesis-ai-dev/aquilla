@@ -139,6 +139,24 @@
        dark steps UP from a mid grey-blue one — a heading is "slightly apart
        from the page" either way, not "always darker". */
     --tl-folder-band: oklch(0.945 0.003 264);
+    /* AQU-2138: THE EDITOR TAB STRIP's own fills. The active tab has to read as
+       selected against two different grounds at once — its inactive
+       neighbours AND the `bg-sidebar` header the strip floats on — and
+       --card could do neither: in light it is pure white on a near-white
+       header, in dark it is defined to exactly --surface, so the active
+       tab's fill vanished into the header behind it and only the border
+       carried the state. Same reason --tl-folder-band exists. Inactive steps
+       away from the header neutrally and hover stays neutral too, so a
+       hovered inactive tab can never be mistaken for the active one. Light
+       recedes the inactive tabs below a near-white header; dark lifts
+       everything above a mid grey-blue one.
+       AQU-2147: in light the active tab is NOT tinted. It is the one white
+       fill (--surface, the editor sheet it opens onto) and so the only tab
+       lighter than the 0.965 header, with its full-opacity border drawing
+       the edge. The tinted active fill survives in dark only. */
+    --tab-active: var(--surface);
+    --tab-inactive: oklch(0.928 0.002 264);
+    --tab-hover: oklch(0.948 0.002 264);
     /* Neutral hover/selection overlay — no blue tint on the chrome. */
     --accent: oklch(0.94 0.003 264);
     --accent-foreground: oklch(0.27 0.008 264);
@@ -157,7 +175,8 @@
     /* AQU-1764: THE PROGRESS PALETTE. Sam picked it on 2026-10-13 ("Layout A,
        softest"), and every progress bar, swatch and chapter square draws from
        it (src/lib/progress/progress-palette.ts names the classes). Text is
-       blue, audio is magenta. Dark = validated, light = done but not
+       blue, audio is plum (magenta until Oct 25, when Sam switched it to the
+       calmer, darker plum). Dark = validated, light = done but not
        validated yet (translated, or recorded); the dark theme flips the
        lightness so validated still stands out most. Stripes = AI drafts
        nobody has validated: the translated colour striped with
@@ -165,8 +184,8 @@
     --progress-text-validated: oklch(0.62 0.15 252);
     --progress-text-translated: oklch(0.81 0.07 245);
     --progress-ai-stripe: oklch(0.93 0.025 245);
-    --progress-audio-validated: oklch(0.64 0.14 355);
-    --progress-audio-recorded: oklch(0.84 0.06 355);
+    --progress-audio-validated: oklch(0.52 0.13 340);
+    --progress-audio-recorded: oklch(0.82 0.05 340);
     --sidebar: oklch(0.965 0.002 264);
     --sidebar-foreground: oklch(0.32 0.008 264);
     --sidebar-primary: oklch(0.78 0.07 245);
@@ -198,6 +217,14 @@
        must sit clear of it; 0.355 reads as a band without becoming a second
        surface. */
     --tl-folder-band: oklch(0.355 0.014 250);
+    /* AQU-2138: the tab strip's dark fills; see the light block. Dark keeps
+       the tinted active fill (AQU-2147 made only the light one white): its
+       header IS --surface, so there is no "lighter than the header" to use.
+       Active sits clear of --accent (0.38 0.04 248) in BOTH lightness and
+       chroma so the neutral hover below it cannot catch up to it. */
+    --tab-active: oklch(0.42 0.045 248);
+    --tab-inactive: oklch(0.345 0.012 250);
+    --tab-hover: oklch(0.375 0.014 250);
     --accent: oklch(0.38 0.04 248);
     --accent-foreground: oklch(0.82 0.09 245);
     --destructive: oklch(0.62 0.15 25);
@@ -215,8 +242,8 @@
     --progress-text-validated: oklch(0.80 0.12 245);
     --progress-text-translated: oklch(0.52 0.10 248);
     --progress-ai-stripe: oklch(0.36 0.05 248);
-    --progress-audio-validated: oklch(0.80 0.12 355);
-    --progress-audio-recorded: oklch(0.52 0.12 355);
+    --progress-audio-validated: oklch(0.76 0.11 340);
+    --progress-audio-recorded: oklch(0.48 0.10 340);
     --sidebar: var(--surface);
     --sidebar-foreground: oklch(0.92 0.008 250);
     --sidebar-primary: oklch(0.78 0.09 245);

@@ -1,21 +1,12 @@
-// AQU-1316: decide, for the editor's right rail, which of the scripture side
-// surfaces render — the full panel or its collapsed edge tab — for Parallel
-// Bibles (helloao), Verse Resources (Aquifer) and, since AQU-1689, Who's Who
-// (the Bible Knowledge Pack's cast of the passage, edge tab "People").
+// AQU-1316: decide, for the editor's right rail, which scripture side panels
+// are offered and which one is open — Parallel Bibles (helloao), Verse
+// Resources (Aquifer, "Helps") and, since AQU-1689, Who's Who ("People").
 //
-// This lived as two inline IIFEs in ProjectWorkspace's `aside` and `asideEdge`
-// props, ~180 lines apart in a 13,000-line component. Both re-derived the same
-// three predicates (in a scripture editor, verse resources gated on, each
-// panel's persisted open flag) and each decided half of the answer, so the one
-// rule that actually matters — a surface is EITHER the panel OR the edge tab,
-// never both, never neither — was written nowhere and pinned by no test. That
-// is the shape AQU-1316 was reported against: duplicate Parallel Bibles panels
-// side by side, and an edge tab that reopened what the panel's X had closed.
-//
-// Keeping the decision here makes the invariant checkable: `aside` renders the
-// `*Panel` flags, `asideEdge` renders the `*Edge` flags, and the exclusivity is
-// a property of one pure function rather than an agreement between two call
-// sites that nothing enforces.
+// The three used to be separate collapsed edge tabs, each its own rail, with
+// any number of panels open side by side. They are now buttons in one rail
+// that switch between panels, so at most one is open. Keeping the decision in
+// one pure function keeps that rule checkable: `asideEdge` renders `tabs`,
+// `aside` renders `openPanel`.
 
 export interface RightRailInputs {
   /**
@@ -43,29 +34,28 @@ export interface RightRailInputs {
   whosWhoOpen: boolean
 }
 
+/** One of the scripture side panels the rail switches between. */
+export type RightRailPanel = "bibles" | "resources" | "people"
+
 export interface RightRailSurfaces {
-  /** Render the full Parallel Bibles panel in `aside`. */
-  biblesPanel: boolean
-  /** Render the collapsed Parallel Bibles edge tab in `asideEdge`. */
-  biblesEdge: boolean
-  /** Render the full Verse Resources panel in `aside`. */
-  resourcesPanel: boolean
-  /** Render the collapsed Verse Resources edge tab in `asideEdge`. */
-  resourcesEdge: boolean
-  /** AQU-1689: render the full Who's Who panel in `aside`. */
-  peoplePanel: boolean
-  /** AQU-1689: render the collapsed Who's Who ("People") edge tab in `asideEdge`. */
-  peopleEdge: boolean
+  /**
+   * The buttons in the single right rail, top to bottom. Empty outside the
+   * scripture editor; otherwise every feature that is available, whether or
+   * not its panel is open (the open one renders as the active button).
+   */
+  tabs: RightRailPanel[]
+  /** The one panel rendered in `aside`, or null when all are closed. */
+  openPanel: RightRailPanel | null
 }
 
 /**
- * Exactly one surface per feature, and only inside the scripture editor.
+ * One rail, one open panel at a time.
  *
- * Each feature is a two-state toggle: open → panel, closed → edge tab. Writing
- * both flags from the same `open` boolean is what makes "panel and edge tab at
- * once" (the duplicate-panel report) unrepresentable rather than merely
- * unintended, and it keeps the X in the panel header and the edge tab as two
- * views of one piece of state — closing one cannot leave the other behind.
+ * The rail's buttons switch between panels like tabs, so at most one is open.
+ * The open flags are persisted separately per feature (and older sessions may
+ * have left several set), so when more than one is set the first in rail order
+ * wins. ProjectWorkspace clears the others when it opens one, so that only
+ * matters on the first render after an upgrade.
  */
 export function computeRightRailSurfaces({
   inScriptureEditor,
@@ -75,36 +65,16 @@ export function computeRightRailSurfaces({
   verseResourcesOpen,
   whosWhoOpen,
 }: RightRailInputs): RightRailSurfaces {
-  if (!inScriptureEditor) {
-    return {
-      biblesPanel: false,
-      biblesEdge: false,
-      resourcesPanel: false,
-      resourcesEdge: false,
-      peoplePanel: false,
-      peopleEdge: false,
-    }
+  if (!inScriptureEditor) return { tabs: [], openPanel: null }
+  const tabs: RightRailPanel[] = ["bibles"]
+  // AQU-461: Verse Resources also needs the project's Bible-resources gate.
+  if (verseResourcesAvailable) tabs.push("resources")
+  // AQU-1689: Who's Who also needs its own enrichment.
+  if (whosWhoAvailable) tabs.push("people")
+  const open: Record<RightRailPanel, boolean> = {
+    bibles: parallelBiblesOpen,
+    resources: verseResourcesOpen,
+    people: whosWhoOpen,
   }
-  // Verse Resources rides the scripture-editor gate PLUS the project's
-  // Bible-resources setting; with the setting off it has neither surface.
-  const resourcesUsable = verseResourcesAvailable
-  return {
-    biblesPanel: parallelBiblesOpen,
-    biblesEdge: !parallelBiblesOpen,
-    resourcesPanel: resourcesUsable && verseResourcesOpen,
-    resourcesEdge: resourcesUsable && !verseResourcesOpen,
-    // AQU-1689: Who's Who rides the same gate plus its own enrichment.
-    peoplePanel: whosWhoAvailable && whosWhoOpen,
-    peopleEdge: whosWhoAvailable && !whosWhoOpen,
-  }
-}
-
-/** True when `aside` has at least one of these surfaces to render. */
-export function hasRightRailPanel(s: RightRailSurfaces): boolean {
-  return s.biblesPanel || s.resourcesPanel || s.peoplePanel
-}
-
-/** True when `asideEdge` has at least one collapsed tab to render. */
-export function hasRightRailEdge(s: RightRailSurfaces): boolean {
-  return s.biblesEdge || s.resourcesEdge || s.peopleEdge
+  return { tabs, openPanel: tabs.find((tab) => open[tab]) ?? null }
 }

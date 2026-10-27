@@ -156,8 +156,14 @@ mode = "smart"
 #  • 04:41 — AQU-1833 projection-snapshot sweep
 #    (src/projection-snapshot-cron.ts). Set PROJECTION_SNAPSHOT_MODE = "off" to
 #    stop it; a skipped night only means the next rebuild replays further back.
+#  • 05:29 — AQU-2145 progress self-heal sweep
+#    (src/progress-selfheal-cron.ts): re-projects files whose progress rows fell
+#    behind their own audio events. Set PROGRESS_SELFHEAL_MODE = "off" to stop
+#    it; a skipped night only means such a file stays wrong one more day. Its
+#    `repaired=N` log line is the alarm for a write-path regression, so a
+#    non-zero count on a healthy database is worth reading, not muting.
 [triggers]
-crons = ["17 3 * * *", "41 4 * * *"]
+crons = ["17 3 * * *", "41 4 * * *", "29 5 * * *"]
 
 [observability]
 enabled = true
@@ -185,9 +191,10 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
 # nightly R2 orphan sweep (src/r2-gc-cron.ts) + AQU-1833 projection-snapshot
-# sweep (src/projection-snapshot-cron.ts).
+# sweep (src/projection-snapshot-cron.ts) + AQU-2145 progress self-heal sweep
+# (src/progress-selfheal-cron.ts).
 [env.production.triggers]
-crons = ["17 3 * * *", "41 4 * * *"]
+crons = ["17 3 * * *", "41 4 * * *", "29 5 * * *"]
 
 # Wrangler (3.x and 4.x) does inherit the top-level [observability] block into
 # named envs, and `versions deploy` syncs the resolved value. It is declared per
@@ -305,9 +312,10 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either. AQU-1856
 # nightly R2 orphan sweep (src/r2-gc-cron.ts) + AQU-1833 projection-snapshot
-# sweep (src/projection-snapshot-cron.ts).
+# sweep (src/projection-snapshot-cron.ts) + AQU-2145 progress self-heal sweep
+# (src/progress-selfheal-cron.ts).
 [env.development.triggers]
-crons = ["17 3 * * *", "41 4 * * *"]
+crons = ["17 3 * * *", "41 4 * * *", "29 5 * * *"]
 
 # See [env.production.observability] — declared per env so a top-level edit
 # can't change what dev logs.
@@ -427,3 +435,12 @@ bucket_name = "aquilla-snapshots"
 [[env.e2e.hyperdrive]]
 binding = "HYPERDRIVE"
 id = "REPLACE_WITH_E2E_HYPERDRIVE_ID"
+
+# Internal AI bridges must reach the matching identity Worker, not the zone origin.
+[[env.production.services]]
+binding = "AUTH_WORKER"
+service = "aquilla-identity"
+
+[[env.development.services]]
+binding = "AUTH_WORKER"
+service = "aquilla-dev-identity"

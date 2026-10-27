@@ -352,6 +352,18 @@ export function parseValidatorStory(xml: string): ValidatorStory {
         if (cs.includes("meta%3ac") && content.trim()) {
             chapter = content.trim().replace(/[^0-9]/g, "");
         }
+        // The visible chapter number is a drop cap (`cv:dc`). It sits ahead of
+        // `meta:c` on a chapter-opening superscription. Keying the chapter from
+        // it keeps the following verses on that chapter when the hidden marker
+        // was dropped.
+        if (
+            (cs.includes("cv%3adc") || cs.includes("cv:dc")) &&
+            !cs.includes("cv%3adc_") &&
+            !cs.includes("cv:dc_") &&
+            /^\d+$/.test(content.trim())
+        ) {
+            chapter = content.trim();
+        }
         if (isPoetryQ1 && cs.startsWith("cv%3av") && content.trim()) pendingCv = content.trim();
         if (isPackedProse && cs.startsWith("cv%3av") && content.trim()) pendingCv = content.trim();
         if (cs.includes("meta%3av") && content.trim() && !isIntro) {

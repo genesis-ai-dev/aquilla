@@ -11,7 +11,51 @@ export const audio = defineNamespace({
     "audio.newVoice.titleEdit": "Edit voice",
     "audio.newVoice.tabTts": "TTS voice",
     "audio.newVoice.tabClone": "Clone voice",
+    "audio.newVoice.tabCharacter": "Characters",
+    "audio.newVoice.tabTrain": "Train voice",
+
+    // TrainVoicePanel — train a custom voice from an organization's own
+    // recordings of a real person. Consent is the organization's responsibility.
+    "audio.train.intro": "A voice trained from a real speaker's recordings. Ready in about 45 minutes.",
+    "audio.train.speakerNameLabel": "Speaker name",
+    "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
+    "audio.train.addRecordings": "Add recordings",
+    "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
+    "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.removeRecordingAriaLabel": "Remove {name}",
+    "audio.train.audioMeter": "{minutes} min",
+    "audio.train.tooMuchAudio": "Over {max} min — remove some",
+    "audio.train.consentTitle": "Consent is on your organization",
+    "audio.train.consentBody": "You need the speaker's informed consent, and you must follow the laws that apply to you and to them. We record who confirmed and when.",
+    "audio.train.consentCheckbox": "For my organization, I confirm the speaker consented and this use is lawful.",
+    "audio.train.consentCheckboxAriaLabel": "Confirm the speaker's consent on behalf of your organization",
+    "audio.train.uploading": "Uploading {done} of {total}…",
+    "audio.train.start": "Start training",
+    "audio.train.minimumHint": "{min} min minimum",
+    "audio.train.recommendedHint": "{recommended}+ min sounds best",
+    "audio.train.fullStatement": "Read the full statement",
+    "audio.newVoice.errorCharacterRequired": "Pick a character voice.",
     "audio.newVoice.kindGroupLabel": "Voice kind",
+
+    // CharacterVoicePicker — the Characters tab: pre-built synthetic character
+    // voices a project adds to its cast in one click.
+    "audio.characters.filterGroupAriaLabel": "Filter character voices",
+    "audio.characters.filterFemale": "Female",
+    "audio.characters.filterMale": "Male",
+    "audio.characters.filterChild": "Child",
+    "audio.characters.filterTeen": "Teen",
+    "audio.characters.filterYoungAdult": "Young adult",
+    "audio.characters.filterAdult": "Adult",
+    "audio.characters.filterElderly": "Elderly",
+    "audio.characters.noMatches": "No character voices match these filters.",
+    "audio.characters.previewAriaLabel": "Preview {name}",
+    "audio.characters.pauseAriaLabel": "Stop previewing {name}",
+    "audio.characters.addAriaLabel": "Add {name} to the cast",
+    "audio.characters.useAriaLabel": "Use {name}",
+    "audio.characters.currentAriaLabel": "{name} is this voice's character",
+    "audio.characters.inCastAriaLabel": "{name} is already in the cast",
+    "audio.characters.footnote": "Synthetic voices — no real person's voice.",
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
@@ -395,6 +439,10 @@ export const audio = defineNamespace({
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",
+    "audio.library.characterEngineLabel": "Character",
+    "audio.library.customEngineLabel": "Custom",
+    "audio.library.trainingEngineLabel": "Training",
+    "audio.library.trainingFailedLabel": "Training failed",
 
     // VoiceCloneSection — record/upload the reference clip a cloned voice
     // is re-voiced to match.
@@ -751,6 +799,79 @@ export const audio = defineNamespace({
           "Tab label for the 'clone a real voice from a reference clip' way of " +
           "making a voice, as opposed to the TTS voice tab.",
         maxLength: 18,
+      },
+      "audio.newVoice.tabCharacter": {
+        description:
+          "Tab label for picking a ready-made character voice from a built-in list, " +
+          "next to the TTS voice and Clone voice tabs.",
+        maxLength: 18,
+      },
+      "audio.newVoice.tabTrain": {
+        description:
+          "Tab label for training a custom voice from recordings of a real person, next to " +
+          "the TTS voice, Clone voice and Characters tabs.",
+        maxLength: 18,
+      },
+      "audio.train.addRecordingsAriaLabel": {
+        description: "Accessible label of the file picker for adding audio recordings of the speaker.",
+      },
+      "audio.train.removeRecordingAriaLabel": {
+        description: "Accessible label of the remove button next to one picked recording.",
+        placeholders: { name: "The recording's file name, e.g. 'session-1.wav'." },
+      },
+      "audio.train.audioMeter": {
+        description: "Total length of the picked recordings, above the progress bar.",
+        placeholders: { minutes: "Total minutes picked so far, one decimal, e.g. '12.5'." },
+      },
+      "audio.train.minimumHint": {
+        description: "Right of the meter while there is not enough audio yet.",
+        placeholders: { min: "Minimum minutes required, e.g. '5'." },
+      },
+      "audio.train.recommendedHint": {
+        description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
+        placeholders: { recommended: "Recommended minutes, e.g. '15'." },
+      },
+      "audio.train.tooMuchAudio": {
+        description: "Shown instead of the meter line when the recordings exceed the maximum.",
+        placeholders: { max: "Maximum minutes allowed, e.g. '60'." },
+      },
+      "audio.train.consentCheckboxAriaLabel": {
+        description:
+          "Accessible label of the consent checkbox. The user confirms, for their organization, " +
+          "that the speaker consented and that the use is lawful. Keep the legal meaning exact.",
+      },
+      "audio.train.uploading": {
+        description: "Start button text while the recordings upload.",
+        placeholders: { done: "Recordings uploaded so far, e.g. '3'.", total: "Recordings in total, e.g. '8'." },
+      },
+      "audio.characters.filterGroupAriaLabel": {
+        description:
+          "Accessible group label (not visible text) for the row of filter chips " +
+          "(Female, Male, Child, …) above the list of character voices.",
+      },
+      "audio.characters.previewAriaLabel": {
+        description: "Accessible label of the play button on a character voice card.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.pauseAriaLabel": {
+        description: "Accessible label of the same button while that character's preview is playing.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.addAriaLabel": {
+        description: "Accessible label of the + button on a character card; adds that voice to the project's cast.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.useAriaLabel": {
+        description: "Accessible label of the same button while editing a voice: switches it to this character.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.currentAriaLabel": {
+        description: "Accessible label of the same (disabled) button on the character the edited voice already uses.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.inCastAriaLabel": {
+        description: "Accessible label of the same (disabled) button when that character is already in the cast.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
       },
       "audio.newVoice.kindGroupLabel": {
         description:
@@ -2445,6 +2566,24 @@ export const audio = defineNamespace({
         description:
           "Small label on a voice row naming its engine, shown for voices that are " +
           "clones (built from a reference clip) rather than plain TTS voices.",
+        maxLength: 12,
+      },
+      "audio.library.customEngineLabel": {
+        description: "Same slot as audio.library.cloneEngineLabel, for a ready custom voice trained from recordings.",
+        maxLength: 12,
+      },
+      "audio.library.trainingEngineLabel": {
+        description: "Same slot, while a custom voice is still training.",
+        maxLength: 12,
+      },
+      "audio.library.trainingFailedLabel": {
+        description: "Same slot, when training a custom voice failed.",
+        maxLength: 16,
+      },
+      "audio.library.characterEngineLabel": {
+        description:
+          "Same slot as audio.library.cloneEngineLabel, shown for voices picked from " +
+          "the built-in list of ready-made character voices.",
         maxLength: 12,
       },
       "audio.clone.title": {

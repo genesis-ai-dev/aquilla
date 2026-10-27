@@ -3,6 +3,8 @@
 // MondayMapping is the `config` JSONB on integration_links. The SPA mirrors
 // these types in src/lib/monday/types.ts — keep them in lockstep.
 
+import { canonicalItemNameTemplate } from "../integrations/item-name"
+
 export type MondayMetricKey =
   | "completion_pct" // filled/total across project (or file) as number 0-100, 1dp
   | "validated_pct" // cells meeting text validation threshold %
@@ -42,7 +44,41 @@ export interface MondayMapping {
   matchExisting?: { columnId: string } | { byName: true } // how to match pre-existing items; else create
   columns: MondayColumnMapping[]
   notes?: string // AI rationale, shown in UI
+  fileSubitems?: MondayFileSubitems // each file as a subitem of the project's item ('project' only)
 }
+
+/**
+ * Files as subitems of the project's item (lib/monday/subitems.ts). Present
+ * means on. Monday keeps every board's subitems on a board of their own, with
+ * its own columns; the push finds that board and its columns (adding the ones
+ * the project's row has and a file can differ in) and keeps them here.
+ * `boardId` is absent until the push has resolved them.
+ */
+export interface MondayFileSubitems {
+  boardId?: string
+  columns: MondayColumnMapping[]
+}
+
+/**
+ * The metrics a file's subitem can show: the ones a file has its own value
+ * for. The rest (deadline, languages, people, activity) are the project's,
+ * already on the row above.
+ */
+export const SUBITEM_METRICS: readonly MondayMetricKey[] = [
+  "completion_pct",
+  "validated_pct",
+  "audio_validated_pct",
+  "has_audio_pct",
+  "filled_count",
+  "total_count",
+  "validated_count",
+  "status_auto",
+  "project_link",
+  "books_done",
+  "next_target_date",
+  "books_in_progress",
+  "external_id",
+]
 
 export interface MondayBoardColumn {
   id: string
@@ -262,45 +298,7 @@ export function sanitizeMapping(
     ? new Map(structure.columns.map((c) => [c.id, c]))
     : null
 
-  const columns: MondayColumnMapping[] = []
-  const rawColumns = Array.isArray(obj.columns) ? obj.columns : []
-  for (const entry of rawColumns) {
-    if (entry == null || typeof entry !== "object") continue
-    const col = entry as Record<string, unknown>
-    const columnId = typeof col.columnId === "string" ? col.columnId : ""
-    if (!columnId) {
-      warnings.push("dropped a column mapping without a columnId")
-      continue
-    }
-    if (!isMetricKey(col.metric)) {
-      warnings.push(`dropped column '${columnId}': unknown metric '${String(col.metric)}'`)
-      continue
-    }
-    let columnType = typeof col.columnType === "string" ? col.columnType : ""
-    if (byId) {
-      const live = byId.get(columnId)
-      if (!live) {
-        warnings.push(`dropped column '${columnId}': not found on the board`)
-        continue
-      }
-      columnType = live.type
-    }
-    if (READ_ONLY_COLUMN_TYPES.has(columnType)) {
-      warnings.push(`dropped column '${columnId}': type '${columnType}' is read-only via the Monday API`)
-      continue
-    }
-    if (!WRITABLE_TYPES_BY_METRIC[col.metric].includes(columnType)) {
-      warnings.push(
-        `dropped column '${columnId}': metric '${col.metric}' cannot write to a '${columnType}' column`,
-      )
-      continue
-    }
-    if (columns.some((c) => c.columnId === columnId)) {
-      warnings.push(`dropped duplicate mapping for column '${columnId}'`)
-      continue
-    }
-    columns.push({ columnId, columnType, metric: col.metric })
-  }
+  const columns = sanitizeColumns(obj.columns, byId, warnings)
 
   let groupId = typeof obj.groupId === "string" && obj.groupId ? obj.groupId : undefined
   if (groupId && structure && !structure.groups.some((g) => g.id === groupId)) {
@@ -338,18 +336,98 @@ export function sanitizeMapping(
   }
   if (idColumn) matchExisting = { columnId: idColumn.columnId }
 
+  // The name template is kept in its one written form, so "{{project_name}}"
+  // is stored as "{projectName}"; one naming anything else is dropped and the
+  // rows keep their default names (lib/integrations/item-name.ts).
+  let itemNameTemplate: string | undefined
+  if (typeof obj.itemNameTemplate === "string" && obj.itemNameTemplate) {
+    itemNameTemplate = canonicalItemNameTemplate(obj.itemNameTemplate) ?? undefined
+    if (!itemNameTemplate) {
+      warnings.push(
+        `dropped itemNameTemplate '${obj.itemNameTemplate}': only {projectName} and {fileName} can be filled in`,
+      )
+    }
+  }
+
+  let fileSubitems: MondayFileSubitems | undefined
+  if (obj.fileSubitems && typeof obj.fileSubitems === "object" && !Array.isArray(obj.fileSubitems)) {
+    if (granularity === "project") {
+      const raw = obj.fileSubitems as Record<string, unknown>
+      // The subitems board's columns are checked by the push, which reads that
+      // board; `structure` is the parent board's and knows none of them.
+      fileSubitems = {
+        ...(typeof raw.boardId === "string" && raw.boardId ? { boardId: raw.boardId } : {}),
+        columns: sanitizeColumns(raw.columns, null, warnings).filter((c) =>
+          SUBITEM_METRICS.includes(c.metric),
+        ),
+      }
+    } else {
+      warnings.push("dropped fileSubitems: files are subitems only under one item for the whole project")
+    }
+  }
+
   return {
     mapping: {
       version: 1,
       itemGranularity: granularity,
       ...(groupId && { groupId }),
-      ...(typeof obj.itemNameTemplate === "string" && obj.itemNameTemplate
-        ? { itemNameTemplate: obj.itemNameTemplate }
-        : {}),
+      ...(itemNameTemplate && { itemNameTemplate }),
       ...(matchExisting && { matchExisting }),
       columns,
       ...(typeof obj.notes === "string" && obj.notes ? { notes: obj.notes } : {}),
+      ...(fileSubitems && { fileSubitems }),
     },
     warnings,
   }
+}
+
+/**
+ * Keep the column mappings that can be written: a known metric, a column the
+ * board has (when `byId` is the board's columns; its live type wins), a type
+ * that isn't read-only and that the metric can write, each column once.
+ */
+function sanitizeColumns(
+  raw: unknown,
+  byId: Map<string, MondayBoardColumn> | null,
+  warnings: string[],
+): MondayColumnMapping[] {
+  const columns: MondayColumnMapping[] = []
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    if (entry == null || typeof entry !== "object") continue
+    const col = entry as Record<string, unknown>
+    const columnId = typeof col.columnId === "string" ? col.columnId : ""
+    if (!columnId) {
+      warnings.push("dropped a column mapping without a columnId")
+      continue
+    }
+    if (!isMetricKey(col.metric)) {
+      warnings.push(`dropped column '${columnId}': unknown metric '${String(col.metric)}'`)
+      continue
+    }
+    let columnType = typeof col.columnType === "string" ? col.columnType : ""
+    if (byId) {
+      const live = byId.get(columnId)
+      if (!live) {
+        warnings.push(`dropped column '${columnId}': not found on the board`)
+        continue
+      }
+      columnType = live.type
+    }
+    if (READ_ONLY_COLUMN_TYPES.has(columnType)) {
+      warnings.push(`dropped column '${columnId}': type '${columnType}' is read-only via the Monday API`)
+      continue
+    }
+    if (!WRITABLE_TYPES_BY_METRIC[col.metric].includes(columnType)) {
+      warnings.push(
+        `dropped column '${columnId}': metric '${col.metric}' cannot write to a '${columnType}' column`,
+      )
+      continue
+    }
+    if (columns.some((c) => c.columnId === columnId)) {
+      warnings.push(`dropped duplicate mapping for column '${columnId}'`)
+      continue
+    }
+    columns.push({ columnId, columnType, metric: col.metric })
+  }
+  return columns
 }

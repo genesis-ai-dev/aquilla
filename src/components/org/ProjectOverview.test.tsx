@@ -134,7 +134,10 @@ type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
 // deadlineStatus stub — we control it per test via module-level variable
 let _deadlineStatusResult: "overdue" | "soon" | "ok" | null = null
 const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProject[]> => Promise.resolve([]))
-vi.mock("@/lib/frontier/portfolio", () => ({
+vi.mock("@/lib/frontier/portfolio", async (importActual) => ({
+  // Media redesign slice 1: the real language-by-language measures
+  // (portfolioMeasure, laneStartedPct, …), which the stubs below never touch.
+  ...(await importActual<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
   // AQU-1566: audio is measured against the server's audio total (a dubbing
@@ -329,7 +332,6 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
-  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -873,6 +875,75 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     const card = await screen.findByTestId("progress-card")
     await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
     expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
+  })
+
+  // Media redesign slice 1 (P1.4): a language that delivers Audio has no text
+  // to translate, so its project shows no Translated or Validated tile at 0%.
+  it("an Audio language's project shows its recordings and no text tiles", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 45,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioTotalCells: 45, audioCells: 17, validatedAudioCells: 9, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 1,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 17, validatedAudioCells: 9, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("Audio Validated").length).toBeGreaterThan(0)
+    // 9 of 45 lines approved: 20%. 17 of 45 recorded: 38%.
+    expect(screen.getAllByText("20%").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("38%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument()
+  })
+
+  // Sam, Oct 22: on "All", a Text language beside an Audio one reads its
+  // validated text over its own lines, as Translated does; the Audio
+  // language's approvals read only in the audio tiles.
+  it("counts only the text languages in the All tab's Validated, beside an Audio language", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 90,
+      filledCells: 30, validatedCells: 20, aiDraftedCells: 0,
+      audioTotalCells: 90, audioCells: 15, validatedAudioCells: 6, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "fr", role: "target", name: "French", laneId: "ln-fr", position: 1,
+        totalCells: 45, filledCells: 30, validatedCells: 20, lastEditAt: null,
+        audioCells: 5, validatedAudioCells: 0, audioTotalCells: 45, recordsAudio: false,
+        delivers: "text", bothValidatedCells: 0,
+      }, {
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 2,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 10, validatedAudioCells: 6, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Validated").length).toBeGreaterThan(0))
+    // 20 of 45: 44%. The old mix, 26 of 90, would read 29%.
+    expect(screen.getAllByText("44%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("29%")).not.toBeInTheDocument()
   })
 
   // AQU-489: a PM who has never seen the dashboard must be able to name what
@@ -2620,8 +2691,11 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
     // AQU-1764: one dimmed two-part bar, and the validated figure names itself
-    // since an archived row has no column headings.
-    expect(sw).toHaveTextContent("8% validated")
+    // since an archived row has no column headings. AQU-2178: it names which
+    // half it is, and a Text language that has recorded nothing shows only the
+    // text one — no audio phrase, rather than "0% audio validated".
+    expect(sw).toHaveTextContent("8% text validated")
+    expect(sw).not.toHaveTextContent("audio validated")
     const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
     expect(archivedBars).toHaveLength(1)
     expect(archivedBars[0].className).toContain("opacity-70")
@@ -2632,6 +2706,33 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
   })
 
+  // AQU-2180: the Languages card is the only overview card built on the shared
+  // Section, so it used to inherit that card's bigger foreground title plus a
+  // subtitle no sibling card has. Compared against Progress, the card next to
+  // it, because "same as the other headings" is the actual contract.
+  it("gives the Languages heading the same type scale as the Progress heading, with no subtitle", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const languages = within(table).getByRole("heading", { level: 2, name: "Languages" })
+    const progress = screen.getByRole("heading", { level: 2, name: "Progress" })
+
+    // happy-dom resolves no stylesheet, so the utility classes that decide
+    // size, weight and colour are what there is to compare.
+    const typeScale = (h: HTMLElement) =>
+      h.className
+        .split(/\s+/)
+        .filter((c) => /^(text-(xs|sm|base|lg)|font-(normal|medium|semibold|bold)|text-(muted-)?foreground)$/.test(c))
+        .sort()
+    expect(typeScale(languages)).toEqual(typeScale(progress))
+    expect(typeScale(languages)).toEqual(["font-semibold", "text-muted-foreground", "text-xs"])
+
+    // The subtitle went with the restyle — the card header is heading + action.
+    expect(within(table).queryByText(/each target language on this project/i)).not.toBeInTheDocument()
+  })
+
   it("does not render an archived group when every lane is active", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
@@ -2640,17 +2741,26 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
-  it("does not render the lane table (or tabs) for a single-lane project", async () => {
+  it("AQU-2194: a single-language project shows the Languages table, with Staff… and Assign…, but no lane tabs", async () => {
+    // Come and See (Oct 26): a PM needs one place to put a linguist on a
+    // language, on every project. With one language the table used to be
+    // hidden, so Staff… was out of reach; the progress tabs stay hidden.
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
-      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+      lanes: [{ lane: "", laneId: "lane-bm", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
     })])
     renderOverview()
 
-    // The progress card still renders (Translated tile present) — just no lane UI.
-    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    const table = await screen.findByTestId("overview-lane-table")
     expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+    // One row, named by the project's target language (the '' lane).
+    const rows = within(table).getAllByTestId(/^overview-lane-row-/)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent("Bambara")
+    // Its ⋯ menu offers Assign… and Staff….
+    fireEvent.click(within(table).getByTestId(/^overview-lane-actions-/))
+    expect(await screen.findByRole("menuitem", { name: /^Assign/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /^Staff/ })).toBeInTheDocument()
   })
 
   it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {

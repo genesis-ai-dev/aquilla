@@ -12,6 +12,7 @@
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError } from './errors'
+import { uploadArtifact } from './mcp-artifact-upload'
 import type { ExternalErrorCode } from './errors'
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
@@ -1103,6 +1104,7 @@ async function exportFile(
   env: ExternalEnv,
   token: string,
   args: Record<string, unknown>,
+  cred: ApiCredentialContext,
 ): Promise<McpToolResult> {
   const projectId = str(args, 'projectId')
   const fileId = str(args, 'fileId')
@@ -1128,11 +1130,15 @@ async function exportFile(
   const exportMode = res.headers.get('X-Export-Mode') ?? 'round-trip'
   const lossyHeader = res.headers.get('X-Usfm-Lossy-Verse-Count')
 
+  const fallback = cred.oauthResource
+    ? 'Open the project in Aquilla and export from the app. MCP OAuth credentials cannot authorize REST downloads.'
+    : `Fetch the bytes with this separately authorized REST credential: GET ${restPath}`
+
   if (!contentType.startsWith('text/')) {
     return fail(
       'validation_failed',
-      `"${fileName}" exports as ${contentType}, which MCP (JSON-RPC text) cannot carry — ` +
-        `fetch the bytes over REST instead: GET ${restPath}`,
+      `"${fileName}" exports as ${contentType}, which this inline text export does not support. ` +
+        fallback,
       { restPath, contentType, exportMode },
     )
   }
@@ -1143,7 +1149,7 @@ async function exportFile(
     return fail(
       'validation_failed',
       `"${fileName}" is ${bytes} bytes, over the ${MCP_EXPORT_MAX_BYTES}-byte inline export ` +
-        `limit — fetch it over REST instead: GET ${restPath}`,
+        `limit. ${fallback}`,
       { restPath, bytes, maxBytes: MCP_EXPORT_MAX_BYTES, exportMode },
     )
   }
@@ -1435,12 +1441,14 @@ export async function callTool(
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':
       return patchSettings(env, token, args, ctx)
+    case 'upload_artifact':
+      return uploadArtifact(env, token, args)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':
       return runParseArtifact(env, token, args, true)
     case 'export_file':
-      return exportFile(env, token, args)
+      return exportFile(env, token, args, cred)
     case 'get_changeset':
       return getChangeset(env, token, args)
     case 'list_changesets':

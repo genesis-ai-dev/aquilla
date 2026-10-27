@@ -59,6 +59,11 @@ async function drainMicrotasks(times = 3): Promise<void> {
   for (let i = 0; i < times; i++) await Promise.resolve()
 }
 
+/** Lets an adapter built with `frameCoalesceMs: 0` land its buffered live frames. */
+async function landFrames(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
 let store: Store<typeof schema>
 let storeId = 0
 
@@ -109,6 +114,7 @@ describe("createOfflineSyncAdapter", () => {
       mintToken: okMint,
       baseUrl: "https://sync.example.com",
       webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 0,
     })
 
     await drainMicrotasks()
@@ -136,6 +142,7 @@ describe("createOfflineSyncAdapter", () => {
         },
       ],
     })
+    await landFrames()
 
     const row = store.query(
       tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first(),
@@ -680,6 +687,7 @@ describe("catch-up", () => {
       mintToken: okMint,
       baseUrl: "https://sync.example.com",
       webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 0,
     })
     await drainMicrotasks()
     const ws = FakeWebSocket.instances[0]
@@ -706,6 +714,7 @@ describe("catch-up", () => {
       file: "file1",
       rows: [row("", "In the beginning"), row("es", "En el principio")],
     })
+    await landFrames()
 
     const laneRow = (laneKey: string) =>
       store.query(
@@ -735,6 +744,7 @@ describe("catch-up", () => {
       mintToken: okMint,
       baseUrl: "https://sync.example.com",
       webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 0,
     })
     await drainMicrotasks()
     const ws = FakeWebSocket.instances[0]
@@ -763,6 +773,7 @@ describe("catch-up", () => {
         },
       ],
     })
+    await landFrames()
 
     expect(
       store.query(
@@ -971,6 +982,281 @@ describe("long offline stretches", () => {
     expect(statusWrites(commit)).toBe(0)
 
     adapter.close()
+  })
+
+  const appliedRow = (i: number, eventId: string) => ({
+    cellId: `GEN 1:${i + 1}`,
+    side: "target" as const,
+    value: `v${i}`,
+    valueHtml: null,
+    eventId,
+    sourceEventId: null,
+    validated: false,
+    aiDrafted: false,
+    sequenceIndex: i,
+    canonicalRef: null,
+  })
+
+  /** Accepts every event and returns its projected row, like the real POST /events. */
+  const acceptAllWithRows = async (_url: string, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { events: Array<{ id: string }> }
+    return new Response(
+      JSON.stringify({
+        accepted: body.events.map((e) => ({ id: e.id })),
+        applied: body.events.map((e) => ({
+          t: "event.applied",
+          id: e.id,
+          kind: "target.cell.commit",
+          project: "proj1",
+          file: "file1",
+          rows: [appliedRow(Number(e.id.slice(1)), e.id)],
+        })),
+      }),
+      { status: 200 },
+    )
+  }
+
+  it("lands everything one POST resolves in a single commit of batched events", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const fetchImpl = vi.fn(acceptAllWithRows)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      connectivity,
+    })
+    queueMany(250)
+    const commit = vi.spyOn(store, "commit")
+
+    connectivity.set(true)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0, 5_000)
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    const names = commit.mock.calls.map((args) => args.map((e) => (e as { name: string }).name))
+    expect(names).toEqual([
+      ["v1.EventsDequeued", "v2.CellsSynced"],
+      ["v1.EventsDequeued", "v2.CellsSynced"],
+    ])
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", side: "target" }))).toHaveLength(250)
+
+    adapter.close()
+  })
+
+  it("writes nothing for a live echo of rows the flush already landed", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: vi.fn(acceptAllWithRows) as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      frameCoalesceMs: 0,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    const [id] = queueMany(1)
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+    const commit = vi.spyOn(store, "commit")
+
+    const echo = { t: "event.applied", id, kind: "target.cell.commit", project: "proj1", file: "file1" }
+    ws.receive({ ...echo, rows: [appliedRow(0, id)] })
+    await landFrames()
+    expect(commit).not.toHaveBeenCalled()
+
+    // A row that did change still lands.
+    ws.receive({ ...echo, id: "peer-1", rows: [{ ...appliedRow(0, "peer-1"), value: "peer edit" }] })
+    await landFrames()
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(
+      store.query(tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first()),
+    ).toMatchObject({ value: "peer edit", eventId: "peer-1" })
+
+    adapter.close()
+  })
+
+  it("lands a burst of live frames as one commit, dequeuing our own writes", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const connectivity = fakeConnectivity(false)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      connectivity,
+      frameCoalesceMs: 20,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    // Our writes, echoed while their POST is still in flight, plus a peer's.
+    const ids = queueMany(50)
+    const commit = vi.spyOn(store, "commit")
+    for (const [i, id] of ids.entries()) {
+      ws.receive({ t: "event.applied", id, kind: "target.cell.commit", project: "proj1", file: "file1", rows: [appliedRow(i, id)] })
+    }
+    ws.receive({ t: "event.applied", id: "peer-1", kind: "target.cell.commit", project: "proj1", file: "file1", rows: [appliedRow(60, "peer-1")] })
+    expect(commit).not.toHaveBeenCalled()
+
+    await waitFor(() => commit.mock.calls.length > 0)
+    expect(commit.mock.calls.map((args) => args.map((e) => (e as { name: string }).name))).toEqual([
+      ["v1.EventsDequeued", "v2.CellsSynced"],
+    ])
+    expect(store.query(tables.eventQueue.select())).toHaveLength(0)
+    expect(store.query(tables.cells.select().where({ projectId: "proj1", side: "target" }))).toHaveLength(51)
+
+    adapter.close()
+  })
+
+  it("drops buffered live frames when closed, so a removed copy stays removed", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 10,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    ws.receive({ t: "event.applied", id: "peer-1", kind: "target.cell.commit", project: "proj1", file: "file1", rows: [appliedRow(0, "peer-1")] })
+    adapter.close()
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(store.query(tables.cells.select())).toHaveLength(0)
+  })
+
+  /** A fetch that holds its response until `release()`, so a test can act while the POST is out. */
+  function heldFetch(serverSeq?: number) {
+    let release!: () => void
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      await released
+      const res = await acceptAllWithRows(url, init)
+      if (serverSeq === undefined) return res
+      const body = (await res.json()) as { applied: Array<Record<string, unknown>> }
+      for (const frame of body.applied) frame.serverSeq = serverSeq
+      return new Response(JSON.stringify(body), { status: 200 })
+    })
+    return { fetchImpl, release }
+  }
+
+  it("keeps a peer's newer row over our older one landing from a slow flush response", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const { fetchImpl, release } = heldFetch(5)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      frameCoalesceMs: 10_000,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    queueMany(1)
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+
+    // The server applied our write (seq 5), then the peer's (seq 6); the
+    // peer's frame reaches us while our response is still on its way.
+    ws.receive({
+      t: "event.applied",
+      id: "peer-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      serverSeq: 6,
+      rows: [{ ...appliedRow(0, "peer-1"), value: "peer edit" }],
+    })
+    release()
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+
+    expect(
+      store.query(tables.cells.select().where({ id: cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY) }).first()),
+    ).toMatchObject({ value: "peer edit", eventId: "peer-1" })
+
+    adapter.close()
+  })
+
+  it("keeps a peer's newer row that already landed while a slow flush response was out", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const { fetchImpl, release } = heldFetch(5)
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+      frameCoalesceMs: 1,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    ws.open()
+    queueMany(1)
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+
+    // The peer's frame (seq 6) is landed by the coalesce timer before our
+    // response (seq 5) comes back.
+    ws.receive({
+      t: "event.applied",
+      id: "peer-1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      serverSeq: 6,
+      rows: [{ ...appliedRow(0, "peer-1"), value: "peer edit" }],
+    })
+    const rowId = cellRowId("proj1", "file1", "GEN 1:1", "target", DEFAULT_LANE_KEY)
+    await waitFor(() => store.query(tables.cells.select().where({ id: rowId }).first())?.eventId === "peer-1")
+    release()
+    await waitFor(() => store.query(tables.eventQueue.select()).length === 0)
+
+    expect(store.query(tables.cells.select().where({ id: rowId }).first())).toMatchObject({
+      value: "peer edit",
+      eventId: "peer-1",
+    })
+
+    adapter.close()
+  })
+
+  it("lands nothing from a flush response that arrives after close", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const { fetchImpl, release } = heldFetch()
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      flushDebounceMs: 1,
+    })
+    queueMany(1)
+    await waitFor(() => fetchImpl.mock.calls.length > 0)
+    const commit = vi.spyOn(store, "commit")
+
+    adapter.close()
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(commit).not.toHaveBeenCalled()
+    expect(store.query(tables.cells.select())).toHaveLength(0)
   })
 
   it(`sends a big backlog oldest first, at most ${MAX_FLUSH_BATCH} per POST`, async () => {

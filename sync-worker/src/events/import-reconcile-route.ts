@@ -11,6 +11,7 @@
 // a re-import from overwriting a concurrent source edit. Losing source events
 // remain as stale siblings in history, matching the normal AD-2 contract.
 
+import { withLongOperationTimeout, type AquillaDb, type AquillaStatement } from '../../../db/shim/postgres'
 import { verifyTokenForDoc } from '../auth'
 import { withCors } from '../cors'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
@@ -31,11 +32,13 @@ import {
   type ContentMatchCell,
   type MatchBand,
 } from './import-content-match'
-import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
+import { buildEventProjectionStmts, contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
 import { assignDeclaredLanguages, readDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { laneIdResolveFromColSql } from './lane-id-sql'
 import { wireLegacyTagSql } from '../../../db/shared/lane-sql'
 import { fullProgressRecomputeStmts } from './progress-projection'
+import { buildForkClone, targetEventKey, type ForkTargetRow, type ForkValidatorRow } from './import-reconcile-fork'
+import { buildReviewEvents } from './import-reconcile-review'
 import { ROLE } from './role-policy'
 import type { EventPayloads } from './types'
 
@@ -100,6 +103,14 @@ interface ReconcileBody {
   artifactId?: string
   rawSourceFormat?: string
   clientTs?: number
+  /**
+   * Sidebar re-import. Off for the collision dialog's "Update existing",
+   * which keeps validation and leaves removed units in place.
+   */
+  reviewChangedSource?: boolean
+  /** Clone `sourceFileId` onto `fileId`, then apply the review pass there. */
+  fork?: boolean
+  sourceFileId?: string
 }
 
 export interface ExistingImportCell {
@@ -403,6 +414,11 @@ function isBody(value: unknown): value is ReconcileBody {
   if (body.artifactId !== undefined && typeof body.artifactId !== 'string') return false
   if (body.rawSourceFormat !== undefined && typeof body.rawSourceFormat !== 'string') return false
   if (body.clientTs !== undefined && (typeof body.clientTs !== 'number' || !Number.isFinite(body.clientTs))) return false
+  if (body.reviewChangedSource !== undefined && typeof body.reviewChangedSource !== 'boolean') return false
+  if (body.fork !== undefined && typeof body.fork !== 'boolean') return false
+  if (body.fork === true && (typeof body.sourceFileId !== 'string' || !body.sourceFileId.trim() || body.sourceFileId === body.fileId)) {
+    return false
+  }
 
   const optionalNumber = (entry: unknown): boolean =>
     entry === undefined || (typeof entry === 'number' && Number.isFinite(entry))
@@ -563,6 +579,61 @@ function buildGatedEventInsert(
      ) WHERE ${fileClaimGate()}
      ON CONFLICT (id) DO NOTHING`,
   ).bind(...binds)
+}
+
+function buildUngatedEventInsert(db: AquillaDb, rows: SeqEventInsertRow[]): AquillaStatement {
+  const cols = 12
+  const values = rows.map(() => `(${Array(cols).fill('?').join(', ')})`).join(', ')
+  const binds: unknown[] = []
+  for (const row of rows) {
+    binds.push(
+      row.id, row.schemaVersion, row.projectId, row.fileId, row.cellId, row.parentId,
+      row.kind, row.author, row.payloadJson, row.clientTs, row.serverTs, row.serverSeq,
+    )
+  }
+  return db.prepare(
+    `INSERT INTO events (
+       id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+       author, payload, client_ts, server_ts, server_seq
+     )
+     SELECT v.id, v.schema_version::integer, v.project_id, v.file_id, v.cell_id,
+       v.parent_id, v.kind, v.author, v.payload::jsonb, v.client_ts::bigint,
+       v.server_ts::bigint, v.server_seq::bigint
+     FROM (VALUES ${values}) AS v(
+       id, schema_version, project_id, file_id, cell_id, parent_id, kind,
+       author, payload, client_ts, server_ts, server_seq
+     )
+     ON CONFLICT (id) DO NOTHING`,
+  ).bind(...binds)
+}
+
+function appendProjectedEvents(
+  db: AquillaDb,
+  statements: AquillaStatement[],
+  events: PersistedEvent[],
+  seqStart: number,
+): void {
+  if (events.length === 0) return
+  const rows: SeqEventInsertRow[] = events.map((event, index) => ({
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId,
+    cellId: event.cellId,
+    parentId: event.parentId,
+    kind: event.kind,
+    author: event.author,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs: event.serverTs,
+    serverSeq: seqStart + index,
+  }))
+  for (let offset = 0; offset < rows.length; offset += BULK_ROWS) {
+    statements.push(buildUngatedEventInsert(db, rows.slice(offset, offset + BULK_ROWS)))
+  }
+  for (const event of events) {
+    buildEventProjectionStmts(db, event, statements, { deferFileCounters: true })
+  }
 }
 
 function buildGatedSourceUpsert(
@@ -735,8 +806,12 @@ function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<s
 
 async function runBatch(db: AquillaDb, statements: AquillaStatement[]): Promise<void> {
   if (statements.length === 0) return
-  if (db.batchPipelined) await db.batchPipelined(statements)
-  else await db.batch(statements)
+  // The batch ends in the same full-file counter scan as POST /import finalize.
+  // That scan is what blows the 15s request-path statement_timeout on a large
+  // study-Bible file, so the whole write runs under the registered ceiling.
+  const writeDb = withLongOperationTimeout(db, 'import-reconcile')
+  if (writeDb.batchPipelined) await writeDb.batchPipelined(statements)
+  else await writeDb.batch(statements)
 }
 
 export async function handleImportReconcileRequest(
@@ -805,20 +880,27 @@ export async function handleImportReconcileRequest(
     return withCors(new Response(`re-import child event id already exists: ${childEventCollision}`, { status: 409 }), request)
   }
 
+  const originFileId = body.fork ? body.sourceFileId! : body.fileId
   const file = await db.prepare(
     `SELECT id, name, role, kind, book_code, source_file_id, anchor_file_id,
             event_id, meta, deleted_at
        FROM files WHERE id = ? AND project_id = ?`,
-  ).bind(body.fileId, body.projectId).first<ExistingFileRow>()
+  ).bind(originFileId, body.projectId).first<ExistingFileRow>()
   if (!file) return withCors(new Response('file not found', { status: 404 }), request)
   if (file.deleted_at != null) return withCors(new Response('cannot re-import a deleted file', { status: 409 }), request)
+  if (body.fork) {
+    const destination = await db.prepare(
+      `SELECT id FROM files WHERE id = ? AND project_id = ?`,
+    ).bind(body.fileId, body.projectId).first<{ id: string }>()
+    if (destination) return withCors(new Response('fork destination already exists', { status: 409 }), request)
+  }
 
   const existingRows = await db.prepare(
     `SELECT cell_id, event_id, value, value_html, type, canonical_ref, anchor_cell_id,
-            start_ms, end_ms, sequence_index, medium, metadata
+            start_ms, end_ms, sequence_index, medium, metadata, hidden_at
        FROM cells
       WHERE project_id = ? AND file_id = ? AND side = 'source'`,
-  ).bind(body.projectId, body.fileId).all<{
+  ).bind(body.projectId, originFileId).all<{
     cell_id: string
     event_id: string
     value: string
@@ -831,7 +913,12 @@ export async function handleImportReconcileRequest(
     sequence_index: number | null
     medium: string | null
     metadata: unknown
+    hidden_at: number | null
   }>()
+  const hiddenAt = new Map(existingRows.results.map((row) => [
+    row.cell_id,
+    row.hidden_at == null ? null : Number(row.hidden_at),
+  ]))
   const existing: ExistingImportCell[] = existingRows.results.map((row) => ({
     cellId: row.cell_id,
     eventId: row.event_id,
@@ -846,6 +933,15 @@ export async function handleImportReconcileRequest(
     medium: row.medium,
     metadata: objectRecord(row.metadata),
   }))
+  const cloneSourceEventIds = new Map<string, string>()
+  const cloneFileEventId = body.fork ? crypto.randomUUID() : null
+  if (body.fork) {
+    for (const cell of existing) {
+      const id = crypto.randomUUID()
+      cloneSourceEventIds.set(cell.cellId, id)
+      cell.eventId = id
+    }
+  }
 
   let plan: ReconciliationPlan
   try {
@@ -875,7 +971,7 @@ export async function handleImportReconcileRequest(
   const mergedMeta = mergeFileMeta(file.meta, body.file)
   const declaredForPayload = readDeclaredLanguages(mergedMeta)
   const filePayload: EventPayloads['file.create'] = {
-    name: file.name,
+    name: body.fork ? body.file.name : file.name,
     fileType: body.file.fileType ?? file.kind ?? file.role ?? 'codex',
     role: file.role ?? body.file.role,
     kind: file.kind ?? body.file.kind,
@@ -904,7 +1000,7 @@ export async function handleImportReconcileRequest(
     projectId: body.projectId,
     fileId: body.fileId,
     cellId: null,
-    parentId: file.event_id,
+    parentId: body.fork ? cloneFileEventId : file.event_id,
     kind: 'file.create',
     author,
     payload: filePayload,
@@ -912,8 +1008,107 @@ export async function handleImportReconcileRequest(
     serverTs: serverTs++,
   }
 
+  const review = body.reviewChangedSource === true || body.fork === true
+  let forkEvents: PersistedEvent[] = []
+  let reviewEvents: PersistedEvent[] = []
+  let writeSourceIds: Set<string> | null = null
+  if (review || body.fork) {
+    const originTargets = await db.prepare(
+      `SELECT cell_id, event_id, value, value_html, lane_id, ${wireLegacyTagSql("cells")} AS target_lang
+         FROM cells WHERE project_id = ? AND file_id = ? AND side = 'target'`,
+    ).bind(body.projectId, originFileId).all<{
+      cell_id: string
+      event_id: string
+      value: string
+      value_html: string | null
+      lane_id: string | null
+      target_lang: string
+    }>()
+    const validatorRows = review
+      ? await db.prepare(
+        `SELECT cv.cell_id, cv.username, cv.lane_id, cv.event_id,
+                COALESCE(l.legacy_tag, '') AS target_lang
+           FROM cell_validators cv
+           LEFT JOIN lanes l ON l.id = cv.lane_id
+          WHERE cv.project_id = ? AND cv.file_id = ?`,
+      ).bind(body.projectId, originFileId).all<{
+        cell_id: string
+        username: string
+        lane_id: string | null
+        event_id: string
+        target_lang: string
+      }>()
+      : { results: [] as { cell_id: string; username: string; lane_id: string | null; event_id: string; target_lang: string }[] }
+    const forkTargets: ForkTargetRow[] = originTargets.results.map((row) => ({
+      cellId: row.cell_id,
+      eventId: row.event_id,
+      value: row.value,
+      valueHtml: row.value_html,
+      laneId: row.lane_id,
+      targetLang: row.target_lang ?? '',
+    }))
+    const forkValidators: ForkValidatorRow[] = validatorRows.results.map((row) => ({
+      cellId: row.cell_id,
+      username: row.username,
+      laneId: row.lane_id,
+      targetLang: row.target_lang ?? '',
+      editEventId: row.event_id,
+    }))
+    const activeTargetIds = new Set(forkTargets.map((target) => target.eventId))
+    let repinTargets = forkTargets.map((target) => ({
+      cellId: target.cellId,
+      laneId: target.laneId,
+      eventId: target.eventId,
+      targetLang: target.targetLang,
+    }))
+    if (body.fork && cloneFileEventId) {
+      const clone = buildForkClone({
+        projectId: body.projectId,
+        fileId: body.fileId,
+        fileEventId: cloneFileEventId,
+        author,
+        clientTs,
+        file: { ...filePayload, name: body.file.name },
+        cells: existing,
+        sourceEventIds: cloneSourceEventIds,
+        targets: forkTargets,
+        validators: forkValidators.filter((validator) => activeTargetIds.has(validator.editEventId)),
+        hiddenCellIds: new Set(
+          [...hiddenAt.entries()].filter((entry) => entry[1] != null).map((entry) => entry[0]),
+        ),
+      })
+      forkEvents = clone.events
+      repinTargets = forkTargets.flatMap((target) => {
+        const eventId = clone.targetEventIds.get(targetEventKey(target.cellId, target.laneId))
+        return eventId ? [{ ...target, eventId }] : []
+      })
+    }
+    if (review) {
+      const built = buildReviewEvents({
+        projectId: body.projectId,
+        fileId: body.fileId,
+        author,
+        clientTs,
+        serverTsStart: 0,
+        plan,
+        existingById: new Map(existing.map((cell) => [cell.cellId, cell])),
+        hiddenAt,
+        targets: repinTargets,
+        validators: forkValidators.map((validator) => ({
+          ...validator,
+          editEventId: body.fork
+            ? repinTargets.find((target) => target.cellId === validator.cellId && target.laneId === validator.laneId)?.eventId
+              ?? validator.editEventId
+            : validator.editEventId,
+        })),
+      })
+      reviewEvents = built.events
+      writeSourceIds = built.writeSourceIds
+    }
+  }
+
   const sourceEvents: PersistedEvent<'source.cell.create'>[] = plan.cells
-    .filter((cell) => cell.changed)
+    .filter((cell) => writeSourceIds ? writeSourceIds.has(cell.finalCellId) : cell.changed)
     .map((cell) => ({
       id: cell.incoming.id,
       schemaVersion: 1,
@@ -927,9 +1122,11 @@ export async function handleImportReconcileRequest(
       clientTs,
       serverTs: serverTs++,
     }))
+  const writesSource = (cell: { finalCellId: string; changed: boolean }) =>
+    writeSourceIds ? writeSourceIds.has(cell.finalCellId) : cell.changed
   const sourceEventByIncomingCell = new Map(plan.cells.map((cell) => [
     cell.originalCellId,
-    cell.changed ? cell.incoming.id : cell.parentId!,
+    writesSource(cell) ? cell.incoming.id : cell.parentId!,
   ]))
   const finalCellByIncomingCell = new Map(plan.cells.map((cell) => [cell.originalCellId, cell.finalCellId]))
 
@@ -938,6 +1135,7 @@ export async function handleImportReconcileRequest(
   ).bind(body.projectId, body.fileId).all<{ cell_id: string; target_lang: string }>()
   const existingTargets = new Set(existingTargetRows.results.map((row) => `${row.cell_id}\0${row.target_lang}`))
   const targetEvents: PersistedEvent<'target.cell.commit'>[] = []
+  if (!review) {
   for (const target of body.targets ?? []) {
     if (!target.id || !target.cellId || typeof target.value !== 'string') {
       return withCors(new Response('each target needs string id, cellId, and value', { status: 400 }), request)
@@ -968,15 +1166,21 @@ export async function handleImportReconcileRequest(
       serverTs: serverTs++,
     })
   }
+  }
+
+  for (const event of [...forkEvents, fileEvent, ...sourceEvents, ...targetEvents, ...reviewEvents]) {
+    event.serverTs = serverTs++
+  }
 
   const fileClaim: ChainSlot = {
     projectId: body.projectId,
     fileId: body.fileId,
     cellId: FILE_CLAIM_CELL_ID,
-    parentKey: parentKeyOf(file.event_id),
+    parentKey: parentKeyOf(body.fork ? cloneFileEventId : file.event_id),
   }
-  const allEventCount = 1 + sourceEvents.length + targetEvents.length
+  const allEventCount = forkEvents.length + 1 + sourceEvents.length + targetEvents.length + reviewEvents.length
   const seqBase = await allocateSeqRange(db, body.projectId, allEventCount)
+  const sourceSeq = seqBase + forkEvents.length
   const sourceRows: SeqEventInsertRow[] = [fileEvent, ...sourceEvents].map((event, index) => ({
     id: event.id,
     schemaVersion: event.schemaVersion,
@@ -989,7 +1193,7 @@ export async function handleImportReconcileRequest(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs: event.serverTs,
-    serverSeq: seqBase + index,
+    serverSeq: sourceSeq + index,
   }))
   const targetRows: SeqEventInsertRow[] = targetEvents.map((event, index) => ({
     id: event.id,
@@ -1003,10 +1207,12 @@ export async function handleImportReconcileRequest(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs: event.serverTs,
-    serverSeq: seqBase + sourceRows.length + index,
+    serverSeq: sourceSeq + sourceRows.length + index,
   }))
 
-  const statements: AquillaStatement[] = [buildChainClaimStmt(db, fileClaim, fileEvent.id)]
+  const statements: AquillaStatement[] = []
+  appendProjectedEvents(db, statements, forkEvents, seqBase)
+  statements.push(buildChainClaimStmt(db, fileClaim, fileEvent.id))
   for (let offset = 0; offset < sourceEvents.length; offset += BULK_ROWS) {
     statements.push(buildBulkCellClaims(
       db,
@@ -1073,6 +1279,47 @@ export async function handleImportReconcileRequest(
   }
   for (let offset = 0; offset < targetEvents.length; offset += BULK_ROWS) {
     statements.push(buildGatedTargetInsert(db, targetEvents.slice(offset, offset + BULK_ROWS), fileClaim, fileEvent.id))
+  }
+  appendProjectedEvents(
+    db,
+    statements,
+    reviewEvents,
+    sourceSeq + sourceRows.length + targetEvents.length,
+  )
+  if (review) {
+    const settingsRow = await db.prepare(
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
+    ).bind(body.projectId).first<{ settings: unknown }>()
+    let validationCount = 1
+    try {
+      const raw = typeof settingsRow?.settings === 'string'
+        ? JSON.parse(settingsRow.settings) as unknown
+        : settingsRow?.settings
+      const count = objectRecord(raw).validationCount
+      if (typeof count === 'number' && Number.isFinite(count) && count > 0) validationCount = Math.floor(count)
+    } catch {
+      validationCount = 1
+    }
+    statements.push(db.prepare(
+      `UPDATE cells AS c
+          SET validated = (
+                SELECT CASE WHEN COUNT(*) >= ? THEN 1 ELSE 0 END
+                  FROM cell_validators v
+                 WHERE v.project_id = c.project_id AND v.file_id = c.file_id
+                   AND v.cell_id = c.cell_id
+                   AND v.lane_id IS NOT DISTINCT FROM c.lane_id
+                   AND v.event_id = c.event_id
+              ),
+              endorsement_count = (
+                SELECT COUNT(*)
+                  FROM cell_validators v
+                 WHERE v.project_id = c.project_id AND v.file_id = c.file_id
+                   AND v.cell_id = c.cell_id
+                   AND v.lane_id IS NOT DISTINCT FROM c.lane_id
+                   AND v.event_id = c.event_id
+              )
+        WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'target'`,
+    ).bind(validationCount, body.projectId, body.fileId))
   }
   statements.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
   statements.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))

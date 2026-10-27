@@ -150,4 +150,34 @@ describe("TTS provider normalization", () => {
     expect(isInworldVoiceName("af_bella")).toBe(false)
     expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Alex" }, "inworld").voiceName).toBe("Alex")
   })
+
+  // AQU-2152 — the catalog ids are Inworld's own display names, so the accented
+  // ones (fr Étienne/Hélène, pt Maitê) are as valid as Alain. An ASCII-only
+  // shape check rejected them and every normalize put Dennis back, so the Edit
+  // voice picker and the generate path both spoke as Dennis.
+  it("accepts accented catalog ids", () => {
+    expect(isInworldVoiceName("Étienne")).toBe(true)
+    expect(isInworldVoiceName("Hélène")).toBe(true)
+    expect(isInworldVoiceName("Maitê")).toBe(true)
+    expect(isInworldVoiceName("Alain")).toBe(true)
+    // Same name NFD-decomposed (E + combining acute) — one byte sequence apart.
+    expect(isInworldVoiceName("E\u0301tienne")).toBe(true)
+  })
+
+  it("keeps an accented catalog id through normalization", () => {
+    for (const voiceName of ["Étienne", "Hélène", "Alain"]) {
+      expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName }, "inworld").voiceName).toBe(voiceName)
+    }
+  })
+
+  it("still narrows to Dennis for an empty, Gemini or leftover Kokoro speaker", () => {
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Kore" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "af_bella" }, "inworld").voiceName)
+      .toBe(DEFAULT_INWORLD_VOICE)
+    expect(isInworldVoiceName("eng")).toBe(false)
+    expect(isInworldVoiceName("fra")).toBe(false)
+  })
 })

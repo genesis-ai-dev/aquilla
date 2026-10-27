@@ -1,5 +1,7 @@
 // Monday push engine — upserts one board item per entity (project, or one per
-// file) and writes the mapped metric columns. Contract §"Push engine".
+// file) and writes the mapped metric columns. Contract §"Push engine". With
+// `fileSubitems` on, the project's item then gets one subitem per file
+// (subitems.ts).
 //
 // Idempotency: integration_item_links is the primary key store; matchExisting
 // (external-id column lookup or name match) recovers pre-existing items before
@@ -28,7 +30,6 @@ import {
   type IntegrationLinkRow,
   type IntegrationConnectionRow,
   type MondayMapping,
-  type MondayMetricKey,
 } from "./types"
 import { getConnectionAccessToken, MondayForeignConnectionError } from "./tokens"
 import {
@@ -40,104 +41,14 @@ import {
   MondayApiError,
   type AliasedMutation,
 } from "./client"
-import { computeProjectMetrics, type MondayEntityMetrics } from "./metrics"
+import { computeProjectMetrics } from "./metrics"
 import { recordPushOutcome, type PushResult } from "../integrations/push-state"
+import { renderItemName, templateNamesFile } from "../integrations/item-name"
+import { buildColumnValues, failingColumnId, type PushEntity } from "./values"
+import { pushFileSubitems } from "./subitems"
+import { saveItemLinks, type ItemLinkPair } from "./item-links"
 
 export type { PushResult } from "../integrations/push-state"
-
-interface PushEntity {
-  kind: "project" | "file"
-  id: string
-  itemName: string
-  metrics: MondayEntityMetrics
-}
-
-/** Format one metric as the Monday column_values JSON value for its column type. */
-function columnValueFor(
-  metric: MondayMetricKey,
-  columnType: string,
-  entity: PushEntity,
-): unknown {
-  const m = entity.metrics
-  switch (metric) {
-    case "completion_pct":
-    case "validated_pct":
-    case "audio_validated_pct":
-    case "has_audio_pct":
-    case "active_contributors_30d":
-    case "recorded_minutes":
-    case "filled_count":
-    case "total_count":
-    case "validated_count":
-      // numbers and text columns both take the stringified value.
-      return String(m[metric])
-    case "translators":
-      return m.translators
-    case "last_activity":
-      return columnType === "date" ? { date: m.last_activity } : m.last_activity
-    case "status_auto":
-      return columnType === "status" ? { label: m.status_auto } : m.status_auto
-    case "deadline":
-      // No deadline clears the cell: Monday treats an empty string as "clear"
-      // for every column type, a date column included.
-      if (!m.deadline) return ""
-      return columnType === "date" ? { date: m.deadline } : m.deadline
-    case "next_target_date":
-      if (!m.next_target_date) return ""
-      return columnType === "date" ? { date: m.next_target_date } : m.next_target_date
-    case "days_since_activity":
-      return m.days_since_activity == null ? "" : String(m.days_since_activity)
-    case "project_link":
-      return columnType === "link" ? { url: m.project_link, text: "Open in Aquilla" } : m.project_link
-    case "schedule_status":
-      return columnType === "status" ? { label: m.schedule_status } : m.schedule_status
-    case "books_done":
-    case "project_manager":
-    case "languages":
-    case "books_in_progress":
-      return m[metric]
-    case "project_name":
-      return entity.itemName
-    case "external_id":
-      return entity.id
-  }
-}
-
-function buildColumnValues(
-  mapping: MondayMapping,
-  entity: PushEntity,
-  excludedColumnIds: ReadonlySet<string>,
-): Record<string, unknown> {
-  const values: Record<string, unknown> = {}
-  for (const col of mapping.columns) {
-    if (excludedColumnIds.has(col.columnId)) continue
-    values[col.columnId] = columnValueFor(col.metric, col.columnType, entity)
-  }
-  return values
-}
-
-function renderItemName(
-  template: string | undefined,
-  granularity: MondayMapping["itemGranularity"],
-  projectName: string,
-  fileName?: string,
-): string {
-  const tpl =
-    template ?? (granularity === "file" ? "{projectName} — {fileName}" : "{projectName}")
-  return tpl
-    .replaceAll("{projectName}", projectName)
-    .replaceAll("{fileName}", fileName ?? "")
-    .trim()
-}
-
-/** Extract the failing column id from a Monday column error message, if present. */
-function failingColumnId(message: string, mapping: MondayMapping): string | null {
-  if (!/column/i.test(message)) return null
-  for (const col of mapping.columns) {
-    if (message.includes(col.columnId)) return col.columnId
-  }
-  return null
-}
 
 async function loadConnectionToken(
   env: Env,
@@ -208,6 +119,10 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
     return { ok: false, pushed: false, linked: true, error: "project not found" }
   }
 
+  // A template written for the project's row would name every file's row the
+  // same, and one written for a file's row would leave the project's ending in
+  // a dash, so each kind of row only uses a template written for it.
+  const namesFile = templateNamesFile(mapping.itemNameTemplate)
   const entities: PushEntity[] =
     mapping.itemGranularity === "project"
       ? [
@@ -215,7 +130,7 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
             kind: "project",
             id: summary.projectId,
             itemName: renderItemName(
-              mapping.itemNameTemplate,
+              namesFile ? undefined : mapping.itemNameTemplate,
               "project",
               summary.projectName,
             ),
@@ -226,7 +141,7 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
           kind: "file" as const,
           id: f.fileId,
           itemName: renderItemName(
-            mapping.itemNameTemplate,
+            namesFile ? mapping.itemNameTemplate : undefined,
             "file",
             summary.projectName,
             f.fileName,
@@ -235,12 +150,25 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
         }))
 
   try {
-    const itemsUpserted = await upsertEntities(env, link, mapping, token, entities)
+    const itemIds = await upsertEntities(env, link, mapping, token, entities)
+    let itemsUpserted = entities.length
+    // Files as subitems: under the project's row, named for the file alone.
+    const parentItemId = itemIds.get(`project:${summary.projectId}`)
+    if (mapping.itemGranularity === "project" && mapping.fileSubitems && parentItemId) {
+      itemsUpserted += await pushFileSubitems(
+        env,
+        link,
+        mapping,
+        token,
+        parentItemId,
+        summary.files.map((f) => ({ kind: "file", id: f.fileId, itemName: f.fileName, metrics: f.metrics })),
+      )
+    }
     await recordPushOutcome(env, link, "ok", null)
     return { ok: true, pushed: true, linked: true, itemsUpserted }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const failedColumn = failingColumnId(message, mapping)
+    const failedColumn = failingColumnId(message, mapping.columns)
     if (failedColumn) {
       // Board structure drifted under us — flag for re-review; the failing
       // column is excluded from the retry inside upsertEntities already.
@@ -264,13 +192,14 @@ export async function pushBoardLink(env: Env, link: IntegrationLinkRow): Promise
   }
 }
 
+/** Upsert the board's own rows; answers every entity's item id, keyed `kind:id`. */
 async function upsertEntities(
   env: Env,
   link: IntegrationLinkRow,
   mapping: MondayMapping,
   token: string,
   entities: PushEntity[],
-): Promise<number> {
+): Promise<Map<string, string>> {
   // 1. Existing item links.
   const linksResult = await env.AQUILLA_PG.prepare(
     "SELECT entity_kind, entity_id, external_item_id FROM integration_item_links WHERE link_id = ?",
@@ -315,7 +244,7 @@ async function upsertEntities(
         toCreate.push(entity)
       }
     }
-    await saveItemLinks(env, link.id, matchedLinks)
+    await saveItemLinks(env, link.id, matchedLinks.map(linkPair))
     // A row Aquilla adopts from the board (found by its Aquilla ID or name,
     // not created) joins the projects group, like a row it creates. Only at
     // adoption: later pushes never move a row the user dragged elsewhere.
@@ -331,7 +260,7 @@ async function upsertEntities(
   // 3. Create missing items (aliased batches; column values included up-front).
   if (toCreate.length > 0) {
     const mutations: AliasedMutation[] = toCreate.map((entity, i) => {
-      const values = buildColumnValues(mapping, entity, new Set())
+      const values = buildColumnValues(mapping.columns, entity, new Set())
       const group = mapping.groupId ? `, group_id: ${gqlString(mapping.groupId)}` : ""
       return {
         alias: `c${i}`,
@@ -347,7 +276,7 @@ async function upsertEntities(
       itemIdByEntity.set(`${entity.kind}:${entity.id}`, String(id))
       createdLinks.push({ entity, itemId: String(id) })
     }
-    await saveItemLinks(env, link.id, createdLinks)
+    await saveItemLinks(env, link.id, createdLinks.map(linkPair))
   }
 
   // 4. Update column values on already-known items.
@@ -358,7 +287,7 @@ async function upsertEntities(
     const buildUpdateMutations = (excluded: ReadonlySet<string>): AliasedMutation[] =>
       toUpdate.map((entity, i) => ({
         alias: `u${i}`,
-        body: `change_multiple_column_values(board_id: ${gqlString(link.external_id)}, item_id: ${gqlString(itemIdByEntity.get(`${entity.kind}:${entity.id}`) ?? "")}, column_values: ${gqlString(JSON.stringify(buildColumnValues(mapping, entity, excluded)))}, create_labels_if_missing: true) { id }`,
+        body: `change_multiple_column_values(board_id: ${gqlString(link.external_id)}, item_id: ${gqlString(itemIdByEntity.get(`${entity.kind}:${entity.id}`) ?? "")}, column_values: ${gqlString(JSON.stringify(buildColumnValues(mapping.columns, entity, excluded)))}, create_labels_if_missing: true) { id }`,
       }))
     try {
       await runAliasedMutations(token, buildUpdateMutations(new Set()))
@@ -366,15 +295,21 @@ async function upsertEntities(
       // Unknown-column error: drop the failing column and retry this push
       // once without it, then surface the error to the caller for recording.
       const message = err instanceof Error ? err.message : String(err)
-      const failed = failingColumnId(message, mapping)
+      const failed = failingColumnId(message, mapping.columns)
       if (!failed) throw err
       await runAliasedMutations(token, buildUpdateMutations(new Set([failed])))
       throw err
     }
   }
 
-  return entities.length
+  return itemIdByEntity
 }
+
+const linkPair = ({ entity, itemId }: { entity: PushEntity; itemId: string }): ItemLinkPair => ({
+  kind: entity.kind,
+  id: entity.id,
+  itemId,
+})
 
 /** Move rows into a group; a failure never fails the push (the values still land). */
 async function moveItemsToGroupBestEffort(token: string, itemIds: string[], groupId: string): Promise<void> {
@@ -388,38 +323,5 @@ async function moveItemsToGroupBestEffort(token: string, itemIds: string[], grou
     )
   } catch (err) {
     console.warn("[monday] moving adopted rows into the projects group failed (best-effort):", err)
-  }
-}
-
-/** Rows per item-link upsert statement — keeps a 66-file push to one write. */
-const ITEM_LINK_WRITE_BATCH = 100
-
-/**
- * Upsert the entity → Monday item mappings in one statement per batch
- * (AQU-1828: this used to be one statement per entity, so a first push over a
- * whole Bible issued ~130 DB round trips on top of the Monday calls).
- */
-async function saveItemLinks(
-  env: Env,
-  linkId: string,
-  pairs: Array<{ entity: PushEntity; itemId: string }>,
-): Promise<void> {
-  for (let i = 0; i < pairs.length; i += ITEM_LINK_WRITE_BATCH) {
-    const batch = pairs.slice(i, i + ITEM_LINK_WRITE_BATCH)
-    const values = batch.map(() => "(?, ?, ?, ?)").join(", ")
-    const bindings = batch.flatMap(({ entity, itemId }) => [
-      linkId,
-      entity.kind,
-      entity.id,
-      itemId,
-    ])
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO integration_item_links (link_id, entity_kind, entity_id, external_item_id)
-       VALUES ${values}
-       ON CONFLICT (link_id, entity_kind, entity_id)
-       DO UPDATE SET external_item_id = EXCLUDED.external_item_id`,
-    )
-      .bind(...bindings)
-      .run()
   }
 }

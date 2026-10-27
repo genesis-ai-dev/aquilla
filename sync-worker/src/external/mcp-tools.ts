@@ -313,7 +313,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'a cold call fails with reason "asr_warming". language (BCP-47) defaults to the lane\'s. ' +
       'Returns { text, words: [{ text, start, end }] (seconds), model, timingsApproximate, ' +
       'creditsCharged }. SPENDS WORKSPACE CREDITS (metered GPU time for Omnilingual) and needs a ' +
-      'project-scoped read-write credential. WRITES NOTHING: to store the transcript, stage it with ' +
+      'read-write project credential or an authorized organization-scoped MCP OAuth grant. WRITES NOTHING: to store the transcript, stage it with ' +
       'prepare_translations (SetTranslation for a target take, SetTranscription for a source media ' +
       'cell) so it goes through the normal approval gate. A stored webm take can ' +
       'only go to omni-ctc / omni-zs, and must be at most 30 s (60 s for Whisper/Qwen WAV).',
@@ -731,9 +731,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Takes. `slot` is "recording" (default: a recorded take) or "generatedVoice" ' +
       '(externally synthesized voice, reviewed and exported like in-app TTS); `durationMs` ' +
       'is the clip length when you know it (the upload does no decoding). `artifactId` must ' +
-      'reference an audio-kind artifact already uploaded to this project via REST ' +
-      '`POST .../projects/:projectId/artifacts` with header `x-artifact-kind: audio` — MCP ' +
-      'is JSON-RPC text and cannot carry that binary upload itself. The receipt\'s `media[]` ' +
+      'reference an audio-kind artifact uploaded to this project with upload_artifact ' +
+      '(or a separately authorized REST upload). The receipt\'s `media[]` ' +
       'carries the native take audioId the app now plays (not the artifact\'s). Multiple ' +
       'LinkMedia commands may share one changeset with each other, but LinkMedia cannot mix ' +
       'with SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. ' +
@@ -846,6 +845,21 @@ const TOOL_SPECS: McpToolSpec[] = [
                     type: ['string', 'number'],
                     description: 'Target org id; omit for a personal (org-less) project.',
                   },
+                  lanes: {
+                    type: 'array',
+                    description: 'Language lanes to create with the project. Omit for an unnamed source lane.',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        role: { type: 'string', enum: ['source', 'target'] },
+                        language: { type: 'string', description: 'Language as entered by the user.' },
+                        name: { type: ['string', 'null'], description: 'Optional display-name override.' },
+                        code: { type: ['string', 'null'], description: 'Optional language-code override.' },
+                      },
+                      required: ['role', 'language'],
+                      additionalProperties: false,
+                    },
+                  },
                 },
                 required: ['kind', 'name'],
                 additionalProperties: false,
@@ -872,7 +886,7 @@ const TOOL_SPECS: McpToolSpec[] = [
                   cellId: { type: 'string' },
                   artifactId: {
                     type: 'string',
-                    description: 'An audio-kind artifact id from the REST artifact upload endpoint.',
+                    description: 'An audio-kind artifact id returned by upload_artifact or a separately authorized REST upload.',
                   },
                   laneId: {
                     type: 'string',
@@ -1017,14 +1031,38 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'upload_artifact',
+    description:
+      'Upload a source or audio artifact through MCP without replaying OAuth on REST. ' +
+      'Supply actual user-authorized bytes as UTF-8 text or canonical base64 (no data URL). ' +
+      'Maximum decoded size: 524288 bytes. This immediately stores an artifact, but ' +
+      'does not import content, attach audio, or spend transcription credits. ' +
+      'Returns artifactId for preview_import / prepare_import, prepare_link_media or ' +
+      'transcribe_audio. Existing project scope, write access, contributor permissions ' +
+      'and upload rate limits apply. For larger files use Aquilla or a separately ' +
+      'authorized REST client; never replay an MCP OAuth token on REST.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        name: { type: 'string', description: 'Original filename, including its extension.' },
+        kind: { type: 'string', enum: ['source', 'audio'] },
+        contentType: { type: 'string', description: 'MIME type; audio requires a supported audio MIME type.' },
+        encoding: { type: 'string', enum: ['utf8', 'base64'] },
+        data: { type: 'string', description: 'Original UTF-8 text or canonical base64 bytes, not a URL.' },
+      },
+      required: ['projectId', 'name', 'kind', 'contentType', 'encoding', 'data'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'preview_import',
     description:
       'Parse an uploaded source artifact with Aquilla\'s built-in importers and PREVIEW the ' +
       'result WITHOUT staging anything. This is step 2 of the artifact-first import ' +
-      'workflow: (1) upload the original file bytes via REST ' +
-      'POST .../projects/:projectId/artifacts with header "x-artifact-name" (25MB cap) — ' +
-      'upload is REST-only because MCP is JSON-RPC text and cannot carry a binary body ' +
-      '(from Claude Code, curl the upload); preserving the original in storage also enables ' +
+      'workflow: (1) upload_artifact stores original UTF-8/base64 bytes (512 KiB cap); ' +
+      'larger uploads need Aquilla or a separately authorized REST client. Never replay ' +
+      'MCP OAuth on REST. Preserving the original in storage also enables ' +
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
@@ -1041,7 +1079,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         ...projectIdProp,
         artifactId: {
           type: 'string',
-          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+          description: 'A source artifact returned by upload_artifact or a separately authorized REST upload.',
         },
         fileType: {
           type: 'string',
@@ -1074,9 +1112,8 @@ const TOOL_SPECS: McpToolSpec[] = [
       'is preserved for round-trip export). Nothing is applied here — like every write ' +
       'this returns { changesetId, summary, digest, mode, approvalUrl? } for the normal ' +
       'confirm_changeset flow (ask mode: a human must approve at the approvalUrl first). ' +
-      'Workflow: REST-upload the original bytes to POST .../projects/:projectId/artifacts ' +
-      '(25MB cap; upload is REST-only — MCP JSON-RPC cannot carry binary, so agents like ' +
-      'Claude Code should curl it), preview_import to check the parse, then this tool, ' +
+      'Workflow: upload_artifact stores the original bytes (512 KiB cap), then ' +
+      'preview_import checks the parse, then this tool stages the import, ' +
       'then confirm_changeset. Same formats/limits as preview_import (5000-cell cap, ' +
       'validation_failed above it); a multi-book USFM artifact must be staged one book per ' +
       'changeset via resultIndex. Requires PROJECT_LEAD role (the floor of the compiled ' +
@@ -1087,7 +1124,7 @@ const TOOL_SPECS: McpToolSpec[] = [
         ...projectIdProp,
         artifactId: {
           type: 'string',
-          description: 'A source artifact already uploaded via REST POST .../artifacts.',
+          description: 'A source artifact returned by upload_artifact or a separately authorized REST upload.',
         },
         fileType: {
           type: 'string',
@@ -1284,7 +1321,7 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
 ]
-type ToolKind = 'read' | 'spend' | 'stage' | 'commit' | 'discard'
+type ToolKind = 'read' | 'spend' | 'stage' | 'upload' | 'commit' | 'discard'
 
 /**
  * How each tool touches Aquilla state. Every tool MUST be listed (a test
@@ -1293,6 +1330,7 @@ type ToolKind = 'read' | 'spend' | 'stage' | 'commit' | 'discard'
  *  read    — no state change at all.
  *  spend   — no project state change, but it costs workspace credits each
  *            call (so it is neither read-only nor idempotent).
+ *  upload  — stores an artifact without changing committed file content.
  *  stage   — writes a pending changeset only; nothing in the project changes
  *            until a confirm (and, in ask mode, a human approval).
  *  commit  — applies a staged changeset: may overwrite translations, delete or
@@ -1325,6 +1363,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   read_term_consistency: 'read',
   list_terms: 'read',
   prepare_translations: 'stage',
+  upload_artifact: 'upload',
   preview_import: 'read',
   prepare_import: 'stage',
   export_file: 'read',

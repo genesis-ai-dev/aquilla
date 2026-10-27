@@ -164,8 +164,9 @@ describe("ProjectSettings — a new lane reaches the page behind the dialog (AQU
     await waitFor(() => expect(within(pageBehind).getByText("French")).toBeTruthy())
     expect(within(pageBehind).queryByText("Spanish")).toBeNull()
     // Both instances have read the one-lane project.
-    await waitFor(() => expect(screen.getByTestId("lane-language-ln-fr")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("lane-language-cell-ln-fr")).toBeTruthy())
 
+    fireEvent.click(screen.getByTestId("add-lane-open"))
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Spanish" } })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
 
@@ -174,7 +175,7 @@ describe("ProjectSettings — a new lane reaches the page behind the dialog (AQU
     // No reload: the page behind converges on its own.
     expect(await within(pageBehind).findByText("Spanish")).toBeTruthy()
     // The dialog's own list has it too.
-    expect(await screen.findByTestId("lane-language-ln-es")).toBeTruthy()
+    expect(await screen.findByTestId("lane-language-cell-ln-es")).toBeTruthy()
   })
 
   it("announces the write the way the overview's portfolio reload listens for it", async () => {
@@ -189,9 +190,10 @@ describe("ProjectSettings — a new lane reaches the page behind the dialog (AQU
     window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onUpdated)
     try {
       const pageBehind = renderDialogOverPage()
-      await waitFor(() => expect(screen.getByTestId("lane-language-ln-fr")).toBeTruthy())
+      await waitFor(() => expect(screen.getByTestId("lane-language-cell-ln-fr")).toBeTruthy())
       expect(seen).toEqual([])
 
+      fireEvent.click(screen.getByTestId("add-lane-open"))
       fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Spanish" } })
       fireEvent.click(screen.getByTestId("add-target-lang-btn"))
 
@@ -207,9 +209,10 @@ describe("ProjectSettings — a new lane reaches the page behind the dialog (AQU
   it("leaves the page behind alone when the create is refused", async () => {
     createProjectLane.mockResolvedValue({ kind: "duplicate" })
     const pageBehind = renderDialogOverPage()
-    await waitFor(() => expect(screen.getByTestId("lane-language-ln-fr")).toBeTruthy())
+    await waitFor(() => expect(screen.getByTestId("lane-language-cell-ln-fr")).toBeTruthy())
     const reads = fetchProjectSettingsResult.mock.calls.length
 
+    fireEvent.click(screen.getByTestId("add-lane-open"))
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "French" } })
     fireEvent.click(screen.getByTestId("add-target-lang-btn"))
 

@@ -1,6 +1,6 @@
 import {
   Pencil, FolderInput, Trash2, Download, Info, UserCheck, SplitSquareVertical,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, RefreshCw,
 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -26,6 +26,8 @@ interface FileActionMenuProps {
    *  dialog itself is read-only below Project Lead and says so, which is more
    *  useful than hiding how the file is divided. */
   onSegmentation?: () => void
+  /** Sidebar re-import of this one file. Shown when the caller can import. */
+  onReimport?: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
   onDelete?: () => void
   /**
@@ -55,7 +57,7 @@ export interface FileReorderActions {
  */
 export function FileActionMenu({
   onShowDetails, onRename, onMove, onExport, onDownloadOriginal, onAssignWork,
-  onSegmentation, onDelete, reorder,
+  onSegmentation, onReimport, onDelete, reorder,
 }: FileActionMenuProps) {
   const t = useT()
   return (
@@ -90,6 +92,11 @@ export function FileActionMenu({
         {onSegmentation && (
           <MenuItem onClick={onSegmentation}>
             <SplitSquareVertical /> {t("segmentation.menuItem")}
+          </MenuItem>
+        )}
+        {onReimport && (
+          <MenuItem onClick={onReimport}>
+            <RefreshCw /> {t("fileDetails.reimport")}
           </MenuItem>
         )}
         {onExport && (

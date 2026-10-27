@@ -11,6 +11,7 @@ import {
   VOICE_CONVERT_MAX_PER_USER_PER_WINDOW,
   handleVoiceConvertRequest,
   handleVoiceReferenceRequest,
+  libraryVoiceKey,
   voiceRefObjectKey,
   voiceReferenceFingerprint,
 } from "../voice-convert"
@@ -19,6 +20,8 @@ import type { SyncTokenClaims } from "../auth"
 const SECRET = "voice-tests-secret"
 const MODAL_URL = "https://acct--seed-vc-web.modal.run/convert"
 const MODAL_TOKEN = "modal-shared-secret"
+const FORGE_URL = "https://acct--voice-forge-web.modal.run/convert"
+const FORGE_TOKEN = "forge-shared-secret"
 
 interface StoredObject {
   key: string
@@ -114,6 +117,8 @@ type StubEnv = {
   R2_KEY_PREFIX?: string
   SEED_VC_URL?: string
   SEED_VC_TOKEN?: string
+  VOICE_FORGE_URL?: string
+  VOICE_FORGE_TOKEN?: string
   AQUILLA_PG?: unknown
 }
 
@@ -123,6 +128,8 @@ function makeEnv(overrides: Partial<StubEnv> = {}): StubEnv {
     SYNC_SECRET_KEY: SECRET,
     SEED_VC_URL: MODAL_URL,
     SEED_VC_TOKEN: MODAL_TOKEN,
+    VOICE_FORGE_URL: FORGE_URL,
+    VOICE_FORGE_TOKEN: FORGE_TOKEN,
     AQUILLA_PG: makeRateLimitDb().db,
     ...overrides,
   }
@@ -579,6 +586,70 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { objectName: string }
     expect(env.SNAPSHOTS._allKeys()).toContain(`pr-7/projects/p1/files/f1/audio/${body.objectName}`)
+  })
+})
+
+describe("POST /api/v1/voice/convert with a library voice", () => {
+  function libraryForm(extra: Record<string, string> = {}) {
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("libraryVoiceId", "narrator-hearth")
+    form.append("sourceAudioId", "rec.webm")
+    for (const [k, v] of Object.entries(extra)) form.append(k, v)
+    return form
+  }
+
+  it("re-voices a recording through the voice forge, not Seed-VC, with no reference clip", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
+    const calls = stubModal(() => new Response(new Uint8Array([7, 7]).buffer, { status: 200 }))
+
+    const res = (await call(env, convertReq(libraryForm({ cellId: "c1" }), await makeToken())))!
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { audioId: string; objectName: string }
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(FORGE_URL)
+    expect((calls[0].init.headers as Record<string, string>)["X-Auth-Token"]).toBe(FORGE_TOKEN)
+    const sent = calls[0].init.body as unknown as FormData
+    expect(sent.get("voice_id")).toBe("narrator-hearth")
+    expect(sent.get("source")).toBeTruthy()
+    expect(sent.get("reference")).toBeNull()
+    // Fingerprinted over the namespaced library key, so the client can tell a
+    // take made by this library voice from one made by any clone voice.
+    const fp = voiceReferenceFingerprint(libraryVoiceKey("narrator-hearth"))
+    expect(body.audioId.startsWith(`vc-${fp}-`)).toBe(true)
+    const stored = await env.SNAPSHOTS._bytes(audioObjectKey(env, "p1", "f1", body.objectName))
+    expect(stored && Array.from(stored)).toEqual([7, 7])
+  })
+
+  it("503 when the voice forge isn't configured, even with Seed-VC configured", async () => {
+    const env = makeEnv({ VOICE_FORGE_URL: undefined, VOICE_FORGE_TOKEN: undefined })
+    const res = (await call(env, convertReq(libraryForm(), await makeToken())))!
+    expect(res.status).toBe(503)
+  })
+
+  it("400 for a libraryVoiceId that isn't a plain voice id", async () => {
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("libraryVoiceId", "../../etc")
+    form.append("sourceAudioId", "rec.webm")
+    const res = (await call(makeEnv(), convertReq(form, await makeToken())))!
+    expect(res.status).toBe(400)
+  })
+
+  it("400 when both referenceAudioId and libraryVoiceId are sent", async () => {
+    const res = (await call(makeEnv(), convertReq(libraryForm({ referenceAudioId: "ref1.wav" }),
+      await makeToken())))!
+    expect(res.status).toBe(400)
+  })
+
+  it("403 for a viewer-role token, before any GPU call", async () => {
+    const calls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+    const res = (await call(makeEnv(), convertReq(libraryForm(), await makeToken({ role: 100 }))))!
+    expect(res.status).toBe(403)
+    expect(calls).toHaveLength(0)
   })
 })
 

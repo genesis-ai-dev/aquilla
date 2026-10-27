@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Navigate, useNavigate } from "react-router-dom"
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -74,7 +74,15 @@ export function AdminConsole() {
   } = useAdminElevation()
   const { setActiveOrg } = useActiveOrg()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>("overview")
+  // The tab lives in the URL so a reload or a shared link reopens the same view.
+  // Switching tabs drops the deeper keys (sub-tab, billing search) with it.
+  const [params, setParams] = useSearchParams()
+  const tabParam = params.get("tab")
+  const tab: Tab = TABS.some((t) => t.key === tabParam) ? (tabParam as Tab) : "overview"
+  const setTab = useCallback(
+    (next: Tab) => setParams(next === "overview" ? {} : { tab: next }),
+    [setParams],
+  )
   const [selectedInvitesOrgId, setSelectedInvitesOrgId] = useState<number | null>(null)
 
   const [overview, setOverview] = useState<AdminOverview | null>(null)

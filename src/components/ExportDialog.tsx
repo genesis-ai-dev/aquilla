@@ -71,6 +71,7 @@ import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
+import { exportHtml, hasBibleVerses } from "@/lib/export/exporters/html"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
@@ -79,6 +80,7 @@ import { exportVtt } from "@/lib/export/exporters/vtt"
 import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
+import { buildHtmlProjectZip } from "@/lib/export/exporters/html-project"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { toast } from "@/components/ui/toast"
 
@@ -115,7 +117,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -195,6 +197,17 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.md.label",
     ext: ".md",
     descriptionKey: "importExport.format.md.description",
+    lossy: true,
+  },
+  {
+    // AQU-2182: a USFM book as one readable, self-contained web page (chapter
+    // index, numbered verses, section headings) — what Codex's "Export as
+    // HTML" gave reviewers and printers. Only shown for a Bible book
+    // (offersHtmlPage).
+    id: "html",
+    labelKey: "importExport.format.html.label",
+    ext: ".html",
+    descriptionKey: "importExport.format.html.description",
     lossy: true,
   },
   {
@@ -404,8 +417,12 @@ interface ExportDialogProps {
   getToken: (fileId: string) => Promise<string | null>
   /** Organization identifier used for internal/beta rollout allowlists. */
   orgId?: string
-  /** Opens the import flow when an IDML locator or anchor needs repair. */
-  onReimport?: () => void
+  /** Builds a repaired IDML copy of the file being exported. The original file is not modified. */
+  onRepairIdmlCopy?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (label: string) => void
+  }) => Promise<{ name: string; unmatched: number }>
   /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
@@ -496,7 +513,7 @@ export function ExportDialog({
   ttsSettings,
   getToken,
   orgId,
-  onReimport,
+  onRepairIdmlCopy,
   outstandingInfractionCount = 0,
   audioValidationRequirement = 1,
   onJumpToAudioLine,
@@ -958,6 +975,8 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
+  // AQU-2183: html does project scope too, through its own orchestrator (a zip
+  // of book pages plus an index), not through buildProjectZip's one-entry-per-file shape.
   const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
@@ -977,13 +996,24 @@ export function ExportDialog({
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
    */
-  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
     (chapterScopeFormats as readonly string[]).includes(fmt)
 
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
+
+  /**
+   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM file is one
+   * by definition; a `codex` file only when its lines carry Bible verse
+   * references — migrated Codex projects also store dubbing episodes, Pilgrim's
+   * Progress and commentaries as `codex`, and only the lines tell them apart.
+   */
+  const offersHtmlPage = useMemo(
+    () => activeFileType === "usfm" || (activeFileType === "codex" && hasBibleVerses(cells)),
+    [activeFileType, cells],
+  )
 
   /**
    * What the fold offers, in what order.
@@ -1003,6 +1033,7 @@ export function ExportDialog({
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
       if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
+      if (f.id === "html") return offersHtmlPage // AQU-2182/AQU-2210: a Bible book only
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1023,7 +1054,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId])
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -1031,6 +1062,14 @@ export function ExportDialog({
   useEffect(() => {
     if (format === "sdbh-xml" && !hasSdbhFiles) setFormat("tsv")
   }, [format, hasSdbhFiles])
+
+  // Web page comes and goes per file inside one project (a migrated project can
+  // hold Bible books beside Pilgrim's Progress), while the remembered fold
+  // format is restored per project — so a page remembered from Ruth must not
+  // stay selected, unseen, on a file that is not offered it.
+  useEffect(() => {
+    if (format === "html" && !offersHtmlPage) setFormat(nativeFormatId ?? "tsv")
+  }, [format, offersHtmlPage, nativeFormatId])
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {
@@ -1052,6 +1091,39 @@ export function ExportDialog({
     bytes: ArrayBuffer
     downloadName: string
   } | null>(null)
+  const [repairingCopy, setRepairingCopy] = useState(false)
+
+  const repairCopy = async () => {
+    if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
+    setRepairingCopy(true)
+    setStatus({
+      kind: "busy",
+      msg: t("importExport.dialog.repairingIdmlCopy", { fileName: activeFileName }),
+    })
+    try {
+      const result = await onRepairIdmlCopy({
+        fileId: activeFileId,
+        fileName: activeFileName,
+        onProgress: (label) => setStatus({ kind: "busy", msg: label }),
+      })
+      setStatus({
+        kind: "ok",
+        msg: result.unmatched > 0
+          ? t("importExport.dialog.repairIdmlCopyDoneUnmatched", {
+              fileName: result.name,
+              count: result.unmatched,
+            })
+          : t("importExport.dialog.repairIdmlCopyDone", { fileName: result.name }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: error instanceof Error ? error.message : t("importExport.dialog.repairIdmlCopyNeedsOriginal"),
+      })
+    } finally {
+      setRepairingCopy(false)
+    }
+  }
 
   const selectedFormat = formatOptions.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
@@ -1792,6 +1864,36 @@ export function ExportDialog({
           return
         }
         setStatus({ kind: "busy", msg: t("importExport.status.buildingZip", { count: projectFileCells.length }) })
+        // AQU-2183: html's project zip is pages plus an index, not one entry
+        // per file, so it has its own builder. Cells are narrowed by the same
+        // rule as every other format before it sees them.
+        if (fmt === "html") {
+          const htmlZip = await buildHtmlProjectZip({
+            // `identityCells` stays UNSCOPED on purpose: validated-only can
+            // drop every row of a book, and that book must still be listed in
+            // the index rather than disappear from the project's export.
+            files: projectFileCells.map((f) => ({
+              ...f,
+              cells: scopeCellsForExport(f.cells, contentMode),
+              identityCells: f.cells,
+            })),
+            title: projectName,
+            validatedOnly,
+            lang: targetLanguage,
+          })
+          const htmlName = buildExportStem(true)
+          downloadBlob(htmlZip.blob, `${htmlName}.zip`)
+          setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
+          // Two independent counts (books exported, files skipped), composed
+          // from two separately-authored phrases rather than one template —
+          // the same shape the SDBH and USFM project messages use.
+          const booksMsg = t("importExport.status.exportedHtmlBooks", { count: htmlZip.booksExported })
+          const skippedMsg = htmlZip.filesSkipped
+            ? t("importExport.status.skippedNonBookFiles", { count: htmlZip.filesSkipped })
+            : ""
+          setStatus({ kind: "ok", msg: `${booksMsg}${skippedMsg}` })
+          return
+        }
         const zipBlob = await buildProjectZip({
           // AQU-1148: each file's cells are narrowed by the same rule the
           // single-file path uses, before any exporter sees them.
@@ -1849,6 +1951,15 @@ export function ExportDialog({
             break
           case "md":
             blob = exportMarkdownStructured(filteredCells)
+            break
+          case "html":
+            // AQU-2182: scoped like the other text formats — hidden cells,
+            // validated-only and the chapter range are already applied above.
+            blob = exportHtml(filteredCells, {
+              fileName: activeFileName,
+              validatedOnly,
+              lang: targetLanguage,
+            })
             break
           case "tsv":
             blob = exportTsv(filteredCells)
@@ -3014,11 +3125,8 @@ export function ExportDialog({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      handleOpenChange(false)
-                      onReimport?.()
-                    }}
-                    disabled={!onReimport}
+                    onClick={() => { void repairCopy() }}
+                    disabled={!onRepairIdmlCopy || repairingCopy}
                   >
                     {t("importExport.dialog.repairByReimporting")}
                   </Button>

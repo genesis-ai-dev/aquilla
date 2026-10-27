@@ -144,3 +144,89 @@ describe("useProjectTts refused-write rollback (AQU-1943)", () => {
     expect(loadProjectTts(PROJECT)?.voices?.[0].id).toBe("v9")
   })
 })
+
+// AQU-2125: a character is cast once, a save folds line-by-line casting, and a
+// surface that only knows a line id still hears the character's voice.
+describe("useProjectTts casting by character (AQU-2125)", () => {
+  const PROJECT = "proj-character-cast"
+  const voices = [{ id: "v-n", name: "Narrator" }, { id: "v-j", name: "JESUS" }, { id: "v-new", name: "Clone" }]
+  const line = (id: string, castName?: string) =>
+    ({ id, fileId: "f1", index: 0, original: "", translated: "x", context: "", group: "", type: "text", status: "unvalidated", validationStatus: "unvalidated", activeValidators: [], validated: false, ...(castName ? { castName } : {}) }) as never
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it("lets a line found by id alone hear its character's voice", () => {
+    const server: ProjectTtsSettings = { voices, castAssignments: { "character:JESUS": "v-j" } }
+    const { result } = renderHook(() => useProjectTts(PROJECT, server, [line("a", "JESUS"), line("b")], vi.fn()))
+    expect(result.current.laneSettings?.castAssignments?.a).toBe("v-j")
+    expect(result.current.laneSettings?.castAssignments).not.toHaveProperty("b")
+    // …in the view only: the stored settings stay one entry per character.
+    expect(result.current.settings?.castAssignments).toEqual({ "character:JESUS": "v-j" })
+    expect(result.current.castStats.get("v-j")?.assigned).toBe(1)
+  })
+
+  it("folds the lines in view on a save by someone who may rewrite the project cast", async () => {
+    const server: ProjectTtsSettings = { voices, castAssignments: { a: "v-j", b: "v-j", c: "v-n" } }
+    const cells = [line("a", "JESUS"), line("b", "JESUS"), line("c", "JESUS")]
+    const onSync = vi.fn()
+    const { result } = renderHook(() =>
+      useProjectTts(PROJECT, server, cells, onSync, undefined, null, "", { mayWriteProjectCast: true }),
+    )
+    await act(async () => { await result.current.saveTts({ provider: "inworld" }) })
+    expect(loadProjectTts(PROJECT)?.castAssignments).toEqual({ "character:JESUS": "v-j", c: "v-n" })
+    expect(onSync.mock.calls.at(-1)?.[0].castAssignments).toEqual({ "character:JESUS": "v-j", c: "v-n" })
+  })
+
+  it("leaves the project cast alone for a role that may not rewrite it", async () => {
+    const server: ProjectTtsSettings = { voices, castAssignments: { a: "v-j", b: "v-j" } }
+    const { result } = renderHook(() =>
+      useProjectTts(PROJECT, server, [line("a", "JESUS"), line("b", "JESUS")], vi.fn(), undefined, null, "", { mayWriteProjectCast: false }),
+    )
+    await act(async () => { await result.current.saveTts({ provider: "inworld" }) })
+    expect(loadProjectTts(PROJECT)?.castAssignments).toEqual({ a: "v-j", b: "v-j" })
+  })
+
+  it("casts a whole character on the lane with one entry", async () => {
+    const server: ProjectTtsSettings = { voices, castAssignments: { "character:JESUS": "v-j" } }
+    const { result } = renderHook(() =>
+      useProjectTts(PROJECT, server, [line("a", "JESUS"), line("b", "JESUS")], vi.fn()),
+    )
+    await act(async () => { result.current.assignCharacter("JESUS", "v-new", ["a", "b"]) })
+    expect(loadProjectTts(PROJECT)?.laneCastAssignments).toEqual({ "": { "character:JESUS": "v-new" } })
+    expect(result.current.laneSettings?.castAssignments?.a).toBe("v-new")
+    expect(result.current.laneSettings?.castAssignments?.b).toBe("v-new")
+  })
+})
+
+describe("applySplitCastCopies (AQU-2101)", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(patchProject).mockClear()
+  })
+
+  it("copies each lane's voice onto the new narration pieces without a settings save", () => {
+    const server: ProjectTtsSettings = {
+      provider: "inworld",
+      voices: [{ id: "sina", name: "Sina", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+      castAssignments: { line: "narrator" },
+      laneCastAssignments: {
+        sm: { line: "sina" },
+        ar: { line: "layla" },
+      },
+    }
+    const onSyncTts = vi.fn()
+    const { result } = renderHook(() => useProjectTts("proj-split-cast", server, [], onSyncTts, "en"))
+    act(() => {
+      result.current.applySplitCastCopies([{ cellId: "line", sameKindAsFirst: ["line-b"] }])
+    })
+    const stored = loadProjectTts("proj-split-cast")
+    expect(stored?.castAssignments).toEqual({ line: "narrator", "line-b": "narrator" })
+    expect(stored?.laneCastAssignments).toEqual({
+      sm: { line: "sina", "line-b": "sina" },
+      ar: { line: "layla", "line-b": "layla" },
+    })
+    expect(onSyncTts).not.toHaveBeenCalled()
+  })
+})

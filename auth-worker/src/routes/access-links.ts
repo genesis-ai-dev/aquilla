@@ -62,6 +62,13 @@ const DEFAULT_LINK_TTL_MS = 90 * 24 * 60 * 60 * 1000
 // resets the counter.
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_MS = 15 * 60 * 1000
+// [Pen test] Auth & session mgmt (2026-10-26): failed_attempts is only reset on
+// success, so once past MAX_FAILED_ATTEMPTS every post-lockout wrong guess
+// re-locked immediately -- an endless ~96 guesses/day, enough to exhaust a
+// 4-digit PIN inside the 90-day TTL. At this lifetime failure count the link
+// is revoked outright; the project lead re-mints (a legitimate holder with the
+// right PIN never gets near this).
+const MAX_LIFETIME_FAILED_ATTEMPTS = 50
 
 // One error for every failure path so a wrong PIN is indistinguishable from a
 // dead link (no token/PIN oracle).
@@ -349,10 +356,14 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
                 locked_until = CASE
                   WHEN failed_attempts + 1 >= ? THEN ?
                   ELSE locked_until
+                END,
+                revoked_at = CASE
+                  WHEN failed_attempts + 1 >= ? THEN CURRENT_TIMESTAMP
+                  ELSE revoked_at
                 END
           WHERE token = ?`,
       )
-        .bind(MAX_FAILED_ATTEMPTS, lockIfTripped, token)
+        .bind(MAX_FAILED_ATTEMPTS, lockIfTripped, MAX_LIFETIME_FAILED_ATTEMPTS, token)
         .run()
     } catch (err) {
       console.error("[access-links] attempt bump failed:", err)

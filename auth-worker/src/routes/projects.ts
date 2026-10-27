@@ -141,8 +141,11 @@ interface FileProjection {
   anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
-  /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
+  /** Sidebar folder. Read from files.meta, or recovered from a Biblica profile on the file or its cells. */
   corpusMarker?: string
+  /** Importer profile stamped on parserVersion, without the @version suffix.
+   *  Re-import uses it to reopen the same importer. */
+  importProfile?: string
   /** AQU-1569: hand-placed position within the file's sidebar group, from
    *  files.meta.sortIndex. Fractional on purpose; absent until someone
    *  reorders that group, which is what keeps an untouched project sorting
@@ -236,6 +239,7 @@ export async function loadFilesByProject(
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
     let corpusMarker: string | undefined
+    let importProfile: string | undefined
     let sortIndex: number | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
@@ -274,6 +278,7 @@ export async function loadFilesByProject(
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
+        importProfile = importProfileFrom(m.parserVersion)
         // AQU-1569: only a finite number is a position. A string / NaN /
         // Infinity in the blob reads as "never reordered" rather than being
         // forwarded for the client's comparator to choke on.
@@ -322,6 +327,7 @@ export async function loadFilesByProject(
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(corpusMarker ? { corpusMarker } : {}),
+      ...(importProfile ? { importProfile } : {}),
       // Not a truthiness check: 0 is a perfectly ordinary position (it is what
       // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
       ...(sortIndex !== undefined ? { sortIndex } : {}),
@@ -338,6 +344,42 @@ export async function loadFilesByProject(
     })
     byProject.set(f.project_id, list)
   }
+
+  // Older Biblica imports stamped the profile on every source cell and left
+  // files.meta empty, so the sidebar had no folder and re-import opened the
+  // general upload. One source cell's profile is enough, and only files that
+  // never recorded a parserVersion are looked up.
+  const missingProfile = [...byProject.values()].flat().filter((file) => !file.importProfile)
+  if (missingProfile.length > 0) {
+    const fileIds = missingProfile.map((file) => file.id)
+    const filePlaceholders = fileIds.map(() => "?").join(",")
+    const profileRows = await env.AQUILLA_PG.prepare(
+      `SELECT DISTINCT ON (file_id) file_id,
+              metadata->'aquillaImport'->>'profileId' AS profile_id
+         FROM cells
+        WHERE project_id IN (${placeholders})
+          AND file_id IN (${filePlaceholders})
+          AND side = 'source'
+          AND metadata->'aquillaImport'->>'profileId' IS NOT NULL
+        ORDER BY file_id`,
+    )
+      .bind(...projectIds, ...fileIds)
+      .all<{ file_id: string; profile_id: string }>()
+    const profileByFile = new Map<string, string>()
+    for (const row of profileRows.results ?? []) {
+      const id = row.profile_id?.trim()
+      if (id) profileByFile.set(row.file_id, id)
+    }
+    for (const file of missingProfile) {
+      const profile = profileByFile.get(file.id)
+      if (!profile) continue
+      file.importProfile = profile
+      if (!file.corpusMarker) {
+        const folder = BIBLICA_PROFILE_FOLDERS[profile]
+        if (folder) file.corpusMarker = folder
+      }
+    }
+  }
   return byProject
 }
 
@@ -350,6 +392,12 @@ const BIBLICA_PROFILE_FOLDERS: Readonly<Record<string, string>> = {
   "builtin:biblica-treasure-hunt": "Treasure Hunt Bible",
   "builtin:biblica-reach4life": "Reach 4 Life",
   "builtin:biblica-ebl": "Equipping Biblical Leaders",
+}
+
+function importProfileFrom(parserVersion: unknown): string | undefined {
+  if (typeof parserVersion !== "string") return undefined
+  const id = parserVersion.split("@")[0]?.trim()
+  return id || undefined
 }
 
 function resolveCorpusMarker(explicit: unknown, parserVersion: unknown): string | undefined {

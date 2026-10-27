@@ -30,6 +30,8 @@ const LOADERS: Record<string, () => Promise<Catalog>> = {
   fr: () => import("./fr").then((m) => m.fr),
   es: () => import("./es").then((m) => m.es),
   pt: () => import("./pt").then((m) => m.pt),
+  sw: () => import("./sw").then((m) => m.sw),
+  hi: () => import("./hi").then((m) => m.hi),
 }
 
 /** Every locale that has a catalog, English first. */

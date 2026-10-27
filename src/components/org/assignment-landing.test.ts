@@ -69,3 +69,33 @@ describe("assignmentScopeText", () => {
     expect(assignmentScopeText({ scopeKind: "file", scopeLabel: "MAT.usfm" })).toBe("MAT.usfm")
   })
 })
+
+// Media redesign slice 2 (P2.2): the inbox lands where the language's work is.
+describe("resolveAssignmentLandingCell by what the language delivers", () => {
+  const verse = (cellId: string, over: Partial<ShortVerse> = {}): ShortVerse =>
+    ({ cellId, ref: cellId, filled: false, validated: false, recorded: false, audioValidated: false, ...over })
+  const ruth1 = async () => [
+    verse("1:6", { recorded: true, audioValidated: true }),
+    verse("1:7", { recorded: true }),
+    verse("1:8"),
+  ]
+
+  it("Audio: the first line without an approved recording, whatever its text", async () => {
+    expect(await resolveAssignmentLandingCell(chapters("RUT 1"), ruth1, "audio")).toBe("1:7")
+  })
+
+  it("Text and audio: the first line not done on both halves", async () => {
+    const read = async () => [
+      verse("a", { filled: true, validated: true, recorded: true, audioValidated: true }),
+      verse("b", { filled: true, validated: true }),
+      verse("c", { recorded: true, audioValidated: true }),
+    ]
+    expect(await resolveAssignmentLandingCell(chapters("RUT 1"), read, "text_and_audio")).toBe("b")
+  })
+
+  it("Text, and a language nobody has chosen for, keep the text order", async () => {
+    for (const delivers of ["text", null, undefined] as const) {
+      expect(await resolveAssignmentLandingCell(chapters("RUT 1"), ruth1, delivers)).toBe("1:6")
+    }
+  })
+})

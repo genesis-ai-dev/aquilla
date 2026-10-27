@@ -108,7 +108,9 @@ const SCHEMA = `
   CREATE TABLE lanes (
     id TEXT PRIMARY KEY, project_id TEXT NOT NULL, role TEXT NOT NULL, language TEXT,
     name TEXT, lang_code TEXT, legacy_tag TEXT, position INTEGER, archived_at TIMESTAMPTZ,
-    records_audio BOOLEAN NOT NULL DEFAULT false
+    records_audio BOOLEAN NOT NULL DEFAULT false,
+    -- 0187: what the language delivers (media redesign slice 1).
+    delivers TEXT CHECK (delivers IS NULL OR delivers IN ('text', 'audio', 'text_and_audio'))
   );
   -- AQU-1771: a settings write resolves the org's validation defaults (0174).
   CREATE TABLE org_settings (

@@ -128,6 +128,25 @@ function clientFetcher(env: Pick<Bindings, "WRANGLER_LOCAL" | "MCP_OAUTH_PINNED_
     : fetch
 }
 
+/** Native public clients choose a fresh loopback port per authorization.
+ * Only the port can vary; the code later binds to the full requested URI. */
+export function matchesRegisteredRedirect(requested: string, registered: string): boolean {
+  if (requested === registered) return true
+  try {
+    const actual = new URL(requested)
+    const allowed = new URL(registered)
+    const loopback = (url: URL) => url.protocol === "http:" &&
+      (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
+      !url.username && !url.password && !url.hash
+    if (!loopback(actual) || !loopback(allowed)) return false
+    actual.port = ""
+    allowed.port = ""
+    return actual.href === allowed.href
+  } catch {
+    return false
+  }
+}
+
 async function validateAuthorize(params: AuthorizeParams, issuer: string, env: ClientEnv): Promise<Validated> {
   const preRegistered = staticClientFor(env, params.client_id)
   const resource = preRegistered ? restResourceFor(env, issuer) : oauthResourceFor(env, issuer)
@@ -135,7 +154,9 @@ async function validateAuthorize(params: AuthorizeParams, issuer: string, env: C
     ? { ok: true as const, client: preRegistered }
     : await resolveClient(params.client_id, clientFetcher(env))
   if (!resolved.ok) return { kind: "fatal", error: resolved.error, error_description: resolved.description }
-  if (!resolved.client.redirectUris.includes(params.redirect_uri)) {
+  if (!resolved.client.redirectUris.some(uri => preRegistered
+    ? params.redirect_uri === uri
+    : matchesRegisteredRedirect(params.redirect_uri, uri))) {
     return { kind: "fatal", error: "invalid_request", error_description: "redirect_uri is not registered for this client" }
   }
   const back = (error: string, error_description: string): Validated => ({

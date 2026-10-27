@@ -163,7 +163,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s5"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -259,18 +259,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:u0:v2:va1:f:s4"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:u0:v2:va1:f:s5"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:u0:v2:va1:f:s4"',
+        'If-None-Match': '"progress:file-progress:7:u0:v2:va1:f:s5"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s4"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:u100:v2:va1:p:s5"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 

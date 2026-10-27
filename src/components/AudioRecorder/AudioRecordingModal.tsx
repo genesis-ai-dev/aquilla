@@ -190,6 +190,13 @@ interface Props {
    * audio cues.
    */
   filmFileId?: string | null
+  /**
+   * Media redesign slice 2: the line's language delivers audio and no text.
+   * The performer reads the SOURCE (gap 8) — the cue's own words on a dubbing
+   * file — so the recorder never says "not translated", and there is no voice
+   * to generate from text the language will never have.
+   */
+  deliversAudioOnly?: boolean
   onClose: () => void
 }
 
@@ -371,6 +378,7 @@ function GroupedTakes({
 export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
+  deliversAudioOnly = false,
 }: Props) {
   const t = useT()
   // Sam's decision (hidden lines on the timeline): Next, Previous, the
@@ -537,8 +545,13 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
-  const readAloudText = readAloud?.text ?? activeCell?.translated ?? ""
-  const readAloudReference = readAloud?.reference ?? null
+  // Media redesign slice 2 (gap 8): an Audio language has no translation to
+  // read, so the performer reads the source where the translation shows today
+  // — the heard line's own words on a dubbing file.
+  const readAloudText = deliversAudioOnly
+    ? (readAloud?.reference?.trim() || readAloud?.text?.trim() || activeCell?.original || "")
+    : readAloud?.text ?? activeCell?.translated ?? ""
+  const readAloudReference = deliversAudioOnly ? null : readAloud?.reference ?? null
   const readAloudCast = readAloud?.castName ?? null
   const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
   /**
@@ -2144,9 +2157,9 @@ export function AudioRecordingModal({
                   lineHeight: `${Math.round(readAloudPx * readAloudRatio)}px`,
                 }}
               >
-                {readAloudText || (
+                {readAloudText || (deliversAudioOnly ? null : (
                   <span className="text-base text-muted-foreground/60 italic">{t("audio.recordingModal.notTranslated")}</span>
-                )}
+                ))}
               </p>
             </div>
             {/* The cue's own transcript. Only shown when the line above came
@@ -2525,6 +2538,7 @@ export function AudioRecordingModal({
               // button it belongs to.
               <div className="space-y-1.5">
               <div className="flex gap-2">
+                {!deliversAudioOnly && (
                 <AppTooltip
                   content={
                     !online
@@ -2589,6 +2603,7 @@ export function AudioRecordingModal({
                     </Button>
                   </span>
                 </AppTooltip>
+                )}
                 <input
                   ref={uploadInputRef}
                   type="file"

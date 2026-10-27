@@ -9,6 +9,7 @@ import { visibleSourceSql } from './hidden-cells-scope'
 import { liveSourceSql } from './tombstoned-cells-scope'
 import { walkAnchorChain } from './cells-read-route'
 import { loadEffectiveThreshold } from '../../../db/shared/validation-threshold'
+import { bothApprovedFromHistogram } from '../../../src/lib/lanes/lane-delivers'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -46,6 +47,13 @@ interface ProgressRow {
   // today's behaviour exactly.
   audio_validator_histogram?: ProgressRow['validator_histogram']
   structural_audio_validator_histogram?: ProgressRow['validator_histogram']
+  /**
+   * Media redesign slice 1: the joint text × audio histogram (migration 0187)
+   * and its structural share, for `bothValidatedCount`. Optional like the
+   * pairs above; absent reads as nothing done on both halves.
+   */
+  text_audio_validator_histogram?: ProgressRow['validator_histogram']
+  structural_text_audio_validator_histogram?: ProgressRow['validator_histogram']
   /**
    * When the projection last rewrote this row — the ETag's backfill clock.
    *
@@ -87,6 +95,13 @@ export interface ProgressCounts {
    * reader can show a project's answer at any threshold without refetching.
    */
   audioValidationLevels: number[]
+  /**
+   * Media redesign slice 2: lines whose text has the required text validators
+   * AND whose recording has the required audio validators — what a "Text and
+   * audio" language counts as done (src/lib/lanes/lane-delivers.ts). Optional
+   * so a body cached before it existed still parses; absent reads as 0.
+   */
+  bothValidatedCount?: number
 }
 
 export interface FileProgressResponse {
@@ -255,6 +270,11 @@ export function counts(
   // numerator alone, so a book whose chapter headings were voiced reported
   // more audio than it had cells.
   const structuralAudio = countStructural ? 0 : Number(row.structural_audio_count) || 0
+  const bothValidated = bothApprovedFromHistogram(
+    row.text_audio_validator_histogram ?? null, validationCount, validationCountAudio,
+  ) - (countStructural ? 0 : bothApprovedFromHistogram(
+    row.structural_text_audio_validator_histogram ?? null, validationCount, validationCountAudio,
+  ))
   return {
     // Clamped at zero: an un-backfilled row has structural counts of 0, but a
     // partially backfilled one must never report a negative denominator.
@@ -271,6 +291,7 @@ export function counts(
     audioValidatedCount:
       audioValidationLevels[Math.min(audioLevelCap, validationCountAudio) - 1] ?? 0,
     audioValidationLevels,
+    bothValidatedCount: Math.max(0, bothValidated),
   }
 }
 
@@ -919,6 +940,7 @@ export async function handleProgressReadRequest(
                 revision, audio_count, audio_validated_count,
                 structural_audio_count, structural_audio_validated_count,
                 audio_validator_histogram, structural_audio_validator_histogram,
+                text_audio_validator_histogram, structural_text_audio_validator_histogram,
                 updated_at
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND ${targetLaneDualReadSql()}`,
@@ -1008,8 +1030,9 @@ export async function handleProgressReadRequest(
   // audioValidationLevels joins the body, audioValidatedCount is now measured
   // against a threshold, and audioCount stopped counting imported source
   // clips — three changes the 0096 backfill likewise makes with no event.
+  // s5 = media redesign: bothValidatedCount joins the body.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:${source === 'projection' ? 'p' : 'f'}:s4${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:u${progressUpdatedAt}:v${validationCount}:va${validationCountAudio}:${source === 'projection' ? 'p' : 'f'}:s5${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

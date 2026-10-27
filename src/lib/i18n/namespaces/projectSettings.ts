@@ -1066,21 +1066,13 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.additionalLanesLabel": "Target lanes",
-    "projectSettings.languages.additionalLanesDescription":
-      "Target-language lanes for this project — e.g. dialect variants or " +
-      "parallel drafts of the same source.",
-    "projectSettings.languages.laneNameLabel": "Lane name",
     "projectSettings.languages.laneNamePlaceholder": "Name this lane",
     // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
     // name, and an OPTIONAL code override. The name's placeholder is the
     // language itself, because that is what the lane shows when no name is set.
-    "projectSettings.languages.laneLanguageLabel": "Lane language",
     "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
     "projectSettings.languages.laneLanguageRequiredError":
       "A lane needs a language. Type the language it translates into.",
-    "projectSettings.languages.laneAdvancedToggle": "Advanced",
-    "projectSettings.languages.laneCodeLabel": "Language code",
     "projectSettings.languages.laneCodeNote":
       "Leave blank to derive the code from the language. Set it only when the " +
       "derived code is wrong.",
@@ -1089,19 +1081,10 @@ export const projectSettings = defineNamespace({
       "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
       "Another lane already has this name. Change one of them.",
-    // AQU-1784: adding a lane that reads the same as an active one is allowed —
-    // two teams may translate into one language — so this warns before the save
-    // rather than refusing it afterwards, and says how the pair will be told
-    // apart once both exist.
-    "projectSettings.languages.duplicateNameNotice":
-      "\"{lane}\" already reads the same as another active lane. You can still add " +
-      "it — the lane switcher will number them.",
+    // AQU-1784: the label a lane that shares its name is shown under elsewhere.
     "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
     "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
-    "projectSettings.languages.archiveConfirm":
-      "Archive \"{lane}\"? It's hidden from the lane switcher by default but kept — " +
-      "its cell data is preserved and you can restore it anytime.",
     // AQU-1464: "is anyone still working in here?" — shown inside the archive
     // confirmation, above the Confirm button.
     "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
@@ -1117,30 +1100,81 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
     "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
-    // AQU-1954 — each language row's "Records audio" switch.
-    "projectSettings.languages.recordsAudioLabel": "Records audio",
-    "projectSettings.languages.recordsAudioAriaLabel": "{lane} records audio",
-    "projectSettings.languages.recordsAudioHint":
-      "Records audio: when on, every book needs audio in that language. When " +
-      "off, a book counts audio only once it has a recording in that language.",
-    "projectSettings.languages.archivedLanesLabel": "Archived lanes",
-    "projectSettings.languages.archivedLanesDescription":
-      "Hidden from the lane switcher by default. Their translations are kept; " +
-      "restore a lane to make it active again.",
+    // Media redesign slice 1 — each language row's "Delivers" choice, which
+    // replaced AQU-1954's "Records audio" switch. Also used by the create dialog.
+    "projectSettings.languages.deliversLabel": "Delivers",
+    "projectSettings.languages.deliversAriaLabel": "What {lane} delivers",
+    "projectSettings.languages.deliversText": "Text",
+    "projectSettings.languages.deliversAudio": "Audio",
+    "projectSettings.languages.deliversTextAndAudio": "Text and audio",
+    "projectSettings.languages.deliversChoose": "Choose",
+    "projectSettings.languages.deliversHint":
+      "Delivers decides how a language's progress is counted. Text: a line is done " +
+      "when its text is validated. Audio: a line is done when its recording is " +
+      "approved, and no text is needed. Text and audio: a line is done only when " +
+      "both its text and its recording are approved.",
+    "projectSettings.languages.deliversNeedsChoice":
+      "This language had \"Records audio\" turned on. Choose whether it delivers Text, " +
+      "or Text and audio. Until you choose, its progress is counted as before.",
     "projectSettings.languages.restoringButton": "Restoring…",
     // "Restore" button → common.restore (identical text)
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
-    "projectSettings.languages.addLaneLabel": "Add a target lane",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
-    "projectSettings.languages.addLaneButton": "Add lane",
     "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
     "projectSettings.languages.alreadyExistsError": "This lane already exists.",
     "projectSettings.languages.conflictError": "Someone else updated shared settings. Refresh to reapply your change.",
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
     "projectSettings.languages.permissionError": "You don't have permission to change shared settings.",
     "projectSettings.languages.savingFailedGeneric": "Saving failed.",
+    // Media redesign (Sam, Oct 25): design B, the compact table — Name |
+    // Language | Code | Delivers | ⋯. Explanations and long sub-text sit behind
+    // small (i) icons, so each "…AriaLabel" here names one of those icons.
+    "projectSettings.languages.targetLanguagesHeading": "Target languages",
+    "projectSettings.languages.targetLanguagesHint":
+      "The languages this project translates into. Add one entry per dialect, or per " +
+      "team when two teams draft the same language.",
+    "projectSettings.languages.targetLanguagesHintAriaLabel": "About target languages",
+    "projectSettings.languages.noTargetLanguages": "No target languages yet.",
+    "projectSettings.languages.codeColumn": "Code",
+    "projectSettings.languages.noLanguageSet": "No language set",
+    "projectSettings.languages.codeOptionalLabel": "Code (optional)",
+    "projectSettings.languages.codeHintAriaLabel": "About the code",
+    "projectSettings.languages.deliversHintAriaLabel": "About Delivers",
+    "projectSettings.languages.deliversNeedsChoiceAriaLabel": "Why {lane} needs a choice",
+    "projectSettings.languages.renameLaneAriaLabel": "Rename {lane}",
+    "projectSettings.languages.rowMenuAriaLabel": "More for {lane}",
+    "projectSettings.languages.sameNameMarker": "Same name as another language",
+    "projectSettings.languages.duplicateBannerTwo":
+      "Two languages are both named \"{lane}\", so they are hard to tell apart in the " +
+      "language switcher and on the Overview.",
+    "projectSettings.languages.duplicateBannerMany":
+      "Several languages are named \"{lane}\", so they are hard to tell apart in the " +
+      "language switcher and on the Overview.",
+    "projectSettings.languages.duplicateRenameAction": "Rename the second one",
+    "projectSettings.languages.duplicateArchiveAction": "Archive it",
+    "projectSettings.languages.addLanguageHeading": "Add a language",
+    "projectSettings.languages.addNameHint":
+      "Starts as the language's name. Give it a name of its own to tell two entries " +
+      "in one language apart.",
+    "projectSettings.languages.addNameHintAriaLabel": "About the name",
+    "projectSettings.languages.newLanguageLabel": "the new language",
+    "projectSettings.languages.addDuplicateNotice":
+      "Another language is already named \"{lane}\". You can still add this one; the " +
+      "language switcher numbers them.",
+    "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
+    "projectSettings.languages.archiveHint":
+      "It leaves the language switcher, but nothing is deleted: its work is kept and " +
+      "you can restore it at any time.",
+    "projectSettings.languages.archiveHintAriaLabel": "About archiving",
+    "projectSettings.languages.archivedHint":
+      "Hidden from the language switcher. Their work is kept; restore one to make it " +
+      "active again.",
+    "projectSettings.languages.archivedHintAriaLabel": "About archived languages",
+    "projectSettings.languages.viewOnly": "View only",
+    "projectSettings.languages.viewOnlyAriaLabel": "Why you can't change languages",
+    "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
     "projectSettings.info.titleLabel": "Project title",
@@ -1246,6 +1280,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.boardChangesReadOnly": "Aquilla can't fill this kind of column.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.oneItemWithSubitemsLabel": "One item for the project, with a subitem per file.",
+    "projectSettings.monday.fileSubitemsLabel": "Files as subitems",
+    "projectSettings.monday.fileSubitemsDescription":
+      "Each file gets a subitem under the project's row on Monday, with its own progress.",
     "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
     "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
     "projectSettings.monday.notPushedYet": "Not pushed yet.",
@@ -1284,7 +1322,7 @@ export const projectSettings = defineNamespace({
       "Couldn't list boards — an org maintainer can change the board later.",
     "projectSettings.monday.pickBoardPlaceholder": "Pick a board",
     "projectSettings.monday.boardItemsLabel": "Board items",
-    "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
+    "projectSettings.monday.granularityProjectLabel": "One item for the project, with a subitem per file",
     "projectSettings.monday.granularityFileLabel": "One item per file",
     "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
     "projectSettings.monday.columnPickerOnBoard": "On your board",
@@ -1325,14 +1363,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.wizardAdvancedShow": "Advanced: match columns myself",
     "projectSettings.monday.wizardAdvancedHide": "Hide advanced",
     "projectSettings.monday.wizardConfirmAdds": plural({
-      one: "Aquilla will add {count} column to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
-      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project up to date in an “Aquilla projects” group.",
+      one: "Aquilla will add {count} column to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
+      other: "Aquilla will add {count} columns to your Monday board and keep one row for this project, with a subitem for each file, up to date in an “Aquilla projects” group.",
     }, "count"),
     "projectSettings.monday.wizardConfirmAddsPerFile": plural({
       one: "Aquilla will add {count} column to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
       other: "Aquilla will add {count} columns to your Monday board and keep one row per file up to date in an “Aquilla projects” group.",
     }, "count"),
-    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project up to date on {board}, in an “Aquilla projects” group.",
+    "projectSettings.monday.wizardConfirmNoAdds": "Aquilla will keep one row for this project, with a subitem for each file, up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardConfirmNoAddsPerFile": "Aquilla will keep one row per file up to date on {board}, in an “Aquilla projects” group.",
     "projectSettings.monday.wizardAddAndConnectButton": "Add columns and connect",
     // AQU-2087: step 1's other choice, a clean board made by Aquilla.
@@ -2132,29 +2170,98 @@ export const projectSettings = defineNamespace({
           word: "The literal, untranslated confirmation word 'DETACH' the user must type verbatim — styled bold-monospace by the caller. Never translate this word: the input is validated against the exact English literal.",
         },
       },
-      "projectSettings.languages.duplicateNameNotice": {
+      "projectSettings.languages.targetLanguagesHintAriaLabel": {
         description:
-          "Notice under the add-lane fields when the lane being added would read " +
-          "the same as a lane the project already has. Not an error — adding it is " +
-          "allowed, and the lane switcher then numbers the pair. Appears while the " +
-          "name is typed, before anything is saved.",
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Target languages heading. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.codeHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside a language's Code field, explaining that the code comes from the language. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.deliversHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Delivers column heading and the add form's Delivers field. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.addNameHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the Name field of the Add a language form. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.archiveHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages inside the confirmation shown before archiving a language. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.archivedHintAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.viewOnlyAriaLabel": {
+        description:
+          "Accessible name of a small (i) icon on Project settings → Languages beside \"View only\", shown to people who may not change the project's languages; the tooltip says which role can. " +
+          "Hovering or focusing it shows the explanation as a tooltip.",
+      },
+      "projectSettings.languages.changeSourceAriaLabel": {
+        description:
+          "Accessible name of the Change button on the source-language line of Project " +
+          "settings → Languages. It opens the source's Name, Language and Code fields.",
+      },
+      "projectSettings.languages.deliversNeedsChoiceAriaLabel": {
+        description:
+          "Accessible name of the small (i) icon beside a target language's Delivers " +
+          "dropdown when nothing is chosen yet. Its tooltip explains why a choice is needed.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.renameLaneAriaLabel": {
+        description:
+          "Accessible name of a target language's name in the languages table, which " +
+          "opens its Name, Language and Code fields when clicked.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.rowMenuAriaLabel": {
+        description:
+          "Accessible name of the ⋯ button at the end of one target language row, which " +
+          "opens Rename, Language and code…, and Archive.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
+      },
+      "projectSettings.languages.duplicateBannerTwo": {
+        description:
+          "Warning above the languages table when two active target languages have the " +
+          "same name. Followed by two actions: rename the second one, or archive it.",
+        placeholders: { lane: "The shared name (data, not translated)." },
+      },
+      "projectSettings.languages.duplicateBannerMany": {
+        description:
+          "Same as projectSettings.languages.duplicateBannerTwo, for three or more active " +
+          "target languages with the same name.",
+        placeholders: { lane: "The shared name (data, not translated)." },
+      },
+      "projectSettings.languages.addDuplicateNotice": {
+        description:
+          "Notice in the Add a language form while the language being added would have " +
+          "the same name as an active one. Not an error: adding it is allowed.",
         placeholders: {
-          lane: "The existing lane's display name, as the switcher shows it (data, not translated).",
+          lane: "The existing language's display name, as the switcher shows it (data, not translated).",
         },
+      },
+      "projectSettings.languages.archiveConfirmShort": {
+        description:
+          "Question under one target language row before it is archived, followed by " +
+          "Confirm archive and Cancel. The longer explanation is in a tooltip beside it.",
+        placeholders: { lane: "The language's display name (data, not translated)." },
       },
       "projectSettings.languages.laneShownAs": {
         description:
-          "Small muted note on a lane row whose name another lane also uses, giving " +
-          "the label this lane is shown under elsewhere in the app — the name plus " +
-          "the suffix that tells the two apart. Not a sentence; no period.",
+          "Tooltip, and accessible name, of the small (i) icon beside the name of a " +
+          "language whose name another language also uses, giving the label it is shown " +
+          "under elsewhere in the app — the name plus the suffix that tells the two " +
+          "apart. Not a sentence; no period.",
         placeholders: {
           label: "The lane's disambiguated display label, e.g. 'Tshangla · 2' (data, not translated).",
-        },
-      },
-      "projectSettings.languages.archiveConfirm": {
-        description: "Inline confirmation prompt shown before archiving one target lane.",
-        placeholders: {
-          lane: "The lane's language tag (data, not translated).",
         },
       },
       "projectSettings.languages.lastChange": {
@@ -2177,8 +2284,10 @@ export const projectSettings = defineNamespace({
           date: "The already-formatted, locale-aware date of the edit (data) — insert exactly as given, do not reformat or reorder its parts.",
         },
       },
-      "projectSettings.languages.recordsAudioAriaLabel": {
-        description: "Accessible name of the switch on one target language row that says every file needs audio in that language.",
+      "projectSettings.languages.deliversAriaLabel": {
+        description:
+          "Accessible name of the dropdown on one target language row that says what the " +
+          "language delivers: Text, Audio, or Text and audio.",
         placeholders: {
           lane: "The language's display name (data, not translated).",
         },
@@ -2541,6 +2650,19 @@ export const projectSettings = defineNamespace({
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
         },
+      },
+      "projectSettings.monday.oneItemWithSubitemsLabel": {
+        description:
+          "Small note under the linked-board status row when the project is one Monday " +
+          "item and each of its files is a subitem under that item.",
+      },
+      "projectSettings.monday.fileSubitemsLabel": {
+        description:
+          "Label of a switch in the Monday.com project settings: when on, each file of the " +
+          "project is pushed as a Monday subitem under the project's row.",
+      },
+      "projectSettings.monday.fileSubitemsDescription": {
+        description: "Help text under the “Files as subitems” switch in the Monday.com project settings.",
       },
       "projectSettings.monday.lastPushOk": {
         description:

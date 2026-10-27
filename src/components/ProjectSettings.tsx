@@ -106,7 +106,7 @@ import {
   createProjectLane,
   renameProjectLane,
   setProjectLaneArchived,
-  setProjectLaneRecordsAudio,
+  setProjectLaneDelivers,
   fetchLaneLastChange,
   settingsEditorName,
   type LaneLastChangeResult,
@@ -125,7 +125,8 @@ import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegratio
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
-import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
@@ -165,10 +166,10 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * implemented but not ready to expose in the UI yet. Keep the code — flip this
  * flag to `true` when we want it back in settings nav + main content.
  *
- * Also re-enable the skipped smoke specs:
- *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
- *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
- *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ * Smoke coverage has to be written, not un-skipped: the three specs this note
+ * used to name (project-settings-termbase-sharing, -publish-toggle,
+ * termbase-subscribe-unsubscribe) are not in e2e/specs/projects/, and no
+ * termbase sharing spec exists anywhere under e2e/ today.
  *
  * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
  * entry points are gated here.
@@ -588,6 +589,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       code?: string | null
       /** AQU-1784: the section already warned about the duplicate inline. */
       allowDuplicateName?: boolean
+      /** Media redesign: the add form's Delivers choice. */
+      delivers?: LaneDelivers
     },
   ) => {
     const jwt = session?.jwt
@@ -602,14 +605,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
-  // AQU-1954: the "Records audio" switch on one language row.
-  const setLaneRecordsAudio = useCallback(async (laneId: string, recordsAudio: boolean) => {
+  // Media redesign slice 1: the "Delivers" choice on one language row.
+  const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
     const jwt = session?.jwt
-    if (!jwt || !id) return false
-    const result = await setProjectLaneRecordsAudio(jwt, id, laneId, recordsAudio)
-    if (result.kind !== "ok") return false
+    if (!jwt || !id) return "error"
+    const result = await setProjectLaneDelivers(jwt, id, laneId, delivers)
+    if (result.kind === "forbidden") return "forbidden"
+    if (result.kind !== "ok") {
+      return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error"
+    }
     await refreshSharedSettingsAfterWrite()
-    return true
+    return "ok"
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
@@ -2238,8 +2244,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
-            onSetLaneRecordsAudio={isCloudProject ? setLaneRecordsAudio : undefined}
+            onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+            startAdding={focusTarget === "add-lane"}
           />
         )}
         {/* AQU-1688: facts about the target language that Bible data checks

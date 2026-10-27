@@ -204,3 +204,24 @@ describe("MilestoneNavigator audio figures (AQU-2110)", () => {
     expect(columns().text).toBe(0)
   })
 })
+
+describe("MilestoneNavigator: what the language delivers wins (media redesign)", () => {
+  const both: MilestoneNavigationItem[] = [
+    chapter(1, { translated: 10, textTranslated: 6, audioRecorded: 7, audioValidated: 7 }),
+    chapter(2, { translated: 2, textTranslated: 2 }),
+  ]
+
+  it("Audio draws the audio figures alone, even where some text exists", () => {
+    render(<MilestoneNavigator items={both} activeKey="scripture:GEN:1" onSelect={() => {}} delivers="audio" />)
+    openPicker()
+    expect(columns().text).toBe(0)
+    expect(columns().audio).toBeGreaterThan(0)
+  })
+
+  it("Text draws the text figures alone, however much is recorded", () => {
+    render(<MilestoneNavigator items={audioOnly} activeKey="scripture:GEN:1" onSelect={() => {}} delivers="text" />)
+    openPicker()
+    expect(columns().audio).toBe(0)
+    expect(columns().text).toBeGreaterThan(0)
+  })
+})

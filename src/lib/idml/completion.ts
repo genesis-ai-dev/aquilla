@@ -5,7 +5,11 @@ import {
 } from "@aquilla/idml-roundtrip"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
-import { plainTextFromProtectedHtml } from "./protected-html"
+import {
+  idmlEditableSlotText,
+  idmlPlainMatchesTranslation,
+  plainTextFromProtectedHtml,
+} from "./protected-html"
 
 export interface IdmlCompletionCell {
   readonly id: string
@@ -119,6 +123,14 @@ export function buildIdmlStructureRepairMessages(
   ]
 }
 
+export interface IdmlStitchOptions {
+  /**
+   * Wording that must survive style placement. A partner reflow that deletes
+   * punctuation or a name the translation already kept is discarded.
+   */
+  readonly preserveWording?: string
+}
+
 /**
  * Convert model output into a persistence snapshot. Plain formats pass
  * through. IDML v2 accepts only canonical protected HTML whose exact anchor
@@ -127,6 +139,7 @@ export function buildIdmlStructureRepairMessages(
 export function normalizeProtectedCompletion(
   cell: IdmlCompletionCell,
   generated: string,
+  options?: IdmlStitchOptions,
 ): NormalizedCompletion {
   const metadata = idmlMetadata(cell)
   if (!metadata) return { value: generated }
@@ -171,6 +184,7 @@ export function normalizeProtectedCompletion(
   // apostrophe glue copies it through, gluing a stray `'` onto translated
   // words. Clearing the slot keeps its span — and so the anchor sequence — but
   // leaves the English typesetting out of the target text.
+  const beforeReflow = validation
   const withoutGlue = normalizePartnerIdmlTargetHtml(
     cell.metadata,
     cell.originalHtml,
@@ -179,7 +193,7 @@ export function normalizeProtectedCompletion(
   )
   if (withoutGlue !== normalizedHtml) {
     const cleared = validateIdmlTranslation(cell.originalHtml, withoutGlue, metadata)
-    if (cleared.valid) {
+    if (cleared.valid && !reflowBreaksPreservedWording(metadata, beforeReflow.slots, cleared.slots, options)) {
       normalizedHtml = withoutGlue
       validation = cleared
     }
@@ -192,10 +206,28 @@ export function normalizeProtectedCompletion(
       `The AI returned no text inside the editable IDML slots for cell ${cell.id}; nothing was saved.`,
     )
   }
+  const editable = idmlEditableSlotText(validation.slots, metadata.editableSlotIndexes)
+  const preserve = options?.preserveWording
   return {
-    value: plainTextFromProtectedHtml(normalizedHtml, validation.slots),
+    value: preserve !== undefined && idmlPlainMatchesTranslation(editable, preserve)
+      ? preserve
+      : plainTextFromProtectedHtml(normalizedHtml, validation.slots),
     valueHtml: normalizedHtml,
   }
+}
+
+function reflowBreaksPreservedWording(
+  metadata: IdmlFormatMetadataV2,
+  beforeSlots: readonly string[],
+  afterSlots: readonly string[],
+  options: IdmlStitchOptions | undefined,
+): boolean {
+  const preserve = options?.preserveWording
+  if (preserve === undefined) return false
+  const before = idmlEditableSlotText(beforeSlots, metadata.editableSlotIndexes)
+  const after = idmlEditableSlotText(afterSlots, metadata.editableSlotIndexes)
+  return idmlPlainMatchesTranslation(before, preserve)
+    && !idmlPlainMatchesTranslation(after, preserve)
 }
 
 /**
@@ -205,6 +237,7 @@ export function normalizeProtectedCompletion(
 export function stitchIdmlSlotTexts(
   cell: IdmlCompletionCell,
   slotTexts: ReadonlyMap<number, string>,
+  options?: IdmlStitchOptions,
 ): NormalizedCompletion {
   const metadata = idmlMetadata(cell)
   if (!metadata || !cell.originalHtml) {
@@ -241,7 +274,7 @@ export function stitchIdmlSlotTexts(
     replaceSlotContent(slot, slotTexts.get(index) ?? "")
   }
 
-  return normalizeProtectedCompletion(cell, paragraph.outerHTML)
+  return normalizeProtectedCompletion(cell, paragraph.outerHTML, options)
 }
 
 export function parseIdmlSlotRepairReply(

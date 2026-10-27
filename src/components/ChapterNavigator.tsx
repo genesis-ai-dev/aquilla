@@ -16,8 +16,6 @@ import {
   CheckCheck,
   CheckIcon,
   CornerDownRight,
-  Languages,
-  Mic,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -33,6 +31,7 @@ import {
   ComboboxSeparator,
   ComboboxTrigger,
 } from "@/components/ui/combobox"
+import { PROGRESS_ICON } from "@/lib/progress/progress-icons"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -46,6 +45,7 @@ import {
   type MilestoneProgress,
   type MilestoneProgressView,
 } from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** AQU-2110: the figures a row carries, and the per-file choice of which to show. */
 export type { MilestoneProgress, MilestoneProgressView }
@@ -313,7 +313,7 @@ function TextProgressColumn({ translated, validated, total }: {
   return (
     <span data-progress-column="text" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
-        icon={Languages}
+        icon={PROGRESS_ICON.text}
         swatchClassName={PROGRESS_BG.textTranslated}
         label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
         value={asPercent(translated)}
@@ -345,7 +345,7 @@ function AudioProgressColumn({ audioRecorded, audioValidated, total }: {
   return (
     <span data-progress-column="audio" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
-        icon={Mic}
+        icon={PROGRESS_ICON.audio}
         swatchClassName={PROGRESS_BG.audioRecorded}
         label={t("editor.milestone.percentRecorded", { percent: percent(audioRecorded, total) })}
         value={asPercent(audioRecorded)}
@@ -598,6 +598,7 @@ export function MilestoneNavigator({
   onSelect,
   compact = false,
   pageByMilestone = false,
+  delivers = null,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
@@ -610,6 +611,12 @@ export function MilestoneNavigator({
    * The picker still lists those ranges so a long section stays searchable.
    */
   pageByMilestone?: boolean
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It decides the unit the rows are drawn in (`deliversView`); absent, the
+   * file's own evidence decides.
+   */
+  delivers?: LaneDelivers | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -620,7 +627,8 @@ export function MilestoneNavigator({
   const pickerCentered = useMinWidthLg()
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
   // AQU-2110: decided over the whole file, once, so every row agrees.
-  const progressView = useMemo(() => progressViewFor(items), [items])
+  // Media redesign: what the language delivers wins where someone has chosen.
+  const progressView = useMemo(() => deliversView(delivers, progressViewFor(items)), [delivers, items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]

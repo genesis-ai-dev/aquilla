@@ -38,20 +38,23 @@ describe("CastGutterVoice", () => {
     expect(trigger.querySelector("circle")).toBeNull()
   })
 
-  it("picking a character fires PURE assignment with the apply-to-speaker choice", () => {
+  // Sam, Oct 23: how far a pick reaches is a choice of three, not a checkbox.
+  it.each([
+    ["line", undefined],
+    ["file", "gutter-voice-scope-file"],
+    ["everywhere", "gutter-voice-scope-everywhere"],
+  ] as const)("picking a character fires PURE assignment with the %s scope", (scope, choice) => {
     const onPick = vi.fn()
     ui(
       <CastGutterVoice voice={narrator} explicit={false} castName="Mary" editable voices={VOICES} onPick={onPick} />,
     )
     fireEvent.click(screen.getByTestId("gutter-voice"))
-    // Footer present (the cell carries a diarized name) — tick it, then pick.
-    fireEvent.click(screen.getByTestId("gutter-voice-all"))
+    if (choice) fireEvent.click(screen.getByTestId(choice))
     fireEvent.click(screen.getByRole("button", { name: /Mary/ }))
-    expect(onPick).toHaveBeenCalledWith("v-mary", { applyToSpeaker: true })
+    expect(onPick).toHaveBeenCalledWith("v-mary", { scope })
   })
 
-  // Sam, 2026-09-28: the box says what it would change, and starts unticked.
-  it("says how many lines share the character, and starts off", () => {
+  it("names the three scopes, says how many lines this file has, and starts at this line", () => {
     const countSpeakerLines = vi.fn(() => 12)
     ui(
       <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} countSpeakerLines={countSpeakerLines} />,
@@ -59,18 +62,36 @@ describe("CastGutterVoice", () => {
     expect(countSpeakerLines).not.toHaveBeenCalled()
     fireEvent.click(screen.getByTestId("gutter-voice"))
     expect(countSpeakerLines).toHaveBeenCalledTimes(1)
-    const box = screen.getByTestId("gutter-voice-all") as HTMLInputElement
-    expect(box.checked).toBe(false)
-    expect(box.closest("label")).toHaveTextContent("Apply to all 12 «Mary» lines")
+    expect(screen.getByTestId("gutter-voice-scope-line")).toBeChecked()
+    expect(screen.getByTestId("gutter-voice-scope-line").closest("label")).toHaveTextContent("This line")
+    expect(screen.getByTestId("gutter-voice-scope-file").closest("label")).toHaveTextContent("Every «Mary» line in this file (12)")
+    expect(screen.getByTestId("gutter-voice-scope-everywhere").closest("label")).toHaveTextContent("Every «Mary» line, in every episode")
   })
 
-  it("no apply-to-speaker footer without a diarized cast name", () => {
+  it("goes back to this line every time the picker opens", () => {
     ui(
-      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} />,
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />,
+    )
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    fireEvent.click(screen.getByTestId("gutter-voice-scope-everywhere"))
+    expect(screen.getByTestId("gutter-voice-scope-everywhere")).toBeChecked()
+    fireEvent.click(screen.getByRole("button", { name: /^John$/ }))
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    expect(screen.getByTestId("gutter-voice-scope-line")).toBeChecked()
+  })
+
+  it("a line without a character offers only this line, and says why", () => {
+    const onPick = vi.fn()
+    ui(
+      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={onPick} />,
     )
     fireEvent.click(screen.getByTestId("gutter-voice"))
     expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
-    expect(screen.queryByTestId("gutter-voice-all")).toBeNull()
+    expect(screen.queryByTestId("gutter-voice-scope-file")).toBeNull()
+    expect(screen.queryByTestId("gutter-voice-scope-everywhere")).toBeNull()
+    expect(screen.getByTestId("gutter-voice-scope-none")).toHaveTextContent("This line has no character, so the voice is for this line only.")
+    fireEvent.click(screen.getByRole("button", { name: /^John$/ }))
+    expect(onPick).toHaveBeenCalledWith("v-john", { scope: "line" })
   })
 
   // Matt's QA (2026-08-21): a character could be replaced but never removed.
@@ -91,22 +112,34 @@ describe("CastGutterVoice", () => {
       // The row shows what the line becomes: the NC mark, not an icon-of-delete.
       expect(clear.textContent).toContain("NC")
       fireEvent.click(clear)
-      expect(onClear).toHaveBeenCalledWith({ applyToSpeaker: false })
+      expect(onClear).toHaveBeenCalledWith({ scope: "line" })
       expect(onPick).not.toHaveBeenCalled()
     })
 
-    it("the apply-to-all checkbox rides the clear too, not only the pick", () => {
-      // Sam, 2026-08-21: the footer promises "all «name» lines" — ticked, the
-      // clear must take the character off every line sharing the name, not
-      // silently ignore the box for one of the two actions above it.
+    it("the file scope rides the clear too, not only the pick", () => {
+      // Sam, 2026-08-21: the footer must mean it for both actions above it.
       const onClear = vi.fn()
       ui(
         <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} onClear={onClear} />,
       )
       fireEvent.click(screen.getByTestId("gutter-voice"))
-      fireEvent.click(screen.getByTestId("gutter-voice-all"))
+      fireEvent.click(screen.getByTestId("gutter-voice-scope-file"))
       fireEvent.click(screen.getByTestId("gutter-voice-clear"))
-      expect(onClear).toHaveBeenCalledWith({ applyToSpeaker: true })
+      expect(onClear).toHaveBeenCalledWith({ scope: "file" })
+    })
+
+    it("removing a character from every episode is not offered, and says so", () => {
+      const onClear = vi.fn()
+      ui(
+        <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} onClear={onClear} />,
+      )
+      fireEvent.click(screen.getByTestId("gutter-voice"))
+      fireEvent.click(screen.getByTestId("gutter-voice-scope-everywhere"))
+      const clear = screen.getByTestId("gutter-voice-clear")
+      expect(clear).toBeDisabled()
+      expect(clear).toHaveTextContent("Choose this line or this file to remove a character.")
+      fireEvent.click(clear)
+      expect(onClear).not.toHaveBeenCalled()
     })
 
     it("a lingering name behind an NC ring is still clearable", () => {
@@ -143,9 +176,9 @@ describe("CastGutterVoice", () => {
       expect(field).toHaveAttribute("aria-label", "Mary. Choose a character")
       fireEvent.click(field)
       expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
-      expect(screen.getByTestId("gutter-voice-all").closest("label")).toHaveTextContent("Apply to all 3 «Mary» lines")
+      expect(screen.getByTestId("gutter-voice-scope-file").closest("label")).toHaveTextContent("Every «Mary» line in this file (3)")
       fireEvent.click(screen.getByRole("button", { name: /John/ }))
-      expect(onPick).toHaveBeenCalledWith("v-john", { applyToSpeaker: false })
+      expect(onPick).toHaveBeenCalledWith("v-john", { scope: "line" })
     })
 
     it("reads as the default voice, with the NC mark, when nobody was cast", () => {

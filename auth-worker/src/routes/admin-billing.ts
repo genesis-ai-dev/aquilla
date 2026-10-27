@@ -22,7 +22,8 @@ import { grantCredits, resetCreditUsage } from "../lib/credits"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { isMissingColumn, readWouldBlockReport, teamCostCheck } from "../lib/billing/admin-plan"
 import { meterMode } from "../../../db/shared/ai-entitlement"
-import { resolveOrgPlan, tierFromLegacyPlan, type OrgTier } from "../../../db/shared/org-plan"
+import { resolveOrgPlan } from "../../../db/shared/org-plan"
+import { ADMIN_BILLING_PAGE_MAX, readAdminBillingOrgs } from "../lib/billing/admin-org-list"
 
 const adminBilling = new Hono<AuthHonoEnv>()
 
@@ -156,59 +157,35 @@ adminBilling.patch("/billing/plans", zValidator("json", fieldPlanPatchSchema), a
   return c.json({ plan: publicPlan(plan, saved.record.settings.fieldPlan), version: saved.record.version, warnings })
 })
 
-adminBilling.get("/billing/orgs", async (c) => {
+const orgListSchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  tier: z.enum(["free", "team", "enterprise", "paid"]).optional(),
+  sort: z.enum(["name", "usage"]).default("name"),
+  limit: z.coerce.number().int().min(1).max(ADMIN_BILLING_PAGE_MAX).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+})
+
+/** One page of orgs with usage and plan. `total` counts every match, so the
+ * console can page and search instead of loading the whole platform. */
+adminBilling.get("/billing/orgs", zValidator("query", orgListSchema), async (c) => {
   const rec = await loadPlatformSettings(c.env)
   const catalog = resolveFieldPlan(rec.settings.fieldPlan, c.env)
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    // to_jsonb reads tier/contract_ends_at as NULL until migration 0182 is applied.
-    `SELECT o.id, o.name, u.username AS owner_username, b.weekly_allowance, b.plan AS legacy_plan,
-        to_jsonb(b) ->> 'tier' AS tier, to_jsonb(b) ->> 'contract_ends_at' AS contract_ends_at
-      FROM organizations o LEFT JOIN users u ON u.id = o.owner_user_id
-      LEFT JOIN org_billing b ON b.org_id = o.id ORDER BY o.name ASC NULLS LAST, o.id ASC`,
-  ).all<{
-    id: number; name: string | null; owner_username: string | null; weekly_allowance: number | null
-    legacy_plan: string | null; tier: OrgTier | null; contract_ends_at: string | null
-  }>()
+  const query = c.req.valid("query")
+  const { orgs, total } = await readAdminBillingOrgs(c.env.AQUILLA_PG, catalog, query)
+  return c.json({ orgs, total, limit: query.limit, offset: query.offset, plan: publicPlan(catalog, rec.settings.fieldPlan) })
+})
 
-  const orgs = []
-  for (const org of results) {
-    const snap = await readWordSnapshot(c.env.AQUILLA_PG, org.id, catalog)
-    const resolved = await resolveOrgPlan(c.env.AQUILLA_PG, org.id)
-    orgs.push({
-      orgId: org.id,
-      // AQU-2067: what an admin set (the control) and what the resolver
-      // answers now (Stripe, contract grace), which can differ.
-      tier: org.tier ?? tierFromLegacyPlan(org.legacy_plan),
-      contractEndsAt: org.contract_ends_at === null ? null : new Date(Date.parse(org.contract_ends_at)).toISOString(),
-      resolvedTier: resolved?.tier ?? "free",
-      planSource: resolved?.source ?? "default",
-      graceEndsAt: resolved?.graceEndsAt ?? null,
-      effectiveWeeklyAllowance: resolved?.weeklyAllowanceUnits ?? null,
-      ownerUsername: org.owner_username,
-      weeklyAllowance: org.weekly_allowance,
-      orgName: org.name,
-      plan: snap.plan,
-      status: snap.status,
-      wordsUsed: snap.wordsUsed,
-      allowanceWords: snap.allowanceWords,
-      remainingWords: snap.remaining,
-      addonPacks: snap.addonPacks,
-      complimentaryWords: snap.complimentaryWords,
-      hardCapWords: snap.hardCapWords,
-      periodStart: snap.periodStart,
-      periodEnd: snap.periodEnd,
-      creditsUsed: snap.creditsUsed,
-      allowanceCredits: snap.allowanceCredits,
-      remainingCredits: snap.remainingCredits,
-      complimentaryCredits: snap.complimentaryCredits,
-      includedCredits: snap.includedCredits,
-      languageCount: snap.languageCount,
-      includedCreditsOverride: snap.includedCreditsOverride,
-      billedLanguageCountOverride: snap.billedLanguageCountOverride,
-      wordsPerCredit: snap.wordsPerCredit,
-    })
-  }
-  return c.json({ orgs, plan: publicPlan(catalog, rec.settings.fieldPlan) })
+/** One org's row, in the list's shape — the console refreshes just that row
+ * after a plan change or grant instead of reloading every page. */
+adminBilling.get("/billing/orgs/:orgId", async (c) => {
+  const raw = c.req.param("orgId") ?? ""
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: "invalid_org" }, 400)
+  const rec = await loadPlatformSettings(c.env)
+  const catalog = resolveFieldPlan(rec.settings.fieldPlan, c.env)
+  const { orgs } = await readAdminBillingOrgs(c.env.AQUILLA_PG, catalog, { orgId, limit: 1, offset: 0 })
+  if (orgs.length === 0) return c.json({ error: "not_found" }, 404)
+  return c.json({ org: orgs[0] })
 })
 
 const orgPatchSchema = z.object({

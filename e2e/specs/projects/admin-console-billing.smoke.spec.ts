@@ -24,7 +24,8 @@ test('admin weekly capacity persists and reaches the owning organization billing
   const billing = new BillingSettingsPage(alice)
   await billing.setWeeklyAllowance(alice.orgId, 1000)
   await alice.reload()
-  await billing.openPlatformBilling(false)
+  // The tab, sub-tab and search live in the URL, so the reload reopens this row.
+  await expect(alice.getByLabel('Search name, owner or org id…')).toHaveValue(String(alice.orgId))
   await expect(alice.getByTestId(`weekly-allowance-${alice.orgId}`)).toHaveValue('1000')
   await billing.openWorkspace(alice.orgId)
   await expect(alice.getByTestId('ai-meter')).toContainText('0%')

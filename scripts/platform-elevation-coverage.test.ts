@@ -186,7 +186,27 @@ const DE_ESCALATED: Record<string, readonly string[]> = {
   // ONE human gate in front of it. Rejecting and assigning write to another
   // tenant's staged plan directly. The read stays open, per AQU-2003.
   "auth-worker/src/routes/changeset-approvals.ts": ["roleWithoutUnelevatedAdmin"],
+  // OPS-49: the ONE authorization decision made by all three progress-sync
+  // routers (monday / airtable / langquest). Their MAINTAINER floors do not
+  // guard a row — they guard WHERE a project's progress leaves Aquilla and ON
+  // WHOSE credential. A link written here outlives the session and the
+  // five-minute cron keeps pushing project names, languages, completion
+  // figures and the `translators` username list to the configured third party,
+  // so an un-elevated admin could open a standing egress channel on any
+  // tenant. The member-level status read (minRole == null) is NOT narrowed,
+  // per AQU-2003.
+  "auth-worker/src/routes/_integration-helpers.ts": [
+    "roleWithoutUnelevatedAdmin",
+    "orgLevelWithoutUnelevatedAdmin",
+  ],
 }
+
+/** The routers whose only authorization decision is that shared guard pair. */
+const INTEGRATION_ROUTERS = [
+  "auth-worker/src/routes/monday.ts",
+  "auth-worker/src/routes/airtable.ts",
+  "auth-worker/src/routes/langquest.ts",
+]
 
 describe("admin authority is de-escalated on the paths that escape the session", () => {
   it.each(Object.entries(DE_ESCALATED))("%s still de-escalates", (file, symbols) => {
@@ -204,6 +224,33 @@ describe("admin authority is de-escalated on the paths that escape the session",
     // assign resolves its own floor (the org's assignment policy), so it
     // narrows at its own call site rather than through authorityDenied.
     expect(src.match(/roleWithoutUnelevatedAdmin\(/g) ?? []).toHaveLength(2)
+  })
+
+  it("the integration guards narrow an asserted floor and leave the status read open (OPS-49)", () => {
+    const src = stripComments(read("auth-worker/src/routes/_integration-helpers.ts"))
+    // Both guards answer the member-level read BEFORE de-escalating, so
+    // AQU-2003's cross-tenant read-only posture is unchanged...
+    expect(src.match(/if \(minRole == null\) return/g) ?? []).toHaveLength(2)
+    // ... and narrow on every path that asserts one.
+    expect(src).toContain("orgLevelWithoutUnelevatedAdmin(c, orgId, user, effective)")
+    expect(src).toContain("roleWithoutUnelevatedAdmin(c, user, projectId, role)")
+  })
+
+  it("the integration routers make no authorization decision of their own (OPS-49)", () => {
+    // If a route in one of these files resolved a role directly it would skip
+    // the gate above, so the guard pair would stop being the whole story.
+    for (const file of INTEGRATION_ROUTERS) {
+      const src = stripComments(read(file))
+      for (const resolver of [
+        "resolveProjectRole",
+        "getEffectiveOrgRole",
+        "getOrgMemberRole",
+      ]) {
+        expect(`${file}: ${resolver}`).toBe(
+          `${file}: ${src.includes(resolver) ? `UNGATED ${resolver}` : resolver}`,
+        )
+      }
+    }
   })
 
   it("the de-escalation helpers only ever NARROW, never widen", () => {

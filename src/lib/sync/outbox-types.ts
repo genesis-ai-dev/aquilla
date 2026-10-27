@@ -411,6 +411,10 @@ export interface OutboxEventPayloads {
     role?: "dub" | "source"
     /** AQU-1767: born a piece of this take (a split take's cleaned copy). Fill-only. */
     pieceOf?: string
+    /** Two-step transcription (0186): what ASR heard, before learned corrections. */
+    asr?: { text: string; model: string }
+    /** Provenance of an AI cleanup; new timings without it clear the mark. */
+    transcriptAi?: { model: string; at: number; changes: number }
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line

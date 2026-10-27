@@ -44,10 +44,16 @@ import {
   laneLanguage,
 } from "../../src/lib/lanes/lane-display"
 import { planNewTargetLane, type ExistingLaneIdentity, type NewTargetLaneProblem } from "../../src/lib/lanes/lane-create"
+import {
+  deliversRecordsAudio,
+  parseLaneDelivers,
+  type LaneDelivers,
+} from "../../src/lib/lanes/lane-delivers"
 import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
 import { grantNewLaneStmt } from "./lane-grants"
+import { seedLaneProgressStmt } from "./lane-progress"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
@@ -565,6 +571,14 @@ export interface ProjectLaneRecord {
    * Optional so a record built before migration 0173 still type-checks.
    */
   recordsAudio?: boolean
+  /**
+   * Media redesign slice 1: what this language delivers — Text, Audio, or
+   * Text and audio — which decides how its lines are counted
+   * (src/lib/lanes/lane-delivers.ts). Null is "not chosen yet" and counts as
+   * before; migration 0187 leaves every "Records audio" language there until
+   * its owner picks. Optional so a record built before 0187 still type-checks.
+   */
+  delivers?: LaneDelivers | null
 }
 
 interface LaneSqlRow {
@@ -577,6 +591,7 @@ interface LaneSqlRow {
   position: number
   archived_at: string | null
   records_audio: boolean | null
+  delivers?: string | null
 }
 
 function toLaneRecord(row: LaneSqlRow): ProjectLaneRecord {
@@ -590,6 +605,7 @@ function toLaneRecord(row: LaneSqlRow): ProjectLaneRecord {
     position: row.position,
     archivedAt: row.archived_at,
     recordsAudio: row.records_audio === true,
+    delivers: row.role === "target" ? parseLaneDelivers(row.delivers) : null,
   }
 }
 
@@ -600,7 +616,8 @@ export async function listProjectLanes(
 ): Promise<ProjectLaneRecord[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, role, language, name, lang_code, legacy_tag, position, archived_at, records_audio
+      `SELECT id, role, language, name, lang_code, legacy_tag, position, archived_at, records_audio,
+              delivers
          FROM lanes
         WHERE project_id = ?
         ORDER BY position, id`,
@@ -741,17 +758,28 @@ export async function insertTargetLane(
     /** Optional BCP 47 override — null when the code is derived on read. */
     langCode: string | null
     legacyTag: string
+    /** Media redesign slice 1: what it delivers. Omitted, the column's default (Text). */
+    delivers?: LaneDelivers
   },
 ): Promise<void> {
   const existing = await listProjectLanes(db, projectId)
   const position = existing.reduce((max, row) => Math.max(max, row.position), -1) + 1
-  await db
-    .prepare(
-      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position)
-       VALUES (?, ?, 'target', ?, ?, ?, ?, ?)`,
-    )
-    .bind(lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position)
-    .run()
+  const delivers = lane.delivers ?? "text"
+  // The new language owes every file from now on: its progress rows land with
+  // it, or each reader would count it short until every file was next edited.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position,
+                            delivers, records_audio)
+         VALUES (?, ?, 'target', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position,
+        delivers, deliversRecordsAudio(delivers),
+      ),
+    seedLaneProgressStmt(db, projectId),
+  ])
 }
 
 /**
@@ -772,6 +800,8 @@ export async function createTargetLane(
     /** AQU-1784: let a display name that duplicates an existing lane's
      *  through — the caller has already shown the maintainer the collision. */
     allowDuplicateName?: boolean
+    /** Media redesign slice 1: what the new language delivers. Omitted, Text. */
+    delivers?: LaneDelivers
   },
 ): Promise<
   | { ok: true; laneId: string; language: string; name: string | null; legacyTag: string; langCode: string | null }
@@ -795,6 +825,7 @@ export async function createTargetLane(
       name: plan.name,
       langCode: plan.langCode,
       legacyTag: plan.legacyTag,
+      delivers: input.delivers,
     })
     return {
       inserted: true as const,
@@ -893,6 +924,35 @@ export async function setTargetLaneRecordsAudio(
   return { status: "ok", lane: { ...current, recordsAudio } }
 }
 
+/**
+ * Media redesign slice 1: what one target language delivers — the "Delivers"
+ * choice on each row of Project settings → Languages, which replaced the
+ * "Records audio" switch. Writes `records_audio` with it (Audio and Text and
+ * audio owe audio on every file; Text does not), so every reader of that column
+ * stays in step without learning this one. Changing it deletes nothing: every
+ * recording and every line of text stays where it is, and the numbers follow.
+ */
+export async function setTargetLaneDelivers(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string,
+  delivers: LaneDelivers,
+): Promise<{ status: "ok"; lane: ProjectLaneRecord } | { status: "not_found" }> {
+  const lanes = await listProjectLanes(db, projectId)
+  const current = lanes.find((lane) => lane.id === laneId && lane.role === "target")
+  if (!current) return { status: "not_found" }
+  const recordsAudio = deliversRecordsAudio(delivers)
+  await db
+    .prepare(
+      `UPDATE lanes
+          SET delivers = ?, records_audio = ?, updated_at = now()
+        WHERE project_id = ? AND id = ? AND role = 'target'`,
+    )
+    .bind(delivers, recordsAudio, projectId, laneId)
+    .run()
+  return { status: "ok", lane: { ...current, delivers, recordsAudio } }
+}
+
 export type ArchiveLaneResult =
   | { status: "ok"; lane: ProjectLaneRecord }
   | { status: "not_found" }
@@ -934,14 +994,17 @@ export async function setTargetLaneArchived(
     if (!stillActive) return { status: "last_lane" }
   }
   const archivedAt = archived ? new Date().toISOString() : null
-  await db
+  const update = db
     .prepare(
       `UPDATE lanes
           SET archived_at = ?, updated_at = now()
         WHERE project_id = ? AND id = ? AND role = 'target'`,
     )
     .bind(archivedAt, projectId, laneId)
-    .run()
+  // A language coming back is counted again, so it needs a row for every
+  // file, including any added while it was archived and never edited since.
+  if (archived) await update.run()
+  else await db.batch([update, seedLaneProgressStmt(db, projectId)])
   return { status: "ok", lane: { ...current, archivedAt } }
 }
 

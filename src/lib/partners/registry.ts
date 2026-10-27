@@ -113,6 +113,47 @@ export function isPartnerScriptureCell(cellMetadata: unknown): boolean {
  * when the profile is missing or no partner claimed it — including the public
  * copy, where the partner folders are gone.
  */
+/**
+ * Which present partner imported a file with this profile. Null when the
+ * profile is missing, generic, or the partner folder has been stripped — the
+ * caller then stays on the general file upload.
+ */
+export function partnerIdForImportProfileWith(
+  integrations: readonly PartnerIntegration[],
+  profileId: string | null | undefined,
+): string | null {
+  const id = profileId?.trim()
+  if (!id) return null
+  return integrations.find((integration) => integration.importProfileIds?.includes(id))?.id ?? null
+}
+
+export function partnerIdForImportProfile(profileId: string | null | undefined): string | null {
+  return partnerIdForImportProfileWith(INTEGRATIONS, profileId)
+}
+
+/**
+ * Partner that should reopen for a sidebar re-import. The profile id wins.
+ * The folder name is the fallback for a file loaded before the profile was
+ * sent, and it misses a folder the user has renamed.
+ */
+export function partnerIdForImportedFileWith(
+  integrations: readonly PartnerIntegration[],
+  file: { importProfile?: string | null; corpusMarker?: string | null },
+): string | null {
+  if (file.importProfile?.trim()) {
+    return partnerIdForImportProfileWith(integrations, file.importProfile)
+  }
+  const marker = file.corpusMarker?.trim()
+  if (!marker) return null
+  return integrations.find((integration) => integration.importCorpusMarkers?.includes(marker))?.id ?? null
+}
+
+export function partnerIdForImportedFile(
+  file: { importProfile?: string | null; corpusMarker?: string | null },
+): string | null {
+  return partnerIdForImportedFileWith(INTEGRATIONS, file)
+}
+
 export function partnerIdmlExportOptionsFor(
   profileId: string | null | undefined,
 ): readonly PartnerIdmlExportOption[] {

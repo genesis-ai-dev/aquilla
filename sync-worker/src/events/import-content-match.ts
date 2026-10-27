@@ -49,14 +49,22 @@ const END_OF_FILE = '\u0000end'
 const FIELD = '\u0001'
 
 /**
+ * Apostrophes InDesign swaps between a republish without the words changing.
+ * The study-Bible heading "Israelʼs covenant history" ships as U+02BC in one
+ * package and as a straight apostrophe, split across two runs, in the next.
+ */
+const APOSTROPHE_VARIANTS = /[\u2018\u2019\u02BB\u02BC\u2032\u00B4]/g
+
+/**
  * Collapse runs of whitespace and trim. Case is deliberately preserved: an
  * exact match is a claim that the old translation still applies verbatim, and
  * a case change is a content change in most languages. Whitespace, by
  * contrast, is routinely reflowed by the producing tool without the text
- * meaning anything different.
+ * meaning anything different. Soft hyphens and apostrophe lookalikes are
+ * typesetting, not a new sentence, so they fold away too.
  */
 export function normalizeForMatch(value: string): string {
-  return value.replace(/\s+/g, ' ').trim()
+  return value.replace(/\u00AD/g, '').replace(APOSTROPHE_VARIANTS, "'").replace(/\s+/g, ' ').trim()
 }
 
 /**

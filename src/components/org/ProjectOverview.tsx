@@ -45,7 +45,7 @@ import {
   useOfflineProjectStatus,
 } from "@/lib/offline/download"
 import { cacheProjectMediaOffline, type CacheProjectMediaResult } from "@/lib/offline/media-cache"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, isAudioOnlyView, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, aiDraftedPct, audioDenominator, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, portfolioShowsText, portfolioLaneMeasure, portfolioText, portfolioTextMeasure, textValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
 import { isLaneArchived } from "@/components/project-lane-archive"
@@ -987,8 +987,15 @@ export function ProjectOverview() {
    * from that language's row (Project settings → Languages). Carried on the
    * portfolio row, so it is read again with the row whenever settings change.
    */
-  const recordsAudio =
-    (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)?.recordsAudio === true
+  const planPortfolioLane = (audio?.lanes ?? []).find((l) => l.role !== "source" && l.lane === planLane)
+  const recordsAudio = planPortfolioLane?.recordsAudio === true
+  /**
+   * Media redesign slice 1: what that language delivers. The board stops
+   * guessing "audio-only" from what a file holds once the language says: an
+   * Audio language owes no text anywhere, a Text and audio one owes it on every
+   * file. Text, and a language nobody has chosen for, read as before.
+   */
+  const planDelivers = planPortfolioLane?.delivers ?? null
   const planShowAudio = useMemo(() => planHasAudio(planUnits, recordsAudio), [planUnits, recordsAudio])
   /**
    * Which FILES carry recordings. Audio expectation is judged per file, never
@@ -1005,7 +1012,7 @@ export function ProjectOverview() {
    * the medium they are actually being produced in instead of reading 0%
    * forever against text nobody will ever write. See `textFileIds`.
    */
-  const planTextFiles = useMemo(() => textFileIds(planUnits), [planUnits])
+  const planTextFiles = useMemo(() => textFileIds(planUnits, planDelivers), [planUnits, planDelivers])
 
   // ── AQU-1278: the two background reads the board and inspector cannot make ──
   //
@@ -1416,8 +1423,8 @@ export function ProjectOverview() {
   }, [planUnits, selectedPlanUnitId])
 
   const planCsv = useCallback(
-    () => planRowsToCsv(planUnits, tableNow, recordsAudio),
-    [planUnits, tableNow, recordsAudio],
+    () => planRowsToCsv(planUnits, tableNow, recordsAudio, planDelivers),
+    [planUnits, tableNow, recordsAudio, planDelivers],
   )
   const handleCopyPlanCsv = useCallback(() => {
     void navigator.clipboard.writeText(planCsv()).then(() => {
@@ -1603,7 +1610,6 @@ export function ProjectOverview() {
   // AQU-1954: a project that says it records audio shows its audio from the
   // first day, at 0%, rather than hiding it until the first take.
   const hasAudio = audio != null && (audio.audioCells > 0 || (audio.recordsAudio === true && audioDenominator(audio) > 0))
-  const showAudio = hasAudio
 
   // AQU-538 §3.3: lane tabs + tile recompute. Tabs only surface once a project
   // has more than one lane (N=1 stays byte-identical). `activeLane` is the
@@ -1616,12 +1622,15 @@ export function ProjectOverview() {
   // former default target also uses lane "", opened two staff popovers.
   const projectLanes: PortfolioLane[] = (audio?.lanes ?? []).filter((lane) => lane.role !== "source")
   // AQU-1458: an archived lane is not another active language. The progress
-  // tabs stay hidden for a single active lane, and the Languages section
-  // still renders when an archived lane needs a place to live.
+  // tabs stay hidden for a single active lane.
+  // AQU-2194: the Languages section, though, renders for ANY target language,
+  // one included. Its row's ⋯ → Staff… is where a person is put on a language,
+  // and a one-language project needs that as much as a five-language one
+  // (Come and See, Oct 26). It still renders when only an archived lane is left.
   const activeProjectLanes = projectLanes.filter((lane) => lane.archived !== true)
   const archivedProjectLanes = projectLanes.filter((lane) => lane.archived === true)
   const showLaneTabs = activeProjectLanes.length > 1
-  const showLanguages = showLaneTabs || archivedProjectLanes.length > 0
+  const showLanguages = activeProjectLanes.length > 0 || archivedProjectLanes.length > 0
   // AQU-1586: label a lane by its ROW's name, not its tag — a tag is the event
   // key and can be the opaque lane id, which read as gibberish on a PM's tabs.
   const laneTabOptions = [
@@ -1638,11 +1647,6 @@ export function ProjectOverview() {
   ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? activeProjectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
-  // AQU-2116: an audio-only language shows only its audio figures — the
-  // Translated/Validated/AI-drafted tiles, bars and Customize entries drop out.
-  // Judged on the tab being viewed, like every other figure in this card, and
-  // on evidence alone: see `isAudioOnlyView`.
-  const showText = hasText && !(audio != null && isAudioOnlyView(audio, activeLane))
   /**
    * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
    * board's own picker. The plan is one language's answer — "All" has no
@@ -1664,8 +1668,25 @@ export function ProjectOverview() {
     })),
     [projectLanes, project?.targetLanguage, t],
   )
+  // Media redesign slice 1: the view's languages say what it shows.
+  // Validated is the lines DONE by what each language delivers; for a Text
+  // language that is its validated text, exactly as before. On "All" both
+  // text tiles count only the languages that deliver text, over one
+  // denominator; an Audio language reads in the audio tiles (Sam, Oct 22).
+  // AQU-2116 + media redesign: an audio-only language shows only its audio
+  // figures — the Translated/Validated/AI-drafted tiles, bars and Customize
+  // entries drop out. What each language delivers decides; one nobody has
+  // chosen for is judged on evidence (`portfolioShowsText`).
+  const showText = hasText && audio != null && portfolioShowsText(audio, activeLane)
+  const showAudio = hasAudio
+  const viewText = activeLane
+    ? { filled: activeLane.filledCells, total: activeLane.totalCells }
+    : audio ? portfolioText(audio) : { filled: 0, total: 0 }
+  const viewDone = activeLane
+    ? portfolioLaneMeasure(activeLane)
+    : audio ? portfolioTextMeasure(audio) : { total: 0, started: 0, done: 0, headline: 0 }
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
-  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
+  const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? textValidatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
   // AQU-1951: audio follows the language tab as text does. Each take belongs
   // to a language (AQU-1591), so the lane's own recordings replace the
@@ -2532,8 +2553,8 @@ export function ProjectOverview() {
                         {statVisible("translated") && (
                           <StatBar
                             label={t("org.orgHome.table.translatedHeaderLabel")}
-                            value={activeLane ? activeLane.filledCells : audio.filledCells}
-                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            value={viewText.filled}
+                            total={viewText.total}
                             tone="textTranslated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
@@ -2550,8 +2571,8 @@ export function ProjectOverview() {
                         {statVisible("validated") && (
                           <StatBar
                             label={t("org.orgHome.table.validatedHeaderLabel")}
-                            value={activeLane ? activeLane.validatedCells : audio.validatedCells}
-                            total={activeLane ? activeLane.totalCells : audio.totalCells}
+                            value={viewDone.done}
+                            total={viewDone.total}
                             tone="textValidated"
                             suffix={t("org.projectOverview.cellsSuffix")}
                           />
@@ -2595,8 +2616,8 @@ export function ProjectOverview() {
               )}
 
               {/* ── Languages / lane table (AQU-538 §3.3, AQU-1458) ── */}
-              {/* Hidden for a single active lane with nothing archived.
-                  An archived lane keeps the section visible so it can be found. */}
+              {/* Shown for every project with a target language (AQU-2194), one
+                  included; an archived lane keeps it visible so it can be found. */}
               {showLanguages && audio && (
                 <OverviewLaneTable
                   projectId={id}
@@ -2687,6 +2708,7 @@ export function ProjectOverview() {
                     units={planUnits}
                     now={tableNow}
                     recordsAudio={recordsAudio}
+                    delivers={planDelivers}
                     projectId={id ?? null}
                     status={planStatus}
                     onRetry={refreshPlan}

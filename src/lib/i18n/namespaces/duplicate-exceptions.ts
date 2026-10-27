@@ -205,6 +205,20 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "awaiting accept/dismiss. A controlled-vocabulary review state and a per-cell " +
     "AI-authorship marker are different referents that happen to share one English " +
     "adjective.",
+  "projectSettings.languages.deliversText":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversAudio and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the editor's Text lens " +
+    "tab or the timeline's Text pane title would tie a deliverable choice to a " +
+    "UI mode, and an edit to either would silently break the set.",
+  "projectSettings.languages.deliversAudio":
+    "One option of the 'Delivers' dropdown on a target language row, naming what " +
+    "that language PRODUCES. It is worded as one set with its siblings " +
+    "projectSettings.languages.deliversText and deliversTextAndAudio, and a " +
+    "translator has to keep the three parallel. Reusing the lens tab's or the " +
+    "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
+    "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
     "Standalone tab label of the header Text/Audio segmented lens switch — a " +
     "primary navigation control read on its own, alongside its sibling 'Text'. " +
@@ -740,27 +754,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "features that happen to share the generic English verb — the object " +
     "being applied differs in each, and several target languages would " +
     "translate the verb differently depending on that object.",
-  "terminology.libraryStats.enforcedLabel":
-    "Stat-tile HEADING above a percentage figure on the Terminology page's " +
-    "summary panel — a title-case label naming what the number below it means. " +
-    "terminology.termDetail.verdictEnforced is a lowercase inline VERDICT word " +
-    "describing a single occurrence's outcome ('enforced' / 'infringed' / 'n/a') " +
-    "in a table cell. A panel-heading noun and an inline verdict adjective are " +
-    "different grammatical roles that many languages inflect or phrase " +
-    "differently depending on which one they are.",
-  "terminology.libraryStats.infringedLabel":
-    "Stat-tile heading counterpart to terminology.libraryStats.enforcedLabel, " +
-    "for the infringed-percentage tile. Distinct from " +
-    "terminology.termDetail.verdictInfringed (lowercase inline verdict word) for " +
-    "the same heading-vs-verdict reason documented on enforcedLabel above.",
-  "terminology.conceptDialog.renderingPlaceholder":
-    "Inline placeholder hint shown INSIDE an empty rendering-text input in the " +
-    "add/edit concept dialog's renderings list — a terse, lowercase instructional " +
-    "hint per normal placeholder convention. terminology.editor.renderingLabel is " +
-    "a visible FIELD LABEL heading (title case) above a single-rendering input " +
-    "elsewhere in GlossaryEditor. A heading noun and an inline instructional hint " +
-    "are different grammatical registers that several languages phrase " +
-    "differently (e.g. an imperative or truncated hint vs. a standalone noun).",
   "terminology.common.statusLabel":
     "Field/column label for a TERM's review status (draft/active/deprecated) in " +
     "the Terminology page's own add/edit-concept dialog and concepts table. " +

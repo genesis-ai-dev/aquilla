@@ -79,7 +79,6 @@ import { roleRequiredBody, type RoleRequiredBody } from "../lib/role-denial"
 import {
   getTermbaseEditMinRoleForProject,
   getOrgCountStructuralCellsForProject,
-  getOrgAllowBulkValidateAiDraftsForProject,
   getLanguageEditMinRoleForProject,
   getProjectOrgPolicy,
   type ProjectOrgPolicy,
@@ -106,8 +105,10 @@ import {
   readLaneLastChange,
   updateTargetLane,
   setTargetLaneArchived,
+  setTargetLaneDelivers,
   setTargetLaneRecordsAudio,
 } from "../../../db/shared/lanes"
+import { LANE_DELIVERS } from "../../../src/lib/lanes/lane-delivers"
 import {
   filterSettingsToVisibleLanes,
   READ_WALL_MAINTAINER,
@@ -128,6 +129,7 @@ import {
 } from "../../../db/shared/retired-lane-settings"
 import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
+import { castNameFromCellMetadata, copyCastsOntoSplitPieces, splitPieceBelongsTo, type SplitCastSource } from "../../../src/lib/audio/split-cast"
 import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -242,19 +244,17 @@ async function withOrgDefaults(
   response: ProjectSettingsResponse,
 ): Promise<ProjectSettingsResponse & {
   orgCountStructuralCells: boolean | null
-  orgAllowBulkValidateAiDrafts: boolean | null
   orgValidationCount: number | null
   orgValidationCountAudio: number | null
   orgPolicy: ProjectOrgPolicy
   visibilityFloors: VisibilityFloorsView
   orgMediaDefaults: MediaDefaults
 }> {
-  const [orgCountStructuralCells, orgAllowBulkValidateAiDrafts, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
+  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
-    getOrgAllowBulkValidateAiDraftsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
-    // here for the same reason as the two above: a project member who is not
-    // in the org cannot read the org settings route.
+    // here for the same reason as countStructuralCells: a project member who
+    // is not in the org cannot read the org settings route.
     loadOrgValidationDefaults(env.AQUILLA_PG, projectId),
     // AQU-1771: and the rest of the org policy the project's own surfaces
     // need, for the same reason — plus the visibility floors this project
@@ -267,7 +267,6 @@ async function withOrgDefaults(
   return {
     ...response,
     orgCountStructuralCells,
-    orgAllowBulkValidateAiDrafts,
     orgValidationCount: orgThresholds.validationCount,
     orgValidationCountAudio: orgThresholds.validationCountAudio,
     orgPolicy: policy.orgPolicy,
@@ -786,6 +785,11 @@ const createLaneSchema = z.object({
    * popover, the sibling merge) still gets.
    */
   allowDuplicateName: z.boolean().optional(),
+  /**
+   * Media redesign slice 1: what the new language delivers. The create dialog
+   * sends each language's choice; absent (every other caller) is Text.
+   */
+  delivers: z.enum(LANE_DELIVERS).optional(),
 })
 
 const archiveLaneSchema = z.object({
@@ -794,6 +798,10 @@ const archiveLaneSchema = z.object({
 
 const laneRecordsAudioSchema = z.object({
   recordsAudio: z.boolean(),
+})
+
+const laneDeliversSchema = z.object({
+  delivers: z.enum(LANE_DELIVERS),
 })
 
 /**
@@ -927,6 +935,7 @@ projectSettings.post(
         language: body.language,
         code: body.code,
         allowDuplicateName: body.allowDuplicateName === true,
+        ...(body.delivers ? { delivers: body.delivers } : {}),
         targetLanguage,
         existing: (current.lanes ?? []).map((lane) => ({
           id: lane.id,
@@ -1059,6 +1068,37 @@ projectSettings.post(
   },
 )
 
+// Media redesign slice 1: the "Delivers" choice on one language row — Text,
+// Audio, or Text and audio — which replaced "Records audio" above. It decides
+// how that language's lines are counted everywhere (src/lib/lanes/
+// lane-delivers.ts), so the dashboard, the plan board and a linked Monday or
+// Airtable board all move with it: the boards are pushed like any other lane
+// change. Gated like every other change to the Languages card. Nothing is
+// deleted; switching back restores every number.
+projectSettings.post(
+  "/:projectId/lanes/:laneId/delivers",
+  authMiddleware,
+  zValidator("json", laneDeliversSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const laneId = c.req.param("laneId") as string
+    const denied = await denyLanguageWrite(c.env, user, projectId)
+    if (denied) return c.json(denied, 403)
+    const result = await setTargetLaneDelivers(
+      c.env.AQUILLA_PG,
+      projectId,
+      laneId,
+      c.req.valid("json").delivers,
+    )
+    if (result.status === "not_found") return c.json({ error: "lane not found" }, 404)
+    const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+    notifySettingsChangedBestEffort(c, projectId, fresh.version)
+    await pushMondayAfterLaneChange(c, projectId)
+    return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
+
 projectSettings.post(
   "/:projectId/lanes/:laneId/archive",
   authMiddleware,
@@ -1103,6 +1143,115 @@ projectSettings.post(
     }
     await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
+
+const splitCastSchema = z.object({
+  fileId: z.string().min(1).max(200),
+  splits: z.array(z.object({
+    cellId: z.string().min(1).max(200),
+    sameKindAsFirst: z.array(z.string().min(1).max(200)).max(40),
+  })).min(1).max(400),
+})
+
+/**
+ * Every new piece must be a source row in this file that was split off the
+ * named row. One stranger refuses the whole request, so an extra id cannot
+ * ride along with a real split. An empty piece list has nothing to prove.
+ * The character name is read off the original row, never off the request, so
+ * the copy can follow a character's voice without the caller naming one.
+ */
+async function splitsReadyToCopy(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+): Promise<SplitCastSource[] | null> {
+  const parentOf = new Map<string, string>()
+  for (const split of splits) {
+    for (const pieceId of split.sameKindAsFirst) {
+      const parent = parentOf.get(pieceId)
+      if (parent !== undefined && parent !== split.cellId) return null
+      parentOf.set(pieceId, split.cellId)
+    }
+  }
+  const wanted = new Set<string>([...parentOf.keys(), ...splits.map((split) => split.cellId)])
+  const found = new Map<string, unknown>()
+  if (wanted.size > 0) {
+    const ids = [...wanted]
+    const marks = ids.map(() => "?").join(", ")
+    const rows = await db
+      .prepare(
+        `SELECT cell_id, metadata FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'source' AND cell_id IN (${marks})`,
+      )
+      .bind(projectId, fileId, ...ids)
+      .all<{ cell_id: string; metadata: unknown }>()
+    for (const row of rows.results ?? []) found.set(row.cell_id, row.metadata)
+  }
+  for (const [pieceId, parentId] of parentOf) {
+    if (!splitPieceBelongsTo(found.get(pieceId), parentId)) return null
+  }
+  return splits.map((split) => {
+    const castName = castNameFromCellMetadata(found.get(split.cellId))
+    return castName
+      ? { cellId: split.cellId, sameKindAsFirst: split.sameKindAsFirst, castName }
+      : { cellId: split.cellId, sameKindAsFirst: split.sameKindAsFirst }
+  })
+}
+
+// AQU-2101: a quote split is a source edit, which a project lead may do, and
+// it has to copy each lane's cast onto the new narration pieces. That copy
+// is not a voice-panel edit: it must land on lanes the lead cannot see, and
+// it must land even when "project leads can manage voices" is off. The only
+// mutation is filling absent cell ids with a voice the same map already holds,
+// and only onto pieces this file records as split from that row.
+projectSettings.post(
+  "/:projectId/split-casts",
+  authMiddleware,
+  zValidator("json", splitCastSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const role = await resolveProjectRole(c.env, user, projectId)
+    if (!role) return c.json({ error: "no access to project" }, 403)
+    if (role.level < ROLE.PROJECT_LEAD) {
+      return c.json({ error: "role >= project lead required" }, 403)
+    }
+    const { fileId, splits } = c.req.valid("json")
+    const ready = await splitsReadyToCopy(c.env.AQUILLA_PG, projectId, fileId, splits)
+    if (!ready) return c.json({ error: "not a split piece" }, 422)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+      const storedTts = plainRecord(current.settings.ttsSettings) ?? {}
+      const nextTts = copyCastsOntoSplitPieces(storedTts, ready)
+      if (!nextTts) return c.json({ changed: false })
+      const over = ttsSettingsCapProblem(nextTts)
+      if (over) return c.json({ error: over.message }, 422)
+      const result = await updateProjectSettingsShared(c.env.AQUILLA_PG, {
+        projectId,
+        settings: { ...current.settings, ttsSettings: nextTts },
+        ifMatchVersion: current.version,
+        updatedBy: user.id,
+        registerLanes: false,
+        blobs: c.env.SNAPSHOTS ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+      if (result.status === "conflict") continue
+      if (result.status === "error") return c.json({ error: "write failed" }, 500)
+      const notifyPromise = notifySyncWorkerOfProjectSettingsChange(
+        c.env,
+        projectId,
+        result.settings.version,
+      )
+      try {
+        c.executionCtx.waitUntil(notifyPromise)
+      } catch {
+        void notifyPromise
+      }
+      return c.json({ changed: true })
+    }
+    return c.json({ error: "version mismatch" }, 409)
   },
 )
 

@@ -14,6 +14,7 @@ import { createHash } from "node:crypto"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import type { Editor } from "@tiptap/core"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -21,7 +22,7 @@ import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
+import { markManualStyleAlign, markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
 import {
   resetVisibleStyleSegmentsCacheForTests,
   setVisibleStyleSegments,
@@ -244,6 +245,7 @@ function renderTable(
     onAlignStyles?: () => void | Promise<boolean>
     isCompletionConfigured?: boolean
     isCompletionAvailable?: boolean
+    onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   },
 ) {
   const qc = new QueryClient()
@@ -267,6 +269,7 @@ function renderTable(
           onCompleteSingle={() => {}}
           onCompleteBatch={() => {}}
           onAlignStyles={options?.onAlignStyles}
+          onOptimisticEdit={options?.onOptimisticEdit}
           healthMap={new Map()}
           lineNumbersEnabled={false}
           cellLabelsEnabled={false}
@@ -337,6 +340,138 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     for (const label of ["Add comment", "Edit history", MIC]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
     }
+  })
+
+  // ── AQU-2173 regression guard ──────────────────────────────────────────────
+  //
+  // The rail is chrome. Every footnote action lives behind the `⋯` (AQU-200),
+  // so if pressing `⋯` lets the browser move focus off the cell editor, the
+  // text selection — and with it the footnote's anchor — is gone before the
+  // menu even paints: the marker lands at the end of the cell with nothing
+  // prefilled. Cancelling the mouse-down is what keeps the caret where it is.
+  it("AQU-2173: pressing ⋯ cancels its mouse-down so the cell keeps the caret", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+
+    // fireEvent returns false when a cancelable event was preventDefault()ed.
+    expect(fireEvent.mouseDown(trigger)).toBe(false)
+
+    // …and the menu still opens on the click that follows.
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+  })
+
+  // The other half of AQU-2173: because the caret stays in the cell, an Escape
+  // aimed at the open menu starts inside the editor. The row has to swallow it
+  // there, or the editor's own Escape (AQU-297 — commit and exit to the grid)
+  // would fire on the way out and take the caret with it.
+  it("AQU-2173: the open ⋯ menu leaves the caret in the cell, and Escape closes only the menu", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    // Click into the cell so the editor is mounted and holds the caret — the
+    // state this guard is about.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const editorSurface = document.querySelector(".ProseMirror") as HTMLElement
+    fireEvent.focus(editorSurface)
+    const row = editorSurface.closest("[data-grid-row]") as HTMLElement
+
+    // A pointer open, not a bare click: base-ui reads the interaction type to
+    // decide whether to pull focus into the popup, and only a keyboard open
+    // should (otherwise the menu is unreachable from the `⋯`).
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+
+    // The menu is open and the cell still has the caret — the selection the
+    // menu's actions act on is still there to act on.
+    expect(document.activeElement).toBe(editorSurface)
+
+    fireEvent.keyDown(editorSurface, { key: "Escape" })
+
+    // Escape closed the menu…
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
+    })
+    // …and did nothing else. Let it through to the editor and ProseMirror's own
+    // handler blurs it and hands focus back to the grid row (AQU-297), losing
+    // the caret with it.
+    expect(document.activeElement).toBe(editorSurface)
+  })
+
+  // ── AQU-2206 regression guard ──────────────────────────────────────────────
+  //
+  // AQU-2173 fixed the anchor CAPTURE; the insertion still ignored it. The Add
+  // Footnote dialog's autofocused text field pulls focus out of the cell, the
+  // editor's blur deactivates the row, and the live editor is gone by the time
+  // Add runs — so the row commits the stored text itself. That path appended the
+  // marker, which put every footnote at the end of the cell however good the
+  // anchor was, and made the dialog's Target preview a lie. This drives the real
+  // path: select a word, open the `⋯`, add the note, and read the committed text.
+  it("AQU-2206: a footnote added over a selection commits the marker at the anchor, not the end of the cell", async () => {
+    const onOptimisticEdit = vi.fn()
+    renderTable({ onOpenComments: vi.fn() }, new Map(), {
+      cellStore: makeStore("cell-1"),
+      onOptimisticEdit,
+    })
+
+    // Click into the cell so the editor mounts and can hold a selection.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const surface = document.querySelector(".ProseMirror") as HTMLElement & { editor?: Editor }
+    const editor = surface.editor!
+    act(() => {
+      fireEvent.focus(surface)
+      // "bon|jour|" — a phrase that is NOT at the end of the cell, which is the
+      // whole point: appending and splicing differ only for such a phrase.
+      editor.commands.insertContent(" le monde")
+      editor.commands.setTextSelection({ from: 1, to: 1 + "bonjour".length })
+    })
+
+    // Open the `⋯` the way a pointer does. base-ui reads the interaction type
+    // to decide whether to pull focus into the popup, and a focus pull here
+    // deactivates the cell before the rail can read its anchor (AQU-2173).
+    const row = surface.closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    const addFootnote = await screen.findByRole("button", { name: "Add footnote" })
+    // The cell is still live, so there is an anchor left to capture.
+    expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    // The rail captures the anchor on mouse-DOWN, before focus can move.
+    fireEvent.mouseDown(addFootnote)
+    fireEvent.click(addFootnote)
+
+    // What the dialog's autofocused field does to the cell: focus leaves the
+    // editor, the row deactivates, and the live editor unmounts.
+    act(() => { fireEvent.blur(surface) })
+
+    const noteField = await screen.findByRole("textbox", { name: "Footnote text" })
+    fireEvent.change(noteField, { target: { value: "bonjour: a greeting" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add footnote" }))
+
+    await waitFor(() => {
+      expect(onOptimisticEdit).toHaveBeenCalled()
+    })
+    const committed = onOptimisticEdit.mock.calls.at(-1)![1].value as string
+    // The marker sits where the preview promised — right after the anchored
+    // phrase — and the rest of the cell still follows it.
+    expect(committed).toMatch(/^bonjour\\f [^]*?\\f\* le monde$/)
+    expect(committed.endsWith(" le monde")).toBe(true)
+    expect(committed).toContain("a greeting")
   })
 
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
@@ -731,6 +866,32 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       resetVisibleStyleSegmentsCacheForTests()
       resetStyleAlignDirtyForTests()
       localStorage.clear()
+    }
+  })
+
+  it("flags a re-imported cell in yellow when Align styles was left for a manual pass", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Plain", "Hello ") + idmlSlot(1, "Bold", "world"))
+    const target = idmlParagraph(idmlSlot(0, "Plain", "Bonjour monde") + idmlSlot(1, "Bold", ""))
+    markManualStyleAlign("cell-1")
+    setVisibleStyleSegments(false)
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    try {
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, target),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      const warning = await screen.findByRole("button", { name: "This cell needs Align styles" })
+      fireEvent.click(warning)
+      expect(onAlignStyles).toHaveBeenCalledTimes(1)
+    } finally {
+      resetStyleAlignDirtyForTests()
+      resetVisibleStyleSegmentsCacheForTests()
     }
   })
 

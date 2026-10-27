@@ -49,7 +49,7 @@ import { readWavFormat, trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
-import { isSilencedForExport } from "./audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
   characterIdentity,
@@ -150,7 +150,8 @@ export function collectPerLineClips(
     }
 
     if (audioTracks.length === 0) {
-      const audioId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+      // AQU-2148: the slot that still has audio, not whichever pointer is set.
+      const audioId = defaultTrackTakeId(cell)
       if (!audioId) continue
       const pieces = piecesOfTake(cell, audioId)
       pieces.forEach((pieceId, i) => {
@@ -180,7 +181,7 @@ export function collectPerLineClips(
     for (const track of audioTracks) {
       const isDefault = isDefaultTrackSlot(slotForTrack(track.id))
       const audioId = isDefault
-        ? (cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId)
+        ? defaultTrackTakeId(cell)
         : cell.selectedBySlot?.[track.id]
       if (!audioId) continue
       const pieces = piecesOfTake(cell, audioId)

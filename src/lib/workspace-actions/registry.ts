@@ -70,7 +70,7 @@ export const workspaceActions: WorkspaceAction[] = [
   {
     id: "run-completions", labelKey: "nav.workspaceActions.runCompletions.label", icon: Sparkles, group: "primary",
     opensFileModal: "draft-next",
-    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "target.cell.commit"),
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && roleAllows(c, "target.cell.commit"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)
@@ -99,7 +99,7 @@ export const workspaceActions: WorkspaceAction[] = [
     id: "complete-all", labelKey: "nav.workspaceActions.completeAll.label", icon: Sparkles, group: "primary",
     opensFileModal: "draft-all",
     isAvailable: (c) => {
-      if (!c.activeFileId) return false
+      if (!c.activeFileId || c.audioOnlyLane) return false
       if (!roleAllows(c, "target.cell.commit")) return false
       const p = c.fileProgress.get(c.activeFileId)
       return !!p && p.total > 0 && p.translated < p.total
@@ -122,7 +122,7 @@ export const workspaceActions: WorkspaceAction[] = [
   {
     id: "batch-validate", labelKey: "nav.workspaceActions.batchValidate.label", icon: CheckSquare, group: "primary",
     opensFileModal: "validate",
-    isAvailable: (c) => c.activeFileId != null && roleAllows(c, "cell.validate"),
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && roleAllows(c, "cell.validate"),
     isDefault: (c) => {
       if (!c.activeFileId) return false
       const p = c.fileProgress.get(c.activeFileId)
@@ -221,7 +221,7 @@ export const workspaceActions: WorkspaceAction[] = [
   },
   {
     id: "synth-all", labelKey: "nav.workspaceActions.synthAll.label", icon: Wand2, group: "secondary",
-    isAvailable: (c) => c.activeFileId != null && (c.audioCounts?.unsynthesized ?? 0) > 0,
+    isAvailable: (c) => c.activeFileId != null && !c.audioOnlyLane && (c.audioCounts?.unsynthesized ?? 0) > 0,
     requiresConfirmation: {
       titleKey: "nav.workspaceActions.synthAll.title",
       description: (c, t) => {

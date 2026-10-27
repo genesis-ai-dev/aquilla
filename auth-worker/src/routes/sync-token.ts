@@ -5,7 +5,7 @@
 // Request: { projectId, fileId } + Bearer JWT.
 // Response: { token, expiresIn: 900, role: { level, name, source } }.
 //
-// Token claims must match apps/sync/src/auth.ts SyncTokenClaims:
+// Token claims must match sync-worker/src/auth.ts SyncTokenClaims:
 //   { userId, username, projectId, fileId, role, aud: "sync", iat, exp }
 // Signed HS256 with SYNC_SECRET_KEY (distinct from SECRET_KEY).
 //

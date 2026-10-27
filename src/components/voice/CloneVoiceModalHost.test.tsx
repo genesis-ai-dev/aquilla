@@ -62,7 +62,10 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
     castStats: new Map(),
     saveTts: vi.fn(async () => {}),
     assignCells: vi.fn(),
+    assignCharacter: vi.fn(),
+    assignPick: vi.fn(),
     ...over,
+    applySplitCastCopies: over.applySplitCastCopies ?? vi.fn(),
   }
 }
 

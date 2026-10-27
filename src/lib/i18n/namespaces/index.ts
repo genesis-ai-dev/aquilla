@@ -54,6 +54,7 @@ import { bibleChecks } from "./bibleChecks"
 import { bibleHelps } from "./bibleHelps"
 import { bibleParticipants } from "./bibleParticipants"
 import { bibleVoices } from "./bibleVoices"
+import { transcribe } from "./transcribe"
 
 export const NAMESPACES = [
   common,
@@ -94,4 +95,5 @@ export const NAMESPACES = [
   bibleHelps,
   bibleParticipants,
   bibleVoices,
+  transcribe,
 ] as const

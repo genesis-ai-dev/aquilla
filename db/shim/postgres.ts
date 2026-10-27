@@ -153,6 +153,11 @@ export const LONG_OPERATION_TIMEOUTS = {
    *  recomputes every per-file and per-section counter for a freshly imported
    *  file in one transaction — a full Bible is ~31k cells. */
   "import-finalize": 120_000,
+  /** Sidebar re-import (`POST /import/reconcile`). One transaction holds the
+   *  cell writes and the same full-file counter scan as import finalize. On a
+   *  study-Bible file that scan's index-only read falls back to tens of
+   *  thousands of heap fetches and exceeds the 15s request-path cap. */
+  "import-reconcile": 120_000,
   /** Projection rebuild (`/admin/projects/:id/rebuild-projection`). An admin
    *  one-off that replays a project's entire event log; minutes are the
    *  expected cost, and nobody is waiting on a page. */
@@ -163,6 +168,11 @@ export const LONG_OPERATION_TIMEOUTS = {
    *  nobody is waiting on it. No transaction is held across the R2 writes — see
    *  the consistency check in events/projection-snapshot.ts. */
   "projection-snapshot": 120_000,
+  /** Progress self-heal sweep (AQU-2145, the nightly sweep and the admin
+   *  route). The selector probes every file holding audio and each repair is a
+   *  full per-file aggregate — on a whole-Bible file that is import-finalize
+   *  work, and it runs unattended with nobody waiting on a page. */
+  "progress-selfheal": 120_000,
   /** D1→Postgres migration finalize (`/migrate/projects/:id/finalize`). Runs
    *  the same project-wide counter recompute as a rebuild, across a whole
    *  project's file set, at the end of a bulk ingest. */

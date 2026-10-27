@@ -102,6 +102,13 @@ interface Props {
   /** Audio mode surfaces "Voice together" instead of Translate/Validate. */
   audioMode?: boolean
   /**
+   * Media redesign slice 2 (P2.3): the language delivers Audio and no text, so
+   * the text actions (AI translate, validate text, harmonize) and the voices
+   * generated FROM text ("Voice together", "Generate voice") leave the bar,
+   * and the audio validation pair is always offered.
+   */
+  audioOnlyLane?: boolean
+  /**
    * The open file's order, as the editor table reads it, so the toolbar can
    * name a line by the number in the table's # column.
    */
@@ -147,7 +154,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, bulkRepetitionToastExtras }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, bulkRepetitionToastExtras }: Props) {
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -717,14 +724,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           width; the buttons take the squeeze (Sam, 2026-09-22). */}
       <span className="shrink-0 whitespace-nowrap font-medium">
         {t("editor.selection.count", { count: selectedCells.length })}
-        {missingCount > 0 && (
+        {missingCount > 0 && !audioOnlyLane && (
           <span className="ms-1 text-muted-foreground">
             {t("editor.selection.needTranslation", { count: missingCount })}
           </span>
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-lg" />
-      {audioMode && (
+      {audioMode && !audioOnlyLane && (
         <AppTooltip content={
           !onVoiceTogether ? t("editor.selection.voiceUnavailable") :
           voiceableCount < 2 ? t("editor.selection.voiceNeedTwo") :
@@ -755,7 +762,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           voice, rather than one shared clip. Sits beside "Voice together"
           because the two are easy to confuse and the tooltips are where the
           difference is stated. */}
-      {audioMode && (
+      {audioMode && !audioOnlyLane && (
         <AppTooltip content={
           voiceableCount === 0
             ? t("audio.batchVoice.needTranslated")
@@ -778,7 +785,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           </Button>
         </AppTooltip>
       )}
-      {!audioMode && (
+      {!audioMode && !audioOnlyLane && (
         <>
       <AppTooltip content={
         // AQU-1459: the permission reason comes FIRST. A validator sees why the
@@ -866,7 +873,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           OUTSIDE the `!audioMode` branch, unlike the text actions: the Audio
           view is where recordings are worked on, and this is the one
           validation it offers. */}
-      {fileHasAudio && (
+      {(fileHasAudio || audioOnlyLane) && (
         <>
           <AppTooltip content={
             validateAudioDisabledReason
@@ -911,7 +918,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           </AppTooltip>
         </>
       )}
-      {!audioMode && (
+      {!audioMode && !audioOnlyLane && (
         <>
       {/* AQU-186: Harmonize affordance — appears when ≥ 1 selected cell has a
           translation (v1 minimum per spec). Disabled when canHarmonize=false

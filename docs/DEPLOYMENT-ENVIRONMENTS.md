@@ -71,7 +71,16 @@ refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
-count first).
+count first). **The restore copies rows, not blobs**, so every audio take it
+brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
+playback on `dev.aquilla.app` 404s;
+`pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
+referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
+what the nightly cleanup protects — the same reference queries, shared in
+`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
+`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+(`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
+refuses any destination but the dev bucket and any database but the dev branch.
 
 **Audio follows the rows, as its own step.** The restore copies every audio row
 and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
@@ -181,11 +190,21 @@ its job. Keep this section in step with that manifest — a contract test assert
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
 | Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
 | Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
-| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
-| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
+| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
+| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
 and sync Workers in the same environment must hold the identical value.
+
+`VOICE_FORGE_URL` and `VOICE_FORGE_TOKEN` point the sync Worker's `/audio/voice-convert`
+route at the Modal `voice-forge` speech-to-speech service for character-library voices
+(`infra/modal/voice_forge.py`); the token must equal the `VOICE_FORGE_TOKEN` in that
+app's `voice-forge-auth` Modal secret. Both sync Workers require them: development
+since the character voice library (#1576), production since custom voice training
+(#1589) made the forge a production dependency. A Worker without them answers a
+library-voice conversion with `503 voice conversion not configured` and a training
+start with `503 voice training not configured`; cloned-voice conversions still go to
+Seed-VC and are unaffected.
 
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,

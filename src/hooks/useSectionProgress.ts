@@ -68,10 +68,21 @@ export function useSectionProgressState(
         textCompleted: percent(section.filledCount, section.totalCount),
         textValidated: percent(section.validatedCount, section.totalCount),
         textValidationLevels: section.validationLevels.map((count) => percent(count, section.totalCount)),
-        audioCompleted: 0,
-        audioValidated: 0,
+        // AQU-2112: the server has always sent these two beside the text
+        // counts — lines with a take of their own, and those whose every
+        // chosen take meets the project's audio validation requirement — and
+        // this mapper threw them away for a hardcoded zero. That is why an
+        // audio-only file expanded in the sidebar read 0% however many of its
+        // takes were signed off.
+        //
+        // Absent (an older worker, or the editor's own optimistic snapshot,
+        // which knows nothing about audio) still reads as zero WITH
+        // `hasAudio` false, so a file with no recordings is unchanged: the
+        // flag, not the count, is what says audio is being measured here.
+        audioCompleted: percent(section.audioCount ?? 0, section.totalCount),
+        audioValidated: percent(section.audioValidatedCount ?? 0, section.totalCount),
         audioValidationLevels: [],
-        hasAudio: false,
+        hasAudio: (section.audioCount ?? 0) > 0,
       }))
     : resource.loading ? null : []
   return { sections, error: resource.error, retry: resource.retry }

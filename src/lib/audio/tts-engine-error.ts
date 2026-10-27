@@ -66,5 +66,8 @@ export function errorFromVoiceConvert(status: number, body: string): Error {
   if (status === 503 && /voice conversion not configured/i.test(detail)) {
     return new Error(SEED_VC_NOT_CONFIGURED_BODY)
   }
+  if (status === 409 && /still training/i.test(detail)) {
+    return new Error("This voice is still training. Training takes about 45 minutes; try again once it shows as ready.")
+  }
   return new Error(`Voice cloning (Seed-VC) failed (${status}): ${detail}`)
 }

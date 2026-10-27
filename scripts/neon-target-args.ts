@@ -22,9 +22,11 @@ export type NeonTargetCommand =
   | "backfill-lane-batch"
   | "repair-lane-grants"
   | "prune-phantom-voices"
+  | "fold-cast-by-character"
   | "verify-lanes"
   | "seed-extract"
   | "scrub-integrations"
+  | "copy-dev-audio"
   | "copy-dev-audio-all"
 
 export function scriptFor(command: NeonTargetCommand): string {
@@ -35,12 +37,17 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"
   if (command === "prune-phantom-voices") return "scripts/neon-prune-phantom-voices.ts"
+  // AQU-2125: fold line-by-line voice casting into one entry per character.
+  if (command === "fold-cast-by-character") return "scripts/neon-fold-cast-by-character.ts"
   if (command === "verify-lanes") return "scripts/neon-verify-lanes.ts"
   // AQU-1953: the dev-DB seed extract runs under neon-target so the source
   // branch is explicit and recorded (AQUILLA_NEON_TARGET) in seed.meta.json.
   if (command === "seed-extract") return "scripts/seed-extract.ts"
   // AQU-1775: strip the integration tokens a production copy carries.
   if (command === "scrub-integrations") return "scripts/neon-scrub-integrations.ts"
+  // AQU-2114: copy one project's prod audio into the dev bucket, so the rows
+  // the dev refresh restored have bytes behind them.
+  if (command === "copy-dev-audio") return "scripts/neon-copy-dev-audio.ts"
   // AQU-2115: copy EVERY project's prod audio into the dev bucket, so the rows
   // the nightly dev refresh restored have bytes behind them.
   if (command === "copy-dev-audio-all") return "scripts/neon-copy-dev-audio-all.ts"
@@ -60,8 +67,10 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "verify-lanes" ||
     command === "repair-lane-grants" ||
     command === "prune-phantom-voices" ||
+    command === "fold-cast-by-character" ||
     command === "seed-extract" ||
     command === "scrub-integrations" ||
+    command === "copy-dev-audio" ||
     command === "copy-dev-audio-all"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

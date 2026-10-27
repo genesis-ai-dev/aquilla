@@ -42,10 +42,11 @@ import {
   planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
 } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
-import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
+import { AUDIO_CTE_SQL, cellAudioVotesSql } from "../../../db/shared/audio-progress"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
-import { loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { effectiveThresholdSql, loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { parseLaneDelivers, type LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
 import {
   assignmentKind,
   compareValidationBehind,
@@ -148,7 +149,7 @@ const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
  * read from each cell's SOURCE row, the only side that carries one — which
  * the view already carries as `ac.type`, so no second join to `cells`.
  */
-const CELLS_DONE_SUBQUERY = byStructuralPolicy(
+const TEXT_CELLS_DONE_SUBQUERY = byStructuralPolicy(
   `(
   SELECT COUNT(*) FROM assignment_member_cells ac
     JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
@@ -165,6 +166,56 @@ const CELLS_DONE_SUBQUERY = byStructuralPolicy(
      AND NOT ${isStructuralSql("ac")}
 )`,
 )
+
+/** The assignment's language as the legacy tag a take's lane is read by (`audioLaneTagSql`). */
+const ASSIGNMENT_LANE_TAG_SQL = `(SELECT COALESCE(tl.legacy_tag, '') FROM lanes tl
+   WHERE tl.project_id = a.project_id AND tl.id = a.lane_id)`
+
+/** The project's "Required validators (audio)": project → org → 1, as every reader resolves it. */
+const AUDIO_THRESHOLD_SQL = `(SELECT ${effectiveThresholdSql("tps.validation_count_audio", "tos.validation_count_audio")}
+   FROM projects tp
+   LEFT JOIN project_settings tps ON tps.project_id = tp.id
+   LEFT JOIN org_settings tos ON tos.org_id = tp.org_id
+  WHERE tp.id = a.project_id)`
+
+/** One assigned line's recording is approved in the assignment's language. */
+const AUDIO_APPROVED_SQL = `${cellAudioVotesSql("ac", ASSIGNMENT_LANE_TAG_SQL)} >= ${AUDIO_THRESHOLD_SQL}`
+
+/** The same, with its text validated too — on the same line, in the same language. */
+const TEXT_VALIDATED_SQL = `EXISTS (
+     SELECT 1 FROM cells c
+      WHERE c.project_id = ac.project_id AND c.file_id = ac.file_id
+        AND c.cell_id = ac.cell_id AND c.side = 'target'
+        AND c.lane_id = a.lane_id AND c.validated = 1)`
+
+const assignedCellsWhereSql = (predicate: string) => byStructuralPolicy(
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND ${predicate}
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("ac")}
+     AND ${predicate}
+)`,
+)
+
+/**
+ * Media redesign slice 1: an assignment's done lines are counted by what its
+ * language DELIVERS (src/lib/lanes/lane-delivers.ts) — the rule the dashboard,
+ * the plan board and Monday follow, so "2 of 23" here is the figure they show.
+ * A Text language, and one nobody has chosen for, is the validated-text count
+ * above, byte for byte; an Audio language counts approved recordings at the
+ * project's audio threshold; Text and audio needs both on the same line.
+ */
+const CELLS_DONE_SUBQUERY = `(CASE (SELECT dl.delivers FROM lanes dl
+              WHERE dl.project_id = a.project_id AND dl.id = a.lane_id)
+  WHEN 'audio' THEN ${assignedCellsWhereSql(AUDIO_APPROVED_SQL)}
+  WHEN 'text_and_audio' THEN ${assignedCellsWhereSql(`${TEXT_VALIDATED_SQL} AND ${AUDIO_APPROVED_SQL}`)}
+  ELSE ${TEXT_CELLS_DONE_SUBQUERY}
+END)`
 
 /**
  * AQU-1969: attach a Validate assignment's own-approval progress to the rows
@@ -1070,6 +1121,12 @@ export async function getAssignmentsGivenBy(
 /** One of the caller's open assignments, with its project name (org-wide inbox). */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers, so the
+   * inbox's link lands on the first line still lacking what that language
+   * owes. Null when nobody has chosen (counts as Text).
+   */
+  laneDelivers: LaneDelivers | null
 }
 
 /**
@@ -1095,6 +1152,7 @@ export async function getMyAssignmentsAcrossOrg(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.kind AS kind,
+            ln.delivers AS lane_delivers,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
             (SELECT f.name FROM assignment_member_cells ac
@@ -1125,6 +1183,7 @@ export async function getMyAssignmentsAcrossOrg(
       created_at: number
       cells_done: number
       kind: string | null
+      lane_delivers: string | null
       file_id: string | null
       file_name: string | null
     }>()
@@ -1136,6 +1195,7 @@ export async function getMyAssignmentsAcrossOrg(
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
+    laneDelivers: parseLaneDelivers(r.lane_delivers),
     fileId: r.file_id,
     fileName: r.file_name,
     fileIds: fileIds.get(r.assignment_id) ?? [],
@@ -1160,6 +1220,30 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
   return { book: m[1].trim(), num: parseInt(m[2], 10) }
 }
 
+/** "GEN 1" / "1CO 12" — a book code plus a chapter number. Not "GEN" or "1CO". */
+const NUMBERED_CHAPTER_KEY = /^([1-3]?[A-Z]{2,3}) (\d+)$/
+/** "GEN" / "1CO" / "TIT" — the book code alone. */
+const BARE_BOOK_CODE = /^[1-3]?[A-Z]{2,3}$/
+
+/**
+ * USFM book-header cells (`RUT:h:1`, `1CO:mt1:1`) cut to a bare book code.
+ * Beside numbered chapters of that book, the bare code is front matter, not a
+ * chapter — the same distinction the plan uses (`classifyPlanSection`). A lone
+ * bare code is a one-chapter book's only chapter (`TIT:4` → `TIT`, which is
+ * chapter 1) and stays. A real "RUT 1" is never this shape, so it stays too.
+ */
+function withoutBookFrontMatter(chapters: string[]): string[] {
+  const numberedBooks = new Set<string>()
+  for (const chapter of chapters) {
+    const match = NUMBERED_CHAPTER_KEY.exec(chapter)
+    if (match) numberedBooks.add(match[1])
+  }
+  return chapters.filter((chapter) => {
+    if (!BARE_BOOK_CODE.test(chapter)) return true
+    return !numberedBooks.has(chapter)
+  })
+}
+
 /**
  * Distinct chapters present in a file, derived from the source cells'
  * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
@@ -1168,7 +1252,8 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
  * (sync-worker assignment-events.ts) matches against the plan board's own
  * keys, so the person gets the chapter's headings and added lines too
  * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
- * precedes "GEN 10".
+ * precedes "GEN 10". Book-header refs (`GEN:h:1`) are not chapters when that
+ * book already has numbered ones; a one-chapter book's bare code is kept.
  */
 export async function getFileChapters(
   env: Env,
@@ -1184,9 +1269,11 @@ export async function getFileChapters(
     .bind(projectId, fileId)
     .all<{ chapter: string }>()
 
-  const chapters = (rows.results ?? [])
-    .map((r) => r.chapter)
-    .filter((c): c is string => typeof c === "string" && c.length > 0)
+  const chapters = withoutBookFrontMatter(
+    (rows.results ?? [])
+      .map((r) => r.chapter)
+      .filter((c): c is string => typeof c === "string" && c.length > 0),
+  )
   chapters.sort((a, b) => {
     const ka = chapterSortKey(a)
     const kb = chapterSortKey(b)

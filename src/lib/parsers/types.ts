@@ -96,28 +96,10 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-export type BuiltinCheckId =
-  | "empty-target"
-  | "target-equals-source"
-  | "placeholder-integrity"
-  | "number-integrity"
-  | "number-integrity-extra"
-  | "end-punctuation-mismatch"
-  | "punctuation-integrity"
-  | "double-space"
-  | "repeated-word"
-  | "unpaired-symbols"
-  | "abbreviation-mismatch"
-  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
-   *  only while the project's Bible data checks enrichment is on. */
-  | import("../../../db/shared/bible-checks/types").BibleCheckId
-  | "usfm-structure"
-  | "capitalization"
-  | "footnote-quote-mismatch"
-  | "corrupted-characters"
-  | "unpaired-quotes"
-  | "untranslated-fragment"
-  | "length-ratio"
+/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
+ *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
+ *  project's Bible data checks enrichment is on. */
+export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -409,6 +391,29 @@ export interface Voice {
    * is set *without* this key (a recorded or uploaded clip).
    */
   referenceTakeKey?: string
+  /**
+   * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
+   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
+   * take into it through the voice forge instead of Seed-VC (sync-worker POST
+   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * words, pronunciation, timing and intonation are kept; only the timbre changes.
+   */
+  libraryVoiceId?: string
+  /**
+   * Set when `libraryVoiceId` is a custom voice trained from the organization's own
+   * recordings of a real speaker (src/lib/audio/custom-voice.ts). A display copy of
+   * the consent confirmation; the authoritative audit record lives server-side
+   * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
+   */
+  customVoice?: {
+    speakerName: string
+    /** ISO time the maintainer confirmed the consent statement. */
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+    /** ISO time training was queued, for the "ready in ~N min" hint. */
+    trainingStartedAt: string
+  }
 }
 
 export interface ProjectTtsSettings {
@@ -605,6 +610,13 @@ export interface ProjectRecord {
     legacyTag: string | null
     position: number
     archivedAt: string | null
+    /** AQU-1954: the row's "Records audio" switch. */
+    recordsAudio?: boolean
+    /**
+     * Media redesign slice 1: what the language delivers, or null when nobody
+     * has chosen yet. Read it through `laneRowDelivers`.
+     */
+    delivers?: import("@/lib/lanes/lane-delivers").LaneDelivers | null
   }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
@@ -902,6 +914,8 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /** Importer profile (`parserVersion` before `@`). Re-import reopens that importer. */
+  importProfile?: string
   /**
    * AQU-1569: hand-placed position within this file's sidebar corpus group,
    * from files.meta.sortIndex (set via the `file.reorder` event). Fractional

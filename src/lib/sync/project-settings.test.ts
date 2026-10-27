@@ -3,6 +3,7 @@ import {
   fetchProjectSettings,
   fetchProjectSettingsResult,
   patchProjectSettings,
+  postSplitCastCopies,
   PROJECT_SETTINGS_VERSION_INITIAL,
   resolveTimingLocked,
   settingsEditorName,
@@ -239,6 +240,32 @@ describe("fetchProjectSettingsResult (fail-closed contract)", () => {
   })
 })
 
+describe("postSplitCastCopies", () => {
+  const splits = [{ cellId: "line", sameKindAsFirst: ["line-b"] }]
+
+  it("retries a conflict and then reports the copy saved", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("", { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ changed: true }), { status: 200 }))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("saved")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const sent = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { fileId: string }
+    expect(sent.fileId).toBe("f1")
+  })
+
+  it("stops on a refusal and does not retry it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ error: "not a split piece" }), { status: 422 }))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("refused")
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports unsaved after the retries are used up", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
+    expect(await postSplitCastCopies("jwt", "p1", "f1", splits, API)).toBe("unsaved")
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3)
+  })
+})
 
 // ── The timing lock (AQU-646, Sam 2026-08-20) ────────────────────────────
 //

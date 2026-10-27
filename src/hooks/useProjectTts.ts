@@ -16,6 +16,7 @@ import {
 } from "@/lib/audio/voices"
 import { laneScopedTtsSettings, stampNewVoiceLanes } from "@/lib/audio/voice-lanes"
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
+import { copyCastsOntoSplitPieces, type SplitCastSource } from "@/lib/audio/split-cast"
 import {
   castLinesOf,
   castPickPatch,
@@ -94,6 +95,13 @@ export interface ProjectTtsApi {
   assignCharacter: (castName: string, voiceId: string | null, lineIds: Iterable<string>) => void
   /** One pick in the voice picker, as far as its scope reaches (`castPickPatch`). */
   assignPick: (pick: CastPick) => void
+  /**
+   * AQU-2101: copy the original row's voice onto the new narration pieces, on
+   * every lane map this client holds and on the project-wide map. Local only.
+   * The server copy is a separate call, so a project lead's settings save —
+   * which may not touch hidden lanes — is not the thing that writes them.
+   */
+  applySplitCastCopies: (splits: readonly SplitCastSource[]) => void
 }
 
 /**
@@ -305,6 +313,20 @@ export function useProjectTts(
     [localTts, serverSettings, lane, activeLaneId, saveTts],
   )
 
+  const applySplitCastCopies = useCallback(
+    (splits: readonly SplitCastSource[]) => {
+      if (!projectId) return
+      const previous = (localTts ?? serverSettings) as Record<string, unknown> | undefined
+      const copied = copyCastsOntoSplitPieces(previous, splits)
+      if (!copied) return
+      const next = copied as ProjectTtsSettings
+      setLocalTts(next)
+      saveProjectTts(projectId, next)
+      void patchProject(projectId, (p) => ({ ...p, ttsSettings: next }))
+    },
+    [projectId, localTts, serverSettings],
+  )
+
   const allVoices = useMemo(() => getVoiceLibrary(settings), [settings])
   // Everything a surface READS goes through the lane view, built in a fixed
   // order: first the lane-scoped library — which voices this lane can see
@@ -343,7 +365,10 @@ export function useProjectTts(
     return m
   }, [cells, laneSettings, defaultVoiceId])
 
-  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells, assignCharacter, assignPick }
+  return {
+    settings, laneSettings, voices, allVoices, defaultVoiceId, castStats,
+    saveTts, assignCells, assignCharacter, assignPick, applySplitCastCopies,
+  }
 }
 
 /**

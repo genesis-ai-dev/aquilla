@@ -40,13 +40,20 @@ function headers(jwt: string): HeadersInit {
   return { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }
 }
 
-export async function fetchZsStatus(jwt: string, projectId: string): Promise<ZsStatus> {
-  const params = new URLSearchParams({ projectId, model: "zs" })
+/** The two Omnilingual models, by the server's short names. */
+export type OmniModelName = "ctc" | "zs"
+
+export async function fetchOmniStatus(jwt: string, projectId: string, model: OmniModelName): Promise<ZsStatus> {
+  const params = new URLSearchParams({ projectId, model })
   const response = await fetch(`${AUTH_BASE}/api/v1/audio/transcriptions/status?${params}`, {
     headers: headers(jwt), signal: AbortSignal.timeout(15000),
   })
-  if (!response.ok) throw new Error(`Zero-shot status failed (${response.status})`)
+  if (!response.ok) throw new Error(`Omnilingual status failed (${response.status})`)
   return await response.json() as ZsStatus
+}
+
+export function fetchZsStatus(jwt: string, projectId: string): Promise<ZsStatus> {
+  return fetchOmniStatus(jwt, projectId, "zs")
 }
 
 /**
@@ -55,9 +62,13 @@ export async function fetchZsStatus(jwt: string, projectId: string): Promise<ZsS
  * then covers it, so a failure here is never an error.
  */
 export async function warmZeroShot(jwt: string, projectId?: string): Promise<void> {
+  await warmOmni(jwt, projectId, "zs")
+}
+
+export async function warmOmni(jwt: string, projectId: string | undefined, model: OmniModelName): Promise<void> {
   await fetch(`${AUTH_BASE}/api/v1/audio/transcriptions/warm`, {
     method: "POST", headers: headers(jwt),
-    body: JSON.stringify({ ...(projectId ? { projectId } : {}), model: "zs" }),
+    body: JSON.stringify({ ...(projectId ? { projectId } : {}), model }),
     signal: AbortSignal.timeout(15000),
   }).catch(() => undefined)
 }

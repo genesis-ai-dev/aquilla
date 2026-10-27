@@ -66,6 +66,15 @@ export type EventKind =
   // comments and validations survive and come back on show. Hiding is per CELL,
   // not per lane, which is why one source-side kind covers every language.
   | 'source.cell.visibility.set'
+  // AQU-2185: name a navigator division of your own starting at this cell, or
+  // clear the one that is there. Non-chain-mutating for the same reason the
+  // hide above is — it moves ONLY cells.milestone_label on the shared source
+  // row, so nothing about the cell's text changed and no lane's translation may
+  // go stale. A division belongs to the file every lane shares, which is why
+  // one source-side kind covers every language. The division itself is DERIVED
+  // from this column by the client's `deriveMilestoneNavigation`; the server
+  // stores the name and nothing more.
+  | 'source.cell.milestone.set'
   // AQU-1767 phase 2: put back a cell a `source.cell.delete` removed — its
   // rows, translations, validations, takes, links and comments — from the
   // archive that delete's projection wrote. Non-chain-mutating (the row does
@@ -332,6 +341,15 @@ export interface EventPayloads {
   'source.cell.visibility.set': {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
+  }
+  'source.cell.milestone.set': {
+    /**
+     * AQU-2185: the section name, exactly as the person typed it, or `null` to
+     * clear the marker. Empty and whitespace-only are REFUSED rather than
+     * folded into a clear — `""` is a mis-send, and a clear says so with
+     * `null`.
+     */
+    label: string | null
   }
   /**
    * AQU-1767 phase 2: undo a removal. Restores the cell from

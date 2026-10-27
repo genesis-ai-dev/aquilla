@@ -63,6 +63,13 @@ const REQUIRED_ROLE: Record<string, number> = {
   // the server then 403s — the row would vanish optimistically and come back on
   // reload, which reads as data loss rather than as a refusal.
   "source.cell.visibility.set": ROLE.PROJECT_LEAD,
+  // AQU-2185: PROJECT_LEAD, in lock-step with the server, and for the same
+  // reason the hide above sits there: naming a section re-divides the file for
+  // EVERYONE, in every lane, and that is how the team plans and assigns work.
+  // It is the source.cell.commit class of decision, not the low-floored
+  // create/delete/reorder trio (those sit at COMMENTER only because re-import,
+  // DCS repair and diarization emit them through a user's own outbox).
+  "source.cell.milestone.set": ROLE.PROJECT_LEAD,
   // AQU-1767 phase 2: undo of a removal; the server adds "only who removed it, or a maintainer".
   "source.cell.restore": ROLE.COMMENTER,
 

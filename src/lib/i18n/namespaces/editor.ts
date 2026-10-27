@@ -1459,6 +1459,37 @@ export const editor = defineNamespace({
     "editor.row.hiddenBadgeTooltip":
       "Hidden — not shown to translators and left out of exports.",
     "editor.row.hiddenBadgeAria": "Hidden cell",
+    // AQU-2185: name a navigator division of your own, starting at this cell.
+    // "Section" is the word the navigator already uses for a named stretch of a
+    // file read out of the file itself, and a hand-set one is the same thing to
+    // a reader — so the menu entry borrows it rather than introducing
+    // "milestone", which is the generic fallback noun and means nothing to a
+    // translator.
+    "editor.row.startSection": "Start a section here",
+    "editor.startSection.title": "Start a section here",
+    "editor.startSection.description":
+      "This section begins at this line and runs to the next section you set, or to the "
+      + "next division the file itself has.",
+    "editor.startSection.nameLabel": "Section name",
+    "editor.startSection.namePlaceholder": "The storm",
+    "editor.startSection.save": "Start section",
+    "editor.startSection.cancel": "Cancel",
+    "editor.startSection.failedToast": "Couldn’t start that section, so nothing changed.",
+    "editor.startSection.forbiddenToast":
+      "You don’t have permission to set sections here, so nothing changed.",
+    // AQU-2186: correcting a section you set. "Section" stays the noun from
+    // the entry above, and the two entries replace it on the marked cell —
+    // "Rename" keeps the ellipsis because a dialog follows, "Remove" has none
+    // because nothing is asked before it happens.
+    "editor.row.renameSection": "Rename section…",
+    "editor.row.removeSection": "Remove section",
+    "editor.renameSection.title": "Rename section",
+    "editor.renameSection.description":
+      "The new name replaces the old one everywhere this section is listed, for everyone "
+      + "on the project.",
+    "editor.renameSection.save": "Rename section",
+    "editor.renameSection.failedToast": "Couldn’t rename that section, so nothing changed.",
+    "editor.removeSection.failedToast": "Couldn’t remove that section, so nothing changed.",
     // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
     // indicator sits in a crowded toolbar where the shortest true string wins.
     "editor.hiddenCells.indicator": "{count} hidden",
@@ -8564,6 +8595,106 @@ export const editor = defineNamespace({
           "Screen-reader name of that crossed-out-eye badge. A short noun phrase, not " +
           "a sentence.",
         maxLength: 20,
+      },
+      // AQU-2185 — name a navigator division of your own.
+      "editor.row.startSection": {
+        description:
+          "Menu entry on a source cell that starts a new named division of the file at " +
+          "that cell, shown in the chapter navigator. Imperative, and \"here\" matters: " +
+          "the section begins at THIS line, it does not merely get added somewhere. " +
+          "Use the same word for \"section\" as the navigator's section vocabulary.",
+        maxLength: 24,
+      },
+      "editor.startSection.title": {
+        description:
+          "Title of the dialog that entry opens. Same wording as the menu entry, so the " +
+          "dialog plainly belongs to the thing that was clicked.",
+        maxLength: 32,
+      },
+      "editor.startSection.description": {
+        description:
+          "One sentence under that title explaining where the new section ENDS, which is " +
+          "the part nobody can guess: at the next section the user sets, or at the next " +
+          "division the file already supplies (a Scripture chapter, a heading). Full " +
+          "sentence with a period.",
+      },
+      "editor.startSection.nameLabel": {
+        description:
+          "Label of the single text field in that dialog — the name the section will be " +
+          "listed under. A short noun phrase, not a sentence.",
+        maxLength: 20,
+      },
+      "editor.startSection.namePlaceholder": {
+        description:
+          "Placeholder in that field: an EXAMPLE of a section name, not an instruction. " +
+          "Replace it with a short, natural example in your language (two or three " +
+          "words naming an episode or topic) rather than translating this one literally.",
+        maxLength: 24,
+      },
+      "editor.startSection.save": {
+        description:
+          "Confirm button of that dialog. Imperative, and names the act rather than " +
+          "saying \"OK\" or \"Save\".",
+        maxLength: 18,
+      },
+      "editor.startSection.cancel": {
+        description: "Dismiss button of that dialog; nothing is changed. Imperative.",
+        maxLength: 14,
+      },
+      "editor.startSection.failedToast": {
+        description:
+          "Toast when the server refused the new section; the navigator has gone back to " +
+          "the divisions it showed before. Full sentence with a period.",
+      },
+      "editor.startSection.forbiddenToast": {
+        description:
+          "Toast when the server refused it for lack of permission. Full sentence with a " +
+          "period; same shape as the hide-cell permission toast.",
+      },
+      // AQU-2186 — correct a division you named.
+      "editor.row.renameSection": {
+        description:
+          "Menu entry on the source cell that STARTS a user-named division, opening a " +
+          "dialog to change its name. Replaces \"Start a section here\" on that one " +
+          "cell. Imperative; keep the trailing ellipsis, which says a dialog follows. " +
+          "Same word for \"section\" as that entry.",
+        maxLength: 24,
+      },
+      "editor.row.removeSection": {
+        description:
+          "Menu entry beside it that takes the user-named division away again, with no " +
+          "dialog. The cells go back to whatever divided them before; nothing is " +
+          "deleted. Imperative, and NO ellipsis — nothing is asked first.",
+        maxLength: 24,
+      },
+      "editor.renameSection.title": {
+        description:
+          "Title of the dialog the rename entry opens. Same wording as that entry minus " +
+          "the ellipsis, so the dialog plainly belongs to the thing that was clicked.",
+        maxLength: 32,
+      },
+      "editor.renameSection.description": {
+        description:
+          "One sentence under that title: the new name shows everywhere the section is " +
+          "listed — the chapter navigator, its page in the split view, the sticky header " +
+          "— and for every member, not just the person renaming it. Full sentence with " +
+          "a period.",
+      },
+      "editor.renameSection.save": {
+        description:
+          "Confirm button of the rename dialog. Imperative, and names the act rather " +
+          "than saying \"OK\" or \"Save\".",
+        maxLength: 18,
+      },
+      "editor.renameSection.failedToast": {
+        description:
+          "Toast when the server refused the new name; the old one is still showing. " +
+          "Full sentence with a period; same shape as the start-section failure toast.",
+      },
+      "editor.removeSection.failedToast": {
+        description:
+          "Toast when the server refused the removal; the section is still there. Full " +
+          "sentence with a period; same shape as the start-section failure toast.",
       },
       "editor.hiddenCells.indicator": {
         description:

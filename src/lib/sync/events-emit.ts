@@ -1827,6 +1827,60 @@ export async function emitSourceCellVisibilitySet(
   return eventId
 }
 
+export interface SourceCellMilestoneInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The section name as typed, or null to clear the marker on this cell. */
+  label: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-2185: name a navigator division of your own, starting at this cell —
+ * the cell menu's "Start a section here" — or clear the one that is there.
+ *
+ * NO `parentId`, for the same reason `emitSourceCellVisibilitySet` has none:
+ * this kind is NOT chain-mutating. It moves only `cells.milestone_label` on the
+ * shared source row, so
+ *
+ *   - the cell's source text, every lane's translation, recordings, comments
+ *     and validations are untouched — a division is not content; and
+ *   - `cells.event_id` does not advance, so no lane's translation goes stale.
+ *     Naming a section says nothing about whether the text changed, and AD-9
+ *     compares a target's pin against the source head.
+ *
+ * One event covers every language: the divisions are the file's, not a lane's.
+ *
+ * The division itself is never stored — `deriveMilestoneNavigation` derives it
+ * from this label plus the file's own divisions on every read, which is what
+ * keeps a hand-set section correct when a re-import changes what is around it.
+ *
+ * A blank label is REFUSED here rather than sent as a clear: the dialog will
+ * not save one, so a blank reaching this function is a caller's bug, and
+ * turning it into a clear would remove a section nobody asked to remove.
+ */
+export async function emitSourceCellMilestoneSet(
+  input: SourceCellMilestoneInput,
+): Promise<string> {
+  const label = input.label === null ? null : input.label.trim()
+  if (label !== null && label === "") {
+    throw new Error("source.cell.milestone.set needs a non-blank label, or null to clear it")
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.milestone.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { label },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellCommitInput {
   projectId: string
   fileId: string

@@ -21,6 +21,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'source.cell.metadata.patch': { version: 1, metadata: {} },
     'source.cell.reanchor': { anchorCellId: null },
     'source.cell.visibility.set': { hidden: true },
+    'source.cell.milestone.set': { label: 'The storm' },
     'source.cell.restore': {},
     'target.cell.create': { cellId: 'cell-1', value: 'x' },
     'target.cell.commit': { value: 'x' },

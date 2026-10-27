@@ -248,8 +248,17 @@ function vocabularyFor(items: readonly MilestoneNavigationItem[]): NavigationVoc
   if (kinds.size === 1 && kinds.has("story")) return VOCABULARIES.story
   // An AI section (AQU-1387) is a section a translator navigates the same way;
   // only its provenance differs, so it shares the section vocabulary rather
-  // than falling through to the generic "milestone" wording.
-  if ([...kinds].every((kind) => kind === "section" || kind === "ai-section")) {
+  // than falling through to the generic "milestone" wording. AQU-2185's
+  // hand-set sections join them for the same reason — a reader navigating "The
+  // storm" is navigating a section, however it came to exist.
+  //
+  // A MIXED set still falls through to "milestone", which is the existing
+  // answer for every mixed file (chapters beside parts, say) and the right one
+  // while the first marker leaves "Part 1" standing above it: calling that list
+  // "sections" would rename divisions nobody renamed.
+  if ([...kinds].every((kind) => (
+    kind === "section" || kind === "ai-section" || kind === "hand-set"
+  ))) {
     return VOCABULARIES.section
   }
   if (kinds.size === 1 && kinds.has("time-range")) return VOCABULARIES.timeRange

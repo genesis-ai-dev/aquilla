@@ -124,6 +124,7 @@ export function TimingModeControl({ mode, onChange, filmTimed = false, className
             >
               {MODES.map((m) => (
                 <DropdownMenuRadioItem
+                  closeOnClick
                   key={m}
                   value={m}
                   data-testid={`tl-timing-mode-${m}`}

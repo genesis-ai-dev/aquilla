@@ -1374,6 +1374,13 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it("picking a choice closes the menu (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    await waitFor(() => expect(screen.queryByTestId("tl-timing-mode-audioFirst")).toBeNull())
+  })
+
   it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", () => {
     const book = [
       cell({ id: "b1", medium: "text", original: "In the days when the judges ruled, there was a famine in the land." }),

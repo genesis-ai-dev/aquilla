@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { layoutGlyphRects, MediaAreaStrip, MediaLayoutGlyph, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
+import { layoutGlyphShape, MediaAreaStrip, MediaLayoutGlyph, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
 import { filmLabelFor, MediaFilmButton } from "./MediaTopBar"
 import { dockView, foldRegion, movePanel, startDockLayout, type DockLayout } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
@@ -11,7 +11,6 @@ function fakeDock(layout: DockLayout, extra: Partial<MediaDock> = {}): MediaDock
     view: dockView(layout, { film: true }),
     fullRegion: null,
     canRestore: false,
-    leftOpen: true,
     activate: vi.fn(),
     toggleFull: vi.fn(),
     fold: vi.fn(),
@@ -55,7 +54,7 @@ describe("an area's strip", () => {
     const dock = fakeDock(startDockLayout())
     render(<MediaAreaStrip dock={dock} area="lr" />)
     fireEvent.click(screen.getByTestId("dock-more-lr"))
-    expect(screen.getByText("Text · in Bottom right")).toBeInTheDocument()
+    expect(screen.getByText("Text · in bottom right")).toBeInTheDocument()
     expect(screen.getByText(/You can also drag the tab to another area/)).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("dock-move-lr"))
     expect(dock.move).toHaveBeenCalledWith("text", "ll")
@@ -109,50 +108,55 @@ describe("the top bar's Film button", () => {
   })
 })
 
-describe("the layout glyph on Move to <area>", () => {
+describe("the map icon on Move to <area> (Sam, Oct 27: one frame, the target solid)", () => {
   const FILM = { film: true }
-  const roles = (rects: ReturnType<typeof layoutGlyphRects>) => Object.fromEntries(rects.map((r) => [r.region, r.role]))
+  const parts = (el: Element) => Array.from(el.querySelectorAll("[data-part]")).map((n) => n.getAttribute("data-part"))
 
-  it("draws the left panel, the timeline and both areas, the destination filled, the panel's own area dotted", () => {
-    render(<MediaLayoutGlyph view={dockView(startDockLayout(), FILM)} leftOpen target="ll" current="lr" />)
+  it("one frame, the timeline band, the split between the areas, the destination solid", () => {
+    render(<MediaLayoutGlyph view={dockView(startDockLayout(), FILM)} target="ll" />)
     const glyph = screen.getByTestId("layout-glyph")
-    const rect = (region: string) => glyph.querySelector(`[data-region="${region}"]`)!
-    expect(Array.from(glyph.querySelectorAll("rect")).map((r) => r.getAttribute("data-region"))).toEqual(["left", "tl", "ll", "lr"])
-    expect(rect("ll")).toHaveAttribute("fill", "currentColor")
-    expect(rect("lr")).toHaveAttribute("fill", "none")
-    expect(rect("lr")).toHaveAttribute("stroke-dasharray")
-    expect(rect("tl")).not.toHaveAttribute("stroke-dasharray")
-    // Bottom left sits left of bottom right, both under the timeline.
-    expect(Number(rect("ll").getAttribute("x"))).toBeLessThan(Number(rect("lr").getAttribute("x")))
-    expect(Number(rect("ll").getAttribute("y"))).toBeGreaterThan(Number(rect("tl").getAttribute("y")))
+    expect(parts(glyph)).toEqual(["target", "frame", "timeline", "split"])
+    const target = glyph.querySelector('[data-part="target"]')!
+    expect(target).toHaveAttribute("fill", "currentColor")
+    // Bottom left: under the band, the left half of the frame.
+    expect([target.getAttribute("x"), target.getAttribute("y"), target.getAttribute("width")]).toEqual(["2", "10", "10"])
+    expect(glyph.querySelector('[data-part="frame"]')).toHaveAttribute("rx", "2")
+    expect(glyph).toHaveAttribute("stroke-width", "1.6")
     expect(glyph).toHaveAttribute("aria-hidden", "true")
   })
 
-  it("leaves out a folded timeline: the areas take its height", () => {
-    const rects = layoutGlyphRects(dockView(foldRegion(startDockLayout(), FILM, "tl"), FILM), true, "ll", "lr")
-    expect(rects.map((r) => r.region)).toEqual(["left", "ll", "lr"])
-    expect(rects.find((r) => r.region === "ll")!.y).toBe(3)
+  it("marks nothing but the destination: no left-panel strip, no dotted current area", () => {
+    render(<MediaLayoutGlyph view={dockView(startDockLayout(), FILM)} target="lr" />)
+    const glyph = screen.getByTestId("layout-glyph")
+    expect(glyph.querySelectorAll('[fill="currentColor"]')).toHaveLength(1)
+    expect(glyph.querySelector("[stroke-dasharray]")).toBeNull()
+    expect(glyph.querySelector('[data-part="target"]')).toHaveAttribute("x", "12")
   })
 
-  it("still draws a destination that is folded or empty now, since moving there opens it", () => {
-    // Both panels as tabs bottom left: bottom right does not exist yet.
+  it("drops the top band when the timeline is folded; the areas start at the frame's top", () => {
+    const g = layoutGlyphShape(dockView(foldRegion(startDockLayout(), FILM, "tl"), FILM), "ll")
+    expect(g.timelineBand).toBe(false)
+    expect(g.target[1]).toBe(4)
+    render(<MediaLayoutGlyph view={dockView(foldRegion(startDockLayout(), FILM, "tl"), FILM)} target="ll" />)
+    expect(parts(screen.getByTestId("layout-glyph"))).toEqual(["target", "frame", "split"])
+  })
+
+  it("draws a destination that doesn't exist yet, and leaves out an area that doesn't exist", () => {
+    // Both panels as tabs bottom left: bottom right does not exist, but it is
+    // where the panel would go, so it is drawn.
     const tabs = dockView(movePanel(startDockLayout(), "text", "ll"), FILM)
-    expect(roles(layoutGlyphRects(tabs, true, "lr", "ll"))).toEqual({ left: "plain", tl: "plain", ll: "current", lr: "target" })
-    // The film folded: moving the text there draws it, filled.
-    const folded = dockView(foldRegion(startDockLayout(), FILM, "ll"), FILM)
-    expect(roles(layoutGlyphRects(folded, true, "ll", "lr")).ll).toBe("target")
+    expect(layoutGlyphShape(tabs, "lr")).toMatchObject({ split: 12, target: [12, 10, 10, 10] })
+    // No film on this file: bottom left holds nothing and is folded too, so a
+    // map with only bottom right open spans the whole width when it is the target.
+    const textOnly = dockView(foldRegion(startDockLayout(), { film: false }, "ll"), { film: false })
+    expect(layoutGlyphShape(textOnly, "lr")).toMatchObject({ split: null, target: [2, 10, 20, 10] })
   })
 
-  it("narrows the left strip while the left panel is folded to its icons", () => {
-    const v = dockView(startDockLayout(), FILM)
-    expect(layoutGlyphRects(v, true, "ll", "lr")[0].w).toBeGreaterThan(layoutGlyphRects(v, false, "ll", "lr")[0].w)
-  })
-
-  it("the menu item's name stays its text", () => {
+  it("reads in sentence case, and the item's name stays its text", () => {
     render(<MediaAreaStrip dock={fakeDock(startDockLayout())} area="lr" />)
     fireEvent.click(screen.getByTestId("dock-more-lr"))
     const item = screen.getByTestId("dock-move-lr")
-    expect(item).toHaveAccessibleName("Move to Bottom left")
-    expect(item.querySelector('[data-testid="layout-glyph"] [data-region="ll"]')).toHaveAttribute("data-role", "target")
+    expect(item).toHaveAccessibleName("Move to bottom left")
+    expect(item.querySelector('[data-testid="layout-glyph"]')).toBeInTheDocument()
   })
 })

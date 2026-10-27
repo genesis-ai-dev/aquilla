@@ -1273,8 +1273,11 @@ export const editor = defineNamespace({
     "editor.dock.foldTimeline": "Fold the timeline",
     "editor.dock.moreTip": "Move this panel, or more",
     "editor.dock.timelineMoreTip": "Timeline settings",
-    "editor.dock.menuHeading": "{panel} · in {area}",
-    "editor.dock.moveTo": "Move to {area}",
+    // Sentence case mid-sentence (Sam, Oct 27): "Move to bottom left".
+    "editor.dock.menuHeadingBottomLeft": "{panel} · in bottom left",
+    "editor.dock.menuHeadingBottomRight": "{panel} · in bottom right",
+    "editor.dock.moveToBottomLeft": "Move to bottom left",
+    "editor.dock.moveToBottomRight": "Move to bottom right",
     "editor.dock.dragNote": "You can also drag the tab to another area, or double-click it for full screen.",
     "editor.dock.tabTip": "{panel} · {keys} · click to show · double-click for full screen",
     "editor.dock.tracks": "Tracks",
@@ -2840,16 +2843,23 @@ export const editor = defineNamespace({
           "corner, which opens the timeline's settings (snapping, following " +
           "the playhead, track names, zoom, row height).",
       },
-      "editor.dock.menuHeading": {
-        description: "Heading of a panel's ⋯ menu, saying which panel it is and where it sits.",
-        placeholders: {
-          panel: "The panel's name: 'Film' or 'Text'.",
-          area: "Where it sits: 'Bottom left' or 'Bottom right'.",
-        },
+      "editor.dock.menuHeadingBottomLeft": {
+        description: "Heading of a panel's ⋯ menu while the panel sits in the area below the timeline on the left.",
+        placeholders: { panel: "The panel's name: 'Film' or 'Text'." },
       },
-      "editor.dock.moveTo": {
-        description: "Menu item that moves the panel to the other area below the timeline.",
-        placeholders: { area: "The area it moves to: 'Bottom left' or 'Bottom right'." },
+      "editor.dock.menuHeadingBottomRight": {
+        description: "Heading of a panel's ⋯ menu while the panel sits in the area below the timeline on the right.",
+        placeholders: { panel: "The panel's name: 'Film' or 'Text'." },
+      },
+      "editor.dock.moveToBottomLeft": {
+        description:
+          "Menu item that moves the panel to the area below the timeline on the left. " +
+          "Its icon is a small map of the layout with that area filled.",
+      },
+      "editor.dock.moveToBottomRight": {
+        description:
+          "Menu item that moves the panel to the area below the timeline on the right. " +
+          "Its icon is a small map of the layout with that area filled.",
       },
       "editor.dock.dragNote": {
         description:

@@ -68,10 +68,11 @@ class _Aligner:
     char tokenizer, so the hypothesis text encodes to per-character targets
     the CTC emissions can be aligned against."""
 
-    def __init__(self) -> None:
+    def __init__(self, **pipe_kwargs: object) -> None:
         from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
 
-        self.pipe = ASRInferencePipeline(model_card="omniASR_CTC_300M")
+        # pipe_kwargs (device, dtype) are for infra/selfhost/omni_asr_server.py.
+        self.pipe = ASRInferencePipeline(model_card="omniASR_CTC_300M", **pipe_kwargs)
         vocab = self.pipe.tokenizer.vocab_info
         # CTC blank: fairseq2 char tokenizers reserve index 0 (pad/blank).
         self.blank = 0
@@ -100,14 +101,15 @@ class _Aligner:
         logits, _ = model(seqs, layout)
         return torch.log_softmax(logits.float(), dim=-1)[0]
 
-    def align(self, wav: "object", text: str) -> tuple[list[dict], bool]:
-        """Return ([{text,start,end}], approximate)."""
+    def align(self, wav: "object", text: str, emis: "object" = None) -> tuple[list[dict], bool]:
+        """Return ([{text,start,end}], approximate). Pass `emis` (from
+        emissions()) to reuse a forward pass that already ran."""
         words = text.split()
         duration = wav.shape[0] / SAMPLE_RATE
         if not words:
             return [], False
         try:
-            emis = self.emissions(wav).cpu().numpy()
+            emis = (self.emissions(wav) if emis is None else emis).cpu().numpy()
             ids: list[int] = []
             spans: list[tuple[int, int]] = []  # token index range per word
             for w in words:

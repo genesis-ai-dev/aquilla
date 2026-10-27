@@ -1,0 +1,23 @@
+# systemd unit for the self-hosted Omnilingual ASR server.
+# Install: see infra/selfhost/README.md
+[Unit]
+Description=Aquilla Omnilingual ASR (self-hosted)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/aquilla-omni/infra/selfhost
+# OMNI_SHARED_SECRET and the optional OMNI_* settings.
+EnvironmentFile=/etc/aquilla-omni.env
+Environment=FAIRSEQ2_CACHE_DIR=/var/cache/aquilla-omni/fairseq2
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/aquilla-omni/.venv/bin/uvicorn omni_asr_server:app --host 127.0.0.1 --port 8088
+Restart=always
+RestartSec=5
+# Model load takes about a minute (several on the first run, which downloads ~32 GB).
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

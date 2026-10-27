@@ -190,6 +190,19 @@ library-voice conversion with `503 voice conversion not configured` and a traini
 start with `503 voice training not configured`; cloned-voice conversions still go to
 Seed-VC and are unaffected.
 
+Omnilingual ASR has two backends. `OMNI_ASR_MODAL_URL` is the Modal app
+(`infra/modal/omni_asr.py`). `OMNI_ASR_PRIMARY_URL` is an optional self-hosted
+server (`infra/selfhost/`, for example a GPU box behind a Cloudflare Tunnel at
+`https://omni-asr.aquilla.app`). Both are plain `[vars]` in
+`auth-worker/wrangler.toml`, not secrets. When the primary is set, identity
+probes its `/healthz` with a 3 s timeout before each call and uses it when it
+answers; on a failed probe, a network error, a 60 s timeout or a 5xx it calls
+Modal instead. It never retries a 4xx. Each call is billed on the `gpu` name
+that the answering backend reports (`db/shared/omni-asr-cost.ts`). Both backends
+check the same `OMNI_SHARED_SECRET`: when you rotate it, also update
+`/etc/aquilla-omni.env` on the self-hosted box and restart `omni-asr@<user>`,
+or the box answers 401 and every call fails (a 401 does not fall back).
+
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,
 so a production org's Monday tokens copied onto the dev Neon branch are unreadable on

@@ -332,7 +332,6 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
-  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -2692,8 +2691,11 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
     // AQU-1764: one dimmed two-part bar, and the validated figure names itself
-    // since an archived row has no column headings.
-    expect(sw).toHaveTextContent("8% validated")
+    // since an archived row has no column headings. AQU-2178: it names which
+    // half it is, and a Text language that has recorded nothing shows only the
+    // text one — no audio phrase, rather than "0% audio validated".
+    expect(sw).toHaveTextContent("8% text validated")
+    expect(sw).not.toHaveTextContent("audio validated")
     const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
     expect(archivedBars).toHaveLength(1)
     expect(archivedBars[0].className).toContain("opacity-70")
@@ -2704,6 +2706,33 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
   })
 
+  // AQU-2180: the Languages card is the only overview card built on the shared
+  // Section, so it used to inherit that card's bigger foreground title plus a
+  // subtitle no sibling card has. Compared against Progress, the card next to
+  // it, because "same as the other headings" is the actual contract.
+  it("gives the Languages heading the same type scale as the Progress heading, with no subtitle", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const languages = within(table).getByRole("heading", { level: 2, name: "Languages" })
+    const progress = screen.getByRole("heading", { level: 2, name: "Progress" })
+
+    // happy-dom resolves no stylesheet, so the utility classes that decide
+    // size, weight and colour are what there is to compare.
+    const typeScale = (h: HTMLElement) =>
+      h.className
+        .split(/\s+/)
+        .filter((c) => /^(text-(xs|sm|base|lg)|font-(normal|medium|semibold|bold)|text-(muted-)?foreground)$/.test(c))
+        .sort()
+    expect(typeScale(languages)).toEqual(typeScale(progress))
+    expect(typeScale(languages)).toEqual(["font-semibold", "text-muted-foreground", "text-xs"])
+
+    // The subtitle went with the restyle — the card header is heading + action.
+    expect(within(table).queryByText(/each target language on this project/i)).not.toBeInTheDocument()
+  })
+
   it("does not render an archived group when every lane is active", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
@@ -2712,17 +2741,26 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
-  it("does not render the lane table (or tabs) for a single-lane project", async () => {
+  it("AQU-2194: a single-language project shows the Languages table, with Staff… and Assign…, but no lane tabs", async () => {
+    // Come and See (Oct 26): a PM needs one place to put a linguist on a
+    // language, on every project. With one language the table used to be
+    // hidden, so Staff… was out of reach; the progress tabs stay hidden.
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
-      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+      lanes: [{ lane: "", laneId: "lane-bm", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
     })])
     renderOverview()
 
-    // The progress card still renders (Translated tile present) — just no lane UI.
-    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    const table = await screen.findByTestId("overview-lane-table")
     expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+    // One row, named by the project's target language (the '' lane).
+    const rows = within(table).getAllByTestId(/^overview-lane-row-/)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent("Bambara")
+    // Its ⋯ menu offers Assign… and Staff….
+    fireEvent.click(within(table).getByTestId(/^overview-lane-actions-/))
+    expect(await screen.findByRole("menuitem", { name: /^Assign/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /^Staff/ })).toBeInTheDocument()
   })
 
   it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {

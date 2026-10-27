@@ -92,6 +92,19 @@ export function partitionMembers(members: ProjectMember[]): {
   return { projectMembers, orgAccessMembers };
 }
 
+/**
+ * AQU-2194: whether anyone besides the caller is on the project to give
+ * language work to. Maintainers and owners (the project's creator among them)
+ * are listed too, but they run the project; a PM looking for a linguist and
+ * finding only them has nobody to hand the work to.
+ */
+export function hasLanguageWorker(
+  members: readonly ProjectMember[],
+  callerUserId: number | null,
+): boolean {
+  return members.some((m) => m.userId !== callerUserId && m.role.level < ROLE.MAINTAINER)
+}
+
 function authHeaders(jwt: string): HeadersInit {
   return {
     "Content-Type": "application/json",

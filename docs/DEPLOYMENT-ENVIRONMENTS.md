@@ -174,7 +174,7 @@ its job. Keep this section in step with that manifest — a contract test assert
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
 | Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
 | Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
-| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
+| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 | Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
@@ -183,10 +183,12 @@ and sync Workers in the same environment must hold the identical value.
 `VOICE_FORGE_URL` and `VOICE_FORGE_TOKEN` point the sync Worker's `/audio/voice-convert`
 route at the Modal `voice-forge` speech-to-speech service for character-library voices
 (`infra/modal/voice_forge.py`); the token must equal the `VOICE_FORGE_TOKEN` in that
-app's `voice-forge-auth` Modal secret. They are required on the development sync Worker
-only until the service is stood up for production. A Worker without them answers a
-library-voice conversion with `503 voice conversion not configured`; cloned-voice
-conversions still go to Seed-VC and are unaffected.
+app's `voice-forge-auth` Modal secret. Both sync Workers require them: development
+since the character voice library (#1576), production since custom voice training
+(#1589) made the forge a production dependency. A Worker without them answers a
+library-voice conversion with `503 voice conversion not configured` and a training
+start with `503 voice training not configured`; cloned-voice conversions still go to
+Seed-VC and are unaffected.
 
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,

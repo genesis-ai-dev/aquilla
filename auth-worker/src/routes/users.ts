@@ -12,6 +12,7 @@ import {
   searchUsersByPrefix,
   searchUsersByScopedPrefix,
 } from "../services/user-lookup"
+import { callerCanSearchUsers } from "../services/user-search-access"
 
 const SEARCH_MIN_PREFIX_LEN = 2
 const SEARCH_DEFAULT_LIMIT = 10
@@ -77,6 +78,10 @@ users.get("/lookup", async (c) => {
  * support lookups, mirroring the access they already have via /admin/users.
  * Exact-match lookup for out-of-scope users is done via GET /users/lookup, which
  * is per-user rate limited (it does confirm hits, so it must not be bulk-walkable).
+ *
+ * AQU-625: a caller who cannot see a member roster is rejected here, not only
+ * in the Share panel. Hiding the field still leaves this route callable.
+ * Platform admins keep the unscoped support path.
  */
 users.get("/search", async (c) => {
   const user = c.get("user")
@@ -100,12 +105,17 @@ users.get("/search", async (c) => {
   const wantsUnscoped = !(
     c.req.query("scoped") === "1" || c.req.query("scoped") === "true"
   )
-  const matches =
-    wantsUnscoped && await isPlatformAdmin(c)
-      ? await searchUsersByPrefix(c.env, prefix, limit)
-      : await searchUsersByScopedPrefix(c.env, user.id, prefix, limit)
-
-  return c.json({ users: matches })
+  // Platform admins can see every roster (resolveProjectRole grants them
+  // owner). The client always sends scoped=1, so the exemption cannot be
+  // limited to the unscoped support path or Share search 403s for them.
+  const admin = await isPlatformAdmin(c)
+  if (admin && wantsUnscoped) {
+    return c.json({ users: await searchUsersByPrefix(c.env, prefix, limit) })
+  }
+  if (!admin && !(await callerCanSearchUsers(c.env, user.id))) {
+    return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
+  }
+  return c.json({ users: await searchUsersByScopedPrefix(c.env, user.id, prefix, limit) })
 })
 
 export default users

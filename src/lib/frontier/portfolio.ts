@@ -468,6 +468,54 @@ export function laneValidatedPct(lane: PortfolioLane): number {
 }
 
 /**
+ * AQU-2178: a language's validated TEXT share, 0..1 — its validated lines over
+ * its lines, and never its recordings.
+ *
+ * Distinct from `laneValidatedPct`, which is the language's DONE share by what
+ * it delivers: for a Text and audio language that counts only the lines
+ * approved on both halves, so validating a line's text without approving its
+ * recording moves this figure and leaves that one where it was. The Languages
+ * table prints the two side by side, so it needs the text half on its own.
+ */
+export function laneTextValidatedPct(lane: PortfolioLane): number {
+  return lane.totalCells > 0 ? lane.validatedCells / lane.totalCells : 0
+}
+
+/**
+ * AQU-2178: does this language owe any audio at all?
+ *
+ * Its own audio total has to be positive — AQU-1954's rule: every file when the
+ * language records audio, else only the files it has actually recorded in. A
+ * language nobody records in owes nothing and reads "—" rather than "0%".
+ *
+ * A server too old to send a language's audio counts (AQU-1951/AQU-1954) cannot
+ * answer the question, so it answers "no". That is deliberate: the alternative
+ * is measuring the language against the PROJECT's audio denominator, which is
+ * the one way this figure could disagree with the Progress card's tile for the
+ * same language.
+ */
+export function laneOwesAudio(lane: PortfolioLane): boolean {
+  return lane.audioCells != null && (lane.audioTotalCells ?? 0) > 0
+}
+
+/**
+ * AQU-2178: a language's approved recordings over its own audio total, 0..1.
+ *
+ * The same arithmetic the Progress card's "Audio Validated" tile does with that
+ * language picked in its filter — `audioValidatedPct` over a project narrowed
+ * to the lane's own counts — so the Languages table and the card can never
+ * print two different numbers for one language. Clamped for the same reason
+ * `audioValidatedPct` is: audio left behind on a re-imported file counts in the
+ * numerator and not the denominator.
+ *
+ * 0 when the language owes no audio; ask `laneOwesAudio` first and print "—".
+ */
+export function laneAudioValidatedPct(lane: PortfolioLane): number {
+  const total = lane.audioTotalCells ?? 0
+  return total > 0 ? Math.min(1, (lane.validatedAudioCells ?? 0) / total) : 0
+}
+
+/**
  * AQU-292: fraction of cells that are AI-drafted and awaiting human review, 0..1.
  * 0 for projects that predate the provenance marker (forward-only, honest).
  */

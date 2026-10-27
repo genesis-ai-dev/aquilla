@@ -37,6 +37,9 @@ export const dialog = defineNamespace({
     "dialog.assign.selfAssignDescription":
       "Self-assignment is on — you can claim this work for yourself. Only leads and " +
       "maintainers can assign work to someone else.",
+    "dialog.assign.onlyProjectMembersHint": "Only people on this project can be given work.",
+    "dialog.assign.addPeopleLink": "Add someone to this project",
+    "dialog.assign.askMaintainerToAdd": "Ask a project maintainer to add the person to this project first.",
     "dialog.assign.deadlineLabel": "Deadline (optional)",
     "dialog.assign.deadlineBatchDescription":
       "Applies to every file selected above — one deadline for the whole batch.",
@@ -221,6 +224,26 @@ export const dialog = defineNamespace({
           "Helper text shown under the assignee field when self-assignment mode is " +
           "on, explaining why the picker is locked and who could assign to others " +
           "instead.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.onlyProjectMembersHint": {
+        description:
+          "Helper text under the assignee field when nobody on the project besides the " +
+          "person assigning (and its maintainers or owners) can be given language work, so " +
+          "the list holds no linguist. Followed by the 'Add someone to this project' link.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.addPeopleLink": {
+        description:
+          "Link after the 'Only people on this project can be given work.' helper text; " +
+          "opens the project's Members settings, where people are added to the project.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.askMaintainerToAdd": {
+        description:
+          "Follows 'Only people on this project can be given work.' for someone below " +
+          "maintainer, who can't open the project's Members settings: tells them who can add " +
+          "the person they want to assign.",
         screenshot: "assign-modal",
       },
       "dialog.assign.deadlineLabel": {

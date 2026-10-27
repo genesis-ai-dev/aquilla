@@ -3,10 +3,23 @@
 // archived sees no change. Archived lanes (AQU-1458) are not rows in this
 // table; they sit in a collapsed group under it. One row per active lane:
 //
-//   Language | Translated % | Validated % | People | Last activity | ⋯
+//   Language | Translated % | Text Validated % | Audio Validated % | People | Last activity | ⋯
 //
-// - Translated/Validated come from the project's PortfolioProject.lanes[]
-//   (laneTranslatedPct / laneValidatedPct — §3.1 foundation, already in base).
+// - Translated comes from the project's PortfolioProject.lanes[]
+//   (laneStartedPct — §3.1 foundation, already in base).
+// - AQU-2178: the validation figures are TWO columns, not one. The single
+//   "Validated" column was each language's *done* share (laneValidatedPct),
+//   which since AQU-2167 means validated text for a Text language, approved
+//   recordings for an Audio one and both halves on one line for a Text and
+//   audio one — under a header that never said which, so a PM could not read
+//   how far a language's audio validation had got without switching the
+//   Progress card's language filter one language at a time. Now Text Validated
+//   is its validated text alone (laneTextValidatedPct) and Audio Validated its
+//   approved recordings over its own audio total (laneAudioValidatedPct), the
+//   same arithmetic the card's tiles do, so the two surfaces cannot disagree.
+//   A language that delivers no text, and one that owes no audio, print "—"
+//   under the column that does not apply rather than a misleading 0%; a project
+//   where no language owes audio has no Audio Validated column at all.
 // - People = lane-scoped members: members below maintainer whose
 //   project_member_scopes carry a { kind:'lane', value:<tag> } row. Loaded
 //   with one GET scopes per member below 600, tolerating individual failures
@@ -52,7 +65,15 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { ROLE } from "@/lib/frontier/roles"
-import { laneDeliversAudioOnly, laneStartedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
+import {
+  laneAudioValidatedPct,
+  laneDeliversAudioOnly,
+  laneOwesAudio,
+  laneStartedPct,
+  laneTextValidatedPct,
+  laneValidatedPct,
+  type PortfolioLane,
+} from "@/lib/frontier/portfolio"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
@@ -164,6 +185,20 @@ function LanePeople({
     >
       {avatars}
     </button>
+  )
+}
+
+/**
+ * AQU-2178: one percentage cell in the Languages table, or "—" when the
+ * language owes nothing under that column — no text to validate, or no audio.
+ * A dash rather than "0%", because 0% says the work is outstanding and these
+ * languages have none.
+ */
+function LaneFigure({ pct, testId }: { pct: number | null; testId: string }) {
+  return (
+    <span className="text-sm tabular-nums text-muted-foreground" data-testid={testId}>
+      {pct == null ? "—" : `${progressPercentOfFraction(pct)}%`}
+    </span>
   )
 }
 
@@ -297,6 +332,25 @@ export function OverviewLaneTable({
     return map
   }, [members, scopesByUser, laneIdentities])
 
+  // Rows of the table: target languages only (a source lane rides along in the
+  // portfolio for the language pair's label).
+  const targetLanes = useMemo(() => lanes.filter((lane) => lane.role !== "source"), [lanes])
+
+  // AQU-2178: a project where no language owes audio has nothing to put in an
+  // Audio Validated column, so it does not get one — its only visible change
+  // is the "Text Validated" heading. Read off the rows this table draws;
+  // archived rows label their own figures and need no column.
+  const showAudioValidated = useMemo(() => targetLanes.some(laneOwesAudio), [targetLanes])
+  // AQU-2194: and the other way round. Now that a one-language project shows
+  // this table too, an Audio language on its own would read "Translated 0%"
+  // and "Text Validated —" for text it never delivers. With no language that
+  // delivers text, those two columns are left out; the Audio Validated column
+  // carries the row.
+  const showText = useMemo(
+    () => targetLanes.length === 0 || targetLanes.some((lane) => !laneDeliversAudioOnly(lane)),
+    [targetLanes],
+  )
+
   // Stable across renders so the column definitions below, which now name a
   // lane in the People cell's accessible name, don't rebuild on every render.
   const laneLabel = useCallback(
@@ -316,26 +370,50 @@ export function OverviewLaneTable({
           <span className="text-sm font-medium text-foreground">{laneLabel(row.original)}</span>
         ),
       },
-      {
-        id: "translated",
-        accessorFn: (l) => laneStartedPct(l),
-        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
-        meta: { className: "w-[9rem]" },
-        cell: ({ row }) => <LaneProgressBar lane={row.original} />,
-      },
-      {
-        id: "validated",
-        accessorFn: (l) => laneValidatedPct(l),
-        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.validatedHeaderLabel")} />,
-        meta: { className: "w-[9rem]" },
-        // The figure only: the Translated column's bar already draws the
-        // validated part, in the dark blue (AQU-1764).
-        cell: ({ row }) => (
-          <span className="text-sm tabular-nums text-muted-foreground">
-            {progressPercentOfFraction(laneValidatedPct(row.original))}%
-          </span>
-        ),
-      },
+      ...(showText
+        ? ([
+          {
+            id: "translated",
+            accessorFn: (l) => laneStartedPct(l),
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.translatedHeaderLabel")} />,
+            meta: { className: "w-[9rem]" },
+            cell: ({ row }) => <LaneProgressBar lane={row.original} />,
+          },
+          {
+            id: "textValidated",
+            // A language with nothing to validate sorts below every real figure
+            // rather than alongside a genuine 0% (same for audio below).
+            accessorFn: (l) => (laneDeliversAudioOnly(l) ? -1 : laneTextValidatedPct(l)),
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.textValidatedHeaderLabel")} />,
+            meta: { className: "w-[9rem]" },
+            // The figure only, no bar of its own. The Translated column's bar draws
+            // the dark part at the language's DONE share (AQU-1764,
+            // `laneValidatedPct`), which is this figure for a Text language but the
+            // both-approved share for a Text and audio one — so for that language
+            // the bar matches neither of these two columns, by design.
+            cell: ({ row }) => (
+              <LaneFigure
+                testId={`overview-lane-text-validated-${laneTagId(row.original.lane)}`}
+                pct={laneDeliversAudioOnly(row.original) ? null : laneTextValidatedPct(row.original)}
+              />
+            ),
+          },
+          ] satisfies ColumnDef<PortfolioLane>[])
+        : []),
+      ...(showAudioValidated
+        ? [{
+            id: "audioValidated",
+            accessorFn: (l: PortfolioLane) => (laneOwesAudio(l) ? laneAudioValidatedPct(l) : -1),
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.projectOverview.audioValidated")} />,
+            meta: { className: "w-[9rem]" },
+            cell: ({ row }: { row: { original: PortfolioLane } }) => (
+              <LaneFigure
+                testId={`overview-lane-audio-validated-${laneTagId(row.original.lane)}`}
+                pct={laneOwesAudio(row.original) ? laneAudioValidatedPct(row.original) : null}
+              />
+            ),
+          } satisfies ColumnDef<PortfolioLane>]
+        : []),
       {
         id: "people",
         enableSorting: false,
@@ -426,6 +504,8 @@ export function OverviewLaneTable({
       canManageLanes,
       membersByLane,
       laneLabel,
+      showAudioValidated,
+      showText,
       onChanged,
       orgId,
       projectId,
@@ -440,8 +520,13 @@ export function OverviewLaneTable({
     <Section
       data-testid="overview-lane-table"
       title={t("fileDetails.languages")}
-      description={t("org.overviewLaneTable.sectionDescription")}
-      headerClassName={ADMIN_TABLE_SECTION_HEADER}
+      // AQU-2180: this card sits under the project overview's own cards, whose
+      // headings are small, semibold and muted (see the Progress card in
+      // ProjectOverview). The shared Section title is larger and in the
+      // foreground colour, which made "Languages" read as a different page —
+      // so restyle it here only, and drop the subtitle no sibling card has.
+      titleClassName="font-sans text-xs font-semibold text-muted-foreground"
+      headerClassName={`${ADMIN_TABLE_SECTION_HEADER} items-center`}
       contentClassName={ADMIN_TABLE_SECTION_CONTENT}
       action={
         canAddLanguage ? (
@@ -464,7 +549,7 @@ export function OverviewLaneTable({
     >
       <DataTable
         columns={columns}
-        data={lanes.filter((lane) => lane.role !== "source")}
+        data={targetLanes}
         getRowId={(l) => l.laneId ?? laneTagId(l.lane)}
         getRowAttributes={(l) => ({
           "data-testid": `overview-lane-row-${laneTagId(l.lane)}`,
@@ -523,11 +608,35 @@ export function OverviewLaneTable({
                     </Link>
                     <Badge variant="outline">{t("org.overviewLaneTable.archivedBadge")}</Badge>
                     <LaneProgressBar lane={lane} dimmed />
-                    {/* No column heading here, so the validated figure names
-                        itself, as the org table's expanded lane rows do. */}
-                    <span className="text-sm tabular-nums text-muted-foreground">
-                      {t("org.orgHome.pctValidated", { pct: progressPercentOfFraction(laneValidatedPct(lane)) })}
-                    </span>
+                    {/* No column headings here, so each figure names itself,
+                        as the org table's expanded lane rows do — and since
+                        AQU-2178 that is one phrase per half the language owes:
+                        its text where it delivers text, its audio where it owes
+                        audio. An archived language that owes neither prints no
+                        figure rather than a bare percentage of nothing. The two
+                        phrases are shared with those org rows (AQU-2179), so
+                        they live under org.orgHome.pct* beside the undivided
+                        "{pct}% validated" they replace. */}
+                    {!laneDeliversAudioOnly(lane) && (
+                      <span
+                        className="text-sm tabular-nums text-muted-foreground"
+                        data-testid={`overview-lane-archived-text-validated-${laneTagId(lane.lane)}`}
+                      >
+                        {t("org.orgHome.pctTextValidated", {
+                          pct: progressPercentOfFraction(laneTextValidatedPct(lane)),
+                        })}
+                      </span>
+                    )}
+                    {laneOwesAudio(lane) && (
+                      <span
+                        className="text-sm tabular-nums text-muted-foreground"
+                        data-testid={`overview-lane-archived-audio-validated-${laneTagId(lane.lane)}`}
+                      >
+                        {t("org.orgHome.pctAudioValidated", {
+                          pct: progressPercentOfFraction(laneAudioValidatedPct(lane)),
+                        })}
+                      </span>
+                    )}
                   </li>
                 )
               })}

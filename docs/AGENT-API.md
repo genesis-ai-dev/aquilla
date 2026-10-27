@@ -1341,3 +1341,40 @@ A take in a target lane is a recording of that lane's text, so its transcript
 is stored with `SetTranslation`. A source media cell's transcript uses
 `SetTranscription` instead (project-lead floor). Call `describe_command` for the
 exact parameters before staging either.
+
+## Status addendum (2026-10-26, AQU-2192 — built-in checks and rules over the settings surface)
+
+An agent could neither see nor set a project's checks. The built-in checks that are
+on by default are never stored, so the raw `settings` blob showed nothing about them,
+and PatchSettings accepted any object for `rules`, `rulePenalties`,
+`algorithmicChecks` and `algorithmicChecksByLane`.
+
+- **Reading.** `GET .../projects/:projectId/settings` and `GET .../projects/:projectId`
+  (and the MCP `get_project_settings` / `get_project`) now carry two more fields beside
+  `settings`: `builtinChecks`, `[{ id, name, enabled, severity, overridden }]` for the
+  whole project, and `builtinChecksByLane`, the same list for each lane that has its own
+  `algorithmicChecksByLane` entries, keyed by lane tag (`""` is the default lane). A lane
+  entry replaces the project-wide entry for that check, as on the Rules page. Bible data
+  checks (`bkp:…` ids) are listed only while the project's Bible data checks are on. A
+  lane the caller cannot see is left out. `settings` itself is unchanged: it is the raw
+  stored blob that PatchSettings patches against.
+- **Writing.** The four keys now have checked shapes (shown by
+  `describe_command("PatchSettings")`). To turn checks off on a web-article project:
+
+  ```json
+  { "kind": "PatchSettings", "projectId": "p1", "ifMatchVersion": 7, "ops": [
+    { "key": "algorithmicChecks", "value": {
+      "usfm-structure": { "enabled": false },
+      "footnote-quote-mismatch": { "enabled": false } } } ] }
+  ```
+
+  The op replaces the whole `algorithmicChecks` value, so start from the stored map in
+  `settings.algorithmicChecks` and add to it. Omit `severity` to keep the default. The
+  command's doc maps each Rules page name ("USFM markers") to its id (`usfm-structure`).
+  Unknown check ids, unknown fields and a `type: "builtin"` rule are rejected with the
+  field named. Rules read back from `settings.rules` can be patched unchanged.
+- **Not covered.** The "Style rules" section of the Rules page lives in the `style_rules`
+  table (auth-worker `/api/v2/projects/:id/style-rules`). It is a different store and is
+  not reachable through the `rules` key. AQU-2195 covers exposing it.
+- **Source of truth.** Check ids, English names and defaults live in
+  `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.

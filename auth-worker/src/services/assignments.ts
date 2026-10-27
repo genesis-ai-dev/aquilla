@@ -1220,6 +1220,30 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
   return { book: m[1].trim(), num: parseInt(m[2], 10) }
 }
 
+/** "GEN 1" / "1CO 12" — a book code plus a chapter number. Not "GEN" or "1CO". */
+const NUMBERED_CHAPTER_KEY = /^([1-3]?[A-Z]{2,3}) (\d+)$/
+/** "GEN" / "1CO" / "TIT" — the book code alone. */
+const BARE_BOOK_CODE = /^[1-3]?[A-Z]{2,3}$/
+
+/**
+ * USFM book-header cells (`RUT:h:1`, `1CO:mt1:1`) cut to a bare book code.
+ * Beside numbered chapters of that book, the bare code is front matter, not a
+ * chapter — the same distinction the plan uses (`classifyPlanSection`). A lone
+ * bare code is a one-chapter book's only chapter (`TIT:4` → `TIT`, which is
+ * chapter 1) and stays. A real "RUT 1" is never this shape, so it stays too.
+ */
+function withoutBookFrontMatter(chapters: string[]): string[] {
+  const numberedBooks = new Set<string>()
+  for (const chapter of chapters) {
+    const match = NUMBERED_CHAPTER_KEY.exec(chapter)
+    if (match) numberedBooks.add(match[1])
+  }
+  return chapters.filter((chapter) => {
+    if (!BARE_BOOK_CODE.test(chapter)) return true
+    return !numberedBooks.has(chapter)
+  })
+}
+
 /**
  * Distinct chapters present in a file, derived from the source cells'
  * canonical_ref (e.g. "GEN 1:1" → "GEN 1"). Populates the assign picker's
@@ -1228,7 +1252,8 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
  * (sync-worker assignment-events.ts) matches against the plan board's own
  * keys, so the person gets the chapter's headings and added lines too
  * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
- * precedes "GEN 10".
+ * precedes "GEN 10". Book-header refs (`GEN:h:1`) are not chapters when that
+ * book already has numbered ones; a one-chapter book's bare code is kept.
  */
 export async function getFileChapters(
   env: Env,
@@ -1244,9 +1269,11 @@ export async function getFileChapters(
     .bind(projectId, fileId)
     .all<{ chapter: string }>()
 
-  const chapters = (rows.results ?? [])
-    .map((r) => r.chapter)
-    .filter((c): c is string => typeof c === "string" && c.length > 0)
+  const chapters = withoutBookFrontMatter(
+    (rows.results ?? [])
+      .map((r) => r.chapter)
+      .filter((c): c is string => typeof c === "string" && c.length > 0),
+  )
   chapters.sort((a, b) => {
     const ka = chapterSortKey(a)
     const kb = chapterSortKey(b)

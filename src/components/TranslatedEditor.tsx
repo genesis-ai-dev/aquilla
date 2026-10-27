@@ -615,6 +615,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const onFootnoteHoverRef = useRef(onFootnoteHover)
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const initialIdmlSelectionRef = useRef(initialIdmlSelection)
+  // AQU-2173: true once the user has actually been in this cell's editor. Any
+  // rail affordance the user reaches for next takes DOM focus off the editor,
+  // so `editor.isFocused` alone cannot tell "the user never put a caret here"
+  // (anchor at the end of the cell) apart from "the user selected a phrase and
+  // then clicked the rail" (anchor at that phrase). This flag carries that
+  // distinction; ProseMirror keeps the selection itself across the blur. It is
+  // about THIS cell, so a recycled editor starts over on a new one.
+  const hasBeenFocusedRef = useRef(false)
+  useEffect(() => { hasBeenFocusedRef.current = false }, [cellId])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
   // AQU-810: while the OS input method is composing (Japanese romaji→kana,
@@ -1498,6 +1507,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       scheduleSelectionPublish(editor)
     },
     onFocus({ editor }) {
+      hasBeenFocusedRef.current = true
       applyEditorDirection(editor)
       const pointerSelection = initialIdmlSelectionRef.current
       initialIdmlSelectionRef.current = null
@@ -1676,7 +1686,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     getFootnoteInsertionAnchor() {
       if (!editor || isReadOnly) return null
       const { state } = editor
-      if (!editor.isFocused) {
+      // AQU-2173: fall back to the end of the cell only when the user never had
+      // a caret in here (the rail reached by hover alone). Once they have been
+      // in the editor, the selection ProseMirror still holds is their anchor —
+      // opening the `⋯` overflow blurs the editor before "Add footnote" can
+      // run, and reading `isFocused` alone sent every one of those footnotes to
+      // the end of the cell with no prefill.
+      if (!editor.isFocused && !hasBeenFocusedRef.current) {
         return withFootnotePreview(state.doc, {
           position: getDocumentEndPosition(state.doc),
           from: getDocumentEndPosition(state.doc),

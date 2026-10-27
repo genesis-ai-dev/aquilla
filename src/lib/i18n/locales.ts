@@ -4,7 +4,7 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese render LTR. Add a locale here + a catalog in
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Hausa render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -62,6 +62,12 @@ export const LOCALES: readonly LocaleMeta[] = [
   // the varieties are mutually readable, and the brief, not the menu label,
   // fixes which one the strings are.
   { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Hausa catalog, worded as standard written Hausa (Kano / Boko, the
+  // variety of education and BBC Hausa). Latin script, including ɓ ɗ ƙ.
+  // Buttons use the polite plural imperative (ku). `ha-NG`, `ha-NE`, and
+  // `ha-Latn` fold onto `ha` by the primary-subtag match. Ajami (`ha-Arab`)
+  // is not registered.
+  { code: "ha", englishName: "Hausa", nativeName: "Hausa", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

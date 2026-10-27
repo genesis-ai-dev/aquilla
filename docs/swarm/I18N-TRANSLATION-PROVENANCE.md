@@ -2,6 +2,35 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `ha` (standard written Hausa) — AQU-2199, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> (9,565 leaves) and merged with `scripts/i18n-catalog.ts import`. **No Hausa speaker
+> has read it.** Variety: standard written Hausa, the Kano-based standard of education
+> and BBC Hausa, in Latin Boko (including ɓ ɗ ƙ). Not Ajami, not a city dialect, not
+> Ghanaian Hausa, not Nigerian Pidgin. Buttons use the polite plural imperative (`ku`).
+> `ha-NG`, `ha-NE`, and `ha-Latn` fold onto `ha`. Ajami (`ha-Arab`) is not registered.
+>
+> Glossary: cell → ƙwaya / ƙwayoyi, lane → hanya / hanyoyi, changeset → rukunin
+> canje-canje, termbase → ma'ajiyar kalmomi, back-translation → fassarar komawa,
+> source → asali, target → manufa, draft → daftari / daftarori. Also locked in this
+> draft: Recently deleted → An goge kwanan nan, corpus → kundi, validate → tabbatar
+> (approve stays amince), Apply → Ku aiwatar, outbox → Akwatin fita, knowledge base →
+> Tushen ilimi. Timeline audio and caption tracks use waƙa / waƙoƙi; hanya stays the
+> language lane. Plurals: `one` is only for 1, and 0 uses `other`.
+>
+> Import report: 8,902/9,039 keys. The leaves the importer dropped were identical to
+> English on purpose (formats, product names, placeholder-only templates, and the
+> keep-English labels below). Mechanical check before import: every todo leaf present,
+> no extra leaf, and no added `{placeholder}`. Plural leaves may drop `{count}` and
+> must not add a placeholder the English seed does not have. `common.datePlaceholder`
+> stays `June 01, 2025`. `org.projectOverview.deadlineDatePlaceholder` stays
+> `July 03, 2026`. Whole values that are exactly Source text, Source audio, Target
+> text, Target audio, Speaker, Camera, Character Label, or Cast stay English, and
+> those tokens stay English inside a sentence that names the product label. Role names
+> inside `org.membersPage.orgTable.projectAccessNote` stay Contributor, Project lead,
+> Viewer, Maintainer, and Owner. Every `knowledgeBase.*` value differs from English.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

@@ -245,6 +245,35 @@ describe("Portuguese", () => {
   })
 })
 
+describe("Hausa (AQU-2199)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const ha = LOCALES.find((l) => l.code === "ha")
+    expect(ha?.dir).toBe("ltr")
+    expect(ha?.englishName).toBe("Hausa")
+    // One catalog, worded as standard written Hausa (Kano / Boko).
+    expect(ha?.nativeName).toBe("Hausa")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.ha ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Hausa to regional browser codes", () => {
+    expect(normalizeLocale("ha-NG")).toBe("ha")
+    expect(normalizeLocale("ha-NE")).toBe("ha")
+    expect(detectInitialLocale(null, "ha-NG")).toBe("ha")
+  })
+  it("supplies Hausa's one/other forms for a count-governed key", () => {
+    const counted = CATALOGS.ha?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      // `one` is only for 1. 0 uses `other`. Identical wording is grammatical
+      // when the noun does not change, so the forms are not required to differ.
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
 describe("Russian (AQU-1226)", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const ru = LOCALES.find((l) => l.code === "ru")

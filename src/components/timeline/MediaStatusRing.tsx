@@ -71,7 +71,7 @@ export function MediaStatusRing({ fraction, audio, syncStatus, fileName, project
               aria-label={t("editor.dock.statusTip")}
               data-testid="status-ring"
             >
-              <svg width={SIZE} height={SIZE} className="-rotate-90" aria-hidden>
+              <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="size-[18px] shrink-0 -rotate-90" aria-hidden>
                 <circle cx={SIZE / 2} cy={SIZE / 2} r={r} fill="none" stroke="currentColor" strokeWidth={STROKE} className="text-muted-foreground/20" />
                 <circle
                   cx={SIZE / 2}
@@ -85,7 +85,7 @@ export function MediaStatusRing({ fraction, audio, syncStatus, fileName, project
                   strokeLinecap="round"
                 />
               </svg>
-              <span aria-hidden className={cn("absolute end-1 top-1 size-1.5 rounded-full ring-2 ring-background", dot)} />
+              <span aria-hidden className={cn("absolute end-0.5 top-0.5 size-1.5 rounded-full", dot)} />
             </Button>
           }
         />

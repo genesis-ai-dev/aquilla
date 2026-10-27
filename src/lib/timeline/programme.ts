@@ -402,3 +402,33 @@ export function targetRatio(slot: ProgrammeSlot): number | null {
   if (slot.targetLenSec <= 0 || slot.sourceLenSec <= 0) return null
   return slot.targetLenSec / slot.sourceLenSec
 }
+
+/**
+ * AQU-2215 (Sam, Oct 27): whether a take on this line can carry a PAUSE
+ * before it — exactly the conditions `buildProgramme` keeps one under, so a
+ * take the timeline lets you drag is always a take whose new pause the
+ * programme reads back. A line with no times of its own has nothing to
+ * measure a pause from; a split take's pieces sit end to end from the slot's
+ * start; a take of unknown length has no window. None of the three can hold
+ * one, and letting a chip be dragged anyway would spring it back.
+ */
+export function canCarryTargetLead(cell: CellData, slot: ProgrammeSlot): boolean {
+  return sectionLenSec(cell) > 0 && slot.targetWindow != null && slot.targetPieces == null
+}
+
+/**
+ * AQU-2215: the pause a move gesture is asking for — where the take's audible
+ * start was dragged to, measured from its line's start on the programme clock.
+ *
+ * Following the recordings a take moves only INSIDE its own line: dragging
+ * right grows the pause (and the line with it, so the lines after move along),
+ * dragging left shrinks it back to none. Zero is the floor — a take never
+ * starts before the line it performs — and anything under
+ * `MIN_TARGET_LEAD_SEC` is the same placement wobble `buildProgramme` already
+ * reads as no pause, so the gesture stores none rather than a value the
+ * layout would then ignore.
+ */
+export function leadSecForMove(slot: ProgrammeSlot, audibleStartSec: number): number {
+  const lead = audibleStartSec - slot.startSec
+  return lead >= MIN_TARGET_LEAD_SEC ? lead : 0
+}

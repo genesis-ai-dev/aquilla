@@ -74,7 +74,7 @@ MONITOR_TARGETS = '''[
 FAILURE_THRESHOLD = "3"
 RECOVERY_THRESHOLD = "2"
 REMINDER_MINUTES = "60"
-DISCORD_MENTION_ROLE_IDS = ""
+DISCORD_MENTION_ROLE_IDS = "1564768432677847051,1564768540450361497"
 DISCORD_MENTION_USER_IDS = ""
 
 [[env.production.durable_objects.bindings]]
@@ -99,7 +99,8 @@ workers_dev = true
 enabled = true
 
 [env.development.triggers]
-crons = ["* * * * *"]
+# Enable after the development sync health route returns 200.
+crons = []
 
 [env.development.vars]
 ENVIRONMENT_LABEL = "development"

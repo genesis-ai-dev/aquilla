@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, type ReactNode } from "react"
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { usePanelRef } from "react-resizable-panels"
 import { PanelLeft } from "lucide-react"
@@ -190,6 +190,8 @@ export function AppShell({
 
   const dockPanelRef = usePanelRef()
   const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
+  /** The dock's last reported width, to tell a reopening clamp from a drag. */
+  const dockSizeRef = useRef<number | null>(null)
   const [videoHeight] = useState(() => readStoredVideoHeight())
   const lgUp = useIsLgUp()
   // Below lg (1024px), both org chrome and the editor dock hide in-flow and
@@ -243,9 +245,13 @@ export function AppShell({
     if (!panel) return
     if (railCollapsed) {
       panel.resize(DOCK_COLLAPSED_WIDTH)
-    } else {
-      panel.resize(readStoredDockWidth(dockStorageKey))
+      return
     }
+    // A frame later: the panel's open limits (200–520 px) land after this
+    // effect, and until they do a resize is held to the rail's 48 px.
+    const width = readStoredDockWidth(dockStorageKey)
+    const frame = requestAnimationFrame(() => dockPanelRef.current?.resize(width))
+    return () => cancelAnimationFrame(frame)
   }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef, mobileNav])
 
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
@@ -484,7 +490,13 @@ export function AppShell({
             maxSize={railCollapsed ? DOCK_COLLAPSED_WIDTH : DOCK_MAX_WIDTH}
             groupResizeBehavior="preserve-pixel-size"
             onResize={(size) => {
-              if (!railCollapsed && size.inPixels >= DOCK_MIN_WIDTH) {
+              // Reopening from the rail, the panel is first clamped up to its
+              // minimum before the effect above restores the stored width.
+              // That clamp is not a choice: storing it would reopen the panel
+              // at 200 px every time.
+              const fromRail = (dockSizeRef.current ?? 0) <= DOCK_COLLAPSED_WIDTH
+              dockSizeRef.current = size.inPixels
+              if (!railCollapsed && !fromRail && size.inPixels >= DOCK_MIN_WIDTH) {
                 writeStoredDockWidth(dockStorageKey, size.inPixels)
               }
             }}

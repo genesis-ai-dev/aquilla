@@ -851,4 +851,27 @@ describe("AssignWork overlap warning (AQU-1510)", () => {
     await waitFor(() => expect(mockUnit).toHaveBeenCalled())
     expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
   })
+
+  it("AQU-2130: warns about an assignment made since the form was opened", async () => {
+    rosterOk()
+    mockUnit.mockResolvedValue([])
+    mockCreate.mockResolvedValue("as-new")
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    await waitFor(() => expect(mockUnit).toHaveBeenCalledWith("jwt", "p1", "f1", "", ""))
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    expect(await screen.findByRole("button", { name: "Assign…" })).toBeInTheDocument()
+
+    const callsBeforeReopen = mockUnit.mock.calls.length
+    mockUnit.mockResolvedValue([wholeBook()])
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    await waitFor(() => expect(mockUnit.mock.calls.length).toBeGreaterThan(callsBeforeReopen))
+    expect(mockUnit).toHaveBeenLastCalledWith("jwt", "p1", "f1", "", "")
+    expect(await screen.findByTestId("assignment-overlap")).toHaveTextContent(/anna already holds/i)
+  })
 })

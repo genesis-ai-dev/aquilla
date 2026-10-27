@@ -8,6 +8,7 @@ import { loadChangeset } from './store'
 import type {
   ChangesetReceipt,
   MemoryWriteReceipt,
+  StyleRuleReviewReceipt,
   ProvenanceChannel,
   ReceiptOnlyReceipt,
   StoredChangeset,
@@ -70,7 +71,7 @@ export async function stampProvenance(
 export async function writeCommittedReceipt(
   db: AquillaDb,
   changesetId: string,
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt,
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | StyleRuleReviewReceipt,
   confirmationId: string | null,
 ): Promise<void> {
   await db

@@ -548,6 +548,34 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'list_style_rules',
+    description:
+      'Read a project’s style rules: the natural-language rules in the Rules page’s Style rules ' +
+      'section, including the ones “Extract from knowledge base” proposed. Newest first, org-shared ' +
+      'rules included. Each row has id, instruction, category, scope, severity, enabled, status ' +
+      '(proposed|approved|rejected|archived), version, source (with sourceDocTitle when it cites a ' +
+      'knowledge document) and `inherited` (true = the org owns it; it cannot be reviewed through ' +
+      'this project). Only approved, enabled rules reach the copilot. To approve, reject or edit, ' +
+      'stage a ReviewStyleRules changeset (describe_command) and send each row’s version as ' +
+      'ifMatchVersion. Args: projectId, optional status, limit (1-500, default 100), cursor. ' +
+      'Errors: permission_denied, scope_denied, validation_failed (unknown status), rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['proposed', 'approved', 'rejected', 'archived'],
+          description: 'Only rules in this state. Omit for all states (what the in-app list shows).',
+        },
+        limit: { type: 'number', description: 'Rules per page (1-500, default 100).' },
+        cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'read_cell_memory',
     description:
       'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
@@ -1359,6 +1387,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_prompt_preview: 'read',
   list_memory: 'read',
   read_cell_memory: 'read',
+  list_style_rules: 'read',
   read_quality: 'read',
   read_term_consistency: 'read',
   list_terms: 'read',

@@ -371,3 +371,26 @@ describe("programmeLines: the one list the timeline and the transport share (AQU
     expect(programmeLines([])).toEqual({ lines: [], untimed: false })
   })
 })
+
+// AQU-2204 (Sam, Oct 26): a pause someone left before a take stays inside its
+// line when the file follows its recordings.
+describe("buildProgramme — a pause before the take (AQU-2204)", () => {
+  const placed = (offsetMs: number) => ({ durationMs: 3_000, targetOffsetMs: offsetMs }) as never
+
+  it("keeps the pause inside the line: the take starts after it and the line is that much longer", () => {
+    // Original 0-2 (2 s); take 3 s placed 0.8 s after the line's start.
+    const prog = buildProgramme([verse("v1", 0, 2, placed(800)), verse("v2", 2, 4, { durationMs: 1_000 })])
+    const [s1, s2] = prog.slots
+    expect(s1.targetLeadSec).toBeCloseTo(0.8, 5)
+    expect(s1.slotLenSec).toBeCloseTo(3.8, 5)
+    expect(s1.clock).toBe("target")
+    expect(s2.startSec).toBeCloseTo(3.8, 5)
+  })
+
+  it("a take that starts on its line, or before it, has no pause", () => {
+    const prog = buildProgramme([verse("v1", 0, 2, placed(0)), verse("v2", 2, 4, placed(-300))])
+    expect(prog.slots[0].targetLeadSec).toBeUndefined()
+    expect(prog.slots[1].targetLeadSec).toBeUndefined()
+    expect(prog.slots[0].slotLenSec).toBeCloseTo(3, 5)
+  })
+})

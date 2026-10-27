@@ -1663,6 +1663,19 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
+  // AQU-2204: a pause someone left before a take, drawn lightly as part of
+  // its line — following the recordings, the line keeps it (programme
+  // `targetLeadSec`) and the take starts after it.
+  const leadGaps = audioFirst
+    ? [...new Map(chips.flatMap((chip) => {
+        const slot = layout?.programme?.byCellId.get(chip.item.cell.id)
+        const lead = slot?.targetLeadSec ?? 0
+        if (!slot || lead <= 0) return []
+        if (!isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) return []
+        return [[slot.cellId, { cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }] as const]
+      })).values()]
+    : []
+
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
@@ -1774,6 +1787,17 @@ export function TargetAudioLane({
           </div>
         )
       })}
+      {leadGaps.map(({ cellId, leftPx, widthPx }) => (
+        <AppTooltip key={`lead-${cellId}`} content={t("editor.timeline.takeLeadPause")}>
+          <div
+            role="img"
+            aria-label={t("editor.timeline.takeLeadPause")}
+            data-testid={`tl-target-lead-${cellId}`}
+            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
+          />
+        </AppTooltip>
+      ))}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}

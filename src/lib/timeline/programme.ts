@@ -25,7 +25,7 @@
 
 import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { hasTiming, sortByLens } from "./derive"
-import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC } from "./lane-timing"
+import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
 /** A window on some clock, in seconds. */
@@ -51,8 +51,9 @@ export interface ProgrammeSlot {
   /** What the ORIGINAL's card is drawn at: its real audible length, or the
    *  whole verse when there is no original audio to be honest about. */
   cardLenSec: number
-  /** max(sourceLenSec, targetLenSec) — the verse's footprint. Every part of it
-   *  is covered by audio, which is what lets the clock run without skipping. */
+  /** max(sourceLenSec, targetLeadSec + targetLenSec) — the verse's footprint.
+   *  Every part of it is covered by audio (or by a pause someone left before
+   *  the take), which is what lets the clock run without skipping. */
   slotLenSec: number
   /**
    * Which side runs long enough to clock the slot, or null when neither side
@@ -81,7 +82,18 @@ export interface ProgrammeSlot {
    * Absent on every other slot.
    */
   standIn?: true
+  /**
+   * AQU-2204 (Sam, Oct 26): a PAUSE someone left before the take — the take
+   * was placed (or recorded) that far after its line's start. Following the
+   * recordings keeps it inside the line: the take starts this long into the
+   * slot, the slot is that much longer, and the timeline draws the pause
+   * lightly. Absent when the take starts on its line (or before it).
+   */
+  targetLeadSec?: number
 }
+
+/** A pause shorter than this is a placement wobble, not a pause. */
+export const MIN_TARGET_LEAD_SEC = 0.05
 
 export interface BuildProgrammeOptions {
   /**
@@ -183,13 +195,23 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     const targetWindow: Window | null =
       target && effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null
 
-    const audibleLenSec = Math.max(sourceLenSec, targetLenSec)
+    // AQU-2204: a pause someone left before the take stays inside its line.
+    // It is where the take was PLACED (its clip's start against the line's),
+    // never a head trim, which only removes the start of the recording. Only a
+    // whole take with a known length on a line with times can carry one — a
+    // split take's pieces sit end to end from the slot's start.
+    const leadGeom = !untimed && targetWindow && !split ? targetChipGeom(cell, att) : null
+    const rawLeadSec = leadGeom && typeof cell.startTime === "number" ? leadGeom.anchor - cell.startTime : 0
+    const targetLeadSec = rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0
+    const targetSpanSec = target ? targetLeadSec + targetLenSec : 0
+
+    const audibleLenSec = Math.max(sourceLenSec, targetSpanSec)
     // Nothing playable at all: keep the section's own length so its card is
     // still readable. Playback skips such a verse outright.
     const slotLenSec = audibleLenSec > 0 ? audibleLenSec : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
     const clock: ProgrammeSlot["clock"] =
       sourceWindow && targetWindow
-        ? targetLenSec > sourceLenSec
+        ? targetSpanSec > sourceLenSec
           ? "target"
           : "source"
         : sourceWindow
@@ -211,6 +233,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       targetWindow,
       ...(split ? { targetPieces: split.pieces } : {}),
       ...(untimed && !target ? { standIn: true as const } : {}),
+      ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
     }
     slots.push(slot)
     byCellId.set(cell.id, slot)

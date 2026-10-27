@@ -152,10 +152,13 @@ function audioFirstLayout(
         usingFallback: false,
       }
     }
+    // AQU-2204: a pause someone left before the take stays inside its line,
+    // so the take starts that far into the slot.
+    const start = slot.startSec + (slot.targetLeadSec ?? 0)
     return {
-      anchor,
-      start: slot.startSec,
-      end: slot.startSec + slot.targetLenSec,
+      anchor: start - trimStartSec,
+      start,
+      end: start + slot.targetLenSec,
       trimStartSec,
       trimEndSec,
       durationSec,

@@ -1080,3 +1080,26 @@ describe("audio-first transport — a file with no times (AQU-2204)", () => {
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "t1" })
   })
 })
+
+// AQU-2204 (Sam, Oct 26): following the recordings, a pause someone left
+// before a take is waited out — the timeline draws it inside the line.
+describe("audio-first transport — a pause before the take (AQU-2204)", () => {
+  it("waits out the pause in silence, then plays the take from its start", async () => {
+    const takeId = "audio-v1-1700000000-take.webm"
+    const paused = {
+      id: "v1", fileId: "f1", medium: "media", startTime: 0, endTime: 4,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "http://audio.test/v1.webm", durationMs: 2_000, targetOffsetMs: 300 } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([paused]), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+    expect(dubEl("v1")?.paused ?? true).toBe(true)
+
+    await new Promise((r) => setTimeout(r, 450))
+    await settle()
+    expect(dubEl("v1")!.paused).toBe(false)
+    expect(getQueueProgress().currentTime).toBeGreaterThanOrEqual(0.29)
+  })
+})

@@ -64,9 +64,9 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     const file = summary!.files[0].metrics
     expect(file.completion_pct).toBeLessThanOrEqual(100)
     expect(summary!.project.completion_pct).toBeLessThanOrEqual(100)
-    // The denominator still describes the file; the numerators are empty
-    // rather than another lane's work.
-    expect(file.total_count).toBe(10)
+    // Each language owes the file's 10 lines; the numerators are empty rather
+    // than another lane's work.
+    expect(file.total_count).toBe(20)
     expect(file.filled_count).toBe(0)
     expect(file.validated_count).toBe(0)
     expect(file.completion_pct).toBe(0)
@@ -160,6 +160,29 @@ describe("Monday metrics — pre-backfill file-counter fallback (AQU-1620)", () 
     expect(file.total_count).toBe(20)
     expect(file.filled_count).toBe(5)
     expect(file.completion_pct).toBe(25)
+  })
+
+  // A language added after the file was last recomputed has no row for it
+  // yet. It still owes every line: the board's total read one language's
+  // worth short for every such file, on a real two-language project 3,131
+  // lines under what the two languages owe.
+  it("counts a language with no row for the file as owing all of it", async () => {
+    await seedProject("proj-7")
+    await seedFallbackFile("proj-7", { cellCount: 10, filledCount: 14, approvedCount: 12 })
+    await seedTargetLanes("proj-7", ["", "French"])
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress
+         (project_id, file_id, scope, section_key, lane_id, total_count, filled_count, updated_at)
+       VALUES ('proj-7', 'f1', 'file', '', 'lane0', 10, 4, 0)`,
+    ).run()
+
+    const summary = await computeProjectMetrics(env.AQUILLA_PG, "proj-7")
+
+    const file = summary!.files[0].metrics
+    expect(file.total_count).toBe(20)
+    expect(file.filled_count).toBe(4)
+    expect(file.completion_pct).toBe(20)
+    expect(summary!.project.total_count).toBe(20)
   })
 
   it("leaves an archived lane's progress row out of the sum", async () => {

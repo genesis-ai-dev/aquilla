@@ -363,8 +363,9 @@ export async function computeProjectMetrics(
   // lane's work, so they stand; with two or more the sum is partly another
   // lane's work, so the numerators are empty rather than wrong. None yet
   // counts as one and an archived lane still counts, because both are what
-  // the counters already added up. The denominator is `files.cell_count`
-  // either way. A project with progress rows never reaches this.
+  // the counters already added up. With two or more, each active language
+  // missing a row adds `files.cell_count` to the total (see the file loop).
+  // A file with progress rows never reaches the counters.
   const laneCountRow = await db
     .prepare("SELECT COUNT(*) AS target_lanes FROM lanes WHERE project_id = ? AND role = 'target'")
     .bind(projectId)
@@ -499,12 +500,13 @@ export async function computeProjectMetrics(
 
   const languagesResult = await db
     .prepare(
-      `SELECT name, language, role FROM lanes
+      `SELECT id, name, language, role FROM lanes
         WHERE project_id = ? AND role = 'target' AND archived_at IS NULL
         ORDER BY position, id`,
     )
     .bind(projectId)
-    .all<{ name: string | null; language: string | null; role: "target" }>()
+    .all<{ id: string; name: string | null; language: string | null; role: "target" }>()
+  const activeLaneIds = (languagesResult.results ?? []).map((l) => l.id)
 
   let activeContributors = 0
   let daysSinceActivity: number | null = null
@@ -583,8 +585,10 @@ export async function computeProjectMetrics(
 
   for (const file of files) {
     const laneRows = progressByFile.get(file.id) ?? []
+    const less = (n: unknown) => (countStructural ? 0 : Number(n) || 0)
+    const fileTotal = Math.max(0, (Number(file.cell_count) || 0) - less(file.structural_cell_count))
     let totals: EntityTotals
-    if (laneRows.length > 0) {
+    if (laneRows.length > 0 || !singleLane) {
       totals = { total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0, headline: 0, started: 0 }
       for (const lane of laneRows) {
         const delivers = parseLaneDelivers(lane.delivers)
@@ -614,23 +618,31 @@ export async function computeProjectMetrics(
         totals.headline! += measure.headline
         totals.started! += measure.started
       }
+      // A language owes every line of every file, whether or not the
+      // projection has written its row for this file yet: rows appear when a
+      // file is next recomputed, so a language added after a file was last
+      // touched has none for it. Each such language adds the file's lines to
+      // the total and nothing done. This used to add a file with no rows once
+      // in all, however many languages owed it, and one with some rows not at
+      // all for the languages missing — a two-language project read 3,131
+      // lines short of its 2 × 73,715.
+      const missing = activeLaneIds.filter((id) => !laneRows.some((row) => row.lane_id === id)).length
+      totals.total += missing * fileTotal
+      // No active language at all: the file still counts once.
+      if (laneRows.length === 0 && activeLaneIds.length === 0) totals.total += fileTotal
     } else {
       // Pre-backfill fallback: file counters (approved ≈ validated), and only
       // on a single-lane project — see `singleLane` above.
-      const less = (n: unknown) => (countStructural ? 0 : Number(n) || 0)
-      const total = Math.max(0, (Number(file.cell_count) || 0) - less(file.structural_cell_count))
-      totals = singleLane
-        ? {
-            total,
-            filled: Math.max(0, (Number(file.filled_count) || 0) - less(file.structural_filled_count)),
-            validated: Math.max(
-              0,
-              (Number(file.approved_count) || 0) - less(file.structural_approved_count),
-            ),
-            audioValidated: 0,
-            hasAudio: 0,
-          }
-        : { total, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
+      totals = {
+        total: fileTotal,
+        filled: Math.max(0, (Number(file.filled_count) || 0) - less(file.structural_filled_count)),
+        validated: Math.max(
+          0,
+          (Number(file.approved_count) || 0) - less(file.structural_approved_count),
+        ),
+        audioValidated: 0,
+        hasAudio: 0,
+      }
     }
     projectTotals.total += totals.total
     projectTotals.filled += totals.filled

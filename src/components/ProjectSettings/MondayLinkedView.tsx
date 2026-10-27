@@ -42,7 +42,7 @@ export type SyncLinkSummary = Pick<
   "enabled" | "structureStale" | "lastPushedAt" | "lastPushStatus" | "lastPushError"
 > &
   Partial<Pick<MondayBoardLink, "boardId" | "boardName" | "boardUrl">> & {
-    config: { columns: MondayColumnMapping[]; itemGranularity: string }
+    config: { columns: MondayColumnMapping[]; itemGranularity: string; fileSubitems?: unknown }
   }
 
 export function MondayLinkedView({
@@ -75,6 +75,7 @@ export function MondayLinkedView({
   mappingCopy = MONDAY_MAPPING_COPY,
   profile = MONDAY_COLUMN_PROFILE,
   idPrefix = "monday",
+  fileSubitems,
 }: {
   link: SyncLinkSummary
   structure: MondayBoardStructure | null
@@ -113,9 +114,13 @@ export function MondayLinkedView({
   profile?: ColumnProfile
   /** Prefix of element ids and test ids ("monday" by default). */
   idPrefix?: string
+  /** Monday's "Files as subitems" switch (one item per project only); absent hides it. */
+  fileSubitems?: { toggling: boolean; onToggle: (on: boolean) => void }
 }) {
   const { t } = useI18n()
   const showNewColumns = canManage && newColumns.length > 0
+  const perProject = link.config.itemGranularity !== "file"
+  const subitemsOn = perProject && link.config.fileSubitems != null
   const shown = target ?? {
     name: link.boardName ?? link.boardId ?? "",
     url: link.boardUrl ?? structure?.url ?? null,
@@ -191,9 +196,11 @@ export function MondayLinkedView({
           )}
           <p className="text-xs text-muted-foreground">
             {granularityLabel ??
-              t("projectSettings.monday.oneItemPerLabel", {
-                granularity: link.config.itemGranularity === "file" ? "file" : "project",
-              })}
+              (subitemsOn
+                ? t("projectSettings.monday.oneItemWithSubitemsLabel")
+                : t("projectSettings.monday.oneItemPerLabel", {
+                    granularity: perProject ? "project" : "file",
+                  }))}
             {" "}
             {link.lastPushedAt ? (
               <RichMessage
@@ -246,6 +253,23 @@ export function MondayLinkedView({
         </div>
       </div>
       {syncNotice && <p className="text-sm text-muted-foreground">{syncNotice}</p>}
+
+      {fileSubitems && perProject && (
+        <div className="flex items-start justify-between gap-3" data-testid={`${idPrefix}-file-subitems`}>
+          <div className="space-y-0.5">
+            <FieldLabel htmlFor={`${idPrefix}-file-subitems`} className="text-sm">
+              {t("projectSettings.monday.fileSubitemsLabel")}
+            </FieldLabel>
+            <p className="text-xs text-muted-foreground">{t("projectSettings.monday.fileSubitemsDescription")}</p>
+          </div>
+          <Switch
+            id={`${idPrefix}-file-subitems`}
+            checked={subitemsOn}
+            onCheckedChange={fileSubitems.onToggle}
+            disabled={!canManage || fileSubitems.toggling}
+          />
+        </div>
+      )}
 
       <div className="space-y-2">
         <p className="text-sm font-medium">{t(copy.mappingLabel)}</p>

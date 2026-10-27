@@ -25,7 +25,7 @@ import {
   sameAudioProgressCellIds,
   type AudioProgressCellIds,
 } from "@/lib/progress/audio-progress-cells"
-import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
+import { deriveMilestoneNavigation, milestoneAcceptsHandSetSection, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
@@ -978,6 +978,30 @@ export class CellStore {
     if (!cellId) return ""
     this.ensureDerivedIndexes()
     return this.sectionLabelById.get(cellId) ?? ""
+  }
+
+  /**
+   * AQU-2185: the cells where "Start a section here" may be offered — those
+   * whose CURRENT division the app made up ("Part N", a 5-minute bucket, an AI
+   * section) or that a hand-set section already covers, so a second marker can
+   * split one.
+   *
+   * Read off the navigation index rather than from the rows, deliberately: the
+   * answer must be the one the navigator is showing. A cell's own metadata
+   * cannot give it — whether a division came out of the file is a property of
+   * the stretch the cell landed in, which only the derivation knows.
+   *
+   * Empty on a file whose every division came out of the file, which is the
+   * answer that takes the entry off a Scripture file's menu.
+   */
+  getCellIdsWhereSectionMayStart(): ReadonlySet<string> {
+    this.ensureDerivedIndexes()
+    const ids = new Set<string>()
+    for (const entry of this.navIndex) {
+      if (!milestoneAcceptsHandSetSection(entry.kind)) continue
+      for (const cellId of entry.cellIds) ids.add(cellId)
+    }
+    return ids
   }
 
   getNavigationIndex(displayCellIds?: readonly string[]): readonly CellNavigationEntry[] {
@@ -2274,6 +2298,44 @@ export class CellStore {
     return previous
   }
 
+  /**
+   * AQU-2185: optimistic "Start a section here" / clear. Returns the PREVIOUS
+   * label (`null` when the cell was unmarked) so the caller can put it back if
+   * the server refuses, and `undefined` when there was no source row to patch —
+   * nothing was done, so nothing needs rolling back.
+   *
+   * `undefined` rather than `null` for "no row" because `null` is a real
+   * previous value here: it is what an unmarked cell had, and a rollback to it
+   * is what clears a section the server rejected.
+   *
+   * Sets a freshness floor like every other optimistic path: without one, a
+   * correcting read already in flight lands the pre-marker row and the division
+   * flickers back to "Part 3" for a beat before the confirming read arrives.
+   *
+   * Source row only — the label lives there, and `getNavigationStructure` reads
+   * it from there.
+   */
+  applyOptimisticCellMilestone(cellId: string, label: string | null): string | null | undefined {
+    const source = this.sourceById.get(cellId)
+    if (!source) return undefined
+    const next = label?.trim() ? label.trim() : null
+    const previous = source.milestoneLabel ?? null
+    if (previous === next) return previous
+    this.freshnessFloors.set(cellId, ++this.writeSeq)
+    this.sourceById.set(cellId, {
+      ...source,
+      milestoneLabel: next === null ? undefined : next,
+    })
+    // The division comes from the navigation structure, which is rebuilt here —
+    // no row left or joined the display list, so unlike the park above there is
+    // no hidden-id set to recollect.
+    this.rebuildDerivedIndexes()
+    this.bumpCells([cellId])
+    this.fileVersion++
+    this.emit([cellId])
+    return previous
+  }
+
   /** Bulk version of applyOptimisticTargetEdit. Stamps optimistic shadows for
    *  every cell in the batch and rebuilds derived indexes + emits ONCE at the
    *  end, instead of once per cell (O(N) not O(N²)). Used by the bulk-import
@@ -2399,6 +2461,12 @@ export class CellStore {
       // Without it the percentage stayed put until the next reload, which is the
       // thing this slice promises not to happen.
       && previousSource.hidden === source.hidden
+      // AQU-2185: and the same trap for a hand-set section — a row whose ONLY
+      // change is its label re-divides the whole file from that cell down, so it
+      // cannot take the "unchanged" branch. `replaceRows` deep-compares and gets
+      // this for free; this per-cell path is the one a collaborator's marker
+      // actually arrives on.
+      && (previousSource.milestoneLabel ?? null) === (source.milestoneLabel ?? null)
       && navigationStartMs(previousSource, previousTarget) === navigationStartMs(source, target)
       && sameJsonData(previousSource.metadata ?? previousTarget.metadata ?? null, source.metadata ?? target.metadata ?? null)
       && countNumericFootnotes(previousTarget.value) === countNumericFootnotes(target.value)
@@ -2868,6 +2936,11 @@ export class CellStore {
         && previous.canonicalRef === (target?.canonicalRef ?? source?.canonicalRef ?? null)
         && previous.startMs === startMs
         && previous.metadata === (source?.metadata ?? target?.metadata ?? null)
+        // AQU-2185: a hand-set section is a NAVIGATION INPUT, so marking,
+        // renaming or clearing one has to miss this cache. Left out, the
+        // structure would be served from the cache and the new division would
+        // not appear until something else about the file changed.
+        && previous.milestoneLabel === (source?.milestoneLabel ?? null)
     })) return cached.derived
     this.work.navigationStructureRebuilds++
     this.work.cellsWalked += ids.length
@@ -2881,6 +2954,10 @@ export class CellStore {
         canonicalRef: target?.canonicalRef ?? source?.canonicalRef ?? null,
         startMs: navigationStartMs(source, target),
         metadata: source?.metadata ?? target?.metadata ?? null,
+        // AQU-2185: the SOURCE row's label and never the target's — a division
+        // belongs to the file every lane shares, and a target row created after
+        // the marker carries none of its own.
+        milestoneLabel: source?.milestoneLabel ?? null,
       }
     })
     const derived = deriveMilestoneNavigation(cells)

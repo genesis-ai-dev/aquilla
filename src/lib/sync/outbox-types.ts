@@ -31,6 +31,13 @@ export type OutboxEventKind =
   // and no lane's translation goes stale. Hiding is per CELL, not per lane,
   // which is why one source-side kind covers every language.
   | "source.cell.visibility.set"
+  // AQU-2185: name a navigator division of your own, starting at this cell
+  // ("Start a section here"), or clear the one that is there. Non-chain-mutating
+  // for the same reason hiding is — it moves ONLY cells.milestone_label on the
+  // shared source row, so no lane's translation goes stale. A division belongs
+  // to the file every lane shares, which is why one source-side kind covers
+  // every language.
+  | "source.cell.milestone.set"
   // AQU-1767 phase 2: undo a removal — restore the cell as the removal found it.
   | "source.cell.restore"
   // Target-side cell events (translator).
@@ -211,6 +218,15 @@ export interface OutboxEventPayloads {
   "source.cell.visibility.set": {
     /** true parks the cell (stamps hidden_at), false brings it back (NULL). */
     hidden: boolean
+  }
+  "source.cell.milestone.set": {
+    /**
+     * AQU-2185: the section name, exactly as the person typed it, or `null` to
+     * clear the marker and let the file's own divisions (or the app-made ones)
+     * stand again. Empty and whitespace-only are refused server-side rather
+     * than quietly treated as a clear — "" is a mis-send, and a clear says so.
+     */
+    label: string | null
   }
   "source.cell.restore": {
     /** The removal to undo; absent = the cell's newest unrestored removal. */

@@ -216,6 +216,14 @@ export const IMPORT_MILESTONE_KINDS = [
   // guess can filter it out, without a parallel boolean that older persisted
   // envelopes would be missing.
   "ai-section",
+  // AQU-2185: a division a person named themselves with "Start a section here",
+  // carried on the cell's own `milestone_label` column rather than in the import
+  // envelope the other kinds come from. It is in this union because every
+  // navigator consumer reads `ImportMilestone`, not because a parser ever emits
+  // one — `readImportMilestone` will never see it in a persisted envelope, and
+  // an importer that did write it would be writing a person's decision into
+  // file provenance.
+  "hand-set",
 ] as const
 
 export type ImportMilestoneKind = (typeof IMPORT_MILESTONE_KINDS)[number]

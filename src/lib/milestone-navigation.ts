@@ -33,6 +33,18 @@ export interface MilestoneNavigationCell {
   canonicalRef?: string | null
   startMs?: number
   metadata?: Record<string, unknown> | null
+  /**
+   * AQU-2185: the name a person gave a division starting at this cell with
+   * "Start a section here" (`cells.milestone_label`, source row only).
+   *
+   * Deliberately NOT inside `metadata`: that bucket is the import envelope, and
+   * a re-import replaces it wholesale, so a section stored there would vanish
+   * the next time the file was brought in. It is also not a persisted
+   * `ImportMilestone` — the division is DERIVED from this label on every read
+   * (`applyHandSetSections` below), which is what keeps it correct when the
+   * divisions around it change.
+   */
+  milestoneLabel?: string | null
 }
 
 export interface DerivedMilestoneNavigation {
@@ -148,7 +160,20 @@ export function deriveMilestoneNavigation(
   // when the overlay is off or has no answers the inherited identity stands.
   // Scripture mode ignored `part` seeds before AQU-1164 too, so it is left out.
   const inheritedPart = (index: number) => !scriptureMode && rawSeeds[index]?.kind === "part"
-  applyAiSections(cells, resolved, options, inheritedPart)
+
+  // AQU-2185: a person's own divisions go on BEFORE the AI overlay, and that
+  // order is the whole of "the AI-section overlay never re-cuts a hand-set
+  // section": the overlay only ever replaces `part` and `time-range` runs, and
+  // a stretch this has claimed carries neither kind any more. `handSetCovered`
+  // closes the one remaining door — a claimed cell whose RAW seed was a
+  // persisted `part`, which `inheritedPart` would otherwise still offer up.
+  const handSetCovered = applyHandSetSections(cells, resolved)
+  applyAiSections(
+    cells,
+    resolved,
+    options,
+    (index) => !handSetCovered.has(index) && inheritedPart(index),
+  )
 
   const milestoneByCellId = new Map<string, ImportMilestone>()
   const groups = new Map<string, {
@@ -205,6 +230,75 @@ export function cellIdsForMilestonePage(
 }
 
 /**
+ * Put a person's own divisions in place of the app-invented ones, in place.
+ * Returns the indices a hand-set section now covers.
+ *
+ * AQU-2185. A marked cell starts a new top-level division that runs until the
+ * next marker or the next division the FILE supplied, replacing the app-made
+ * divisions across that stretch — the way adding a heading would. So:
+ *
+ *   - App-made divisions BEFORE the first marker are untouched. "Part 2" simply
+ *     ends just above the marked cell, and the "Part 3" that used to follow is
+ *     gone, because the hand-set section swallowed its cells.
+ *   - A second marker further down SPLITS the first section there, because the
+ *     walk starts a fresh division whenever it meets one.
+ *   - A division the file supplied is never moved or removed. Meeting one ends
+ *     the hand-set run, and a label found ON a file-supplied cell is IGNORED
+ *     here: inside those, a marker becomes a sub-entry, which is AQU-2190's
+ *     slice and not offered by this one's menu. Ignoring it rather than
+ *     honouring it is what keeps a Scripture file's chapters exactly as they
+ *     were even if a label reaches such a cell by some other route.
+ *
+ * "File-supplied" is read off the resolved kind rather than from a list of
+ * parsers, so it stays true as formats are added: `part` and `time-range` are
+ * the two kinds the app makes up when a file offers nothing, and everything
+ * else came out of the file. That is the same predicate the AI overlay uses,
+ * and for the same reason.
+ */
+function applyHandSetSections(
+  cells: readonly MilestoneNavigationCell[],
+  resolved: ImportMilestone[],
+): ReadonlySet<number> {
+  const covered = new Set<number>()
+  let active: ImportMilestone | undefined
+
+  for (let index = 0; index < cells.length; index += 1) {
+    // A division out of the file closes whatever section was running: a
+    // hand-set section may not straddle one.
+    if (!isAppInventedKind(resolved[index]?.kind)) {
+      active = undefined
+      continue
+    }
+    const label = cells[index]?.milestoneLabel?.trim()
+    if (label) active = handSetMilestone(cells[index].id, label)
+    if (!active) continue
+    resolved[index] = active
+    covered.add(index)
+  }
+
+  return covered
+}
+
+function handSetMilestone(cellId: string, label: string): ImportMilestone {
+  return {
+    // Keyed by the cell the person marked, so the division's identity is the
+    // marker rather than its name: renaming it (AQU-2186) keeps the navigator
+    // selection, and two sections may legitimately share a name.
+    key: `handset:${cellId}`,
+    kind: "hand-set",
+    // Shown EXACTLY as typed — a section name is content, not UI vocabulary, so
+    // it is neither translated nor title-cased here. Not truncated either: the
+    // picker is the one place that knows how much room it has.
+    label,
+    // The same badge a section read out of the file gets. The two are the same
+    // thing to a reader — a named stretch of the file — and the kind, not the
+    // badge, is what carries the difference for anything that must tell them
+    // apart.
+    shortLabel: "§",
+  }
+}
+
+/**
  * Replace app-invented divisions with AI sections, in place.
  *
  * Works run by run rather than over the whole file: a file can be part
@@ -241,6 +335,30 @@ function applyAiSections(
 /** Divisions the app made up when the file offered none. */
 function isAppInventedKind(kind: ImportMilestoneKind | undefined): boolean {
   return kind === "part" || kind === "time-range"
+}
+
+/**
+ * AQU-2185: may "Start a section here" be offered on a cell sitting in a
+ * division of this kind?
+ *
+ * The UI gate and {@link applyHandSetSections} must agree, so the rule lives
+ * here once rather than as a kind list in a menu. True for every division the
+ * APP made up, false for every division read out of the FILE — inside those, a
+ * marker becomes a sub-entry (AQU-2190), which this slice does not offer.
+ *
+ * `ai-section` is in the list and `isAppInventedKind` does not mention it, which
+ * looks like a disagreement and is not: the overlay runs AFTER
+ * `applyHandSetSections`, so that function can never meet one, while this gate
+ * reads the FINAL kind a reader is looking at — and an AI-cut section is as
+ * app-made as the "Part N" it replaced.
+ *
+ * `hand-set` is in the list too, so a second marker further down splits a
+ * section that is already hand-set.
+ */
+export function milestoneAcceptsHandSetSection(
+  kind: ImportMilestoneKind | undefined,
+): boolean {
+  return isAppInventedKind(kind) || kind === "ai-section" || kind === "hand-set"
 }
 
 function replaceRun(
@@ -475,6 +593,13 @@ function milestone(value: unknown): ImportMilestone | undefined {
   return { key, kind, label, shortLabel }
 }
 
+/**
+ * Which kinds may arrive in a PERSISTED import envelope. `"hand-set"` is
+ * deliberately absent: AQU-2185's divisions are a person's decision carried on
+ * `cells.milestone_label` and derived on every read, never file provenance, so
+ * an envelope claiming one was written by something that had no business
+ * writing it and is rejected here like any other unknown kind.
+ */
 function isMilestoneKind(value: string | undefined): value is ImportMilestoneKind {
   return value === "chapter"
     || value === "chapter-range"

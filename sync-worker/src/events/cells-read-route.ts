@@ -127,6 +127,10 @@ interface CellRowRaw {
    *  on the shared source row — see the column comment in db/postgres/schema.sql.
    *  Absent on a pre-0112 database or a hand-built fixture. */
   hidden_at?: number | null
+  /** AQU-2185: the hand-set navigator-section name, NULL when unmarked. Source
+   *  row only — see the column comment in db/postgres/schema.sql. Absent on a
+   *  pre-0188 database or a hand-built fixture. */
+  milestone_label?: string | null
 }
 
 interface CellRowOut {
@@ -164,6 +168,12 @@ interface CellRowOut {
    * row; consumers resolve a cell's visibility from there.
    */
   hidden?: boolean
+  /**
+   * AQU-2185: the name a person gave a navigator division starting at this cell.
+   * OMITTED (not `null`) on an unmarked row, for the same reason `hidden` above
+   * is. Source row only — a division belongs to the file every lane shares.
+   */
+  milestoneLabel?: string
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -227,6 +237,10 @@ function mapRow(row: CellRowRaw): CellRowOut {
     // Absent, not `false`, on a visible row — keeps this shape identical to
     // cell-row-serialize.ts's (guarded by the by-ids byte-identity test).
     ...(row.hidden_at != null ? { hidden: true as const } : {}),
+    // Likewise absent, not `null`, on an unmarked row.
+    ...(row.milestone_label != null && row.milestone_label !== ''
+      ? { milestoneLabel: row.milestone_label }
+      : {}),
   }
 }
 
@@ -878,7 +892,7 @@ export async function handleCellsReadRequest(
     `cells.cell_id, cells.side, COALESCE(wl.legacy_tag, '') AS target_lang, cells.value, cells.value_html, cells.type, cells.canonical_ref, cells.anchor_cell_id, ` +
     "cells.event_id, cells.source_event_id, cells.last_editor, cells.last_edit_at, cells.validated, cells.ai_drafted, cells.ai_draft, cells.word_count, " +
     "cells.endorsement_count, cells.start_ms, cells.end_ms, " +
-    `cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, ${cellMetadataWireSql("cells")} AS metadata, cells.lane_id, cells.hidden_at`
+    `cells.medium, cells.sequence_index, cells.transcription, cells.camera_state, ${cellMetadataWireSql("cells")} AS metadata, cells.lane_id, cells.hidden_at, cells.milestone_label`
 
   // Per-cell fast path: when `cellIds=a,b,c` is present we skip chain walking
   // and just return matching rows. Used by the WS-triggered single-cell

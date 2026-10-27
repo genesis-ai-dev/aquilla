@@ -141,6 +141,17 @@ export interface CellRow {
    * survive) has no flag of its own.
    */
   hidden?: boolean
+  /**
+   * AQU-2185: the name a person gave a navigator division starting at this cell
+   * ("Start a section here"). Absent on a cell nobody has marked — the server
+   * omits the key rather than sending `null` on every one of a Bible file's 30k
+   * rows.
+   *
+   * ONLY THE SOURCE ROW CARRIES IT, for the same reason `hidden` above does: a
+   * division belongs to the file every lane shares, not to one translation, so a
+   * target row created after the marker has no label of its own to read.
+   */
+  milestoneLabel?: string
 }
 
 /** Primary content kind of a segment. */

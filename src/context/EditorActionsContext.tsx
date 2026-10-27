@@ -189,6 +189,28 @@ export interface EditorActionsContextValue {
    * live-linked nor DCS-pinned).
    */
   onSetCellHidden?: (cellId: string, hidden: boolean) => void
+  /**
+   * AQU-2185: open the "Start a section here" dialog for this cell. The
+   * workspace owns the dialog and the emit, so the menu entry only says which
+   * cell was asked about.
+   *
+   * Passed unconditionally, like `onSetCellHidden` above — the role gate is
+   * applied in the row, where the per-cell DCS / live-linked reasons already
+   * live.
+   */
+  onStartSection?: (cellId: string) => void
+  /**
+   * AQU-2185: the cells where that entry may be offered — those whose current
+   * division the app made up ("Part N", a 5-minute bucket, an AI section) or
+   * that a hand-set section already covers.
+   *
+   * A SET for the whole file rather than a per-cell flag on the row, because
+   * the answer is not a property of the cell: whether a division came out of
+   * the file is a property of the stretch the cell landed in, which only the
+   * navigation derivation knows. Absent while the navigation has not been
+   * derived yet, which reads as "not here" and is the safe way round.
+   */
+  sectionStartCellIds?: ReadonlySet<string>
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

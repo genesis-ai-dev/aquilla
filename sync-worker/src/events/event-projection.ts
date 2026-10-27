@@ -1033,6 +1033,56 @@ export function buildEventProjectionStmts(
       return ['cells', 'files']
     }
 
+    case 'source.cell.milestone.set': {
+      const p = event.payload as EventPayloads['source.cell.milestone.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // `null` clears the marker. A string sets it — but an empty or
+      // whitespace-only one is a MIS-SEND, not a clear: the dialog refuses to
+      // save one, so an event carrying it came from something that skipped the
+      // dialog, and silently turning it into a clear would delete a section
+      // nobody asked to remove.
+      if (p.label !== null && (typeof p.label !== 'string' || p.label.trim() === '')) {
+        throw new Error(
+          `${event.kind} event ${event.id} requires payload.label to be a non-blank string or null`,
+        )
+      }
+      // AQU-2185: set (or clear) the name of ONE hand-set navigator division.
+      // Non-chain-mutating by design, exactly as source.cell.visibility.set is:
+      // it moves only `milestone_label` and never advances `cells.event_id`,
+      // because naming a division says nothing about whether the cell's text
+      // changed and must NOT make every lane's translation go stale (AD-9
+      // compares the target's pin against the source head). It replays
+      // unconditionally on rebuild in seq order, so the last set/clear wins.
+      //
+      // Written to the SHARED SOURCE ROW ONLY. A division is a property of the
+      // file every lane shares, not of one translation: every consumer resolves
+      // a cell's section from this one row, so a target row created AFTER the
+      // marker needs no label of its own.
+      //
+      // No file-counter recompute, and that is the difference from the hide
+      // above: a hidden cell stops being work, while a named section only
+      // re-groups cells that were already counted. The file's totals are
+      // unchanged, and the navigator's per-division figures are derived
+      // client-side from the same rows.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET milestone_label = ?
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source'`,
+          )
+          .bind(
+            p.label === null ? null : p.label.trim(),
+            event.projectId,
+            event.fileId,
+            event.cellId,
+          ),
+      )
+      return ['cells']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']

@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   Blocks,
+  Bookmark,
   BookOpenText,
   CloudOff,
   Quote,
@@ -3867,6 +3868,15 @@ function CellSourceMenu({
   hidden,
   onToggleHidden,
   hiddenDisabledReason,
+  /** AQU-2185: name a navigator division of your own, starting at this cell.
+   *  Hidden entirely (not disabled) for anyone below the source-edit gate, and
+   *  on a cell sitting in a division the FILE supplied — exactly as the park
+   *  entry above is hidden, and for the same two reasons: a reader must not
+   *  learn that sections can be set, and an action that is inapplicable to this
+   *  cell for a reason that cannot change while you are in the file is
+   *  furniture, not an explanation. */
+  onStartSection,
+  startSectionDisabledReason,
 }: {
   cellId: string
   onInsertBelow?: () => void
@@ -3886,6 +3896,9 @@ function CellSourceMenu({
   /** AQU-1422: park it / bring it back. Absent ⇒ not offered at all. */
   onToggleHidden?: () => void
   hiddenDisabledReason?: string | null
+  /** AQU-2185: open the name dialog. Absent ⇒ not offered at all. */
+  onStartSection?: () => void
+  startSectionDisabledReason?: string | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -3897,11 +3910,16 @@ function CellSourceMenu({
   // source-edit permission rather than on the add/remove tier, so it is its own
   // flag rather than another term in `structural`.
   const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
+  // AQU-2185: its own flag for the same reason `parkable` is one — it sits with
+  // the structural block (it changes how the file is divided, not what a cell
+  // says) but is gated on the source-edit permission rather than the
+  // add/remove tier.
+  const sectionable = onStartSection !== undefined || Boolean(startSectionDisabledReason)
   // Nothing to offer at all: no menu. This is the PROJECT-level case the
   // corner already handled by not rendering — the tier does not admit you, or
   // the source is mirrored from upstream. Those never change while you are in
   // the file, so a permanently dead button would be furniture.
-  if (!structural && !parkable && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
+  if (!structural && !parkable && !sectionable && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
 
   return (
     <>
@@ -3958,8 +3976,17 @@ function CellSourceMenu({
               onSelect={() => setTimesOpen(true)}
             />
           )}
-          {(structural || parkable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
+          {(structural || parkable || sectionable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
             <DropdownMenuSeparator />
+          )}
+          {sectionable && (
+            <RowInsertItem
+              testId="cell-menu-start-section"
+              icon={<Bookmark className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.row.startSection")}
+              reason={startSectionDisabledReason}
+              onSelect={onStartSection}
+            />
           )}
           {parkable && (
             <RowInsertItem
@@ -5672,6 +5699,7 @@ function EditorRow({
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
+    onStartSection, sectionStartCellIds,
     timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -5995,6 +6023,36 @@ function EditorRow({
   const cellHidden = cell.hidden === true
   const onToggleHidden = mayParkCells && canEditSource && onSetCellHidden
     ? () => onSetCellHidden(cell.id, !cellHidden)
+    : undefined
+
+  /**
+   * AQU-2185: may this person start a division of their own HERE?
+   *
+   * Three conditions, and the first two are different kinds of "no":
+   *
+   *   - the ROLE gate, read from the same table the emitter and the server
+   *     enforce, so the entry and the write cannot disagree. Below it the entry
+   *     is ABSENT, not disabled — a reader must not learn that sections can be
+   *     set, the same call `mayParkCells` above makes for hiding;
+   *   - WHERE THE CELL SITS. Inside a division the file supplied (a Scripture
+   *     chapter, a heading section, a slide) a marker would become a sub-entry,
+   *     which is AQU-2190's slice; this one does not offer it there. Absent
+   *     rather than disabled again, because this cannot change while you are in
+   *     the file — the menu's house rule is that a disabled entry explains an
+   *     inapplicable action, not one that is inapplicable forever;
+   *   - the DCS / live-linked pin, which IS explained, because it is the same
+   *     refusal Edit text and Hide cell already explain on that row.
+   *
+   * `sectionStartCellIds` is computed once for the file from the navigation the
+   * navigator itself is showing — a cell cannot answer this from its own row,
+   * because whether a division came out of the file is a property of the
+   * stretch the cell landed in.
+   */
+  const maySetSections = canPerform("source.cell.milestone.set", project.syncRole?.level ?? null)
+  const sectionMayStartHere = maySetSections && sectionStartCellIds?.has(cell.id) === true
+  const startSectionDisabledReason = canEditSource ? null : sourceReadOnlyReason
+  const onStartSectionHere = sectionMayStartHere && canEditSource && onStartSection
+    ? () => onStartSection(cell.id)
     : undefined
 
   // AQU-1068 item 5: the source cell's menu. The row's own reasons arrived as
@@ -8475,6 +8533,13 @@ function EditorRow({
               hidden={cellHidden}
               onToggleHidden={onToggleHidden}
               hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
+              // AQU-2185: same shape as the park entry beside it — the action is
+              // the gate (absent ⇒ no entry at all), and the reason is the DCS
+              // pin's, shown only to someone who would otherwise have the entry.
+              onStartSection={onStartSectionHere}
+              startSectionDisabledReason={
+                sectionMayStartHere && onStartSection ? startSectionDisabledReason : null
+              }
             />
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
                 mirrors the target column's header lane, and that mirror is what

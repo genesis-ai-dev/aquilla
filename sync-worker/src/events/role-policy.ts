@@ -72,6 +72,13 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // because re-import, DCS repair and diarization all emit them through a
   // user's own outbox, and nothing emits this but a person choosing it.
   'source.cell.visibility.set': ROLE.PROJECT_LEAD,
+  // AQU-2185: naming a section re-divides the file for EVERYONE, in every lane,
+  // and those divisions are how the team plans, assigns and reports on the work.
+  // Same class of decision as source.cell.commit and the hide above, so the
+  // same floor — and the floor is the SERVER's, not just the menu's: the UI
+  // hides the entry below this rank and this table is what refuses the event if
+  // one is sent on a contributor's behalf anyway.
+  'source.cell.milestone.set': ROLE.PROJECT_LEAD,
   // AQU-1767 phase 2: undoing a removal. The floor matches the delete it
   // reverses; authorize.ts adds the real rule — only the person who removed the
   // cell, or a maintainer, may put it back, and never through the external API.

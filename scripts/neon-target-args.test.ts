@@ -38,6 +38,12 @@ describe("neon-target hands the backfill its flags", () => {
     // rehearsal read-only; dropping either copies the wrong thing, for real.
     expect(childArgs("copy-dev-audio", ["--project", "p1", "--dry-run"]))
       .toEqual(["scripts/neon-copy-dev-audio.ts", "--project", "p1", "--dry-run"])
+    // AQU-2115: the nightly refresh passes the copy its budget and concurrency.
+    // Dropping them would let one run spend the whole job's wall clock.
+    expect(childArgs("copy-dev-audio-all", ["--budget-minutes", "240", "--concurrency", "4"]))
+      .toEqual(["scripts/neon-copy-dev-audio-all.ts", "--budget-minutes", "240", "--concurrency", "4"])
+    expect(childArgs("copy-dev-audio-all", ["--dry-run"]))
+      .toEqual(["scripts/neon-copy-dev-audio-all.ts", "--dry-run"])
   })
 
   it("still runs an unscoped backfill when nothing follows the command", () => {

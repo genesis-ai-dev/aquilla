@@ -82,6 +82,22 @@ what the nightly cleanup protects — the same reference queries, shared in
 (`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
 refuses any destination but the dev bucket and any database but the dev branch.
 
+**Audio follows the rows, as its own step.** The restore copies every audio row
+and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
+dev` step that runs the copy across every project with media, most recently
+active first (AQU-2115, `pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
+in the job on purpose: the restore has already succeeded by then, so a copy
+failure turns only that step red and `dev.aquilla.app` still shows the data the
+restore wrote. The first backfill (~561k objects / 167 GB) is bigger than one
+run, so each run takes a wall-clock budget (`DEV_AUDIO_COPY_BUDGET_MINUTES`),
+stops at a project boundary, and resumes on the next run — there is no cursor,
+only the rule that an object already in dev is never copied twice. Every run
+writes its counts to the run page's summary. Two dispatch inputs bracket it:
+`preflight_only` copies nothing, and `media_copy_only` copies without restoring
+(use it to push the backfill along during the day, or to re-run after a
+failure). Without `R2_ACCOUNT_ID` and the AQU-2113 copy key the step prints a
+`::warning` and skips, leaving the restore green.
+
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
 `wrangler deploy` therefore cannot target a production Worker. Production named

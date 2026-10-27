@@ -7,6 +7,10 @@ on:
         description: "Only verify NEON_API_KEY against the Neon API (read-only, restores nothing)"
         type: boolean
         default: false
+      media_copy_only:
+        description: "Skip the restore and only copy prod audio into the dev R2 bucket (AQU-2115 backfill)"
+        type: boolean
+        default: false
   schedule:
     # GitHub cron is UTC. These two schedules cover 4:07 a.m. Eastern during
     # daylight and standard time; the first step gates execution to the 4 a.m.
@@ -21,6 +25,9 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    # The audio copy below takes a wall-clock budget of its own (AQU-2115); the
+    # job has to outlive it, or Actions kills the step before it can report.
+    timeout-minutes: 350
     permissions:
       contents: read
     env:
@@ -33,6 +40,17 @@ jobs:
       DEV_API_HEALTH_URL: https://api.dev.aquilla.app/identity/api/v2/health
       DEV_API_PROJECT_READ_URL: ${{ secrets.DEV_API_PROJECT_READ_URL }}
       DEV_API_PROJECT_READ_TOKEN: ${{ secrets.DEV_API_PROJECT_READ_TOKEN }}
+      # AQU-2113's dedicated copy key: read `aquilla-snapshots`, write
+      # `aquilla-snapshots-dev`, nothing else. Absent until that issue lands —
+      # the copy step warns and skips rather than failing the refresh.
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID || '6a80496d1e59948a9cbaa3c643ba81d7' }}
+      R2_DEV_MEDIA_COPY_ACCESS_KEY_ID: ${{ secrets.R2_DEV_MEDIA_COPY_ACCESS_KEY_ID }}
+      R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY: ${{ secrets.R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY }}
+      # Per-run ceiling for the audio copy. The first backfill (~561k objects /
+      # 167 GB) spans several nights and resumes on its own, because an object
+      # already in dev is never copied twice.
+      DEV_AUDIO_COPY_BUDGET_MINUTES: "240"
+      DEV_AUDIO_COPY_CONCURRENCY: "4"
     steps:
       - name: Gate scheduled run to 4 a.m. Eastern
         id: eastern_gate
@@ -92,5 +110,30 @@ jobs:
         run: pnpm neon:refresh:dev
 
       - name: Restore dev branch from production and apply dev migrations
-        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true
+        id: restore
+        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true && inputs.media_copy_only != true
         run: pnpm neon:refresh:dev
+
+      # AQU-2115 — the restore above copies every audio ROW out of production
+      # and none of the audio BYTES, which live in R2, so prod recordings 404 on
+      # dev.aquilla.app. This copies the bytes the rows just restored reference,
+      # most recently active project first, under a per-run budget.
+      #
+      # ITS OWN STEP, AND LAST, DELIBERATELY. The restore has already succeeded
+      # by the time this runs; a copy failure turns only this step red and
+      # cannot undo or roll back the restore, so dev still shows last night's
+      # production data. Nothing is added after it for the same reason.
+      #
+      # `media_copy_only` runs this without the restore — to push the backfill
+      # along during the day, or to re-run after a failure.
+      - name: Copy prod audio to dev
+        id: media_copy
+        if: steps.eastern_gate.outputs.should_run == 'true' && inputs.preflight_only != true
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ] || [ -z "$R2_DEV_MEDIA_COPY_ACCESS_KEY_ID" ] || [ -z "$R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY" ]; then
+            echo "::warning title=Dev audio copy skipped::R2_ACCOUNT_ID, R2_DEV_MEDIA_COPY_ACCESS_KEY_ID and R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY are required (AQU-2113). The restore is unaffected; prod audio will keep 404ing on dev until they are set."
+            exit 0
+          fi
+          pnpm neon:copy-dev-audio-all:dev -- \
+            --budget-minutes "$DEV_AUDIO_COPY_BUDGET_MINUTES" \
+            --concurrency "$DEV_AUDIO_COPY_CONCURRENCY"

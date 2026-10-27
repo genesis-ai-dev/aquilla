@@ -2741,17 +2741,26 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
-  it("does not render the lane table (or tabs) for a single-lane project", async () => {
+  it("AQU-2194: a single-language project shows the Languages table, with Staff… and Assign…, but no lane tabs", async () => {
+    // Come and See (Oct 26): a PM needs one place to put a linguist on a
+    // language, on every project. With one language the table used to be
+    // hidden, so Staff… was out of reach; the progress tabs stay hidden.
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
-      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+      lanes: [{ lane: "", laneId: "lane-bm", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
     })])
     renderOverview()
 
-    // The progress card still renders (Translated tile present) — just no lane UI.
-    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    const table = await screen.findByTestId("overview-lane-table")
     expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+    // One row, named by the project's target language (the '' lane).
+    const rows = within(table).getAllByTestId(/^overview-lane-row-/)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent("Bambara")
+    // Its ⋯ menu offers Assign… and Staff….
+    fireEvent.click(within(table).getByTestId(/^overview-lane-actions-/))
+    expect(await screen.findByRole("menuitem", { name: /^Assign/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /^Staff/ })).toBeInTheDocument()
   })
 
   it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {

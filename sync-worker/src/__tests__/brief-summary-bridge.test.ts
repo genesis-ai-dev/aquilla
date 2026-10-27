@@ -22,6 +22,13 @@ function okResponse() {
   })
 }
 
+/** The `AUTH_WORKER` binding stand-in, typed as the real `Fetcher.fetch` so a
+ *  test can assert on the call's arguments: a bare `vi.fn(async () => …)` has
+ *  `mock.calls: [][]`, which tsc rejects at `calls[0][0]` (TS2493). */
+function bindingMock(respond: () => Response) {
+  return vi.fn<Fetcher['fetch']>(async () => respond())
+}
+
 let globalFetch: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
@@ -37,7 +44,7 @@ afterEach(() => {
 
 describe('renderBriefSummary transport (AQU-2191)', () => {
   it('calls the AUTH_WORKER service binding and never the zone origin', async () => {
-    const binding = vi.fn(async () => okResponse())
+    const binding = bindingMock(okResponse)
     const result = await renderBriefSummary(
       { AUTH_WORKER_URL: AUTH_URL, SYNC_SECRET_KEY: 's', AUTH_WORKER: { fetch: binding } },
       INPUT,
@@ -59,7 +66,7 @@ describe('renderBriefSummary transport (AQU-2191)', () => {
 
   it('names the wiring on a Cloudflare-generated status instead of asking for a retry', async () => {
     for (const status of [520, 521, 522, 523, 524, 525, 526, 527, 530]) {
-      const binding = vi.fn(async () => new Response('<html>error 522</html>', { status }))
+      const binding = bindingMock(() => new Response('<html>error 522</html>', { status }))
       const result = await renderBriefSummary(
         { AUTH_WORKER_URL: AUTH_URL, SYNC_SECRET_KEY: 's', AUTH_WORKER: { fetch: binding } },
         INPUT,
@@ -76,8 +83,8 @@ describe('renderBriefSummary transport (AQU-2191)', () => {
   })
 
   it('still reports an auth-worker-generated 5xx as job_failed', async () => {
-    const binding = vi.fn(
-      async () =>
+    const binding = bindingMock(
+      () =>
         new Response(JSON.stringify({ error: 'job_failed', message: 'brief summary model failed (502)' }), {
           status: 502,
           headers: { 'Content-Type': 'application/json' },
@@ -92,7 +99,7 @@ describe('renderBriefSummary transport (AQU-2191)', () => {
   })
 
   it('logs every failure with a findable prefix so the render is not silent', async () => {
-    const binding = vi.fn(async () => new Response('<html>error 522</html>', { status: 522 }))
+    const binding = bindingMock(() => new Response('<html>error 522</html>', { status: 522 }))
     await renderBriefSummary(
       { AUTH_WORKER_URL: AUTH_URL, SYNC_SECRET_KEY: 's', AUTH_WORKER: { fetch: binding } },
       INPUT,

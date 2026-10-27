@@ -1291,12 +1291,23 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("the detail readout shows DURATIONS only — file-clock ranges lie against the re-flowed track (2026-08-06)", () => {
+  it("following the recordings, the readout shows the recording's length and no source timing (AQU-2204)", () => {
     renderAt("audioFirst", { initialSelectedCellId: "v1" })
-    // v1: original 6s, translation 11s.
-    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Source: 6.0s")
+    // v1: original 6s, translation 11s. The original's 6s is a SOURCE timing,
+    // which a file following its recordings shows nowhere (Sam, Oct 26).
+    expect(screen.queryByTestId("tl-detail-src-duration")).toBeNull()
     expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Target: 11.0s")
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
+  })
+
+  it("following the recordings, the source rows' cards show no time range; following the source they do (AQU-2204)", () => {
+    const { container, unmount } = renderAt("audioFirst")
+    const sourceCard = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!
+    expect(sourceCard.textContent).not.toMatch(/\d:\d\d/)
+    unmount()
+    const dub = renderAt("dubbing")
+    const dubCard = dub.container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!
+    expect(dubCard.textContent).toMatch(/0:00\.0–0:06\.0/)
   })
 
   it("running long stops being a warning, and says how it compares instead", async () => {
@@ -1320,34 +1331,163 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle, and below the floor shows the mode as a plain label", () => {
-    // Pre-merge round: the mode is FILE-level and its control is back in the
-    // toolbar. Without `onChangeTimingMode` (below the maintainer floor) only
-    // the ACTIVE mode renders, as a span — same testid, so browser passes
-    // read the mode identically either way.
+  it("hides the snap toggle, and below project lead shows the timing as plain text with its (i) (AQU-2204)", async () => {
+    // Without `onChangeTimingMode` (below the project-lead floor) the choice
+    // renders as plain text — same testids, so browser passes read the mode
+    // identically either way — and the (i) says who can change it.
     renderAt("audioFirst")
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")
     expect(label.tagName).toBe("SPAN")
-    expect(label).toHaveTextContent("Free timing")
-    expect(label).toHaveAttribute("title", expect.stringContaining("Only a maintainer can change this."))
-    // The inactive mode renders nothing at all below the floor.
+    expect(label).toHaveTextContent("Timing:Follows recordings")
+    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
   })
 
-  it("above the floor the mode is a two-button control that changes THIS file", () => {
+  it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
     const onChange = vi.fn()
     renderAt("audioFirst", { onChangeTimingMode: onChange })
-    const active = screen.getByTestId("tl-timing-mode-audioFirst")
+    const trigger = screen.getByTestId("tl-timing-mode-trigger")
+    expect(trigger).toHaveTextContent("Timing:Follows recordings")
+    fireEvent.click(trigger)
+    const active = await screen.findByTestId("tl-timing-mode-audioFirst")
     const other = screen.getByTestId("tl-timing-mode-dubbing")
-    expect(active).toHaveAttribute("aria-pressed", "true")
-    expect(other).toHaveAttribute("aria-pressed", "false")
-    // Clicking the active mode is a no-op; clicking the other requests it.
-    fireEvent.click(active)
-    expect(onChange).not.toHaveBeenCalled()
+    // Each choice carries its one line.
+    expect(active).toHaveTextContent(/Lines play back to back, each as long as its recording/)
+    expect(other).toHaveTextContent(/Lines keep their times from the source, and its pauses stay\./)
+    expect(active).toHaveAttribute("aria-checked", "true")
+    expect(other).toHaveAttribute("aria-checked", "false")
+    // Picking the other choice requests it, for THIS file.
     fireEvent.click(other)
     expect(onChange).toHaveBeenCalledWith("dubbing")
+  })
+
+  it("picking the choice the file already has changes nothing (AQU-2204)", async () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("the menu as drawn on board 22: a heading, each choice's file length and the muting line (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    // Beside the (i): how long the file is with the current choice.
+    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("16.0 s long")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
+    expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
+    // Following the recordings each verse is as long as its longer side: 11 + 10.
+    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("21.0 s")
+    expect(screen.getByTestId("tl-timing-menu-mute-note")).toHaveTextContent(
+      "Muting a track only changes what you hear. It never moves anything.",
+    )
+  })
+
+  it("with nothing to follow, Follows source is greyed out with why (AQU-2204, board 24)", async () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange, timingSourceUnavailable: true })
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    const source = await screen.findByTestId("tl-timing-mode-dubbing")
+    expect(source).toHaveAttribute("data-disabled")
+    expect(source).toHaveTextContent("This file has no times and no source recording to follow.")
+    expect(screen.queryByTestId("tl-timing-mode-dubbing-length")).toBeNull()
+    fireEvent.click(source)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    const gap = screen.getByTestId("tl-target-lead-p1")
+    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
+    // The take starts where the pause ends.
+    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
+  it("picking a choice closes the menu (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    await waitFor(() => expect(screen.queryByTestId("tl-timing-mode-audioFirst")).toBeNull())
+  })
+
+  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", () => {
+    const book = [
+      cell({ id: "b1", medium: "text", original: "In the days when the judges ruled, there was a famine in the land." }),
+      cell({ id: "b2", medium: "text", original: "Short." }),
+    ]
+    const { container } = renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="audioFirst" onRetimeSubtitle={() => {}} />,
+    )
+    const c1 = container.querySelector('[data-testid="tl-card-b1"]')!
+    const c2 = container.querySelector('[data-testid="tl-card-b2"]')!
+    for (const card of [c1, c2]) {
+      expect(card).toHaveAttribute("data-stand-in")
+      expect(card.textContent).not.toMatch(/\d:\d\d/)
+    }
+    // The longer verse takes longer to read, so it takes more room; the short
+    // one is held at the 1.5 s floor.
+    expect(px(c1, "width")).toBeGreaterThan(px(c2, "width") * 2)
+    // ONE (i) explains the dashed lines; nothing is parked in the Untimed strip.
+    expect(screen.getByTestId("tl-stand-in-info")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
+  })
+
+  it("following the recordings, a recorded verse with no times draws its take in its slot (AQU-2204)", () => {
+    const take = "audio-b1-1700000000-take.webm"
+    const book = [
+      cell({
+        id: "b1", medium: "text", original: "In the days when the judges ruled.",
+        selectedAudioId: take,
+        attachments: { [take]: { type: "audio", url: "frontier-audio://take", durationMs: 4_000 } },
+      } as Partial<CellData>),
+      cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+    ]
+    const { container } = renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="audioFirst" onRetimeSubtitle={() => {}} />,
+    )
+    // The recorded verse is a real slot, not a stand-in, and its take is on the
+    // Target audio row; the unrecorded one is the stand-in.
+    expect(container.querySelector('[data-testid="tl-card-b1"]')).not.toHaveAttribute("data-stand-in")
+    expect(container.querySelector('[data-testid="tl-card-b2"]')).toHaveAttribute("data-stand-in")
+    expect(container.querySelectorAll('[data-testid="tl-target-lane"] [data-testid^="tl-target-"]').length).toBeGreaterThan(0)
+  })
+
+  it("following the source, a file with no times keeps its lines in the Untimed strip, as before (AQU-2204)", () => {
+    const book = [cell({ id: "b1", medium: "text", original: "In the beginning." })]
+    renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="dubbing" onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-untimed-b1")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+  })
+
+  it("a file timed to a film only follows its source: plain text and an (i), even for a lead (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
+    const control = screen.getByTestId("tl-timing-mode")
+    expect(control).toHaveAttribute("data-mode", "dubbing")
+    expect(control).toHaveAttribute("data-locked", "film")
+    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
+    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
   })
 
   // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
@@ -2991,7 +3131,7 @@ describe("TimelineEditor — withholding the timing-mode control", () => {
   it("is shown by default — an imported recording still chooses its mode", () => {
     render(editor({ onChangeTimingMode: vi.fn() }))
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "dubbing")
-    expect(screen.getByTestId("tl-timing-mode-audioFirst")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-timing-mode-trigger")).toHaveTextContent("Follows source")
   })
 })
 

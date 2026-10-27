@@ -319,7 +319,7 @@ Example: \`{ "kind": "SetTranscription", "fileId": "f1", "cellId": "c3", "transc
     agentReachable: true,
     paramsDoc: `### SetTiming
 Params: \`{ fileId, cellId?, startMs?, endMs?, timingMode? }\` \u2014 at least one of (startMs+endMs) or timingMode.
-\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (MAINTAINER 600). A command carrying both needs the higher floor.
+\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (PROJECT_LEAD 500). A command carrying both needs the higher floor.
 Gotchas:
 - MILLISECONDS MUST BE INTEGERS. A fractional value is rejected at prepare with the offending number in the message (AQU-927: ms columns are BIGINT and one float used to fail every event in its flush). Round before sending; this surface will not round for you.
 - Projects default to TIMING LOCKED: while \`timingLocked\` is not exactly false, a retime needs MAINTAINER (600) unless the cell is a line someone added by hand. Prepare refuses rather than staging a plan you could not commit.

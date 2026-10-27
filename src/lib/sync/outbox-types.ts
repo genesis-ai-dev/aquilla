@@ -793,7 +793,7 @@ export interface OutboxEventPayloads {
   // defaults. Inside a patch, null means "clear THAT override" and an absent
   // key means "leave it alone"; `kind` has no null form because a track's
   // kind is its identity. The patch is FLAT on purpose — the projection
-  // strips nulls recursively. Maintainer floor, like file.timing.set.
+  // strips nulls recursively. Maintainer floor.
   //
   // The kind union is spelled out here rather than imported from
   // @/lib/timeline/tracks: this module is the wire mirror of

@@ -199,6 +199,9 @@ export interface EditorActionsContextValue {
    */
   timingLocked?: boolean
   canUnlockTiming?: boolean
+  /** AQU-2204: the open file follows its recordings, so no source times are
+   *  shown — a line's "Edit timestamps" is unavailable, with the reason. */
+  followsRecordings?: boolean
   /** Takes a maintainer to the setting that holds the lock. Deliberately not
    *  a toggle: the lock is project-wide, so they should see its scope before
    *  changing it (Sam, 2026-09-09). */

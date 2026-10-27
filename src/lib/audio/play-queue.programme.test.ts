@@ -1038,3 +1038,68 @@ describe("audio-first transport — video-less subtitle import (AQU-1704)", () =
     expect(getQueueProgress().programmeClock).toBe(false)
   })
 })
+
+// AQU-2204 (Sam, Oct 26): a file with NO times at all (an audio Bible book)
+// following its recordings plays its recorded lines back to back, in order,
+// and steps over the stand-ins (lines nobody has recorded yet).
+describe("audio-first transport — a file with no times (AQU-2204)", () => {
+  const bookLine = (id: string, takeMs?: number): CellData => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return {
+      id,
+      fileId: "f1",
+      original: `${id} words`,
+      translated: "",
+      medium: "text",
+      ...(takeMs != null ? { selectedAudioId: takeId } : {}),
+      attachments:
+        takeMs != null ? { [takeId]: { type: "audio", url: `http://audio.test/${id}.webm`, durationMs: takeMs } } : {},
+    } as unknown as CellData
+  }
+
+  it("lays the book out at the recordings' lengths plus the stand-ins, and starts on the first recorded line", async () => {
+    // b1 recorded 2s, b2 not recorded (a stand-in: "b2 words" = 8 chars → the 1.5s floor), b3 recorded 3s.
+    const cells = [bookLine("b1", 2_000), bookLine("b2"), bookLine("b3", 3_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().duration).toBeCloseTo(2 + 1.5 + 3, 5)
+    expect(getQueueState()).toMatchObject({ cellId: "b1" })
+    expect(dubEl("b1")).toBeDefined()
+  })
+
+  it("keeps the plain line-by-line path when a take's length was never measured", async () => {
+    const unmeasured = {
+      id: "t1", fileId: "f1", medium: "text",
+      selectedGeneratedVoiceAudioId: "gen-1",
+      attachments: { "gen-1": { type: "audio", url: "http://audio.test/gen-1.wav" } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([unmeasured, bookLine("b2", 2_000)]), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "t1" })
+  })
+})
+
+// AQU-2204 (Sam, Oct 26): following the recordings, a pause someone left
+// before a take is waited out — the timeline draws it inside the line.
+describe("audio-first transport — a pause before the take (AQU-2204)", () => {
+  it("waits out the pause in silence, then plays the take from its start", async () => {
+    const takeId = "audio-v1-1700000000-take.webm"
+    const paused = {
+      id: "v1", fileId: "f1", medium: "media", startTime: 0, endTime: 4,
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "http://audio.test/v1.webm", durationMs: 2_000, targetOffsetMs: 300 } },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([paused]), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+    expect(dubEl("v1")?.paused ?? true).toBe(true)
+
+    await new Promise((r) => setTimeout(r, 450))
+    await settle()
+    expect(dubEl("v1")!.paused).toBe(false)
+    expect(getQueueProgress().currentTime).toBeGreaterThanOrEqual(0.29)
+  })
+})

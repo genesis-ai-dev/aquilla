@@ -57,6 +57,9 @@ import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
+import { standInEstimator } from "@/lib/timeline/stand-in"
+import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
 import { isImportedRow } from "@/lib/cell-editing-gate"
@@ -78,6 +81,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -489,6 +493,13 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
+  /** AQU-2204: the file is timed to a film (footage linked, or an audio cue
+   *  file), so it can only follow its source: the Timing control shows
+   *  "Follows source" as plain text with an (i) saying why. */
+  timingFilmTimed?: boolean
+  /** AQU-2204 (board 24): the file has no times and no source recording, so
+   *  there is nothing to follow: "Follows source" is greyed out with why. */
+  timingSourceUnavailable?: boolean
   /**
    * AQU-1119: collapse the timeline itself, and collapse the text section
    * whose header this component portals into the workspace's slot.
@@ -623,30 +634,6 @@ export interface TimelineEditorProps {
  *  parameter list would hand every render a new array and churn every memo
  *  downstream of it. */
 const DEFAULT_TRACKS = deriveTracksForFile(null)
-
-/** The timing modes' user-facing copy, per mode.
- *
- *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) resolves the same
- *  `editor.timeline.timingMode*` name/description keys for
- *  TimingModeChangedDialog; this table adds `lockedDescription` — the same
- *  sentence plus the below-maintainer note, kept whole rather than
- *  concatenated, because a `{mode}` frame filled with a translated noun
- *  cannot be made grammatical in every locale. */
-const TIMING_MODE_KEYS: Record<
-  AudioTimingMode,
-  { name: MessageKey; description: MessageKey; lockedDescription: MessageKey }
-> = {
-  dubbing: {
-    name: "editor.timeline.timingModeDubbing",
-    description: "editor.timeline.timingModeDubbingHint",
-    lockedDescription: "editor.timeline.timingModeDubbingHintLocked",
-  },
-  audioFirst: {
-    name: "editor.timeline.timingModeFree",
-    description: "editor.timeline.timingModeFreeHint",
-    lockedDescription: "editor.timeline.timingModeFreeHintLocked",
-  },
-}
 
 /** Each audio track's speaker-button copy. Whole sentences per track, not one
  *  frame per state with the track's name poured in — the name inflects. */
@@ -1231,6 +1218,8 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  timingFilmTimed = false,
+  timingSourceUnavailable = false,
   soundSource,
   onCollapseSection,
   onCollapseTextSection,
@@ -2017,7 +2006,17 @@ export function TimelineEditor({
     )
   }
 
-  const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // AQU-2204: following its recordings, a file with NO times at all (an audio
+  // Bible book) lays its lines out in order — each at its recording's length,
+  // or a dashed stand-in from its text — instead of parking them all in the
+  // Untimed strip. The same rule as the transport's (programmeLines).
+  const { subtitle, dialogue, untimed, standInLines } = useMemo(() => {
+    const lanes = deriveLanes(cells)
+    if (timingMode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
+      return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
+    }
+    return { ...lanes, standInLines: false }
+  }, [cells, timingMode])
   const independentTextCells = useMemo(
     () => Object.values(textTrackCells ?? {}).flat(),
     [textTrackCells],
@@ -2041,6 +2040,18 @@ export function TimelineEditor({
   // become conditional on whether an audio VTT has been imported.
   const videoDurationSec = useVideoDurationSec(coreMediaUrl)
   const subtitleFileWithFootage = Boolean(coreMediaUrl) && dialogue.length === 0
+  // AQU-2204 (board 22): how long the file comes out with each choice, so the
+  // effect shows before anyone picks. Following the source: the source's own
+  // end (or the film's, when it runs longer). Following the recordings: the
+  // programme, laid out exactly as that choice lays it.
+  const timingLengths = useMemo(() => {
+    let sourceEnd = 0
+    for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
+    const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
+    const { lines, untimed } = programmeLines(cells)
+    const recorded = buildProgramme(lines, untimed ? { standInLenSec: standInEstimator(lines) } : undefined)
+    return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
+  }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2053,8 +2064,9 @@ export function TimelineEditor({
         // so the cues are the verses; export stitches them the same way.
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
+        standInLines ? { standInLenSec: standInEstimator(subtitle) } : undefined,
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, standInLines],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
@@ -2788,9 +2800,10 @@ export function TimelineEditor({
     // against the re-flowed track — the only honest numbers are durations.
     // Src = the original's window length, Tgt = the dub's measured length.
     if (audioFirst) {
-      const { startTime, endTime } = currentCell
-      const srcDurationSec =
-        typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
+      // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no
+      // SOURCE timing anywhere — not even the original's length — so only the
+      // recording's own length is read out.
+      const srcDurationSec = null
       // AQU-1767: a split take's length is all its pieces'.
       const geoms = targetItems
         .filter((t) => t.cell.id === currentCell.id)
@@ -2798,7 +2811,8 @@ export function TimelineEditor({
       const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
         ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
         : null
-      if (srcDurationSec == null && tgtDurationSec == null) return null
+      // Always the free readout, even with nothing measured: falling back to
+      // the plain row would print the line's SOURCE range.
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
     // AQU-1767: a split take's pieces are consecutive items, and the pills read
@@ -4148,52 +4162,29 @@ export function TimelineEditor({
         {onCollapseSection && (
           <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
         )}
-        {/* Pre-merge round: the mode is FILE-level again (the video link it
-            interacts with is per-file), so the control returns to the
-            toolbar. Same clearance as before: `onChangeTimingMode` absent =
-            below the maintainer floor = the active mode renders as a plain
-            label instead of buttons. The wrapper keeps its testid +
-            data-mode so browser passes read the mode exactly as before.
-            AQU-646 stage 1: withheld outright for a file with only one mode
-            available to it — see `hideTimingMode`. */}
+        {/* AQU-2204: the file's one Timing control ("Follows source" /
+            "Follows recordings"). Self-contained so the layout work can move
+            it into the top bar beside the play controls as it is.
+            `onChangeTimingMode` absent = below project lead = plain text;
+            `timingFilmTimed` = a file timed to a film, which only follows
+            its source. */}
         {!hideTimingMode && (
-          <div
-            data-testid="tl-timing-mode"
-            data-mode={timingMode}
-            className="ms-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
-          >
-            {(["dubbing", "audioFirst"] as const).map((mode) =>
-              onChangeTimingMode ? (
-                <button
-                  key={mode}
-                  type="button"
-                  data-testid={`tl-timing-mode-${mode}`}
-                  aria-pressed={timingMode === mode}
-                  title={t(TIMING_MODE_KEYS[mode].description)}
-                  onClick={() => {
-                    if (timingMode !== mode) onChangeTimingMode(mode)
-                  }}
-                  className={cn(
-                    "px-2 py-1",
-                    timingMode === mode
-                      ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                      : "bg-background text-foreground/60 hover:bg-muted",
-                  )}
-                >
-                  {t(TIMING_MODE_KEYS[mode].name)}
-                </button>
-              ) : timingMode === mode ? (
-                <span
-                  key={mode}
-                  data-testid={`tl-timing-mode-${mode}`}
-                  title={t(TIMING_MODE_KEYS[mode].lockedDescription)}
-                  className="px-2 py-1 text-foreground/70"
-                >
-                  {t(TIMING_MODE_KEYS[mode].name)}
-                </span>
-              ) : null,
-            )}
-          </div>
+          <TimingModeControl
+            className="ms-2"
+            mode={timingMode}
+            onChange={onChangeTimingMode}
+            filmTimed={timingFilmTimed}
+            sourceUnavailable={timingSourceUnavailable}
+            lengths={timingLengths}
+          />
+        )}
+        {/* AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip. */}
+        {layout.programme?.slots.some((slot) => slot.standIn) && (
+          <TimingInfoButton
+            label={t("editor.timeline.standInInfoAria")}
+            text={t("editor.timeline.standInInfo")}
+            testId="tl-stand-in-info"
+          />
         )}
         {/* AQU-646: the playhead is already shifted back by the delay the
             browser reports, so this does NOT say "there is latency" — it says

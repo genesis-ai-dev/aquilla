@@ -4,7 +4,7 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese render LTR. Add a locale here + a catalog in
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Punjabi render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -62,6 +62,12 @@ export const LOCALES: readonly LocaleMeta[] = [
   // the varieties are mutually readable, and the brief, not the menu label,
   // fixes which one the strings are.
   { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Punjabi catalog, Gurmukhi Majhi (the written standard of Indian Punjab).
+  // Bare `pa` is Gurmukhi, so `pa-IN` folding onto `pa` is right. `pa-Arab` and
+  // `pa-PK` also fold here by primary subtag, which is the wrong script for a
+  // Shahmukhi reader; Shahmukhi needs its own future locale. Do not alias them
+  // away and do not change `normalizeLocale` to split the scripts.
+  { code: "pa", englishName: "Punjabi", nativeName: "ਪੰਜਾਬੀ", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

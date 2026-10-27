@@ -217,6 +217,41 @@ describe("Spanish", () => {
   })
 })
 
+describe("Punjabi (AQU-2202)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const pa = LOCALES.find((l) => l.code === "pa")
+    expect(pa?.dir).toBe("ltr")
+    expect(pa?.englishName).toBe("Punjabi")
+    expect(pa?.nativeName).toBe("ਪੰਜਾਬੀ")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.pa ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("folds Indian Punjabi onto this Gurmukhi catalog", () => {
+    expect(normalizeLocale("pa")).toBe("pa")
+    expect(normalizeLocale("pa-IN")).toBe("pa")
+    expect(detectInitialLocale(null, "pa-IN")).toBe("pa")
+    // This catalog is Gurmukhi. `pa-Arab` is Shahmukhi, so folding it here is
+    // the wrong script for a Shahmukhi reader. Shahmukhi needs its own future
+    // locale. `normalizeLocale` is unchanged, and the primary subtag still wins.
+    expect(normalizeLocale("pa-Arab")).toBe("pa")
+  })
+  it("supplies one and other, and one covers 0 and 1", () => {
+    // Punjabi `one` covers 0 and 1. Identical wording on both forms is
+    // grammatical when the noun does not change.
+    const counted = CATALOGS.pa?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      expect(counted.forms.one).toBeTruthy()
+      expect(counted.forms.other).toBeTruthy()
+    }
+    const rules = new Intl.PluralRules("pa")
+    expect(rules.select(0)).toBe("one")
+    expect(rules.select(1)).toBe("one")
+    expect(rules.select(2)).toBe("other")
+  })
+})
+
 describe("Portuguese", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const pt = LOCALES.find((l) => l.code === "pt")

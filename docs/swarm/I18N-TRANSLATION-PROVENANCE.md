@@ -2,6 +2,36 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `pa` (Gurmukhi Punjabi, Majhi) — 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo`
+> packet and merged with `scripts/i18n-catalog.ts import` (AQU-2202). **No
+> Punjabi speaker has read it.** Not derived from Hindi or Urdu. Not Shahmukhi.
+> The variety is Indian standard Punjabi, Gurmukhi, Majhi, LTR. Buttons use
+> ਤੁਸੀਂ and the polite imperative. Bare `pa` is Gurmukhi, so `pa-IN` folding
+> onto `pa` is right. `pa-Arab` and `pa-PK` currently fold onto this Gurmukhi
+> catalog by primary subtag, which is the wrong script for a Shahmukhi reader;
+> Shahmukhi needs its own future locale. `normalizeLocale` was not changed.
+> Plurals follow `Intl.PluralRules("pa")`: `one` and `other`, and `one` covers
+> 0 and 1. Identical wording on both forms is grammatical when the noun does
+> not change.
+>
+> Glossary: cell → ਸੈੱਲ, lane → ਲੇਨ, changeset → ਬਦਲਾਅ-ਸਮੂਹ, termbase →
+> ਸ਼ਬਦ-ਅਧਾਰ, back-translation → ਉਲਟਾ-ਅਨੁਵਾਦ, source → ਸਰੋਤ, target → ਟੀਚਾ,
+> draft → ਖਰੜਾ.
+>
+> Import report: 8,909/9,039 keys. Identical-to-English leaves were dropped on
+> purpose (formats, product names, placeholder-only templates, and locked
+> English labels). Mechanical check before import found no added placeholders:
+> non-plural leaves kept the exact placeholder set, and plural leaves could
+> drop `{count}` only. `common.datePlaceholder` stays `June 01, 2025`.
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026`.
+> Whole-string labels Source text, Source audio, Target text, Target audio,
+> Speaker, Camera, Character Label, and Cast stay English, including those
+> tokens inside longer sentences when they name the product label.
+> `org.membersPage.orgTable.projectAccessNote` keeps Contributor, Project lead,
+> Viewer, Maintainer, and Owner in English.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

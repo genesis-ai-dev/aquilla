@@ -243,8 +243,6 @@ export const th: Catalog = {
   "nav.fileRow.expandSections": "ขยายส่วนต่างๆ",
   "nav.fileRow.collapse": "ยุบ",
   "nav.fileRow.expand": "ขยาย",
-  "nav.fileRow.timelineOrderedTooltip": "เรียงตามไทม์ไลน์ (ยึดไทม์โค้ดเป็นหลัก)",
-  "nav.fileRow.timelineOrderedFile": "ไฟล์ที่เรียงตามไทม์ไลน์",
   "nav.fileRow.importedAsTooltip": "{name} (นำเข้าในชื่อ {originalName})",
   "nav.fileRow.progressAriaLabel": "แปลแล้ว {translated}%, ตรวจสอบแล้ว {validated}%",
   "nav.fileRow.fileActions": "การจัดการไฟล์",

@@ -203,7 +203,7 @@ export const audio = defineNamespace({
     "audio.newVoice.mmsOtherCode": "Other MMS code",
     "audio.newVoice.mmsCodeLabel": "MMS code",
 
-    // VoicePlaybackBar — the Audio lens' bottom transport bar.
+    // VoicePlaybackBar — the Media view's bottom playback strip.
     "audio.playbackBar.lineFallback": "Line",
     "audio.playbackBar.nothingPlaying": "Nothing playing",
     "audio.playbackBar.pressPlayToListen": "Press play to listen",
@@ -760,7 +760,7 @@ export const audio = defineNamespace({
   context: {
     _context: {
       description:
-        "The Audio Studio (\"Audio lens\") — recording, TTS generation, voice " +
+        "Audio in the Media view — recording, TTS generation, voice " +
         "management, and playback for turning a translated project into narrated " +
         "audio. Domain terms translators will not know from the English alone: a " +
         "'take' is one recorded or generated audio attempt for a line (there can be " +
@@ -3432,12 +3432,12 @@ export const audio = defineNamespace({
   surfaces: [
     {
       id: "audio-studio",
-      title: "Audio Studio",
+      title: "Media view",
       route: "/project/:projectId/voice",
       notes:
-        "The Audio lens: left Voices sidebar (select/create/edit/delete voices), " +
-        "center editor rows with per-line record/generate controls, and a bottom " +
-        "transport bar for playback. Take chips, record dialog, and clone-reference " +
+        "The Media view: left Voices sidebar (select/create/edit/delete voices), " +
+        "the timeline over the editor rows with per-line record/generate controls, " +
+        "and a bottom playback strip. Take chips, record dialog, and clone-reference " +
         "controls all nest inside this surface's dialogs and panels.",
     },
   ],

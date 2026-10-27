@@ -243,8 +243,6 @@ export const my: Catalog = {
   "nav.fileRow.expandSections": "အပိုင်းများ ဖြန့်ရန်",
   "nav.fileRow.collapse": "ခေါက်သိမ်းရန်",
   "nav.fileRow.expand": "ဖြန့်ရန်",
-  "nav.fileRow.timelineOrderedTooltip": "အချိန်ဇယားအလိုက် စီထားသည် (အချိန်ကုဒ်များက အခြေခံ)",
-  "nav.fileRow.timelineOrderedFile": "အချိန်ဇယားအလိုက် စီထားသောဖိုင်",
   "nav.fileRow.importedAsTooltip": "{name} ({originalName} အဖြစ် တင်သွင်းထားသည်)",
   "nav.fileRow.progressAriaLabel": "{translated}% ဘာသာပြန်ပြီး၊ {validated}% စိစစ်ပြီး",
   "nav.fileRow.fileActions": "ဖိုင်လုပ်ဆောင်ချက်များ",

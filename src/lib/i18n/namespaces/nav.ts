@@ -345,8 +345,6 @@ export const nav = defineNamespace({
     "nav.fileRow.expandSections": "Expand sections",
     "nav.fileRow.collapse": "Collapse",
     "nav.fileRow.expand": "Expand",
-    "nav.fileRow.timelineOrderedTooltip": "Timeline-ordered (timecodes are the spine)",
-    "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
@@ -505,7 +503,7 @@ export const nav = defineNamespace({
         description:
           "The bare word 'Audio' as a short heading: the Audio column of the " +
           "organization's project table and the Audio side of the character " +
-          "check. (It named the editor's Audio lens until that lens became Media " +
+          "check. (It named the editor's second view until that view became Media " +
           "on every file.) Short — a column heading or a button label.",
       },
       "nav.lens.transcribe": {
@@ -912,7 +910,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.transcribeAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
+          "Secondary action-menu item (Media) that runs Whisper transcription " +
           "on every recorded-but-untimed cell in the file.",
         maxLength: 32,
       },
@@ -933,7 +931,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.synthAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that generates AI voice for " +
+          "Secondary action-menu item (Media) that generates AI voice for " +
           "every translated-but-unrecorded cell in the file.",
         maxLength: 40,
       },
@@ -954,7 +952,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.changeVoiceAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
+          "Secondary action-menu item (Media) that keeps every cell's existing " +
           "recording and makes it sound like the cloned voice assigned to that cell. " +
           "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
           "from text.",
@@ -1098,7 +1096,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.diarize": {
         description:
-          "Action-menu item (Audio lens) that runs speaker diarization on the " +
+          "Action-menu item (Media) that runs speaker diarization on the " +
           "file's audio. Default/idle state of nav.fileMenu.diarizing.",
         maxLength: 24,
       },
@@ -1116,7 +1114,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.useFileSpeakerAsVoice": {
         description:
-          "Action-menu item (Audio lens, after diarization) that adopts the file's " +
+          "Action-menu item (Media, after diarization) that adopts the file's " +
           "detected speaker as a reusable cast voice.",
         maxLength: 40,
       },
@@ -1426,14 +1424,6 @@ export const nav = defineNamespace({
       },
       "nav.fileRow.expand": {
         description: "Accessible name for the chevron toggle in its collapsed state.",
-      },
-      "nav.fileRow.timelineOrderedTooltip": {
-        description:
-          "Tooltip on the small waveform icon shown next to files whose cells are " +
-          "ordered by timecode rather than sequence.",
-      },
-      "nav.fileRow.timelineOrderedFile": {
-        description: "Accessible label for the same timeline-ordered indicator icon.",
       },
       "nav.fileRow.importedAsTooltip": {
         description:

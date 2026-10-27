@@ -257,8 +257,6 @@ export const hi: Catalog = {
   "nav.fileRow.expandSections": "खंड फैलाएँ",
   "nav.fileRow.collapse": "समेटें",
   "nav.fileRow.expand": "फैलाएँ",
-  "nav.fileRow.timelineOrderedTooltip": "समयरेखा क्रम (टाइमकोड रीढ़ हैं)",
-  "nav.fileRow.timelineOrderedFile": "समयरेखा-क्रम फ़ाइल",
   "nav.fileRow.importedAsTooltip": "{name} ({originalName} के रूप में आयातित)",
   "nav.fileRow.progressAriaLabel": "{translated}% अनुवादित, {validated}% जाँचा",
   "nav.fileRow.fileActions": "फ़ाइल क्रियाएँ",

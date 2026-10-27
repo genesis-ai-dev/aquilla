@@ -244,8 +244,6 @@ export const ru: Catalog = {
   "nav.fileRow.expandSections": "Развернуть разделы",
   "nav.fileRow.collapse": "Свернуть",
   "nav.fileRow.expand": "Развернуть",
-  "nav.fileRow.timelineOrderedTooltip": "Упорядочено по таймлайну (основа — таймкоды)",
-  "nav.fileRow.timelineOrderedFile": "Файл, упорядоченный по таймлайну",
   "nav.fileRow.importedAsTooltip": "{name} (импортирован как {originalName})",
   "nav.fileRow.progressAriaLabel": "переведено {translated}%, подтверждено {validated}%",
   "nav.fileRow.fileActions": "Действия с файлом",

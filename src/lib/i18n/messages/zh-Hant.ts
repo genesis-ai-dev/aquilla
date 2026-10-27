@@ -243,8 +243,6 @@ export const zh_Hant: Catalog = {
   "nav.fileRow.expandSections": "展開章節",
   "nav.fileRow.collapse": "收合",
   "nav.fileRow.expand": "展開",
-  "nav.fileRow.timelineOrderedTooltip": "依時間軸排序（以時間碼為主軸）",
-  "nav.fileRow.timelineOrderedFile": "時間軸排序的檔案",
   "nav.fileRow.importedAsTooltip": "{name}（匯入時名稱為 {originalName}）",
   "nav.fileRow.progressAriaLabel": "已翻譯 {translated}%，已驗證 {validated}%",
   "nav.fileRow.fileActions": "檔案操作",

@@ -258,8 +258,6 @@ export const sw: Catalog = {
   "nav.fileRow.expandSections": "Panua sehemu",
   "nav.fileRow.collapse": "Kunja",
   "nav.fileRow.expand": "Panua",
-  "nav.fileRow.timelineOrderedTooltip": "Imepangwa kwa mstari wa muda (misimbo ya muda ndiyo uti wa mgongo)",
-  "nav.fileRow.timelineOrderedFile": "Faili iliyopangwa kwa mstari wa muda",
   "nav.fileRow.importedAsTooltip": "{name} (iliyoingizwa kama {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% imetafsiriwa, {validated}% imethibitishwa",
   "nav.fileRow.audioProgressAriaLabel": "{recorded}% imerekodiwa, {audioValidated}% sauti imethibitishwa",

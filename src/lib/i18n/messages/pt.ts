@@ -254,8 +254,6 @@ export const pt: Catalog = {
   "nav.fileRow.expandSections": "Expandir seções",
   "nav.fileRow.collapse": "Recolher",
   "nav.fileRow.expand": "Expandir",
-  "nav.fileRow.timelineOrderedTooltip": "Ordem temporal (os códigos de tempo são o eixo)",
-  "nav.fileRow.timelineOrderedFile": "Arquivo por tempo",
   "nav.fileRow.importedAsTooltip": "{name} (importado como {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% traduzido, {validated}% validado",
   "nav.fileRow.fileActions": "Ações do arquivo",

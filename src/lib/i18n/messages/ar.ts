@@ -243,8 +243,6 @@ export const ar: Catalog = {
   "nav.fileRow.expandSections": "توسيع الأقسام",
   "nav.fileRow.collapse": "طيّ",
   "nav.fileRow.expand": "توسيع",
-  "nav.fileRow.timelineOrderedTooltip": "مرتَّب حسب الخط الزمني (الرموز الزمنية هي الأساس)",
-  "nav.fileRow.timelineOrderedFile": "ملف مرتب حسب الخط الزمني",
   "nav.fileRow.importedAsTooltip": "{name} (مستورد باسم {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% مُترجَم، {validated}% مُتحقَّق منه",
   "nav.fileRow.fileActions": "إجراءات الملف",

@@ -5723,7 +5723,7 @@ export const editor = defineNamespace({
       },
       "editor.selection.voiceTogether": {
         description:
-          "Button in the selection toolbar (audio lens only) that synthesizes the " +
+          "Button in the selection toolbar (Media only) that synthesizes the " +
           "selected lines into ONE continuous recording rather than one clip per " +
           "line. 'Together' is the whole point — keep that sense.",
         maxLength: 22,
@@ -7901,7 +7901,7 @@ export const editor = defineNamespace({
       },
       "editor.empty.noMediaSegments": {
         description:
-          "Heading filling the editing area in the audio lens when a timed file has " +
+          "Heading filling the editing area in Media when a timed file has " +
           "no media clips yet. 'Segments' are the individual timed pieces.",
         maxLength: 30,
       },

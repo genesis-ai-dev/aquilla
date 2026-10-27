@@ -236,8 +236,6 @@ export const fr: Catalog = {
   "nav.fileRow.expandSections": "Développer les sections",
   "nav.fileRow.collapse": "Réduire",
   "nav.fileRow.expand": "Développer",
-  "nav.fileRow.timelineOrderedTooltip": "Ordonné par ligne temporelle (les codes temporels font foi)",
-  "nav.fileRow.timelineOrderedFile": "Fichier chronologique",
   "nav.fileRow.importedAsTooltip": "{name} (importé sous {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated} % traduit, {validated} % validé",
   "nav.fileRow.fileActions": "Actions sur le fichier",

@@ -241,8 +241,6 @@ export const ms: Catalog = {
   "nav.fileRow.expandSections": "Kembangkan bahagian",
   "nav.fileRow.collapse": "Kuncupkan",
   "nav.fileRow.expand": "Kembangkan",
-  "nav.fileRow.timelineOrderedTooltip": "Disusun ikut garis masa (kod masa jadi tulang belakang)",
-  "nav.fileRow.timelineOrderedFile": "Fail ikut garis masa",
   "nav.fileRow.importedAsTooltip": "{name} (diimport sebagai {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% diterjemah, {validated}% disahkan",
   "nav.fileRow.fileActions": "Tindakan fail",

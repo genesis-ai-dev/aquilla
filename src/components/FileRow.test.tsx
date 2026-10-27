@@ -334,3 +334,14 @@ describe("FileRow progress in a language that counts its recordings", () => {
     expect(slot.getAttribute("title")).toBeNull()
   })
 })
+
+// AQU-1758 (Sam): a timed file carried a waveform "squiggle" in the file list.
+// Every file opens on the timeline in Media now — "they're all media files" —
+// so no row is marked.
+describe("FileRow — no marker for a timed file (AQU-1758)", () => {
+  it("draws a subtitle file's row like any other, with no waveform", () => {
+    const { container } = renderRow({ file: makeFile({ type: "vtt", orderedBy: "time", name: "Episode 1.vtt" }) })
+    expect(within(container).queryByLabelText("Timeline-ordered file")).toBeNull()
+    expect(container.querySelector("svg.lucide-audio-waveform")).toBeNull()
+  })
+})

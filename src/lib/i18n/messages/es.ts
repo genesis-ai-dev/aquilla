@@ -253,8 +253,6 @@ export const es: Catalog = {
   "nav.fileRow.expandSections": "Expandir secciones",
   "nav.fileRow.collapse": "Contraer",
   "nav.fileRow.expand": "Expandir",
-  "nav.fileRow.timelineOrderedTooltip": "Orden temporal (los códigos de tiempo son el eje)",
-  "nav.fileRow.timelineOrderedFile": "Archivo por tiempo",
   "nav.fileRow.importedAsTooltip": "{name} (importado como {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% traducido, {validated}% validado",
   "nav.fileRow.fileActions": "Acciones del archivo",

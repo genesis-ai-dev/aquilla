@@ -243,8 +243,6 @@ export const zh_Hans: Catalog = {
   "nav.fileRow.expandSections": "展开章节",
   "nav.fileRow.collapse": "折叠",
   "nav.fileRow.expand": "展开",
-  "nav.fileRow.timelineOrderedTooltip": "依时间轴排序（以时间码为主轴）",
-  "nav.fileRow.timelineOrderedFile": "时间轴排序的文件",
   "nav.fileRow.importedAsTooltip": "{name}（导入时名称为 {originalName}）",
   "nav.fileRow.progressAriaLabel": "已翻译 {translated}%，已验证 {validated}%",
   "nav.fileRow.fileActions": "文件操作",

@@ -7,17 +7,22 @@ export function initialExpansionTab({
   hasIssues,
   transcriptNeedsAttention,
   audioLanguage,
+  media = false,
 }: {
   /** The line breaks a rule: its issues come first. */
   hasIssues: boolean
   /** Its recording's transcript does not say the text. */
   transcriptNeedsAttention: boolean
   /** The open language delivers Audio, so the line IS its audio (Sam,
-   *  2026-09-29, for the Audio view; AQU-1758 for every view since it went):
-   *  the Recording tab, not Back-translation, unless issues need seeing first. */
+   *  2026-09-29; AQU-1758 for every view): the Recording tab, not
+   *  Back-translation, unless issues need seeing first. */
   audioLanguage: boolean
+  /** AQU-1758 (Sam): in Media a row always opens on Recording, whatever the
+   *  language delivers — unless issues need seeing first. The Text view
+   *  keeps the rule above. */
+  media?: boolean
 }): ExpansionTabOnOpen {
   if (hasIssues) return "issues"
-  if (transcriptNeedsAttention || audioLanguage) return "audio"
+  if (media || transcriptNeedsAttention || audioLanguage) return "audio"
   return "backtranslation"
 }

@@ -236,8 +236,6 @@ export const id: Catalog = {
   "nav.fileRow.expandSections": "Bentangkan bagian",
   "nav.fileRow.collapse": "Ciutkan",
   "nav.fileRow.expand": "Bentangkan",
-  "nav.fileRow.timelineOrderedTooltip": "Diurutkan menurut lini masa (kode waktu adalah tulang punggungnya)",
-  "nav.fileRow.timelineOrderedFile": "File yang diurutkan menurut lini masa",
   "nav.fileRow.importedAsTooltip": "{name} (diimpor sebagai {originalName})",
   "nav.fileRow.progressAriaLabel": "{translated}% diterjemahkan, {validated}% tervalidasi",
   "nav.fileRow.fileActions": "Tindakan file",

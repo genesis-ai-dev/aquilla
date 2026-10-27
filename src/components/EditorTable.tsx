@@ -7585,10 +7585,11 @@ function EditorRow({
   const railOverflowAttentionDot: "emerald" | "primary" | null =
     openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
-  // First-open auto-tab: prefer the most-attention-worthy tab — and in a
-  // language that delivers Audio, Recording (Sam, 2026-09-29; AQU-1758). Only
-  // applied when the panel was closed and is being opened — once open, the
-  // user's choice (or programmatic switches via inline rule clicks) wins.
+  // First-open auto-tab: prefer the most-attention-worthy tab — and in Media,
+  // or in a language that delivers Audio, Recording (Sam, 2026-09-29;
+  // AQU-1758). Only applied when the panel was closed and is being opened —
+  // once open, the user's choice (or programmatic switches via inline rule
+  // clicks) wins. `castGutter` is the table under the timeline: Media.
   const previousExpandedRef = useRef(false)
   useEffect(() => {
     if (expanded && !previousExpandedRef.current) {
@@ -7596,10 +7597,11 @@ function EditorRow({
         hasIssues: cellInfractions.length > 0,
         transcriptNeedsAttention,
         audioLanguage: audioOnlyLane,
+        media: castGutter,
       }))
     }
     previousExpandedRef.current = expanded
-  }, [expanded, cellInfractions.length, transcriptNeedsAttention, audioOnlyLane])
+  }, [expanded, cellInfractions.length, transcriptNeedsAttention, audioOnlyLane, castGutter])
 
   useEffect(() => {
     if (expansionTab === "footnotes" && !showFootnotesInExpansion) {

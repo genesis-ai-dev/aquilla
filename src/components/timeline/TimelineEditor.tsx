@@ -47,7 +47,6 @@ import {
   Volume2,
   LockOpen,
   Rows3,
-  Settings2,
   VolumeX,
   X,
 } from "lucide-react"
@@ -87,9 +86,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
@@ -4129,9 +4125,9 @@ export function TimelineEditor({
     }
   }
 
-  // The timeline's own settings, under "Timeline settings" in its corner ⋯:
-  // the toggles and steppers that used to crowd the right of its toolbar,
-  // which the one 40 px bar has no room for. Same handlers, same testids.
+  // The timeline's own settings, straight in its corner ⋯ (Sam, Oct 27: no
+  // submenu): the toggles and steppers that used to crowd the right of its
+  // toolbar, which the one 40 px bar has no room for. Same handlers, testids.
   const stepper = (label: string, readout: string, less: { aria: string; title?: string; icon: typeof Minus; run: () => void }, more: { aria: string; title?: string; icon: typeof Plus; run: () => void }) => (
     <div className="flex items-center gap-2 px-1.5 py-1 text-sm">
       <span className="flex-1">{label}</span>
@@ -4182,85 +4178,79 @@ export function TimelineEditor({
     </>
   ) : null
   const timelineSettings = (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger data-testid="tl-settings">
-        <Settings2 />
-        {t("editor.dock.timelineSettings")}
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent className="w-72">
-        {/* Meeting 2026-08-05: generated voices default to compressed
-            playback; fast connections can opt into the original WAV. Mic
-            recordings have no lossless form — the description says so. */}
+    <>
+      {/* Meeting 2026-08-05: generated voices default to compressed
+          playback; fast connections can opt into the original WAV. Mic
+          recordings have no lossless form — the description says so. */}
+      <DropdownMenuCheckboxItem
+        checked={audioQuality === "original"}
+        onCheckedChange={(on) => setAudioQualityPref(on ? "original" : "compressed")}
+        data-testid="tl-quality-toggle"
+        title={audioQuality === "original" ? t("editor.timeline.qualityOriginalTooltip") : t("editor.timeline.qualityCompressedTooltip")}
+      >
+        <AudioLines />
+        {t("editor.timeline.qualityToggleAria")}
+      </DropdownMenuCheckboxItem>
+      {/* SUB-53: nothing to snap to when positions are computed. */}
+      {!audioFirst && (
         <DropdownMenuCheckboxItem
-          checked={audioQuality === "original"}
-          onCheckedChange={(on) => setAudioQualityPref(on ? "original" : "compressed")}
-          data-testid="tl-quality-toggle"
-          title={audioQuality === "original" ? t("editor.timeline.qualityOriginalTooltip") : t("editor.timeline.qualityCompressedTooltip")}
-        >
-          <AudioLines />
-          {t("editor.timeline.qualityToggleAria")}
-        </DropdownMenuCheckboxItem>
-        {/* SUB-53: nothing to snap to when positions are computed. */}
-        {!audioFirst && (
-          <DropdownMenuCheckboxItem
-            checked={snapOn}
-            onCheckedChange={(on) => {
-              setSnapOn(on)
-              saveSnapEnabled(on)
-            }}
-            data-testid="tl-snap-toggle"
-          >
-            <Magnet />
-            {t("editor.timeline.snapToggleAria")}
-          </DropdownMenuCheckboxItem>
-        )}
-        <DropdownMenuCheckboxItem
-          checked={follow}
-          onCheckedChange={(next) => {
-            setFollow(next)
-            if (next) {
-              const el = scrollRef.current
-              if (el) {
-                const target = computeFollowScroll(
-                  secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
-                )
-                if (target != null) scrollTrackTo(target)
-              }
-            }
+          checked={snapOn}
+          onCheckedChange={(on) => {
+            setSnapOn(on)
+            saveSnapEnabled(on)
           }}
-          data-testid="tl-follow-toggle"
+          data-testid="tl-snap-toggle"
         >
-          <LocateFixed />
-          {t("editor.timeline.followPlayhead")}
+          <Magnet />
+          {t("editor.timeline.snapToggleAria")}
         </DropdownMenuCheckboxItem>
-        {/* AQU-646 stage 3b: the gutter's two widths, all rows at once (Sam,
-            2026-08-24). It was the « » in the corner; chevrons are gone from
-            the layout, so it is a setting beside the others. */}
-        <DropdownMenuCheckboxItem
-          checked={!gutterCollapsed}
-          onCheckedChange={(on) => setGutterCollapsed(!on)}
-          data-testid="tl-gutter-toggle"
-        >
-          <Rows3 />
-          {t("editor.timeline.gutterExpandAria")}
-        </DropdownMenuCheckboxItem>
-        <DropdownMenuSeparator />
-        {stepper(
-          t("editor.dock.zoom"),
-          `${(pxPerSec / ZOOM_DEFAULT).toFixed(1)}×`,
-          { aria: t("editor.timeline.zoomOut"), icon: Minus, run: () => applyZoom(pxPerSec / 1.3) },
-          { aria: t("editor.timeline.zoomIn"), icon: Plus, run: () => applyZoom(pxPerSec * 1.3) },
-        )}
-        {/* Stage 3: the vertical zoom beside the horizontal one, and the
-            readout says pixels so the two are never confused. */}
-        {stepper(
-          t("editor.dock.rowHeight"),
-          `${rowH}px`,
-          { aria: t("editor.timeline.rowsShorterAria"), title: t("editor.timeline.rowsShorterTooltip"), icon: ChevronsDownUp, run: () => applyRowHeight(rowH / 1.3) },
-          { aria: t("editor.timeline.rowsTallerAria"), title: t("editor.timeline.rowsTallerTooltip"), icon: ChevronsUpDown, run: () => applyRowHeight(rowH * 1.3) },
-        )}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+      )}
+      <DropdownMenuCheckboxItem
+        checked={follow}
+        onCheckedChange={(next) => {
+          setFollow(next)
+          if (next) {
+            const el = scrollRef.current
+            if (el) {
+              const target = computeFollowScroll(
+                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+              )
+              if (target != null) scrollTrackTo(target)
+            }
+          }
+        }}
+        data-testid="tl-follow-toggle"
+      >
+        <LocateFixed />
+        {t("editor.timeline.followPlayhead")}
+      </DropdownMenuCheckboxItem>
+      {/* AQU-646 stage 3b: the gutter's two widths, all rows at once (Sam,
+          2026-08-24). It was the « » in the corner; chevrons are gone from
+          the layout, so it is a setting beside the others. */}
+      <DropdownMenuCheckboxItem
+        checked={!gutterCollapsed}
+        onCheckedChange={(on) => setGutterCollapsed(!on)}
+        data-testid="tl-gutter-toggle"
+      >
+        <Rows3 />
+        {t("editor.timeline.gutterExpandAria")}
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
+      {stepper(
+        t("editor.dock.zoom"),
+        `${(pxPerSec / ZOOM_DEFAULT).toFixed(1)}×`,
+        { aria: t("editor.timeline.zoomOut"), icon: Minus, run: () => applyZoom(pxPerSec / 1.3) },
+        { aria: t("editor.timeline.zoomIn"), icon: Plus, run: () => applyZoom(pxPerSec * 1.3) },
+      )}
+      {/* Stage 3: the vertical zoom beside the horizontal one, and the
+          readout says pixels so the two are never confused. */}
+      {stepper(
+        t("editor.dock.rowHeight"),
+        `${rowH}px`,
+        { aria: t("editor.timeline.rowsShorterAria"), title: t("editor.timeline.rowsShorterTooltip"), icon: ChevronsDownUp, run: () => applyRowHeight(rowH / 1.3) },
+        { aria: t("editor.timeline.rowsTallerAria"), title: t("editor.timeline.rowsTallerTooltip"), icon: ChevronsUpDown, run: () => applyRowHeight(rowH * 1.3) },
+      )}
+    </>
   )
 
   // The timeline's tools, in the top bar's order (canvas board 23): Timing,
@@ -4752,7 +4742,13 @@ export function TimelineEditor({
                     // and the ⋯, which carries Fold too.
                     compact={gutterCollapsed}
                     foldTip={t("editor.dock.foldTimelineTip", { keys: dockKeys().fold })}
-                    menu={<TimelineMenu controls={layoutControls} settings={<>{compactEditItems}{timelineSettings}</>} />}
+                    menu={
+                      <TimelineMenu
+                        controls={layoutControls}
+                        compact={gutterCollapsed}
+                        settings={<>{compactEditItems}{timelineSettings}</>}
+                      />
+                    }
                   />
                 ) : (
                   <div className="ms-auto">

@@ -1272,13 +1272,12 @@ export const editor = defineNamespace({
     "editor.dock.foldArea": "Fold this area",
     "editor.dock.foldTimeline": "Fold the timeline",
     "editor.dock.moreTip": "Move this panel, or more",
-    "editor.dock.timelineMoreTip": "Timeline layout and settings",
+    "editor.dock.timelineMoreTip": "Timeline settings",
     "editor.dock.menuHeading": "{panel} · in {area}",
     "editor.dock.moveTo": "Move to {area}",
     "editor.dock.dragNote": "You can also drag the tab to another area, or double-click it for full screen.",
     "editor.dock.tabTip": "{panel} · {keys} · click to show · double-click for full screen",
     "editor.dock.tracks": "Tracks",
-    "editor.dock.timelineSettings": "Timeline settings",
     "editor.dock.zoom": "Zoom",
     "editor.dock.rowHeight": "Row height",
     "editor.dock.timing": "Timing",
@@ -2838,7 +2837,8 @@ export const editor = defineNamespace({
       "editor.dock.timelineMoreTip": {
         description:
           "Tooltip and screen-reader name of the ⋯ button in the timeline's " +
-          "corner, which opens full screen, fold and the timeline's settings.",
+          "corner, which opens the timeline's settings (snapping, following " +
+          "the playhead, track names, zoom, row height).",
       },
       "editor.dock.menuHeading": {
         description: "Heading of a panel's ⋯ menu, saying which panel it is and where it sits.",
@@ -2870,11 +2870,6 @@ export const editor = defineNamespace({
           "Small label in the timeline's top-left corner, above the column of " +
           "track names; the timeline's layout buttons sit beside it.",
         maxLength: 12,
-      },
-      "editor.dock.timelineSettings": {
-        description:
-          "Submenu in the timeline's ⋯ menu holding its settings: original " +
-          "quality, snapping, following the playhead, track names, zoom and row height.",
       },
       "editor.dock.zoom": {
         description: "Label of the horizontal zoom stepper (−, a reading like 1.0×, +) in the timeline's settings.",

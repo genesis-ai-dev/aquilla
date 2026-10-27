@@ -65,11 +65,21 @@ describe("an area's strip", () => {
 describe("the timeline's corner controls", () => {
   it("the narrow track names leave room for Full screen and ⋯ only", () => {
     const controls = { isFull: false, canFold: true, onToggleFull: vi.fn(), onFold: vi.fn() }
-    render(<PanelControlButtons region="tl" controls={controls} foldTip="Fold" compact menu={<TimelineMenu controls={controls} />} />)
+    render(<PanelControlButtons region="tl" controls={controls} foldTip="Fold" compact menu={<TimelineMenu controls={controls} compact />} />)
     expect(screen.queryByTestId("dock-fold-tl")).toBeNull()
     fireEvent.click(screen.getByTestId("dock-more-tl"))
     fireEvent.click(screen.getByTestId("dock-menu-fold-tl"))
     expect(controls.onFold).toHaveBeenCalled()
+  })
+
+  it("its ⋯ leaves Full screen and Fold to the buttons beside it (Sam, Oct 27)", () => {
+    const controls = { isFull: false, canFold: true, onToggleFull: vi.fn(), onFold: vi.fn() }
+    render(<TimelineMenu controls={controls} settings={<span data-testid="settings">settings</span>} />)
+    fireEvent.click(screen.getByTestId("dock-more-tl"))
+    expect(screen.getByText("Timeline")).toBeInTheDocument()
+    expect(screen.queryByTestId("dock-menu-full-tl")).toBeNull()
+    expect(screen.queryByTestId("dock-menu-fold-tl")).toBeNull()
+    expect(screen.getByTestId("settings")).toBeInTheDocument()
   })
 })
 

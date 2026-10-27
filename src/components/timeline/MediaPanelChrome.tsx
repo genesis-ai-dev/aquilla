@@ -302,25 +302,38 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
 
 /**
  * The timeline's ⋯ (Decided › LAYOUT: "timeline ⋯, no Move" — it is the
- * anchor everything else docks to): Full screen, Fold the timeline, and the
- * timeline's own settings, which the 40 px bar has no room for.
+ * anchor everything else docks to): its heading, then the timeline's own
+ * settings, which the 40 px bar has no room for. Full screen and Fold are the
+ * buttons beside it, so the menu leaves them out (Sam, Oct 27) — except Fold
+ * while the track names are narrowed, when there is room for Full screen and
+ * this ⋯ only.
  */
-export function TimelineMenu({ controls, settings }: { controls?: RegionLayoutControls; settings?: ReactNode }) {
+export function TimelineMenu({
+  controls,
+  compact = false,
+  settings,
+}: {
+  controls?: RegionLayoutControls
+  compact?: boolean
+  settings?: ReactNode
+}) {
   const t = useT()
+  const keys = dockKeys()
   return (
     <DropdownMenu>
       <MoreTrigger tip={t("editor.dock.timelineMoreTip")} testId="dock-more-tl" />
-      <DropdownMenuContent align="start" className="w-[270px]">
+      <DropdownMenuContent align="start" className="w-72">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">{t("editor.timeline.title")}</DropdownMenuLabel>
-          {controls && <LayoutItems controls={controls} foldLabel={t("editor.dock.foldTimeline")} region="tl" />}
+          {compact && controls?.canFold && (
+            <DropdownMenuItem onClick={controls.onFold} data-testid="dock-menu-fold-tl">
+              <Minus />
+              {t("editor.dock.foldTimeline")}
+              <DropdownMenuShortcut>{keys.fold}</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
-        {settings && (
-          <>
-            {controls && <DropdownMenuSeparator />}
-            {settings}
-          </>
-        )}
+        {settings}
       </DropdownMenuContent>
     </DropdownMenu>
   )

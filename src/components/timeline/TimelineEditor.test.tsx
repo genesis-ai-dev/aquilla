@@ -13,15 +13,14 @@ import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
- * quality, track names, zoom, row height) live in its corner ⋯, under
- * "Timeline settings". Finds the control, opening that submenu if need be.
+ * quality, track names, zoom, row height) live in its corner ⋯, directly
+ * (Sam, Oct 27: no submenu). Finds the control, opening the menu if need be.
  */
 function inTimelineSettings<T>(find: () => T): T {
   try {
     return find()
   } catch {
     fireEvent.click(screen.getByTestId("dock-more-tl"))
-    fireEvent.click(screen.getByTestId("tl-settings"))
     return find()
   }
 }

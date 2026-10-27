@@ -245,6 +245,40 @@ describe("Portuguese", () => {
   })
 })
 
+describe("Swahili (AQU-2198)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const sw = LOCALES.find((l) => l.code === "sw")
+    expect(sw?.dir).toBe("ltr")
+    expect(sw?.englishName).toBe("Swahili")
+    // One catalog, worded as Kiswahili sanifu. The menu stays the endonym.
+    expect(sw?.nativeName).toBe("Kiswahili")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.sw ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves standard Swahili to Kenyan and Tanzanian browser codes", () => {
+    // One written standard, not a national dialect. Congolese Swahili (`swc`)
+    // does not share the `sw` primary subtag and must not land here.
+    expect(normalizeLocale("sw")).toBe("sw")
+    expect(normalizeLocale("sw-KE")).toBe("sw")
+    expect(normalizeLocale("sw-TZ")).toBe("sw")
+    expect(normalizeLocale("swc")).toBe("en")
+    expect(detectInitialLocale(null, "sw-TZ")).toBe("sw")
+  })
+  it("supplies Swahili's one/other forms for a count-governed key", () => {
+    // CLDR `sw`: `one` is exactly 1; 0 and everything else are `other`.
+    // Class 9/10 nouns often keep the same shape, so identical wording is grammatical.
+    const counted = CATALOGS.sw?.["common.cellCount"]
+    expect(counted, "common.cellCount must be count-governed in sw").toBeDefined()
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
 describe("Russian (AQU-1226)", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const ru = LOCALES.find((l) => l.code === "ru")

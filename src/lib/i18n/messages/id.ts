@@ -3231,7 +3231,6 @@ export const id: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "Organisasi tamu",
   "org.switcher.guestRole": "Tamu",
   "org.switcher.personalWorkspace": "Pribadi",
-  "org.overviewLaneTable.sectionDescription": "Progres, orang, dan tindakan untuk setiap bahasa target pada proyek ini.",
   "org.projectOverview.chapterAbbrevLabel": "Ps {chapter}",
   "org.projectOverview.archiveDialogTitle": "Arsipkan proyek",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Saring progres menurut bahasa",

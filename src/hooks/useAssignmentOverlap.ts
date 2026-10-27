@@ -7,8 +7,13 @@
  * and roster floors, so a manager below them gets a 403 and no warning rather
  * than a look at assignments the org keeps from them.
  *
- * A plain fetch per file, cached for as long as the form stays mounted: the
- * assignee and scope change far more often than the files' assignments do.
+ * Fetched again whenever the set of files changes. The overview form passes no
+ * files while it is collapsed, so opening it loads the assignments that exist
+ * now — including one created a moment ago in this same form (AQU-2130). A
+ * cache that lived for the whole mount hid that assignment until a reload.
+ * Changing the assignee or the scope does not refetch; those only re-read the
+ * rows already loaded for these files. A refusal or a network error is no
+ * warning, never an error in the form. More than MAX_FILES skips the check.
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -48,12 +53,14 @@ export function useAssignmentOverlap({
     () => (scope && assigneeUserId != null && fileIds.length <= MAX_FILES ? [...new Set(fileIds)] : []),
     [scope, assigneeUserId, fileIds],
   )
-  const missing = wanted.filter((id) => !byFile.has(id)).join("\n")
+  // The file ids, not the array identity. Empty while the form is closed, so
+  // closing and opening the same file is a change and fetches again.
+  const wantedKey = wanted.join("\n")
 
   useEffect(() => {
-    if (!jwt || !missing) return
+    if (!jwt || !wantedKey) return
     let cancelled = false
-    const ids = missing.split("\n")
+    const ids = wantedKey.split("\n")
     void Promise.all(
       ids.map((fileId) =>
         getUnitAssignments(jwt, projectId, fileId, "", "")
@@ -72,7 +79,7 @@ export function useAssignmentOverlap({
     return () => {
       cancelled = true
     }
-  }, [jwt, projectId, missing])
+  }, [jwt, projectId, wantedKey])
 
   return useMemo(() => {
     if (!scope || assigneeUserId == null) return []

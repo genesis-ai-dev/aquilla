@@ -46,6 +46,39 @@ export interface ValidatedPair {
 }
 
 /**
+ * Regex-free, locale-independent term data that `compileConceptsToRulesCore`
+ * attaches to the rules it compiles from a project's termbase (`term:…` ids).
+ *
+ * AQU-2209: prompt injection reads THIS, never the match patterns. Rendering
+ * the patterns was injecting the whole glossary as raw regex into every draft
+ * call — a 722-concept termbase meant 722 lines like
+ * `"(?<![\p{L}\p{M}])Moses(?![\p{L}\p{M}])"`, a 115 KB system prompt for a
+ * 213-char source. The boundary wrappers are the matcher's internals and
+ * carry no meaning for a model, and the two terms that actually occurred in
+ * the cell were buried in the 720 that did not — so adherence got WORSE as
+ * the glossary got better, which is the opposite of the point of a termbase.
+ *
+ * `sourcePattern` stays here so injection can ask the only question that
+ * matters — is this concept present in THIS cell's source? — using the exact
+ * pattern `rule-engine` lints with, so the prompt promises what the engine
+ * enforces.
+ */
+export interface PromptTermInfo {
+  /** The concept this rule compiled from. Rules sharing one render as one line. */
+  conceptId: string
+  /** The glossary's own spelling of the source term — what the model reads. */
+  sourceTerm: string
+  /** Regex source matching the concept in SOURCE text. Wildcards, project
+   *  affixes and mark folding are already baked in by the shared matcher. */
+  sourcePattern: string
+  caseSensitive?: boolean
+  /** Preferred + admitted renderings, plain text (the `:approved` rule). */
+  approved?: string[]
+  /** The single forbidden rendering this rule names (a `:forbidden:…` rule). */
+  forbidden?: string
+}
+
+/**
  * The subset of `TranslationRule` (src/lib/parsers/types.ts) that prompt
  * injection actually reads. Declared structurally so this module stays
  * alias-free; `TranslationRule[]` is assignable to `PromptRule[]`.
@@ -60,6 +93,10 @@ export interface PromptRule {
     | { type: "target-forbids"; targetPattern: string }
     | { type: "source-target-match"; pattern: string }
     | { type: "builtin" }
+  /** Terminology rules only (AQU-2209). A rule carrying this is injected ONLY
+   *  when `term.sourcePattern` occurs in the source being drafted, and is
+   *  rendered from its plain fields instead of its `check` patterns. */
+  term?: PromptTermInfo
 }
 
 /**
@@ -153,19 +190,161 @@ export function selectApprovedExamples(
 }
 
 /**
+ * How many distinct glossary concepts one call may inject (AQU-2209). The
+ * terms that actually occur in a cell are few, so this is a backstop for a
+ * pathological source (a term list, a long merged paragraph) against a large
+ * termbase: prompt size is then bounded by the cap, not by the glossary.
+ * Overflow is reported by `selectInjectedTerms`, never silently swallowed.
+ */
+export const DEFAULT_MAX_INJECTED_TERMS = 40
+
+/** One concept's injectable guidance, merged across its compiled rules. */
+export interface InjectedTerm {
+  conceptId: string
+  sourceTerm: string
+  approvedRenderings: string[]
+  forbiddenRenderings: string[]
+}
+
+export interface TermSelection {
+  /** Concepts present in the source, in compile order, after the cap. */
+  injected: InjectedTerm[]
+  /** How many concepts were present in the source BEFORE the cap. */
+  matched: number
+  /** How many present concepts the cap left out (`matched - injected.length`). */
+  dropped: number
+}
+
+/**
+ * Does a compiled term pattern occur in the source?
+ *
+ * The shared matcher emits Unicode property escapes (`\p{L}`), which REQUIRE
+ * the `u` flag — the same opt-in `rule-engine` makes for `term:` rules alone.
+ * A pattern that will not compile counts as absent, matching the engine
+ * (which declines to fire a rule it cannot compile), so injection never
+ * promises a constraint the engine would not enforce.
+ */
+function termPatternOccurs(pattern: string, caseSensitive: boolean, sourceText: string): boolean {
+  if (!sourceText) return false
+  try {
+    return new RegExp(pattern, caseSensitive ? "u" : "iu").test(sourceText)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Narrow a project's compiled terminology to the concepts that actually occur
+ * in `sourceText` (AQU-2209), merging each concept's rules — one `:approved`
+ * plus one `:forbidden:…` per forbidden rendering — back into a single entry.
+ *
+ * Concepts keep their compile order, which is deliberate: subscribed org
+ * termbases first (highest precedence), then the project's own. So when the
+ * cap bites, it drops the lowest-precedence matches.
+ *
+ * Exported because the Agent API's prompt preview reports the selection as
+ * `parts.injectedTerms` and warns on `dropped` — an agent tuning a termbase
+ * needs to see which terms landed, and the preview must not re-derive that.
+ */
+export function selectInjectedTerms(
+  rules: readonly PromptRule[],
+  sourceText: string,
+  maxTerms: number = DEFAULT_MAX_INJECTED_TERMS,
+): TermSelection {
+  const byConcept = new Map<string, InjectedTerm>()
+  // One regex test per distinct pattern: a concept's rules all share one.
+  const presence = new Map<string, boolean>()
+
+  for (const rule of rules) {
+    if (!rule.enabled || !rule.term) continue
+    const { term } = rule
+    const caseSensitive = term.caseSensitive === true
+    const key = `${caseSensitive ? "s" : "i"}\u0000${term.sourcePattern}`
+    let present = presence.get(key)
+    if (present === undefined) {
+      present = termPatternOccurs(term.sourcePattern, caseSensitive, sourceText)
+      presence.set(key, present)
+    }
+    if (!present) continue
+
+    let entry = byConcept.get(term.conceptId)
+    if (!entry) {
+      entry = {
+        conceptId: term.conceptId,
+        sourceTerm: term.sourceTerm,
+        approvedRenderings: [],
+        forbiddenRenderings: [],
+      }
+      byConcept.set(term.conceptId, entry)
+    }
+    for (const rendering of term.approved ?? []) {
+      if (rendering && !entry.approvedRenderings.includes(rendering)) {
+        entry.approvedRenderings.push(rendering)
+      }
+    }
+    if (term.forbidden && !entry.forbiddenRenderings.includes(term.forbidden)) {
+      entry.forbiddenRenderings.push(term.forbidden)
+    }
+  }
+
+  const matched = [...byConcept.values()]
+  const limit = maxTerms > 0 ? maxTerms : 0
+  return {
+    injected: matched.slice(0, limit),
+    matched: matched.length,
+    dropped: Math.max(0, matched.length - limit),
+  }
+}
+
+/**
+ * One glossary line, regex-free. Returns "" for a concept with nothing to say
+ * — the compiler emits no rule in that case (a lane where every rendering
+ * belongs to another one, AQU-1508), so this is a guard, not a path — and the
+ * caller drops empty lines rather than injecting a bare term.
+ */
+function renderInjectedTerm(term: InjectedTerm): string {
+  const parts: string[] = []
+  const [preferred, ...alternates] = term.approvedRenderings
+  if (preferred) {
+    parts.push(
+      alternates.length
+        ? `"${term.sourceTerm}" → "${preferred}" (also acceptable: ${alternates.map((r) => `"${r}"`).join(", ")})`
+        : `"${term.sourceTerm}" → "${preferred}"`,
+    )
+  }
+  if (term.forbiddenRenderings.length) {
+    const forbidden = term.forbiddenRenderings.map((r) => `"${r}"`).join(", ")
+    parts.push(preferred ? `Do NOT use ${forbidden}` : `"${term.sourceTerm}": Do NOT use ${forbidden}`)
+  }
+  return parts.length ? `- ${parts.join(". ")}.` : ""
+}
+
+/**
  * Render active project rules as a concise terminology/guidance block that
  * can be injected into a system prompt. Only `source-requires-target` rules
  * are rendered as explicit "if you see X → use Y" guidance; other check
  * types become a simple "avoid: X" instruction. Disabled rules are skipped.
  *
+ * Terminology rules — the ones carrying `term`, compiled from the project's
+ * termbase — are handled apart from those three regex shapes: they are
+ * narrowed to the concepts that occur in `options.sourceText` and rendered as
+ * plain `"Moses" → "Moisés"` lines (AQU-2209; see PromptTermInfo for why).
+ * With no `sourceText` there is nothing to narrow against, so NO term is
+ * injected: a caller assembling a prompt always has the source it is about to
+ * translate, and injecting the whole table is the bug this replaced.
+ *
  * Returns an empty string when there are no active, injectable rules.
  */
-export function buildRulesBlock(rules: PromptRule[]): string {
+export function buildRulesBlock(
+  rules: PromptRule[],
+  options: { sourceText?: string; maxTerms?: number } = {},
+): string {
   const active = rules.filter((r) => r.enabled)
   if (!active.length) return ""
 
   const lines: string[] = []
   for (const rule of active) {
+    if (rule.term) continue // narrowed and rendered below, not as regex prose
     const { check } = rule
     if (check.type === "source-requires-target") {
       lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
@@ -175,6 +354,13 @@ export function buildRulesBlock(rules: PromptRule[]): string {
       lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
     }
     // builtin checks are algorithmic; no useful prompt injection
+  }
+
+  // Glossary terms last: the rules above are the project's standing
+  // instructions, these are the handful specific to the cell in hand.
+  for (const term of selectInjectedTerms(active, options.sourceText ?? "", options.maxTerms).injected) {
+    const line = renderInjectedTerm(term)
+    if (line) lines.push(line)
   }
 
   if (!lines.length) return ""
@@ -275,8 +461,9 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
   if (briefBlock) sys = sys + "\n\n" + briefBlock
 
   // Inject rules block after the base system prompt so it is always visible.
+  // The source goes in so terminology narrows to this cell (AQU-2209).
   if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
+    const block = buildRulesBlock(options.rules, { sourceText: options.sourceText })
     if (block) sys = sys + "\n\n" + block
   }
 

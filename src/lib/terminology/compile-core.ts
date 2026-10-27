@@ -24,9 +24,17 @@
 //      condition yet, see AQU-1712 — lintTerminology applies one itself)
 //
 // draft / deprecated concepts are skipped entirely.
+//
+// Every rule also carries a `term` payload (AQU-2209): the concept id, the
+// plain source term and renderings, and the source pattern. Prompt injection
+// reads ONLY that — `buildRulesBlock` narrows terminology to the concepts
+// present in the cell being drafted and renders them as `Moses → Moisés`,
+// instead of spelling every concept's match regex into every draft call. The
+// `check` patterns remain the rule engine's and nobody else's.
 
 import { conceptToRegexSource, termToRegexSource } from "./match"
 import type { TermMatchOptions, TermMatchingSettings } from "./model"
+import type { PromptTermInfo } from "../completion/prompt-build"
 
 /** Structural echo of `TermRendering` (./types). */
 export interface CompiledRendering {
@@ -58,6 +66,10 @@ export interface CompiledTermRule {
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
     | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+  /** Regex-free data for prompt injection (AQU-2209) — the plain source term
+   *  and renderings, plus the source pattern injection narrows on. Derived on
+   *  read with the rest of the rule; nothing persists it. */
+  term: PromptTermInfo
 }
 
 /**
@@ -120,6 +132,15 @@ export function compileConceptsToRulesCore(
     )
     if (sourcePattern === null) continue
 
+    // Shared by this concept's rules, so injection tests one pattern per
+    // concept rather than one per rule (AQU-2209).
+    const term: PromptTermInfo = {
+      conceptId: concept.id,
+      sourceTerm: concept.sourceTerm,
+      sourcePattern,
+      ...(concept.caseSensitive ? { caseSensitive: true } : {}),
+    }
+
     // source-requires-target: each source instance needs a counterpart rendering.
     if (approved.length > 0) {
       // Alternation of all approved renderings, each wildcard-aware. Drop any
@@ -151,6 +172,7 @@ export function compileConceptsToRulesCore(
           targetPattern,
           ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
+        term: { ...term, approved: approved.map((r) => r.rendering) },
       })
     }
 
@@ -180,6 +202,7 @@ export function compileConceptsToRulesCore(
           targetPattern: forbiddenPattern,
           ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
+        term: { ...term, forbidden: f.rendering },
       })
     }
   }

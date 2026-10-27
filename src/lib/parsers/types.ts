@@ -125,6 +125,10 @@ export interface TranslationRule {
   autofixAttemptedAt?: string  // ISO; absent means never tried
   /** For org-scoped rules promoted from a project: the originating project id. */
   sourceProjectId?: string
+  /** Terminology rules only (AQU-2209): the regex-free term data prompt
+   *  injection reads instead of the `check` patterns — set by
+   *  `compileConceptsToRulesCore`, derived on read, never persisted. */
+  term?: import("../completion/prompt-build").PromptTermInfo
 }
 
 export type RuleCheck =

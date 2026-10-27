@@ -62,9 +62,12 @@ import {
   buildPrompt,
   buildRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
   selectApprovedExamples,
+  selectInjectedTerms,
   type ChatMessage,
+  type InjectedTerm,
   type PromptRule,
   type ValidatedPair,
 } from "../../../src/lib/completion/prompt-build"
@@ -188,13 +191,10 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 /** Labeled description of one injected term, so a caller can see WHICH
- *  terminology entry produced a line in the rules block. */
-export interface InjectedTerm {
-  conceptId: string
-  sourceTerm: string
-  approvedRenderings: string[]
-  forbiddenRenderings: string[]
-}
+ *  terminology entry produced a line in the rules block. Re-exported from the
+ *  shared builder: since AQU-2209 this list IS the builder's selection — the
+ *  concepts present in this cell's source — not the whole termbase. */
+export type { InjectedTerm }
 
 export interface PromptPreviewBody {
   projectId: string
@@ -432,18 +432,13 @@ export async function buildPromptPreview(
     targetLang,
   )
 
-  const injectedTerms: InjectedTerm[] = visibleConcepts
-    .filter((c) => c.status === "active")
-    .map((c) => ({
-      conceptId: c.id,
-      sourceTerm: c.sourceTerm,
-      approvedRenderings: c.renderings
-        .filter((r) => r.status === "preferred" || r.status === "admitted")
-        .map((r) => r.rendering),
-      forbiddenRenderings: c.renderings
-        .filter((r) => r.status === "forbidden")
-        .map((r) => r.rendering),
-    }))
+  // AQU-2209: report exactly what the prompt injects — the concepts whose
+  // source term occurs in THIS cell — by asking the builder that does the
+  // narrowing, never by re-deriving it from the full concept list. An agent
+  // tuning a termbase reads this to confirm a term landed, so a preview that
+  // listed all 722 concepts while the prompt carried two was worse than none.
+  const termSelection = selectInjectedTerms(rules, sourceText)
+  const injectedTerms: InjectedTerm[] = termSelection.injected
 
   // ── discourse window (D4): the approved target of preceding cells ────────
   const precedingContext = precedingCount
@@ -517,6 +512,16 @@ export async function buildPromptPreview(
         "the copilot refuses to draft it, and retrieval was skipped",
     })
   }
+  if (termSelection.dropped > 0) {
+    warnings.push({
+      code: "terms_capped",
+      message:
+        `${termSelection.matched} glossary concepts occur in this source, more than the ` +
+        `${DEFAULT_MAX_INJECTED_TERMS}-term injection cap: the ${termSelection.dropped} ` +
+        "lowest-precedence matches (the project's own concepts before any subscribed " +
+        "termbase's) were left out of the prompt",
+    })
+  }
   if (/\\f\s/.test(sourceText) || sourceText.includes("\\f*")) {
     warnings.push({
       code: "footnote_addendum_not_previewed",
@@ -542,7 +547,7 @@ export async function buildPromptPreview(
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
         brief: buildBriefBlock(briefSummary),
-        rules: buildRulesBlock(rules),
+        rules: buildRulesBlock(rules, { sourceText }),
         injectedTerms,
         examples,
         precedingContext,

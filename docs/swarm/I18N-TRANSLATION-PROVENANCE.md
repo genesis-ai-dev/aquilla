@@ -4,7 +4,7 @@
 
 > ## `sw` (Kiswahili sanifu) — AQU-2198, 2026-10-26
 >
-> Machine-translated from the full `pnpm i18n:todo` packet (9,566 leaves) and merged
+> Machine-translated from the full `pnpm i18n:todo` packet (9,565 leaves) and merged
 > with `scripts/i18n-catalog.ts import`. **No Swahili speaker has read it.** One
 > catalog, worded as Kiswahili sanifu — the written East African standard, not a
 > Kenyan or Tanzanian national dialect, not Sheng, and not Congolese Swahili
@@ -14,9 +14,9 @@
 > istilahi, back-translation → tafsiri ya nyuma, source → chanzo, target → lengo,
 > draft → rasimu, project → mradi, organization → shirika.
 >
-> Import report: 8,913/9,040 keys. The leaves the importer dropped were identical to
+> Import report: 8,912/9,039 keys. The leaves the importer dropped were identical to
 > English (formats, product names, placeholder-only templates, and the labels that
-> must stay English). Mechanical check before import: 9,566 leaves, 0 missing, and
+> must stay English). Mechanical check before import: 9,565 leaves, 0 missing, and
 > 0 `{placeholder}` drift. Plural forms may omit `{count}` and add none.
 > `common.datePlaceholder` stays `June 01, 2025` and
 > `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026` because the

@@ -3816,7 +3816,6 @@ export const sw: Catalog = {
   "org.switcher.guestRole": "Mgeni",
   "org.switcher.personalWorkspace": "Binafsi",
   "org.overviewLaneTable.peopleCellAriaLabel": "Watu kwenye {lane}",
-  "org.overviewLaneTable.sectionDescription": "Maendeleo, watu, na vitendo kwa kila lugha lengwa kwenye mradi huu.",
   "org.projectOverview.chapterAbbrevLabel": "Sura {chapter}",
   "org.projectOverview.archiveDialogTitle": "Weka mradi kwenye kumbukumbu",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Chuja maendeleo kwa lugha",

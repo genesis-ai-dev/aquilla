@@ -41,5 +41,7 @@ test("sidebar re-import updates this file and flags the changed source", async (
   const inserted = await workspace.cellIndexBySource("This verse is new.")
   await expect(workspace.cellRow(inserted).locator('[data-cell-type="target"]')).not.toContainText(translated)
   await expect(workspace.cellRow(inserted)).not.toHaveAttribute("data-source-review", "true")
-  await expect(alice.locator("[data-cell-id]")).not.toContainText("This verse will be removed.")
+  // Every row, not one: after the re-import the file has two rows, and a
+  // negative toContainText on a multi-element locator is a strict-mode error.
+  await expect(alice.locator("[data-cell-id]").filter({ hasText: "This verse will be removed." })).toHaveCount(0)
 })

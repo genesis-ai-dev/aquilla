@@ -22,7 +22,7 @@ export const CELL_ROW_COLUMNS =
   `cell_id, side, ${wireLegacyTagSql("cells")} AS target_lang, value, value_html, type, canonical_ref, anchor_cell_id, ` +
   "event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, " +
   "endorsement_count, start_ms, end_ms, " +
-  `medium, sequence_index, transcription, camera_state, ${cellMetadataWireSql()} AS metadata, lane_id, hidden_at`
+  `medium, sequence_index, transcription, camera_state, ${cellMetadataWireSql()} AS metadata, lane_id, hidden_at, milestone_label`
 
 export interface CellRowRaw {
   cell_id: string
@@ -58,6 +58,11 @@ export interface CellRowRaw {
    *  on the shared source row — see the column comment in db/postgres/schema.sql.
    *  Absent on a pre-0112 database or a hand-built fixture. */
   hidden_at?: number | null
+  /** AQU-2185: the name a person gave a navigator division starting at this
+   *  cell, NULL when nobody has marked it. Only ever set on the shared source
+   *  row — see the column comment in db/postgres/schema.sql. Absent on a
+   *  pre-0188 database or a hand-built fixture. */
+  milestone_label?: string | null
 }
 
 export interface CellRowOut {
@@ -98,6 +103,14 @@ export interface CellRowOut {
    * of its own to read.
    */
   hidden?: boolean
+  /**
+   * AQU-2185: the name a person gave a navigator division starting at this
+   * cell ("Start a section here"). OMITTED (not `null`) on an unmarked row, for
+   * the same reason `hidden` above is omitted. Only ever emitted on the SOURCE
+   * row — a division belongs to the file every lane shares, so consumers
+   * resolve a cell's section from that row rather than from their own side.
+   */
+  milestoneLabel?: string
 }
 
 /** JSONB comes back as a parsed object from the Postgres driver; a text
@@ -162,5 +175,11 @@ export function mapCellRow(row: CellRowRaw): CellRowOut {
     // stringify drops `undefined` too, but an absent key also keeps the two
     // serialisers' object shapes identical for the by-ids byte-identity test.
     ...(row.hidden_at != null ? { hidden: true as const } : {}),
+    // Spread so the key is absent, not `undefined`, on an unmarked row — the
+    // same reason `hidden` above is spread, and the same byte-identity test
+    // holds the two serialisers' object shapes together.
+    ...(row.milestone_label != null && row.milestone_label !== ''
+      ? { milestoneLabel: row.milestone_label }
+      : {}),
   }
 }

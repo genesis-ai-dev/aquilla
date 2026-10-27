@@ -795,6 +795,18 @@ CREATE TABLE cells (
     -- and survives both. Nothing is deleted — text, translations, recordings,
     -- comments and validations all come back untouched on show.
     hidden_at         BIGINT,
+    -- AQU-2185: the name a person gave a navigator division of their own with
+    -- "Start a section here" (migration 0188). NULL on every cell nobody has
+    -- marked. Written by source.cell.milestone.set on the SHARED SOURCE ROW
+    -- ONLY (side='source') — a division belongs to the file every lane shares,
+    -- not to one translation, so one event covers every language and consumers
+    -- read the label off that one row. Deliberately NOT in `metadata`: a
+    -- re-import replaces a cell's `aquillaImport` envelope wholesale, and this
+    -- column is absent from the source.cell.create UPSERT's SET list, so a
+    -- hand-set section survives both a re-import and a mirror upsert. The
+    -- division itself is DERIVED from this column at read time
+    -- (`deriveMilestoneNavigation`); there is no second copy to keep in step.
+    milestone_label   TEXT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     -- Identity is lane_id (AQU-1420). The projection target_lang column was
@@ -808,6 +820,12 @@ CREATE TABLE cells (
 CREATE INDEX IF NOT EXISTS idx_cells_hidden
   ON cells(project_id, file_id)
   WHERE hidden_at IS NOT NULL;
+
+-- AQU-2185: a file has a handful of hand-set sections at most, so only the
+-- marked rows are indexed — same shape and same reason as idx_cells_hidden.
+CREATE INDEX IF NOT EXISTS idx_cells_milestone_label
+  ON cells(project_id, file_id)
+  WHERE milestone_label IS NOT NULL;
 
 -- Cells a live link's upstream deleted (tombstoned_at). Only live-linked
 -- downstreams have any, so this indexes a small slice of the table — the set

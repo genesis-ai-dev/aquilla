@@ -100,6 +100,12 @@ function isEventAppliedRowsKind(kind: string): boolean {
     // learn a row left the file — correct, but a round trip for a one-column
     // change we already have in hand.
     kind === 'source.cell.visibility.set' ||
+    // AQU-2185: a hand-set section changes the marked cell's projected row
+    // without being chain-mutating, so it has to be named here too — left out,
+    // every collaborator's client would fall back to a by-ids refetch to learn
+    // the file has a new division, which is the round trip this frame exists to
+    // avoid.
+    kind === 'source.cell.milestone.set' ||
     // AQU-1767 phase 2: a restore brings a cell's rows back, so collaborators
     // get them in the frame rather than a refetch.
     kind === 'source.cell.restore'

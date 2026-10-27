@@ -287,7 +287,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitSourceCellMilestoneSet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -313,6 +313,7 @@ import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmen
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
+import { StartSectionDialog } from "@/components/StartSectionDialog"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
@@ -1949,6 +1950,29 @@ export function ProjectWorkspace() {
         }
       : undefined),
     [mayParkCellsInProject, hiddenCellCount, showHiddenCellsPref],
+  )
+  /**
+   * AQU-2185: the cells whose menu may offer "Start a section here" — those
+   * sitting in a division the app made up, or in one that is already hand-set
+   * (a second marker splits it). Empty for anyone below the role floor, so a
+   * contributor's rows never even receive the set, and empty on a file whose
+   * every division came out of the file.
+   *
+   * Computed here rather than in the row because it is not a property of a
+   * cell: whether a division came out of the file is a property of the stretch
+   * the cell landed in, which only the navigation derivation knows.
+   * `readAtVersion` because the React Compiler memoises away a version-only
+   * dependency — see the note in useActiveCellStore.
+   */
+  const maySetSectionsInProject = canPerform(
+    "source.cell.milestone.set",
+    project?.syncRole?.level ?? null,
+  )
+  const sectionStartCellIds = useMemo(
+    () => (maySetSectionsInProject
+      ? readAtVersion(cellStoreVersion, () => cellStore.getCellIdsWhereSectionMayStart())
+      : undefined),
+    [maySetSectionsInProject, cellStore, cellStoreVersion],
   )
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
   /**
@@ -3670,6 +3694,70 @@ export function ProjectWorkspace() {
       await applying
     },
     [applyCellHidden, activeFileId],
+  )
+
+  /**
+   * AQU-2185: set the name of a navigator division starting at this cell, or
+   * clear it.
+   *
+   * Shaped on `applyCellHidden` above, and for the same reason: one
+   * non-chain-mutating event moves one column on the source row, so there is no
+   * confirmation, no cascade, no successor to re-point and no chain slot to
+   * lose. It destroys nothing — the division is DERIVED from this label, so
+   * clearing it puts the file's own divisions back rather than losing anything.
+   *
+   * Optimistic first so the navigator re-divides on the click; the snapshot is
+   * what puts the old divisions back if the server refuses. That path matters
+   * as much as the happy one: a section that appeared and was then rejected
+   * would leave the team planning against a division that does not exist.
+   */
+  const applyCellMilestone = useCallback(
+    async (cellId: string, label: string | null): Promise<boolean> => {
+      if (!project?.id || !activeFileId) return false
+      const previous = cellStore.applyOptimisticCellMilestone(cellId, label)
+      // `undefined` ⇒ no source row to mark. Nothing was done, so there is
+      // nothing to say and nothing to roll back. `null` is a REAL previous
+      // value here (an unmarked cell), so it must not be confused with it.
+      if (previous === undefined) return false
+      const restore = () => {
+        cellStore.applyOptimisticCellMilestone(cellId, previous)
+        revalidateCells()
+      }
+      try {
+        await emitSourceCellMilestoneSet({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId,
+          label,
+          author: currentUsername,
+        })
+      } catch (err) {
+        // `enqueueEvent` mirrors the role floor and throws BEFORE writing, so
+        // nothing is queued and no flush callback can fire. Without this the
+        // division would stand on screen behind a freshness floor no refetch
+        // can clear, with no message — the same note as in applyCellHidden.
+        console.error("[applyCellMilestone] refused before enqueue:", err)
+        restore()
+        toast.add({ type: "error", title: t("editor.startSection.failedToast") })
+        return false
+      }
+      let refused = false
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: () => {
+          refused = true
+          restore()
+        },
+        onForbidden: () => {
+          refused = true
+          restore()
+          toast.add({ type: "error", title: t("editor.startSection.forbiddenToast") })
+        },
+      })
+      revalidateCells()
+      return !refused
+    },
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, toast, t],
   )
 
   // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
@@ -9654,6 +9742,13 @@ export function ProjectWorkspace() {
   const handleSetCellHiddenStable = useCallback((cellId: string, hidden: boolean) => {
     setCellHiddenRef.current(cellId, hidden)
   }, [])
+  // AQU-2185: same indirection, same reason — this one only opens the dialog,
+  // and the dialog's own state lives beside the other editor dialogs further
+  // down, which a dep array evaluated up here could not name.
+  const startSectionRef = useRef<(cellId: string) => void>(() => {})
+  const handleStartSectionStable = useCallback((cellId: string) => {
+    startSectionRef.current(cellId)
+  }, [])
 
   /**
    * Take a maintainer to the switch that locks timings, rather than flipping
@@ -9712,11 +9807,16 @@ export function ProjectWorkspace() {
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
     onSetCellHidden: handleSetCellHiddenStable,
+    // AQU-2185: likewise unconditional — the role gate and the "is this cell in
+    // a division the file supplied" gate are both applied in the row, beside the
+    // DCS/live-linked reasons they share a menu entry with.
+    onStartSection: handleStartSectionStable,
+    sectionStartCellIds,
     onRetimeCell: handleRetimeSubtitle,
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleStartSectionStable, sectionStartCellIds, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -12647,6 +12747,11 @@ export function ProjectWorkspace() {
   }
   // AQU-1422: same publication, same reason.
   setCellHiddenRef.current = (cellId, hidden) => { void handleSetCellHidden(cellId, hidden) }
+  // AQU-2185: which cell the open "Start a section here" dialog is about. The
+  // id is held rather than passed through the dialog so the dialog stays a
+  // name-one-thing form with no idea what it is naming.
+  const [startSectionCellId, setStartSectionCellId] = useState<string | null>(null)
+  startSectionRef.current = (cellId: string) => { setStartSectionCellId(cellId) }
 
   // AQU-1068: who may add and remove cells at all. ONE question, asked of the
   // project's configured tier — no rank clears it on its own, because the
@@ -18178,6 +18283,17 @@ export function ProjectWorkspace() {
         onConfirm={() => {
           if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])
           setPendingQuoteSplit(null)
+        }}
+      />
+      {/* AQU-2185: name a navigator division of your own, starting at the cell
+          whose menu opened this. */}
+      <StartSectionDialog
+        open={startSectionCellId !== null}
+        onOpenChange={(open) => { if (!open) setStartSectionCellId(null) }}
+        onSubmit={(label) => {
+          const cellId = startSectionCellId
+          setStartSectionCellId(null)
+          if (cellId) void applyCellMilestone(cellId, label)
         }}
       />
       {/* A remote timing-mode change, acknowledged (2026-08-06). */}

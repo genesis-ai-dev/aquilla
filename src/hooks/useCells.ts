@@ -174,6 +174,12 @@ export interface CellData {
    *  cell, not per lane, and a target row created after the hide carries no flag
    *  of its own. Absent on a visible cell. */
   hidden?: boolean
+  /** AQU-2185: the name a person gave a navigator division starting at this
+   *  cell ("Start a section here"). Read from the SOURCE row's `milestoneLabel`
+   *  and NEVER from the target row — a division belongs to the file every lane
+   *  shares, and a target row created after the marker carries no label of its
+   *  own. Absent on a cell nobody has marked. */
+  milestoneLabel?: string
   waivers?: import("@/lib/parsers/types").RuleWaiver[]
   /** Most-recent edit timestamp on the target row (ms epoch). Forwarded from
    *  the CellRow projection so consumers like useLivingMemory can sort by
@@ -434,6 +440,9 @@ export function buildCellData(
     paragraphStart: paragraphStart || undefined,
     // AQU-1422: source row only, deliberately — see the field's doc comment.
     hidden: source?.hidden === true ? true : undefined,
+    // AQU-2185: source row only too, and for the same reason — a division
+    // belongs to the file every lane shares.
+    milestoneLabel: source?.milestoneLabel || undefined,
   }
 }
 

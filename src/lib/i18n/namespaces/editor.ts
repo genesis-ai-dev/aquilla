@@ -1459,6 +1459,24 @@ export const editor = defineNamespace({
     "editor.row.hiddenBadgeTooltip":
       "Hidden — not shown to translators and left out of exports.",
     "editor.row.hiddenBadgeAria": "Hidden cell",
+    // AQU-2185: name a navigator division of your own, starting at this cell.
+    // "Section" is the word the navigator already uses for a named stretch of a
+    // file read out of the file itself, and a hand-set one is the same thing to
+    // a reader — so the menu entry borrows it rather than introducing
+    // "milestone", which is the generic fallback noun and means nothing to a
+    // translator.
+    "editor.row.startSection": "Start a section here",
+    "editor.startSection.title": "Start a section here",
+    "editor.startSection.description":
+      "This section begins at this line and runs to the next section you set, or to the "
+      + "next division the file itself has.",
+    "editor.startSection.nameLabel": "Section name",
+    "editor.startSection.namePlaceholder": "The storm",
+    "editor.startSection.save": "Start section",
+    "editor.startSection.cancel": "Cancel",
+    "editor.startSection.failedToast": "Couldn’t start that section, so nothing changed.",
+    "editor.startSection.forbiddenToast":
+      "You don’t have permission to set sections here, so nothing changed.",
     // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
     // indicator sits in a crowded toolbar where the shortest true string wins.
     "editor.hiddenCells.indicator": "{count} hidden",
@@ -8541,6 +8559,61 @@ export const editor = defineNamespace({
           "Screen-reader name of that crossed-out-eye badge. A short noun phrase, not " +
           "a sentence.",
         maxLength: 20,
+      },
+      // AQU-2185 — name a navigator division of your own.
+      "editor.row.startSection": {
+        description:
+          "Menu entry on a source cell that starts a new named division of the file at " +
+          "that cell, shown in the chapter navigator. Imperative, and \"here\" matters: " +
+          "the section begins at THIS line, it does not merely get added somewhere. " +
+          "Use the same word for \"section\" as the navigator's section vocabulary.",
+        maxLength: 24,
+      },
+      "editor.startSection.title": {
+        description:
+          "Title of the dialog that entry opens. Same wording as the menu entry, so the " +
+          "dialog plainly belongs to the thing that was clicked.",
+        maxLength: 32,
+      },
+      "editor.startSection.description": {
+        description:
+          "One sentence under that title explaining where the new section ENDS, which is " +
+          "the part nobody can guess: at the next section the user sets, or at the next " +
+          "division the file already supplies (a Scripture chapter, a heading). Full " +
+          "sentence with a period.",
+      },
+      "editor.startSection.nameLabel": {
+        description:
+          "Label of the single text field in that dialog — the name the section will be " +
+          "listed under. A short noun phrase, not a sentence.",
+        maxLength: 20,
+      },
+      "editor.startSection.namePlaceholder": {
+        description:
+          "Placeholder in that field: an EXAMPLE of a section name, not an instruction. " +
+          "Replace it with a short, natural example in your language (two or three " +
+          "words naming an episode or topic) rather than translating this one literally.",
+        maxLength: 24,
+      },
+      "editor.startSection.save": {
+        description:
+          "Confirm button of that dialog. Imperative, and names the act rather than " +
+          "saying \"OK\" or \"Save\".",
+        maxLength: 18,
+      },
+      "editor.startSection.cancel": {
+        description: "Dismiss button of that dialog; nothing is changed. Imperative.",
+        maxLength: 14,
+      },
+      "editor.startSection.failedToast": {
+        description:
+          "Toast when the server refused the new section; the navigator has gone back to " +
+          "the divisions it showed before. Full sentence with a period.",
+      },
+      "editor.startSection.forbiddenToast": {
+        description:
+          "Toast when the server refused it for lack of permission. Full sentence with a " +
+          "period; same shape as the hide-cell permission toast.",
       },
       "editor.hiddenCells.indicator": {
         description:

@@ -181,6 +181,7 @@ import {
   ruleFixPreflight,
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
+  canRestructureTracks,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -13075,19 +13076,17 @@ export function ProjectWorkspace() {
   // which the server floors at maintainer — the same clearance, read the same
   // way, as the timing mode beside it. The gate is "don't pass the callback":
   // below the floor the gutter has no grip, no grab cursor and no tab stop.
-  const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
-  // AQU-646 stage 2: RESTRUCTURING is doubly gated — the same maintainer floor
-  // AND the project's `allowTrackEditing` setting, which is off unless somebody
-  // turned it on. Two independent conditions, and the server checks both
-  // separately (track-editing-authority.ts), so this is the affordance rather
-  // than the permission.
-  //
-  // RENAME AND REORDER ARE DELIBERATELY NOT IN HERE. Both already ship, and a
-  // new setting defaulting to off must not silently take an existing capability
-  // away from every project that has one — so they stay on `canReorderTracks`'
-  // clearance alone. That split is why the editor takes `onRenameTrack` as its
-  // own prop instead of folding it into `trackEditing`.
-  const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const trackRoleLevel = serverRoleLevel ?? project?.syncRole?.level ?? 0
+  const canReorderTracks = trackRoleLevel >= ROLE.MAINTAINER
+  // AQU-646 stage 2 / AQU-2214: RESTRUCTURING is doubly gated — the same
+  // maintainer floor AND the project's `allowTrackEditing`, which is ON unless
+  // somebody turned it off. Both clauses, and why rename and reorder are not
+  // among them, live in `canRestructureTracks` so a test pins the rule without
+  // rendering this component.
+  const canEditTracks = canRestructureTracks({
+    roleLevel: trackRoleLevel,
+    allowTrackEditing: project?.allowTrackEditing,
+  })
   /**
    * AQU-1565 / AQU-1566: who is offered captions as rows, the timeline's
    * Attach captions, and the upload of the original recording. One pure

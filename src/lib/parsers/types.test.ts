@@ -299,3 +299,16 @@ describe("isFilmTimedFile (AQU-2204)", () => {
     expect(isFilmTimedFile(null)).toBe(false)
   })
 })
+
+describe("resolveFileTimingMode — nothing to follow (AQU-2204, board 24)", () => {
+  it("a file with no times and no source recording follows its recordings, whatever it stored", () => {
+    expect(resolveFileTimingMode({ type: "usfm", timingMode: "dubbing" } as never, null, { nothingToFollow: true })).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "usfm" } as never, null, { nothingToFollow: true })).toBe("audioFirst")
+  })
+
+  it("a film still wins: its lines are timed to it", () => {
+    expect(
+      resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, null, { nothingToFollow: true }),
+    ).toBe("dubbing")
+  })
+})

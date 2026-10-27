@@ -114,6 +114,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
+import { hasNothingToFollow } from "@/lib/timeline/stand-in"
 import { isAudioCueFile, isExtensionDataFile, isFilmTimedFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
@@ -2821,6 +2822,18 @@ export function ProjectWorkspace() {
     (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
   )
   const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
+  // AQU-2204 (board 24): a file whose lines have no times and no source
+  // recording has NOTHING TO FOLLOW, so it follows its recordings and the
+  // control greys "Follows source" out. Only a time-ordered file has the
+  // timeline (and so the control); a sequence-ordered book opens in the Audio
+  // view and keeps today's playback.
+  const timingNothingToFollow = useMemo(
+    () =>
+      activeFileTimeOrdered &&
+      Boolean(activeFileId) &&
+      hasNothingToFollow(readAtVersion(cellStoreVersion, getActiveCells).filter((c) => c.fileId === activeFileId)),
+    [activeFileTimeOrdered, activeFileId, cellStoreVersion, getActiveCells],
+  )
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
@@ -2829,6 +2842,7 @@ export function ProjectWorkspace() {
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, {
     timedToLinkedVideo,
     hasAudioCues: fileHasAudioCues,
+    nothingToFollow: timingNothingToFollow,
   })
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
@@ -4123,10 +4137,10 @@ export function ProjectWorkspace() {
       const nextMode = resolveFileTimingMode(
         activeFile ? { ...activeFile, coreMediaUrl: url } : null,
         project,
-        { hasAudioCues: fileHasAudioCues },
+        { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow },
       )
       const modeWillChange =
-        nextMode !== resolveFileTimingMode(activeFile, project, { hasAudioCues: fileHasAudioCues })
+        nextMode !== resolveFileTimingMode(activeFile, project, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow })
       if (modeWillChange) timingAckOwnWriteRef.current?.note(nextMode)
       try {
         await emitFileVideoSet({
@@ -4148,7 +4162,7 @@ export function ProjectWorkspace() {
             : denialMessage(t, ROLE.CONTRIBUTOR, level) })
       }
     },
-    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues],
+    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -4167,14 +4181,14 @@ export function ProjectWorkspace() {
       // state the person is about to leave.
       if (
         url &&
-        resolveFileTimingMode(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues }) === "audioFirst"
+        resolveFileTimingMode(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }) === "audioFirst"
       ) {
         setPendingVideoUrl(url)
         return
       }
       void applyLinkVideo(url) // clearing never prompts
     },
-    [activeFile, project, applyLinkVideo, fileHasAudioCues],
+    [activeFile, project, applyLinkVideo, fileHasAudioCues, timingNothingToFollow],
   )
 
   // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
@@ -13480,6 +13494,8 @@ export function ProjectWorkspace() {
       // Silent because it is unreachable from the UI; this exists so no
       // programmatic caller can write a mode the resolver would then ignore.
       if (mode === "audioFirst" && timingFilmTimed) return
+      // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
+      if (mode === "dubbing" && timingNothingToFollow) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -13493,7 +13509,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, timingFilmTimed, applyTimingMode],
+    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -16774,6 +16790,7 @@ export function ProjectWorkspace() {
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
                     timingFilmTimed={timingFilmTimed}
+                    timingSourceUnavailable={timingNothingToFollow}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns
                     // the header it portals into the table column's slot.

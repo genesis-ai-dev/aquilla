@@ -58,6 +58,8 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
+import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
 import { isImportedRow } from "@/lib/cell-editing-gate"
@@ -495,6 +497,9 @@ export interface TimelineEditorProps {
    *  file), so it can only follow its source: the Timing control shows
    *  "Follows source" as plain text with an (i) saying why. */
   timingFilmTimed?: boolean
+  /** AQU-2204 (board 24): the file has no times and no source recording, so
+   *  there is nothing to follow: "Follows source" is greyed out with why. */
+  timingSourceUnavailable?: boolean
   /**
    * AQU-1119: collapse the timeline itself, and collapse the text section
    * whose header this component portals into the workspace's slot.
@@ -1214,6 +1219,7 @@ export function TimelineEditor({
   onChangeTimingMode,
   hideTimingMode = false,
   timingFilmTimed = false,
+  timingSourceUnavailable = false,
   soundSource,
   onCollapseSection,
   onCollapseTextSection,
@@ -2034,6 +2040,18 @@ export function TimelineEditor({
   // become conditional on whether an audio VTT has been imported.
   const videoDurationSec = useVideoDurationSec(coreMediaUrl)
   const subtitleFileWithFootage = Boolean(coreMediaUrl) && dialogue.length === 0
+  // AQU-2204 (board 22): how long the file comes out with each choice, so the
+  // effect shows before anyone picks. Following the source: the source's own
+  // end (or the film's, when it runs longer). Following the recordings: the
+  // programme, laid out exactly as that choice lays it.
+  const timingLengths = useMemo(() => {
+    let sourceEnd = 0
+    for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
+    const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
+    const { lines, untimed } = programmeLines(cells)
+    const recorded = buildProgramme(lines, untimed ? { standInLenSec: standInEstimator(lines) } : undefined)
+    return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
+  }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -4156,6 +4174,8 @@ export function TimelineEditor({
             mode={timingMode}
             onChange={onChangeTimingMode}
             filmTimed={timingFilmTimed}
+            sourceUnavailable={timingSourceUnavailable}
+            lengths={timingLengths}
           />
         )}
         {/* AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip. */}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { CellData } from "@/hooks/useCells"
 import {
   defaultPaceCps,
+  hasNothingToFollow,
   learnedPaceCps,
   PACE_ALPHABETIC_CPS,
   PACE_CJK_CPS,
@@ -89,5 +90,24 @@ describe("the file's own pace", () => {
   it("falls back to each line's script default before then", () => {
     const cells = [line("d", "y".repeat(42))]
     expect(standInEstimator(cells)(cells[0])).toBeCloseTo(42 / PACE_ALPHABETIC_CPS, 5)
+  })
+})
+
+describe("a file with nothing to follow (AQU-2204, board 24)", () => {
+  it("is one whose lines have no times and no source recording", () => {
+    expect(hasNothingToFollow([line("a", "In the beginning."), line("b", "And the earth.", 2_000)])).toBe(true)
+  })
+
+  it("is not one with any timed line, or any line with a source recording, or no lines", () => {
+    const timed = { ...line("a", "x"), startTime: 0, endTime: 2 } as unknown as CellData
+    // A verse cut from an original reading: a media line carrying the file's clip.
+    const reading = {
+      ...line("b", "y"),
+      medium: "media",
+      attachments: { "audio-f1-1690000000-shared.mp3": { type: "audio", url: "frontier-audio://src" } },
+    } as unknown as CellData
+    expect(hasNothingToFollow([line("c", "z"), timed])).toBe(false)
+    expect(hasNothingToFollow([reading])).toBe(false)
+    expect(hasNothingToFollow([])).toBe(false)
   })
 })

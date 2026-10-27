@@ -17,7 +17,8 @@
 // Pure, and nothing here is stored: the stand-in is re-derived on every layout,
 // exactly like the rest of the programme.
 
-import { resolveTargetPieces } from "@/lib/audio/track-audio"
+import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { hasTiming } from "./derive"
 import { effectiveAttachmentDurationMs } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
@@ -31,9 +32,20 @@ export const PACE_CJK_CPS = 5
 export const PACE_OTHER_CPS = 12
 
 /** Han, kana, and the CJK punctuation/symbol blocks. */
-const CJK = /[　-〿぀-ヿㇰ-ㇿ㐀-䶿一-鿿豈-﫿＀-￯]/u
+const CJK = /[\u3000-\u303F\u3040-\u30FF\u31F0-\u31FF\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/u
 /** Scripts written letter by letter: Latin, Greek, Cyrillic, Armenian, Georgian. */
-const ALPHABETIC = /[A-Za-zÀ-ɏḀ-ỿͰ-ϿЀ-ӿԀ-ԯ԰-֏Ⴀ-ჿ]/u
+const ALPHABETIC = /[A-Za-z\u00C0-\u024F\u1E00-\u1EFF\u0370-\u03FF\u0400-\u04FF\u0500-\u052F\u0530-\u058F\u10A0-\u10FF]/u
+
+/**
+ * AQU-2204 (board 24): a file has NOTHING TO FOLLOW when none of its lines has
+ * times of its own and none has a source recording — a Bible book with no
+ * reading. Following the source would leave every line in the Untimed strip,
+ * so such a file can only follow its recordings.
+ */
+export function hasNothingToFollow(cells: readonly CellData[]): boolean {
+  if (cells.length === 0) return false
+  return cells.every((c) => !hasTiming(c) && sourceClipAudioForCell(c) == null)
+}
 
 /** The words a line is read from: its translation, else its source. */
 export function standInText(cell: Pick<CellData, "translated" | "original" | "transcription">): string {

@@ -1145,6 +1145,12 @@ export function resolveFileTimingMode(
      */
     hasAudioCues?: boolean
     /**
+     * AQU-2204 (board 24): the file has no times and no source recording, so
+     * there is nothing to follow — it follows its recordings, whatever it
+     * stored (the control greys "Follows source" out with the reason).
+     */
+    nothingToFollow?: boolean
+    /**
      * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
      * DEFAULT is Original timing and the Media view shows the video. The
      * legacy project-level Free timing no longer reaches it (it hid the video
@@ -1171,6 +1177,8 @@ export function resolveFileTimingMode(
   // stored "audioFirst" (picked before the rule, or by an older client) would
   // otherwise be one nobody can see or change back.
   if (isFilmTimedFile(file, { hasAudioCues: opts?.hasAudioCues })) return "dubbing"
+  // AQU-2204 (board 24): nothing to follow, so it follows its recordings.
+  if (opts?.nothingToFollow) return "audioFirst"
   // AQU-1704: every other file reads its own choice next, so the picker the
   // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode

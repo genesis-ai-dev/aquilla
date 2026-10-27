@@ -1374,6 +1374,54 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it("the menu as drawn on board 22: a heading, each choice's file length and the muting line (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    // Beside the (i): how long the file is with the current choice.
+    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("16.0 s long")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
+    expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
+    // Following the recordings each verse is as long as its longer side: 11 + 10.
+    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("21.0 s")
+    expect(screen.getByTestId("tl-timing-menu-mute-note")).toHaveTextContent(
+      "Muting a track only changes what you hear. It never moves anything.",
+    )
+  })
+
+  it("with nothing to follow, Follows source is greyed out with why (AQU-2204, board 24)", async () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange, timingSourceUnavailable: true })
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    const source = await screen.findByTestId("tl-timing-mode-dubbing")
+    expect(source).toHaveAttribute("data-disabled")
+    expect(source).toHaveTextContent("This file has no times and no source recording to follow.")
+    expect(screen.queryByTestId("tl-timing-mode-dubbing-length")).toBeNull()
+    fireEvent.click(source)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    const gap = screen.getByTestId("tl-target-lead-p1")
+    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
+    // The take starts where the pause ends.
+    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
   it("picking a choice closes the menu (AQU-2204)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))

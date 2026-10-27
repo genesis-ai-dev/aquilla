@@ -961,6 +961,18 @@ export const editor = defineNamespace({
       "A line with no times of its own and no recording yet still takes room on the timeline, " +
       "at a stand-in length worked out from its text at the language's reading pace. It has no " +
       "real time, so it shows none. Recording the line replaces the stand-in with the recording's length.",
+    "editor.timeline.timingMenuHeading": "What decides how long each line is",
+    "editor.timeline.timingMenuMuteNote": "Muting a track only changes what you hear. It never moves anything.",
+    "editor.timeline.timingSourceUnavailable": "This file has no times and no source recording to follow.",
+    "editor.timeline.timingInfoNothingToFollow":
+      "This file has no times and no source recording, so it follows its recordings: the lines " +
+      "play back to back, each as long as its recording. A line not recorded yet takes a " +
+      "stand-in length from its words.",
+    "editor.timeline.timingLengthSeconds": "{seconds} s",
+    "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
+    "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
+    "editor.timeline.timingLengthLong": "{length} long",
+    "editor.timeline.takeLeadPause": "A pause someone left before this take",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -6329,6 +6341,50 @@ export const editor = defineNamespace({
         description:
           "Tooltip of that (i): why a line with no times and no recording still takes room " +
           "on the timeline (a stand-in length from its text) and why it shows no time.",
+      },
+      "editor.timeline.timingMenuHeading": {
+        description:
+          "First line of the Timing menu (choices 'Follows source' / 'Follows recordings'), " +
+          "above the two choices. Not clickable.",
+      },
+      "editor.timeline.timingMenuMuteNote": {
+        description:
+          "Last line of the Timing menu, under the two choices: muting a track on the timeline " +
+          "changes only what you hear, never where lines sit.",
+      },
+      "editor.timeline.timingSourceUnavailable": {
+        description:
+          "Line under the greyed-out 'Follows source' choice in the Timing menu, on a file whose " +
+          "lines have no times and no source recording (e.g. a Bible book with no reading): why " +
+          "it can't be picked.",
+      },
+      "editor.timeline.timingInfoNothingToFollow": {
+        description:
+          "Tooltip of the (i) beside the Timing control on a file with no times and no source " +
+          "recording: it follows its recordings, and unrecorded lines take a stand-in length.",
+      },
+      "editor.timeline.timingLengthSeconds": {
+        description: "A file's length under a minute, e.g. '16.8 s'.",
+        placeholders: { seconds: "Seconds with one decimal, e.g. 16.8." },
+      },
+      "editor.timeline.timingLengthMinutes": {
+        description: "A file's length under an hour, e.g. '12 min 4 s'.",
+        placeholders: { minutes: "Whole minutes, 1 to 59.", seconds: "Whole seconds left over, 0 to 59." },
+      },
+      "editor.timeline.timingLengthHours": {
+        description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
+        placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
+      },
+      "editor.timeline.timingLengthLong": {
+        description:
+          "Beside the Timing control: how long the file comes out with the current choice. " +
+          "For example '16.8 s long'.",
+        placeholders: { length: "The file's length, already formatted, e.g. '16.8 s' or '12 min 4 s'." },
+      },
+      "editor.timeline.takeLeadPause": {
+        description:
+          "Hover text on a faint stretch of the timeline just before a recording, inside its " +
+          "line: the person who placed or recorded the take left this pause before it.",
       },
       "editor.timeline.qualityToggleAria": {
         description:

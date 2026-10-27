@@ -36,6 +36,15 @@ export interface RecordingLinesContext {
   lineUntouched(cellId: string, createdEventId: string | null): boolean | null
   /** Remove a line, as "Remove row" does. False when refused. */
   removeLine(cellId: string): Promise<boolean>
+  /**
+   * Whether this person may remove the line at all: the server lets someone
+   * below Maintainer remove only a line added by hand (sync-worker
+   * authorize.ts, "removing an imported cell requires maintainer"), and lines
+   * made from a recording are imported lines. Asked before any removal, so an
+   * undo that would be refused is skipped instead of queuing writes the
+   * server turns down (slice 13 evidence, Oct 27). Absent: everyone may.
+   */
+  mayRemoveLine?(cellId: string): boolean
   /** Bring a removed line back. False when refused. */
   restoreLine(cellId: string): Promise<boolean>
   /** Where a file is: live, in Recently deleted, or gone for good. */
@@ -54,6 +63,9 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
         const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
         if (states.every((s) => s === null)) return GONE
         if (states.some((s) => s !== true)) return CHANGED
+        if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId))) {
+          return { kind: "skipped", reason: "notAllowed" }
+        }
         // Last first: each removal then has no line after it to re-point.
         let removed = 0
         for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId)) removed += 1

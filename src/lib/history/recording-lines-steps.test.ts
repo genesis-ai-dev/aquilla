@@ -59,6 +59,22 @@ describe("lines.fromRecording", () => {
     expect([...lines.keys()].sort()).toEqual(["l1", "l2", "l3"])
   })
 
+  // Slice 13 evidence (Oct 27): Lena, a Project lead, made the lines and
+  // pressed Undo; the five removals were queued and the server refused each
+  // ("removing an imported cell requires maintainer"), leaving "5 failed" and
+  // every line in place. Someone who may not remove them is told instead.
+  it("is skipped, removing nothing, when this person may not remove the lines", async () => {
+    const lines = fresh()
+    const { ctx, handlers } = ctxFor(lines)
+    ctx.mayRemoveLine = () => false
+    expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "skipped", reason: "notAllowed" })
+    expect(ctx.removeLine).not.toHaveBeenCalled()
+    expect(lines.size).toBe(3)
+    ctx.mayRemoveLine = () => true
+    expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "done" })
+    expect(lines.size).toBe(0)
+  })
+
   it("once anyone has recorded on one line, the whole step is skipped and every line stays", async () => {
     const lines = fresh()
     lines.set("l2", { untouched: false, head: "e2" }) // Asha recorded a take on line 2

@@ -14595,6 +14595,8 @@ export function ProjectWorkspace() {
     },
     [getActiveCell, cellStore],
   )
+  // Slice 13: the person's role, for the lines-from-a-recording undo's guard.
+  const syncRoleLevel = project?.syncRole?.level ?? 0
   const fileStateRef = useRef<(fileId: string) => "live" | "deleted" | null>(() => null)
   fileStateRef.current = (fileId) => {
     if (optimisticDeletes.has(fileId) || [...deletedFiles, ...optimisticTrash].some((f) => f.fileId === fileId)) return "deleted"
@@ -14606,6 +14608,13 @@ export function ProjectWorkspace() {
       recordingLinesStepHandlers({
         lineUntouched,
         removeLine: async (cellId) => (await removeLineCore(cellId)) !== false,
+        // The server's rule for removing a line (authorize.ts): a Maintainer
+        // may remove any; below that, only a line added by hand.
+        mayRemoveLine: (cellId) => {
+          if (syncRoleLevel >= ROLE.MAINTAINER) return true
+          const cell = getActiveCells().find((c) => c.id === cellId)
+          return cell ? isUserAddedLine(cell) : false
+        },
         restoreLine: (cellId) => applyRestoreRow(cellId),
         fileState: (fileId) => fileStateRef.current(fileId),
         fileUntouched: (fileId) => {
@@ -14616,7 +14625,7 @@ export function ProjectWorkspace() {
         restoreFile: (fileId) => handleRestoreFile(fileId),
       }),
     )
-  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile])
+  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null

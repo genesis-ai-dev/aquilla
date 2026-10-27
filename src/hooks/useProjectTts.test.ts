@@ -200,3 +200,33 @@ describe("useProjectTts casting by character (AQU-2125)", () => {
   })
 })
 
+describe("applySplitCastCopies (AQU-2101)", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(patchProject).mockClear()
+  })
+
+  it("copies each lane's voice onto the new narration pieces without a settings save", () => {
+    const server: ProjectTtsSettings = {
+      provider: "inworld",
+      voices: [{ id: "sina", name: "Sina", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+      castAssignments: { line: "narrator" },
+      laneCastAssignments: {
+        sm: { line: "sina" },
+        ar: { line: "layla" },
+      },
+    }
+    const onSyncTts = vi.fn()
+    const { result } = renderHook(() => useProjectTts("proj-split-cast", server, [], onSyncTts, "en"))
+    act(() => {
+      result.current.applySplitCastCopies([{ cellId: "line", sameKindAsFirst: ["line-b"] }])
+    })
+    const stored = loadProjectTts("proj-split-cast")
+    expect(stored?.castAssignments).toEqual({ line: "narrator", "line-b": "narrator" })
+    expect(stored?.laneCastAssignments).toEqual({
+      sm: { line: "sina", "line-b": "sina" },
+      ar: { line: "layla", "line-b": "layla" },
+    })
+    expect(onSyncTts).not.toHaveBeenCalled()
+  })
+})

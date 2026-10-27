@@ -27,11 +27,15 @@
 // existing translation of the row is then either:
 //   - DIVIDED, when it splits at its own quotation marks into the same number
 //     of pieces with narration and speech in the same places. Each piece gets
-//     its part, pinned to the new source so nothing reads as stale; or
-//   - KEPT whole on the first piece, untouched, in every other case. The
-//     source under it changed, so AD-9 flags it for review — which is exactly
-//     what a translator needs to see: "move the quoted part to the rows below".
-// Nothing is ever deleted or rewritten on a guess.
+//     its part; or
+//   - KEPT whole on the first piece, in every other case, so the words are
+//     still there for the translator to move by hand.
+// Either way the commit is pinned to the source event from BEFORE the split.
+// That event's text is the whole line, and the source is now only a piece of
+// it, so the stale-source read marks the row for review (AQU-2101). The new
+// commit also clears approval: what was signed off was the old line. An empty
+// translation is left alone — there is no work to redo. Nothing is deleted,
+// and a translation is never re-cut on a guess.
 
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import type { BuildEventInput } from "@/lib/sync/events-emit"
@@ -220,7 +224,10 @@ export function planQuoteSplits(input: {
       })
     }
 
-    const commitId = commitIdByCell.get(split.cellId)!
+    // The source head this translation was written against. Pinning the new
+    // commits here, rather than at the split's own source events, is what
+    // leaves them stale: the pinned text is the whole line.
+    const previousSourceEventId = row.source.eventId
     for (const target of row.targets) {
       if (!target.value.trim()) continue
       const targetLang = target.targetLang ?? ""
@@ -232,7 +239,10 @@ export function planQuoteSplits(input: {
       const divisible =
         isPlainHtml(target.valueHtml) && own.refusal === null && sameShape(own.pieces, split.pieces)
       split.lanes.push({ targetLang, outcome: divisible ? "divided" : "kept" })
-      if (!divisible) continue
+      // A kept translation is recommitted so its approval clears, but the
+      // words and their formatting stay. Omitting valueHtml stores null and
+      // would wipe a footnote, a style, or a line break the split refused to cut.
+      const keptHtml = !divisible && target.valueHtml ? { valueHtml: target.valueHtml } : {}
       targetEvents.push({
         kind: "target.cell.commit",
         projectId,
@@ -240,8 +250,14 @@ export function planQuoteSplits(input: {
         cellId: split.cellId,
         parentId: target.eventId,
         author,
-        payload: { value: own.pieces[0].text, sourceEventId: commitId, ...lane },
+        payload: {
+          value: divisible ? own.pieces[0].text : target.value,
+          ...keptHtml,
+          sourceEventId: previousSourceEventId,
+          ...lane,
+        },
       })
+      if (!divisible) continue
       split.newCellIds.forEach((cellId, i) => {
         targetEvents.push({
           kind: "target.cell.commit",
@@ -252,7 +268,7 @@ export function planQuoteSplits(input: {
           // first commit does (see `getCommitHandle`).
           parentId: createIds[i],
           author,
-          payload: { value: own.pieces[i + 1].text, sourceEventId: createIds[i], ...lane },
+          payload: { value: own.pieces[i + 1].text, sourceEventId: previousSourceEventId, ...lane },
         })
       })
     }
@@ -268,6 +284,12 @@ export function planQuoteSplits(input: {
  * read in the project's default voice until someone casts them; that is the
  * point of the split. Null when there is nothing to add (the row had no voice
  * of its own, so its pieces fall back to the same default anyway).
+ *
+ * This is the project-wide map only. The split that lands does not call this.
+ * `copyCastsOntoSplitPieces` (AQU-2101) writes each lane's map and the
+ * project-wide map, and it also carries a character's entry when the row has
+ * none of its own. Writing one lane's voice into this map would make every
+ * other lane speak it.
  */
 export function voiceAssignmentsForSplits(
   splits: readonly Pick<PlannedQuoteSplit, "cellId" | "sameKindAsFirst">[],

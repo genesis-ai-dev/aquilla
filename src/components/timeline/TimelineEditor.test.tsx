@@ -1403,6 +1403,26 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
   })
 
+  it("following the recordings, a recorded verse with no times draws its take in its slot (AQU-2204)", () => {
+    const take = "audio-b1-1700000000-take.webm"
+    const book = [
+      cell({
+        id: "b1", medium: "text", original: "In the days when the judges ruled.",
+        selectedAudioId: take,
+        attachments: { [take]: { type: "audio", url: "frontier-audio://take", durationMs: 4_000 } },
+      } as Partial<CellData>),
+      cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+    ]
+    const { container } = renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="audioFirst" onRetimeSubtitle={() => {}} />,
+    )
+    // The recorded verse is a real slot, not a stand-in, and its take is on the
+    // Target audio row; the unrecorded one is the stand-in.
+    expect(container.querySelector('[data-testid="tl-card-b1"]')).not.toHaveAttribute("data-stand-in")
+    expect(container.querySelector('[data-testid="tl-card-b2"]')).toHaveAttribute("data-stand-in")
+    expect(container.querySelectorAll('[data-testid="tl-target-lane"] [data-testid^="tl-target-"]').length).toBeGreaterThan(0)
+  })
+
   it("following the source, a file with no times keeps its lines in the Untimed strip, as before (AQU-2204)", () => {
     const book = [cell({ id: "b1", medium: "text", original: "In the beginning." })]
     renderWithTooltips(

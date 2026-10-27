@@ -1547,8 +1547,12 @@ export function TargetAudioLane({
     const att = item.cell.attachments?.[item.audioId]
     const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
-    if (!geom || typeof startTime !== "number" || typeof endTime !== "number") continue
-    const section = layout?.chipSection(item.cell, att) ?? { start: startTime, end: endTime }
+    // AQU-2204: following its recordings, a line with NO times of its own (a
+    // verse in a book with no times) still has its slot in the programme, so
+    // its take is drawn there; only the source's clock needs the cell's times.
+    const section = layout?.chipSection(item.cell, att)
+      ?? (typeof startTime === "number" && typeof endTime === "number" ? { start: startTime, end: endTime } : null)
+    if (!geom || !section) continue
     const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
     chips.push({
       item,

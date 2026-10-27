@@ -2,6 +2,33 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `bn` (Bangladeshi Bengali) — AQU-2201, 2026-10-27
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,565 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Bengali speaker has read it.** This is an
+> unreviewed machine draft. The menu endonym stays বাংলা. The wording is Bangladeshi
+> standard colloquial Bengali (প্রমিত চলিত বাংলা): আপনি imperative, পানি not জল. Not
+> sadhu bhasha, and not a regional dialect. `bn-BD` and `bn-IN` fold onto `bn`.
+> Glossary: cell → সেল, lane → লেন, changeset → পরিবর্তনসেট, termbase →
+> পরিভাষাভাণ্ডার, back-translation → বিপরীত অনুবাদ, source → উৎস, target → লক্ষ্য,
+> draft → খসড়া.
+>
+> Bengali plurals are `one` and `other`. `one` covers 0 and 1. The two forms may share
+> wording when the noun does not change.
+>
+> Import report: 8,931/9,039 keys. The leaves the importer dropped were identical to
+> English on purpose (formats, product names, placeholder-only templates, and the
+> track labels that stay English). Mechanical check before import: 0 missing leaves
+> and no added `{placeholder}`s. Plural leaves may drop `{count}` and must not add a
+> placeholder the English seed does not have; this pass added none.
+> `common.datePlaceholder` stays `June 01, 2025` and
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026` because the
+> date parser only accepts those en-US shapes. Source text, Source audio, Target
+> text, Target audio, Speaker, Camera, Character Label, and Cast stay English when
+> they name the product label, including "Target audio" and "Source text" inside
+> longer sentences. Role names inside `org.membersPage.orgTable.projectAccessNote`
+> stay English: Contributor, Project lead, Viewer, Maintainer, and Owner.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

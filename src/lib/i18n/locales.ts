@@ -4,7 +4,7 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese render LTR. Add a locale here + a catalog in
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Bengali render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -62,6 +62,12 @@ export const LOCALES: readonly LocaleMeta[] = [
   // the varieties are mutually readable, and the brief, not the menu label,
   // fixes which one the strings are.
   { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Bengali catalog, worded as Bangladeshi standard colloquial
+  // (প্রমিত চলিত বাংলা): আপনি imperative, পানি not জল. Not sadhu bhasha and
+  // not a regional dialect. `bn-BD` and `bn-IN` both fold onto `bn`. The
+  // endonym stays "বাংলা" — the brief, not the menu label, fixes which
+  // national standard the strings are.
+  { code: "bn", englishName: "Bengali", nativeName: "বাংলা", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

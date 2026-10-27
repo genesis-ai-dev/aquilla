@@ -245,6 +245,36 @@ describe("Portuguese", () => {
   })
 })
 
+describe("Bengali (AQU-2201)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const bn = LOCALES.find((l) => l.code === "bn")
+    expect(bn?.dir).toBe("ltr")
+    expect(bn?.englishName).toBe("Bengali")
+    // One catalog, worded as Bangladeshi standard colloquial. The menu stays
+    // the language endonym, the same honesty as Español.
+    expect(bn?.nativeName).toBe("বাংলা")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.bn ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Bengali to regional browser codes", () => {
+    expect(normalizeLocale("bn-BD")).toBe("bn")
+    expect(normalizeLocale("bn-IN")).toBe("bn")
+    expect(detectInitialLocale(null, "bn-BD")).toBe("bn")
+  })
+  it("supplies Bengali's one/other forms for a count-governed key", () => {
+    // `one` covers 0 and 1. The noun does not change, so the two forms may
+    // share wording.
+    const counted = CATALOGS.bn?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
 describe("Russian (AQU-1226)", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const ru = LOCALES.find((l) => l.code === "ru")

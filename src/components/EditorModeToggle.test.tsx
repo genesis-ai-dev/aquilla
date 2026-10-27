@@ -17,13 +17,13 @@ afterEach(() => { window.matchMedia = realMatchMedia })
 
 describe("EditorModeToggle", () => {
   it("labels every view by default", () => {
-    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} onAgentSelect={vi.fn()} />)
     expect(screen.getByRole("tab", { name: "Text" })).toHaveTextContent("Text")
     expect(screen.getByRole("tab", { name: "Media" })).toHaveTextContent("Media")
   })
 
   it("with labels='active', only the open view keeps its label; the others are named on hover", async () => {
-    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} labels="active" />)
+    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} onAgentSelect={vi.fn()} labels="active" />)
     expect(screen.getByRole("tab", { name: "Media" })).toHaveTextContent("Media")
     for (const name of ["Text", "Transcribe", "Agent"]) {
       expect(screen.getByRole("tab", { name }).textContent, name).toBe("")

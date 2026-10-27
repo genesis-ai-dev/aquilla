@@ -113,8 +113,10 @@ test("the extension editor carries the source toolbar, the source menu, the foot
   await audioVote.click()
   await expect(audioVote).toHaveAttribute("data-state", "full", { timeout: 15_000 })
 
-  // ── Audio lens: the take's waveform, play and the voice picker.
-  await alice.locator("button, [role=radio], [role=tab]").filter({ hasText: /^\s*Audio\s*$/ }).first().click()
+  // ── Audio lens: the take's waveform, play and the voice picker. The host's
+  // mode switch names it Media on every file (AQU-1758); the extension keeps
+  // its own Audio lens inside the frame.
+  await alice.locator("button, [role=radio], [role=tab]").filter({ hasText: /^\s*Media\s*$/ }).first().click()
   await expect(row("MAT 1:1").getByTestId("voice-waveform")).toBeVisible({ timeout: 20_000 })
   await expect(row("MAT 1:1").getByRole("button", { name: /Play/ })).toBeVisible()
 })

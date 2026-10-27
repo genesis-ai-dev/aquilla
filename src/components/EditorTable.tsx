@@ -58,7 +58,7 @@ import {
 } from "@/lib/audio/file-has-audio"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import { infractionSeverity, type TranslationRule, type RuleInfraction, type ProjectRecord, type Voice, type ProjectTtsSettings, type OrderedBy, type FileType } from "@/lib/parsers/types"
+import { infractionSeverity, type TranslationRule, type RuleInfraction, type ProjectRecord, type ProjectTtsSettings, type OrderedBy, type FileType } from "@/lib/parsers/types"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { formatCellIssueLine, summarizeCellIssues } from "@/lib/rules/cell-issue-summary"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
@@ -137,8 +137,7 @@ import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-c
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
-import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellKind, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
-import type { AudioViewPlace } from "@/hooks/useAudioViewPlace"
+import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
@@ -223,8 +222,6 @@ import {
   useVisibleStyleSegments,
 } from "@/lib/store/visible-style-segments-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
-import { CellVoicePanel } from "./cell/CellVoicePanel"
-import { AudioTrackColorPicker } from "./audio/AudioTrackColorPicker"
 import { CheckMarks, GutterMarks } from "./table-header-marks"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
@@ -771,63 +768,6 @@ export interface EditorTableHandle {
   pulseCells: (cellIds: readonly string[]) => void
 }
 
-/** Per-cell audio production data + actions, supplied only when the editor is
- *  in the Audio lens. When null/undefined the editor renders plain text mode.
- *  In Audio mode each cell's SOURCE column is replaced with CellVoicePanel —
- *  the full per-line voice controls (character picker, generate, play, make-a-
- *  character) — so this context carries everything that panel needs. */
-/**
- * AQU-1642 follow-up: a press that selects a verse — inside its row, and not on
- * one of its play controls. A menu the row opens is drawn outside it (⋯ Play
- * audio's among them), and pressing in one is no choice of verse either.
- */
-function selectsAudioPlace(row: HTMLElement | null, target: EventTarget | null): boolean {
-  if (!row || !(target instanceof Element) || !row.contains(target)) return false
-  return !target.closest("[data-place-control]")
-}
-
-/** Whether focus arrived by keyboard. Old engines that lack the selector say no. */
-function isFocusVisible(target: EventTarget | null): boolean {
-  try {
-    return target instanceof Element && target.matches(":focus-visible")
-  } catch {
-    return false
-  }
-}
-
-export interface AudioLensContext {
-  voices: Voice[]
-  /** Hydrated TTS settings (cast assignments) — source of truth for who voices a line. */
-  settings: ProjectTtsSettings | undefined
-  /** The project's default/narrator voice id, used when a line has no explicit cast. */
-  defaultVoiceId: string
-  /** The TTS-overlaid project record (real engine/key/cast) used for generation. */
-  project: ProjectRecord
-  projectId: string
-  /** Frontier session for synth/playback token minting (kept opaque for the panel). */
-  session: unknown
-  username: string
-  onAssignCast: (cellId: string, voiceId: string) => void
-  /** Revalidate after a successful per-cell generate. */
-  onAfterGenerate: () => void
-  /** Play just this one cell through the shared play-queue. Pass the audio-
-   *  enriched cell (carries selectedGeneratedVoiceAudioId + attachments) so the
-   *  play-queue can resolve a take; the raw cell row alone cannot, which
-   *  silently stalls play right after a generate. */
-  onPlayCell: (cellId: string, enrichedCell?: CellData) => void
-  /** Open the "make a character from this voice" flow seeded with this cell's take. */
-  onMakeCharacterFromCell: (cellId: string) => void
-  /** AQU-2212: clone this take straight into the cast as `name`. */
-  onCloneTake?: (cell: CellData, audioId: string, name: string) => Promise<void>
-  /** AQU-2212: "Add a voice…" from a line's voice dropdown. */
-  onAddVoice?: (cellId: string) => void
-  /**
-   * AQU-1642 follow-up: the one place to play from. The cards and ⋯ Play drive
-   * the bottom bar's player through it, and selecting a verse moves it.
-   */
-  place?: AudioViewPlace
-}
-
 interface EditorTableProps {
   project: ProjectRecord
   cellStore: CellStore
@@ -916,15 +856,6 @@ interface EditorTableProps {
    * does not get this entry even if a caller passes it.
    */
   onAddLane?: () => void
-  /** When set, each row shows the Audio-lens strip (speaker chip + generate). */
-  audioLens?: AudioLensContext | null
-  /**
-   * Audio mode: the file's dub-track colour token (null = the default green),
-   * which the takes are drawn in, and — for maintainers only — the way to
-   * change it. Absent `onSetAudioTrackColor` withholds the picker.
-   */
-  audioTrackColor?: string | null
-  onSetAudioTrackColor?: (hueId: string) => void
   /** 2026-08-07: the character gutter — a voice circle per speaking row,
    *  aligned to the source's first line. On ONLY in the stacked media lens
    *  (Sam's call: not the Text lens, not the voice-panel table). */
@@ -938,7 +869,7 @@ interface EditorTableProps {
    *  filters by segment `medium` and sorts by timing. Absent or `'sequence'`
    *  ⇒ today's behavior (no filtering, no reorder). */
   orderedBy?: OrderedBy
-  /** Switch to the Audio lens and open the cast/voice library (error recovery). */
+  /** Open the voice setup (engine, key, library) — error recovery. */
   onOpenAudioSetup?: () => void
   /** Media-lens empty state: attach a clip to THIS file (upload / direct URL).
    *  When absent, the empty state falls back to the static hint. */
@@ -1253,8 +1184,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
-  audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
-  audioTrackColor, onSetAudioTrackColor,
+  castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl, linkedVideoEmptyState, linkedVideoEmptyPlacement = "text", onOpenMediaView,
   onAttachCaptions, onUseCaptionTrackAsRows, linkedVideoSound,
   orderedBy,
@@ -1393,7 +1323,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     (project.syncRole.level ?? 0) < ROLE.CONTRIBUTOR
   // Probe mic permission once (shared across all rows) so the help affordance
   // on CellAudioRecordButton activates when the user has blocked the mic.
-  const { micDenied } = useMicPermission(audioLens !== null)
+  // AQU-1758: in Media, where the recorder opens from the rows and the
+  // timeline, and only for someone who may record.
+  const { micDenied } = useMicPermission(castGutter && canEdit)
   const parentRef = useRef<HTMLElement | null>(null)
   const listRootRef = useRef<HTMLDivElement | null>(null)
   const listRef = useRef<LegendListRef | null>(null)
@@ -1466,7 +1398,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const fileCellIds = useCellIds(cellStore, orderedBy)
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
   // AQU-1687, AQU-1689: Bible data. Voices (chips, rails), Who's Who (mention
@@ -3060,7 +2992,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
           micDenied={micDenied}
-          audioLens={audioLens ?? null}
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
@@ -3130,7 +3061,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     activeLane,
     audioByCellId,
     audioColumn,
-    audioLens,
     castGutter,
     ttsSettings,
     backtranslationByCellId,
@@ -3386,18 +3316,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ) : (
             <GutterMarks numbers={lineNumbersEnabled ? (scriptureNumbering ? "verse" : "cell") : null} />
           )}
-          {/* In Audio mode the left column carries per-line voice controls, not
-              source text, so label it "Controls" (no source-language badge). */}
           <div className="col-start-1 flex min-w-0 flex-wrap items-center gap-1 ps-1 md:col-auto md:gap-2 md:ps-2">
             {castGutter ? (
-              <span className="md:hidden">{audioLens ? t("editor.column.controls") : t("editor.column.source")}</span>
-            ) : audioLens ? t("editor.column.controls") : t("editor.column.source")}
-            {/* Sam, 2026-09-26: the colour the file's takes are drawn in, beside
-                the heading of the column they sit in. Maintainers only. */}
-            {audioLens && onSetAudioTrackColor && (
-              <AudioTrackColorPicker color={audioTrackColor} onPick={onSetAudioTrackColor} />
-            )}
-            {!castGutter && !audioLens && project.sourceLanguage && (
+              <span className="md:hidden">{t("editor.column.source")}</span>
+            ) : t("editor.column.source")}
+            {!castGutter && project.sourceLanguage && (
               <Badge variant="secondary" className="max-w-full min-w-0 whitespace-normal break-words text-[10px] font-normal normal-case tracking-normal">
                 {project.sourceLanguage}
               </Badge>
@@ -3406,8 +3329,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
-                check in both (Sam, 2026-09-28; the Text and Audio views). */}
-            {(audioLens || !castGutter) && <CheckMarks audioColumn={audioColumn} textColumn={!audioOnlyLane} />}
+                check in both (Sam, 2026-09-28). */}
+            {!castGutter && <CheckMarks audioColumn={audioColumn} textColumn={!audioOnlyLane} />}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -4290,7 +4213,6 @@ interface MemoizedRowProps {
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
-  audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   /** Add-from-selection: create a terminology entry from selected source text. */
@@ -4378,7 +4300,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
-    audioLens, onOpenAudioSetup,
+    onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
@@ -4545,7 +4467,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
         micDenied={micDenied}
-        audioLens={audioLens}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
@@ -4748,7 +4669,6 @@ interface EditorRowProps {
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
   micDenied?: boolean
-  audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
   /** Add-from-selection: create a terminology entry from selected source text. */
@@ -5662,7 +5582,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+  onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -7314,8 +7234,7 @@ function EditorRow({
   ])
   // This row shows only WHICH WORD is spoken (the karaoke highlight, here and
   // in the editor), so its players report the playhead per word, not per
-  // frame: one playback per take makes them follow the Audio view card and
-  // the Recording tab too, and a per-frame playhead re-rendered the whole row
+  // frame: one playback per take makes them follow the Recording tab too, and a per-frame playhead re-rendered the whole row
   // on every frame a take played anywhere (2026-09-30).
   const audioController = useCellAudio(project, cellForAudio, cell.fileId, {
     timeKey: (t) => findActiveTimingIndex(cellAudioTimings, t),
@@ -7343,14 +7262,7 @@ function EditorRow({
       ? `t${takeWindow.start}-${takeWindow.end}~${takeWindow.gaps?.map((g) => `${g.start}-${g.end}`).join(",") ?? ""}`
       : ""
   const { setTrim: setRailTrim } = audioController
-  // AQU-1642 follow-up: in the Audio view the bottom bar's player is the one
-  // player — the card, ⋯ Play audio and selecting a verse drive it.
-  const audioPlace = audioLens?.place ?? null
-  const runHere = useQueueCellKind(audioPlace ? cell.id : undefined)
-  // ⋯ Play audio is the run's, unless the line's own player is the one
-  // sounding (a fresh take playing itself after Generate): then it pauses that.
-  const railViaRun = audioPlace != null && !audioController.isPlaying
-  const railPlaying = railViaRun ? runHere === "playing" || runHere === "loading" : audioController.isPlaying
+  const railPlaying = audioController.isPlaying
   useEffect(() => {
     if (railSectionWindow) setRailTrim(railSectionWindow.start, railSectionWindow.end)
     else if (takeWindow) setRailTrim(takeWindow.start, takeWindow.end, takeWindow.gaps)
@@ -7367,8 +7279,7 @@ function EditorRow({
   const generatedVoiceController = useCellAudio(project, cellForGeneratedVoice, cell.fileId, {
     timeKey: (t) => findActiveTimingIndex(generatedVoiceTimings, t),
   })
-  // The Audio view card and the Recording tab keep players of their own and
-  // are NOT handed these (AQU-1211 handed them over so the word highlight
+  // The Recording tab keeps players of its own and is NOT handed these (AQU-1211 handed them over so the word highlight
   // would follow the card's play button). One playback per take now keeps
   // every copy of a take in step, these included, so the highlight still
   // follows; and these publish a word at a time, which would make the card's
@@ -7549,24 +7460,14 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
-  //
-  // The Audio view uses the same picker, opened from a field under each line's
-  // waveform rather than from a gutter (Sam, 2026-09-28). Headings get that
-  // field too: Generate and Record already sit on a heading, and the dropdown
-  // is how you choose who reads it. Section breaks (paratext) stay silent —
-  // the card itself renders nothing for them.
   const speaksInGutter = castGutter && !isStructuralCell(cell.type)
-  const speaksInAudio = Boolean(audioLens) && cell.type !== "paratext"
-  const resolvedVoice = (speaksInGutter || speaksInAudio)
+  const gutterVoice = speaksInGutter
     ? resolveCastVoice(ttsSettings, cell, cell.ttsSettings?.voiceId)
     : null
-  const gutterVoice = speaksInGutter ? resolvedVoice : null
-  const audioVoice = speaksInAudio ? resolvedVoice : null
   const assignmentResolves = Boolean(
     findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cell) ?? cell.ttsSettings?.voiceId),
   )
   const gutterExplicit = speaksInGutter && assignmentResolves
-  const audioExplicit = speaksInAudio && assignmentResolves
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
@@ -7684,22 +7585,21 @@ function EditorRow({
   const railOverflowAttentionDot: "emerald" | "primary" | null =
     openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
-  // First-open auto-tab: prefer the most-attention-worthy tab — and in the
-  // Audio view, Recording (Sam, 2026-09-29). Only applied when the panel was
-  // closed and is being opened — once open, the user's choice (or
-  // programmatic switches via inline rule clicks) wins.
+  // First-open auto-tab: prefer the most-attention-worthy tab — and in a
+  // language that delivers Audio, Recording (Sam, 2026-09-29; AQU-1758). Only
+  // applied when the panel was closed and is being opened — once open, the
+  // user's choice (or programmatic switches via inline rule clicks) wins.
   const previousExpandedRef = useRef(false)
-  const inAudioView = audioLens != null
   useEffect(() => {
     if (expanded && !previousExpandedRef.current) {
       setExpansionTab(initialExpansionTab({
         hasIssues: cellInfractions.length > 0,
         transcriptNeedsAttention,
-        audioView: inAudioView,
+        audioLanguage: audioOnlyLane,
       }))
     }
     previousExpandedRef.current = expanded
-  }, [expanded, cellInfractions.length, transcriptNeedsAttention, inAudioView])
+  }, [expanded, cellInfractions.length, transcriptNeedsAttention, audioOnlyLane])
 
   useEffect(() => {
     if (expansionTab === "footnotes" && !showFootnotesInExpansion) {
@@ -7772,29 +7672,13 @@ function EditorRow({
     // the next one, producing three rails when an editor is also focused.
     setIsHovering(false)
   }
-  const handleRowFocusCapture = (e: React.FocusEvent) => {
+  const handleRowFocusCapture = () => {
     // AQU-669: claim the exclusive focus pin for this cell. Because the table
     // holds a single owner, this simultaneously releases whichever row was
     // pinned before — no reliance on the previous row's focus-out.
     onRowFocusPin(cell.id)
     // AQU-354: focusing anything in the row re-summons an idle-collapsed rail.
     registerRailActivity()
-    // AQU-1642 follow-up: tabbing into a verse selects it, as a click does.
-    // Only a keyboard arrival (`:focus-visible`), from outside the row — a
-    // click has already selected it, and focus put back by a closing dialog
-    // is no choice of the person's.
-    const from = e.relatedTarget as Node | null
-    if (audioPlace && !(from && rowRef.current?.contains(from)) && selectsAudioPlace(rowRef.current, e.target) && isFocusVisible(e.target)) {
-      audioPlace.select(cell.id)
-    }
-  }
-  // AQU-1642 follow-up (Sam, 2026-10-17): in the Audio view, selecting a verse
-  // — pressing anywhere in its row but its play controls — sends the place to
-  // play from to that verse's start: the next Play, wherever it is pressed,
-  // starts it from the top. A Cmd/Ctrl-click is multi-select, not this.
-  const handleRowPointerDownCapture = (e: React.PointerEvent) => {
-    if (!audioPlace || e.button !== 0 || e.metaKey || e.ctrlKey) return
-    if (selectsAudioPlace(rowRef.current, e.target)) audioPlace.select(cell.id)
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
@@ -7887,13 +7771,12 @@ function EditorRow({
   // the badge listened on `synth:<subtitle>` and the two never met.
   //
   // MOVING IT TO `audioHome` ALONE WOULD HAVE TRADED ONE BLIND SPOT FOR THREE.
-  // Stage 3f moved the rail button and nothing else, so three producers still
-  // file under the ROW's cell: the audio lens's own CellVoicePanel (the primary
-  // per-line generate control in the lens the dubbing workflow lives in),
-  // dropping a voice from the dock onto the row, and "Voice together". None of
-  // them has an error surface of its own — CellVoicePanel reads this status
-  // only to know it is busy — so this badge is the whole of their failure
-  // reporting, and pointing it at the cue would have silenced all three.
+  // Stage 3f moved the rail button and nothing else, so other producers still
+  // file under the ROW's cell: dropping a voice from the dock onto the row,
+  // and "Voice together" (and, until AQU-1758, the Audio view's voice card).
+  // Neither has an error surface of its own, so this badge is the whole of
+  // their failure reporting, and pointing it at the cue would have silenced
+  // them.
   //
   // Watching both is the honest question anyway: "did anything about THIS
   // ROW's voice fail". Where those producers should be writing is a separate
@@ -8195,7 +8078,6 @@ function EditorRow({
         onFocusCapture={handleRowFocusCapture}
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
-        onPointerDownCapture={handleRowPointerDownCapture}
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
         // AQU-2173: the `⋯` menu now opens without taking the caret off this
@@ -8349,7 +8231,7 @@ function EditorRow({
                     </span>
                   </AppTooltip>
                 )}
-                {((isSynthBusy && !audioLens) || isSynthError) && (
+                {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
@@ -8380,387 +8262,312 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Source column. In Audio mode there's no need for source text to
-            voice a line, so the column is REPLACED with this cell's voice
-            controls (character picker, generate, play, make-a-character). In
-            Text mode it shows the source text as usual. */}
-        {audioLens ? (
-          // AQU-768: the panel resolves this line's active voice from `settings`
-          // itself — don't pre-resolve it here (a stale-prone JSX IIFE deep in
-          // this huge row let the React Compiler serve a stale voice, so a
-          // freshly-picked voice didn't stick in the trigger).
-          <div
-            // md:pe-3: the card keeps 20px from the health line beside it,
-            // not 8 (Sam, 2026-09-28) — a little more than the 12px the
-            // checks keep on the line's other side.
-            // md:pt: the waveform's middle rides the line number's (Sam, same
-            // day). The number's box is the source line — fontSize × 1.6 — set
-            // 26px down the gutter (its 6px padding and the 20px strip
-            // spacer), so its middle is 26 + 0.8·fontSize down; the waveform's
-            // is 28 down (half its 56px). Hence 0.8·fontSize − 2px, and it
-            // follows the reader's font size.
-            className={cn(
-              "col-start-2 flex flex-col transition-opacity md:col-auto md:pe-3 md:pt-[calc(var(--aq-src-fs)*0.8_-_2px)]",
-              isSynthBusy && "opacity-70",
-            )}
-            style={{ "--aq-src-fs": `${sourceFontSize}px` } as React.CSSProperties}
-            dir="ltr"
-          >
-            <CellVoicePanel
-              cell={cell}
-              project={audioLens.project}
-              projectId={audioLens.projectId}
-              settings={audioLens.settings}
-              session={audioLens.session}
-              username={audioLens.username}
-              targetLang={activeLane || undefined}
-              canEdit={editable}
-              voiceFromText={!audioOnlyLane}
-              onRecord={editable && onOpenRecording ? () => onOpenRecording(cell.id) : undefined}
-              recordUnavailable={getUnsupportedReason()}
-              onAfterGenerate={audioLens.onAfterGenerate}
-              onPlay={() => audioLens.onPlayCell(cell.id, cell)}
-              // AQU-1642 follow-up: the card drives the bottom bar's player —
-              // Play, and Stop while the run is on this verse — and draws the
-              // place to play from, held while it waits.
-              place={audioPlace ? {
-                onPress: () => audioPlace.pressCard(cell.id),
-                onPick: (atSeconds: number) => audioPlace.pickOnWaveform(cell.id, atSeconds),
-              } : null}
-              onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-              onCloneTake={audioLens.onCloneTake
-                ? (audioId, name) => audioLens.onCloneTake!(cell, audioId, name)
-                : undefined}
-              // AQU-2212: a pick acts on this line once it is accepted.
-              voicePicker={audioVoice && (({ takeLabel, onPicked }) => (
-                <CastGutterVoice
-                  variant="field"
-                  voice={audioVoice}
-                  explicit={audioExplicit}
-                  castName={gutterCastName}
-                  editable={editable && Boolean(onAssignCastVoice)}
-                  voices={gutterVoices}
-                  showLanguageBadge={gutterLanguageBadge}
-                  takeLabel={takeLabel}
-                  onPick={(voiceId, opts) => {
-                    if (onAssignCastVoice?.(cell, voiceId, opts) !== false) onPicked(voiceId)
-                  }}
-                  onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
-                  onAddVoice={audioLens.onAddVoice ? () => audioLens.onAddVoice!(cell.id) : undefined}
-                  countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
-                />
-              ))}
+        {/* Source column. */}
+        <div
+          data-showcase="editor.source"
+          ref={sourceColRef}
+          className={cn(
+            // The showcase node IS the text surface so it fills the whole
+            // source column. pe-7 clears the floating pencil.
+            // select-text: global chrome disables selection; source must stay
+            // selectable for add-to-termbase / Ask AI from selection.
+            // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+            // TRACK, but a grid item keeps `min-width: auto` and would still
+            // overflow its area on an unbreakable token; min-w-0 lets it
+            // shrink and break-words (inherited by the text below) breaks the
+            // token instead of blowing the column out.
+            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity] md:col-auto",
+            // Match the target well — same muted fill + ring (not a darker
+            // primary-tinted edit chrome).
+            "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
+            sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
+            isSynthBusy && "opacity-70",
+          )}
+          dir={sourceCellDirection}
+          aria-label={t("editor.source.textAria")}
+          data-editor-cell-surface="source"
+          data-cell-type="source"
+          style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
+          onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
+        >
+          {/* Source-selection toolbar. Appears when source text is selected:
+              "Ask AI" pushes the selection into the agent as a context chip,
+              "Add to terminology" opens a popover to create an entry, and a
+              "View term" button appears when the selection matches an active concept. */}
+          {(sourceSelection || addTermOpen) && (
+            <SourceSelectionToolbar
+              sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
+              concepts={terminologyConcepts}
+              onAskAi={handleAskAiFromSelection}
+              onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
+              addConceptBlockedReason={addConceptBlockedReason}
+              canApproveConcept={canApproveConcept}
+              cellStore={previewCellStore}
+              termMatching={project.termMatching}
+              onSetUpAffixes={onSetUpAffixes}
+              onAddOpenChange={handleAddTermOpenChange}
+              onViewConcept={onOpenTerminologyConcept}
+              onToolbarMouseDown={handleToolbarMouseDown}
+              onToolbarMouseUp={handleToolbarMouseUp}
             />
+          )}
+          {/* AQU-1068 item 5: ONE menu for this cell, in the pencil's place.
+              Edit its source text, edit its timestamps, insert a cell either
+              side of it, take it out. Floated to the column's top-right so
+              it costs no layout, rather than taking a slot in the context
+              line below — that line is reserved for column alignment and is
+              usually empty, so it has no room to spare. */}
+          {sourceWarningOpen && (
+            <SourceEditWarningDialog
+              onCancel={() => setSourceWarningOpen(false)}
+              onConfirm={() => {
+                setSourceWarningOpen(false)
+                setSourceEditing(true)
+              }}
+            />
+          )}
+          <CellSourceMenu
+            cellId={cell.id}
+            sourceEditing={sourceEditing}
+            onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
+            // The DCS pin used to show a padlock where the pencil sat, so the
+            // affordance never silently vanished (AQU-615). It is the same
+            // idea, now as the entry's own reason.
+            sourceEditDisabledReason={canEditSourceForCell ? null : sourceReadOnlyReasonForCell}
+            onInsertAbove={insertAbove}
+            aboveDisabledReason={insertAboveReason}
+            onInsertBelow={insertBelow}
+            belowDisabledReason={insertBelowReason}
+            onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
+            removeDisabledReason={removeReason}
+            onSplitAtQuotes={splitAtQuotes}
+            splitDisabledReason={splitReason}
+            timestamps={timestamps}
+            // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
+            // the role gate (absent ⇒ no entry at all); the reason is the DCS
+            // pin's, the same one Edit text shows.
+            hidden={cellHidden}
+            onToggleHidden={onToggleHidden}
+            hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
+          />
+          {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
+              mirrors the target column's header lane, and that mirror is what
+              puts the two columns' first text lines on the same baseline. Drop
+              it for context-free cells and every such row's source text rides
+              20px above its translation — the target lane can't be made
+              conditional to match, because it also reserves the strip the
+              floating action rail occupies. */}
+          <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel || showVoiceChip ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+            {/* AQU-646: the character, on the SOURCE side too (Sam,
+                2026-08-26) — "put that character label also in the top left
+                of source cells… we'll just scoot the time range over".
+
+                THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                call was that these two corners agree with EACH OTHER, so both
+                read the one `labelText` and both ride the "Show cell labels"
+                preference. AQU-1018 did not weaken that — it only gave
+                `labelText` a `cast_name` rung beneath the assigned voice, so
+                the corners now agree with the timeline/recorder/exports in the
+                cases where they used to agree on NOTHING. The two names still
+                are not interchangeable, and an assigned voice still wins.
+
+                `dir="auto"` because the lane is forced LTR for timecodes and
+                a name is not a timecode. The width cap is what does the
+                scooting: a long character name truncates rather than pushing
+                the timing out of the row. */}
+            {showCellLabel && (
+              <AppTooltip content={labelText} disabled={!labelText}>
+                <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
+                  {labelText}
+                </span>
+              </AppTooltip>
+            )}
+            {/* AQU-1687: the Bible voice chip, in the same slot, one per row. */}
+            {showVoiceChip && cellVoices && <VoiceChip view={cellVoices} className="max-w-[45%] shrink-0" />}
+            {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
+                relaying the client): it moved to the foot of the cell — see
+                `source-timing-line` — so the character label has this corner
+                to itself. Other context, a scripture reference like
+                "GEN 1:1", still belongs at the top: it names what the line IS
+                rather than when it happens, and it is centred as it was. */}
+            {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+            {/* AQU-1391: this source text is not unique in the file. It sits
+                on the SOURCE line because that is what repeats — the badge
+                answers "you will meet this string N times", which is what
+                makes auto-propagation predictable rather than surprising. */}
+            {typeof repetitionCount === "number" && repetitionCount > 1 && (
+              <AppTooltip content={t("editor.repetition.tooltip", { count: repetitionCount })}>
+                <span
+                  data-testid="source-repetition-count"
+                  className="shrink-0 rounded-sm bg-muted px-1 font-medium tabular-nums"
+                >
+                  {t("editor.repetition.badge", { count: repetitionCount })}
+                </span>
+              </AppTooltip>
+            )}
+            {/* AQU-1422: the eye-off badge. Only ever rendered on a row that
+                reached the table while parked, which only happens for a
+                source editor with "Show hidden cells" on — so it needs no
+                permission check of its own. */}
+            {cellHidden && (
+              <AppTooltip content={t("editor.row.hiddenBadgeTooltip")}>
+                <span
+                  data-testid="source-cell-hidden-badge"
+                  aria-label={t("editor.row.hiddenBadgeAria")}
+                  className="flex shrink-0 items-center"
+                >
+                  <EyeOff className="h-3.5 w-3.5" />
+                </span>
+              </AppTooltip>
+            )}
+            <SourceTagChips metadata={cell.metadata} />
+            <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
           </div>
-        ) : (
-          <div
-            data-showcase="editor.source"
-            ref={sourceColRef}
-            className={cn(
-              // The showcase node IS the text surface so it fills the whole
-              // source column. pe-7 clears the floating pencil.
-              // select-text: global chrome disables selection; source must stay
-              // selectable for add-to-termbase / Ask AI from selection.
-              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
-              // TRACK, but a grid item keeps `min-width: auto` and would still
-              // overflow its area on an unbreakable token; min-w-0 lets it
-              // shrink and break-words (inherited by the text below) breaks the
-              // token instead of blowing the column out.
-              "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity] md:col-auto",
-              // Match the target well — same muted fill + ring (not a darker
-              // primary-tinted edit chrome).
-              "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
-              sourceEditing && "bg-muted ring-1 ring-ring/40 ring-inset",
-              isSynthBusy && "opacity-70",
-            )}
-            dir={sourceCellDirection}
-            aria-label={t("editor.source.textAria")}
-            data-editor-cell-surface="source"
-            data-cell-type="source"
-            style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
-            onMouseUp={(!sourceEditing && (onAddConceptFromSelection || onAskAiFromSelection)) ? handleSourceMouseUp : undefined}
-          >
-            {/* Source-selection toolbar. Appears when source text is selected:
-                "Ask AI" pushes the selection into the agent as a context chip,
-                "Add to terminology" opens a popover to create an entry, and a
-                "View term" button appears when the selection matches an active concept. */}
-            {(sourceSelection || addTermOpen) && (
-              <SourceSelectionToolbar
-                sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
-                concepts={terminologyConcepts}
-                onAskAi={handleAskAiFromSelection}
-                onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
-                addConceptBlockedReason={addConceptBlockedReason}
-                canApproveConcept={canApproveConcept}
-                cellStore={previewCellStore}
-                termMatching={project.termMatching}
-                onSetUpAffixes={onSetUpAffixes}
-                onAddOpenChange={handleAddTermOpenChange}
-                onViewConcept={onOpenTerminologyConcept}
-                onToolbarMouseDown={handleToolbarMouseDown}
-                onToolbarMouseUp={handleToolbarMouseUp}
-              />
-            )}
-            {/* AQU-1068 item 5: ONE menu for this cell, in the pencil's place.
-                Edit its source text, edit its timestamps, insert a cell either
-                side of it, take it out. Floated to the column's top-right so
-                it costs no layout, rather than taking a slot in the context
-                line below — that line is reserved for column alignment and is
-                usually empty, so it has no room to spare. */}
-            {sourceWarningOpen && (
-              <SourceEditWarningDialog
-                onCancel={() => setSourceWarningOpen(false)}
-                onConfirm={() => {
-                  setSourceWarningOpen(false)
-                  setSourceEditing(true)
-                }}
-              />
-            )}
-            <CellSourceMenu
-              cellId={cell.id}
-              sourceEditing={sourceEditing}
-              onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
-              // The DCS pin used to show a padlock where the pencil sat, so the
-              // affordance never silently vanished (AQU-615). It is the same
-              // idea, now as the entry's own reason.
-              sourceEditDisabledReason={canEditSourceForCell ? null : sourceReadOnlyReasonForCell}
-              onInsertAbove={insertAbove}
-              aboveDisabledReason={insertAboveReason}
-              onInsertBelow={insertBelow}
-              belowDisabledReason={insertBelowReason}
-              onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
-              removeDisabledReason={removeReason}
-              onSplitAtQuotes={splitAtQuotes}
-              splitDisabledReason={splitReason}
-              timestamps={timestamps}
-              // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
-              // the role gate (absent ⇒ no entry at all); the reason is the DCS
-              // pin's, the same one Edit text shows.
-              hidden={cellHidden}
-              onToggleHidden={onToggleHidden}
-              hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
+          <SourceReferenceAttachments metadata={cell.metadata} />
+          {sourceEditing ? (
+            <TranslatedEditor
+              cellId={`${cell.id}::source`}
+              initialPlain={sourceDraft?.value ?? sourceSeed.text}
+              initialHtml={sourceDraft?.valueHtml ?? sourceSeed.html}
+              onCommit={handleSourceCommit}
+              onBlur={() => setSourceEditing(false)}
+              editable
+              // Size to content like the read surface — compactHeight skips
+              // the h-full / min-h-[40px] stretch that was jumping the row.
+              compactHeight
+              ariaLabel={t("editor.source.editText")}
+              placeholder={t("editor.source.placeholder")}
+              className="w-full !px-0"
             />
-            {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
-                mirrors the target column's header lane, and that mirror is what
-                puts the two columns' first text lines on the same baseline. Drop
-                it for context-free cells and every such row's source text rides
-                20px above its translation — the target lane can't be made
-                conditional to match, because it also reserves the strip the
-                floating action rail occupies. */}
-            <div data-testid="source-context-line" data-selection-ignore="" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel || showVoiceChip ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
-              {/* AQU-646: the character, on the SOURCE side too (Sam,
-                  2026-08-26) — "put that character label also in the top left
-                  of source cells… we'll just scoot the time range over".
-
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
-                  call was that these two corners agree with EACH OTHER, so both
-                  read the one `labelText` and both ride the "Show cell labels"
-                  preference. AQU-1018 did not weaken that — it only gave
-                  `labelText` a `cast_name` rung beneath the assigned voice, so
-                  the corners now agree with the timeline/recorder/exports in the
-                  cases where they used to agree on NOTHING. The two names still
-                  are not interchangeable, and an assigned voice still wins.
-
-                  `dir="auto"` because the lane is forced LTR for timecodes and
-                  a name is not a timecode. The width cap is what does the
-                  scooting: a long character name truncates rather than pushing
-                  the timing out of the row. */}
-              {showCellLabel && (
-                <AppTooltip content={labelText} disabled={!labelText}>
-                  <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
-                    {labelText}
-                  </span>
-                </AppTooltip>
-              )}
-              {/* AQU-1687: the Bible voice chip, in the same slot. One per row:
-                  here in the Text view, in the target corner in the Audio view
-                  (which replaces this column). */}
-              {showVoiceChip && cellVoices && <VoiceChip view={cellVoices} className="max-w-[45%] shrink-0" />}
-              {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
-                  relaying the client): it moved to the foot of the cell — see
-                  `source-timing-line` — so the character label has this corner
-                  to itself. Other context, a scripture reference like
-                  "GEN 1:1", still belongs at the top: it names what the line IS
-                  rather than when it happens, and it is centred as it was. */}
-              {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
-              {/* AQU-1391: this source text is not unique in the file. It sits
-                  on the SOURCE line because that is what repeats — the badge
-                  answers "you will meet this string N times", which is what
-                  makes auto-propagation predictable rather than surprising. */}
-              {typeof repetitionCount === "number" && repetitionCount > 1 && (
-                <AppTooltip content={t("editor.repetition.tooltip", { count: repetitionCount })}>
-                  <span
-                    data-testid="source-repetition-count"
-                    className="shrink-0 rounded-sm bg-muted px-1 font-medium tabular-nums"
-                  >
-                    {t("editor.repetition.badge", { count: repetitionCount })}
-                  </span>
-                </AppTooltip>
-              )}
-              {/* AQU-1422: the eye-off badge. Only ever rendered on a row that
-                  reached the table while parked, which only happens for a
-                  source editor with "Show hidden cells" on — so it needs no
-                  permission check of its own. */}
-              {cellHidden && (
-                <AppTooltip content={t("editor.row.hiddenBadgeTooltip")}>
-                  <span
-                    data-testid="source-cell-hidden-badge"
-                    aria-label={t("editor.row.hiddenBadgeAria")}
-                    className="flex shrink-0 items-center"
-                  >
-                    <EyeOff className="h-3.5 w-3.5" />
-                  </span>
-                </AppTooltip>
-              )}
-              <SourceTagChips metadata={cell.metadata} />
-              <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
-            </div>
-            <SourceReferenceAttachments metadata={cell.metadata} />
-            {sourceEditing ? (
-              <TranslatedEditor
-                cellId={`${cell.id}::source`}
-                initialPlain={sourceDraft?.value ?? sourceSeed.text}
-                initialHtml={sourceDraft?.valueHtml ?? sourceSeed.html}
-                onCommit={handleSourceCommit}
-                onBlur={() => setSourceEditing(false)}
-                editable
-                // Size to content like the read surface — compactHeight skips
-                // the h-full / min-h-[40px] stretch that was jumping the row.
-                compactHeight
-                ariaLabel={t("editor.source.editText")}
-                placeholder={t("editor.source.placeholder")}
-                className="w-full !px-0"
-              />
-            ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              // AQU-1135: a formatted source cell renders as sanitized HTML, so
-              // it cannot host the per-match TermLookupPopover triggers the
-              // plain-text path builds. It gets the highlights as decorated
-              // markup instead, and the click is delegated here — the same
-              // `.term-chip-host[data-source-term]` contract TranslatedEditor
-              // uses for the target lane, landing on the same popover.
-              <div
-                onClick={(event) => {
-                  const host = (event.target as HTMLElement).closest(
-                    ".term-chip-host[data-source-term]",
-                  )
-                  const term = host?.getAttribute("data-source-term")
-                  if (!term) return
-                  event.stopPropagation()
-                  handleTermChipClick(term, host as HTMLElement)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return
-                  const host = (event.target as HTMLElement).closest(
-                    ".term-chip-host[data-source-term]",
-                  )
-                  const term = host?.getAttribute("data-source-term")
-                  if (!term) return
-                  event.preventDefault()
-                  event.stopPropagation()
-                  handleTermChipClick(term, host as HTMLElement)
-                }}
-              >
-                <SanitizedRichHtml
-                  html={sourceDraft?.valueHtml || cell.originalHtml || ""}
-                  idmlStyleCatalog={idmlStyleCatalog}
-                  idmlParagraphStyleId={idmlParagraphStyleId}
-                  concepts={terminologyConcepts}
-                  termMatching={project.termMatching}
-                  // AQU-1757: the same underlines as the plain path. The spans
-                  // index the text the checks read, not the markup.
-                  ranges={sourceRanges}
-                  rangeText={effectiveSourceText(cell)}
-                  onRangeClick={openInlineRule}
-                />
-              </div>
-            ) : cellMentions ? (
-              // AQU-1689: a Greek or Hebrew source whose words are the pack's.
-              // Each word that refers to a participant is a Who's Who mention;
-              // the text between mentions renders as below.
-              <MentionSourceText
-                view={cellMentions}
-                cellId={cell.id}
-                text={shownSourceText}
-                renderSlice={(start, end, insideMention) =>
-                  insideMention ? (
-                    <HighlightedText
-                      text={shownSourceText.slice(start, end)}
-                      ranges={clipRangesToTextSlice(sourceRanges, start, end)}
-                    />
-                  ) : (
-                    <SourceWithTermLookup
-                      inline
-                      text={shownSourceText.slice(start, end)}
-                      highlights={highlights}
-                      ranges={clipRangesToTextSlice(sourceRanges, start, end)}
-                      showEvidence={examplesExpanded}
-                      onRangeClick={openInlineRule}
-                      concepts={terminologyConcepts}
-                      termMatching={project.termMatching}
-                      onViewConcept={onOpenTerminologyConcept}
-                    />
-                  )
-                }
-              />
-            ) : (
-              <UsfmSourceText
-                // AQU-646: an imported media segment's stored `value` is the
-                // filename; once transcribed, the ASR transcript IS the source
-                // text users translate. Non-media cells are unaffected.
-                // AQU-847: media rows skip the HTML branch above entirely — a
-                // transcript is plain text, and letting `originalHtml` win
-                // there is what pinned the file title over the transcript once
-                // any source commit had landed.
-                text={shownSourceText}
-                highlights={highlights}
+          ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
+            // AQU-1135: a formatted source cell renders as sanitized HTML, so
+            // it cannot host the per-match TermLookupPopover triggers the
+            // plain-text path builds. It gets the highlights as decorated
+            // markup instead, and the click is delegated here — the same
+            // `.term-chip-host[data-source-term]` contract TranslatedEditor
+            // uses for the target lane, landing on the same popover.
+            <div
+              onClick={(event) => {
+                const host = (event.target as HTMLElement).closest(
+                  ".term-chip-host[data-source-term]",
+                )
+                const term = host?.getAttribute("data-source-term")
+                if (!term) return
+                event.stopPropagation()
+                handleTermChipClick(term, host as HTMLElement)
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return
+                const host = (event.target as HTMLElement).closest(
+                  ".term-chip-host[data-source-term]",
+                )
+                const term = host?.getAttribute("data-source-term")
+                if (!term) return
+                event.preventDefault()
+                event.stopPropagation()
+                handleTermChipClick(term, host as HTMLElement)
+              }}
+            >
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+                concepts={terminologyConcepts}
+                termMatching={project.termMatching}
+                // AQU-1757: the same underlines as the plain path. The spans
+                // index the text the checks read, not the markup.
                 ranges={sourceRanges}
-                showEvidence={examplesExpanded}
+                rangeText={effectiveSourceText(cell)}
                 onRangeClick={openInlineRule}
-                concepts={terminologyConcepts}
-                termMatching={project.termMatching}
-                onViewConcept={onOpenTerminologyConcept}
-                footnotePanelActive={footnotePanelActive}
-                footnoteNumberOffset={sourceFootnoteNumberOffset}
               />
-            )}
-            {cellExamples.length > 0 && (
-              <ExamplePanel
-                examples={cellExamples}
-                // AQU-1393: the source the examples were retrieved FOR — what the
-                // match percentages and the word diff are measured against.
-                currentSource={displayedSourceText(cell, sourceDraft?.value)}
-                originFor={exampleOriginFor}
-                // Not offered at all when the row can't take the write — a
-                // button that quietly no-ops is worse than no button
-                // (09-design-and-ux "never disable silently").
-                onInsert={
-                  editable && !idmlConfiguration && !lockHolderLabel
-                    ? handleInsertExampleTarget
-                    : undefined
-                }
-              />
-            )}
-            {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
-                timecode, and that asymmetry with the lane above is deliberate:
-                the top lane is reserved even when empty because its 20px is
-                what keeps the source and target columns' first lines on one
-                baseline, while nothing below the text mirrors anything — so an
-                always-on strip here would be wasted height on every scripture
-                row in the app. */}
-            {/* AQU-2204: a file that follows its recordings shows no source
-                time anywhere, so the cue's timecode line goes too. */}
-            {contextIsTimecode && !followsRecordings && (
-              <div
-                data-testid="source-timing-line"
-                data-context-kind="timecode"
-                className="mt-1 flex h-4 items-center justify-start text-left text-xs text-muted-foreground"
-                dir="ltr"
-              >
-                <span className="min-w-0 truncate">{cell.context}</span>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          ) : cellMentions ? (
+            // AQU-1689: a Greek or Hebrew source whose words are the pack's.
+            // Each word that refers to a participant is a Who's Who mention;
+            // the text between mentions renders as below.
+            <MentionSourceText
+              view={cellMentions}
+              cellId={cell.id}
+              text={shownSourceText}
+              renderSlice={(start, end, insideMention) =>
+                insideMention ? (
+                  <HighlightedText
+                    text={shownSourceText.slice(start, end)}
+                    ranges={clipRangesToTextSlice(sourceRanges, start, end)}
+                  />
+                ) : (
+                  <SourceWithTermLookup
+                    inline
+                    text={shownSourceText.slice(start, end)}
+                    highlights={highlights}
+                    ranges={clipRangesToTextSlice(sourceRanges, start, end)}
+                    showEvidence={examplesExpanded}
+                    onRangeClick={openInlineRule}
+                    concepts={terminologyConcepts}
+                    termMatching={project.termMatching}
+                    onViewConcept={onOpenTerminologyConcept}
+                  />
+                )
+              }
+            />
+          ) : (
+            <UsfmSourceText
+              // AQU-646: an imported media segment's stored `value` is the
+              // filename; once transcribed, the ASR transcript IS the source
+              // text users translate. Non-media cells are unaffected.
+              // AQU-847: media rows skip the HTML branch above entirely — a
+              // transcript is plain text, and letting `originalHtml` win
+              // there is what pinned the file title over the transcript once
+              // any source commit had landed.
+              text={shownSourceText}
+              highlights={highlights}
+              ranges={sourceRanges}
+              showEvidence={examplesExpanded}
+              onRangeClick={openInlineRule}
+              concepts={terminologyConcepts}
+              termMatching={project.termMatching}
+              onViewConcept={onOpenTerminologyConcept}
+              footnotePanelActive={footnotePanelActive}
+              footnoteNumberOffset={sourceFootnoteNumberOffset}
+            />
+          )}
+          {cellExamples.length > 0 && (
+            <ExamplePanel
+              examples={cellExamples}
+              // AQU-1393: the source the examples were retrieved FOR — what the
+              // match percentages and the word diff are measured against.
+              currentSource={displayedSourceText(cell, sourceDraft?.value)}
+              originFor={exampleOriginFor}
+              // Not offered at all when the row can't take the write — a
+              // button that quietly no-ops is worse than no button
+              // (09-design-and-ux "never disable silently").
+              onInsert={
+                editable && !idmlConfiguration && !lockHolderLabel
+                  ? handleInsertExampleTarget
+                  : undefined
+              }
+            />
+          )}
+          {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
+              timecode, and that asymmetry with the lane above is deliberate:
+              the top lane is reserved even when empty because its 20px is
+              what keeps the source and target columns' first lines on one
+              baseline, while nothing below the text mirrors anything — so an
+              always-on strip here would be wasted height on every scripture
+              row in the app. */}
+          {/* AQU-2204: a file that follows its recordings shows no source
+              time anywhere, so the cue's timecode line goes too. */}
+          {contextIsTimecode && !followsRecordings && (
+            <div
+              data-testid="source-timing-line"
+              data-context-kind="timecode"
+              className="mt-1 flex h-4 items-center justify-start text-left text-xs text-muted-foreground"
+              dir="ltr"
+            >
+              <span className="min-w-0 truncate">{cell.context}</span>
+            </div>
+          )}
+        </div>
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions
@@ -8793,7 +8600,6 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
-            {showVoiceChip && cellVoices && audioLens && <VoiceChip view={cellVoices} className="max-w-[60%]" />}
             <CellPresenceBadges peers={remoteCellPresence} />
             {/* AQU-1191: low-memory mode drops the presence badges above, which
                 were the ONLY thing naming who holds a cell — `heldByLabel` just
@@ -9233,10 +9039,6 @@ function EditorRow({
         <div className="pointer-events-none relative col-start-2 z-20 flex justify-end md:absolute md:end-2 md:top-0.5">
           <div
             className="pointer-events-auto"
-            // AQU-1642 follow-up: ⋯ Play audio lives in here and pauses and
-            // resumes the run, so pressing into the rail never counts as
-            // selecting the verse (which would send the place to its start).
-            data-place-control=""
             // AQU-354: track focus landing on / leaving a rail control so the
             // idle auto-hide never collapses the rail while it is being used.
             onFocusCapture={() => setRailHasFocus(true)}
@@ -9423,14 +9225,11 @@ function EditorRow({
                   }
                   tooltip={railPlaying ? t("common.pause") : t("editor.audio.play")}
                   onClick={() => {
-                    // AQU-1642 follow-up: in the Audio view, Play and Pause on
-                    // the bottom bar's run (a pause keeps the place).
-                    if (railViaRun && audioPlace) { audioPlace.pressMenu(cell.id); return }
                     if (audioController.state === "loading") return
                     if (audioController.isPlaying) audioController.pause()
                     else void audioController.play()
                   }}
-                  disabled={!railViaRun && audioController.state === "loading"}
+                  disabled={audioController.state === "loading"}
                   toneClass={
                     railPlaying
                       ? "text-primary hover:text-primary"

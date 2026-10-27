@@ -193,7 +193,7 @@ import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
 import { StatusBar, statusBarFigure } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
+import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
 import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
@@ -220,7 +220,6 @@ import {
 } from "@/lib/timeline/sequence-timeline"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
-import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
@@ -347,8 +346,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
-import { fileTrackColor } from "@/lib/timeline/take-colors"
+import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -377,9 +375,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
-import { resolveTtsProvider } from "@/lib/audio/tts-providers"
-import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -1559,11 +1555,11 @@ export function ProjectWorkspace() {
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode
-  // surfaces the Cast studio in the Voices dock tab (VoiceSidebar) and
-  // replaces each cell's SOURCE column with that line's voice controls
-  // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
-  // workspace root, not inside the dock.
+  // Text vs Media lens — the same table over the same cells; Media stacks the
+  // timeline over it and surfaces the Cast studio in the Voices dock tab
+  // (VoiceSidebar). (The stored value for Media is "audio", from when a
+  // book's Media lens was the Audio view — AQU-1758.) Cloning from a cell
+  // opens NewVoiceModal at the workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
   // page where the Gemini API key can be set. The old implementation called
@@ -2478,7 +2474,16 @@ export function ProjectWorkspace() {
   // one chapter at a time, with dashed stand-ins for lines not yet recorded.
   const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
-  const activeFileOnTimeline = Boolean(activeFileForLens)
+  // Smart Extensions (apiRev 2 + 3): an `editor` extension mounted for the
+  // active file draws the file itself. (Declared here, ahead of the lens
+  // gates below, which read it.)
+  const extensionEditorActive = Boolean(
+    activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
+  )
+  // AQU-1758: except a book or document an extension editor draws — the
+  // first-party extension editor keeps its own Audio lens (apiRev 4), and the
+  // bottom bar it has always had (below).
+  const activeFileOnTimeline = Boolean(activeFileForLens) && (activeFileTimeOrdered || !extensionEditorActive)
   /** Media lens = the timeline STACKED over the always-rendered text table
    *  (one EditorTable instance across both lenses — the imperative ref,
    *  selection singleton, and presence claims stay single). */
@@ -2506,80 +2511,6 @@ export function ProjectWorkspace() {
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
-  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
-  // the file's cells with their takes — is written by a layout effect below,
-  // once they exist; the place only reads it at press time.
-  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
-  const audioLens = useMemo<AudioLensContext | null>(
-    () =>
-      lens === "audio" && audioProject && !activeFileOnTimeline
-        ? {
-            voices: tts.voices,
-            settings: tts.laneSettings,
-            defaultVoiceId: tts.defaultVoiceId,
-            project: audioProject,
-            projectId: audioProject.id,
-            session: frontierSession ?? null,
-            username: currentUsername,
-            onAssignCast: (cellId, voiceId) => tts.assignCells([cellId], voiceId),
-            onAfterGenerate: refresh,
-            // Play just this one line through the shared play-queue: hand it a
-            // single-cell snapshot so it doesn't walk on to the next line.
-            // Prefer the audio-enriched cell from the table — the raw `cells`
-            // row never carries selectedGeneratedVoiceAudioId/attachments, so
-            // pickPlayableAudio would find nothing and play would go silently
-            // IDLE right after a generate.
-            onPlayCell: (cellId, enrichedCell) => {
-              if (!frontierSession?.jwt) return
-              const cell = enrichedCell ?? cellStore.getCellView(cellId)
-              if (!cell) return
-              startQueue(
-                // snapshot: the bar's keep-cells-fresh effect must not swap
-                // the full file in — this is "play just this line", full stop.
-                { cells: [cell], projectId: audioProject.id, session: frontierSession, snapshot: true },
-                0,
-              )
-            },
-            // Turn this line's take into a reusable Cast character.
-            onMakeCharacterFromCell: (cellId) => {
-              setMakeCharacterSeedCellId(cellId)
-              setMakeCharacterMode("clone")
-              setMakeCharacterOpen(true)
-            },
-            // AQU-2212: Clone voice from take, without the dialog.
-            onCloneTake: async (cell, audioId, name) => {
-              const level = project?.syncRole?.level ?? null
-              if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
-                throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
-              }
-              const voice = await cloneVoiceFromTake({
-                projectId: audioProject.id, cell, audioId, name,
-                provider: resolveTtsProvider(tts.settings),
-                // A clone rides Inworld or Gemini, which take no target language.
-                paletteIndex: tts.allVoices.length,
-                session: frontierSession ?? null,
-              })
-              const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
-              await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
-              toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
-            },
-            // "Add a voice…" opens New voice on the ready-made characters; the
-            // voice it adds is cast on the line it was opened from.
-            onAddVoice: (cellId) => {
-              setMakeCharacterSeedCellId(cellId)
-              setMakeCharacterMode("character")
-              setMakeCharacterOpen(true)
-            },
-            place: audioViewPlace,
-          }
-        : null,
-    [
-      lens, audioProject, activeFileOnTimeline, tts.voices, tts.laneSettings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
-      tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
-    ],
-  )
-
   // Media redesign slice 2: in a language that counts its recordings, a line
   // is unfinished until it is done by what the language delivers; on a dubbing
   // file a subtitle line no heard line performs is never a stop. The performed
@@ -7942,8 +7873,8 @@ export function ProjectWorkspace() {
   // through this so no path skips the trace. Self-no-ops when the lens isn't
   // changing, the file isn't time-ordered, or there's nothing to trace.
   const switchLens = useCallback((next: EditorLens) => {
-    // AQU-1758: every file has the timeline in Media, so every file traces.
-    const timeOrdered = Boolean(activeFile)
+    // AQU-1758: every file the timeline draws traces across the switch.
+    const timeOrdered = Boolean(activeFile) && activeFileOnTimeline
     // AQU-646's trace belongs to the TEXT ↔ MEDIA pair alone: those two lenses
     // share the mounted table, and the timeline whose selection it carries only
     // exists in Media. AQU-2153: a switch through Transcribe is not that pair —
@@ -7989,10 +7920,10 @@ export function ProjectWorkspace() {
       }
     }
     setLens(next)
-  }, [lens, setLens, activeFile, activeFileId, cellStore, viewScrollMemory])
+  }, [lens, setLens, activeFile, activeFileId, activeFileOnTimeline, cellStore, viewScrollMemory])
 
-  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
-  // and surfaces the Voices dock tab (where the voice controls now live).
+  // ISSUE-3 fix: /project/:id/voice deep-link opens Media on mount, and
+  // surfaces the Voices dock tab (where the voice controls live).
   // Declared after switchLens so it calls the live callback rather than one
   // captured before it exists (react-hooks/immutability).
   useEffect(() => {
@@ -11993,7 +11924,8 @@ export function ProjectWorkspace() {
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
     lens === "audio" &&
-    Boolean(activeFile)
+    Boolean(activeFile) &&
+    activeFileOnTimeline
   // Per-file audio attachments for the Media timeline's missing-clip badge.
   // Timeline cells carry no attachments, so the badge probe resolves the
   // selected clip's take from this read. Gated on timeline visibility so no
@@ -12438,10 +12370,10 @@ export function ProjectWorkspace() {
   /**
    * AQU-2026: Change voice for ONE line, from the Media timeline's take menu.
    *
-   * The per-line control shipped on the Audio tab's voice card, and a
-   * time-ordered file has no voice cards — `audioLens` is null there and the
-   * lens draws the timeline instead — so on video and subtitle files the only
-   * Change voice was the whole-file one. Dubbing is where cloned voices are
+   * The per-line control shipped on the Audio view's voice card, and a
+   * time-ordered file had no voice cards — the lens drew the timeline instead
+   * — so on video and subtitle files the only Change voice was the whole-file
+   * one. (AQU-1758: no file has voice cards now; this menu is the one.) Dubbing is where cloned voices are
    * used most, so that is exactly backwards.
    *
    * Both halves read the line the same way the Audio tab does: its cast voice
@@ -12588,17 +12520,6 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
-  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
-  // with — the same lines, takes and "moved to this line" as the bar's Play.
-  // Written after every commit (no deps) so a press reads this render's cells;
-  // a layout effect, not a render-time write, because the hook's return value
-  // is frozen to react-hooks/immutability and the ref is never read in render.
-  useLayoutEffect(() => {
-    audioViewContextRef.current = project
-      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
-      : null
-  })
-
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the
@@ -15131,9 +15052,6 @@ export function ProjectWorkspace() {
   // shared cell store, commit/validate/repetition path, AI drafting,
   // back-translation, rules/health signals, presence drafts, the recorder and
   // the bulk selection bar. Memoized so the frame only hears about real changes.
-  const extensionEditorActive = Boolean(
-    activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
-  )
   // Footnote tray (apiRev 4): the extension editor reports its visible rows
   // (editor.visible); the host feeds the same tray the built-in table does.
   const extensionVisibleIds = useEditorViewportVisibleCellIds(extensionEditorActive && footnoteViewMode === "tray")
@@ -15950,7 +15868,6 @@ export function ProjectWorkspace() {
         if (l === "audio") selectDockTab("voices")
       }}
       onAgentSelect={() => openAgentTab("editor")}
-      timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
       checkResult={checkResult}
@@ -16398,7 +16315,6 @@ export function ProjectWorkspace() {
                   audioMode={lens === "audio"}
                   audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
-                  mediaLayer={!!audioLens}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
                     const result = await generateCombinedVoice({
@@ -16687,7 +16603,6 @@ export function ProjectWorkspace() {
             onChooseFile={chooseFileInSidebar}
             editorMode={{
               lens,
-              timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
               onLensChange: (next) => {
                 switchLens(next)
                 if (next === "audio") selectDockTab("voices")
@@ -17285,17 +17200,6 @@ export function ProjectWorkspace() {
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
-            audioLens={audioLens}
-            // Sam, 2026-09-26: the Audio view's colour IS the file's dub-track
-            // colour, the timeline's own value — one colour per file, the same
-            // for everyone. A maintainer may change it whatever the track-
-            // editing setting says (track-editing-authority.ts).
-            audioTrackColor={audioLens ? fileTrackColor(project?.files, activeFileId, DEFAULT_TARGET_TRACK_ID) : undefined}
-            onSetAudioTrackColor={
-              audioLens && canReorderTracks
-                ? (hueId) => handleSetTrackColor([{ trackId: DEFAULT_TARGET_TRACK_ID, color: hueId }])
-                : undefined
-            }
             castGutter={timelineStacked}
             ttsSettings={tts.laneSettings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
@@ -17660,7 +17564,9 @@ export function ProjectWorkspace() {
           (() => {
             // Audio playback chrome belongs to the open file — hide it on
             // overlay surfaces (Terminology / Agent / …) even if the audio
-            // lens is still selected from a prior editor visit.
+            // lens is still selected from a prior editor visit. AQU-1758: the
+            // media view has its own strip, so this bar is only for a book an
+            // extension editor draws in its own Audio lens.
             const showAudioToolbar =
               lens === "audio" && centerSurface === "editor" && !!project
             // Media redesign, layout: the media view has no footer. Its
@@ -17693,9 +17599,7 @@ export function ProjectWorkspace() {
                   // bar names the voice the sounding line speaks with HERE.
                   settings={tts.laneSettings}
                   onActiveCell={handleBarActiveCell}
-                  // AQU-1642 follow-up: in the Audio view, Play starts from the
-                  // verse last selected or stopped.
-                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
+                  startCellId={timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings

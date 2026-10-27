@@ -220,8 +220,8 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
     "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
-    "Standalone tab label of the header Text/Audio segmented lens switch — a " +
-    "primary navigation control read on its own, alongside its sibling 'Text'. " +
+    "A standalone heading — the Audio column of the organization's project table " +
+    "and the Audio side of the character check — read on its own. " +
     "nav.outbox.previewAudio is a one-word fallback preview for an audio-attach " +
     "event row deep in the outbox diagnostics popover, standing in for a missing " +
     "text body among noun-phrase siblings like 'edit {id}'. A standalone control " +

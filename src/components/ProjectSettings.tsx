@@ -2944,14 +2944,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 />
               </SettingsRow>
               <SettingsRow
-                label={t("projectSettings.voice.studioLabel")}
-                description={t("projectSettings.voice.libraryNote")}
+                label={t("common.voices")}
+                description={t("projectSettings.voice.voicesNote")}
                 control={
-                  <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                    requestNavigate(`/project/${id}/editor`)
-                  }}>
-                    {t("projectSettings.voice.openStudioButton")}
+                  // AQU-1758: Media, with the Voices tab open (the /voice route).
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)}>
+                    {t("projectSettings.voice.openVoicesButton")}
                   </Button>
                 }
               />

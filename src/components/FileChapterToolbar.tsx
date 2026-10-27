@@ -34,7 +34,6 @@ export interface FileChapterToolbarProps {
   onLensChange: (lens: EditorLens) => void
   onAgentSelect?: () => void
   agentActive?: boolean
-  timeOrdered?: boolean
   checkOpen: boolean
   checkRunning: boolean
   checkResult: CheckRunResult | null
@@ -65,7 +64,6 @@ export function FileChapterToolbar({
   onLensChange,
   onAgentSelect,
   agentActive = false,
-  timeOrdered = false,
   checkOpen,
   checkRunning,
   checkResult,
@@ -186,7 +184,6 @@ export function FileChapterToolbar({
           onChange={onLensChange}
           onAgentSelect={onAgentSelect}
           agentActive={agentActive}
-          timeOrdered={timeOrdered}
           labels={lensLabels}
         />
         {beforeMenu}

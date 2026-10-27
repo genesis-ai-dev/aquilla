@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { EditorTable, type AudioLensContext } from "./EditorTable"
+import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -130,25 +130,8 @@ function makeStore(): CellStore {
   return store
 }
 
-function audioLens(): AudioLensContext {
-  return {
-    voices: TTS.voices ?? [],
-    settings: TTS,
-    defaultVoiceId: "v-narr",
-    project,
-    projectId: project.id,
-    session: null,
-    username: "tester",
-    onAssignCast: () => {},
-    onAfterGenerate: () => {},
-    onPlayCell: () => {},
-    onMakeCharacterFromCell: () => {},
-  }
-}
-
 function renderTable(opts: {
   castGutter?: boolean
-  audioLens?: AudioLensContext | null
   actions?: Partial<EditorActionsContextValue>
 } = {}) {
   const qc = new QueryClient()
@@ -173,7 +156,6 @@ function renderTable(opts: {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           castGutter={opts.castGutter ?? true}
-          audioLens={opts.audioLens}
           ttsSettings={TTS}
         />
       </EditorActionsProvider>
@@ -248,13 +230,16 @@ describe("EditorTable — character gutter", () => {
     expect(opts).toEqual({ scope: "line" })
   })
 
-  it("the Audio view offers the voice dropdown on a heading, and not on a section break", async () => {
-    renderTable({ castGutter: false, audioLens: audioLens() })
-    await screen.findByText("The Creation")
-    expect(within(rowEl("cell-section")).getByTestId("voice-field")).toBeInTheDocument()
-    expect(within(rowEl("cell-plain")).getByTestId("voice-field")).toBeInTheDocument()
-    expect(within(rowEl("cell-heading")).queryByTestId("voice-field")).toBeNull()
-    expect(within(rowEl("cell-heading")).queryByTestId("voice-card-empty")).toBeNull()
+  // AQU-1758: the Audio view, which put a voice card where the source text
+  // is, is gone. Under the timeline every row shows its source, as in Text.
+  it("shows every row's source text, and no voice cards, under the timeline", async () => {
+    renderTable()
+    await screen.findByText("Mary's line")
+    expect(within(rowEl("cell-section")).getAllByText("The Creation").length).toBeGreaterThan(0)
+    expect(within(rowEl("cell-plain")).getByText("an uncast line")).toBeInTheDocument()
+    expect(within(rowEl("cell-heading")).getByText("Section title")).toBeInTheDocument()
+    expect(screen.queryAllByTestId("voice-field")).toHaveLength(0)
+    expect(screen.queryAllByTestId("voice-card-empty")).toHaveLength(0)
   })
 
   it("the scope choice rides along in the gutter popover", async () => {

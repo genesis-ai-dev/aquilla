@@ -625,8 +625,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Frontier.",
-    "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
-    "projectSettings.voice.openStudioButton": "Open Voice Studio",
+    // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
+    // cast are in Media's Voices tab.
+    "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
+    "projectSettings.voice.openVoicesButton": "Open Voices",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
       "When this is on, a project lead can create, edit, and assign voices on the lanes they can write. " +
@@ -1183,7 +1185,6 @@ export const projectSettings = defineNamespace({
       "The standing instructions behind every AI draft — how the AI should write, " +
       "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
-    "projectSettings.voice.studioLabel": "Voice Studio",
     "projectSettings.localModels.onDeviceLabel": "On-device models",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
     "projectSettings.gitSync.minutesAbbrev": "min",

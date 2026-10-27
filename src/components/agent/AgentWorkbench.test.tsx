@@ -630,7 +630,7 @@ describe("AgentWorkbench unified view navigation", () => {
 })
 
 describe("AgentWorkbench editor chrome (AQU-980)", () => {
-  it("keeps Text / Audio / Agent on the workbench row so you can switch back", async () => {
+  it("keeps Text / Media / Agent on the workbench row so you can switch back", async () => {
     const onLensChange = vi.fn()
     render(<AgentWorkbench {...workbenchProps()} editorMode={{ lens: "text", onLensChange }} />)
 
@@ -641,7 +641,7 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     const agentMode = await within(row).findByRole("tab", { name: "Agent" })
     expect(agentMode).toHaveAttribute("aria-selected", "true")
     const textTab = within(row).getByRole("tab", { name: "Text" })
-    const audioTab = within(row).getByRole("tab", { name: "Audio" })
+    const audioTab = within(row).getByRole("tab", { name: "Media" })
     expect(textTab).toBeVisible()
     expect(audioTab).toBeVisible()
     expect(agentMode).toHaveClass("px-2", "py-1")

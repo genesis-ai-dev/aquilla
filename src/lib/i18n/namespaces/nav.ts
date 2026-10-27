@@ -500,25 +500,26 @@ export const nav = defineNamespace({
           "long translation there only affects the tooltip/aria-label, not layout).",
       },
 
-      // -- EditorModeToggle / audio-lens-label.ts (AQU-353) --
+      // -- EditorModeToggle (AQU-353; AQU-1758: one Media lens on every file) --
       "nav.lens.audio": {
         description:
-          "Second tab of the header Text/Audio segmented lens switch, for a cell-" +
-          "ordered file: reveals the cast library, transport and per-line speaker " +
-          "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
-          "icon 'Text' tab in a two-tab segmented control.",
+          "The bare word 'Audio' as a short heading: the Audio column of the " +
+          "organization's project table and the Audio side of the character " +
+          "check. (It named the editor's Audio lens until that lens became Media " +
+          "on every file.) Short — a column heading or a button label.",
       },
       "nav.lens.transcribe": {
         description:
           "Third tab of the header lens switch, offered when the file has audio: a view for " +
           "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
-          "beside the Text and Audio tabs in a segmented control.",
+          "beside the Text and Media tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:
-          "Same second lens tab as nav.lens.audio, relabelled for a time-ordered " +
-          "(timeline) file where the lens shows separate media segments rather than " +
-          "audio attached to text cells.",
+          "Second tab of the header Text/Media segmented lens switch, on every " +
+          "file: the timeline stacked over the same table the Text tab edits, with " +
+          "the cast library and the playback strip. Short — sits beside a Pencil-" +
+          "icon 'Text' tab in a segmented control.",
       },
 
       // -- NavHistoryControls --

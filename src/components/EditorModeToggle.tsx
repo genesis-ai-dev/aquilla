@@ -1,19 +1,17 @@
-// Text / Audio-or-Media / Agent switch in the chapter navigation row.
+// Text / Media / Transcribe / Agent switch in the chapter navigation row.
 // Compact viewports stay icon-only with a tooltip; md+ (768px, same as the
 // Check file control in this row) shows the label beside the icon.
-// The editor lenses read the SAME cell list. For non-time-ordered files the toggle is local
-// state over one mounted editor, so scroll/selection carry over directly; for
-// time-ordered (media) files the editors swap and the workspace TRACES the
-// current cell across the switch instead (AQU-646 — media→text scrolls+flashes
-// the row, text→media selects/centers/cues the clip). Text mode is plain
-// translation; Audio mode reveals the cast library, transport, per-line
-// speaker chips and generate controls (the old standalone Voice Studio).
+// Text and Media read the SAME cell list over one mounted table; Media stacks
+// the timeline over it, and the workspace TRACES the current cell across the
+// switch (AQU-646 — media→text scrolls+flashes the row, text→media selects/
+// centers/cues the clip). AQU-1758: one label, "Media", on every file — the
+// Audio view a book used to open in here is gone. The stored lens value for
+// Media stays "audio", so every project's saved choice keeps working.
 
 import { useSyncExternalStore, type ComponentType } from "react"
-import { Mic2, Pencil, AudioWaveform, Bot, Captions } from "lucide-react"
+import { Pencil, AudioWaveform, Bot, Captions } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { audioLensLabelKey } from "@/lib/editor/audio-lens-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 /** "transcribe": the two-step transcription view (ASR, then AI cleanup). */
@@ -43,13 +41,9 @@ interface Props {
   /** Open the full Agent workbench. Agent is a destination rather than a
    * persisted editor lens, so selecting it delegates navigation to the shell. */
   onAgentSelect?: () => void
-  /** When the Agent workbench is showing, select the Agent tab so Text/Audio
+  /** When the Agent workbench is showing, select the Agent tab so Text/Media
    *  remain one click away. */
   agentActive?: boolean
-  /** Timeline-segment-model: when true the active file is time-ordered, so the
-   *  second lens selects the MEDIA layer (separate media segments) rather than
-   *  audio-attachments on the same text cells. Relabels "Audio" → "Media". */
-  timeOrdered?: boolean
 }
 
 export function EditorModeToggle({
@@ -57,21 +51,12 @@ export function EditorModeToggle({
   onChange,
   onAgentSelect,
   agentActive = false,
-  timeOrdered = false,
   labels = "all",
 }: Props) {
   const t = useT()
   const wide = useIsMdUp()
   const current = agentActive ? "agent" : lens
   const labeledFor = (value: string) => wide && (labels === "all" || value === current)
-  // AQU-353: the canonical lens label is shared with every other entry point
-  // that toggles this lens (e.g. the sidebar "More" item) via audioLensLabelKey,
-  // so they never diverge (this used to say "Audio" while the sidebar said
-  // "Voice"). The icon pair is kept in lockstep with audioLensIcon (see its
-  // test); it stays inline here as a stable component ref so it can be used as
-  // JSX.
-  const secondLabel = t(audioLensLabelKey(timeOrdered))
-  const SecondIcon = timeOrdered ? AudioWaveform : Mic2
   return (
     <Tabs
       value={agentActive ? "agent" : lens}
@@ -86,7 +71,7 @@ export function EditorModeToggle({
     >
       <TabsList>
         <ModeTab value="text" label={t("editor.lens.text")} icon={Pencil} labeled={labeledFor("text")} />
-        <ModeTab value="audio" label={secondLabel} icon={SecondIcon} labeled={labeledFor("audio")} />
+        <ModeTab value="audio" label={t("nav.lens.media")} icon={AudioWaveform} labeled={labeledFor("audio")} />
         <ModeTab value="transcribe" label={t("nav.lens.transcribe")} icon={Captions} labeled={labeledFor("transcribe")} />
         {(onAgentSelect || agentActive) ? (
           <ModeTab value="agent" label={t("nav.dock.agentTab")} icon={Bot} labeled={labeledFor("agent")} />

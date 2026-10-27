@@ -655,8 +655,6 @@ export const audio = defineNamespace({
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
     "audio.castGutter.addVoice": "Add a voice…",
-    "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
-    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -855,10 +853,6 @@ export const audio = defineNamespace({
         placeholders: { done: "Recordings uploaded so far, e.g. '3'.", total: "Recordings in total, e.g. '8'." },
       },
       "audio.castGutter.addVoice": { description: "Last row of a line's voice dropdown: opens the New voice dialog to add a voice to the cast." },
-      "audio.castGutter.recordingTooltip": {
-        description: "Tooltip of a line's voice field when its audio is a person's recording and no voice is assigned.",
-        placeholders: { label: "What the field shows, e.g. 'Your recording' or 'Recorded by Ana'." },
-      },
       "audio.characters.filterGroupAriaLabel": {
         description:
           "Accessible group label (not visible text) for the row of filter chips " +
@@ -3033,16 +3027,6 @@ export const audio = defineNamespace({
         placeholders: {
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
-      },
-      "audio.castGutter.defaultVoiceLabel": {
-        description:
-          "The voice field under a line's waveform in the Audio view, when nobody " +
-          "chose a character for the line and it falls back to the default voice — " +
-          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
-        placeholders: {
-          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
-        },
-        maxLength: 32,
       },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:

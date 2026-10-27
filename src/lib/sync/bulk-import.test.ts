@@ -667,7 +667,7 @@ describe("reconcileSourceImport", () => {
       order.push("upload")
       return { artifactId: "artifact-copy", key: "key", sha256: "digest" }
     })
-    const fetchSpy = vi.fn(async () => {
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       order.push("reconcile")
       return Response.json({
         fileId: "file-copy", replayed: false, matched: 1, added: 0,

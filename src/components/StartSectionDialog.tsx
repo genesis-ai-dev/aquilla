@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -42,22 +42,30 @@ export function StartSectionDialog({
   const t = useT()
   const [name, setName] = useState("")
 
-  // Fresh every time it opens: the previous section's name is never the one you
-  // want for the next, and leaving it there invites naming two sections alike
-  // by accident.
-  useEffect(() => {
-    if (open) setName("")
-  }, [open])
+  /**
+   * Cleared on the way OUT, not by an effect on the way in. The field must be
+   * fresh every time the dialog opens — the previous section's name is never
+   * the one you want for the next, and leaving it there invites naming two
+   * sections alike by accident — but resetting it from an effect on `open` is a
+   * cascading render for a value this component already owns
+   * (`react-hooks/set-state-in-effect`). Every exit routes through here: the
+   * Cancel button, a successful save, and the primitive's own Esc / outside
+   * click.
+   */
+  const close = () => {
+    setName("")
+    onOpenChange(false)
+  }
 
   const trimmed = name.trim()
   const submit = () => {
     if (!trimmed) return
     onSubmit(trimmed)
-    onOpenChange(false)
+    close()
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) close() }}>
       <DialogContent aria-labelledby="start-section-title" aria-describedby="start-section-desc">
         <DialogHeader>
           <DialogTitle id="start-section-title">{t("editor.startSection.title")}</DialogTitle>
@@ -85,7 +93,7 @@ export function StartSectionDialog({
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={close}>
             {t("editor.startSection.cancel")}
           </Button>
           <Button

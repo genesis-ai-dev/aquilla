@@ -150,8 +150,10 @@ describe("AQU-2185 — the navigator re-divides around a hand-set section", () =
     expect(previous).toBe("The storm")
     expect(s.getNavigationIndex().map((e) => e.label)).toEqual(["Part 1", "Part 2", "The calm"])
 
-    // The server refuses: back to what it was, not to unmarked.
-    s.applyOptimisticCellMilestone("c70", previous)
+    // The server refuses: back to what it was, not to unmarked. `?? null` only
+    // satisfies the signature's `string | null` — the assertion above is what
+    // pins the value, so an `undefined` here would already have failed.
+    s.applyOptimisticCellMilestone("c70", previous ?? null)
     expect(s.getNavigationIndex().map((e) => e.label)).toEqual(["Part 1", "Part 2", "The storm"])
   })
 

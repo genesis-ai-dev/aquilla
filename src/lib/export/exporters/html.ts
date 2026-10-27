@@ -41,6 +41,7 @@
 // text does, shows those characters and runs nothing.
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
 import { blockClass, cellLines, escapeHtml, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
 import { parseScriptureReference } from "@/lib/scripture-reference"
@@ -65,6 +66,21 @@ export interface HtmlExportOptions {
 /** The only fields the page reads; `CellData` satisfies it. */
 export type HtmlExportCell = Pick<CellData, "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker"> &
   Parameters<typeof effectiveSourceText>[0]
+
+/**
+ * Does this file read as a Bible book — does any line carry a Bible verse
+ * reference (a known book code with a chapter and verse, `RUT 1:1`)?
+ *
+ * AQU-2210: a `codex` file is not always Scripture. Migrated projects hold
+ * dubbing episodes (`TheChosen-101-en-5-2 1:cue-…`), Pilgrim's Progress
+ * (`PilgrimsProgress 1:13`) and commentaries under the same type, and the file
+ * row cannot tell them apart (no book code; Codex's corpus marker is not
+ * migrated). The lines can, by the same reference test that numbers a verse
+ * on the page — so a file offered the page gets numbered verses.
+ */
+export function hasBibleVerses(cells: readonly Pick<CellData, "group">[]): boolean {
+  return cells.some((cell) => parseScriptureReference(cell.group)?.verse != null)
+}
 
 export function exportHtml(cells: readonly HtmlExportCell[], opts: HtmlExportOptions = {}): Blob {
   return new Blob([buildHtmlPage(cells, opts)], { type: "text/html;charset=utf-8" })
@@ -183,8 +199,16 @@ function entryFor(cell: HtmlExportCell): Entry | null {
   const text = cellLines(raw)
   const lines = splitPlainLines(text.lines)
   if (lines.length === 0) return null
-  const kind: Entry["kind"] = cell.type === "verse" ? "verse" : cell.type === "heading" ? "heading" : "text"
-  const verse = kind === "verse" ? (parseScriptureReference(cell.group)?.verse ?? null) : null
+  // A USFM import types its verses `verse`; a migrated Codex book types every
+  // verse `text` and says it is one only through its reference (AQU-2210). So
+  // content whose reference reads as a verse is a verse, whatever its type —
+  // a cue ref, a bare chapter ref or a structural cell never qualifies.
+  const ref = parseScriptureReference(cell.group)
+  const kind: Entry["kind"] =
+    cell.type === "heading" ? "heading"
+    : cell.type === "verse" || (ref?.verse && !isStructuralCell(cell.type)) ? "verse"
+    : "text"
+  const verse = kind === "verse" ? (ref?.verse ?? null) : null
   return {
     kind,
     verse,

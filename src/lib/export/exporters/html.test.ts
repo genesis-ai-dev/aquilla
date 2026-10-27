@@ -2,7 +2,7 @@
 // the book, its chapters and numbered verses, never a raw USFM marker, and
 // never run anything a translation typed.
 import { describe, it, expect } from "vitest"
-import { buildHtmlPage, exportHtml } from "./html"
+import { buildHtmlPage, exportHtml, hasBibleVerses } from "./html"
 import type { CellData } from "@/hooks/useCells"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { usfmSectionToStrings } from "@/lib/parsers/parse-text-formats"
@@ -186,6 +186,55 @@ describe("buildHtmlPage", () => {
     expect(html).toContain("<title>notes</title>")
     expect(html).not.toContain("<nav")
     expect(html).toContain('<p class="text">First cue</p>')
+  })
+
+  // AQU-2210: a migrated Codex book types every verse `text` (target rows carry
+  // no type at all), so its verses are recognisable only by their reference.
+  it("numbers a Codex book's verses, which are typed text and known only by their ref", () => {
+    const cells = [
+      makeCell({ id: "a", group: "RUT 1:1", type: "text", translated: "In the days" }),
+      makeCell({ id: "b", group: "RUT 1:2", type: "text", translated: "The man's name" }),
+      makeCell({ id: "c", group: "RUT 2:1", type: "text", translated: "Naomi had a relative" }),
+    ]
+    const html = buildHtmlPage(cells, { fileName: "RUT", now: NOW })
+
+    expect(html).toContain('<h1 class="book-title">Ruth</h1>')
+    expect(html).toContain('<p class="verse"><sup class="verse-number">1</sup> In the days</p>')
+    expect(html).toContain('<sup class="verse-number">2</sup> The man')
+    expect(html).toContain('<sup class="verse-number">1</sup> Naomi had a relative')
+    expect(html).not.toContain('<p class="text">')
+  })
+
+  it("a cue ref, a non-Bible work, a bare chapter ref or a structural cell is never numbered as a verse", () => {
+    const cells = [
+      makeCell({ id: "cue", group: "TheChosen-106 1:cue-834.376-835.294", type: "text", translated: "A cue" }),
+      makeCell({ id: "pp", group: "PilgrimsProgress 1:13", type: "text", translated: "He answered" }),
+      makeCell({ id: "chap", group: "GEN 5", type: "text", translated: "Before the first verse" }),
+      makeCell({ id: "para", group: "GEN 5:1", type: "paratext", translated: "An intro line" }),
+      makeCell({ id: "v", group: "GEN 5:1", type: "verse", translated: "This is the book" }),
+    ]
+    const html = buildHtmlPage(cells, { now: NOW })
+
+    expect(html).toContain('<p class="text">A cue</p>')
+    expect(html).toContain('<p class="text">He answered</p>')
+    expect(html).toContain('<p class="text">Before the first verse</p>')
+    expect(html).toContain('<p class="text">An intro line</p>')
+    expect(html.match(/class="verse-number"/g)).toHaveLength(1)
+  })
+})
+
+// AQU-2210: what decides whether a `codex` file is offered the page at all.
+describe("hasBibleVerses", () => {
+  it("is true for a file whose lines carry a Bible verse reference", () => {
+    expect(hasBibleVerses([{ group: "" }, { group: "RUT 1:1" }])).toBe(true)
+  })
+
+  it("is false for cue refs, a non-Bible work's chapter:verse refs, bare chapters and no refs", () => {
+    expect(hasBibleVerses([{ group: "TheChosen-101-en-5-2 1:cue-2642.261-2642.684" }])).toBe(false)
+    expect(hasBibleVerses([{ group: "PilgrimsProgress 1:13" }, { group: "PilgrimsProgress 10:1" }])).toBe(false)
+    expect(hasBibleVerses([{ group: "GEN 5" }, { group: "GEN intro" }])).toBe(false)
+    expect(hasBibleVerses([{ group: "" }])).toBe(false)
+    expect(hasBibleVerses([])).toBe(false)
   })
 })
 

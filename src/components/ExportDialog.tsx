@@ -80,6 +80,7 @@ import { exportVtt } from "@/lib/export/exporters/vtt"
 import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
+import { buildHtmlProjectZip } from "@/lib/export/exporters/html-project"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { toast } from "@/components/ui/toast"
 
@@ -974,8 +975,9 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  // html is file-only for now: the whole-project zip of pages is AQU-2183.
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump", "html"] as const
+  // AQU-2183: html does project scope too, through its own orchestrator (a zip
+  // of book pages plus an index), not through buildProjectZip's one-entry-per-file shape.
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -1862,6 +1864,36 @@ export function ExportDialog({
           return
         }
         setStatus({ kind: "busy", msg: t("importExport.status.buildingZip", { count: projectFileCells.length }) })
+        // AQU-2183: html's project zip is pages plus an index, not one entry
+        // per file, so it has its own builder. Cells are narrowed by the same
+        // rule as every other format before it sees them.
+        if (fmt === "html") {
+          const htmlZip = await buildHtmlProjectZip({
+            // `identityCells` stays UNSCOPED on purpose: validated-only can
+            // drop every row of a book, and that book must still be listed in
+            // the index rather than disappear from the project's export.
+            files: projectFileCells.map((f) => ({
+              ...f,
+              cells: scopeCellsForExport(f.cells, contentMode),
+              identityCells: f.cells,
+            })),
+            title: projectName,
+            validatedOnly,
+            lang: targetLanguage,
+          })
+          const htmlName = buildExportStem(true)
+          downloadBlob(htmlZip.blob, `${htmlName}.zip`)
+          setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
+          // Two independent counts (books exported, files skipped), composed
+          // from two separately-authored phrases rather than one template —
+          // the same shape the SDBH and USFM project messages use.
+          const booksMsg = t("importExport.status.exportedHtmlBooks", { count: htmlZip.booksExported })
+          const skippedMsg = htmlZip.filesSkipped
+            ? t("importExport.status.skippedNonBookFiles", { count: htmlZip.filesSkipped })
+            : ""
+          setStatus({ kind: "ok", msg: `${booksMsg}${skippedMsg}` })
+          return
+        }
         const zipBlob = await buildProjectZip({
           // AQU-1148: each file's cells are narrowed by the same rule the
           // single-file path uses, before any exporter sees them.

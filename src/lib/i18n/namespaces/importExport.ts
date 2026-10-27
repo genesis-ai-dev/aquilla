@@ -985,6 +985,16 @@ export const importExport = defineNamespace({
       other: "Downloaded {fileName} ({count} rows)",
     }),
     "importExport.status.buildingZip": "Building zip for {count} files…",
+    // AQU-2183: the whole-project HTML zip reports two independent counts, so
+    // the skipped half is its own phrase, appended only when something was.
+    "importExport.status.exportedHtmlBooks": plural({
+      one: "Exported {count} book as HTML",
+      other: "Exported {count} books as HTML",
+    }),
+    "importExport.status.skippedNonBookFiles": plural({
+      one: ", skipped {count} file that isn't a USFM book",
+      other: ", skipped {count} files that aren't USFM books",
+    }),
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
@@ -2440,6 +2450,14 @@ export const importExport = defineNamespace({
       "importExport.status.exportedFilesCount": {
         description: "Success-status message after a project-scope USFM export, or a single-file-scope USFM export whose count is 1.",
         placeholders: { count: "Number of files exported." },
+      },
+      "importExport.status.exportedHtmlBooks": {
+        description: "Success-status message after a whole-project HTML export, which downloads a zip of one page per Bible book.",
+        placeholders: { count: "Number of Bible books exported." },
+      },
+      "importExport.status.skippedNonBookFiles": {
+        description: "Second half of the whole-project HTML export success message, appended after exportedHtmlBooks when some files were left out. Starts with a comma because it continues that sentence.",
+        placeholders: { count: "Number of files skipped because they are not USFM Bible books." },
       },
       "importExport.status.skippedOlderImports": {
         description: "Second half of the USFM project-export success message, appended after exportedFilesCount when some files were skipped.",

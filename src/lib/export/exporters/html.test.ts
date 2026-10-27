@@ -460,7 +460,7 @@ describe("buildHtmlPage — layout (AQU-2184)", () => {
   it("print keeps the poetry indents and the chapter's notes on the page", () => {
     const print = buildHtmlPage(GENESIS, { now: NOW })
     const media = print.slice(print.indexOf("@media print"))
-    expect(media).toContain(".chapter-index,.metadata{display:none}")
+    expect(media).toContain(".chapter-index,.metadata,.back-link{display:none}")
     expect(media).not.toContain(".notes{display:none}")
     expect(media).toContain(".notes{break-inside:avoid")
     expect(media).toContain(".poetry{break-inside:avoid}")

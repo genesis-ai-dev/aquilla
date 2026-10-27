@@ -317,7 +317,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
-import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
+import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
@@ -6872,7 +6872,15 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${visibleTranslated ?? ""}${marker}`
+      // AQU-2206: no live editor to insert into (the dialog's text field took
+      // focus, which deactivated the cell and unmounted it), so commit the
+      // stored text ourselves — spliced at the anchor the dialog previewed, not
+      // appended to the end of the cell.
+      const next = insertFootnoteMarkerAtAnchor(
+        visibleTranslated ?? "",
+        marker,
+        pendingFootnoteAnchorRef.current,
+      )
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
@@ -8150,6 +8158,20 @@ function EditorRow({
         onPointerDownCapture={handleRowPointerDownCapture}
         onClick={handleRowClick}
         onKeyDown={handleGridRowKeyDown}
+        // AQU-2173: the `⋯` menu now opens without taking the caret off this
+        // row's editor, so an Escape meant to dismiss the menu would otherwise
+        // reach the editor's own Escape (AQU-297 — commit and exit to the grid)
+        // on its way out of the row. While the menu is open, Escape closes the
+        // menu and nothing else: the caret and selection stay put, so typing
+        // carries on where it left off. A keyboard-opened menu holds focus
+        // inside its own popup, which portals out of this row — that Escape
+        // never reaches here and base-ui dismisses it as before.
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Escape" || !railOverflowOpen) return
+          event.preventDefault()
+          event.stopPropagation()
+          setRailOverflowOpen(false)
+        }}
       >
         {/* AQU-1333: caret park for the activation window. Inert and invisible
             the rest of the time — it only becomes editable because the row it

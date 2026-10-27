@@ -37,6 +37,7 @@ import {
   listUserDirectMembershipsInOrg,
   listProjectGrantOrgIds,
   listPlatformAdminOrgsPage,
+  countVisibleActiveLanguages,
   listOrgPortfolioPage,
   listUserOrgs,
   summarizeVisiblePortfolios,
@@ -60,6 +61,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
+import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
@@ -463,19 +465,24 @@ orgs.get("/:orgId/portfolio", async (c) => {
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
   // AQU-1071: the active-lane count rides along with the rollup the org
-  // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same count billing bills on, and deliberately org-wide rather than
-  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
-  // reading a smaller figure than their invoice is the confusion this ticket
-  // exists to remove, and a bare count names no project, so it discloses
-  // nothing the visibility rule guards.
-  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+  // dashboard is already asking for, so its tile costs no extra round trip.
+  // Maintainer+, platform admins, and any deployment with the read wall off
+  // still get the org-wide figure billing bills on (not scoped to this page).
+  // AQU-1515: below that wall the figure is only the lanes this caller may
+  // see — the same decision that hides sibling lane names. The field stays
+  // on the response either way; a real zero and a withheld registry are
+  // different numbers, and neither one is an omitted field.
+  const seesEveryLanguage =
+    isAdmin || role >= READ_WALL_MAINTAINER || !laneReadWallEnabled(c.env.LANE_READ_WALL)
+  const [{ projects, nextCursor }, activeLanguageCount] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
-    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+    seesEveryLanguage
+      ? countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]).then(({ byOrg }) => byOrg.get(orgId) ?? 0)
+      : countVisibleActiveLanguages(c.env, orgId, user.id),
   ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
-    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
+    activeLanguageCount,
     nextCursor,
   })
 })

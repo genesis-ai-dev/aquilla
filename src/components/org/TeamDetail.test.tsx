@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, act, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
@@ -350,6 +350,45 @@ describe("TeamDetail admin management", () => {
     expect(tabs.parentElement).toHaveClass("@6xl/team-detail:pl-11")
     expect(tabs.parentElement).not.toHaveClass("pl-11")
     expect(well).toContainElement(tabs)
+  })
+})
+
+describe("TeamDetail overview (AQU-2140)", () => {
+  it("opens this team's members and projects from Overview", async () => {
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100 }],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }],
+    })
+    renderDetail()
+    const sections = await screen.findByRole("tablist", { name: /team sections/i })
+    const overview = within(sections).getByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/orgs/1/teams/10")
+    // Projects is the landing tab; members stay put until Overview is opened.
+    expect(screen.queryByRole("heading", { name: "Members" })).toBeNull()
+    fireEvent.click(overview)
+    expect(await screen.findByRole("heading", { name: "Members" })).toBeInTheDocument()
+    expect(screen.getByText("anna")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeInTheDocument()
+    expect(screen.getByText("Bambara")).toBeInTheDocument()
+  })
+
+  it("shows a member only the team's own roster and projects", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100 }],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }],
+    })
+    renderDetail()
+    const sections = await screen.findByRole("tablist", { name: /team sections/i })
+    fireEvent.click(within(sections).getByRole("link", { name: "Overview" }))
+    expect(await screen.findByText("anna")).toBeInTheDocument()
+    expect(screen.getByText("Bambara")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /attach project/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /add (a )?member/i })).toBeNull()
   })
 })
 

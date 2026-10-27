@@ -2362,6 +2362,103 @@ async function visiblePortfolioText(
 }
 
 /**
+ * AQU-1515: how many active target lanes this caller may see.
+ *
+ * Same population billing counts (`countTargetLanesByOrg`): unarchived target
+ * lanes on projects that are not archived and not paused. Same decision as
+ * `visiblePortfolioText` about which of those lanes the caller may see: a
+ * project they created, or where their project role is maintainer or above,
+ * contributes every active lane; otherwise only lanes whose legacy tag the
+ * read wall would show. Projects they cannot open contribute nothing.
+ *
+ * The select list is ids and tags. Lane names are not read, so fixing the
+ * number cannot put a hidden name on the response.
+ */
+export async function countVisibleActiveLanguages(
+  env: Env,
+  orgId: number,
+  userId: number,
+): Promise<number> {
+  const { results } = await env.AQUILLA_PG.prepare(
+    `SELECT l.id AS lane_id, p.id AS project_id, p.created_by AS created_by,
+            l.legacy_tag AS legacy_tag, l.archived_at AS archived_at
+       FROM lanes l
+       JOIN projects p ON p.id = l.project_id
+      WHERE p.org_id = ?
+        AND p.archived_at IS NULL
+        AND COALESCE(p.is_active, TRUE)
+        AND l.role = 'target'
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}`,
+  ).bind(orgId, 0, userId, userId, userId, userId).all<{
+    lane_id: string
+    project_id: string
+    created_by: number | string | null
+    legacy_tag: string | null
+    archived_at: string | null
+  }>()
+
+  const byProject = new Map<string, {
+    createdBy: number
+    lanes: { id: string; legacyTag: string | null; archivedAt: string | null }[]
+  }>()
+  for (const row of results ?? []) {
+    let entry = byProject.get(row.project_id)
+    if (!entry) {
+      entry = { createdBy: Number(row.created_by), lanes: [] }
+      byProject.set(row.project_id, entry)
+    }
+    entry.lanes.push({ id: row.lane_id, legacyTag: row.legacy_tag, archivedAt: row.archived_at })
+  }
+  if (byProject.size === 0) return 0
+
+  const activeCount = (lanes: { archivedAt: string | null }[]) =>
+    lanes.reduce((n, lane) => n + (lane.archivedAt == null || lane.archivedAt === "" ? 1 : 0), 0)
+
+  // Same stand-in as visiblePortfolioText: an empty email cannot match the
+  // platform-admin allowlist and widen this caller. Admins never reach here.
+  const user = { id: userId, email: "" } as AuthUser
+  const unsettled: string[] = []
+  let count = 0
+  for (const [projectId, entry] of byProject) {
+    if (entry.createdBy === userId) count += activeCount(entry.lanes)
+    else unsettled.push(projectId)
+  }
+  if (unsettled.length === 0) return count
+
+  const roles = await resolveProjectRoles(env, user, unsettled)
+  const restricted: string[] = []
+  for (const projectId of unsettled) {
+    const role = roles.get(projectId)
+    if (role != null && role.level >= READ_WALL_MAINTAINER) count += activeCount(byProject.get(projectId)!.lanes)
+    else restricted.push(projectId)
+  }
+  if (restricted.length === 0) return count
+
+  const grants = await loadLaneGrantsForProjects(env.AQUILLA_PG, userId, restricted)
+  for (const projectId of restricted) {
+    const lanes = byProject.get(projectId)!.lanes
+    const visible = visibleLaneTags({
+      enabled: true,
+      role: roles.get(projectId)?.level ?? 0,
+      laneGrants: grants.get(projectId) ?? [],
+    })
+    const tags = legacyTagsForVisibleLanes(
+      lanes.map((lane) => ({ id: lane.id, name: null, legacyTag: lane.legacyTag })),
+      visible,
+    )
+    if (tags === null) {
+      count += activeCount(lanes)
+      continue
+    }
+    for (const lane of lanes) {
+      if (lane.archivedAt != null && lane.archivedAt !== "") continue
+      if (tags.has(lane.legacyTag ?? "")) count += 1
+    }
+  }
+  return count
+}
+
+/**
  * One page (or the full set) of visible portfolio rows across `orgIds`,
  * ordered by name. Used by the org / all-orgs project tables so search and
  * infinite scroll do not dump every project to the client.
@@ -2879,29 +2976,6 @@ export async function getOrgCountStructuralCells(env: Env, orgId: number): Promi
   const settings = await loadOrgSettingsBlob(env, orgId)
   const raw = (settings as Record<string, unknown>)?.countStructuralCells
   return typeof raw === "boolean" ? raw : DEFAULT_COUNT_STRUCTURAL_CELLS
-}
-
-/**
- * Whether the org lets bulk text validation sign off untouched AI drafts
- * (`allowBulkValidateAiDrafts`, off unless the org opts in), resolved through
- * a project's org. Null for a project with no org.
- *
- * Read here, for the project settings response, because the org settings
- * route answers only org members: a project member who is not in the org got
- * a 403 there, so the switch always read off for them however the org set it.
- */
-export async function getOrgAllowBulkValidateAiDraftsForProject(
-  env: Env,
-  projectId: string,
-): Promise<boolean | null> {
-  const project = await env.AQUILLA_PG.prepare(
-    "SELECT org_id FROM projects WHERE id = ?",
-  )
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-  if (!project?.org_id) return null
-  const settings = await loadOrgSettingsBlob(env, project.org_id)
-  return (settings as Record<string, unknown>)?.allowBulkValidateAiDrafts === true
 }
 
 export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {

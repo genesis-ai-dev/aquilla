@@ -670,6 +670,11 @@ export const importExport = defineNamespace({
     "importExport.format.md.description":
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
+    "importExport.format.html.label": "Web page",
+    "importExport.format.html.description":
+      "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
+      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
+      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",

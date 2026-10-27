@@ -5,10 +5,18 @@
 // source lane, above that list.
 //
 // Media redesign (Sam, Oct 25, design B "compact table"): the source is one
-// line with Change; the targets are a table — Name | Language | Code |
+// line with Change; the targets are a table — Language | Name | Code |
 // Delivers | ⋯ — whose rows open into labelled fields with Save and Cancel.
 // Explanations and long sub-text sit behind (i) icons, and nothing is drawn as
 // a pill.
+//
+// AQU-2174: the LANGUAGE leads everywhere on this card — the table's first
+// column, the edit form's first field, and the one-line summaries (source and
+// archived) — because it is the required field, the one the AI is told, and the
+// one the add form already asks for first. The name is an optional display
+// override that falls back to the language, so it follows it. The row menu
+// offers one `Edit` item: "Rename" and "Language and code…" opened the same
+// form and differed only in which field took focus.
 //
 // AQU-601: lanes are ARCHIVED, not deleted. Archiving records a lane's tag in
 // `settings.archivedLanes` — the lane stays in `targetLanes` (its cell data and
@@ -71,9 +79,9 @@ import { cn } from "@/lib/utils"
 
 const MAX_LANE_LENGTH = 64
 
-// The table's columns: Name | Language | Code | Delivers | ⋯. Below `sm` the
-// Language and Code columns fold into a muted line under the name, so a phone
-// keeps the name, the Delivers choice and the menu side by side.
+// The table's columns: Language | Name | Code | Delivers | ⋯ (AQU-2174). Below
+// `sm` the Name and Code columns fold into a muted line under the language, so
+// a phone keeps the language, the Delivers choice and the menu side by side.
 const GRID_WITH_DELIVERS =
   "grid grid-cols-[minmax(0,1fr)_9.5rem_2rem] sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_4.5rem_10rem_2rem] items-center gap-x-3"
 const GRID_WITHOUT_DELIVERS =
@@ -196,6 +204,19 @@ function byPosition(a: ProjectLaneView, b: ProjectLaneView): number {
   return a.position - b.position || a.id.localeCompare(b.id)
 }
 
+/**
+ * AQU-2174 — what follows the language in a one-line summary of a lane: the
+ * lane's label when it says something the language does not, then the code. A
+ * lane whose name is just its language therefore reads "Samoan · sm", not
+ * "Samoan · Samoan · sm".
+ */
+function summaryDetail(lane: ProjectLaneView, label: string): string {
+  const language = laneLanguage(lane)
+  return [label !== language ? label : null, laneLanguageCode(lane)]
+    .filter(Boolean)
+    .join(" · ")
+}
+
 function foldedDisplayName(lane: Pick<ProjectLaneView, "role" | "language" | "name">): string {
   return laneDisplayName(lane).trim().toLocaleLowerCase()
 }
@@ -273,8 +294,10 @@ export function LanguagesSection({
   const [addError, setAddError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   // The one row opened into its fields (a target row or the source), and the
-  // field that takes focus: Rename lands on Name, "Language and code…" on
-  // Language.
+  // field that takes focus: the menu's Edit and the source's Change land on
+  // Language (the form's first field); clicking a name, and the "two languages
+  // share a name" warning's Rename, land on Name, because those are explicitly
+  // about the name.
   const [editing, setEditing] = useState<{ laneId: string; focus: "name" | "language" } | null>(null)
   const [pendingArchive, setPendingArchive] = useState<string | null>(null)
   const [laneActionError, setLaneActionError] = useState<string | null>(null)
@@ -512,7 +535,7 @@ export function LanguagesSection({
     }
   }
 
-  /** The ⋯ menu: Rename, Language and code…, Archive. Blob lanes only archive. */
+  /** The ⋯ menu: Edit, Archive (AQU-2174). Blob lanes only archive. */
   function rowMenu(key: string, label: string) {
     return (
       <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
@@ -528,19 +551,13 @@ export function LanguagesSection({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-auto min-w-44">
             {rowMode && (
-              <>
-                <DropdownMenuItem data-testid={`lane-rename-${key}`} onClick={() => startEdit(key, "name")}>
-                  <Pencil className="size-4" />
-                  {t("fileDetails.rename")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  data-testid={`lane-edit-language-${key}`}
-                  onClick={() => startEdit(key, "language")}
-                >
-                  <Globe className="size-4" />
-                  {t("projectSettings.languages.languageAndCodeAction")}
-                </DropdownMenuItem>
-              </>
+              <DropdownMenuItem
+                data-testid={`lane-edit-action-${key}`}
+                onClick={() => startEdit(key, "language")}
+              >
+                <Pencil className="size-4" />
+                {t("common.edit")}
+              </DropdownMenuItem>
             )}
             <DisabledFieldTooltip
               disabled={rowMode && !canArchiveAnyLane}
@@ -607,9 +624,9 @@ export function LanguagesSection({
       role="row"
       className={cn(grid, "border-b bg-muted/40 px-3 py-1.5 text-xs font-medium text-muted-foreground")}
     >
-      <span role="columnheader">{t("common.name")}</span>
+      <span role="columnheader">{t("org.orgHome.table.languageHeader")}</span>
       <span role="columnheader" className="hidden sm:block">
-        {t("org.orgHome.table.languageHeader")}
+        {t("common.name")}
       </span>
       <span role="columnheader" className="hidden sm:block">
         {t("projectSettings.languages.codeColumn")}
@@ -674,10 +691,12 @@ export function LanguagesSection({
             ) : (
               <div className="flex min-w-0 items-center gap-2 text-sm" data-testid="source-language-line">
                 {laneLanguage(sourceRow) ? (
+                  /* AQU-2174: language · name · code, and the name only when it
+                     says something the language does not. */
                   <span className="truncate">
-                    <span className="font-medium">{laneDisplayName(sourceRow)}</span>
-                    {laneLanguage(sourceRow) !== laneDisplayName(sourceRow) && (
-                      <span className="text-muted-foreground"> · {laneLanguage(sourceRow)}</span>
+                    <span className="font-medium">{laneLanguage(sourceRow)}</span>
+                    {laneDisplayName(sourceRow) !== laneLanguage(sourceRow) && (
+                      <span className="text-muted-foreground"> · {laneDisplayName(sourceRow)}</span>
                     )}
                     {laneLanguageCode(sourceRow) && (
                       <span className="font-mono text-xs text-muted-foreground"> · {laneLanguageCode(sourceRow)}</span>
@@ -784,6 +803,8 @@ export function LanguagesSection({
                     const language = laneLanguage(lane)
                     const code = laneLanguageCode(lane)
                     const delivers = laneRowDelivers(lane)
+                    // What the Name and Code columns fold into below `sm`.
+                    const folded = summaryDetail(lane, laneDisplayName(lane))
                     if (editing?.laneId === lane.id) {
                       return (
                         <div key={lane.id} role="row" className="border-b bg-muted/30 px-3 py-3 last:border-b-0">
@@ -805,23 +826,17 @@ export function LanguagesSection({
                           className={cn(grid, "border-b px-3 py-1.5 text-sm last:border-b-0")}
                           data-testid={`lane-identity-row-${lane.id}`}
                         >
+                          {/* AQU-2174: the language is the row's main label, so
+                              a phone leads with it too; the name (only when it
+                              differs) and the code fold under it. */}
                           <div role="cell" className="flex min-w-0 flex-col gap-0.5">
                             <span className="flex min-w-0 items-center gap-1">
-                              {canEdit ? (
-                                <button
-                                  type="button"
-                                  data-testid={`lane-name-${lane.id}`}
-                                  aria-label={t("projectSettings.languages.renameLaneAriaLabel", { lane: label })}
-                                  className="min-w-0 truncate text-start font-medium underline-offset-2 hover:underline"
-                                  onClick={() => startEdit(lane.id, "name")}
-                                >
-                                  {laneDisplayName(lane)}
-                                </button>
-                              ) : (
-                                <span className="min-w-0 truncate font-medium" data-testid={`lane-name-${lane.id}`}>
-                                  {laneDisplayName(lane)}
-                                </span>
-                              )}
+                              <span
+                                className={cn("min-w-0 truncate font-medium", !language && "text-muted-foreground")}
+                                data-testid={`lane-language-cell-${lane.id}`}
+                              >
+                                {language || t("projectSettings.languages.noLanguageSet")}
+                              </span>
                               {/* AQU-1784: a lane that shares its label with
                                   another says how it is told apart elsewhere. */}
                               {laneSuffixes[lane.id] && (
@@ -842,18 +857,28 @@ export function LanguagesSection({
                                 {t("projectSettings.languages.sameNameMarker")}
                               </span>
                             )}
-                            <span className="truncate text-xs text-muted-foreground sm:hidden">
-                              {language
-                                ? code ? `${language} · ${code}` : language
-                                : t("projectSettings.languages.noLanguageSet")}
-                            </span>
+                            {folded && (
+                              <span className="truncate text-xs text-muted-foreground sm:hidden">
+                                {folded}
+                              </span>
+                            )}
                           </div>
-                          <span
-                            role="cell"
-                            className={cn("hidden truncate sm:block", !language && "text-muted-foreground")}
-                            data-testid={`lane-language-cell-${lane.id}`}
-                          >
-                            {language || t("projectSettings.languages.noLanguageSet")}
+                          <span role="cell" className="hidden min-w-0 truncate sm:block">
+                            {canEdit ? (
+                              <button
+                                type="button"
+                                data-testid={`lane-name-${lane.id}`}
+                                aria-label={t("projectSettings.languages.renameLaneAriaLabel", { lane: label })}
+                                className="min-w-0 max-w-full truncate text-start underline-offset-2 hover:underline"
+                                onClick={() => startEdit(lane.id, "name")}
+                              >
+                                {laneDisplayName(lane)}
+                              </button>
+                            ) : (
+                              <span className="min-w-0 truncate" data-testid={`lane-name-${lane.id}`}>
+                                {laneDisplayName(lane)}
+                              </span>
+                            )}
                           </span>
                           <span
                             role="cell"
@@ -1097,17 +1122,17 @@ export function LanguagesSection({
                 {(rowMode
                   ? archivedRows.map((lane) => ({
                       key: lane.id,
-                      label: laneLabel(lane),
-                      detail: [laneLanguage(lane), laneLanguageCode(lane)].filter(Boolean).join(" · "),
+                      // AQU-2174: language · name · code, the name only when it
+                      // says something the language does not.
+                      label: laneLanguage(lane) || t("projectSettings.languages.noLanguageSet"),
+                      detail: summaryDetail(lane, laneLabel(lane)),
                     }))
                   : archived.map((lane) => ({ key: lane, label: lane, detail: "" }))
                 ).map(({ key, label, detail }) => (
                   <li key={key} className="flex items-center gap-3 px-3 py-1.5 text-sm">
                     <span className="min-w-0 flex-1 truncate">
                       <span className="font-medium text-muted-foreground">{label}</span>
-                      {detail && label !== detail && (
-                        <span className="text-xs text-muted-foreground"> · {detail}</span>
-                      )}
+                      {detail && <span className="text-xs text-muted-foreground"> · {detail}</span>}
                     </span>
                     <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                       <Button
@@ -1216,26 +1241,9 @@ function LaneEditFields({
 
   return (
     <div className="flex flex-col gap-2" data-testid={`lane-edit-${lane.id}`}>
+      {/* AQU-2174: Language, Name, Code — the required field first, matching
+          the table's columns and the add form. */}
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_7rem]">
-        <div className="flex flex-col gap-1">
-          <FieldLabel htmlFor={`lane-name-field-${lane.id}`}>{t("common.name")}</FieldLabel>
-          <input
-            id={`lane-name-field-${lane.id}`}
-            value={name}
-            autoFocus={focus === "name"}
-            disabled={saving}
-            data-testid={`lane-name-input-${lane.id}`}
-            // The placeholder is the language: that IS what the lane shows when
-            // no name is set, so an empty field is not a missing value.
-            placeholder={language.trim() || t("projectSettings.languages.laneNamePlaceholder")}
-            className={FIELD_INPUT_CLASS}
-            onChange={(e) => {
-              setName(e.target.value)
-              setError(null)
-            }}
-            onKeyDown={onFieldKeyDown}
-          />
-        </div>
         <div className="flex flex-col gap-1">
           <FieldLabel htmlFor={`lane-language-${lane.id}`}>{t("org.orgHome.table.languageHeader")}</FieldLabel>
           <LanguageComboboxInput
@@ -1262,6 +1270,25 @@ function LaneEditFields({
                 void save()
               }
             }}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel htmlFor={`lane-name-field-${lane.id}`}>{t("common.name")}</FieldLabel>
+          <input
+            id={`lane-name-field-${lane.id}`}
+            value={name}
+            autoFocus={focus === "name"}
+            disabled={saving}
+            data-testid={`lane-name-input-${lane.id}`}
+            // The placeholder is the language: that IS what the lane shows when
+            // no name is set, so an empty field is not a missing value.
+            placeholder={language.trim() || t("projectSettings.languages.laneNamePlaceholder")}
+            className={FIELD_INPUT_CLASS}
+            onChange={(e) => {
+              setName(e.target.value)
+              setError(null)
+            }}
+            onKeyDown={onFieldKeyDown}
           />
         </div>
         <div className="flex flex-col gap-1">

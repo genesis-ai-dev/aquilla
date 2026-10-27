@@ -88,7 +88,14 @@ test("the fill toast's Validate all signs the filled repetitions off", async ({ 
   await expect(alice.getByText("Applied to 2 repeated segments")).toBeVisible({ timeout: 10_000 })
   await expect(ws.modalDialogs()).toHaveCount(0)
   await alice.getByRole("button", { name: "Validate all", exact: true }).click()
-  await expect(alice.getByText("Validated 2 repeated rows")).toBeVisible({ timeout: 10_000 })
+  // AQU-2176: the outcome is a dialog that NAMES the rows it signed off and
+  // waits to be dismissed, not a toast that counts them and vanishes.
+  const signedOff = alice.getByTestId("repetition-validated-dialog")
+  await expect(signedOff).toBeVisible({ timeout: 10_000 })
+  await expect(signedOff.getByText("Validated 2 repeated rows")).toBeVisible()
+  await expect(signedOff.getByRole("listitem")).toHaveCount(2)
+  await signedOff.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(signedOff).toHaveCount(0)
 
   await expect.poll(async () => {
     const targets = await readProjectedCells(jwt, seeded, "target")

@@ -256,3 +256,26 @@ describe("MembersPanel scopes editor", () => {
     await waitFor(() => expect(toggle).toHaveTextContent("1 lane"))
   })
 })
+
+describe("MembersPanel search when the roster is hidden", () => {
+  it("leaves the username field usable for a project lead when the list is visible", () => {
+    renderPanel(<MembersPanel {...baseProps()} callerMaxRole={500} />)
+    expect(screen.getByRole("textbox")).toBeEnabled()
+  })
+
+  it("disables the username field and shows the reason", () => {
+    const reason = "Contributors cannot view the member list."
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        callerMaxRole={600}
+        searchDisabledReason={reason}
+      />,
+    )
+    const field = screen.getByRole("textbox")
+    expect(field).toBeDisabled()
+    expect(field).toHaveAttribute("aria-describedby", "member-search-disabled-reason")
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
+  })
+})

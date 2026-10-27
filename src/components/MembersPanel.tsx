@@ -120,6 +120,11 @@ interface MembersPanelProps {
   suggestions?: readonly UserSearchResult[];
   /** Shown when `suggestions` is provided but empty and nothing is typed. */
   emptySuggestionsHint?: string;
+  /**
+   * AQU-625: when set, the add-member search is disabled and this sentence is
+   * shown. Share sets it when the member list is hidden from the caller.
+   */
+  searchDisabledReason?: string;
   /** AQU-1030: scope of the add row's grant sentence. Omit to keep the plain Add label. */
   grantScope?: GrantScope;
   /** AQU-1808: current target lanes the add row must choose among. */
@@ -140,6 +145,7 @@ export function MembersPanel({
   scopeConfig,
   suggestions,
   emptySuggestionsHint,
+  searchDisabledReason,
   grantScope,
   targetLanes,
 }: MembersPanelProps) {
@@ -242,8 +248,9 @@ export function MembersPanel({
         onBatchErrorMessage={onAddBatchError}
         excludedUserIds={existingUserIds}
         scopedUserSearch={scopedUserSearch}
-        suggestions={suggestions}
+        suggestions={searchDisabledReason != null ? undefined : suggestions}
         emptySuggestionsHint={emptySuggestionsHint}
+        disabledReason={searchDisabledReason}
         grantScope={grantScope}
         targetLanes={targetLanes}
       />

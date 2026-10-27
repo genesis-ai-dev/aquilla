@@ -3231,7 +3231,6 @@ export const th: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "องค์กรแขก",
   "org.switcher.guestRole": "แขก",
   "org.switcher.personalWorkspace": "ส่วนตัว",
-  "org.overviewLaneTable.sectionDescription": "ความคืบหน้า คน และการกระทำสำหรับภาษาเป้าหมายแต่ละภาษาในโครงการนี้",
   "org.projectOverview.chapterAbbrevLabel": "บท {chapter}",
   "org.projectOverview.archiveDialogTitle": "เก็บถาวรโครงการ",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "กรองความคืบหน้าตามภาษา",

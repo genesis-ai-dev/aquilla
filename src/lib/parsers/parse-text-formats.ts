@@ -101,6 +101,7 @@ export function usfmSectionToStrings(
       section: `${bookId} ${v.chapter}`,
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
+      paragraphMarker: v.paragraphMarker,
     })),
     // Headings include book-name/title/TOC + intro when excludeFrontMatter is
     // false (AQU-634 default). When opted out, parseUsfmLossless already omits
@@ -113,6 +114,7 @@ export function usfmSectionToStrings(
       section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
       type: h.kind,
       paragraphStart: undefined as boolean | undefined,
+      paragraphMarker: undefined as string | undefined,
     })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
@@ -125,6 +127,7 @@ export function usfmSectionToStrings(
     globalReferences: [s.ref],
     type: s.type,
     ...(s.paragraphStart ? { paragraphStart: true } : {}),
+    ...(s.paragraphMarker ? { paragraphMarker: s.paragraphMarker } : {}),
   }))
   return { bookId, strings, duplicateRefs, structureFindings: checkUsfmStructure(section) }
 }

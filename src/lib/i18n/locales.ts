@@ -4,7 +4,7 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese render LTR. Add a locale here + a catalog in
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Swahili render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -62,6 +62,11 @@ export const LOCALES: readonly LocaleMeta[] = [
   // the varieties are mutually readable, and the brief, not the menu label,
   // fixes which one the strings are.
   { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Swahili catalog, worded as Kiswahili sanifu (the written East African
+  // standard), not a national dialect and not Congolese Swahili. Buttons use
+  // the imperative (Hifadhi, Ghairi). `sw-KE` and `sw-TZ` fold onto `sw` by
+  // the primary subtag; `swc` does not share that subtag and must not.
+  { code: "sw", englishName: "Swahili", nativeName: "Kiswahili", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

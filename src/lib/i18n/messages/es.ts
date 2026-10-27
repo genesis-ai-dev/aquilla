@@ -3710,7 +3710,6 @@ export const es: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "Organizaciones como invitado",
   "org.switcher.guestRole": "Invitado",
   "org.overviewLaneTable.peopleCellAriaLabel": "Personas en {lane}",
-  "org.overviewLaneTable.sectionDescription": "Progreso, personas y acciones de cada idioma de destino en este proyecto.",
   "org.projectOverview.chapterAbbrevLabel": "Cap. {chapter}",
   "org.projectOverview.archiveDialogTitle": "Archivar proyecto",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "Filtrar el progreso por idioma",

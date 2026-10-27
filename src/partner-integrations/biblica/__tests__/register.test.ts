@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { partnerIntegrations } from "@/lib/partners/registry"
+import { partnerIdForImportedFile, partnerIdForImportProfile, partnerIntegrations } from "@/lib/partners/registry"
 
 describe("partner registry — this tree", () => {
   /**
@@ -28,6 +28,13 @@ describe("partner registry — this tree", () => {
       "builtin:biblica-study-notes",
       "builtin:biblica-treasure-hunt",
     ])
+    expect(partnerIdForImportProfile("builtin:biblica-study-notes")).toBe("biblica")
+    expect(partnerIdForImportProfile("builtin:biblica-treasure-hunt")).toBe("biblica")
+    expect(partnerIdForImportProfile("builtin:biblica-reach4life")).toBe("biblica")
+    expect(partnerIdForImportProfile("builtin:biblica-ebl")).toBe("biblica")
+    expect(partnerIdForImportProfile("builtin:idml-roundtrip")).toBeNull()
+    expect(partnerIdForImportedFile({ corpusMarker: "Biblica Study Notes" })).toBe("biblica")
+    expect(partnerIdForImportedFile({ corpusMarker: "OT" })).toBeNull()
   })
 
   /** Without this hook the editor silently stops marking Biblica verse rows (AQU-1285). */

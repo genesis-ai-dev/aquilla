@@ -16,6 +16,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/editor/import-media-captions.smoke.spec.ts"],
   },
   {
+    source: /^(?:src\/components\/(?:FileActionMenu|FileRow|ExpandableFileList|ImportDialog|import\/PreviewPanel|EditorTable)|src\/lib\/(?:cells\/source-review|import\/reimport-copy-name|import\.ts|sync\/bulk-import)|sync-worker\/src\/events\/import-reconcile)/,
+    sentinels: ["e2e/specs/editor/sidebar-reimport.smoke.spec.ts"],
+  },
+  {
     source: /^auth-worker\/src\/routes\/transcription\.ts$/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },

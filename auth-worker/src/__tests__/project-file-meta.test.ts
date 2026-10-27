@@ -93,7 +93,33 @@ describe("what files.meta projects into a file summary", () => {
     const byProject = await loadFilesByProject(env, ["proj-meta-test"])
     const files = byProject.get("proj-meta-test")!
     expect(files.find((f) => f.id === "meta-thb-legacy")!.corpusMarker).toBe("Treasure Hunt Bible")
+    expect(files.find((f) => f.id === "meta-thb-legacy")!.importProfile).toBe("builtin:biblica-treasure-hunt")
     expect(files.find((f) => f.id === "meta-r4l-legacy")!.corpusMarker).toBe("Reach 4 Life")
+    expect(files.find((f) => f.id === "meta-r4l-legacy")!.importProfile).toBe("builtin:biblica-reach4life")
+  })
+
+  it("recovers a Biblica profile from a source cell when files.meta never recorded one", async () => {
+    await seed("meta-from-cell", {})
+    await seed("meta-from-cell-moved", { corpusMarker: "My Notes" })
+    const metadata = JSON.stringify({
+      aquillaImport: { profileId: "builtin:biblica-study-notes" },
+    })
+    for (const fileId of ["meta-from-cell", "meta-from-cell-moved"]) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, lane_id, metadata)
+         VALUES ('proj-meta-test', ?, ?, 'source', 'In the beginning', ?, 0, (SELECT aquilla_test_resolve_source_lane('proj-meta-test')), ?)`,
+      )
+        .bind(fileId, `cell-${fileId}`, `evt-${fileId}`, metadata)
+        .run()
+    }
+    const byProject = await loadFilesByProject(env, ["proj-meta-test"])
+    const files = byProject.get("proj-meta-test")!
+    const recovered = files.find((f) => f.id === "meta-from-cell")!
+    expect(recovered.importProfile).toBe("builtin:biblica-study-notes")
+    expect(recovered.corpusMarker).toBe("Biblica Study Notes")
+    const moved = files.find((f) => f.id === "meta-from-cell-moved")!
+    expect(moved.importProfile).toBe("builtin:biblica-study-notes")
+    expect(moved.corpusMarker).toBe("My Notes")
   })
 
   it("prefers the stored corpusMarker over a Biblica parserVersion backfill", async () => {
@@ -104,5 +130,6 @@ describe("what files.meta projects into a file summary", () => {
     const byProject = await loadFilesByProject(env, ["proj-meta-test"])
     const file = byProject.get("proj-meta-test")!.find((f) => f.id === "meta-moved")!
     expect(file.corpusMarker).toBe("My Notes")
+    expect(file.importProfile).toBe("builtin:biblica-study-notes")
   })
 })

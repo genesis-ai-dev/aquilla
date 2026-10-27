@@ -3234,7 +3234,6 @@ export const ar: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "المنظمات الضيف",
   "org.switcher.guestRole": "ضيف",
   "org.switcher.personalWorkspace": "شخصي",
-  "org.overviewLaneTable.sectionDescription": "التقدم والأشخاص والإجراءات لكل لغة مستهدفة في هذا المشروع.",
   "org.projectOverview.chapterAbbrevLabel": "ف{chapter}",
   "org.projectOverview.archiveDialogTitle": "أرشفة المشروع",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "تصفية التقدم حسب اللغة",

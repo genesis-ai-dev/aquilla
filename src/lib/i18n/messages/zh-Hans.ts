@@ -3232,7 +3232,6 @@ export const zh_Hans: Catalog = {
   "org.switcher.guestOrganizationsGroupLabel": "访客组织",
   "org.switcher.guestRole": "访客",
   "org.switcher.personalWorkspace": "个人",
-  "org.overviewLaneTable.sectionDescription": "这个项目中每个目标语言的进度、人员与可用操作。",
   "org.projectOverview.chapterAbbrevLabel": "第 {chapter} 章",
   "org.projectOverview.archiveDialogTitle": "封存项目",
   "org.projectOverview.filterProgressByLanguageAriaLabel": "依语言筛选进度",

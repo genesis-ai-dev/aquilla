@@ -30,7 +30,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -79,7 +79,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 
-type TeamTab = "projects" | "members"
+type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
 type TeamProject = TeamDetailType["projects"][number]
 
@@ -658,6 +658,12 @@ export function TeamDetail() {
   )
 
   const teamDescription = team?.description?.trim() || null
+  // AQU-2140: the team page is the overview. The control links there (the same
+  // path row-click and create already use) and reveals members plus projects.
+  const teamOverviewHref =
+    activeOrgId != null && groupIdNum != null
+      ? orgPath(activeOrgId, `/teams/${groupIdNum}`)
+      : null
   const teamScopePath: ScopePath = [
     ...(activeOrgId != null && activeOrg?.name ? [{ type: "org" as const, id: String(activeOrgId), name: activeOrg.name }] : []),
     ...(team ? [{ type: "team" as const, id: String(team.id), name: team.name }] : []),
@@ -885,9 +891,24 @@ export function TeamDetail() {
                 <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
                   <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
                   <TabsTrigger value="members">{t("editor.navTitle.members")}</TabsTrigger>
+                  {teamOverviewHref ? (
+                    <Link
+                      to={teamOverviewHref}
+                      onClick={() => setTab("overview")}
+                      className={cn(
+                        "inline-flex items-center justify-center rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap",
+                        tab === "overview"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-foreground/60 hover:text-foreground",
+                      )}
+                    >
+                      {t("editor.navTitle.overview")}
+                    </Link>
+                  ) : null}
                 </TabsList>
 
-                <TabsContent value="projects" className="space-y-4">
+                <div className="flex flex-col gap-8">
+                <div className="space-y-4" hidden={tab !== "projects" && tab !== "overview"}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">{t("nav.projects")}</h2>
@@ -1029,9 +1050,9 @@ export function TeamDetail() {
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                </TabsContent>
+                </div>
 
-                <TabsContent value="members" className="space-y-4">
+                <div className="space-y-4" hidden={tab !== "members" && tab !== "overview"}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">
@@ -1173,7 +1194,8 @@ export function TeamDetail() {
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                </TabsContent>
+                </div>
+                </div>
               </Tabs>
               </div>
             </>

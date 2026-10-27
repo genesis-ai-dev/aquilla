@@ -59,6 +59,8 @@ interface FileRowProps {
   unassigned?: boolean
   /** Opens the Segmentation dialog for this file. */
   onSegmentation?: () => void
+  /** Opens the single-file re-import dialog. */
+  onReimport?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
   onApplySuggestion?: () => void
@@ -71,7 +73,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
+    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onReimport, onDelete,
     onApplySuggestion, unassigned = false, reorder,
   } = props
   const t = useT()
@@ -146,6 +148,7 @@ export function FileRow(props: FileRowProps) {
       onDownloadOriginal={onDownloadOriginal}
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
+      onReimport={onReimport}
       onDelete={onDelete}
       reorder={reorder}
     />

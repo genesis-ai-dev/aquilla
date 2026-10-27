@@ -96,28 +96,10 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-export type BuiltinCheckId =
-  | "empty-target"
-  | "target-equals-source"
-  | "placeholder-integrity"
-  | "number-integrity"
-  | "number-integrity-extra"
-  | "end-punctuation-mismatch"
-  | "punctuation-integrity"
-  | "double-space"
-  | "repeated-word"
-  | "unpaired-symbols"
-  | "abbreviation-mismatch"
-  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
-   *  only while the project's Bible data checks enrichment is on. */
-  | import("../../../db/shared/bible-checks/types").BibleCheckId
-  | "usfm-structure"
-  | "capitalization"
-  | "footnote-quote-mismatch"
-  | "corrupted-characters"
-  | "unpaired-quotes"
-  | "untranslated-fragment"
-  | "length-ratio"
+/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
+ *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
+ *  project's Bible data checks enrichment is on. */
+export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -932,6 +914,8 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /** Importer profile (`parserVersion` before `@`). Re-import reopens that importer. */
+  importProfile?: string
   /**
    * AQU-1569: hand-placed position within this file's sidebar corpus group,
    * from files.meta.sortIndex (set via the `file.reorder` event). Fractional

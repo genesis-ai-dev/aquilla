@@ -17,6 +17,7 @@
 
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { filterSettingsBlobForMember, visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import { loadEffectiveChecks, type EffectiveChecksView } from './effective-checks'
 import { laneContextFrom, lanesVisibleToCaller } from './external-lane'
 
 export interface ExternalProjectDetail {
@@ -29,6 +30,11 @@ export interface ExternalProjectDetail {
   role: number
   /** Normalized project settings blob (empty object when never written). */
   settings: Record<string, unknown>
+  /** AQU-2192: the built-in checks in force (defaults + overrides), beside the
+   *  raw `settings` blob that holds only the overrides. */
+  builtinChecks: EffectiveChecksView['builtinChecks']
+  /** Lanes with their own overrides only, keyed by lane tag ("" = default lane). */
+  builtinChecksByLane: EffectiveChecksView['builtinChecksByLane']
   /** Live project_settings.version — pass this as PatchSettings.ifMatchVersion.
    *  0 when the project has no settings row yet (the first write creates it). */
   settingsVersion: number
@@ -81,6 +87,14 @@ export async function loadProjectDetail(
     language: lane.language,
     role: lane.role,
   }))
+  const checks = await loadEffectiveChecks(
+    db,
+    viewer?.flag,
+    projectId,
+    viewer?.userId ?? 0,
+    role,
+    settings.settings,
+  )
   return {
     id: row.id,
     name: row.name,
@@ -88,6 +102,8 @@ export async function loadProjectDetail(
     archived: row.archived_at != null,
     role,
     settings: visibleSettings,
+    builtinChecks: checks.builtinChecks,
+    builtinChecksByLane: checks.builtinChecksByLane,
     settingsVersion: settings.version,
     settingsUpdatedAt: settings.updatedAt,
     lanes,

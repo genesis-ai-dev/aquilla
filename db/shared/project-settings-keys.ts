@@ -23,6 +23,16 @@ import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
+import {
+  ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
+  ALGORITHMIC_CHECKS_TYPE_NAME,
+  RULE_PENALTIES_TYPE_NAME,
+  RULES_TYPE_NAME,
+  algorithmicChecksByLaneProblem,
+  algorithmicChecksProblem,
+  rulePenaltiesProblem,
+  rulesProblem,
+} from './rules-settings'
 import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
 
 const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
@@ -126,15 +136,27 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   livingMemoryEntries: { kind: 'object[]' },
   alignmentSeeds: { kind: 'object[]' },
 
-  // Rules / checks
-  rules: { kind: 'object[]' },
-  rulePenalties: { kind: 'object' },
-  algorithmicChecks: { kind: 'object' },
+  // Rules / checks (AQU-2192: real validators; shapes in db/shared/rules-settings.ts)
+  rules: { kind: 'object[]', problem: (value) => rulesProblem(value), typeName: RULES_TYPE_NAME },
+  rulePenalties: {
+    kind: 'object',
+    problem: (value) => rulePenaltiesProblem(value),
+    typeName: RULE_PENALTIES_TYPE_NAME,
+  },
+  algorithmicChecks: {
+    kind: 'object',
+    problem: (value) => algorithmicChecksProblem(value),
+    typeName: ALGORITHMIC_CHECKS_TYPE_NAME,
+  },
   // AQU-1906: the same overrides, PER TARGET LANE — `{ [laneTag]: { [checkId]:
   // override } }`, where "" is the default lane. A lane entry lies over
   // `algorithmicChecks` per check id (src/lib/lqa/lane-builtin-checks.ts), so a
   // project with one lane keeps working untouched with this key absent.
-  algorithmicChecksByLane: { kind: 'object' },
+  algorithmicChecksByLane: {
+    kind: 'object',
+    problem: (value) => algorithmicChecksByLaneProblem(value),
+    typeName: ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
+  },
   // `terminology` is NOT here: it is retired (AQU-1724) — see
   // RETIRED_TERMINOLOGY_KEY below.
   // AQU-1688: facts about the target language that Bible data checks need

@@ -116,6 +116,7 @@ export const editor = defineNamespace({
       one: "{count} cell with stale source",
       other: "{count} cells with stale source",
     }),
+    "editor.reimport.sourceReview": "The source text changed in a re-import. The translation was kept. Validating this cell clears the highlight.",
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
@@ -1430,7 +1431,9 @@ export const editor = defineNamespace({
     "editor.splitQuotes.narration": "Narration",
     "editor.splitQuotes.quotation": "Quotation",
     "editor.splitQuotes.translationsNote":
-      "A translation that splits the same way is divided between the new lines. Any other translation stays whole on the first line and is marked for review.",
+      "Every translation of this line is marked for review, so it has to be done again. A translation that splits the same way is divided between the new lines. Any other stays whole on the first line.",
+    "editor.splitQuotes.multiLaneWarning":
+      "Splitting changes the source all lanes share. Each lane's translation of this line is marked so it has to be done again, and each lane keeps the voice it already gave this line on the new narration lines.",
     "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
     "editor.splitQuotes.confirm": plural({
       one: "Split into {count} line",
@@ -1450,6 +1453,8 @@ export const editor = defineNamespace({
     "editor.splitQuotes.unchangedToast": "That couldn\u2019t be split. Nothing was changed.",
     "editor.splitQuotes.failedToast": "That line couldn\u2019t be split, so it has been put back.",
     "editor.splitQuotes.forbiddenToast": "You don\u2019t have permission to split lines here, so it has been put back.",
+    "editor.splitQuotes.castFailedToast":
+      "The lines were split, but their voices could not be copied onto the new narration lines.",
     // AQU-1422: the reversible sibling of "Remove this line". The wording says
     // "cell" rather than "line" on purpose — one hide parks the row in EVERY
     // language lane at once, so calling it a line invites the reading that it
@@ -2023,6 +2028,10 @@ export const editor = defineNamespace({
     "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
+    "editor.source.multiLaneTitle": "Change the source every language shares?",
+    "editor.source.multiLaneBody":
+      "All lanes share this source. Changing it marks each lane's translation of this line for review. The words stay, and so does the approval.",
+    "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
     "editor.source.placeholder": "Source text…",
@@ -2324,6 +2333,12 @@ export const editor = defineNamespace({
       one: "Validated {count} repeated row",
       other: "Validated {count} repeated rows",
     }, "count"),
+    // AQU-2176 — the dialog that names them.
+    "editor.repetition.validatedBody": plural({
+      one: "This row was signed off with yours. Choose it to go to it.",
+      other: "These rows were signed off with yours. Choose one to go to it.",
+    }, "count"),
+    "editor.repetition.validatedRowNumber": "Row {number}",
     "editor.repetition.unvalidatedRepeats": plural({
       one: "{count} repeated row has this text but isn't validated",
       other: "{count} repeated rows have this text but aren't validated",
@@ -2444,10 +2459,27 @@ export const editor = defineNamespace({
       },
       "editor.repetition.validated": {
         description:
-          "Toast confirming that the repeated rows were filled in and marked " +
-          "validated. Paired with an Undo action.",
+          "Title of the dialog confirming that the repeated rows were filled in " +
+          "and marked validated. The dialog lists those rows and carries Undo, " +
+          "Done, and sometimes 'Ask me each time'.",
         placeholders: {
           count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validatedBody": {
+        description:
+          "Body of that dialog, under the title. Explains that these rows were " +
+          "validated as a side effect of the row the reviewer validated " +
+          "themselves, and that each listed row is clickable and jumps the " +
+          "editor to it. 'Signed off' means 'marked as validated'.",
+      },
+      "editor.repetition.validatedRowNumber": {
+        description:
+          "Label for one listed row in that dialog: the row's position in the " +
+          "file, as the editor's left gutter numbers it. Sits beside the row's " +
+          "reference or timecode, so keep it very short.",
+        placeholders: {
+          number: "The row's number in the file, already formatted. Never empty.",
         },
       },
       "editor.repetition.unvalidatedRepeats": {
@@ -2916,6 +2948,11 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      "editor.reimport.sourceReview": {
+        description:
+          "Tooltip on a cell outlined in yellow after a sidebar re-import changed its source " +
+          "text. Explains that the translation was kept and that validating the cell removes the outline.",
       },
       "editor.rail.moreActions": {
         description:
@@ -7812,6 +7849,21 @@ export const editor = defineNamespace({
           "downstream, so it is deliberately explicit. Imperative.",
         maxLength: 24,
       },
+      "editor.source.multiLaneTitle": {
+        description:
+          "Heading of the dialog that appears before the source editor opens, when " +
+          "the project has two or more target languages. A question.",
+      },
+      "editor.source.multiLaneBody": {
+        description:
+          "Body of that dialog. Says all lanes share the source, without saying how " +
+          "many there are. A change marks each lane's translation for review. The " +
+          "translation stays, and so does its approval.",
+      },
+      "editor.source.multiLaneConfirm": {
+        description: "Confirm button of that dialog. Imperative. Opens the source editor.",
+        maxLength: 24,
+      },
       "editor.source.doneEditing": {
         description:
           "The same pencil's label while the source editor is open; pressing it " +
@@ -8469,8 +8521,16 @@ export const editor = defineNamespace({
       },
       "editor.splitQuotes.translationsNote": {
         description:
-          "Note in the dialog about existing translations of the line: divided when they have " +
-          "matching quotation marks, otherwise kept on the first line and flagged for review.",
+          "Note in the dialog about existing translations of the line: every one is marked " +
+          "for review. A translation with matching quotation marks is divided between the " +
+          "new lines; any other stays whole on the first line.",
+      },
+      "editor.splitQuotes.multiLaneWarning": {
+        description:
+          "Warning under that note, shown only when the project has two or more target " +
+          "lanes. Says the split changes the source all lanes share, without saying how " +
+          "many lanes there are, marks each lane's translation to be done again, and " +
+          "keeps each lane's existing voice on the new narration lines.",
       },
       "editor.splitQuotes.recordingsNote": {
         description:
@@ -8514,6 +8574,11 @@ export const editor = defineNamespace({
         description:
           "Toast when the server refused a split for lack of permission; the line has been " +
           "restored as it was.",
+      },
+      "editor.splitQuotes.castFailedToast": {
+        description:
+          "Error toast after a split whose lines did change, when the voice copy did not " +
+          "save. The new narration lines still need the voice the original line had.",
       },
       // AQU-1422 — hide / show one cell.
       "editor.row.hideCell": {

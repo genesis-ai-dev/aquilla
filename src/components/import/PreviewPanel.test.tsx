@@ -312,4 +312,37 @@ describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
     render(<PreviewPanel results={clean} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.queryByTestId("usfm-structure-findings")).toBeNull()
   })
+
+  it("sends the sidebar re-import choice instead of confirming a normal import", () => {
+    const choices = [
+      ["Update this file", "update"],
+      ["Make updated copy", "updated-copy"],
+      ["Make a blank copy", "blank"],
+    ] as const
+    for (const [label, choice] of choices) {
+      const onConfirm = vi.fn()
+      const view = render(<PreviewPanel results={RESULTS} onConfirm={onConfirm} onCancel={vi.fn()} reimport />)
+      expect(screen.queryByRole("button", { name: /confirm import/i })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      expect(onConfirm).toHaveBeenCalledWith({ reimportChoice: choice })
+      view.unmount()
+    }
+  })
+
+  it("shows how many cells a re-import would add and update", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 2, updated: 1, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [{ text: "After", previous: "Before", number: 2 }] }}
+      />,
+    )
+    expect(screen.getByRole("region", { name: "Analysis" })).toBeTruthy()
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 cells added")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("4 A new line")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("1 cell updated")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 Before → After")
+  })
 })

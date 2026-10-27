@@ -29,7 +29,8 @@ import { exportSrt } from "./exporters/srt"
  *  require the raw sidecar bytes from the server, plain-text-dump which
  *  is advanced/single-file only, metadata-csv which has its own
  *  project-scope path in ExportDialog that flattens all cells into one sheet,
- *  and html, whose project zip of pages plus index is AQU-2183). */
+ *  and html, whose project zip is pages plus an index rather than one entry
+ *  per file — `exporters/html-project.ts` builds that one, AQU-2183). */
 export type TextExportFormat = Exclude<ExportFormat, "usfm" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "vtt" | "docx" | "pptx" | "idml" | "json" | "plain-text-dump" | "metadata-csv" | "sdbh-xml" | "html">
 
 export interface ProjectFileCellsInput {

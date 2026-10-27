@@ -290,7 +290,7 @@ import {
 import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
+import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
@@ -309,7 +309,8 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
-import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow } from "@/lib/cells/quote-split-plan"
+import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
@@ -369,7 +370,7 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -407,9 +408,9 @@ import { useFileFilterFocus } from "@/hooks/useFileFilterFocus"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import {
   computeRightRailSurfaces,
-  hasRightRailEdge,
-  hasRightRailPanel,
+  type RightRailPanel,
 } from "@/lib/editor/right-rail-panels"
+import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
@@ -1280,6 +1281,12 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  const [reimportTarget, setReimportTarget] = useState<{
+    fileId: string
+    name: string
+    importProfile?: string
+    corpusMarker?: string
+  } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -5060,6 +5067,7 @@ export function ProjectWorkspace() {
         cellsWithoutRow: 0,
         cameraDisagreements: 0,
         filledByPosition: 0,
+        matchedByWords: 0,
         distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
       })
     },
@@ -9536,15 +9544,31 @@ export function ProjectWorkspace() {
         cellStore.rollbackOptimisticQuoteSplit(undo)
         toast.add({ type: "error", title: t(refusal) })
       } else {
-        // Narration after narration keeps the row's voice; quotations are left
-        // for casting — which is the whole point of splitting.
-        // AQU-2125: through the lookup, so a row cast by its character (no entry
-        // of its own) still hands its voice to its narration pieces.
-        const voices = voiceAssignmentsForSplits(
-          plan.splits,
-          (id) => assignedCastVoiceId(tts.settings, cellStore.getCellView(id) ?? id),
-        )
-        if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
+        // Narration after narration keeps the row's voice, on every lane that
+        // had cast it — the line's own entry, or its character's when it has
+        // none. The server writes the lanes this client cannot see; the local
+        // copy updates the ones it can, after the server accepts. Quotations
+        // are left for casting.
+        const castSplits = plan.splits
+          .filter((split) => split.sameKindAsFirst.length > 0)
+          .map((split) => {
+            const view = cellStore.getCellView(split.cellId)
+            const castName = view ? castNameOf(view) : null
+            return {
+              cellId: split.cellId,
+              sameKindAsFirst: split.sameKindAsFirst,
+              ...(castName ? { castName } : {}),
+            }
+          })
+        const jwt = jwtRef.current
+        let castFailed = false
+        if (castSplits.length > 0) {
+          const castStatus = jwt
+            ? await postSplitCastCopies(jwt, projectId, fileId, castSplits)
+            : "unsaved"
+          if (castStatus === "saved") tts.applySplitCastCopies(castSplits)
+          else castFailed = true
+        }
         const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
         const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
         toast.add({
@@ -9554,9 +9578,12 @@ export function ProjectWorkspace() {
             : t("editor.splitQuotes.doneManyToast", { rows: plan.splits.length, count: lines }),
           ...(kept > 0 ? { description: t("editor.splitQuotes.keptToast", { count: kept }) } : {}),
         })
-        // A translation kept whole now sits on changed source text: ask again
-        // which rows are stale, so its review marker shows without a reload.
-        if (kept > 0) staleSourceRefetchRef.current()
+        if (castFailed) {
+          toast.add({ type: "error", title: t("editor.splitQuotes.castFailedToast") })
+        }
+        // Every translation of a split row is pinned to the old source, so ask
+        // again which rows are stale and show the review marker without a reload.
+        if (plan.splits.some((split) => split.lanes.length > 0)) staleSourceRefetchRef.current()
       }
       revalidateCells()
     },
@@ -11432,6 +11459,7 @@ export function ProjectWorkspace() {
     // dialog itself greys out New source text below Project lead.
     const level = project.syncRole?.level ?? null
     if (!canPerform("file.create", level) && !canPerform("target.cell.commit", level)) return
+    setReimportTarget(null)
     setImportOpen(true)
   }, [project])
 
@@ -14720,6 +14748,16 @@ export function ProjectWorkspace() {
    * came from. See `useRepetitionValidation`.
    */
   const repetitionRoleLevel = project?.syncRole?.level ?? null
+  /**
+   * AQU-2176: an entry in the "these rows were signed off" dialog is a jump to
+   * that row. Repetitions are always in the OPEN file, so the editor usually
+   * has the row already; the park is for the case where it does not — the
+   * media lens, where no text editor is mounted to scroll.
+   */
+  const goToRepetitionRow = useCallback((cellId: string) => {
+    if (editorRef.current?.scrollToCellId(cellId, { flash: true })) return
+    pendingCellScrollRef.current = { cellId, flash: true, fileId: activeFileId, source: "link" }
+  }, [activeFileId])
   const {
     handleCellValidated,
     prepareBulkRepetitions,
@@ -14746,6 +14784,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     rememberPendingTargetCommit,
     afterWrite: flushRepetitionWrites,
+    goToCell: goToRepetitionRow,
   })
   // The "Batch validate text…" action is built above this point; it reaches
   // the bulk planner through this ref.
@@ -15816,6 +15855,23 @@ export function ProjectWorkspace() {
     verseResourcesOpen,
     whosWhoOpen,
   })
+  // The rail's buttons act like tabs: opening one panel closes the other two,
+  // and `null` closes whichever is open.
+  const selectRightRailPanel = (panel: RightRailPanel | null) => {
+    const next = {
+      bibles: panel === "bibles",
+      resources: panel === "resources",
+      people: panel === "people",
+    }
+    setParallelBiblesOpen(next.bibles)
+    setVerseResourcesOpen(next.resources)
+    setWhosWhoOpen(next.people)
+    if (projectId) {
+      writeParallelBiblesOpen(projectId, next.bibles)
+      writeVerseResourcesOpen(projectId, next.resources)
+      writeWhosWhoOpen(projectId, next.people)
+    }
+  }
 
   return (
     <EditorScrollProvider>
@@ -15921,6 +15977,17 @@ export function ProjectWorkspace() {
                     setAssignModalOpen(true)
                   } : undefined}
                   onSegmentation={setSegmentationFileId}
+                  onReimport={canImportSource ? (fileId) => {
+                    const file = project.files.find((entry) => entry.id === fileId)
+                    if (!file) return
+                    setReimportTarget({
+                      fileId,
+                      name: file.name,
+                      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
+                      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
+                    })
+                    setImportOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -17010,6 +17077,7 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            activeLaneId={activeLaneId}
             audioOnlyLane={activeLaneDelivers === "audio"}
             laneDelivers={activeLaneDelivers}
             lanes={availableLanes}
@@ -17206,7 +17274,7 @@ export function ProjectWorkspace() {
         )}
         aside={(() => {
           const hasRightAside =
-            hasRightRailPanel(rightRail) ||
+            rightRail.openPanel !== null ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -17221,7 +17289,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {rightRail.biblesPanel && (
+              {rightRail.openPanel === "bibles" && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
@@ -17235,7 +17303,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {rightRail.resourcesPanel && (
+              {rightRail.openPanel === "resources" && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
@@ -17251,7 +17319,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-1689: Who's Who, the passage's cast — open panel only;
                   its "People" edge tab rides in asideEdge. */}
-              {rightRail.peoplePanel && (
+              {rightRail.openPanel === "people" && (
                 <WhosWhoSidebar
                   project={project!}
                   fileId={activeFile?.id ?? null}
@@ -17435,57 +17503,18 @@ export function ProjectWorkspace() {
             </>
           )
         })()}
-        asideEdge={(() => {
-          // AQU-461: collapsed tabs stack here — bibles, verse resources and
-          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
-          // AQU-1316: both flags come from `rightRail`, the same value `aside`
-          // reads, so a tab can never sit beside its own open panel.
-          if (!hasRightRailEdge(rightRail)) return null
-          return (
-            <>
-              {rightRail.biblesEdge && (
-                <ParallelBiblesSidebar
-                  key={`${activeFile!.id}-edge`}
-                  trackedRef={trackedCellRef}
-                  open={false}
-                  onToggle={() => {
-                    const next = !parallelBiblesOpen
-                    setParallelBiblesOpen(next)
-                    if (projectId) writeParallelBiblesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.resourcesEdge && (
-                <VerseResourcesSidebar
-                  key={`${activeFile!.id}-resources-edge`}
-                  projectId={project!.id}
-                  trackedRef={trackedCellRef}
-                  getJwt={() => jwtRef.current}
-                  open={false}
-                  onToggle={() => {
-                    const next = !verseResourcesOpen
-                    setVerseResourcesOpen(next)
-                    if (projectId) writeVerseResourcesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.peopleEdge && (
-                <WhosWhoSidebar
-                  project={project!}
-                  fileId={activeFile?.id ?? null}
-                  trackedRef={trackedCellRef}
-                  sourceLanguage={activeSourceLanguage}
-                  open={false}
-                  onToggle={() => {
-                    const next = !whosWhoOpen
-                    setWhosWhoOpen(next)
-                    if (projectId) writeWhosWhoOpen(projectId, next)
-                  }}
-                />
-              )}
-            </>
-          )
-        })()}
+        asideEdge={
+          // The Bibles / Helps / People buttons share one rail and switch
+          // between their panels, so at most one is open (AQU-1316's
+          // panel-or-tab rule now lives in `rightRail.openPanel`).
+          rightRail.tabs.length > 0 ? (
+            <ScriptureSideRail
+              tabs={rightRail.tabs}
+              openPanel={rightRail.openPanel}
+              onSelect={selectRightRailPanel}
+            />
+          ) : null
+        }
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on
@@ -17732,6 +17761,7 @@ export function ProjectWorkspace() {
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
         <ImportDialog open={importOpen} onOpenChange={(next) => {
             setImportOpen(next)
+            if (!next) setReimportTarget(null)
             // AQU-693: when an import launched from the setup checklist closes
             // (success, cancel, or error), return the user to the still-live
             // checklist — step 1 now reflects its true state — instead of
@@ -17754,6 +17784,7 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
+          reimportTarget={reimportTarget}
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
@@ -18041,9 +18072,11 @@ export function ProjectWorkspace() {
                 quality: t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality]),
               })
             : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
-          notice={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
-            ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
-            : undefined}
+          notice={pendingActionConfirm.id === "split-quotes" && project && openTargetLaneCount(project) >= 2
+            ? t("nav.workspaceActions.splitQuotes.multiLaneWarning")
+            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
+              ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
+              : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
@@ -18173,6 +18206,7 @@ export function ProjectWorkspace() {
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}
         hasRecordings={pendingQuoteSplit?.hasRecordings ?? false}
+        targetLaneCount={project ? openTargetLaneCount(project) : 1}
         onCancel={() => setPendingQuoteSplit(null)}
         onConfirm={() => {
           if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])

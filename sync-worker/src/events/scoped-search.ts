@@ -14,6 +14,7 @@
 //   - The `AND cells.project_id = ?` predicate is hardcoded here, not supplied
 //     by the caller, so it cannot be accidentally omitted.
 
+import { targetVisibilityClause } from "./lane-read-wall"
 import type { SyncTokenClaims } from "../auth"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
 import { notHiddenSql, visibleSourceSql } from "./hidden-cells-scope"
@@ -288,6 +289,40 @@ function clampLimit(n: number | undefined): number {
 // ---------------------------------------------------------------------------
 
 /**
+ * Lane read wall for search. `null` = every lane. A walled caller sees source
+ * rows plus target rows in their granted lanes — for the matched row AND for
+ * the opposite-side `paired` value, which would otherwise leak another lane's
+ * translation through a source-side hit.
+ */
+export type SearchLaneWall = readonly string[] | null
+
+function wallFor(alias: string, laneIds: SearchLaneWall): { sql: string; binds: unknown[] } {
+  return (
+    targetVisibilityClause({ laneIds, sideExpr: `${alias}.side`, laneIdExpr: `${alias}.lane_id` }) ?? {
+      sql: "",
+      binds: [],
+    }
+  )
+}
+
+/** Pairing subselect: the opposite-side value, restricted to visible lanes. */
+function pairedSubselect(laneIds: SearchLaneWall): { sql: string; binds: unknown[] } {
+  const w = wallFor("paired", laneIds)
+  return {
+    sql: [
+      "  (SELECT paired.value FROM cells AS paired",
+      "    WHERE paired.project_id = cells.project_id",
+      "      AND paired.file_id = cells.file_id",
+      "      AND paired.cell_id = cells.cell_id",
+      "      AND paired.side = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
+      `    ${w.sql}`,
+      "    LIMIT 1) AS paired_value,",
+    ].join(" "),
+    binds: w.binds,
+  }
+}
+
+/**
  * Run an FTS5 ranked search over `cells_fts` for the given project. The
  * project scope (`AND cells.project_id = ?`) is hardcoded — the caller
  * cannot bypass it.
@@ -299,12 +334,14 @@ export async function queryScopedSearch(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   q: string,
-  opts: { side?: "source" | "target"; limit?: number },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
 ): Promise<SearchResultOut[]> {
   const ftsQuery = sanitizeFtsQuery(q)
   if (!ftsQuery) return []
 
   const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
 
   // FTS5 JOIN: cells_fts.rowid lines up with cells.rowid via the virtual
   // table's external-content binding (migration 0003).
@@ -327,12 +364,7 @@ export async function queryScopedSearch(
     // One opposite-side value, never a row multiplier. A target hit has a
     // single source lane; a source hit may have several target lanes, and
     // LIMIT 1 keeps the hit list one row per matched cell (AQU-1011).
-    "  (SELECT paired.value FROM cells AS paired",
-    "    WHERE paired.project_id = cells.project_id",
-    "      AND paired.file_id = cells.file_id",
-    "      AND paired.cell_id = cells.cell_id",
-    "      AND paired.side = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
-    "    LIMIT 1) AS paired_value,",
+    paired.sql,
     LOCATION_SELECT,
     "FROM cells",
     LOCATION_FROM,
@@ -350,11 +382,15 @@ export async function queryScopedSearch(
     // script the person was actually looking for.
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [q, q, q, verifiedProjectId]
+  const binds: unknown[] = [q, q, ...paired.binds, q, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
   }
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")
@@ -380,6 +416,7 @@ export async function queryScopedSearch(
 // ---------------------------------------------------------------------------
 
 export interface PatternSearchOptions extends TextFindOptions {
+  laneIds: SearchLaneWall
   side?: "source" | "target"
   limit?: number
 }
@@ -410,6 +447,8 @@ export async function queryScopedPattern(
   if (findPatternError(q, find)) throw new Error("invalid regexp")
 
   const limit = clampLimit(opts.limit)
+  const paired = pairedSubselect(opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
   const pgRegexp = find.useRegexp === true && postgresCanRunRegexp(q)
   const fetchLimit = find.useRegexp === true && !pgRegexp
     ? PATTERN_SCAN_CAP
@@ -423,12 +462,7 @@ export async function queryScopedPattern(
     "  cells.file_id AS file_id,",
     "  cells.side AS side,",
     "  cells.value AS value,",
-    "  (SELECT paired.value FROM cells AS paired",
-    "    WHERE paired.project_id = cells.project_id",
-    "      AND paired.file_id = cells.file_id",
-    "      AND paired.cell_id = cells.cell_id",
-    "      AND paired.side = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
-    "    LIMIT 1) AS paired_value,",
+    paired.sql,
     LOCATION_SELECT,
     "FROM cells",
     LOCATION_FROM,
@@ -436,7 +470,7 @@ export async function queryScopedPattern(
     `AND ${notHiddenSql("cells")}`,
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [verifiedProjectId]
+  const binds: unknown[] = [...paired.binds, verifiedProjectId]
 
   if (!find.useRegexp) {
     parts.push(
@@ -454,6 +488,10 @@ export async function queryScopedPattern(
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
   }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
+  }
   parts.push("ORDER BY cells.cell_id, cells.side")
   parts.push("LIMIT ?")
   binds.push(fetchLimit)
@@ -467,7 +505,7 @@ export async function queryScopedPattern(
     const message = err instanceof Error ? err.message : String(err)
     if (!pgRegexp || !/invalid regular expression/i.test(message)) throw err
     const scanParts = parts.filter((part) => !part.startsWith("AND cells.value ~"))
-    const scanBinds = binds.filter((_, i) => i !== 1)
+    const scanBinds = binds.filter((_, i) => i !== paired.binds.length + 1)
     scanBinds[scanBinds.length - 1] = PATTERN_SCAN_CAP
     result = await db.prepare(scanParts.join(" ")).bind(...scanBinds).all<PatternRowRaw>()
   }
@@ -517,12 +555,14 @@ export async function queryScopedExact(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   exactText: string,
-  opts: { side?: "source" | "target"; limit?: number },
+  opts: { side?: "source" | "target"; limit?: number; laneIds: SearchLaneWall },
 ): Promise<ParallelPassageRow[]> {
   const ftsQuery = sanitizeFtsExactPhrase(exactText)
   if (!ftsQuery) return []
 
   const limit = clampLimit(opts.limit)
+  const pairedWall = wallFor("paired", opts.laneIds)
+  const cellWall = wallFor("cells", opts.laneIds)
 
   // The LEFT JOIN on `paired` fetches the opposite-side cell at the same
   // logical address. CASE flips source↔target so one query covers both
@@ -546,6 +586,7 @@ export async function queryScopedExact(
     "  AND paired.file_id    = cells.file_id",
     "  AND paired.cell_id    = cells.cell_id",
     "  AND paired.side       = CASE cells.side WHEN 'source' THEN 'target' ELSE 'source' END",
+    pairedWall.sql,
     "WHERE cells.value_tsv @@ phraseto_tsquery('simple', ?)",
     "AND cells.project_id = ?",
     // AQU-1424: as in queryScoped — parked cells leave the results, and with
@@ -556,11 +597,15 @@ export async function queryScopedExact(
     // cue sheet corrupts a timecode nobody was editing.
     `AND ${inCountedFileSql("cells")}`,
   ]
-  const binds: unknown[] = [exactText, exactText, exactText, verifiedProjectId]
+  const binds: unknown[] = [exactText, exactText, ...pairedWall.binds, exactText, verifiedProjectId]
 
   if (opts.side !== undefined) {
     parts.push("AND cells.side = ?")
     binds.push(opts.side)
+  }
+  if (cellWall.sql) {
+    parts.push(cellWall.sql)
+    binds.push(...cellWall.binds)
   }
   parts.push("ORDER BY rank DESC")
   parts.push("LIMIT ?")

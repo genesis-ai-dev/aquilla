@@ -12,6 +12,12 @@
 //                                   picker where the run's rows disagree, one
 //                                   summary toast with one Undo.
 //
+// AQU-2176 changed how a single row's "Validate all" REPORTS itself: not the
+// ten-second "Validated N repeated rows" toast, which never said which rows,
+// but a dialog that names each one and waits to be dismissed
+// (`RepetitionValidatedDialog`). The fill-only toast stays a toast — it fires
+// after nearly every typed translation with repeats. Bulk is AQU-2177.
+//
 // The planning is pure (`lib/workflow/repetition-validation.ts`); this hook
 // asks, writes, and undoes.
 
@@ -23,6 +29,11 @@ import {
   type RepetitionAnswer,
   type RepetitionPrompt,
 } from "@/components/repetition/RepetitionDialogs"
+import {
+  RepetitionValidatedDialog,
+  type RepetitionValidatedReport,
+} from "@/components/repetition/RepetitionValidatedDialog"
+import { describeValidatedRepetitionRows } from "@/components/repetition/validated-rows"
 import type { CellData } from "@/hooks/useCells"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -68,6 +79,12 @@ export interface UseRepetitionValidationArgs {
   rememberPendingTargetCommit: (cellId: string, eventId: string, parentId: string | null) => void
   /** Flush the outbox and revalidate after a write. */
   afterWrite: () => Promise<void>
+  /**
+   * AQU-2176: scroll the editor to a row and flash it — what clicking an entry
+   * in the "these rows were signed off" dialog does. Every row it can name is
+   * a repetition in the OPEN file, so this never has to change file.
+   */
+  goToCell: (cellId: string) => void
 }
 
 /** A validation vote, cast on (and taken back from) one edit. */
@@ -171,6 +188,7 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
   const {
     enabled, projectId, username, lane, canCommit, canValidateRepeats, getCells, isWritable,
     resolveParentId, applyOptimisticTargetEdit, rememberPendingTargetCommit, afterWrite,
+    goToCell,
   } = args
   const t = useT()
 
@@ -205,6 +223,18 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
   const forgetChoice = useCallback(() => {
     if (projectId) setRepetitionChoice(username, projectId, null)
   }, [projectId, username])
+
+  // ── Reporting (AQU-2176) ──────────────────────────────────────────────────
+  // The open "these rows were signed off" dialog. `id` re-keys it so a second
+  // validation while the first is still up starts from fresh controls rather
+  // than inheriting the old one's spent Undo. Its Undo is wrapped in `once`
+  // here, not in the dialog, because the ban is on running the revert twice —
+  // not on clicking a button twice.
+  const [report, setReport] = useState<
+    (RepetitionValidatedReport & { id: number; undo: () => Promise<void> }) | null
+  >(null)
+  const reportSeqRef = useRef(0)
+  const closeReport = useCallback(() => setReport(null), [])
 
   // ── Writing ───────────────────────────────────────────────────────────────
 
@@ -343,6 +373,28 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
     })
   }, [t])
 
+  /**
+   * AQU-2176: the report a "Validate all" ends in — the rows it signed off,
+   * named, in a dialog that waits. `fills` carries the text each filled row
+   * just received (the typed edit's earlier fills included), so the list shows
+   * the translation the row now holds without depending on when the
+   * optimistic patch lands in the store.
+   */
+  const showValidated = useCallback((
+    cellIds: readonly string[],
+    fills: readonly WrittenFill[],
+    { viaMemory, undo }: { viaMemory: boolean; undo: () => Promise<void> },
+  ) => {
+    const filledWith = new Map(fills.map((f) => [f.commit.cellId, f.commit.value]))
+    reportSeqRef.current += 1
+    setReport({
+      id: reportSeqRef.current,
+      rows: describeValidatedRepetitionRows(cellIds, getCells(), filledWith),
+      viaMemory,
+      undo: once(undo),
+    })
+  }, [getCells])
+
   // ── One row ───────────────────────────────────────────────────────────────
 
   const planFor = useCallback((seedId: string) => planRepetitionValidation({
@@ -371,14 +423,11 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
     await afterWrite()
     if (votes.length === 0) return
     const allFills = [...earlierFills, ...fills]
-    addUndoToast(
-      {
-        title: t("editor.repetition.validated", { count: votes.length }),
-        secondaryAction: viaMemory ? askEachTimeAction() : null,
-      },
-      () => undoGesture(votes, allFills),
-    )
-  }, [planFor, writeFills, votesFor, castVotes, afterWrite, undoGesture, askEachTimeAction, addUndoToast, t])
+    showValidated(votes.map((v) => v.cellId), allFills, {
+      viaMemory,
+      undo: () => undoGesture(votes, allFills),
+    })
+  }, [planFor, writeFills, votesFor, castVotes, afterWrite, undoGesture, showValidated, t])
 
   /** AQU-1391's fill, with the toast this gesture calls for. */
   const fillOnly = useCallback(async (
@@ -594,6 +643,20 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
     handleCellValidated,
     prepareBulkRepetitions,
     bulkToastExtras,
-    dialogs: <RepetitionDialogs prompt={prompt} onAnswer={onAnswer} />,
+    dialogs: (
+      <>
+        <RepetitionDialogs prompt={prompt} onAnswer={onAnswer} />
+        {report && (
+          <RepetitionValidatedDialog
+            key={report.id}
+            report={report}
+            onGoToRow={(cellId) => { closeReport(); goToCell(cellId) }}
+            onUndo={() => { closeReport(); void report.undo() }}
+            onAskEachTime={forgetChoice}
+            onClose={closeReport}
+          />
+        )}
+      </>
+    ),
   }
 }

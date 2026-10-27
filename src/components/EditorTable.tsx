@@ -38,8 +38,11 @@ import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { laneOptionLabels, toLaneComboboxOptions } from "@/components/lane-options"
 import { laneLanguageCodeForTag } from "@/lib/lanes/lane-language"
+import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
+import { SourceEditWarningDialog } from "@/components/SourceEditWarningDialog"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import type { CellData } from "@/hooks/useCells"
+import { cellNeedsSourceReview } from "@/lib/cells/source-review"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
@@ -316,7 +319,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
-import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
+import { deleteFootnote, insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
@@ -833,6 +836,8 @@ interface EditorTableProps {
    * the emit helpers, so N=1 is byte-identical.
    */
   activeLane?: string
+  /** Lane row id for the open lane. Flags a re-imported source change on that lane. */
+  activeLaneId?: string | null
   /**
    * Media redesign slice 2: the open language delivers Audio and no text. Its
    * validation column shows only the audio check — on every line, recorded or
@@ -1218,7 +1223,7 @@ interface EditorTableProps {
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
-  project, cellStore, fileType, username, activeLane = "", audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
+  project, cellStore, fileType, username, activeLane = "", activeLaneId = null, audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
   isCompletionConfigured, isCompletionAvailable,
   completing, examples, errors, previews, exampleOriginFor, onClearCellErrors,
@@ -2888,18 +2893,22 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           // row itself, and the mark moves from row to row with playback. The
           // Pause icon alone sat in a closed ⋯ menu, so the move was invisible.
           const cuePlayingRow = playingCueCellId != null && playingCueCellId === cell.id
+          const needsSourceReview = cellNeedsSourceReview(cell.metadata, activeLaneId)
           return (
       <div
         data-cell-id={cell.id}
         data-index={index}
         data-cue-playing={cuePlayingRow ? "true" : undefined}
+        data-source-review={needsSourceReview ? "true" : undefined}
         aria-current={cuePlayingRow ? "time" : undefined}
         data-untimed={untimedInTimeLens ? "true" : undefined}
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
+        title={needsSourceReview ? t("editor.reimport.sourceReview") : undefined}
         className={cn(
           "relative",
+          needsSourceReview && "ring-2 ring-inset ring-yellow-400",
           // The hover group for the structural strip below. Named so it cannot
           // be caught by the row's other `group` users.
           sourceLineEditing && "group/rowstrip",
@@ -5800,6 +5809,19 @@ function EditorRow({
   // hold of the just-committed text (kept out of the target-only optimistic-shadow
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
+  const [sourceWarningOpen, setSourceWarningOpen] = useState(false)
+  const openTargets = openTargetLaneCount(project)
+  const toggleSourceEdit = () => {
+    if (sourceEditing) {
+      setSourceEditing(false)
+      return
+    }
+    if (openTargets >= 2) {
+      setSourceWarningOpen(true)
+      return
+    }
+    setSourceEditing(true)
+  }
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
   // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
   // stored value is the import FILENAME — an import record, not prose — so for
@@ -6865,7 +6887,15 @@ function EditorRow({
     ) ?? false
 
     if (!inserted) {
-      const next = `${visibleTranslated ?? ""}${marker}`
+      // AQU-2206: no live editor to insert into (the dialog's text field took
+      // focus, which deactivated the cell and unmounted it), so commit the
+      // stored text ourselves — spliced at the anchor the dialog previewed, not
+      // appended to the end of the cell.
+      const next = insertFootnoteMarkerAtAnchor(
+        visibleTranslated ?? "",
+        marker,
+        pendingFootnoteAnchorRef.current,
+      )
       handleEditorCommit({ value: next, valueHtml: next })
     }
 
@@ -8444,10 +8474,19 @@ function EditorRow({
                 it costs no layout, rather than taking a slot in the context
                 line below — that line is reserved for column alignment and is
                 usually empty, so it has no room to spare. */}
+            {sourceWarningOpen && (
+              <SourceEditWarningDialog
+                onCancel={() => setSourceWarningOpen(false)}
+                onConfirm={() => {
+                  setSourceWarningOpen(false)
+                  setSourceEditing(true)
+                }}
+              />
+            )}
             <CellSourceMenu
               cellId={cell.id}
               sourceEditing={sourceEditing}
-              onToggleSourceEdit={canEditSourceForCell ? () => setSourceEditing((v) => !v) : undefined}
+              onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
               // The DCS pin used to show a padlock where the pencil sat, so the
               // affordance never silently vanished (AQU-615). It is the same
               // idea, now as the entry's own reason.

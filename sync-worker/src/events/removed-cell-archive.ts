@@ -69,6 +69,10 @@ export const CELLS_RESTORE_COLUMNS = [
   'upstream_cell_id',
   'lane_id',
   'hidden_at',
+  // AQU-2185: a restored cell keeps the section a person named on it. Dropped
+  // from this list, "Remove row" then "Undo" would silently un-name a division
+  // for the whole team — which is the loss the guard test below exists to stop.
+  'milestone_label',
 ] as const
 
 /** Tables restored row-for-row from the archive (no generated columns). */

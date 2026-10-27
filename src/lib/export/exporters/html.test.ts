@@ -187,6 +187,38 @@ describe("buildHtmlPage", () => {
     expect(html).not.toContain("<nav")
     expect(html).toContain('<p class="text">First cue</p>')
   })
+
+  // AQU-2210: a migrated Codex book types every verse `text` (target rows carry
+  // no type at all), so its verses are recognisable only by their reference.
+  it("numbers a Codex book's verses, which are typed text and known only by their ref", () => {
+    const cells = [
+      makeCell({ id: "a", group: "RUT 1:1", type: "text", translated: "In the days" }),
+      makeCell({ id: "b", group: "RUT 1:2", type: "text", translated: "The man's name" }),
+      makeCell({ id: "c", group: "RUT 2:1", type: "text", translated: "Naomi had a relative" }),
+    ]
+    const html = buildHtmlPage(cells, { fileName: "RUT", now: NOW })
+
+    expect(html).toContain('<h1 class="book-title">Ruth</h1>')
+    expect(html).toContain('<p class="verse"><sup class="verse-number">1</sup> In the days</p>')
+    expect(html).toContain('<sup class="verse-number">2</sup> The man')
+    expect(html).toContain('<sup class="verse-number">1</sup> Naomi had a relative')
+    expect(html).not.toContain('<p class="text">')
+  })
+
+  it("a cue ref, a bare chapter ref or a structural cell is never numbered as a verse", () => {
+    const cells = [
+      makeCell({ id: "cue", group: "TheChosen-106 1:cue-834.376-835.294", type: "text", translated: "A cue" }),
+      makeCell({ id: "chap", group: "GEN 5", type: "text", translated: "Before the first verse" }),
+      makeCell({ id: "para", group: "GEN 5:1", type: "paratext", translated: "An intro line" }),
+      makeCell({ id: "v", group: "GEN 5:1", type: "verse", translated: "This is the book" }),
+    ]
+    const html = buildHtmlPage(cells, { now: NOW })
+
+    expect(html).toContain('<p class="text">A cue</p>')
+    expect(html).toContain('<p class="text">Before the first verse</p>')
+    expect(html).toContain('<p class="text">An intro line</p>')
+    expect(html.match(/class="verse-number"/g)).toHaveLength(1)
+  })
 })
 
 describe("exportHtml", () => {

@@ -41,6 +41,7 @@
 // text does, shows those characters and runs nothing.
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
 import { blockClass, cellLines, escapeHtml, lineInlineHtml, createNoteCollector, type CellLine, type NoteCollector } from "@/lib/export/exporters/html-blocks"
 import { parseScriptureReference } from "@/lib/scripture-reference"
@@ -183,8 +184,16 @@ function entryFor(cell: HtmlExportCell): Entry | null {
   const text = cellLines(raw)
   const lines = splitPlainLines(text.lines)
   if (lines.length === 0) return null
-  const kind: Entry["kind"] = cell.type === "verse" ? "verse" : cell.type === "heading" ? "heading" : "text"
-  const verse = kind === "verse" ? (parseScriptureReference(cell.group)?.verse ?? null) : null
+  // A USFM import types its verses `verse`; a migrated Codex book types every
+  // verse `text` and says it is one only through its reference (AQU-2210). So
+  // content whose reference reads as a verse is a verse, whatever its type —
+  // a cue ref, a bare chapter ref or a structural cell never qualifies.
+  const ref = parseScriptureReference(cell.group)
+  const kind: Entry["kind"] =
+    cell.type === "heading" ? "heading"
+    : cell.type === "verse" || (ref?.verse && !isStructuralCell(cell.type)) ? "verse"
+    : "text"
+  const verse = kind === "verse" ? (ref?.verse ?? null) : null
   return {
     kind,
     verse,

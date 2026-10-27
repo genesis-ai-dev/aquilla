@@ -201,7 +201,8 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
   {
     // AQU-2182: a USFM book as one readable, self-contained web page (chapter
     // index, numbered verses, section headings) — what Codex's "Export as
-    // HTML" gave reviewers and printers. Only shown for files imported as USFM.
+    // HTML" gave reviewers and printers. Only shown for a Scripture book
+    // (HTML_PAGE_FILE_TYPES).
     id: "html",
     labelKey: "importExport.format.html.label",
     ext: ".html",
@@ -325,6 +326,18 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   csv: "csv",
   tsv: "tsv",
 }
+
+/**
+ * The file types that are one Scripture book, which is what the Web page
+ * export lays out (title, chapter index, numbered verses).
+ *
+ * AQU-2210: `"codex"` is what every book of a migrated Codex project is stored
+ * as (AQU-997) — the very teams AQU-2182 brought Codex's "Export as HTML" back
+ * for — and it never matched the original `=== "usfm"` test. The page is built
+ * from the cell array, not the USFM side-car, so a Codex book needs nothing a
+ * USFM book has that it lacks.
+ */
+const HTML_PAGE_FILE_TYPES: ReadonlySet<string> = new Set(["usfm", "codex"])
 
 interface ExportDialogProps {
   open: boolean
@@ -1019,7 +1032,7 @@ export function ExportDialog({
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
       if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
-      if (f.id === "html") return activeFileType === "usfm" // AQU-2182: the readable page is a USFM book's
+      if (f.id === "html") return activeFileType != null && HTML_PAGE_FILE_TYPES.has(activeFileType) // AQU-2182/AQU-2210
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true

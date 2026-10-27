@@ -62,7 +62,7 @@ command = "bash ../scripts/verify-deploy-branch.sh release"
 enabled = true
 
 [env.production.triggers]
-crons = []
+crons = ["* * * * *"]
 
 [env.production.vars]
 ENVIRONMENT_LABEL = "production"

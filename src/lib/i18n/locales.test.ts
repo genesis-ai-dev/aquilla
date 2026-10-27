@@ -217,6 +217,38 @@ describe("Spanish", () => {
   })
 })
 
+describe("Amharic (AQU-2203)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const am = LOCALES.find((l) => l.code === "am")
+    expect(am?.dir).toBe("ltr")
+    expect(am?.englishName).toBe("Amharic")
+    // One catalog, worded as standard written Amharic (Addis Ababa). The menu
+    // stays the language endonym. Geʽez is LTR.
+    expect(am?.nativeName).toBe("አማርኛ")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.am ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Amharic to regional browser codes", () => {
+    expect(normalizeLocale("am-ET")).toBe("am")
+    expect(detectInitialLocale(null, "am-ET")).toBe("am")
+  })
+  it("supplies Amharic's one/other forms for a count-governed key", () => {
+    // Amharic `one` covers 0 and 1. Identical wording on both forms is
+    // grammatical when the noun does not change.
+    const rules = new Intl.PluralRules("am")
+    expect(rules.select(0)).toBe("one")
+    expect(rules.select(1)).toBe("one")
+    const counted = CATALOGS.am?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
 describe("Portuguese", () => {
   it("is registered as a selectable LTR locale with its endonym", () => {
     const pt = LOCALES.find((l) => l.code === "pt")

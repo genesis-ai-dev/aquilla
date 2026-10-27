@@ -2,6 +2,24 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## `am` (standard written Amharic) — AQU-2203, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> (9,565 leaves) and merged with `scripts/i18n-catalog.ts import`. **No Amharic speaker
+> has read it.** Variety: Addis Ababa written standard, Geʽez script, LTR, formal
+> imperative; not Tigrinya. `am-ET` folds onto `am`. Plural category `one` covers 0 and 1.
+>
+> Glossary: cell → ሕዋስ, lane → መስመር, changeset → የለውጥ ስብስብ, termbase → የቃላት መዝገብ,
+> back-translation → የተገላቢጦሽ ትርጉም, source → ምንጭ, target → ዒላማ, draft → ረቂቅ.
+>
+> Import report: 8,917/9,039 keys. Identical-to-English leaves were dropped on purpose
+> (formats, product names, and placeholder-only templates). Placeholder check before
+> import found no added placeholders. `common.datePlaceholder` stays `June 01, 2025`.
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026`. Track labels and
+> Speaker / Camera / Character Label / Cast stay English. Role names inside
+> `org.membersPage.orgTable.projectAccessNote` stay Contributor, Project lead, Viewer,
+> Maintainer, and Owner.
+
 > ## `es` (Latin American Spanish) — 2026-10-20
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,682 leaves) and merged

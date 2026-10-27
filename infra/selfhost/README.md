@@ -20,8 +20,11 @@ The server reports the real device name as `gpu` (for example
 names in `db/shared/omni-asr-cost.ts`. If you add a new card, add its name
 there too: an unknown name bills at the highest rate.
 
-Memory: CTC 1B and the 300M aligner use about 3 GiB together. ZS 7B in bf16
-peaked at 16.4 GiB with 10 examples on Modal, so it fits on a 24 GB card.
+Memory, measured on 2× RTX 4090 (2026-10-27): CTC 1B and the 300M aligner
+peak at 2.6 GiB on GPU 0. ZS 7B peaks at 15.1 GiB on GPU 1 (16.9 GB used on
+the card), so it fits on a 24 GB card. A warm CTC call on a 5 s clip takes
+0.09 s end to end; ZS takes 1.3–2.2 s. First start: CTC loads in about 4 min
+and ZS in about 11 min, most of it the weight download.
 
 ## Install (Ubuntu / Pop!_OS with an NVIDIA driver)
 
@@ -38,6 +41,14 @@ sudo systemctl daemon-reload && sudo systemctl enable --now "omni-asr@$USER"
 journalctl -u "omni-asr@$USER" -f     # wait for "[zs] loaded"
 curl -s localhost:8088/healthz       # {"ok":true,"models":["ctc","zs"]}
 ```
+
+Without sudo, run it as a systemd **user** service instead (needs
+`loginctl enable-linger $USER` once, so it runs while nobody is logged in).
+Put the venv and code in `~/aquilla-omni`, the secret in
+`~/.config/aquilla-omni.env` (mode 600), and a copy of the unit at
+`~/.config/systemd/user/omni-asr.service` with `%h/...` paths in place of
+`/opt/...` and `/etc/...` and no `User=` line. Then
+`systemctl --user enable --now omni-asr`.
 
 The first start downloads about 32 GB of weights into
 `/var/cache/aquilla-omni/fairseq2`. Later starts load from disk.

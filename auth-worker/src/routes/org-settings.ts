@@ -169,21 +169,11 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssi
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 
 /**
- * Whether bulk text validation may sign off untouched AI drafts. Like
- * countStructuralCells it is not a permission policy — it widens what one
- * validate gesture covers, not who may validate — so it rides the general
- * MAINTAINER gate and needs only validation. Unset means NO. The rule it
- * relaxes is client-side (the bulk paths' eligibility filter); the external
- * Agent API keeps its own no-bypass check in sync-worker (AQU-1184).
- */
-const ALLOW_BULK_AI_DRAFTS_KEY = "allowBulkValidateAiDrafts"
-
-/**
  * Omnilingual ASR: `{ zeroShotEnabled?: boolean }`. Lets an org turn off the
  * zero-shot transcription model (each user still opts in; absent = allowed —
  * auth-worker lib/omni-asr.ts zeroShotEnabledForOrg). It decides which model
  * members may pick, not who may see or do anything, so like
- * allowBulkValidateAiDrafts it rides the general MAINTAINER gate (owners and
+ * countStructuralCells it rides the general MAINTAINER gate (owners and
  * maintainers) and needs only validation.
  */
 const TRANSCRIPTION_KEY = "transcription"
@@ -666,11 +656,6 @@ orgSettings.on(
         || (zeroShot !== undefined && typeof zeroShot !== "boolean")) {
         return c.json({ error: `${TRANSCRIPTION_KEY}.zeroShotEnabled must be a boolean` }, 400)
       }
-    }
-    // Same reason: a string "true" would read as off and nobody would know why.
-    const rawAllowBulkAiDrafts = body.settings[ALLOW_BULK_AI_DRAFTS_KEY]
-    if (rawAllowBulkAiDrafts !== undefined && typeof rawAllowBulkAiDrafts !== "boolean") {
-      return c.json({ error: `${ALLOW_BULK_AI_DRAFTS_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

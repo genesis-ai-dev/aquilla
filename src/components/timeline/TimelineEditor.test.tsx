@@ -5235,6 +5235,40 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
   })
+
+  // AQU-2213: an audio Bible book has no times of its own, so it can only
+  // follow its recordings — and the blade was held back in that mode, which
+  // left a whole class of file unable to split a take at all. Splitting is
+  // offered on every file, whichever clock it follows.
+  it("offers the blade, and splits, on a file following its recordings (AQU-2213)", () => {
+    const BOOK_TAKE = "audio-b1-1700000000-take.webm"
+    const onCutTargets = vi.fn()
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="bk" coreMediaUrl={null} editable onRetimeSubtitle={() => {}} timingMode="audioFirst"
+        onCutTargets={onCutTargets}
+        cells={[
+          cell({
+            id: "b1", medium: "text", original: "In the days when the judges ruled.",
+            selectedAudioId: BOOK_TAKE,
+            attachments: { [BOOK_TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 } },
+          }),
+          cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+        ]}
+      />,
+    )
+    expect(screen.getByTestId("tl-blade-toggle")).not.toBeDisabled()
+    // The verse's take fills its slot from 0 s; the playhead lands 2 s in.
+    fireEvent.click(screen.getByTestId("tl-ruler"), { clientX: 2 * 38 })
+    fireEvent.click(screen.getByTestId("tl-target-b1"))
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).toHaveBeenCalledTimes(1)
+    const [cuts] = onCutTargets.mock.calls[0]
+    expect(cuts).toHaveLength(1)
+    expect(cuts[0]).toMatchObject({ cellId: "b1", audioId: BOOK_TAKE })
+    expect(cuts[0].atMs).toBeGreaterThan(1900)
+    expect(cuts[0].atMs).toBeLessThan(2100)
+  })
 })
 
 // AQU-1684 (Sam's decision): each person hides lanes on their own screen, per

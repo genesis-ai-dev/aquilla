@@ -988,7 +988,6 @@ export const editor = defineNamespace({
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
     "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
-    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available while the file follows its recordings yet",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
@@ -6441,12 +6440,6 @@ export const editor = defineNamespace({
           "and S splits the selected take at the playhead without the blade — keep both as the " +
           "Latin letters B and S.",
         maxLength: 60,
-      },
-      "editor.timeline.bladeFreeTiming": {
-        description:
-          "Tooltip of the disabled blade button while the file's timing is 'Follows " +
-          "recordings' (lines laid out back to back). Use the same wording for that choice " +
-          "as the Timing dropdown does.",
       },
       "editor.timeline.takeMenuSplit": {
         description:

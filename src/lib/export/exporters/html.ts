@@ -20,6 +20,11 @@
 // break. Paragraph flow, poetry indents, footnotes and character styles are
 // AQU-2184. Every piece of cell text is HTML-escaped — a translation that
 // reads `<script>` shows those characters and runs nothing.
+//
+// AQU-2183 bundles one of these pages per book into a project zip beside an
+// index. The page shell, the footer and the "what would this render" count are
+// exported for that orchestrator (`html-project.ts`) so the zip's pages and its
+// index.html are the same document, built once here rather than twice.
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { chapterLabelForCell } from "@/lib/export/chapter-scope"
@@ -39,6 +44,18 @@ export interface HtmlExportOptions {
   lang?: string | null
   /** The export moment, for the footer. Injectable so tests are byte-stable. */
   now?: Date
+  /** A link back to the project index at the top of the page. Set only by the
+   *  whole-project zip (AQU-2183) — a single-book export is one file with no
+   *  index to return to, so it must not grow a dead link. */
+  backLink?: HtmlBackLink | null
+}
+
+/** The "back to the index" link a zip's book page carries (AQU-2183). */
+export interface HtmlBackLink {
+  /** Relative href inside the zip — `index.html`. */
+  href: string
+  /** The visible text. */
+  label: string
 }
 
 /** The only fields the page reads; `CellData` satisfies it. */
@@ -109,8 +126,8 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
   else chapters[chapters.length - 1].lines.push(...pending)
 
   const title = pageTitle(cells, opts.fileName)
-  const lang = isLanguageTag(opts.lang) ? ` lang="${escapeHtml(opts.lang)}"` : ""
   const parts: string[] = []
+  if (opts.backLink) parts.push(backLinkHtml(opts.backLink))
   parts.push(`<h1 class="book-title">${escapeHtml(title)}</h1>`)
   if (chapters.length === 0) {
     // No chapters at all: the lines ARE the document, not front matter.
@@ -132,15 +149,49 @@ export function buildHtmlPage(cells: readonly HtmlExportCell[], opts: HtmlExport
       )
     }
   }
-  parts.push(footerHtml(opts, untranslated))
+  parts.push(htmlExportFooter(opts, untranslated))
 
+  return htmlPageShell({ title, lang: opts.lang, body: parts.join("\n") })
+}
+
+/**
+ * The document around a page's body: doctype, head, the inline CSS, `<main>`.
+ * Shared so a zip's index.html is the same page as the books beside it
+ * (AQU-2183) — same stylesheet, same shell — rather than a second lookalike.
+ */
+export function htmlPageShell(opts: { title: string; lang?: string | null; body: string }): string {
+  const lang = isLanguageTag(opts.lang) ? ` lang="${escapeHtml(opts.lang)}"` : ""
   return (
     `<!DOCTYPE html>\n<html${lang}>\n<head>\n<meta charset="utf-8">\n` +
     `<meta name="viewport" content="width=device-width, initial-scale=1">\n` +
-    `<title>${escapeHtml(title)}</title>\n<style>\n${CSS}\n</style>\n</head>\n<body>\n<main>\n` +
-    parts.join("\n") +
+    `<title>${escapeHtml(opts.title)}</title>\n<style>\n${CSS}\n</style>\n</head>\n<body>\n<main>\n` +
+    opts.body +
     `\n</main>\n</body>\n</html>\n`
   )
+}
+
+function backLinkHtml(link: HtmlBackLink): string {
+  return `<nav class="back-link"><a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a></nav>`
+}
+
+/** What `buildHtmlPage` would put on the page, without building it.
+ *
+ *  The zip needs both numbers before it writes anything: a book with no lines
+ *  gets no page at all (it is listed in the index as having nothing exported),
+ *  and the index's footer counts the untranslated lines across every book. Both
+ *  read through `lineFor`, so "this cell renders nothing" stays one rule — a
+ *  blank translation with a blank source is absent from the page AND from the
+ *  count, and cannot disagree between them. */
+export function summarizeHtmlCells(cells: readonly HtmlExportCell[]): { lines: number; untranslated: number } {
+  let lines = 0
+  let untranslated = 0
+  for (const cell of cells) {
+    const line = lineFor(cell)
+    if (!line) continue
+    lines++
+    if (line.untranslated) untranslated++
+  }
+  return { lines, untranslated }
 }
 
 function lineFor(cell: HtmlExportCell): Line | null {
@@ -199,7 +250,7 @@ function pageTitle(cells: readonly HtmlExportCell[], fileName: string | null | u
   return stem || "Export"
 }
 
-function footerHtml(opts: HtmlExportOptions, untranslated: number): string {
+export function htmlExportFooter(opts: HtmlExportOptions, untranslated: number): string {
   const date = (opts.now ?? new Date()).toISOString().slice(0, 10)
   const mode = opts.validatedOnly
     ? "Target translations, validated only — lines not yet validated are left out."
@@ -238,6 +289,16 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .front-matter{margin:0 0 1.5rem;text-align:center;color:var(--muted)}
 .front-matter h2{margin:.25rem 0;font-size:1.125rem;font-weight:600;color:var(--heading)}
 .front-matter p{margin:.25rem 0}
+.back-link{margin:0 0 1.5rem;font-family:system-ui,sans-serif;font-size:.875rem}
+.back-link a{color:var(--link);text-decoration:none}
+.back-link a:hover{text-decoration:underline}
+.book-list{margin:0;padding:0;list-style:none}
+.book-list li{padding:.5rem 0;border-bottom:1px solid var(--rule);font-family:system-ui,sans-serif}
+.book-list a{color:var(--link);text-decoration:none}
+.book-list a:hover{text-decoration:underline}
+.book-list .empty{color:var(--muted)}
+.book-list .empty-note{margin-left:.5rem;font-size:.8125rem}
+.book-list .file-note{color:var(--muted);font-size:.8125rem}
 .chapter-index{margin:0 0 2.5rem;padding:1rem;border:1px solid var(--rule);border-radius:.5rem;background:var(--panel)}
 .chapter-index h2{margin:0 0 .5rem;font-family:system-ui,sans-serif;font-size:.8125rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .chapter-index ol{display:flex;flex-wrap:wrap;gap:.375rem;margin:0;padding:0;list-style:none}
@@ -251,4 +312,4 @@ main{max-width:42rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
 .untranslated{color:var(--muted);font-style:italic}
 .metadata{margin-top:3rem;padding-top:1rem;border-top:1px solid var(--rule);font-family:system-ui,sans-serif;font-size:.8125rem;color:var(--muted)}
 .metadata p{margin:.25rem 0}
-@media print{@page{margin:2cm}main{max-width:none;padding:0}.chapter-index,.metadata{display:none}.chapter-title,.section-heading{break-after:avoid}.verse{break-inside:avoid}}`
+@media print{@page{margin:2cm}main{max-width:none;padding:0}.chapter-index,.metadata,.back-link{display:none}.chapter-title,.section-heading{break-after:avoid}.verse{break-inside:avoid}}`

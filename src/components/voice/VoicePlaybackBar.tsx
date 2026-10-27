@@ -67,11 +67,13 @@ interface Props {
    *  language reads as unvoiced here, which is what it is. */
   lane?: string
   /**
-   * Media redesign, layout: "toolbar" lays the same transport out inline at
-   * the left of the media view's 40 px top bar — previous, play, next, the
-   * time, speed and volume. That view has no footer; this is its play bar.
+   * Media redesign, layout: "strip" is the same transport as a thin 28 px
+   * strip along the bottom of the media view (Sam, Oct 27: the controls back
+   * at the bottom, in a very narrow footprint) — the time at the left,
+   * previous · play · next in the centre, speed and volume at the right, and
+   * nothing else: the status lives in the top bar's ring.
    */
-  variant?: "bar" | "toolbar"
+  variant?: "bar" | "strip"
 }
 
 function fmtTime(s: number): string {
@@ -257,57 +259,64 @@ export function VoicePlaybackBar({
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
-  if (variant === "toolbar") {
+  if (variant === "strip") {
     // The same controls as the bar below, wired identically (the comments on
-    // each are there), laid out inline: previous, play, next, the time, speed
-    // and volume. No scrubber — the timeline under the bar is the scrubber.
+    // each are there). A container query drops the time first when the view
+    // is narrow; the buttons stay. No scrubber: the timeline is the scrubber.
     return (
-      <div className="flex shrink-0 items-center gap-1.5" data-testid="top-transport">
-        <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
-          <SkipBack className="h-4 w-4" />
-        </IconButton>
-        <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAllSpace")}>
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="default"
-            onClick={onPlayPause}
-            disabled={!canPlay}
-            aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
-            data-testid="transport-play"
-            className="bg-foreground text-background hover:bg-foreground/90"
-          >
-            {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
-          </Button>
-        </AppTooltip>
-        <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
-          <SkipForward className="h-4 w-4" />
-        </IconButton>
-        <span className="shrink-0 text-[11.5px] tabular-nums text-muted-foreground" data-testid="transport-time">
+      <div
+        data-testid="media-play-strip"
+        className="@container relative flex h-7 shrink-0 items-center border-t border-border bg-muted/30 px-2"
+      >
+        <span className="hidden shrink-0 text-[11.5px] tabular-nums text-muted-foreground @md:inline" data-testid="transport-time">
           {fmtTime(currentTime)} / {fmtTime(duration)}
         </span>
-        <SpeedButton
-          compact
-          rate={rate}
-          onChange={(r) => {
-            setQueueRate(r)
-            if (drivesVideo) videoController?.setRate(r)
-          }}
-        />
-        <VolumeControl
-          compact
-          volume={volume}
-          muted={drivesVideo ? !sourceAudible : volume === 0}
-          what={drivesVideo ? "the film's own sound" : "playback"}
-          onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
-          onToggleMute={() => {
-            if (drivesVideo && fileId) {
-              toggleAudibility(fileId, "source")
-              return
-            }
-            setQueueVolume(volume === 0 ? 1 : 0)
-          }}
-        />
+        <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1" data-testid="top-transport">
+          <IconButton small title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
+            <SkipBack className="h-3.5 w-3.5" />
+          </IconButton>
+          <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAllSpace")}>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="default"
+              onClick={onPlayPause}
+              disabled={!canPlay}
+              aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
+              data-testid="transport-play"
+              className="bg-foreground text-background hover:bg-foreground/90"
+            >
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+            </Button>
+          </AppTooltip>
+          <IconButton small title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
+            <SkipForward className="h-3.5 w-3.5" />
+          </IconButton>
+        </div>
+        <div className="ms-auto flex shrink-0 items-center gap-1">
+          <SpeedButton
+            compact
+            rate={rate}
+            onChange={(r) => {
+              setQueueRate(r)
+              if (drivesVideo) videoController?.setRate(r)
+            }}
+          />
+          <VolumeControl
+            compact
+            volume={volume}
+            muted={drivesVideo ? !sourceAudible : volume === 0}
+            what={drivesVideo ? "the film's own sound" : "playback"}
+            onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
+            onToggleMute={() => {
+              if (drivesVideo && fileId) {
+                toggleAudibility(fileId, "source")
+                return
+              }
+              setQueueVolume(volume === 0 ? 1 : 0)
+            }}
+          />
+        </div>
       </div>
     )
   }
@@ -422,18 +431,20 @@ export function VoicePlaybackBar({
 }
 
 function IconButton({
-  children, title, onClick, disabled,
+  children, title, onClick, disabled, small = false,
 }: {
   children: ReactNode
   title: string
   onClick: () => void
   disabled?: boolean
+  /** The media view's 28 px strip. */
+  small?: boolean
 }) {
   return (
     <AppTooltip content={title}>
       <Button
         type="button"
-        size="icon-sm"
+        size={small ? "icon-xs" : "icon-sm"}
         variant="ghost"
         aria-label={title}
         onClick={onClick}
@@ -488,12 +499,12 @@ function SpeedButton({ rate, onChange, compact = false }: { rate: number; onChan
         <PopoverTrigger
           render={
             compact ? (
-              // The top bar's outlined "1× ⌄", 26 px tall.
+              // The strip's outlined "1× ⌄", 22 px tall.
               <Button
                 type="button"
                 variant="outline"
                 size="xs"
-                className="h-[26px] gap-0.5 px-1.5 tabular-nums"
+                className="h-[22px] gap-0.5 px-1.5 tabular-nums"
                 data-testid="transport-speed"
               >
                 {rate}×
@@ -511,7 +522,7 @@ function SpeedButton({ rate, onChange, compact = false }: { rate: number; onChan
           }
         />
       </AppTooltip>
-      <PopoverContent align="center" side={compact ? "bottom" : "top"} className="w-24 p-1">
+      <PopoverContent align="center" side="top" className="w-24 p-1">
         {SPEEDS.map((s) => (
           <button
             key={s}
@@ -558,7 +569,7 @@ function VolumeControl({
   what: string
   onChange: (v: number) => void
   onToggleMute: () => void
-  /** The media view's top bar: the speaker alone, opening these two controls. */
+  /** The media view's strip: the speaker alone, opening these two controls. */
   compact?: boolean
 }) {
   const t = useT()
@@ -607,7 +618,7 @@ function VolumeControl({
           }
         />
       </AppTooltip>
-      <PopoverContent align="start" side="bottom" className="w-auto p-1.5">
+      <PopoverContent align="end" side="top" className="w-auto p-1.5">
         {controls}
       </PopoverContent>
     </Popover>

@@ -1,13 +1,12 @@
 // The media view's one 40 px bar. (Media redesign, layout — canvas board 23,
-// "Lean chrome: your mix", from board 20: "Play, previous and next line, the
-// time, speed 0.5–2× and volume join the toolbar and the timeline's tools in
-// one 40 px bar. No play bar at the bottom.")
+// "Lean chrome: your mix".)
 //
-// Left to right: the transport, a separator, the film, the timeline's tools
-// (portaled into the "media-top-tools" slot by TimelineEditor, which owns
-// them), and at the right the status ring, History, the mode toggle and the
-// Panels button. It replaces three rows: the toolbar row above the view, the
-// timeline's own title row, and the play bar at the bottom of the window.
+// Left to right: the film, the timeline's tools (portaled into the
+// "media-top-tools" slot by TimelineEditor, which owns them), and at the right
+// the status ring, History, the mode toggle and the Panels button. It replaces
+// two rows: the toolbar row above the view and the timeline's own title row.
+// The transport left this bar on Oct 27 (Sam): it is the thin strip along the
+// bottom of the view now (VoicePlaybackBar's "strip").
 
 import type { ReactNode } from "react"
 import { ChevronDown, EyeOff, Film, Link2 } from "lucide-react"
@@ -123,12 +122,9 @@ export function MediaFilmButton({ url, fallbackName, hiddenByTiming, showing, on
 }
 
 export function MediaTopBar({
-  transport,
   film,
   trailing,
 }: {
-  /** The play bar's toolbar variant. */
-  transport: ReactNode
   film: ReactNode
   /** Status ring, History, the mode toggle, Panels — right-aligned. */
   trailing: ReactNode
@@ -138,8 +134,6 @@ export function MediaTopBar({
       data-testid="media-top-bar"
       className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border bg-muted/30 px-2"
     >
-      {transport}
-      <div aria-hidden className="h-[22px] w-px shrink-0 bg-border" />
       {film}
       {/* The timeline's tools land here (TimelineEditor portals them). */}
       <div ref={uiSlotRef("media-top-tools")} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden" />

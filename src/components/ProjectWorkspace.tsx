@@ -16670,28 +16670,11 @@ export function ProjectWorkspace() {
             )}
             {timelineStacked && activeFile && project ? (
               // Media redesign, layout (canvas board 23): ONE 40 px bar for the
-              // whole view — the transport, the film, the timeline's tools, the
-              // status ring, History, the mode toggle and Panels. It replaces
-              // the toolbar row that was here, the timeline's title row, and
-              // the play bar at the bottom of the window.
+              // whole view — the film, the timeline's tools, the status ring,
+              // History, the mode toggle and Panels. It replaces the toolbar
+              // row that was here and the timeline's title row. The transport
+              // is the thin strip along the bottom of the view (below).
               <MediaTopBar
-                transport={
-                  <VoicePlaybackBar
-                    variant="toolbar"
-                    cells={legacyCells}
-                    projectId={project.id}
-                    session={frontierSession ?? null}
-                    settings={tts.laneSettings}
-                    onActiveCell={handleBarActiveCell}
-                    startCellId={timelineSelectedCellId}
-                    coreMediaUrl={activeFile.coreMediaUrl ?? null}
-                    videoPaneOnScreen={showVideoPane}
-                    timelineDurationSec={timelineDurationSec}
-                    virtualSoundingCellId={virtualSoundingCellId}
-                    freeTiming={timingMode === "audioFirst"}
-                    lane={activeLane}
-                  />
-                }
                 film={
                   <MediaFilmButton
                     url={activeFile.coreMediaUrl ?? null}
@@ -17284,6 +17267,26 @@ export function ProjectWorkspace() {
               </ForecastProvider>
               </EditorActionsProvider>
             </div>
+            {timelineStacked && activeFile && project ? (
+              // Sam, Oct 27: the playback controls back at the bottom, in a
+              // very narrow footprint — a 28 px strip across the view, outside
+              // the panels, so no fold or full screen ever hides it.
+              <VoicePlaybackBar
+                variant="strip"
+                cells={legacyCells}
+                projectId={project.id}
+                session={frontierSession ?? null}
+                settings={tts.laneSettings}
+                onActiveCell={handleBarActiveCell}
+                startCellId={timelineSelectedCellId}
+                coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                videoPaneOnScreen={showVideoPane}
+                timelineDurationSec={timelineDurationSec}
+                virtualSoundingCellId={virtualSoundingCellId}
+                freeTiming={timingMode === "audioFirst"}
+                lane={activeLane}
+              />
+            ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
             {footnoteViewMode === "tray" && (
               <FootnotesTray

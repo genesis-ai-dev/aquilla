@@ -325,3 +325,19 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
     expect(screen.queryByTestId("tl-take-menu-change-voice")).toBeNull()
   })
 })
+
+// Sam's decision: a hidden line is not recorded onto from its take.
+describe("TargetAudioLane — a hidden line's take menu", () => {
+  it("offers no re-record", async () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: { ...oneTake(), hidden: true } as CellData, kind: "take", audioId: TAKE }]}
+        takeMenu={menuActions()}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    expect(await screen.findByTestId("tl-take-menu-rename")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-take-menu-rerecord")).toBeNull()
+  })
+})

@@ -131,6 +131,11 @@ export interface CodexCellAttachment {
   recordedBy?: string | null;
   /** AQU-1767: the take this one was cut from (its piece group's root). */
   pieceOf?: string | null;
+  /** Two-step transcription (0186): what ASR heard, kept through corrections. */
+  asrText?: string | null;
+  asrModel?: string | null;
+  /** Provenance of an AI cleanup while the transcript is still the AI's. */
+  transcriptAi?: { model: string; at: number; changes: number } | null;
   /** AQU-646 round 8: the take's permanent display name ("Take 3", or a
    *  rename). Carried so the Recording tab can head an added-track take with
    *  its own name rather than its track id. */

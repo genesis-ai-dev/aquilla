@@ -11,7 +11,7 @@
 // multi-book USFM staging discipline; the MCP tool adapters; and a drift guard
 // keeping the (literal) discovery-map format list equal to the parser core's.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*).
 vi.mock('partyserver', () => ({
@@ -246,6 +246,8 @@ interface StageBody {
 interface ErrorBody {
   error: { code: string; message: string; details?: Record<string, unknown> }
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 let bucket: ReturnType<typeof makeStubBucket>
@@ -866,6 +868,74 @@ async function callMcpTool(
 }
 
 describe('MCP preview_import / prepare_import', () => {
+  it('bounds and validates uploads while retaining write and project restrictions', async () => {
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', CRED_LEAD])
+    const base = { projectId: PROJECT, name: 'fixture.txt', kind: 'source', contentType: 'text/plain', encoding: 'base64', data: 'TQ==' }
+    for (const change of [
+      { data: 'data:text/plain;base64,TQ==' }, { data: 'TR==' },
+      { data: 'TQ===' }, { data: '!!!!' },
+      { data: 'a'.repeat(4 * Math.ceil(524288 / 3) + 4) },
+      { encoding: 'utf8', data: '語'.repeat(200000) },
+      { kind: 'audio', contentType: 'text/html' },
+    ]) {
+      const response = await callMcpTool(leadToken, 'upload_artifact', { ...base, ...change })
+      expect(response.isError).toBe(true)
+      expect(response.payload.error).toMatchObject({ code: 'validation_failed' })
+    }
+    const outside = await callMcpTool(leadToken, 'upload_artifact', { ...base, projectId: 'outside' })
+    expect(outside.isError).toBe(true)
+    expect(outside.payload.error).toMatchObject({ code: 'scope_denied' })
+    await tdb.pg.query("UPDATE api_credentials SET access = 'read' WHERE id = $1", [CRED_LEAD])
+    const readonly = await callMcpTool(leadToken, 'upload_artifact', base)
+    expect(readonly.isError).toBe(true)
+    expect(readonly.payload.error).toMatchObject({ code: 'scope_denied' })
+    expect(await tdb.rows('artifacts')).toHaveLength(0)
+  })
+
+  it('uploads through resource-bound OAuth and commits text, binary and multi-book originals', async () => {
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', CRED_LEAD])
+    const docx = buildDocxParityFixture()
+    const multi = `${USFM_GENESIS}\n\\id EXO Test Bible\n\\c 1\n\\v 1 Now these are the names.`
+    const cases = [
+      { name: 'Genesis.usfm', contentType: 'text/plain', encoding: 'utf8', data: USFM_GENESIS, bytes: new TextEncoder().encode(USFM_GENESIS), count: 1 },
+      { name: DOCX_PARITY_FILE_NAME, contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', encoding: 'base64', data: Buffer.from(docx).toString('base64'), bytes: docx, count: 1 },
+      { name: 'books.usfm', contentType: 'text/plain', encoding: 'utf8', data: multi, bytes: new TextEncoder().encode(multi), count: 2 },
+    ]
+    let files = 0
+    for (const fixture of cases) {
+      const uploaded = await callMcpTool(leadToken, 'upload_artifact', {
+        projectId: PROJECT, name: fixture.name, kind: 'source',
+        contentType: fixture.contentType, encoding: fixture.encoding, data: fixture.data,
+      })
+      expect(uploaded.isError).toBe(false)
+      const artifactId = uploaded.payload.artifactId
+      const preview = await callMcpTool(leadToken, 'preview_import', { projectId: PROJECT, artifactId })
+      expect(preview.isError).toBe(false)
+      expect(preview.payload.results).toHaveLength(fixture.count)
+      for (let resultIndex = 0; resultIndex < fixture.count; resultIndex++) {
+        const staged = await callMcpTool(leadToken, 'prepare_import', { projectId: PROJECT, artifactId, resultIndex })
+        expect(staged.isError).toBe(false)
+        const committed = await callMcpTool(leadToken, 'confirm_changeset', {
+          projectId: PROJECT, changesetId: staged.payload.changesetId, digest: staged.payload.digest,
+        })
+        expect(committed.isError).toBe(false)
+        files++
+      }
+      expect(await tdb.rows('files')).toHaveLength(files)
+      const artifacts = await tdb.rows<{ id: string; r2_key: string }>('artifacts')
+      const artifact = artifacts.find(row => row.id === artifactId)!
+      const original = await bucket.get(artifact.r2_key)
+      expect(new Uint8Array(await original!.arrayBuffer())).toEqual(fixture.bytes)
+      const sources = await tdb.rows<{ r2_key: string }>('file_source_blobs')
+      expect(sources.filter(row => row.r2_key === artifact.r2_key)).toHaveLength(fixture.count)
+    }
+    const replay = await handleExternalArtifactsRequest(new Request(`https://w/api/v1/external/projects/${PROJECT}/artifacts`, {
+      method: 'POST', headers: { Authorization: `Bearer ${leadToken}`, 'x-artifact-name': 'replay.txt' }, body: 'no',
+    }), env)
+    expect(replay?.status).toBe(403)
+    expect(await replay!.json()).toMatchObject({ error: { code: 'permission_denied' } })
+  })
+
   it('preview_import returns the parse without staging; prepare_import stages and points at confirm_changeset', async () => {
     const artifactId = await upload(env, leadToken, 'Genesis.usfm', USFM_GENESIS)
 

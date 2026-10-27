@@ -42,6 +42,9 @@ const biblica: PartnerIntegration = {
   // AQU-1285: a study-Bible volume carries its verses as cells next to the
   // notes; the editor marks those rows through this hook.
   isScriptureCell: isBiblicaScriptureCell,
+  // Repair has to cut cells the way a normal Biblica import does. The editions
+  // stay behind this thunk so the four readers are not in the initial bundle.
+  idmlImportEditions: () => import("./editions").then((mod) => Object.values(mod.BIBLICA_EDITIONS)),
 }
 
 export default biblica

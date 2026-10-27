@@ -53,10 +53,13 @@ INWORLD_API_KEY=""
 # SEED_VC_URL="http://127.0.0.1:8791/convert"
 # SEED_VC_TOKEN=""
 
+# Library voices (Change voice into a pre-built character voice): the
+# infra/modal/voice_forge.py deploy's /convert URL and its shared secret.
+# VOICE_FORGE_URL="https://<workspace>--voice-forge-web.modal.run/convert"
+# VOICE_FORGE_TOKEN=""
+
 # TTS usage/cost guardrails. Leave unset to disable enforcement.
 # TTS_BUDGET_ENFORCE="false"
-# TTS_COST_CENTS_PER_CALL=""
-# TTS_COST_PER_AUDIO_SEC_CENTS=""
 # TTS_USER_DAILY_SECONDS_LIMIT=""
 
 # PostHog server-side analytics (optional — omit to disable).

@@ -9,6 +9,9 @@ import { MondayOAuthCallback } from "./MondayOAuthCallback"
 import { completeMondayOAuth } from "@/lib/monday/api"
 import { announceMondayOAuthOutcome } from "@/lib/monday/oauth-return"
 
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: { jwt: "tok" }, loading: false }),
+}))
 vi.mock("@/lib/monday/api", () => ({ completeMondayOAuth: vi.fn() }))
 vi.mock("@/lib/monday/oauth-return", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/monday/oauth-return")>()),

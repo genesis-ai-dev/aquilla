@@ -53,12 +53,11 @@ import { loadObservations, loadScoreInputs, passagePhraseKeys } from "../lib/sma
 import { buildLlmMessages, LLM_MAX_TOKENS, parseLlmEdits } from "../../../src/lib/smart-edits/llm"
 import { tokenize } from "../../../src/lib/smart-edits/tokens"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
-import { admitChatUsage, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
-import { weeklyUsageActive } from "../lib/billing/usage-mode"
+import { openRouterEstimate, providerRejectedPreModel, releaseChatUsage, settleChatUsage } from "../lib/billing/chat-usage"
+import { admitPaidCall } from "../lib/billing/paid-call"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
@@ -192,10 +191,10 @@ aiSmartEdits.post("/suggest", authMiddleware, zValidator("json", suggestSchema),
     .map((s) => ({ s, tier: "memory" as const }))
   const toVerify = selected.filter((s) => s.tier === "verify").slice(0, MAX_VERIFY_PER_REQUEST)
 
-  let jev: "skipped" | "model" | "no_key" | "timeout" | "upstream" = "skipped"
+  let jev: "skipped" | "model" | "no_key" | "timeout" | "upstream" | "refused" = "skipped"
   if (input.verify && toVerify.length > 0) {
     const request = buildVerifyRequest(JEV_MODEL, passage, toVerify)
-    const called = await callJev(c.env, request, JEV_TIMEOUT_MS)
+    const called = await callJev(c.env, request, JEV_TIMEOUT_MS, { projectId: input.projectId, userId: user.id })
     if (!called.ok) {
       jev = called.reason
     } else {
@@ -314,11 +313,6 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   const aiGuard = await runAiGuard(model, user.id, db, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 
-  // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy split
-  // below, so a metered request is bounded by it too.
-  const spendCeiling = await checkAiSpendCeiling(db, c.env, "smart-edits")
-  if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(input.projectId).first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0
 
@@ -340,17 +334,17 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     rankEvidence(observations, input.source),
   )
 
-  // Billing: identical to routes/import-classify.ts — weekly ledger when it is
-  // active, legacy credit + word guards otherwise.
-  let usage: ChatUsage | undefined
-  const weekly = weeklyUsageActive(c.env, c.req.url)
-  if (weekly === "unavailable") return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-  if (weekly === "on") {
-    if (orgId <= 0) return c.json({ error: "forbidden" }, 403)
-    const suppliedId = c.req.header("Idempotency-Key")
-    if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) return c.json({ error: "invalid_request_id" }, 400)
-    usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
-  }
+  // Billing: identical to routes/import-classify.ts — the one entitlement
+  // check (AQU-2062: plan, key, platform ceiling, and a reservation when the
+  // meter is on), legacy credit + word guards when the meter is off.
+  const gate = await admitPaidCall(c.env, {
+    orgId, userId: user.id, projectId: input.projectId, rail: "llm",
+    requestUrl: c.req.url, idempotencyKey: c.req.header("Idempotency-Key"),
+    estimate: openRouterEstimate(c.env, { model,
+      promptChars: messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: LLM_MAX_TOKENS }),
+  })
+  if (!gate.ok) return c.json(gate.body, gate.status)
+  const { usage, apiKey } = gate
   if (!usage) {
     const credits = await creditGuard(db, c.env, orgId, "llm")
     if (!credits.ok) {
@@ -359,21 +353,6 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
     const words = await wordGuard(db, orgId)
     if (!words.ok) return c.json(wordCapBody(words.reason), 429)
   }
-  if (usage) {
-    try {
-      const created = await admitChatUsage(c.env, {
-        ...usage, userId: user.id, projectId: input.projectId, model,
-        promptChars: messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: LLM_MAX_TOKENS,
-      })
-      if (!created) return c.json({ error: "usage_request_already_admitted" }, 409)
-    } catch (error) {
-      if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
-        return c.json({ error: "weekly_ai_allowance_exhausted", message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 429)
-      }
-      if (error instanceof Error && error.message === "Model price unavailable") return c.json({ error: "model_price_unavailable" }, 503)
-      return c.json({ error: "usage_accounting_unavailable" }, 503)
-    }
-  }
 
   // AQU-1849: total deadline (`stream: false`), linked to the client's signal
   // so a user who navigates away still cancels upstream.
@@ -381,7 +360,7 @@ aiSmartEdits.post("/llm", authMiddleware, zValidator("json", llmSchema), async (
   try {
     const upstream = await fetch(resolveOpenRouterUrl(c.env), {
       method: "POST",
-      headers: { Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model,
         messages,

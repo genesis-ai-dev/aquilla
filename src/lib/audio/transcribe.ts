@@ -19,6 +19,7 @@ import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import type { WordTiming } from "@/lib/codex-editor/types"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
 import type {
@@ -386,6 +387,10 @@ export interface TranscribeCellArgs {
   /** The batch's "Use automatic": this run skips zero-shot whatever the
    *  account chose. */
   forceAutoModel?: boolean
+  /** Two-step transcription: what ASR heard (before learned corrections), the
+   *  transcript that was stored, and the model that ran. Called once, after
+   *  the attach is queued. */
+  onTranscribed?: (result: { heard: string; transcript: string; model: string; timings: WordTiming[] }) => void
   /**
    * AQU-1767 (Sam, 2026-10-14): the live pieces of a SPLIT take, in clip order.
    * The take is transcribed whole — every piece, together, and nothing a
@@ -588,6 +593,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
     // karaoke decoration maps them against the TipTap doc, so align against
     // cell.translated (transcript offsets as fallback when counts mismatch).
     const transcriptText = result.text.trim()
+    let storedTimings: WordTiming[] = []
     if (result.chunks.length > 0 || (isSourceSegment && transcriptText)) {
       // AQU-646: for SOURCE segments align timings against the transcript itself
       // (there's no target text yet — the transcript IS the text karaoke maps);
@@ -596,6 +602,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       const timings = takeHeadSec > 0
         ? aligned.map((w) => ({ ...w, t0: w.t0 + takeHeadSec, t1: w.t1 + takeHeadSec }))
         : aligned
+      storedTimings = timings
       // Signed-out transcribes (cache hit) have no session — the emit queues
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
@@ -643,6 +650,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // guard is attachment PROVENANCE, not cell medium, so a dub take
         // recorded onto a media section can never clobber its transcript.
         ...(isSourceSegment && transcriptText ? { transcription: transcriptText } : {}),
+        // Two-step transcription: what ASR heard, BEFORE learned corrections,
+        // so the pair kept for cleanup shows the real ASR error.
+        ...(raw.text.trim() ? { asr: { text: raw.text.trim(), model: raw.model ?? "unknown" } } : {}),
         // AQU-1978: a take's timings are written in the take's own lane, so
         // the re-attach can never deselect another language's take.
         ...(!isSourceSegment && targetLang ? { targetLang } : {}),
@@ -651,6 +661,8 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
       })
     }
+
+    args.onTranscribed?.({ heard: raw.text.trim(), transcript: transcriptText, model: raw.model ?? "unknown", timings: storedTimings })
 
     setTranscribeStatus(audioId, {
       kind: "done",

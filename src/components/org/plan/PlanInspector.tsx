@@ -28,7 +28,7 @@ import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
   planAudioTotal, planOpenKind, planPct, planUnitExpectsAudio,
-  planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
+  planUnitShowsWayToWork, planUnitLabel, planUnitNote,
   planUnitExpectsText, planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
 } from "@/lib/plan/plan-status"
 import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
@@ -167,9 +167,10 @@ export function PlanInspector({
   const audioTotal = planAudioTotal(unit)
   // Not `status === "nearly_complete"`: a unit that is ALSO overdue is filed
   // under Overdue, and it is precisely the row that needs its shortfall said
-  // out loud. `planUnitIsNearlyComplete` asks the same question with the date
-  // stripped, so the row and this panel cannot drift apart.
-  const nearlyComplete = planUnitIsNearlyComplete(unit, now, audioFiles, textFiles)
+  // out loud. `planUnitShowsWayToWork` asks the same question with the date
+  // stripped — and says yes, too, for a unit marked done with work left in it
+  // (AQU-1974) — so the row and this panel cannot drift apart.
+  const showsWayToWork = planUnitShowsWayToWork(unit, now, audioFiles, textFiles)
   // The same words the row uses, from the same renderer: "3 cells to validate",
   // or "6 to translate · 8 to validate" when two mediums are outstanding. Null
   // means nothing is, which on a unit nobody has marked done is its own news.
@@ -443,7 +444,7 @@ export function PlanInspector({
                 Beneath the bars it belongs to the unit rather than to its
                 chapters, which is what it always measured. The grid keeps the
                 per-chapter count. */}
-            {nearlyComplete && (
+            {showsWayToWork && (
               <div
                 // FLUSH LEFT, where the bars' LABELS start and not where their
                 // tracks do. The `ps-8` above belongs to the audio note, which
@@ -456,15 +457,15 @@ export function PlanInspector({
                 <span className={shortfallText ? "font-medium text-foreground" : "text-muted-foreground"}>
                   {shortfallText ?? t("org.projectOverview.plan.nothingLeft")}
                 </span>
-                {/* NEARLY COMPLETE ONLY, and so are the grid's count badges. A
+                {/* NEARLY COMPLETE ONLY (or marked done with work left,
+                    AQU-1974), and so are the grid's count badges. A
                     unit with ninety chapters to go gets no link, on the grounds
                     that "first outstanding cell" is not a useful place to stand
                     when nearly everything is outstanding; you open the file, not
                     a cell. THIS IS FLAGGED FOR RE-CONFIRMATION AT BUILD REVIEW:
                     it is the one rule in AQU-1278 that withholds something from
                     the majority of units, and if the answer changes it changes
-                    on the condition above and in the `nearlyComplete` prop
-                    passed to the grid, nowhere else. */}
+                    on `planUnitShowsWayToWork`, nowhere else. */}
                 {openKind != null && onGoToFirstOpen && (
                   <Button
                     variant="link"
@@ -502,7 +503,7 @@ export function PlanInspector({
               sections={sections}
               showAudio={hasAudio}
               showText={hasText}
-              nearlyComplete={nearlyComplete}
+              nearlyComplete={showsWayToWork}
               selectedKey={openSectionKey}
               // Pure state. The fetch used to be launched from inside this
               // updater, which made a request a side effect of rendering:

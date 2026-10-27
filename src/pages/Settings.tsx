@@ -9,5 +9,6 @@ export { OrgSettingsProjectDefaults } from "./settings/OrgSettingsProjectDefault
 export { OrgSettingsBilling } from "./settings/OrgSettingsBilling"
 export { OrgSettingsProviders } from "./settings/OrgSettingsProviders"
 export { OrgSettingsMonday } from "./settings/OrgSettingsMonday"
+export { OrgSettingsAirtable } from "./settings/OrgSettingsAirtable"
 export { OrgSettingsKnowledge } from "./settings/OrgSettingsKnowledge"
 export { OrgSettingsRules } from "./settings/OrgSettingsRules"

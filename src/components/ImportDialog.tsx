@@ -77,7 +77,7 @@ import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { filterEpubStrings } from "@/lib/parsers/epub"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -99,6 +99,7 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import { reimportTargetFor, type ReimportTarget } from "@/lib/import/reimport-target"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
   EMPTY_UPLOAD_HEADER,
@@ -153,6 +154,7 @@ import {
 } from "@/lib/import/import-file-gate"
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
 import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
 import { ImportOptionCard } from "@/components/import/ImportOptionCard"
 import {
@@ -389,6 +391,10 @@ interface ImportDialogProps {
   /** AQU-1365: the "A translation" path. Absent, the dialog offers source
    *  import only, as before. */
   translation?: TranslationImportHost
+  /** IDML Update Existing places kept translations into the new style runs.
+   *  Absent when AI completion is not configured; the re-import still updates
+   *  the source and leaves every translation where it is. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -418,6 +424,7 @@ export function ImportDialog({
   linkSource,
   sourceDisabledReason = null,
   translation,
+  alignReimportedIdml,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -518,9 +525,12 @@ export function ImportDialog({
     returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
+  // AQU-2120: the existing file the collision screen chose for the seed file.
+  const [spreadsheetReimportTarget, setSpreadsheetReimportTarget] = useState<ReimportTarget | null>(null)
   const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-525: a single JSON file goes through the key picker before import.
   const [jsonSeedFile, setJsonSeedFile] = useState<File | null>(null)
+  const [jsonReimportTarget, setJsonReimportTarget] = useState<ReimportTarget | null>(null)
   const [jsonReturnScreen, setJsonReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
@@ -559,7 +569,10 @@ export function ImportDialog({
       setPreviewUploadPhase("")
       setPreviewUploadProgress(null)
       setSpreadsheetSeedFile(null)
+      setSpreadsheetReimportTarget(null)
       setSpreadsheetReturnScreen("landing")
+      setJsonSeedFile(null)
+      setJsonReimportTarget(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
@@ -1217,6 +1230,7 @@ export function ImportDialog({
               setPartnerId(selectedPartnerId ?? null)
               if (s === "spreadsheet") {
                 setSpreadsheetSeedFile(null)
+                setSpreadsheetReimportTarget(null)
                 setSpreadsheetReturnScreen("landing")
               }
               setScreen(s)
@@ -1288,13 +1302,15 @@ export function ImportDialog({
               setPreviewState({ results, commit, returnScreen: "upload" })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("upload")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("upload")
               setScreen("jsonKeys")
             }}
@@ -1304,6 +1320,7 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
             onTranslationCheck={translationCheckFor("upload")}
           />
         )}
@@ -1336,13 +1353,15 @@ export function ImportDialog({
               setPreviewState({ results, commit, returnScreen: "gdrive" })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("gdrive")
               setScreen("jsonKeys")
             }}
@@ -1352,6 +1371,7 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
@@ -1496,8 +1516,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={spreadsheetSeedFile}
+            reimportTarget={spreadsheetReimportTarget}
             onCancel={() => {
               setSpreadsheetSeedFile(null)
+              setSpreadsheetReimportTarget(null)
               setScreen(spreadsheetReturnScreen)
             }}
           />
@@ -1524,8 +1546,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={jsonSeedFile}
+            reimportTarget={jsonReimportTarget}
             onCancel={() => {
               setJsonSeedFile(null)
+              setJsonReimportTarget(null)
               setScreen(jsonReturnScreen)
             }}
           />
@@ -2114,11 +2138,15 @@ interface UploadPanelProps {
   onCommitError?: (message: string | null) => void
   /** Spreadsheet-shaped files need explicit column mapping before preview.
    * Keep this handoff inside the unified Upload files entry point so users do
-   * not have to know which specialized importer to choose. */
-  onSpreadsheetFile: (file: File) => void
+   * not have to know which specialized importer to choose.
+   * AQU-2120: the handoff carries the re-import target the collision screen
+   * resolved for this file, so "Update existing" updates instead of quietly
+   * creating a second file with the same name. */
+  onSpreadsheetFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-525: a lone JSON file goes through the key picker, so the user says
-   * which keys hold translatable text before any cell is created. */
-  onJsonFile: (file: File) => void
+   * which keys hold translatable text before any cell is created.
+   * AQU-2120: carries the re-import target, as `onSpreadsheetFile` does. */
+  onJsonFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
@@ -2140,6 +2168,8 @@ interface UploadPanelProps {
     /** Every file in the batch, flagged or not, media included. */
     fileCount: number,
   ) => Promise<boolean>
+  /** IDML Update Existing places kept translations into the new style runs. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** AQU-1365: one parsed text upload, as the translation check sees it. */
@@ -2250,7 +2280,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2340,7 +2370,10 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           setError(t("importExport.upload.oneSpreadsheetAtATime"))
           return
         }
-        onSpreadsheetFile(spreadsheets[0])
+        onSpreadsheetFile(
+          spreadsheets[0],
+          reimportTargetFor(spreadsheets[0].name, reimportFileIds, existingFiles),
+        )
         return
       }
 
@@ -2361,7 +2394,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }
         })
         if (parseable) {
-          onJsonFile(candidate)
+          onJsonFile(candidate, reimportTargetFor(candidate.name, reimportFileIds, existingFiles))
           return
         }
       }
@@ -2523,7 +2556,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, onTranslationCheck, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -2563,7 +2596,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const allRefs: FileReference[] = []
       const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
-      const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      const allSpeakerPairs: SpeakerAssignment[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
       // cell count/percentage that "feels stalled" on large partner imports.
       // Totals come from the real File.size; within a file we scale by the cell
@@ -2576,14 +2609,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const persistCastAdditions = async () => {
         castAttempted = true
         if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
       }
       try {
@@ -2608,6 +2636,22 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
+            alignReimportedIdml,
+            onPhase: (phase) => {
+              setPhase(phase)
+              onCommitPhase?.(phase)
+            },
+            onAlignProgress: (count, total) => {
+              const frac = total > 0 ? Math.min(count / total, 1) : 0
+              const next: ImportUploadProgress = {
+                count,
+                total,
+                bytesReceived: bytesBefore + Math.round(frac * (file.size || 0)),
+                bytesTotal,
+              }
+              setProgress(next)
+              onCommitProgress?.(next)
+            },
             onCellEnqueued: (count, total) => {
               const p = t("importExport.upload.uploadingFile", { fileName: file.name })
               setPhase(p)
@@ -2698,7 +2742,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, alignReimportedIdml, t]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -4214,6 +4258,13 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
       {collisions.some((collision) => collision.ambiguous) && (
         <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
           {t("importExport.collision.ambiguousWarning")}
+        </p>
+      )}
+      {/* AQU-2120: media has no in-place re-import, so say so rather than
+          leaving a disabled button unexplained. */}
+      {collisions.some((collision) => collision.updateUnsupported) && (
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+          {t("importExport.collision.mediaUpdateUnavailable")}
         </p>
       )}
 

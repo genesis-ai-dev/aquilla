@@ -5,6 +5,11 @@
 // deciding where the seams fall is a heuristic over many quoting conventions —
 // so the person sees exactly the lines it will make, each tagged narration or
 // quotation, and confirms. Nothing is sent until they do.
+//
+// AQU-2089: a piece's `text` keeps its USFM markup, because the split writes
+// that text back as the new lines' source. The preview is a reading surface,
+// so it shows the same marker-free text the editor shows — display only; the
+// pieces handed to the split are untouched.
 
 import {
   Dialog,
@@ -17,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
+import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface SplitAtQuotesDialogProps {
@@ -49,7 +55,9 @@ export function SplitAtQuotesDialog({ pieces, hasRecordings, onConfirm, onCancel
               <Badge variant={piece.kind === "quote" ? "default" : "soft"} className="mt-0.5 shrink-0">
                 {piece.kind === "quote" ? t("editor.splitQuotes.quotation") : t("editor.splitQuotes.narration")}
               </Badge>
-              <span dir="auto" className="min-w-0 break-words">{piece.text}</span>
+              <span dir="auto" className="min-w-0 break-words whitespace-pre-line">
+                {usfmDisplayText(piece.text)}
+              </span>
             </li>
           ))}
         </ol>

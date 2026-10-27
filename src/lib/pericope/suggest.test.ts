@@ -110,4 +110,50 @@ describe("resolvePericopeResume", () => {
       { canonicalRef: "GEN 1:2", translated: false },
     ])).toEqual({ book: "GEN", from: { chapter: 1, verse: 2 } })
   })
+
+  // AQU-2158: an ETEN team with Hosea open was offered Genesis 4:21–4:26.
+  it("resumes in the book the file is about, not the book its first ref names", () => {
+    expect(resolvePericopeResume([
+      { canonicalRef: "GEN 4:21", translated: false },
+      { canonicalRef: "HOS 1:1", translated: true },
+      { canonicalRef: "HOS 1:2", translated: false },
+      { canonicalRef: "HOS 2:1", translated: false },
+    ])).toEqual({ book: "HOS", from: { chapter: 1, verse: 2 } })
+  })
+
+  it("resumes in the book on screen when the file addresses several", () => {
+    const cells = [
+      { canonicalRef: "GEN 1:1", translated: false },
+      { canonicalRef: "GEN 1:2", translated: false },
+      { canonicalRef: "HOS 2:1", translated: false },
+    ]
+    expect(resolvePericopeResume(cells)).toEqual({ book: "GEN", from: { chapter: 1, verse: 1 } })
+    expect(resolvePericopeResume(cells, { preferBook: "HOS" }))
+      .toEqual({ book: "HOS", from: { chapter: 2, verse: 1 } })
+    expect(resolvePericopeResume(cells, { preferBook: "hos" }))
+      .toEqual({ book: "HOS", from: { chapter: 2, verse: 1 } })
+  })
+
+  it("has nothing to suggest once the book on screen is finished, rather than crossing into another", () => {
+    expect(resolvePericopeResume([
+      { canonicalRef: "HOS 1:1", translated: true },
+      { canonicalRef: "GEN 1:1", translated: false },
+    ], { preferBook: "HOS" })).toBeNull()
+  })
+
+  it("falls back to the file's own book when the viewport names a book the file does not address", () => {
+    expect(resolvePericopeResume([
+      { canonicalRef: "HOS 1:1", translated: false },
+    ], { preferBook: "REV" })).toEqual({ book: "HOS", from: { chapter: 1, verse: 1 } })
+    expect(resolvePericopeResume([
+      { canonicalRef: "HOS 1:1", translated: false },
+    ], { preferBook: null })).toEqual({ book: "HOS", from: { chapter: 1, verse: 1 } })
+  })
+
+  it("will not let a label that merely looks like a ref decide the book", () => {
+    expect(resolvePericopeResume([
+      { canonicalRef: "CH 4:21", translated: false },
+      { canonicalRef: "HOS 1:1", translated: false },
+    ])).toEqual({ book: "HOS", from: { chapter: 1, verse: 1 } })
+  })
 })

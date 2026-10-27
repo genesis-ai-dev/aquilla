@@ -38,13 +38,14 @@ import { ROLE, type Env } from "../types"
 import { errorJson, requireAutopilotReleased, requireRole } from "./_contextual-helpers"
 import { isAutopilotReleased } from "../lib/contextual/release-gate"
 import { runAiGuard } from "../lib/ai-budget"
-import { AI_SPEND_CEILING_ERROR, checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
+import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { listRunTraces, makeTraceRecorder, TRACE_LIST_LIMIT } from "../lib/contextual/traces"
-import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled, backgroundUsageAllowed, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
+import { AgentUsageMeter, paidCallAdmit, type PaidCallAdmit } from "../lib/billing/agent-usage"
+import { admitPaidCall, paidCallMeterMode } from "../lib/billing/paid-call"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
 import {
@@ -412,9 +413,11 @@ function leaseAwareLlm(
 
 /** Run waves until the run stops continuing or the safety cap. Owns its own
  *  PG connection (env.AQUILLA_PG dies with the Response); never throws. */
-/** Build the weekly-usage admission for a run, or undefined when metering is
- *  off. Fails the run (never runs it unmetered) when metering is on but the
- *  run has no billing workspace, no persisted owner, or a non-local provider. */
+/** Build the usage admission for a run, or undefined when the meter is off.
+ *  Fails the run (never runs it unmetered) when the meter is on but the run
+ *  has no billing workspace or a non-local rehearsal provider. A run a person
+ *  started bills that person; a reaction run has no role snapshot and bills
+ *  the project's org as the system user (spec §3.3, AQU-2062). */
 async function contextualUsageAdmit(
   env: Env,
   db: AquillaDb,
@@ -422,15 +425,15 @@ async function contextualUsageAdmit(
   runId: string,
   notify: (frame: ContextualProgressFrame) => Promise<void>,
 ): Promise<PaidCallAdmit | undefined> {
-  if (!agentUsageEnabled(env)) return undefined
+  const mode = paidCallMeterMode(env)
+  if (mode === "off") return undefined
+  if (mode === "unavailable") throw new Error("usage_rehearsal_unavailable")
   const run = await getRun(db, runId)
   const project = await db.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId)
     .first<{ org_id: number | null }>()
   const orgId = project?.org_id ?? 0
-  const userId = run?.roleSnapshot?.userId
-  if (!backgroundUsageAllowed(env) || orgId <= 0 || !userId) {
-    throw new Error(!backgroundUsageAllowed(env) ? "usage_rehearsal_unavailable" : "usage_workspace_unavailable")
-  }
+  if (orgId <= 0) throw new Error("usage_workspace_unavailable")
+  const userId = run?.roleSnapshot?.userId ?? null
   const base = paidCallAdmit(new AgentUsageMeter(env, { orgId, userId, projectId }))
   let paused = false
   return async (input) => {
@@ -472,6 +475,9 @@ export async function selfTickLoop(
 ): Promise<void> {
   const shim = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
   const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
+  // The meter writes from this loop, after the request that started it has
+  // closed its connection: billing reads and writes go through the loop's own.
+  const runEnv: Env = shim ? Object.assign(Object.create(env) as Env, { AQUILLA_PG: db }) : env
   const notify = async (frame: ContextualProgressFrame) =>
     notifySyncWorkerOfContextualActivity(env, projectId, frame)
   // Dev cost meter (AQU pricing exercise): one row per model call, flushed
@@ -487,10 +493,22 @@ export async function selfTickLoop(
     // AQU-837 weekly allowance: every graph call reserves before the provider
     // and settles after. The run's persisted role snapshot funds background
     // and sweeper resumes; exhaustion pauses the run at the next span edge.
-    const admit = await contextualUsageAdmit(env, db, projectId, runId, notify)
+    const admit = await contextualUsageAdmit(runEnv, db, projectId, runId, notify)
+    // AQU-1847: resolved once per loop, not per wave — the project's billing
+    // workspace cannot change under a run, and the org ceiling is checked on
+    // every acquire anyway.
+    const orgId = await resolveProjectOrgId(db, projectId)
+    // AQU-2062: the one entitlement check chooses the key every call in this
+    // loop uses. It reserves nothing; `admit` reserves each call.
+    const entry = await admitPaidCall(runEnv, { orgId, userId: null, projectId, rail: "agent" })
+    if (!entry.ok) {
+      const paused = await parkRun(db, runId, "awaiting_input")
+      if (paused.status === "ok") await publishRunStateOutsideTick(env, db, projectId, paused.run)
+      return
+    }
     const llm = makeLlmCall({
       url: resolveOpenRouterUrl(env),
-      apiKey: env.OPENROUTER_API_KEY ?? "",
+      apiKey: entry.apiKey,
       models: resolveContextualModels(env, settings),
       ...(admit ? { admit } : {}),
       ...(Number(env.CONTEXTUAL_MAX_INFLIGHT) > 0
@@ -515,10 +533,6 @@ export async function selfTickLoop(
         }),
       onTrace: (t) => traces.add(t),
     })
-    // AQU-1847: resolved once per loop, not per wave — the project's billing
-    // workspace cannot change under a run, and the org ceiling is checked on
-    // every acquire anyway.
-    const orgId = await resolveProjectOrgId(db, projectId)
     const capacityLimits = {
       project: resolveMaxProjectConcurrency(env.CONTEXTUAL_MAX_CONCURRENCY),
       org: resolveMaxOrgConcurrency(env.CONTEXTUAL_MAX_ORG_CONCURRENCY),
@@ -568,7 +582,7 @@ export async function selfTickLoop(
             llm: guarded.llm,
             notify,
             ...(concurrency ? { concurrency } : {}),
-            triage: (input) => decide(env, { purpose: "triage", projectId, ...input }),
+            triage: (input) => decide(runEnv, { purpose: "triage", projectId, ...input }),
             bible,
           })
           if (checkpoint.reused > 0) {
@@ -864,14 +878,19 @@ export const startReactionRun: StartReactionRun = async (env, input) => {
   } catch {
     /* best-effort — degrade to org 0, exactly as the start route does */
   }
-  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
-  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
-  const words = await wordGuard(env.AQUILLA_PG, orgId)
-  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
-  // Platform daily spend ceiling (AQU-1869). An autonomous reaction has no
-  // user to tell, so it simply declines to start and says why.
-  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-reaction")
-  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
+  // Legacy credit/word caps only while the meter is off; the meter's own
+  // allowance pauses a metered run at its next call (contextualUsageAdmit).
+  if (paidCallMeterMode(env) === "off") {
+    const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+    if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+    const words = await wordGuard(env.AQUILLA_PG, orgId)
+    if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  }
+  // AQU-2062: the one entitlement check (plan, key, platform spend ceiling,
+  // AQU-1869). An autonomous reaction has no user to tell, so it simply
+  // declines and says why. It runs as the system user (spec §3.3).
+  const entry = await admitPaidCall(env, { orgId, userId: null, projectId: input.projectId, rail: "agent" })
+  if (!entry.ok) return { status: "skipped", reason: entry.body.error }
 
   const created = await createRun(env.AQUILLA_PG, {
     projectId: input.projectId,
@@ -930,14 +949,19 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   } catch {
     /* best-effort — degrade to org 0, exactly as the start route does */
   }
-  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
-  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
-  const words = await wordGuard(env.AQUILLA_PG, orgId)
-  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
-  // Platform daily spend ceiling (AQU-1869) — waking a parked run resumes
-  // paid work, so it is gated exactly like starting one.
-  const spendCeiling = await checkAiSpendCeiling(env.AQUILLA_PG, env, "autopilot-wake")
-  if (!spendCeiling.ok) return { status: "skipped", reason: AI_SPEND_CEILING_ERROR }
+  // Legacy credit/word caps only while the meter is off; the meter's own
+  // allowance pauses a metered run at its next call (contextualUsageAdmit).
+  if (paidCallMeterMode(env) === "off") {
+    const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+    if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+    const words = await wordGuard(env.AQUILLA_PG, orgId)
+    if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+  }
+  // AQU-2062: the one entitlement check (plan, key, platform spend ceiling,
+  // AQU-1869). An autonomous reaction has no user to tell, so it simply
+  // declines and says why. It runs as the system user (spec §3.3).
+  const entry = await admitPaidCall(env, { orgId, userId: null, projectId: input.projectId, rail: "agent" })
+  if (!entry.ok) return { status: "skipped", reason: entry.body.error }
 
   // An EXHAUSTED parked run (every span settled) has nothing left to drive —
   // waking it would consume the steering and re-park untouched. Retire it and
@@ -1119,11 +1143,6 @@ contextual.post(
     const guard = await runAiGuard(models.mid, user.id, c.env.AQUILLA_PG, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
 
-    // Platform daily spend ceiling (AQU-1869). Autopilot is the heaviest paid
-    // surface per start, so it is refused before a run row exists.
-    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "autopilot-start")
-    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-
     let orgId = 0
     try {
       const projectRow = await c.env.AQUILLA_PG
@@ -1134,9 +1153,13 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    // AQU-837: enforced usage never funds an unowned project from org 0, and
-    // retires the legacy guards for runs it meters.
-    if (!agentUsageEnabled(c.env)) {
+    // AQU-2062: the one entitlement check (plan, key, platform spend ceiling
+    // — AQU-1869). Autopilot is the heaviest paid surface per start, so it is
+    // refused before a run row exists. The meter never funds an unowned
+    // project from org 0, and retires the legacy guards for runs it meters.
+    const preflight = await admitPaidCall(c.env, { orgId, userId: user.id, projectId, rail: "agent", requestUrl: c.req.url })
+    if (!preflight.ok) return c.json(preflight.body, preflight.status)
+    if (paidCallMeterMode(c.env, c.req.url) === "off") {
       const credit = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
       if (!credit.ok) {
         const { body: err, status } = errorJson(
@@ -1149,15 +1172,6 @@ contextual.post(
       }
       const words = await wordGuard(c.env.AQUILLA_PG, orgId)
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
-    } else {
-      if (!agentUsageAllowed(c.env, c.req.url)) {
-        const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
-        return c.json(err, status)
-      }
-      if (orgId <= 0) {
-        const { body: err, status } = errorJson("permission_denied", "This project has no billing workspace.", 403)
-        return c.json(err, status)
-      }
     }
 
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
@@ -2299,10 +2313,6 @@ contextual.post(
     const guard = await runAiGuard(models.fast, user.id, db, c.env)
     if (!guard.ok) return c.json(guard.body, guard.status)
 
-    // Platform daily spend ceiling (AQU-1869).
-    const spendCeiling = await checkAiSpendCeiling(db, c.env, "autopilot-note")
-    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-
     let orgId = 0
     try {
       const projectRow = await db
@@ -2313,18 +2323,13 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    // AQU-837: a metered pass reserves each model call against the weekly
-    // allowance and retires the legacy guards for itself.
+    // AQU-2062: the one entitlement check (plan, key, platform spend ceiling
+    // — AQU-1869). It reserves nothing itself: a metered pass reserves each
+    // model call and retires the legacy guards for itself.
+    const preflight = await admitPaidCall(c.env, { orgId, userId: user.id, projectId, rail: "llm", requestUrl: c.req.url })
+    if (!preflight.ok) return c.json(preflight.body, preflight.status)
     let admit: PaidCallAdmit | undefined
-    if (agentUsageEnabled(c.env)) {
-      if (!agentUsageAllowed(c.env, c.req.url)) {
-        const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
-        return c.json(err, status)
-      }
-      if (orgId <= 0) {
-        const { body: err, status } = errorJson("permission_denied", "This project has no billing workspace.", 403)
-        return c.json(err, status)
-      }
+    if (paidCallMeterMode(c.env, c.req.url) !== "off") {
       admit = paidCallAdmit(new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId }))
     } else {
       const credit = await creditGuard(db, c.env, orgId, "agent")
@@ -2350,7 +2355,7 @@ contextual.post(
     const meter = makeCostMeter(c.env, db)
     const llm = makeLlmCall({
       url: resolveOpenRouterUrl(c.env),
-      apiKey: c.env.OPENROUTER_API_KEY,
+      apiKey: preflight.apiKey,
       models,
       signal: c.req.raw.signal,
       ...(admit ? { admit } : {}),
@@ -2382,9 +2387,9 @@ contextual.post(
     } catch (err) {
       const reason = err instanceof Error ? err.message : ""
       if (reason === "usage_exhausted") {
-        const { body, status } = errorJson("weekly_ai_allowance_exhausted",
-          "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.", 429)
-        return c.json(body, status)
+        // The client contract for an exhausted allowance (spec §5.3).
+        return c.json({ error: "ai_allowance_exhausted",
+          message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 402)
       }
       if (reason === "usage_unpriced" || reason === "usage_unavailable") {
         const { body, status } = errorJson("usage_accounting_unavailable", "Usage accounting is unavailable. Nothing was changed.", 503)

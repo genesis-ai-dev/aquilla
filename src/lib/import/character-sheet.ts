@@ -31,6 +31,7 @@
 import { splitCastName } from "@/lib/parsers/spreadsheet"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import { alignPairs, normalizeCueText } from "./cue-reconcile"
 
 // Re-exported rather than redeclared: this file used to carry its own copy of
 // the union, which meant widening it for `group` (2026-08-20) would have left
@@ -219,6 +220,10 @@ export interface KeyableCell {
   id?: string
   /** Seconds. */
   startTime?: number
+  /** The line's own words. Lets a row the timestamps missed be matched by its
+   *  wording instead, when the sheet carries the text too — see the word pass
+   *  in `planCharacterAssignments`. */
+  original?: string
 }
 
 export interface CharacterAssignment {
@@ -246,6 +251,10 @@ export interface CharacterAssignmentPlan {
    *  `planCharacterAssignments`. Worth reporting: it means the sheet and the
    *  subtitles disagree slightly about where some lines start. */
   filledByPosition: number
+  /** Rows the timestamp missed but their WORDS matched — see the word pass in
+   *  `planCharacterAssignments`. Non-zero means the sheet's times and the
+   *  file's disagree (or the sheet's times could not be read at all). */
+  matchedByWords: number
   /** How many different people are in this episode. */
   distinctCharacters: number
 }
@@ -269,7 +278,11 @@ export function planCharacterAssignments({
   toleranceMs = MATCH_TOLERANCE_MS,
 }: PlanCharacterAssignmentsArgs): CharacterAssignmentPlan {
   const timed = cells
-    .map((c) => ({ id: c.cellId ?? c.id ?? "", startMs: Math.round((c.startTime ?? NaN) * 1000) }))
+    .map((c) => ({
+      id: c.cellId ?? c.id ?? "",
+      startMs: Math.round((c.startTime ?? NaN) * 1000),
+      text: c.original ?? "",
+    }))
     .filter((c) => c.id !== "" && Number.isFinite(c.startMs))
     .sort((a, b) => a.startMs - b.startMs)
 
@@ -311,6 +324,52 @@ export function planCharacterAssignments({
       rowNumber: row.rowNumber,
       ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
     })
+  }
+
+  // ── Word pass: rows whose TIME missed, matched by their WORDS. (AQU-2193,
+  // 2026-10-26, from Come and See's re-delivered episode 101.)
+  //
+  // Their new sheet writes its times as video timecode, `00:01:03:05` — hours,
+  // minutes, seconds and a FRAME — which `parseClock` cannot read, so every
+  // row came back unmatched and the whole sheet was refused, though its
+  // `Translation` column matched the file's 548 lines word for word. When the
+  // sheet carries the line's own words and the cells carry theirs, those
+  // words are better evidence than a clock anyway: the same order-preserving
+  // alignment the audio sheet uses (`alignPairs`), over only the rows the
+  // timestamps left and the cells nobody claimed. Identical wording only, so
+  // nothing here is a guess; a wrong-episode sheet still matches almost
+  // nothing, and its unmatched rows still refuse it.
+  let matchedByWords = 0
+  if (unmatchedRows.length > 0 && rows.some((r) => r.text !== "") && timed.some((c) => c.text !== "")) {
+    const waiting = new Set(unmatchedRows)
+    const wanting = rows.filter((r) => waiting.has(r.rowNumber))
+    const free = timed.filter((c) => !claimed.has(c.id))
+    // An empty line never matches anything, including another empty line.
+    const rowKeys = wanting.map((r, i) => normalizeCueText(r.text) || `\u0000row${i}`)
+    const cellKeys = free.map((c, j) => normalizeCueText(c.text) || `\u0001cell${j}`)
+    const pairs = alignPairs(
+      rowKeys,
+      cellKeys,
+      wanting.map((r) => (r.startSec === undefined ? 0 : Math.round(r.startSec * 1000))),
+      free.map((c) => c.startMs),
+    )
+    for (const [ri, ci] of pairs) {
+      const row = wanting[ri]
+      const cell = free[ci]
+      claimed.add(cell.id)
+      waiting.delete(row.rowNumber)
+      assignments.push({
+        cellId: cell.id,
+        castName: row.castName,
+        cameraState: row.cameraState,
+        rowNumber: row.rowNumber,
+        ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
+      })
+      matchedByWords++
+    }
+    const left = unmatchedRows.filter((n) => waiting.has(n))
+    unmatchedRows.length = 0
+    unmatchedRows.push(...left)
   }
 
   // ── Second pass: recover rows that DRIFTED but are pinned by their
@@ -378,6 +437,7 @@ export function planCharacterAssignments({
     cellsWithoutRow: timed.length - claimed.size,
     cameraDisagreements,
     filledByPosition,
+    matchedByWords,
     distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
   }
 }

@@ -9,7 +9,7 @@
 import { NewVoiceModal } from "./NewVoiceModal"
 import { upsertVoice } from "@/lib/audio/voices"
 import { resolveTtsProvider } from "@/lib/audio/tts-providers"
-import { ROLE } from "@/lib/frontier/roles"
+import { canManageVoices } from "@/lib/audio/voice-permission"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -30,6 +30,8 @@ export interface CloneVoiceModalHostProps {
   cells: CellData[]
   /** Project role level; same maintainer floor as VoiceLibraryPanel. */
   roleLevel?: number | null
+  /** AQU-2041. Same switch as VoiceLibraryPanel. */
+  leadsManageVoices?: boolean
 }
 
 export function CloneVoiceModalHost({
@@ -45,18 +47,20 @@ export function CloneVoiceModalHost({
   archivedLanes,
   cells,
   roleLevel,
+  leadsManageVoices = false,
 }: CloneVoiceModalHostProps) {
-  const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
+  const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
 
   // AQU-2037: a library write merges into the PROJECT's voices, not the open
   // lane's — `tts.voices` is the lane view, and storing it would delete every
-  // other lane's voices. The stored default rides along unchanged for the same
-  // reason: `tts.defaultVoiceId` is this lane's resolved default, so writing it
-  // back would overwrite another lane's starred voice. `saveTts` stamps the new
-  // voice with the active lane on the way through.
+  // other lane's voices. `saveTts` stamps the new voice with the active lane on
+  // the way through.
+  // AQU-2038: a `defaultVoiceId` in the patch is the ACTIVE LANE's star, so the
+  // default riding along is the lane's own (`tts.laneSettings`). Passing the
+  // project-wide one through here would move the lane's star back onto it.
   const saveVoice = (voice: Voice) => {
     if (!canEditVoices) return
-    const next = upsertVoice(tts.allVoices, voice, tts.settings?.defaultVoiceId)
+    const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
     void tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
   }
 

@@ -1,8 +1,11 @@
 // AQU-1486 — the gestures that validate a repeated row, end to end through the
 // hook: what is asked, what is written, and what Undo takes back.
+//
+// AQU-2176 — and what the reviewer is TOLD: a "Validate all" now reports the
+// rows it signed off in a dialog that names them, not a toast that counts them.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { act, render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import { getRepetitionChoice } from "@/lib/store/repetition-choice-pref"
 import {
@@ -75,6 +78,7 @@ function setup(cells: CellData[], over: Partial<UseRepetitionValidationArgs> = {
     },
     rememberPendingTargetCommit: (cellId, eventId) => { pending.set(cellId, eventId) },
     afterWrite: async () => {},
+    goToCell: () => {},
     ...over,
   }
   const api: { current: UseRepetitionValidation | null } = { current: null }
@@ -120,14 +124,23 @@ describe("useRepetitionValidation", () => {
       { kind: "validate", cellId: "r1", editEventId: "commit-1" },
       { kind: "validate", cellId: "r2", editEventId: "commit-2" },
     ]))
-    expect(lastToast().title).toBe("Validated 2 repeated rows")
+    // AQU-2176: the outcome names its rows and waits, rather than counting
+    // them for ten seconds. `seed` is row 1 and is NOT listed — the reviewer
+    // validated it themselves.
+    const dialog = await screen.findByTestId("repetition-validated-dialog")
+    expect(within(dialog).getByText("Validated 2 repeated rows")).toBeTruthy()
+    expect([...dialog.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "Row 2Neema.",
+      "Row 3Neema.",
+    ])
+    expect(within(dialog).queryByRole("button", { name: "Ask me each time" })).toBeNull()
 
-    // A second click on the same Undo reverts nothing more.
-    await act(async () => { lastToast().actionProps!.onClick(); lastToast().actionProps!.onClick() })
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Undo" })) })
     await waitFor(() => expect(emitted.commits.slice(2).map((c) => [c.cellId, c.value, c.parentId])).toEqual([
       ["r1", "", "commit-1"],
       ["r2", "Old", "commit-2"],
     ]))
+    expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull()
   })
 
   it("a click asks; Validate all with Don't ask again is remembered, and later clicks offer Ask me each time", async () => {
@@ -156,14 +169,62 @@ describe("useRepetitionValidation", () => {
     expect([getRepetitionChoice("me", "p1"), getRepetitionChoice("other", "p1"), getRepetitionChoice("me", "p2")])
       .toEqual(["all", null, null])
 
+    // The answer reports in a dialog, which keeps nothing but the changes when
+    // it is dismissed with Done.
+    const first = await screen.findByTestId("repetition-validated-dialog")
+    expect([...first.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "Row 2Neema.",
+      "Row 3Neema.",
+    ])
+    fireEvent.click(within(first).getByRole("button", { name: "Done" }))
+    await waitFor(() => expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull())
+    expect(emitted.votes).toHaveLength(2)
+
     // Remembered: the next click validates without asking, and says how to undo that.
     cells.splice(1, 2, makeCell({ id: "r3" }))
     await act(() => api.current.handleCellValidated("seed", "click"))
     expect(screen.queryByTestId("repetition-choice-dialog")).toBeNull()
     expect(emitted.votes.at(-1)).toMatchObject({ kind: "validate", cellId: "r3" })
-    expect(lastToast().data?.secondaryAction?.label).toBe("Ask me each time")
-    act(() => lastToast().data!.secondaryAction!.onClick())
+    const second = await screen.findByTestId("repetition-validated-dialog")
+    fireEvent.click(within(second).getByRole("button", { name: "Ask me each time" }))
     expect(localStorage.getItem("aq.repetition-choice.v1")).toBeNull()
+  })
+
+  it("a listed row is a jump: it closes the dialog and sends the editor to that row (AQU-2176)", async () => {
+    const cells = [
+      makeCell({ id: "seed", translated: "Neema.", status: "validated", activeValidators: ["me"] }),
+      makeCell({ id: "hidden-row", hidden: true }),
+      makeCell({ id: "r1", context: "GEN 1:1" }),
+      makeCell({ id: "r2", startTime: 62.5 }),
+    ]
+    const goToCell = vi.fn()
+    const api = setup(cells, { goToCell })
+    await act(() => api.current.handleCellValidated("seed", "typed"))
+    await act(async () => { lastToast().data!.secondaryAction!.onClick() })
+
+    const dialog = await screen.findByTestId("repetition-validated-dialog")
+    // A hidden row is not in the file's numbering, and the rows that have one
+    // carry their reference or their timecode beside the number.
+    expect([...dialog.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "Row 2GEN 1:1Neema.",
+      "Row 31:02.5Neema.",
+    ])
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /GEN 1:1/ }))
+    expect(goToCell).toHaveBeenCalledWith("r1")
+    await waitFor(() => expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull())
+  })
+
+  it("reports nothing when the repeats were already validated (AQU-2176)", async () => {
+    const cells = [
+      makeCell({ id: "seed", translated: "Neema.", status: "validated", activeValidators: ["me"] }),
+      makeCell({ id: "done", translated: "Neema.", status: "validated", activeValidators: ["me"] }),
+    ]
+    const api = setup(cells)
+    await act(() => api.current.handleCellValidated("seed", "click"))
+    expect(screen.queryByTestId("repetition-choice-dialog")).toBeNull()
+    expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull()
+    expect(emitted.votes).toEqual([])
   })
 
   it("never offers Validate all when the caller cannot sign the repeats off", async () => {

@@ -35,6 +35,14 @@ export function buildSampleSession() {
   return [
     events.offlineProjectStatusSet({ projectId: "proj1", status: "downloading", syncedAt: null, queueDepth: 0 }),
     events.projectSynced({ id: "proj1", name: "Genesis", orgId: "org1", settings: { targetLanguage: "es" }, syncedAt: at }),
+    events.projectSnapshotSynced({
+      id: "proj1",
+      snapshot: { id: "proj1", name: "Genesis", orgId: 1, role: { level: 300, name: "translator", source: "org" }, files: [] },
+    }),
+    events.projectSettingsSnapshotSynced({
+      id: "proj1",
+      settings: { version: 1, updatedAt: "2026-01-01T00:00:00.000Z", updatedBy: null, settings: {}, lanes: [] },
+    }),
     events.fileSynced({ id: "file1", projectId: "proj1", name: "GEN", type: "usfm", sequenceIndex: 0 }),
     events.fileSynced({ id: "file2", projectId: "proj1", name: "EXO", type: "usfm", sequenceIndex: 1 }),
     // Rows an earlier build landed before lanes existed (AQU-1614).
@@ -59,13 +67,16 @@ export function buildSampleSession() {
     events.syncCursorSet({ projectId: "proj1", fileId: "file2", serverSeq: 17, projectEpoch: 1 }),
     events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: at, queueDepth: 0 }),
 
-    // q1 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
+    // q1, q5, q6 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
     queued("q1", "GEN 1:1", "En el principio creó Dios"),
     queued("q2", "GEN 1:2", "Y la tierra estaba desordenada"),
     queued("q3", "EXO 1:1", "Estos son los nombres"),
     queued("q4", "GEN 1:1", "En el principio creó Dios los cielos"),
+    queued("q5", "GEN 1:2", "y las tinieblas"),
+    queued("q6", "EXO 1:1", "Estos son"),
     events.eventQueueStatusSet({ id: "q1", status: "flushing" }),
     events.eventDequeued({ id: "q1" }),
+    events.eventsDequeued({ ids: ["q5", "q6"] }),
     events.eventQueueStatusSet({ id: "q2", status: "flushing" }),
     events.eventQueueStatusSet({ id: "q3", status: "failed" }),
 

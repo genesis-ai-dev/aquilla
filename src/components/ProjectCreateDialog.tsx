@@ -42,6 +42,8 @@ import {
 } from "@/lib/sync/project-settings"
 import { laneLanguage } from "@/lib/lanes/lane-display"
 import { isPrimaryRegistryLane } from "@/lib/lanes/registry-lanes"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
+import { LaneDeliversSelect } from "@/components/LaneDeliversSelect"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
 import { INHERIT_DEFAULTS } from "@/lib/sync/inherited-settings"
 import { InheritedSettingsChoice } from "@/components/ProjectSettings/InheritedSettingsChoice"
@@ -60,6 +62,8 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import posthog from "@/lib/posthog"
+import { LangQuestCreatePanel } from "@/components/langquest/LangQuestCreatePanel"
+import { LangQuestLogo } from "@/components/langquest/LangQuestLogo"
 
 interface ProjectCreateDialogProps {
   onCreated: (project: ProjectRecord) => void
@@ -203,6 +207,9 @@ const projectSchema = z
     // Self-contained shape only (spec §5 / AQU-1240): extras beyond the
     // primary; the PATCH writes targetLanes as [primary, ...extras].
     extraLanguages: z.array(z.string()),
+    // Media redesign slice 1: what each target language delivers, keyed by the
+    // language as typed, lowercased. A language missing here is Text.
+    deliversByLanguage: z.record(z.string(), z.enum(["text", "audio", "text_and_audio"])),
     shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
     linkConsumes: z.union([z.enum(["source", "target"]), z.literal("")]),
@@ -286,6 +293,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   // close, or page-org change). Submit is disabled while it is null, so a
   // stale or unresolved choice can never pick the org (review finding).
   const [destination, setDestination] = useState<Destination | null>(null)
+  // AQU-2105: the "Import from LangQuest" path replaces the form while chosen.
+  const [langquestMode, setLangquestMode] = useState(false)
   // AQU-1352 P2: teams to create into; reset whenever the destination changes.
   const [teamIds, setTeamIds] = useState<number[]>([])
   const [teamsError, setTeamsError] = useState(false)
@@ -338,6 +347,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       sourceLanguage: "",
       targetLanguage: "",
       extraLanguages: [] as string[],
+      deliversByLanguage: {} as Record<string, LaneDelivers>,
       shape: "self-contained" as ProjectShape,
       upstreamProjectId: "",
       upstreamLaneId: "",
@@ -429,7 +439,11 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               if (renamed.kind !== "ok") extraLanguagesFailed = true
             }
             for (const language of completeTargetLanes(project.targetLanguage, extrasToApply)) {
-              const created = await createProjectLane(jwt, project.id, { name: "", language })
+              const created = await createProjectLane(jwt, project.id, {
+                name: "",
+                language,
+                delivers: value.deliversByLanguage[language.toLowerCase()] ?? "text",
+              })
               if (created.kind !== "ok") {
                 extraLanguagesFailed = true
                 break
@@ -592,6 +606,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
   useEffect(() => {
     if (open) return
     setDestination(null)
+    setLangquestMode(false)
     setTeamIds([])
     setTeamsError(false)
     form.reset()
@@ -644,8 +659,24 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       </DialogTrigger>
       <DialogContent closeDisabled={!canClose}>
         <DialogHeader>
-          <DialogTitle>{t("projectSettings.create.dialogTitle")}</DialogTitle>
+          <DialogTitle>
+            {langquestMode ? t("langquest.create.title") : t("projectSettings.create.dialogTitle")}
+          </DialogTitle>
         </DialogHeader>
+        {langquestMode ? (
+          <LangQuestCreatePanel
+            jwt={session?.jwt}
+            username={session?.username}
+            getProjectId={() => draftProjectId.current}
+            pageOrgId={orgId}
+            onBack={() => setLangquestMode(false)}
+            onCreated={(project) => {
+              onCreated(project)
+              toast.add({ type: "success", title: t("langquest.create.createdToast", { name: project.name }) })
+              setOpen(false)
+            }}
+          />
+        ) : (
         <form
           id="project-create-form"
           autoComplete="off"
@@ -661,6 +692,22 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           className="contents"
         >
           <DialogBody>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-auto w-full justify-start gap-3 py-2 text-left"
+              onClick={() => setLangquestMode(true)}
+              disabled={locked}
+              data-testid="project-create-langquest"
+            >
+              <LangQuestLogo className="size-6" />
+              <span className="flex min-w-0 flex-col">
+                <span className="font-medium">{t("langquest.create.entry")}</span>
+                <span className="text-xs font-normal whitespace-normal text-muted-foreground">
+                  {t("langquest.create.entryHint")}
+                </span>
+              </span>
+            </Button>
             {/* AQU-1519: one disabled fieldset backs the whole lock — it takes
                 every input, radio, select trigger and button inside it out of
                 play at once, so a control added to this dialog later (the
@@ -772,15 +819,21 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         <form.Field
                           name="extraLanguages"
                           children={(extrasField) => (
-                            <TargetLanguageInputs
-                              // Remount when the dialog reopens so local row
-                              // state can't leak across sessions.
-                              key={open ? "open" : "closed"}
-                              onPrimaryChange={field.handleChange}
-                              onExtrasChange={extrasField.handleChange}
-                              onBlur={field.handleBlur}
-                              invalid={invalid}
-                              disabled={locked}
+                            <form.Field
+                              name="deliversByLanguage"
+                              children={(deliversField) => (
+                                <TargetLanguageInputs
+                                  // Remount when the dialog reopens so local row
+                                  // state can't leak across sessions.
+                                  key={open ? "open" : "closed"}
+                                  onPrimaryChange={field.handleChange}
+                                  onExtrasChange={extrasField.handleChange}
+                                  onDeliversChange={deliversField.handleChange}
+                                  onBlur={field.handleBlur}
+                                  invalid={invalid}
+                                  disabled={locked}
+                                />
+                              )}
                             />
                           )}
                         />
@@ -1215,6 +1268,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             }}
           />
         </form>
+        )}
       </DialogContent>
     </Dialog>
   )
@@ -1439,8 +1493,9 @@ function validateTargetLanguage(
 }
 
 /** A target-language box. The id is stable across removals so React never
- *  re-uses one row's DOM (and focus) for another row's value. */
-type LaneDraft = { id: number; value: string }
+ *  re-uses one row's DOM (and focus) for another row's value. `delivers` is
+ *  the box's own "Delivers" choice (media redesign slice 1), Text until changed. */
+type LaneDraft = { id: number; value: string; delivers: LaneDelivers }
 
 /** Split the overflow field. Commas are the documented separator; newlines
  *  count too so pasting a column of languages works without reformatting. */
@@ -1454,12 +1509,15 @@ function splitBulkLanes(raw: string): string[] {
 function TargetLanguageInputs({
   onPrimaryChange,
   onExtrasChange,
+  onDeliversChange,
   onBlur,
   invalid = false,
   disabled = false,
 }: {
   onPrimaryChange: (next: string) => void
   onExtrasChange: (next: string[]) => void
+  /** Each language's "Delivers" choice, keyed by the language lowercased. */
+  onDeliversChange: (next: Record<string, LaneDelivers>) => void
   onBlur?: () => void
   invalid?: boolean
   /** AQU-1519: locked while the dialog is working. */
@@ -1467,9 +1525,12 @@ function TargetLanguageInputs({
 }) {
   const t = useT()
   // Index 0 is the project's targetLanguage; 1..n are the additional lanes.
-  const [lanes, setLanes] = useState<LaneDraft[]>([{ id: 0, value: "" }])
+  const [lanes, setLanes] = useState<LaneDraft[]>([{ id: 0, value: "", delivers: "text" }])
   // Overflow once every box is used: comma-separated, parsed the same way.
   const [bulk, setBulk] = useState("")
+  // The overflow field's languages each get their own choice too, keyed by
+  // the language lowercased (they have no box to hang it on).
+  const [bulkDelivers, setBulkDelivers] = useState<Record<string, LaneDelivers>>({})
   const nextLaneId = useRef(1)
 
   /**
@@ -1501,11 +1562,30 @@ function TargetLanguageInputs({
     return extras
   }
 
-  function sync(nextLanes: LaneDraft[], nextBulk: string) {
+  /** Every language's choice, boxes first (a box wins over the overflow field). */
+  function collectDelivers(
+    nextLanes: LaneDraft[],
+    nextBulkDelivers: Record<string, LaneDelivers>,
+  ): Record<string, LaneDelivers> {
+    const out: Record<string, LaneDelivers> = { ...nextBulkDelivers }
+    for (const lane of nextLanes) {
+      const key = lane.value.trim().toLowerCase()
+      if (key) out[key] = lane.delivers
+    }
+    return out
+  }
+
+  function sync(
+    nextLanes: LaneDraft[],
+    nextBulk: string,
+    nextBulkDelivers: Record<string, LaneDelivers> = bulkDelivers,
+  ) {
     setLanes(nextLanes)
     setBulk(nextBulk)
+    setBulkDelivers(nextBulkDelivers)
     onPrimaryChange(nextLanes[0]?.value ?? "")
     onExtrasChange(collectExtras(nextLanes, nextBulk))
+    onDeliversChange(collectDelivers(nextLanes, nextBulkDelivers))
   }
 
   const values = lanes.map((l) => l.value)
@@ -1516,6 +1596,7 @@ function TargetLanguageInputs({
   // the cap — so the count reflects what would actually be created.
   const bulkAccepted =
     collectExtras(lanes, bulk).length - collectExtras(lanes, "").length
+  const bulkLanguages = collectExtras(lanes, bulk).slice(collectExtras(lanes, "").length)
 
   return (
     <div className="flex flex-col gap-2" data-testid="create-target-lang-inputs">
@@ -1557,6 +1638,18 @@ function TargetLanguageInputs({
                 }
                 aria-invalid={(index === 0 && invalid) || error != null}
                 disabled={disabled}
+              />
+              <LaneDeliversSelect
+                testId={`create-target-lang-delivers-${index}`}
+                value={lane.delivers}
+                laneLabel={lane.value.trim() || String(index + 1)}
+                disabled={disabled}
+                onValueChange={(delivers) =>
+                  sync(
+                    lanes.map((l, i) => (i === index ? { ...l, delivers } : l)),
+                    bulk,
+                  )
+                }
               />
               {index > 0 && (
                 <button
@@ -1609,6 +1702,26 @@ function TargetLanguageInputs({
               })}
             </p>
           )}
+          {bulkLanguages.length > 0 && (
+            <ul className="flex flex-col gap-1" data-testid="create-bulk-target-langs-delivers">
+              {bulkLanguages.map((language) => {
+                const key = language.toLowerCase()
+                return (
+                  <li key={key} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0 truncate">{language}</span>
+                    <LaneDeliversSelect
+                      value={bulkDelivers[key] ?? "text"}
+                      laneLabel={language}
+                      disabled={disabled}
+                      onValueChange={(delivers) =>
+                        sync(lanes, bulk, { ...bulkDelivers, [key]: delivers })
+                      }
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </div>
       ) : (
         <div>
@@ -1619,7 +1732,7 @@ function TargetLanguageInputs({
             disabled={disabled || !canAddMore}
             data-testid="create-add-target-lang"
             onClick={() =>
-              sync([...lanes, { id: nextLaneId.current++, value: "" }], bulk)
+              sync([...lanes, { id: nextLaneId.current++, value: "", delivers: "text" }], bulk)
             }
           >
             <Plus className="size-4" aria-hidden="true" />

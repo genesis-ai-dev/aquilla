@@ -8,6 +8,8 @@
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
 import { settingsKeyDocLines } from './project-settings-keys'
+import { BIBLE_CHECK_META, TEXT_CHECK_IDS, TEXT_CHECK_META } from './builtin-checks'
+import { BIBLE_CHECK_IDS } from './bible-checks/types'
 import { POLICY_DIRECTION_TABLE } from './policy-direction'
 
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
@@ -35,6 +37,14 @@ export interface CommandCatalogEntry {
 const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
   .map((line) => `\`${line}\``)
   .join(', ')
+
+// AQU-2192: the Rules page's check names, mapped to the ids `algorithmicChecks` is keyed by.
+const PATCH_SETTINGS_CHECKS_DOC = `Built-in checks (Rules page name → id, default): ${TEXT_CHECK_IDS.map((id) => {
+  const m = TEXT_CHECK_META[id]
+  return `"${m.name}" → \`${id}\` (${m.defaultEnabled ? 'on' : 'off'}, ${m.defaultSeverity})`
+}).join('; ')}. Bible data checks, present only while the project's Bible data checks are on (all default on): ${BIBLE_CHECK_IDS.map((id) => `"${BIBLE_CHECK_META[id].name}" → \`${id}\``).join('; ')}.
+To override a check, write \`algorithmicChecks\` as a map from id to \`{ enabled, severity? }\`, e.g. \`{ "usfm-structure": { "enabled": false }, "footnote-quote-mismatch": { "enabled": false } }\`. Omit \`severity\` for the default; a check with no entry keeps its default. The op replaces the whole map, so start from \`settings.algorithmicChecks\` (GET .../settings) and add to it. \`algorithmicChecksByLane\` is \`{ [laneTag]: that same map }\` (\`""\` is the default lane); a lane's entry for a check replaces the project-wide entry for that check, and other checks fall through. \`rules\` holds only your own regex rules, never built-in checks. The "Style rules" section of the Rules page is a different store and cannot be written through \`rules\`.`
+
 
 /** AQU-1282: the per-key restrictive direction, rendered from the same table the
  *  enforcing helper uses (db/shared/policy-direction.ts) so the doc an agent
@@ -74,8 +84,8 @@ Example: \`{ "kind": "SetTranslation", "fileId": "f1", "cellId": "c3", "laneId":
     tier: 'prepared',
     agentReachable: true,
     paramsDoc: `### LinkMedia
-Params: \`{ fileId, cellId, artifactId }\` — the artifact must be audio-kind, same project.
-Compiles to \`cell.audio.attach\` + \`cell.audio.select\`; bytes are copied into the app's native audio layout so playback works everywhere.
+Params: \`{ fileId, cellId, artifactId, laneId, slot?, durationMs? }\` — the artifact must be audio-kind, same project. \`laneId\` is the target lane's \`lanes.id\` (required — a take with no lane is filed under the legacy default lane and never shows in a tagged lane's Takes); \`slot\` is \`"recording"\` (default: a recorded take) or \`"generatedVoice"\` (externally synthesized voice, reviewed and exported like in-app TTS); \`durationMs\` is the clip length when known (the upload does no decoding).
+Compiles to \`cell.audio.attach\` + \`cell.audio.select\` in that lane. The take gets a cell-seeded native audio id — reported as \`receipt.media[].audioId\`, not the upload's audioId — and the bytes are copied into the app's native audio layout, so the Takes list, the Target track, playback and the dubbing export treat it like a recorded take.
 Gotcha: upload the artifact first (REST artifact endpoint with \`x-artifact-kind: audio\`); LinkMedia-only changesets cannot mix other commands.`,
   },
   {
@@ -185,9 +195,11 @@ Floors: every key needs MAINTAINER 600 (the language keys — sourceLanguage, ta
 Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
+${PATCH_SETTINGS_CHECKS_DOC}
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
+- Checks and rules: \`rules\`, \`rulePenalties\`, \`algorithmicChecks\` and \`algorithmicChecksByLane\` are checked field by field; a wrong shape or an unknown field is \`validation_failed\` naming it. Read \`builtinChecks\` from GET .../settings to see what is on; \`settings\` alone shows only overrides.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 - RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "systemPrompt", "value": "Be concise." }], "ifMatchVersion": 7 }\``,

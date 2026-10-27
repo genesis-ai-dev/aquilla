@@ -18,6 +18,7 @@ import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -214,6 +215,13 @@ export interface ProjectWideSettings {
    * keep it; see `isAutopilotVisible` in src/lib/features/flags.ts.
    */
   autopilotEnabled?: boolean
+  /**
+   * AQU-2041: when on, a project lead can create, edit, and assign voices on
+   * the lanes they can write. Absent or false keeps voice management at
+   * maintainer. Only a maintainer can change this key. Turning it off leaves
+   * voices that were already created.
+   */
+  projectLeadsManageVoices?: boolean
   /**
    * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
    * project is exactly today's Aquilla: the native editor, the built-in
@@ -515,13 +523,6 @@ export interface ProjectSettingsResponse {
    */
   orgMediaDefaults?: MediaDefaults
   /**
-   * Whether the org lets bulk text validation take untouched AI drafts. On
-   * this response for the same reason as the line above, and because a project
-   * member outside the org cannot read the org's settings at all. Null when
-   * the project has no org; optional on an older server.
-   */
-  orgAllowBulkValidateAiDrafts?: boolean | null
-  /**
    * AQU-1771: the rest of the org's policy this project's surfaces apply —
    * both visibility floors, assignment authority, the repetition default, the
    * export floor — carried here so a member outside the org gets the org's
@@ -558,6 +559,13 @@ export interface ProjectLaneView {
    * server that predates migration 0173, which reads as off.
    */
   recordsAudio?: boolean
+  /**
+   * Media redesign slice 1: what this language delivers — Text, Audio, or
+   * Text and audio. Null is "not chosen yet" (a language that had "Records
+   * audio" on before this existed), which counts as before and asks for a
+   * choice. Absent from a server that predates migration 0187.
+   */
+  delivers?: LaneDelivers | null
 }
 
 export type PatchResult =
@@ -667,6 +675,8 @@ export async function createProjectLane(
     language: string
     code?: string | null
     allowDuplicateName?: boolean
+    /** Media redesign slice 1: what the language delivers. Omitted, Text. */
+    delivers?: LaneDelivers
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
@@ -690,29 +700,37 @@ export async function createProjectLane(
   return { kind: "ok", lane: body.lane }
 }
 
-/** AQU-1954: POST /api/v2/projects/:id/lanes/:laneId/records-audio. */
-export async function setProjectLaneRecordsAudio(
+export type SetLaneDeliversResult =
+  | { kind: "ok"; lane: ProjectLaneView | null }
+  /** The caller is below the project's language-edit floor. */
+  | { kind: "forbidden" }
+  | { kind: "error"; message: string }
+
+/** Media redesign slice 1: POST /api/v2/projects/:id/lanes/:laneId/delivers. */
+export async function setProjectLaneDelivers(
   jwt: string,
   projectId: string,
   laneId: string,
-  recordsAudio: boolean,
+  delivers: LaneDelivers,
   apiUrl: string = FRONTIER_API_URL,
-): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+): Promise<SetLaneDeliversResult> {
   let res: Response
   try {
     res = await fetch(
-      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/records-audio`,
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/delivers`,
       {
         method: "POST",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ recordsAudio }),
+        body: JSON.stringify({ delivers }),
       },
     )
   } catch (e) {
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
+  if (res.status === 403) return { kind: "forbidden" }
   if (!res.ok) return { kind: "error", message: `save failed (${res.status})` }
-  return { kind: "ok" }
+  const body = (await res.json().catch(() => null)) as { lane?: ProjectLaneView } | null
+  return { kind: "ok", lane: body?.lane ?? null }
 }
 
 /** POST /api/v2/projects/:id/lanes/:laneId/archive. */

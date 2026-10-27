@@ -603,10 +603,6 @@ export const terminology = defineNamespace({
       other: "Apply {count} changes",
     }),
 
-    // ── TerminologyPage.tsx: ConceptDialog (add/edit concept form) ──────────
-    "terminology.conceptDialog.renderingPlaceholder": "rendering",
-    "terminology.conceptDialog.targetRenderingsLabel": "Target renderings",
-
     // ── TerminologyPage.tsx: TermbaseImportDialog ────────────────────────────
     "terminology.importDialog.title": "Import term base",
     "terminology.importDialog.parsing": "Parsing…",
@@ -615,15 +611,6 @@ export const terminology = defineNamespace({
     "terminology.importDialog.csvColumnsHint":
       "Columns: source_lemma · target_lemma · target_status · definition (optional)",
     "terminology.importDialog.tbxDialectsHint": "TBX-Basic and TBX-Min dialects supported",
-
-    // ── TerminologyPage.tsx: LibraryStatsHeader ──────────────────────────────
-    "terminology.libraryStats.heading": "Library Overview",
-    "terminology.libraryStats.noActiveConcepts": "(no active concepts)",
-    "terminology.libraryStats.activeConceptsLabel": "Active concepts",
-    "terminology.libraryStats.enforcedLabel": "Enforced",
-    "terminology.libraryStats.infringedLabel": "Infringed",
-    "terminology.libraryStats.cellsAnalyzedLabel": "Cells analyzed",
-    "terminology.libraryStats.mostInfringedLabel": "Most infringed",
 
     // ── GlossaryEditor.tsx inside the workspace shell — what is left of the
     // retired TerminologyPage.tsx's own chrome ──────────────────────────────
@@ -1280,18 +1267,6 @@ export const terminology = defineNamespace({
           "are currently checked.",
         placeholders: { count: "Number of rename suggestions currently checked." },
       },
-      "terminology.conceptDialog.renderingPlaceholder": {
-        description:
-          "Placeholder text in an empty rendering-text input, inside the add/edit " +
-          "concept dialog's list of target renderings. A generic noun naming what goes " +
-          "in the field, not an example value.",
-      },
-      "terminology.conceptDialog.targetRenderingsLabel": {
-        description:
-          "Field label over the list of target-language renderings in the add/edit " +
-          "concept dialog — each rendering is one approved/alternate/forbidden " +
-          "translation of the source term.",
-      },
       "terminology.importDialog.title": {
         description:
           "Title of the dialog for bulk-importing terms into the project's term base " +
@@ -1328,39 +1303,6 @@ export const terminology = defineNamespace({
           "'TBX-Min' are the names of specific TermBase eXchange format dialects — " +
           "proper names, keep verbatim.",
       },
-      "terminology.libraryStats.heading": {
-        description: "Small heading over the Terminology page's summary stats panel.",
-      },
-      "terminology.libraryStats.noActiveConcepts": {
-        description:
-          "Parenthetical qualifier shown beside the stats panel heading when the " +
-          "project has zero active concepts yet, so the stats below all read as " +
-          "placeholders.",
-      },
-      "terminology.libraryStats.activeConceptsLabel": {
-        description: "Stat-tile label above the count of active (non-draft, non-deprecated) concepts.",
-      },
-      "terminology.libraryStats.enforcedLabel": {
-        description:
-          "Stat-tile label above the percentage of scanned occurrences using an " +
-          "approved rendering. Distinct from terminology.termDetail.verdictEnforced " +
-          "(a lowercase inline verdict word on one occurrence) — this is a stat-tile " +
-          "heading and may need different capitalization/register in the target " +
-          "language.",
-      },
-      "terminology.libraryStats.infringedLabel": {
-        description:
-          "Stat-tile label above the percentage of scanned occurrences that violate a " +
-          "concept's approved/forbidden renderings. Distinct from " +
-          "terminology.termDetail.verdictInfringed for the same reason as the Enforced " +
-          "label above.",
-      },
-      "terminology.libraryStats.cellsAnalyzedLabel": {
-        description: "Stat-tile label above the total count of cells the terminology scan covered.",
-      },
-      "terminology.libraryStats.mostInfringedLabel": {
-        description: "Small heading over the list of the concepts with the most violations, shown when any exist.",
-      },
       "terminology.loadingLabel": {
         description:
           "Loading-panel label shown while the Terminology surface's initial data " +
@@ -1371,8 +1313,9 @@ export const terminology = defineNamespace({
       "terminology.page.mergeDuplicatesButton": {
         description:
           "Button opening the merge-duplicate-concepts dialog, shown only once the " +
-          "project has 2+ concepts. Visible text; distinct from the same button's " +
-          "accessible name (terminology.mergeDialog.title, reused here since identical).",
+          "project has 2+ concepts. This is the button's whole accessible name as " +
+          "well as its visible text (AQU-2077): it carries no aria-label, so a " +
+          "translation must stay speakable as a voice command.",
       },
       "terminology.bibleLink.heading": {
         description:

@@ -5,6 +5,12 @@ export const dialog = defineNamespace({
     "dialog.confirmCheckboxDefault": "I understand this action.",
     "dialog.assign.title": "Assign work",
     "dialog.assign.scopeLabel": "Scope",
+    // AQU-1969: what the assignment hands out.
+    "dialog.assign.kindLabel": "Task",
+    "dialog.assign.kind.translate": "Translate",
+    "dialog.assign.kind.validate": "Validate",
+    "dialog.assign.kindValidateDescription":
+      "Their progress counts the lines they approve themselves, in text and audio.",
     "dialog.assign.scope.selection": "Current selection",
     "dialog.assign.scope.allVerses": "All verses in file",
     "dialog.assign.scope.entireFile": "Entire file",
@@ -31,6 +37,9 @@ export const dialog = defineNamespace({
     "dialog.assign.selfAssignDescription":
       "Self-assignment is on — you can claim this work for yourself. Only leads and " +
       "maintainers can assign work to someone else.",
+    "dialog.assign.onlyProjectMembersHint": "Only people on this project can be given work.",
+    "dialog.assign.addPeopleLink": "Add someone to this project",
+    "dialog.assign.askMaintainerToAdd": "Ask a project maintainer to add the person to this project first.",
     "dialog.assign.deadlineLabel": "Deadline (optional)",
     "dialog.assign.deadlineBatchDescription":
       "Applies to every file selected above — one deadline for the whole batch.",
@@ -40,6 +49,10 @@ export const dialog = defineNamespace({
     "dialog.assign.error.selectMember": "Select a member.",
     "dialog.assign.error.notProjectMember": "You can only assign work to a project member.",
     "dialog.assign.error.selfOnly": "You can only assign work to yourself.",
+    "dialog.assign.overlap.oneFile":
+      "{username} already holds {held} in {file}, so this would assign those lines twice. You can still assign it.",
+    "dialog.assign.overlap.manyFiles":
+      "{username} already holds lines in {files}, so this would assign them twice. You can still assign it.",
     "dialog.assign.error.laneOutOfScope":
       "You can only assign work in the language lanes you've been given.",
     "dialog.assign.error.assigneeNotEligible":
@@ -83,6 +96,34 @@ export const dialog = defineNamespace({
           "Form label above the scope selector — what portion of the project this " +
           "assignment covers (current selection, whole file, chapters, or files).",
         screenshot: "assign-modal",
+      },
+      "dialog.assign.kindLabel": {
+        description:
+          "Form label above the choice of what an assignment hands out: Translate " +
+          "(the work as it has always been) or Validate (only the approving). On " +
+          "both assign surfaces — the Assign dialog and the Team card's panel.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kind.translate": {
+        description:
+          "Task option: the person translates the lines (the default, and every " +
+          "assignment made before there was a choice). A verb, like its sibling.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kind.validate": {
+        description:
+          "Task option: the person only validates (approves) the lines; somebody " +
+          "else translates them. Use the word the app uses for approving a line.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.kindValidateDescription": {
+        description:
+          "Helper text under the Task field, shown only when Validate is chosen: " +
+          "this person's progress will count their OWN approvals of the lines — " +
+          "not whether someone else has approved them — for written text and for " +
+          "recordings alike.",
+        screenshot: "assign-modal",
+        maxLength: 120,
       },
       "dialog.assign.scope.selection": {
         description:
@@ -185,6 +226,26 @@ export const dialog = defineNamespace({
           "instead.",
         screenshot: "assign-modal",
       },
+      "dialog.assign.onlyProjectMembersHint": {
+        description:
+          "Helper text under the assignee field when nobody on the project besides the " +
+          "person assigning (and its maintainers or owners) can be given language work, so " +
+          "the list holds no linguist. Followed by the 'Add someone to this project' link.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.addPeopleLink": {
+        description:
+          "Link after the 'Only people on this project can be given work.' helper text; " +
+          "opens the project's Members settings, where people are added to the project.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.askMaintainerToAdd": {
+        description:
+          "Follows 'Only people on this project can be given work.' for someone below " +
+          "maintainer, who can't open the project's Members settings: tells them who can add " +
+          "the person they want to assign.",
+        screenshot: "assign-modal",
+      },
       "dialog.assign.deadlineLabel": {
         description: "Form label above the optional deadline date picker.",
         screenshot: "assign-modal",
@@ -220,6 +281,28 @@ export const dialog = defineNamespace({
           "Inline validation error when the selected assignee turns out not to be a " +
           "project member (defense-in-depth check; the picker already filters these " +
           "out in normal use).",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.overlap.oneFile": {
+        description:
+          "Amber warning in the Assign work dialog and the Team card's assign panel when the new " +
+          "assignment covers lines the chosen person already holds in one file. It warns and " +
+          "never blocks: the Assign button still works.",
+        placeholders: {
+          username: "The person being assigned — not translated.",
+          held: "What they already hold there, e.g. \"MAT 21–28\" or a stored label like \"All verses\".",
+          file: "The file's display name, e.g. \"Matthew\".",
+        },
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.overlap.manyFiles": {
+        description:
+          "Amber warning in the Assign work dialog when several picked files hold lines the " +
+          "chosen person already has. Warns only; the Assign button still works.",
+        placeholders: {
+          username: "The person being assigned — not translated.",
+          files: "Up to three file names separated by commas, then \"…\" when there are more.",
+        },
         screenshot: "assign-modal",
       },
       "dialog.assign.error.selfOnly": {

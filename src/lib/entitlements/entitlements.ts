@@ -4,8 +4,9 @@
 // lives in auth-worker org_billing; this stub still grants TM opt-out to
 // every org until that feature is wired to a plan.
 //
-// Storage conventions (existing "dumb store" blobs, no migrations needed, C6):
-//   - org_settings.settings.enterprise: true        → org is enterprise-flagged
+// Storage conventions:
+//   - the org's plan (AQU-2059) comes from GET /api/v2/orgs/:id/plan; the
+//     server's resolveOrgPlan (db/shared/org-plan.ts) is the only copy of the rules
 //   - project_settings.settings.contributeToGlobalTm: false → project opts out
 //     of the global translation memory (default TRUE when absent).
 
@@ -26,8 +27,12 @@ export const grantAllBillingStub: BillingStub = {
 }
 
 export interface OrgSettingsBlob {
-  enterprise?: boolean
   [key: string]: unknown
+}
+
+/** The plan as GET /api/v2/orgs/:id/plan returns it. */
+export interface OrgPlanSummary {
+  tier: "free" | "team" | "enterprise"
 }
 
 export interface ProjectSettingsBlob {
@@ -58,6 +63,7 @@ export function resolveProjectEntitlements(args: {
   }
 }
 
-/** Enterprise flag lives on the org settings blob. */
-export const isEnterpriseOrg = (orgSettings: OrgSettingsBlob | null | undefined): boolean =>
-  orgSettings?.enterprise === true
+/** AQU-2059: Enterprise is the org's plan tier, not a settings-blob flag.
+ *  Nothing ever wrote `org_settings.settings.enterprise`. */
+export const isEnterpriseOrg = (plan: OrgPlanSummary | null | undefined): boolean =>
+  plan?.tier === "enterprise"

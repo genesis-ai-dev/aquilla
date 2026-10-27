@@ -1,5 +1,5 @@
 // Client for the self-hosted Omnilingual ASR service on Modal
-// (infra/modal/omnilingual_asr.py; spec docs/superpowers/specs/2026-10-16-omnilingual-asr.md).
+// (infra/modal/omni_asr.py; spec docs/superpowers/specs/2026-10-16-omnilingual-asr.md).
 // Every call carries the shared secret; the service compares it in constant time.
 
 import { z } from "zod"

@@ -8,6 +8,7 @@ export type {
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
+  SubtitleCueRepair,
   ExportCellFields,
 } from "./core-types"
 // Also needed in local type positions below, not just re-exported.
@@ -95,28 +96,10 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-export type BuiltinCheckId =
-  | "empty-target"
-  | "target-equals-source"
-  | "placeholder-integrity"
-  | "number-integrity"
-  | "number-integrity-extra"
-  | "end-punctuation-mismatch"
-  | "punctuation-integrity"
-  | "double-space"
-  | "repeated-word"
-  | "unpaired-symbols"
-  | "abbreviation-mismatch"
-  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
-   *  only while the project's Bible data checks enrichment is on. */
-  | import("../../../db/shared/bible-checks/types").BibleCheckId
-  | "usfm-structure"
-  | "capitalization"
-  | "footnote-quote-mismatch"
-  | "corrupted-characters"
-  | "unpaired-quotes"
-  | "untranslated-fragment"
-  | "length-ratio"
+/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
+ *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
+ *  project's Bible data checks enrichment is on. */
+export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -408,6 +391,29 @@ export interface Voice {
    * is set *without* this key (a recorded or uploaded clip).
    */
   referenceTakeKey?: string
+  /**
+   * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
+   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
+   * take into it through the voice forge instead of Seed-VC (sync-worker POST
+   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * words, pronunciation, timing and intonation are kept; only the timbre changes.
+   */
+  libraryVoiceId?: string
+  /**
+   * Set when `libraryVoiceId` is a custom voice trained from the organization's own
+   * recordings of a real speaker (src/lib/audio/custom-voice.ts). A display copy of
+   * the consent confirmation; the authoritative audit record lives server-side
+   * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
+   */
+  customVoice?: {
+    speakerName: string
+    /** ISO time the maintainer confirmed the consent statement. */
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+    /** ISO time training was queued, for the "ready in ~N min" hint. */
+    trainingStartedAt: string
+  }
 }
 
 export interface ProjectTtsSettings {
@@ -433,6 +439,24 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * AQU-2038: the per-lane cast, keyed by lane legacy tag (`''` is the default
+   * lane — the same convention as `cells`/`lanes` since AQU-538), then by
+   * cellId. A lane with no entry for a cell falls back to the project-wide
+   * `castAssignments` above, so every project that predates this field keeps
+   * generating exactly as it did. The empty string is a SENTINEL meaning "this
+   * lane uses its own default voice" — it has to be storable, because a lane
+   * that is sent back to its default must outrank a project-wide assignment
+   * naming a voice.
+   */
+  laneCastAssignments?: Record<string, Record<string, string>>
+  /**
+   * AQU-2038: the starred/default voice per lane, keyed by lane legacy tag.
+   * Absent for a lane that never starred one — it then falls back to
+   * `defaultVoiceId`. The empty-string sentinel means "this lane has no
+   * default of its own", which outranks the project-wide default.
+   */
+  laneDefaultVoiceId?: Record<string, string>
   /**
    * Character disagreements a person has settled. (AQU-646, 2026-08-18)
    *
@@ -586,6 +610,13 @@ export interface ProjectRecord {
     legacyTag: string | null
     position: number
     archivedAt: string | null
+    /** AQU-1954: the row's "Records audio" switch. */
+    recordsAudio?: boolean
+    /**
+     * Media redesign slice 1: what the language delivers, or null when nobody
+     * has chosen yet. Read it through `laneRowDelivers`.
+     */
+    delivers?: import("@/lib/lanes/lane-delivers").LaneDelivers | null
   }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
@@ -594,6 +625,11 @@ export interface ProjectRecord {
   members: ProjectMember[]
   completionSettings?: CompletionSettings
   ttsSettings?: ProjectTtsSettings
+  /**
+   * AQU-2041: project leads may manage voices on lanes they can write.
+   * Absent is off. Only a maintainer can change it.
+   */
+  projectLeadsManageVoices?: boolean
   username?: string
   rules?: TranslationRule[]
   /** Per-project enable/severity overrides for built-in algorithmic checks.

@@ -125,6 +125,58 @@ describe("FileRow — AQU-341 truncation consistency", () => {
     expect(slot).toHaveAttribute("aria-label", "99% translated, 100% validated")
   })
 
+  // AQU-2111: a project whose target language has no written form reads 0
+  // filled / 0 approved forever, so the row has to draw its AUDIO figures
+  // instead — this row used to read "0% translated, 0% validated" over a file
+  // where every line was recorded and signed off.
+  it("draws the audio bar alone on a file with takes and no target text", () => {
+    const { container } = renderRow({
+      progress: { translated: 0, validated: 0, total: 10, recorded: 5, audioValidated: 5 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute("aria-label", "50% recorded, 50% audio validated")
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(1)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => `${part.dataset.progressTone} ${part.style.width}`))
+      .toEqual(["audioValidated 50%"])
+    // The slot reservation is untouched, so names still truncate identically.
+    expect(slot.className).toContain("w-[50px]")
+  })
+
+  it("keeps the text bar and adds an audio one on a file with both", () => {
+    const { container } = renderRow({
+      progress: { translated: 8, validated: 5, total: 10, recorded: 4, audioValidated: 1 },
+    })
+    const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+    expect(slot).toHaveAttribute(
+      "aria-label",
+      "80% translated, 50% validated, 40% recorded, 10% audio validated",
+    )
+    const bars = slot.querySelectorAll('[data-slot="progress-split-bar"]')
+    expect(bars).toHaveLength(2)
+    expect([...bars[0].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["textValidated", "textTranslated"])
+    expect([...bars[1].querySelectorAll<HTMLElement>("[data-progress-tone]")]
+      .map((part) => part.dataset.progressTone)).toEqual(["audioValidated", "audioRecorded"])
+  })
+
+  // WHY: a text-only project must look exactly as it did. An absent pair (an
+  // older sync-worker) and a real zero both mean "no audio bar", and neither
+  // may read as "0% recorded".
+  it("is unchanged on a text-only file, whether the audio pair is zero or absent", () => {
+    for (const progress of [
+      { translated: 8, validated: 5, total: 10 },
+      { translated: 8, validated: 5, total: 10, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = renderRow({ progress })
+      const slot = container.querySelector('[data-testid="file-row-progress-slot"]')!
+      expect(slot).toHaveAttribute("aria-label", "80% translated, 50% validated")
+      expect(slot.querySelectorAll('[data-slot="progress-split-bar"]')).toHaveLength(1)
+      unmount()
+    }
+  })
+
   it("exposes the full (untruncated) name so the user can recover it", () => {
     const { container } = renderRow()
     // The accessible name is the full string even though it renders truncated.
@@ -225,5 +277,60 @@ describe("FileRow — AQU-894 unassigned de-emphasis", () => {
     expect(note?.textContent).toContain("Not assigned to you")
     expect(note?.textContent).toContain("still open it")
     expect(renderRow().container.querySelector(".sr-only")).toBeNull()
+  })
+})
+
+// Media redesign slice 2 (P2.1): a language that counts its recordings
+// describes the file by them.
+describe("FileRow progress in a language that counts its recordings", () => {
+  it("Audio: the bar says recorded and approved, never translated", () => {
+    const { getByTestId } = renderRow({ progress: { total: 45, translated: 10, validated: 6, delivers: "audio" } })
+    const label = getByTestId("file-row-progress-slot").getAttribute("aria-label") ?? ""
+    expect(label).toMatch(/^\d+% recorded, \d+% audio validated$/)
+    expect(label).not.toMatch(/translated/)
+  })
+
+  it("Text: a language that delivers text draws its text alone, however much is recorded", () => {
+    const { getByTestId } = renderRow({
+      progress: { total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label")).not.toMatch(/recorded/)
+  })
+
+  it("Text and audio: drawn exactly like a not-chosen file that holds both (Sam, Oct 24)", () => {
+    // The language's own row: started / done in translated / validated (what
+    // the footer reads), the two halves beside them.
+    const chosen = renderRow({
+      progress: {
+        total: 10, translated: 9, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 5, audioValidated: 3,
+      },
+    })
+    const chosenSlot = chosen.getByTestId("file-row-progress-slot")
+    // The same file, nobody having chosen: text and audio figures as they are.
+    const unchosen = renderRow({ progress: { total: 10, translated: 6, validated: 4, recorded: 5, audioValidated: 3 } })
+    const unchosenSlot = unchosen.getAllByTestId("file-row-progress-slot")[1]
+    expect(chosenSlot.getAttribute("aria-label")).toBe("60% translated, 40% validated, 50% recorded, 30% audio validated")
+    expect(chosenSlot.getAttribute("aria-label")).toBe(unchosenSlot.getAttribute("aria-label"))
+    expect(chosenSlot.innerHTML).toBe(unchosenSlot.innerHTML)
+    expect(chosenSlot.getAttribute("title")).toBeNull()
+  })
+
+  it("Text and audio: the audio bar shows before the first recording, since the language owes it", () => {
+    const { getByTestId } = renderRow({
+      progress: {
+        total: 10, translated: 6, validated: 4, delivers: "text_and_audio",
+        textTranslated: 6, textValidated: 4, recorded: 0, audioValidated: 0,
+      },
+    })
+    expect(getByTestId("file-row-progress-slot").getAttribute("aria-label"))
+      .toBe("60% translated, 40% validated, 0% recorded, 0% audio validated")
+  })
+
+  it("Text: exactly as before", () => {
+    const { getByTestId } = renderRow({ progress: { total: 10, translated: 5, validated: 2 } })
+    const slot = getByTestId("file-row-progress-slot")
+    expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
+    expect(slot.getAttribute("title")).toBeNull()
   })
 })

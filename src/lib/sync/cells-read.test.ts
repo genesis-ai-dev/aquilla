@@ -372,3 +372,23 @@ describe("adaptive cell pages", () => {
     expect(metas).toEqual([1, 2, 2].map(maxServerSeq => ({ maxServerSeq, projectEpoch: undefined, total: 2501 })))
   })
 })
+
+describe("fetchProjectFiles — lane (AQU-2118)", () => {
+  it("names the lane on the wire only when one is given", async () => {
+    const calls: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      calls.push(url)
+      return pageResponse({ files: [], nextCursor: null })
+    }))
+    const { fetchProjectFiles } = await import("./cells-read")
+    await fetchProjectFiles("p1", "jwt", { lane: "fr" })
+    await fetchProjectFiles("p1", "jwt", { lane: "" })
+    await fetchProjectFiles("p1", "jwt")
+    expect(calls).toHaveLength(3)
+    expect(new URL(calls[0]).searchParams.get("lane")).toBe("fr")
+    // The default lane stays off the wire (AQU-538), so a one-lane project's
+    // request is byte-identical to before.
+    expect(new URL(calls[1]).searchParams.has("lane")).toBe(false)
+    expect(new URL(calls[2]).searchParams.has("lane")).toBe(false)
+  })
+})

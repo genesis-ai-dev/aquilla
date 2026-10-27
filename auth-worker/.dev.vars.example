@@ -87,6 +87,12 @@ MONDAY_APP_SLUG=""
 # for local dev use the local SPA origin:
 MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 
+# Airtable integration (routes/airtable.ts, AQU-804). Needs no app or secret:
+# each org pastes a personal access token, stored encrypted like Monday's. Set
+# this only to walk the integration against a stand-in Airtable on this
+# machine; leave it unset to talk to the real API.
+# AIRTABLE_API_URL="http://127.0.0.1:9690"
+
 # DO NOT put WRANGLER_LOCAL in this file (or in any deployed env). It's
 # injected by `scripts/dev-stack.ts` only and unlocks /__test__/reset and
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.

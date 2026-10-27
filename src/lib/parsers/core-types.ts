@@ -74,6 +74,12 @@ export interface TranslatableString {
   /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
    *  Drives paragraph grouping for multi-cell draft operations. */
   paragraphStart?: boolean
+  /** AQU-2184: USFM only — the bare paragraph marker that opened this cell's
+   *  block ("p", "m", "q1", "pi2", …). Present only alongside
+   *  `paragraphStart`; the marker sits between verse spans, so this is the
+   *  only record of whether the block is prose or a poetry line at level N.
+   *  Rides into `metadata.paragraphMarker` on import. */
+  paragraphMarker?: string
   /**
    * Extensible per-cell metadata bucket, mirrored through the import path into
    * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
@@ -87,6 +93,24 @@ export interface TranslatableString {
   sourceLocation?: SourceLocation
   /** Exact format locator when a package-block locator would lose identity. */
   sourceLocator?: ImportSourceLocator
+}
+
+/**
+ * Subtitle-import cue counts (AQU-2119). Numbers, never sentences — the
+ * preview notice's wording is resolved where it is built (`import.ts`), the
+ * same split `structureFindings` uses.
+ */
+export interface SubtitleCueRepair {
+  /** Cue timestamp lines padded from WebVTT's short form (`01:03.209`) to the
+   *  strict `HH:MM:SS.mmm` the parser matches. Every one of these would
+   *  otherwise have vanished WITH ITS WORDS — see
+   *  `repairShortFormCueTimestamps`. Always 0 for SRT, which has no short
+   *  form. */
+  repairedShortForm: number
+  /** Timestamp lines that produced no cue at all: a range the parser still
+   *  can't read, or a range with no text under it. Reported so the import says
+   *  so instead of dropping the words silently. */
+  droppedCues: number
 }
 
 /**
@@ -109,6 +133,8 @@ export interface ParsedTextFileResult {
    *  site, the same way `rule-engine.ts` reason codes are handled. Absent when
    *  the file is clean. */
   structureFindings?: UsfmStructureFinding[]
+  /** Subtitle (vtt/srt) cue counts (AQU-2119). Absent when both are zero. */
+  cueRepair?: SubtitleCueRepair
 }
 
 /**

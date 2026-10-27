@@ -51,6 +51,10 @@ const PASSAGES_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/search\/passages$/
 
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 500
+// [Pen test] API security (2026-10-22): `q` is attacker-controlled and, with
+// regexp=1, compiled as a pattern. Bounding its length bounds the cost of
+// pathological patterns without touching any realistic search.
+const MAX_QUERY_LENGTH = 500
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -161,6 +165,9 @@ export async function handleSearchReadRequest(
   if (q === null || q.trim() === "") {
     return new Response("missing q", { status: 400 })
   }
+  if (q.length > MAX_QUERY_LENGTH) {
+    return new Response("q too long", { status: 400 })
+  }
 
   const parsed = parseCommonParams(url)
   if ("error" in parsed) return parsed.error
@@ -225,6 +232,9 @@ export async function handleSearchPassagesRequest(
   const q = url.searchParams.get("q")
   if (q === null || q.trim() === "") {
     return new Response("missing q", { status: 400 })
+  }
+  if (q.length > MAX_QUERY_LENGTH) {
+    return new Response("q too long", { status: 400 })
   }
 
   const parsed = parseCommonParams(url)

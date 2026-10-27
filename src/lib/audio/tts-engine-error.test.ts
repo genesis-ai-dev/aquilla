@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest"
 import {
-  HOSTED_TTS_CREDIT_CAP_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_NOT_CONFIGURED_BODY,
   errorFromHostedTts,
   errorFromVoiceConvert,
 } from "./tts-engine-error"
+import { AiRefusalError } from "@/lib/billing/ai-refusal"
 
 describe("errorFromHostedTts", () => {
   it("names Inworld when the local worker has no Inworld API key", () => {
@@ -21,27 +21,26 @@ describe("errorFromHostedTts", () => {
     expect(err.message).toContain("upstream timeout")
   })
 
-  // AQU-1872: the worker refuses an out-of-credit org BEFORE calling the
-  // vendor, so reporting it as a vendor failure tells the user the opposite of
-  // the truth and hides the only person who can clear it.
-  it("does not blame the engine when the org is out of credit", () => {
+  // AQU-1872/AQU-2068: the worker refuses an out-of-allowance org BEFORE
+  // calling the vendor, so reporting it as a vendor failure tells the user the
+  // opposite of the truth. The one refusal helper words it, and meters flip.
+  it("does not blame the engine when the workspace is out of allowance", () => {
     const body = JSON.stringify({
       error: "credit_cap_exceeded",
       message: "This organization has used its daily credit allowance.",
       reason: "daily",
     })
-    const message = errorFromHostedTts(429, body).message
-    expect(message).toBe(HOSTED_TTS_CREDIT_CAP_BODY)
-    // The three things the user needs: no audio, not the engine, who can fix it.
-    expect(message).toMatch(/no audio was generated/i)
-    expect(message).toMatch(/voice engine is fine/i)
-    expect(message).toMatch(/org admin/i)
-    // And NOT a provider red herring: the cause is already named outright, so
-    // naming Gemini here would only plant the idea it is meant to rule out.
-    expect(message).not.toMatch(/gemini/i)
-    // And never the raw JSON the server sent.
-    expect(message).not.toContain("credit_cap_exceeded")
-    expect(message).not.toMatch(/^Inworld TTS failed/)
+    const err = errorFromHostedTts(429, body)
+    expect(err).toBeInstanceOf(AiRefusalError)
+    expect(err.message).toMatch(/used this week's AI/i)
+    // Not a provider red herring, not the raw JSON, and never an amount.
+    expect(err.message).not.toMatch(/gemini|credit/i)
+    expect(err.message).not.toMatch(/^Inworld TTS failed/)
+  })
+
+  it("reads the 402 contract the same way", () => {
+    const err = errorFromHostedTts(402, JSON.stringify({ error: "ai_allowance_exhausted", tier: "free" }))
+    expect(err).toBeInstanceOf(AiRefusalError)
   })
 
   it("leaves other 429s on the generic path", () => {

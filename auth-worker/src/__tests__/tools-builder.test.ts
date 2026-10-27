@@ -4,10 +4,16 @@
 // test is the pipeline, not the model.
 
 import { describe, it, expect } from "vitest"
-import { runBuild, TOOLS_BUILDER_MODEL } from "../lib/tools/builder"
+import { runBuild, TOOLS_BUILDER_MODEL, type BuilderAdmit } from "../lib/tools/builder"
 import { TOOLS_BUILDER_SYSTEM_PROMPT, buildUserMessage, parseBuildReply, parseRequirementsBlock } from "../lib/tools/build-prompt"
 import { TOOLS_REVIEW_SYSTEM_PROMPT, parseReview, staticUiFindings } from "../lib/tools/build-review"
 import { UI_CHECKS } from "../lib/tools/build-prompt-guide"
+
+/** These tests are about the pipeline, not billing: every call is admitted on
+ *  the house key "k" (the metering contract is in tools-build-metering.test.ts). */
+const houseKey: BuilderAdmit = async () => ({
+  ok: true, apiKey: "k", recorded: false, settleFrom: async () => undefined, release: async () => {},
+})
 
 function stubFetch(contents: string[], cost = 0.12): { fetchImpl: typeof fetch; bodies: { model: string; max_tokens: number; messages: { role: string; content: string }[] }[] } {
   const bodies: { model: string; max_tokens: number; messages: { role: string; content: string }[] }[] = []
@@ -37,7 +43,7 @@ const CLEAN = `<div class="skel">Loading</div><script>aq.mount(aq.ui.Page({ chil
 describe("tools builder gates", () => {
   it("accepts a clean reply and reports cost (no review)", async () => {
     const { fetchImpl, bodies } = stubFetch([reply(MANIFEST, CLEAN)])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "a grid", review: false }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "a grid", review: false }, { admit: houseKey, fetchImpl })
     expect(out.ok).toBe(true)
     expect(out.usage.cost).toBeCloseTo(0.12)
     expect(out.model).toBe(TOOLS_BUILDER_MODEL)
@@ -47,7 +53,7 @@ describe("tools builder gates", () => {
 
   it("fails lint on banned globals and returns a repair message naming them", async () => {
     const { fetchImpl, bodies } = stubFetch([reply(MANIFEST, `<script>fetch("https://x");eval("1")</script>`)])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "a grid" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "a grid" }, { admit: houseKey, fetchImpl })
     expect(out.ok).toBe(false)
     if (out.ok) return
     expect(out.failure).toMatch(/fetch\(\) is not available/)
@@ -59,7 +65,7 @@ describe("tools builder gates", () => {
 
   it("fails on an unknown scope", async () => {
     const { fetchImpl } = stubFetch([reply({ ...MANIFEST, scopes: ["write:everything"] }, "<script></script>")])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "x" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "x" }, { admit: houseKey, fetchImpl })
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.failure).toMatch(/unknown scope: write:everything/)
   })
@@ -143,7 +149,7 @@ describe("requirements pass", () => {
       reply(MANIFEST, CLEAN),
       review({ requirements: [{ id: 1, status: "covered", note: "Columns joined by ref" }, { id: 2, status: "not_possible", note: "No alignment API." }], ui: [{ check: "no-duplicate-header", ok: true }], fix: null }),
     ])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, { admit: houseKey, fetchImpl })
     expect(bodies).toHaveLength(2)
     expect(bodies[1].messages[0].content).toBe(TOOLS_REVIEW_SYSTEM_PROMPT)
     expect(bodies[1].max_tokens).toBeLessThan(bodies[0].max_tokens)
@@ -162,7 +168,7 @@ describe("requirements pass", () => {
       review({ requirements: [{ id: 1, status: "missing", note: "No columns" }], ui: [{ check: "no-duplicate-header", ok: false, note: "h1 Grid" }], fix: "1. Remove the <h1>. 2. Add the ref-joined columns." }),
       reply(MANIFEST, fixed, [{ id: 1, text: "Verses side by side, linked by ref", priority: "must", status: "covered" }]),
     ])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, { admit: houseKey, fetchImpl })
     expect(bodies).toHaveLength(3)
     expect(bodies[1].messages[1].content).toContain("no-duplicate-header") // the static finding is passed to the review
     expect(bodies[2].messages[1].content).toContain("Remove the <h1>")
@@ -180,7 +186,7 @@ describe("requirements pass", () => {
       review({ requirements: [{ id: 1, status: "partial" }], ui: [], fix: "Add columns." }),
       reply(MANIFEST, `<script>eval("x")</script>`),
     ])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, { admit: houseKey, fetchImpl })
     expect(out.ok && out.source).toBe(CLEAN)
     expect(out.ok && out.review.fixed).toBe(false)
     expect(out.ok && out.requirements[0].status).toBe("partial")
@@ -188,7 +194,7 @@ describe("requirements pass", () => {
 
   it("an unreadable review leaves the build unreviewed, never failed", async () => {
     const { fetchImpl } = stubFetch([reply(MANIFEST, CLEAN), "I think it looks fine"])
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "tracks" }, { admit: houseKey, fetchImpl })
     expect(out.ok).toBe(true)
     expect(out.ok && out.review.reviewed).toBe(false)
   })
@@ -199,14 +205,14 @@ describe("requirements pass", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch
-    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "big" }, fetchImpl)
+    const out = await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "big" }, { admit: houseKey, fetchImpl })
     expect(out.ok).toBe(false)
     if (!out.ok) expect(out.failure).toMatch(/cut off at the output limit/)
   })
 
   it("repairs skip the review", async () => {
     const { fetchImpl, bodies } = stubFetch([reply(MANIFEST, CLEAN)])
-    await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "x", repair: { previousSource: "", previousManifest: "{}", failure: "smoke" } }, fetchImpl)
+    await runBuild({ OPENROUTER_API_KEY: "k" }, { request: "x", repair: { previousSource: "", previousManifest: "{}", failure: "smoke" } }, { admit: houseKey, fetchImpl })
     expect(bodies).toHaveLength(1)
   })
 })

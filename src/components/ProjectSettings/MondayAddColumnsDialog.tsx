@@ -1,6 +1,9 @@
 // "Add columns" on a linked board: the setup's step 2 list in a dialog, so a
 // board can grow later. Ticks start at what the board already uses; ticking a
 // new one creates it on confirm, unticking one stops filling it.
+//
+// An Airtable table grows the same way (AQU-804): it passes its own
+// `addColumns` (create the fields), `profile` and words.
 
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -23,6 +26,14 @@ import {
 } from "@/lib/monday/column-selection"
 import { MondayColumnChooser } from "./MondayColumnChooser"
 import { useT } from "@/lib/i18n/I18nProvider"
+import {
+  MONDAY_ADD_COLUMNS_COPY,
+  MONDAY_CHOOSER_COPY,
+  type AddColumnsCopy,
+  type ChooserCopy,
+  type ColumnProfile,
+} from "@/lib/integrations/sync-ui"
+import { MONDAY_COLUMN_PROFILE } from "@/lib/monday/types"
 
 export function MondayAddColumnsDialog({
   open,
@@ -34,6 +45,11 @@ export function MondayAddColumnsDialog({
   rows,
   boardColumns,
   onSave,
+  addColumns,
+  profile = MONDAY_COLUMN_PROFILE,
+  copy = MONDAY_ADD_COLUMNS_COPY,
+  chooserCopy = MONDAY_CHOOSER_COPY,
+  testIdPrefix = "monday",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -45,6 +61,12 @@ export function MondayAddColumnsDialog({
   boardColumns: MondayBoardStructure["columns"] | null | undefined
   /** Save the new mapping; resolves false when the save failed. */
   onSave: (rows: MondayColumnMapping[], structure: MondayBoardStructure | null) => Promise<boolean>
+  /** Create the columns for these metrics (Monday's columns route by default). */
+  addColumns?: (metrics: MondayMetricKey[]) => Promise<MondayAddColumnsResult>
+  profile?: ColumnProfile
+  copy?: AddColumnsCopy
+  chooserCopy?: ChooserCopy
+  testIdPrefix?: string
 }) {
   const t = useT()
   const [selected, setSelected] = useState<Set<MondayMetricKey>>(new Set())
@@ -54,30 +76,31 @@ export function MondayAddColumnsDialog({
 
   useEffect(() => {
     if (!open) return
-    setSelected(initialColumnSelection(rows, boardColumns, { recommend: false }))
+    setSelected(initialColumnSelection(rows, boardColumns, { recommend: false }, profile))
     setError(null)
     setNotAdded([])
     // Fresh ticks each time it opens, from what the board uses now.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const { adds } = columnSelectionCounts(selected, rows, boardColumns)
+  const { adds } = columnSelectionCounts(selected, rows, boardColumns, profile)
 
   async function confirm() {
     if (!jwt || busy) return
     setBusy(true)
     setError(null)
     try {
-      const need = metricsToAdd(selected, rows)
-      const added = need.length > 0 ? await addMondayColumns(jwt, projectId, { boardId, metrics: need }) : null
-      const saved = await onSave(selectedRows(rows, selected, added), added?.structure ?? null)
+      const need = metricsToAdd(selected, rows, profile)
+      const add = addColumns ?? ((metrics: MondayMetricKey[]) => addMondayColumns(jwt, projectId, { boardId, metrics }))
+      const added = need.length > 0 ? await add(need) : null
+      const saved = await onSave(selectedRows(rows, selected, added, profile), added?.structure ?? null)
       if (added && added.failed.length > 0) {
         setNotAdded(added.failed)
         return
       }
       if (saved) onOpenChange(false)
     } catch (e) {
-      setError(t("projectSettings.monday.wizardAddColumnsFailed", { reason: e instanceof Error ? e.message : String(e) }))
+      setError(t(copy.failed, { reason: e instanceof Error ? e.message : String(e) }))
     } finally {
       setBusy(false)
     }
@@ -85,10 +108,10 @@ export function MondayAddColumnsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl" data-testid="monday-add-columns-dialog">
+      <DialogContent className="max-w-xl" data-testid={`${testIdPrefix}-add-columns-dialog`}>
         <DialogHeader>
-          <DialogTitle>{t("projectSettings.monday.addColumnsDialogTitle")}</DialogTitle>
-          <DialogDescription>{t("projectSettings.monday.chooser.intro")}</DialogDescription>
+          <DialogTitle>{t(copy.title)}</DialogTitle>
+          <DialogDescription>{t(chooserCopy.intro)}</DialogDescription>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-y-auto pr-1">
           <MondayColumnChooser
@@ -99,11 +122,14 @@ export function MondayAddColumnsDialog({
             onChange={setSelected}
             disabled={busy}
             hideIntro
+            profile={profile}
+            copy={chooserCopy}
+            testIdPrefix={testIdPrefix}
           />
         </div>
         {notAdded.length > 0 && (
           <p role="alert" className="text-sm text-amber-700 dark:text-amber-500">
-            {t("projectSettings.monday.wizardSomeColumnsNotAdded", {
+            {t(copy.notAdded, {
               columns: notAdded.map((f) => f.title).join(", "),
               reason: notAdded[0]?.error ?? "",
             })}
@@ -117,7 +143,7 @@ export function MondayAddColumnsDialog({
           {notAdded.length === 0 && (
             <Button onClick={() => void confirm()} disabled={busy || !jwt}>
               {busy && <Spinner data-icon="inline-start" />}
-              {adds > 0 ? t("projectSettings.monday.addColumnsConfirm", { count: adds }) : t("common.save")}
+              {adds > 0 ? t(copy.confirm, { count: adds }) : t("common.save")}
             </Button>
           )}
         </DialogFooter>

@@ -7,7 +7,7 @@ import {
   LOCALES,
   normalizeLocale,
 } from "./locales"
-import { CATALOGS } from "./messages"
+import { CATALOGS } from "./messages/all"
 import { detectInitialLocale } from "./store"
 import { isPluralMessage } from "./plurals"
 
@@ -183,6 +183,99 @@ describe("French (AQU-1432)", () => {
     expect(normalizeLocale("fr-CA")).toBe("fr")
     expect(normalizeLocale("fr-FR")).toBe("fr")
     expect(normalizeLocale("fr-SN")).toBe("fr")
+  })
+})
+
+
+describe("Spanish", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const es = LOCALES.find((l) => l.code === "es")
+    expect(es?.dir).toBe("ltr")
+    expect(es?.englishName).toBe("Spanish")
+    // One catalog, worded as Latin American. The menu stays the language
+    // endonym, the same honesty as Français.
+    expect(es?.nativeName).toBe("Español")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.es ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Spanish to regional browser codes", () => {
+    expect(normalizeLocale("es-MX")).toBe("es")
+    expect(normalizeLocale("es-ES")).toBe("es")
+    expect(normalizeLocale("es-419")).toBe("es")
+    expect(detectInitialLocale(null, "es-MX")).toBe("es")
+  })
+  it("supplies Spanish's one/many/other forms for a count-governed key", () => {
+    const counted = CATALOGS.es?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "many", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+      expect(counted.forms.one).not.toBe(counted.forms.other)
+    }
+  })
+})
+
+describe("Portuguese", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const pt = LOCALES.find((l) => l.code === "pt")
+    expect(pt?.dir).toBe("ltr")
+    expect(pt?.englishName).toBe("Portuguese")
+    // One catalog, worded as Brazilian. The menu stays the language endonym.
+    expect(pt?.nativeName).toBe("Português")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.pt ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Portuguese to regional browser codes", () => {
+    expect(normalizeLocale("pt-BR")).toBe("pt")
+    expect(normalizeLocale("pt-PT")).toBe("pt")
+    expect(detectInitialLocale(null, "pt-BR")).toBe("pt")
+  })
+  it("supplies Portuguese's one/many/other forms for a count-governed key", () => {
+    const counted = CATALOGS.pt?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "many", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+      expect(counted.forms.one).not.toBe(counted.forms.other)
+    }
+  })
+})
+
+describe("Swahili (AQU-2198)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const sw = LOCALES.find((l) => l.code === "sw")
+    expect(sw?.dir).toBe("ltr")
+    expect(sw?.englishName).toBe("Swahili")
+    // One catalog, worded as Kiswahili sanifu. The menu stays the endonym.
+    expect(sw?.nativeName).toBe("Kiswahili")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.sw ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves standard Swahili to Kenyan and Tanzanian browser codes", () => {
+    // One written standard, not a national dialect. Congolese Swahili (`swc`)
+    // does not share the `sw` primary subtag and must not land here.
+    expect(normalizeLocale("sw")).toBe("sw")
+    expect(normalizeLocale("sw-KE")).toBe("sw")
+    expect(normalizeLocale("sw-TZ")).toBe("sw")
+    expect(normalizeLocale("swc")).toBe("en")
+    expect(detectInitialLocale(null, "sw-TZ")).toBe("sw")
+  })
+  it("supplies Swahili's one/other forms for a count-governed key", () => {
+    // CLDR `sw`: `one` is exactly 1; 0 and everything else are `other`.
+    // Class 9/10 nouns often keep the same shape, so identical wording is grammatical.
+    const counted = CATALOGS.sw?.["common.cellCount"]
+    expect(counted, "common.cellCount must be count-governed in sw").toBeDefined()
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
   })
 })
 

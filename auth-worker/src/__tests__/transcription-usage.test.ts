@@ -21,7 +21,7 @@ async function fixture() {
   }, { headers: { 'X-Generation-Id': 'gen-whisper' } }))
   vi.stubGlobal('fetch', vi.fn(async input => {
     if (String(input).includes('/models?')) return Response.json({ data: [
-      { id: 'openai/whisper-1', pricing: { prompt: '0.0001' } },
+      { id: 'openai/whisper-large-v3', pricing: { prompt: '0.0001' } },
     ] })
     if (String(input).endsWith('/audio/transcriptions')) return provider()
     throw new Error(`unexpected provider ${input}`)
@@ -65,8 +65,9 @@ it('refuses exhausted weekly capacity before invoking Whisper', async () => {
     requestId: 'spent', rail: 'llm', maxRawCostCents: 62.5 })
   await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'spent', 62.5)
   const response = await f.send()
-  expect(response.status).toBe(429)
-  expect(await response.json()).toEqual({ error: 'weekly_ai_allowance_exhausted' })
+  // The spec §5.3 client contract: an exhausted allowance is 402, never 429 (429 is rate limiting).
+  expect(response.status).toBe(402)
+  expect(await response.json()).toMatchObject({ error: 'ai_allowance_exhausted' })
   expect(f.provider).not.toHaveBeenCalled()
   const capacity = await app.request('/api/v2/orgs/1/billing/workspace', {
     headers: authHeader(await jwtFor('alice')),

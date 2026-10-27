@@ -46,6 +46,7 @@ import { agentDraftReview } from "../namespaces/agentDraftReview"
 import { workspace } from "../namespaces/workspace"
 import { segmentation } from "../namespaces/segmentation"
 import { smartEdits } from "../namespaces/smartEdits"
+import { langquest } from "../namespaces/langquest"
 import { harmonizer } from "../namespaces/harmonizer"
 import { bibleData } from "../namespaces/bibleData"
 import { extensions } from "../namespaces/extensions"
@@ -56,6 +57,7 @@ import { bibleChecks } from "../namespaces/bibleChecks"
 import { bibleHelps } from "../namespaces/bibleHelps"
 import { bibleParticipants } from "../namespaces/bibleParticipants"
 import { bibleVoices } from "../namespaces/bibleVoices"
+import { transcribe } from "../namespaces/transcribe"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -86,6 +88,7 @@ export const en = {
   ...workspace.keys,
   ...segmentation.keys,
   ...smartEdits.keys,
+  ...langquest.keys,
   ...harmonizer.keys,
   ...bibleData.keys,
   ...extensions.keys,
@@ -96,6 +99,7 @@ export const en = {
   ...bibleHelps.keys,
   ...bibleParticipants.keys,
   ...bibleVoices.keys,
+  ...transcribe.keys,
 } as const
 
 export type MessageKey = keyof typeof en

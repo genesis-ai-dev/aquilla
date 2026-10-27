@@ -44,13 +44,17 @@ export function InworldVoiceField({
     () => catalogLanguagesForInworld(targetLanguages, language),
     [targetLanguages, language],
   )
-  const { voices, status, attempted } = useInworldCatalogVoices({
+  const { voices, status } = useInworldCatalogVoices({
     enabled: true,
     projectId,
     fileId,
     session,
     languages: catalogLanguages,
   })
+  // AQU-2035: the lookup ran and this language has no stock voices. Offering
+  // the built-in English list instead is the wrong set of choices, so the
+  // picker is disabled on the voice that will actually be saved.
+  const unavailable = status === "unavailable"
   const showBadge = showVoiceLanguageBadge(targetLanguages) || catalogLanguages.length > 1
   const groups = useMemo(() => groupCatalogByLanguage(voices), [voices])
   const selected = voices.find((v) => v.voiceId === value)
@@ -73,10 +77,17 @@ export function InworldVoiceField({
       <FieldLabel htmlFor="inworld-voice">{t("audio.newVoice.inworldVoiceLabel")}</FieldLabel>
       <Select
         value={selectValue}
+        disabled={unavailable}
         onValueChange={(next) => {
-          const id = typeof next === "string" && next ? next : DEFAULT_INWORLD_VOICE
-          const match = voices.find((v) => v.voiceId === id)
-          onChange(id, match?.language)
+          // AQU-2152: the item list re-registers right after a pick lands — the
+          // saved-speaker row drops out, and the catalog refetches for the
+          // language the pick just seeded — and base-ui emits a null value for
+          // it. Coercing that to the built-in default overwrote the speaker the
+          // user had just chosen with Dennis. There is no "no voice" item, so a
+          // nullish value is never a real choice: ignore it and keep the pick.
+          if (typeof next !== "string" || !next) return
+          const match = voices.find((v) => v.voiceId === next)
+          onChange(next, match?.language)
         }}
       >
         <SelectTrigger id="inworld-voice" className="h-10">
@@ -128,9 +139,6 @@ export function InworldVoiceField({
           ))}
         </SelectContent>
       </Select>
-      {status === "fallback" && attempted && (
-        <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.inworldVoiceUnavailable")}</p>
-      )}
     </Field>
   )
 }

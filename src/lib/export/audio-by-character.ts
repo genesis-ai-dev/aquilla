@@ -34,7 +34,7 @@ import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audi
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { isInternalIdName, stripInternalIds } from "./internal-id-names"
-import { isSilencedForExport } from "./audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 
 export interface CharacterClip {
   cellId: string
@@ -92,9 +92,12 @@ export interface CharacterPreview {
 }
 
 /** Pick the best-available audio for a cell: recording slot first, else
- *  generated-voice slot. Returns null when the cell has no usable audio. */
+ *  generated-voice slot. Returns null when the cell has no usable audio.
+ *  AQU-2148: "usable" is the point — a slot whose selected take was removed
+ *  falls through to the other rather than resolving to a dead id and dropping
+ *  the line out of the deliverable. See `defaultTrackTakeId`. */
 function bestAudioId(cell: CellData): string | null {
-  return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
+  return defaultTrackTakeId(cell)
 }
 
 /**
@@ -132,12 +135,12 @@ export function characterIdentity(
 ): { key: string; name: string; color?: string } {
   const named = resolveName?.(cell)?.trim() || null
   if (named) {
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+    const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
     return { key: named, name: named, ...(voice.color ? { color: voice.color } : {}) }
   }
-  const explicit = assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId
+  const explicit = assignedCastVoiceId(settings, cell) ?? cell.ttsSettings?.voiceId
   if (!explicit) return { key: UNNAMED_CHARACTER_KEY, name: UNNAMED_CHARACTER_LABEL }
-  const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+  const voice = resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId)
   // AQU-1461: A VOICE NAMED BY ITS ID IS NOT A CAST CHARACTER. The New voice
   // modal requires a name, but `voices` is persisted project JSON that imports,
   // other clients and the Agent API all write — so an id can arrive here, and it

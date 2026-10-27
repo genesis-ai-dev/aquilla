@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 // Delete every external-integration connection — and, by cascade, its board
-// links and item links — from a NON-production database (AQU-1775).
+// links and item links — plus every LangQuest link (0185) from a NON-production database (AQU-1775).
 //
 // WHY: the dev Neon branch is restored from production
 // (scripts/refresh-neon-branch.ts). That copy carried every org's encrypted
@@ -30,14 +30,15 @@ async function main() {
   const client = neonClient()
   await client.connect()
   try {
-    const counts = await client.query<{ connections: string; links: string; items: string }>(
+    const counts = await client.query<{ connections: string; links: string; items: string; langquest: string }>(
       `SELECT (SELECT count(*) FROM integration_connections) AS connections,
               (SELECT count(*) FROM integration_links) AS links,
-              (SELECT count(*) FROM integration_item_links) AS items`,
+              (SELECT count(*) FROM integration_item_links) AS items,
+              (SELECT count(*) FROM langquest_links) AS langquest`,
     )
-    const { connections, links, items } = counts.rows[0]
+    const { connections, links, items, langquest } = counts.rows[0]
     console.log(
-      `${target}: ${connections} integration connection(s), ${links} board link(s), ${items} item link(s)`,
+      `${target}: ${connections} integration connection(s), ${links} board link(s), ${items} item link(s), ${langquest} LangQuest link(s)`,
     )
     if (dryRun) {
       console.log("dry run — nothing deleted")
@@ -47,6 +48,9 @@ async function main() {
     console.log(
       `deleted ${deleted.rowCount ?? 0} integration connection(s); their board links and item links went with them (ON DELETE CASCADE)`,
     )
+    // LangQuest tokens are per project, not per org connection (0185).
+    const langquestDeleted = await client.query("DELETE FROM langquest_links")
+    console.log(`deleted ${langquestDeleted.rowCount ?? 0} LangQuest link(s) and their passage maps`)
   } finally {
     await client.end()
   }

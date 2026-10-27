@@ -42,10 +42,18 @@ import {
   planKeysJoinSql, unitBookKeyExpr, unitSectionKeyExpr,
 } from "../../../db/shared/plan-keys"
 import { planUnitsSql } from "../../../db/shared/plan-units"
-import { AUDIO_CTE_SQL } from "../../../db/shared/audio-progress"
+import { AUDIO_CTE_SQL, cellAudioVotesSql } from "../../../db/shared/audio-progress"
 import { laneDisplayNameSql } from "../../../db/shared/lanes"
 import { wireLegacyTagSql } from "../../../db/shared/lane-sql"
-import { loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { effectiveThresholdSql, loadEffectiveThreshold } from "../../../db/shared/validation-threshold"
+import { parseLaneDelivers, type LaneDelivers } from "../../../src/lib/lanes/lane-delivers"
+import {
+  assignmentKind,
+  compareValidationBehind,
+  loadValidationProgress,
+  type AssignmentKind,
+  type ValidationProgress,
+} from "./assignment-validation"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -141,7 +149,7 @@ const CELLS_TOTAL_SUBQUERY = byStructuralPolicy(
  * read from each cell's SOURCE row, the only side that carries one — which
  * the view already carries as `ac.type`, so no second join to `cells`.
  */
-const CELLS_DONE_SUBQUERY = byStructuralPolicy(
+const TEXT_CELLS_DONE_SUBQUERY = byStructuralPolicy(
   `(
   SELECT COUNT(*) FROM assignment_member_cells ac
     JOIN cells c ON c.project_id = ac.project_id AND c.file_id = ac.file_id
@@ -158,6 +166,79 @@ const CELLS_DONE_SUBQUERY = byStructuralPolicy(
      AND NOT ${isStructuralSql("ac")}
 )`,
 )
+
+/** The assignment's language as the legacy tag a take's lane is read by (`audioLaneTagSql`). */
+const ASSIGNMENT_LANE_TAG_SQL = `(SELECT COALESCE(tl.legacy_tag, '') FROM lanes tl
+   WHERE tl.project_id = a.project_id AND tl.id = a.lane_id)`
+
+/** The project's "Required validators (audio)": project → org → 1, as every reader resolves it. */
+const AUDIO_THRESHOLD_SQL = `(SELECT ${effectiveThresholdSql("tps.validation_count_audio", "tos.validation_count_audio")}
+   FROM projects tp
+   LEFT JOIN project_settings tps ON tps.project_id = tp.id
+   LEFT JOIN org_settings tos ON tos.org_id = tp.org_id
+  WHERE tp.id = a.project_id)`
+
+/** One assigned line's recording is approved in the assignment's language. */
+const AUDIO_APPROVED_SQL = `${cellAudioVotesSql("ac", ASSIGNMENT_LANE_TAG_SQL)} >= ${AUDIO_THRESHOLD_SQL}`
+
+/** The same, with its text validated too — on the same line, in the same language. */
+const TEXT_VALIDATED_SQL = `EXISTS (
+     SELECT 1 FROM cells c
+      WHERE c.project_id = ac.project_id AND c.file_id = ac.file_id
+        AND c.cell_id = ac.cell_id AND c.side = 'target'
+        AND c.lane_id = a.lane_id AND c.validated = 1)`
+
+const assignedCellsWhereSql = (predicate: string) => byStructuralPolicy(
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND ${predicate}
+)`,
+  `(
+  SELECT COUNT(*) FROM assignment_member_cells ac
+   WHERE ac.assignment_id = a.assignment_id
+     AND NOT ${isStructuralSql("ac")}
+     AND ${predicate}
+)`,
+)
+
+/**
+ * Media redesign slice 1: an assignment's done lines are counted by what its
+ * language DELIVERS (src/lib/lanes/lane-delivers.ts) — the rule the dashboard,
+ * the plan board and Monday follow, so "2 of 23" here is the figure they show.
+ * A Text language, and one nobody has chosen for, is the validated-text count
+ * above, byte for byte; an Audio language counts approved recordings at the
+ * project's audio threshold; Text and audio needs both on the same line.
+ */
+const CELLS_DONE_SUBQUERY = `(CASE (SELECT dl.delivers FROM lanes dl
+              WHERE dl.project_id = a.project_id AND dl.id = a.lane_id)
+  WHEN 'audio' THEN ${assignedCellsWhereSql(AUDIO_APPROVED_SQL)}
+  WHEN 'text_and_audio' THEN ${assignedCellsWhereSql(`${TEXT_VALIDATED_SQL} AND ${AUDIO_APPROVED_SQL}`)}
+  ELSE ${TEXT_CELLS_DONE_SUBQUERY}
+END)`
+
+/**
+ * AQU-1969: attach a Validate assignment's own-approval progress to the rows
+ * that are validate assignments, and make their `cellsTotal` / `cellsDone`
+ * say the same thing — the lines theirs to approve, and the ones they have —
+ * so every reader that only knows those two (the "Assigned to me" inboxes, the
+ * given-by list) reports the assignee's own work rather than anyone's. A
+ * translate row passes through untouched, and a list with no validate rows
+ * costs no query.
+ */
+async function withValidationProgress<
+  T extends { assignmentId: string; kind: AssignmentKind; cellsTotal: number; cellsDone: number },
+>(env: Env, rows: T[]): Promise<Array<T & { validation?: ValidationProgress }>> {
+  const ids = rows.filter((r) => r.kind === "validate").map((r) => r.assignmentId)
+  if (ids.length === 0) return rows
+  const progress = await loadValidationProgress(env, ids)
+  return rows.map((r) => {
+    const validation = r.kind === "validate" ? progress.get(r.assignmentId) : undefined
+    return validation
+      ? { ...r, validation, cellsTotal: validation.text.total, cellsDone: validation.text.validated }
+      : r
+  })
+}
 
 /**
  * AQU-1609: the `lanes.id` a legacy target-language tag names, or `''` when the
@@ -210,6 +291,10 @@ export interface OrgAssignmentRow {
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress; absent on a translate one. */
+  validation?: ValidationProgress
 }
 
 /**
@@ -234,6 +319,7 @@ export async function getOrgAssignmentWorkload(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
+            a.kind             AS kind,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
@@ -259,10 +345,11 @@ export async function getOrgAssignmentWorkload(
       cells_total: number
       cells_done: number
       deadline: string | null
+      kind: string | null
       file_id: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  return withValidationProgress(env, (rows.results ?? []).map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
@@ -276,7 +363,8 @@ export async function getOrgAssignmentWorkload(
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
-  }))
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /**
@@ -284,6 +372,11 @@ export async function getOrgAssignmentWorkload(
  * Returns every assignee who has at least one open assignment in the project,
  * sorted by remaining work descending (same order as the org workload view).
  * Requires the caller to be maintainer+ on the project (enforced in the route).
+ *
+ * AQU-1969: TRANSLATE assignments only. A validate assignment's progress is a
+ * different number (the person's own approvals), so folding it into this
+ * per-person sum would blend two measures into one bar; the Team card lists
+ * those from `getProjectValidationAssignments` instead.
  */
 export async function getProjectAssignmentRoster(
   env: Env,
@@ -297,7 +390,8 @@ export async function getProjectAssignmentRoster(
        FROM assignments a
        LEFT JOIN users u ON u.id = a.assignee_user_id
       WHERE a.project_id = ?
-        AND a.unassigned_at IS NULL AND a.completed_at IS NULL`,
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+        AND a.kind <> 'validate'`,
   )
     .bind(projectId)
     .all<{
@@ -329,6 +423,74 @@ export async function getProjectAssignmentRoster(
   )
 }
 
+/** AQU-1969: one open validate assignment, with the assignee's own approvals. */
+export interface ValidationAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** The lane it is pinned to, as the legacy tag. */
+  targetLang: string
+  laneName?: string | null
+  laneId: string
+  deadline: string | null
+  validation: ValidationProgress
+}
+
+/**
+ * AQU-1969: every open validate assignment in ONE project, furthest behind
+ * first — the Team card's per-member validation lines. Same route, so the
+ * same floors, as the per-assignee roster above.
+ */
+export async function getProjectValidationAssignments(
+  env: Env,
+  projectId: string,
+): Promise<ValidationAssignment[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT a.assignment_id    AS assignment_id,
+            a.assignee_user_id AS assignee_user_id,
+            u.username         AS assignee_username,
+            a.scope_label      AS scope_label,
+            COALESCE(ln.legacy_tag, '') AS target_lang,
+            ${laneDisplayNameSql("ln")} AS lane_name,
+            a.lane_id          AS lane_id,
+            a.deadline         AS deadline
+       FROM assignments a
+       LEFT JOIN users u ON u.id = a.assignee_user_id
+       LEFT JOIN lanes ln
+         ON ln.project_id = a.project_id AND ln.id = a.lane_id
+      WHERE a.project_id = ? AND a.kind = 'validate'
+        AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+      ORDER BY a.created_at DESC, a.assignment_id`,
+  )
+    .bind(projectId)
+    .all<{
+      assignment_id: string
+      assignee_user_id: number
+      assignee_username: string | null
+      scope_label: string
+      target_lang: string
+      lane_name: string | null
+      lane_id: string
+      deadline: string | null
+    }>()
+  const results = rows.results ?? []
+  const progress = await loadValidationProgress(env, results.map((r) => r.assignment_id))
+  return results
+    .map((r) => ({
+      assignmentId: r.assignment_id,
+      assigneeUserId: Number(r.assignee_user_id),
+      username: r.assignee_username,
+      scopeLabel: r.scope_label,
+      targetLang: r.target_lang ?? "",
+      laneName: r.lane_name,
+      laneId: r.lane_id,
+      deadline: r.deadline,
+      validation: progress.get(r.assignment_id)!,
+    }))
+    .sort(compareValidationBehind)
+}
+
 /**
  * One live assignment covering a planning unit, with that assignee's OWN
  * progress — every count below is over that assignment's cells inside this
@@ -352,6 +514,14 @@ export interface UnitAssignment {
   validated: number
   recorded: number
   audioValidated: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /**
+   * AQU-1969: a validate assignment's own approvals inside this unit, measured
+   * in the assignment's own lane (see assignment-validation.ts). Absent on a
+   * translate assignment, whose four counts above stay its progress.
+   */
+  validation?: ValidationProgress
   /**
    * AQU-1278: the same five counts again, broken out per chapter, in canonical
    * order. Summing any column across this array gives the aggregate above it.
@@ -506,6 +676,7 @@ export async function getUnitAssignments(
             COALESCE(ln.legacy_tag, '') AS target_lang,
             a.lane_id          AS lane_id,
             a.deadline         AS deadline,
+            a.kind             AS kind,
             -- AQU-1278. One row per (assignment, chapter) rather than per
             -- assignment: the inspector needs to say WHICH chapters a person
             -- still owes work in, and which chapters of the unit nobody holds.
@@ -575,7 +746,7 @@ export async function getUnitAssignments(
         AND NOT (pol.exclude_structural AND COALESCE(ac.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
-               COALESCE(ln.legacy_tag, ''), a.lane_id, a.deadline, a.created_at,
+               COALESCE(ln.legacy_tag, ''), a.lane_id, a.deadline, a.kind, a.created_at,
                ${unitSectionKeyExpr("ac", "ik")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
@@ -609,6 +780,7 @@ export async function getUnitAssignments(
       lane_id: string
       lane_name: string | null
       deadline: string | null
+      kind: string | null
       chapter_key: string
       cells_total: number
       translated: number
@@ -634,6 +806,7 @@ export async function getUnitAssignments(
         laneName: r.lane_name,
         laneId: r.lane_id,
         deadline: r.deadline,
+        kind: assignmentKind(r.kind),
         cellsTotal: 0,
         translated: 0,
         validated: 0,
@@ -669,6 +842,14 @@ export async function getUnitAssignments(
       const kb = chapterSortKey(b.key)
       return ka.book === kb.book ? ka.num - kb.num : ka.book.localeCompare(kb.book)
     })
+  }
+
+  // AQU-1969: a validate assignment's own approvals, over its lines in this
+  // unit — the same file and book the rows above were narrowed to.
+  const validateIds = [...byAssignment.values()].filter((e) => e.kind === "validate").map((e) => e.assignmentId)
+  if (validateIds.length > 0) {
+    const progress = await loadValidationProgress(env, validateIds, { fileId, sectionKey })
+    for (const id of validateIds) byAssignment.get(id)!.validation = progress.get(id)
   }
   return [...byAssignment.values()]
 }
@@ -714,9 +895,14 @@ export interface MyAssignment {
   laneId?: string | null
   deadline: string | null
   note: string | null
+  /** AQU-1969: for a validate assignment, the lines theirs to approve and the ones they have. */
   cellsTotal: number
   cellsDone: number
   createdAt: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress; absent on a translate one. */
+  validation?: ValidationProgress
 }
 
 /**
@@ -806,6 +992,7 @@ export async function getMyAssignments(
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
+            a.kind AS kind,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
             (SELECT f.name FROM assignment_member_cells ac
@@ -832,6 +1019,7 @@ export async function getMyAssignments(
       cells_total: number
       created_at: number
       cells_done: number
+      kind: string | null
       file_id: string | null
       file_name: string | null
     }>()
@@ -843,7 +1031,7 @@ export async function getMyAssignments(
     results.filter((r) => r.scope_kind === "cells").map((r) => r.assignment_id),
   )
 
-  return results.map((r) => ({
+  return withValidationProgress(env, results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     fileId: r.file_id,
@@ -860,7 +1048,8 @@ export async function getMyAssignments(
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
-  }))
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /** An open assignment the caller handed out, with who it went to. */
@@ -874,6 +1063,9 @@ export interface GivenAssignment {
   targetLang: string
   cellsTotal: number
   cellsDone: number
+  /** AQU-1969: what the assignment hands out. */
+  kind: AssignmentKind
+  validation?: ValidationProgress
 }
 
 /**
@@ -891,6 +1083,7 @@ export async function getAssignmentsGivenBy(
             ${wireLegacyTagSql("a")} AS target_lang,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
+            a.kind AS kind,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
        FROM assignments a
@@ -908,10 +1101,11 @@ export async function getAssignmentsGivenBy(
       target_lang: string | null
       cells_total: number
       cells_done: number
+      kind: string | null
       file_id: string | null
     }>()
 
-  return (rows.results ?? []).map((r) => ({
+  return withValidationProgress(env, (rows.results ?? []).map((r) => ({
     assignmentId: r.assignment_id,
     fileId: r.file_id,
     assigneeUserId: Number(r.assignee_user_id),
@@ -920,12 +1114,19 @@ export async function getAssignmentsGivenBy(
     targetLang: r.target_lang ?? "",
     cellsTotal: Number(r.cells_total),
     cellsDone: Number(r.cells_done),
-  }))
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /** One of the caller's open assignments, with its project name (org-wide inbox). */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers, so the
+   * inbox's link lands on the first line still lacking what that language
+   * owes. Null when nobody has chosen (counts as Text).
+   */
+  laneDelivers: LaneDelivers | null
 }
 
 /**
@@ -950,6 +1151,8 @@ export async function getMyAssignmentsAcrossOrg(
             a.deadline AS deadline, a.note AS note,
             ${CELLS_TOTAL_SUBQUERY} AS cells_total, a.created_at AS created_at,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
+            a.kind AS kind,
+            ln.delivers AS lane_delivers,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id,
             (SELECT f.name FROM assignment_member_cells ac
@@ -979,6 +1182,8 @@ export async function getMyAssignmentsAcrossOrg(
       cells_total: number
       created_at: number
       cells_done: number
+      kind: string | null
+      lane_delivers: string | null
       file_id: string | null
       file_name: string | null
     }>()
@@ -986,10 +1191,11 @@ export async function getMyAssignmentsAcrossOrg(
   const results = rows.results ?? []
   const fileIds = await fileIdsForAssignments(env, results.map((r) => r.assignment_id))
 
-  return results.map((r) => ({
+  return withValidationProgress(env, results.map((r) => ({
     assignmentId: r.assignment_id,
     projectId: r.project_id,
     projectName: r.project_name,
+    laneDelivers: parseLaneDelivers(r.lane_delivers),
     fileId: r.file_id,
     fileName: r.file_name,
     fileIds: fileIds.get(r.assignment_id) ?? [],
@@ -1003,7 +1209,8 @@ export async function getMyAssignmentsAcrossOrg(
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     createdAt: r.created_at,
-  }))
+    kind: assignmentKind(r.kind),
+  })))
 }
 
 /** Split "GEN 10" → { book: "GEN", num: 10 } for natural ordering. */
@@ -1011,6 +1218,30 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
   const m = chapter.match(/^(.*?)(\d+)\s*$/)
   if (!m) return { book: chapter, num: 0 }
   return { book: m[1].trim(), num: parseInt(m[2], 10) }
+}
+
+/** "GEN 1" / "1CO 12" — a book code plus a chapter number. Not "GEN" or "1CO". */
+const NUMBERED_CHAPTER_KEY = /^([1-3]?[A-Z]{2,3}) (\d+)$/
+/** "GEN" / "1CO" / "TIT" — the book code alone. */
+const BARE_BOOK_CODE = /^[1-3]?[A-Z]{2,3}$/
+
+/**
+ * USFM book-header cells (`RUT:h:1`, `1CO:mt1:1`) cut to a bare book code.
+ * Beside numbered chapters of that book, the bare code is front matter, not a
+ * chapter — the same distinction the plan uses (`classifyPlanSection`). A lone
+ * bare code is a one-chapter book's only chapter (`TIT:4` → `TIT`, which is
+ * chapter 1) and stays. A real "RUT 1" is never this shape, so it stays too.
+ */
+function withoutBookFrontMatter(chapters: string[]): string[] {
+  const numberedBooks = new Set<string>()
+  for (const chapter of chapters) {
+    const match = NUMBERED_CHAPTER_KEY.exec(chapter)
+    if (match) numberedBooks.add(match[1])
+  }
+  return chapters.filter((chapter) => {
+    if (!BARE_BOOK_CODE.test(chapter)) return true
+    return !numberedBooks.has(chapter)
+  })
 }
 
 /**
@@ -1021,7 +1252,8 @@ function chapterSortKey(chapter: string): { book: string; num: number } {
  * (sync-worker assignment-events.ts) matches against the plan board's own
  * keys, so the person gets the chapter's headings and added lines too
  * (AQU-1493). Natural-sorted (book code, then chapter number) so "GEN 2"
- * precedes "GEN 10".
+ * precedes "GEN 10". Book-header refs (`GEN:h:1`) are not chapters when that
+ * book already has numbered ones; a one-chapter book's bare code is kept.
  */
 export async function getFileChapters(
   env: Env,
@@ -1037,9 +1269,11 @@ export async function getFileChapters(
     .bind(projectId, fileId)
     .all<{ chapter: string }>()
 
-  const chapters = (rows.results ?? [])
-    .map((r) => r.chapter)
-    .filter((c): c is string => typeof c === "string" && c.length > 0)
+  const chapters = withoutBookFrontMatter(
+    (rows.results ?? [])
+      .map((r) => r.chapter)
+      .filter((c): c is string => typeof c === "string" && c.length > 0),
+  )
   chapters.sort((a, b) => {
     const ka = chapterSortKey(a)
     const kb = chapterSortKey(b)

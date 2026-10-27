@@ -43,6 +43,7 @@ import { agentDraftReview } from "./agentDraftReview"
 import { workspace } from "./workspace"
 import { segmentation } from "./segmentation"
 import { smartEdits } from "./smartEdits"
+import { langquest } from "./langquest"
 import { harmonizer } from "./harmonizer"
 import { bibleData } from "./bibleData"
 import { extensions } from "./extensions"
@@ -53,6 +54,7 @@ import { bibleChecks } from "./bibleChecks"
 import { bibleHelps } from "./bibleHelps"
 import { bibleParticipants } from "./bibleParticipants"
 import { bibleVoices } from "./bibleVoices"
+import { transcribe } from "./transcribe"
 
 export const NAMESPACES = [
   common,
@@ -82,6 +84,7 @@ export const NAMESPACES = [
   workspace,
   segmentation,
   smartEdits,
+  langquest,
   harmonizer,
   bibleData,
   extensions,
@@ -92,4 +95,5 @@ export const NAMESPACES = [
   bibleHelps,
   bibleParticipants,
   bibleVoices,
+  transcribe,
 ] as const

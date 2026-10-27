@@ -11,7 +11,7 @@ import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
-import { attentionRank, deadlineStatus, getPortfolios, translatedPct, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { attentionRank, deadlineStatus, getPortfolios, progressPct, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { UserError } from "@/lib/errors/user-error"
 import { buttonVariants } from "@/components/ui/button"
 import { RoleLabel } from "@/components/RoleLabel"
@@ -105,7 +105,8 @@ function sortProjectsByLens(
       case "recent":
         return (bPortfolio?.lastEditAt ?? 0) - (aPortfolio?.lastEditAt ?? 0)
       case "least-translated":
-        return (aPortfolio ? translatedPct(aPortfolio) : 1) - (bPortfolio ? translatedPct(bPortfolio) : 1)
+        // Media redesign slice 1: by what each language delivers.
+        return (aPortfolio ? progressPct(aPortfolio) : 1) - (bPortfolio ? progressPct(bPortfolio) : 1)
       case "attention":
       case "overdue":
         return (bPortfolio ? attentionRank(bPortfolio, now) : -1) - (aPortfolio ? attentionRank(aPortfolio, now) : -1)

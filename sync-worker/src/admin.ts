@@ -11,8 +11,13 @@ import {
   runProjectionSnapshotSweep,
   type ProjectionSnapshotCronEnv,
 } from "./projection-snapshot-cron"
+import {
+  formatProgressSelfHealReport,
+  runProgressSelfHealSweep,
+  type ProgressSelfHealCronEnv,
+} from "./progress-selfheal-cron"
 
-export interface AdminEnv extends R2GcCronEnv, ProjectionSnapshotCronEnv {
+export interface AdminEnv extends R2GcCronEnv, ProjectionSnapshotCronEnv, ProgressSelfHealCronEnv {
   SNAPSHOTS: R2Bucket
   /**
    * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
@@ -60,7 +65,8 @@ export async function handleAdminRequest(
   const fileMatch = url.pathname.match(/^\/admin\/files\/([^/]+)\/([^/]+)$/)
   const gcMatch = url.pathname === "/admin/r2-gc"
   const snapshotMatch = url.pathname === "/admin/projection-snapshot"
-  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch) {
+  const selfHealMatch = url.pathname === "/admin/progress-selfheal"
+  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch && !selfHealMatch) {
     return new Response("not found", { status: 404 })
   }
 
@@ -130,6 +136,41 @@ export async function handleAdminRequest(
       ok: true,
       report,
       summary: formatProjectionSnapshotReport(report),
+    })
+  }
+
+  // POST /admin/progress-selfheal — run the AQU-2145 progress self-heal sweep
+  // now instead of waiting for the nightly cron. `?projectId=` narrows it to one
+  // project, which is what an operator wants after a bulk recording or
+  // validation burst on a known project rather than a whole-database pass.
+  // `?maxRepairs=` raises or lowers the per-run cap. POST, not GET, because it
+  // rewrites progress rows.
+  //
+  // The report distinguishes the two answers that matter: `repaired` is how many
+  // files were wrong, and `remaining` is how many the cap left for the next run.
+  // A healthy database answers 0 and 0.
+  if (selfHealMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const maxRepairs = Number(url.searchParams.get("maxRepairs"))
+    const report = await runProgressSelfHealSweep(env, {
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+      ...(Number.isInteger(maxRepairs) && maxRepairs > 0 ? { maxRepairs } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        {
+          ok: false,
+          error:
+            "progress self-heal sweep skipped — see worker logs (PROGRESS_SELFHEAL_MODE=off, no HYPERDRIVE, or refused)",
+        },
+        { status: 503 },
+      )
+    }
+    return Response.json({
+      ok: true,
+      report,
+      summary: formatProgressSelfHealReport(report),
     })
   }
 

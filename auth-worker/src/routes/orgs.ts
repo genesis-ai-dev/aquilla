@@ -37,6 +37,7 @@ import {
   listUserDirectMembershipsInOrg,
   listProjectGrantOrgIds,
   listPlatformAdminOrgsPage,
+  countVisibleActiveLanguages,
   listOrgPortfolioPage,
   listUserOrgs,
   summarizeVisiblePortfolios,
@@ -60,6 +61,7 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
+import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
 import { lookupUserByUsername } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
@@ -351,7 +353,14 @@ const portfolioSummaryBody = z.object({
  * AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
  * for this org"). There is no org-count cap. Omitted orgIds means every
  * membership. An empty array still means none. Platform admins may name
- * orgs they are not members of; everyone else must belong to each explicit id.
+ * orgs they are not members of; everyone else must belong to each explicit id
+ * — or, AQU-1488, hold a project in it.
+ *
+ * A project-only member (invited to one project, never to its org) used to see
+ * "Projects 0" on the all-organizations Overview beside a table listing that
+ * project, because only memberships could be named here. Naming a guest org
+ * widens nothing: every row still passes the per-project visibility predicate,
+ * so a guest's totals count exactly the projects they were given.
  */
 async function resolvePortfolioOrgIds(
   env: Env,
@@ -365,10 +374,13 @@ async function resolvePortfolioOrgIds(
   const isAdmin = await isPlatformAdminEmail(env, user.email)
   if (!isAdmin && !fromMemberships && uniqueOrgIds.length > 0) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-    const allowed = await env.AQUILLA_PG.prepare(
-      `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
-    ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>()
-    const allowedOrgIds = new Set((allowed.results ?? []).map((row) => row.org_id))
+    const [allowed, guestOrgIds] = await Promise.all([
+      env.AQUILLA_PG.prepare(
+        `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,
+      ).bind(user.id, ...uniqueOrgIds).all<{ org_id: number }>(),
+      listProjectGrantOrgIds(env, user.id),
+    ])
+    const allowedOrgIds = new Set([...(allowed.results ?? []).map((row) => row.org_id), ...guestOrgIds])
     if (uniqueOrgIds.some((orgId) => !allowedOrgIds.has(orgId))) {
       return { error: "not an org member" }
     }
@@ -453,19 +465,24 @@ orgs.get("/:orgId/portfolio", async (c) => {
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
   // AQU-1071: the active-lane count rides along with the rollup the org
-  // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same count billing bills on, and deliberately org-wide rather than
-  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
-  // reading a smaller figure than their invoice is the confusion this ticket
-  // exists to remove, and a bare count names no project, so it discloses
-  // nothing the visibility rule guards.
-  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+  // dashboard is already asking for, so its tile costs no extra round trip.
+  // Maintainer+, platform admins, and any deployment with the read wall off
+  // still get the org-wide figure billing bills on (not scoped to this page).
+  // AQU-1515: below that wall the figure is only the lanes this caller may
+  // see — the same decision that hides sibling lane names. The field stays
+  // on the response either way; a real zero and a withheld registry are
+  // different numbers, and neither one is an omitted field.
+  const seesEveryLanguage =
+    isAdmin || role >= READ_WALL_MAINTAINER || !laneReadWallEnabled(c.env.LANE_READ_WALL)
+  const [{ projects, nextCursor }, activeLanguageCount] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
-    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+    seesEveryLanguage
+      ? countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]).then(({ byOrg }) => byOrg.get(orgId) ?? 0)
+      : countVisibleActiveLanguages(c.env, orgId, user.id),
   ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
-    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
+    activeLanguageCount,
     nextCursor,
   })
 })

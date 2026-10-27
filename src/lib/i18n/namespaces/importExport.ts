@@ -458,6 +458,8 @@ export const importExport = defineNamespace({
       "Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.",
     "importExport.collision.ambiguousWarning":
       "Some files have multiple matches. Choose Skip or Import as duplicate for those files.",
+    "importExport.collision.mediaUpdateUnavailable":
+      "Audio and video files cannot be updated in place. Choose Skip or Import as duplicate for those files.",
     "importExport.collision.applyToAll": "Apply to all:",
     "importExport.collision.updateAll": "Update all",
     "importExport.collision.skipAll": "Skip all",
@@ -575,6 +577,7 @@ export const importExport = defineNamespace({
     "importExport.upload.finishingUp": "Finishing up…",
     "importExport.upload.finalizationFailed": "Import finalization failed",
     "importExport.upload.uploadingFile": "Uploading {fileName}…",
+    "importExport.upload.aligningIdmlStyles": "Aligning styles in {fileName}… {count}/{total}",
     "importExport.upload.notAttempted": "not attempted after an earlier file failed",
     "importExport.upload.castAssignmentsLabel": "Cast assignments",
     "importExport.upload.importFinalizationLabel": "Import finalization",
@@ -667,6 +670,11 @@ export const importExport = defineNamespace({
     "importExport.format.md.description":
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
+    "importExport.format.html.label": "Web page",
+    "importExport.format.html.description":
+      "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
+      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
+      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -885,7 +893,9 @@ export const importExport = defineNamespace({
       one: "{count} line has no validated recording and will be left silent.",
       other: "{count} lines have no validated recording and will be left silent.",
     }),
-    "importExport.dialog.audioUnvalidatedJump": "Show me",
+    "importExport.dialog.audioUnvalidatedLinesAria": "Lines with an unvalidated recording",
+    "importExport.dialog.audioUnvalidatedShowLine": "Show line {line}",
+    "importExport.dialog.audioUnvalidatedMore": "+{count} more",
     "importExport.dialog.untimedRecordingsNote": plural({
       one: "{count} recording has no timing and cannot be placed.",
       other: "{count} recordings have no timing and cannot be placed.",
@@ -914,7 +924,14 @@ export const importExport = defineNamespace({
       "suitable for re-import.",
     "importExport.dialog.prefixWithRef": "Prefix each line with canonical ref (e.g. {example})",
     "importExport.dialog.downloadOriginalUnchanged": "Download original unchanged",
-    "importExport.dialog.repairByReimporting": "Repair by re-importing",
+    "importExport.dialog.repairByReimporting": "Repair a copy",
+    "importExport.dialog.repairingIdmlCopy": "Repairing a copy of {fileName}…",
+    "importExport.dialog.repairIdmlCopyDone": "Created {fileName}. The original file was left unchanged.",
+    "importExport.dialog.repairIdmlCopyDoneUnmatched": plural({
+      one: "Created {fileName}. {count} translation could not be paired and stayed on the original file.",
+      other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
+    }),
+    "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -1021,6 +1038,18 @@ export const importExport = defineNamespace({
     "importExport.notices.basicParserFallback":
       "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check " +
       "the preview carefully before importing.",
+    "importExport.notices.subtitleShortFormTimestamps": plural({
+      one:
+        "{count} cue time left out the hours (01:03.209) and was read as minutes and seconds. " +
+        "Check that cue's wording in the preview.",
+      other:
+        "{count} cue times left out the hours (01:03.209) and were read as minutes and seconds. " +
+        "Check those cues' wording in the preview.",
+    }),
+    "importExport.notices.subtitleCuesUnreadable": plural({
+      one: "{count} cue time could not be read, so its wording is not in this import.",
+      other: "{count} cue times could not be read, so their wording is not in this import.",
+    }),
 
     // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
     //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
@@ -1532,6 +1561,27 @@ export const importExport = defineNamespace({
         'Importing a source document into a project and exporting a translation back out — the format pickers, per-format hints, upload progress, collision handling and failure messages. Importing is the very first action a translator takes in Aquilla, so these strings are read before any other working surface.',
     },
     keys: {
+      // Import preview notices for subtitle files (AQU-2119) — shown in the
+      // PreviewPanel's "Review before importing" list before anything is
+      // written, so a .vtt whose cue times leave out the hours is reported
+      // instead of quietly losing those cues.
+      "importExport.notices.subtitleShortFormTimestamps": {
+        description:
+          "Preview notice after importing a subtitle file whose cue times used WebVTT's short form (no hours). Aquilla read them as minutes and seconds and kept the cues; the notice exists because those cues used to disappear. Count-governed. '01:03.209' is a literal example of such a time — keep it as written.",
+        placeholders: {
+          count:
+            "Number of cue timestamps that were read as minutes and seconds; also governs the plural form.",
+        },
+      },
+      "importExport.notices.subtitleCuesUnreadable": {
+        description:
+          "Preview notice after importing a subtitle file in which some cue timestamp lines still could not be read, so those cues' words are not being imported. A loss the person needs to see before committing the import. Count-governed.",
+        placeholders: {
+          count:
+            "Number of cue timestamp lines that produced no cue; also governs the plural form.",
+        },
+      },
+
       // Timeline media import (AQU-1431) — the three dialogs that review segments
       // against a media file before anything is saved: the shared media import
       // preview, Attach captions, and Align script. In all of them {number} is a
@@ -2133,6 +2183,33 @@ export const importExport = defineNamespace({
         description: "Upload-phase progress label on the Upload files panel, naming the file currently uploading.",
         placeholders: { fileName: "Name of the file currently uploading — not translated." },
       },
+      "importExport.upload.aligningIdmlStyles": {
+        description:
+          "Progress label after an IDML file is updated in place, while existing translations are placed into the source's style runs.",
+        placeholders: {
+          fileName: "Name of the IDML file whose styles are being aligned — not translated.",
+          count: "Number of cells placed so far, already locale-formatted.",
+          total: "Number of cells that need placement, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairingIdmlCopy": {
+        description: "Progress label in the Export dialog while a repaired copy of the current IDML file is being built.",
+        placeholders: { fileName: "Display name of the file being copied — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDone": {
+        description: "Success message after a repaired IDML copy is created. The original file is not modified.",
+        placeholders: { fileName: "Display name of the new repaired copy — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDoneUnmatched": {
+        description: "Success message when some translations could not be matched to the re-parsed IDML and remain only on the original file.",
+        placeholders: {
+          fileName: "Display name of the new repaired copy — not translated.",
+          count: "Number of translations that stayed on the original file, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairIdmlCopyNeedsOriginal": {
+        description: "Error when the file being repaired has no stored IDML package to re-parse.",
+      },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",
         placeholders: {
@@ -2281,10 +2358,20 @@ export const importExport = defineNamespace({
           "The same amber warning in the Export dialog's Audio card when the Content setting is 'Validated only': these lines have no validated recording, so the audio export leaves them silent (and omits their file from the per-line zip).",
         placeholders: { count: "Number of lines with no validated recording." },
       },
-      "importExport.dialog.audioUnvalidatedJump": {
+      "importExport.dialog.audioUnvalidatedLinesAria": {
         description:
-          "Link at the end of the Export dialog's unvalidated-recordings warning. Closes the dialog and takes the user to the first line that has no validated recording. Two or three words.",
-        maxLength: 24,
+          "Accessible name for the row of small line buttons under the Export dialog's unvalidated-recordings warning; each button names one line that would ship a recording nobody has validated.",
+      },
+      "importExport.dialog.audioUnvalidatedShowLine": {
+        description:
+          "Accessible name for one small line button under the Export dialog's unvalidated-recordings warning. Pressing it closes the dialog and takes the user to that line.",
+        placeholders: { line: "How the file names the line: its reference (e.g. 'JHN 6:5') or 'L' and its number (e.g. 'L3'). Not translated." },
+      },
+      "importExport.dialog.audioUnvalidatedMore": {
+        description:
+          "Button after the first eight line buttons under the Export dialog's unvalidated-recordings warning, when there are more lines; pressing it shows the rest in place. Keep it very short.",
+        placeholders: { count: "How many more lines are not shown yet." },
+        maxLength: 16,
       },
       "importExport.dialog.untimedRecordingsNote": {
         description:

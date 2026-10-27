@@ -8,7 +8,7 @@
 // transport-level failures (bad credential -> 401, unknown tool + unknown method
 // -> JSON-RPC errors).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit path: mcp-handlers -> changesets-route -> commit.ts -> events/route ->
 // broadcast.ts -> partyserver (cloudflare:*). Stub it as the changeset suite does.
@@ -111,6 +111,8 @@ function toolPayload(result: { content: { text: string }[]; isError?: boolean })
   return { payload: JSON.parse(result.content[0].text), isError: result.isError === true }
 }
 
+afterEach(async () => { await tdb?.close() })
+
 let tdb: TestDb
 beforeEach(async () => {
   tdb = await seed()
@@ -205,7 +207,26 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 32 tools each with an input schema', async () => {
+  it.each([false, true])('reports model warm-up side effects for OAuth=%s', async (oauth) => {
+    const token = await credToken(tdb)
+    if (oauth) {
+      await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', [
+        'https://w/api/v1/external/mcp', CRED_1,
+      ])
+    }
+    const res = await rpc(makeEnv(tdb.db), token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
+    const body = await res.json() as { result: { tools: typeof MCP_TOOLS } }
+    const status = body.result.tools.find(tool => tool.name === 'transcription_status')
+    expect(status).toMatchObject({
+      inputSchema: { properties: { warm: { type: 'boolean' } } },
+      annotations: {
+        readOnlyHint: false, destructiveHint: false,
+        idempotentHint: false, openWorldHint: false,
+      },
+    })
+  })
+
+  it('returns all 33 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -230,10 +251,10 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects',
         // Omnilingual ASR spec §7.
         'transcribe_audio', 'transcription_status',
-        'wait_for_changeset',
+        'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(32)
+    expect(body.result.tools).toHaveLength(33)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

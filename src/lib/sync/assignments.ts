@@ -12,9 +12,39 @@ import { fetchWithTimeout } from "../frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
 import { v7 as uuidv7 } from "uuid"
 import { laneTagForAssignment } from "./assignment-lane"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { buildRawEvent } from "./events-emit"
 import { fetchSyncToken } from "./sync-token"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+
+/**
+ * AQU-1969: what an assignment hands out. 'translate' is every assignment made
+ * before kinds existed and the dialogs' default; 'validate' gives a person only
+ * the approving, and its progress counts their OWN approvals.
+ */
+export type AssignmentKind = "translate" | "validate"
+
+/**
+ * AQU-1969: one medium's share of a validate assignment (mirrors the server's
+ * auth-worker/src/services/assignment-validation.ts). Every line of the scope
+ * is in exactly one of: validated, waiting, left — or out of `total` entirely
+ * when it is not theirs to approve (self-validation off, and they wrote or
+ * recorded it). `changed` is the part of "left" they had approved before it
+ * moved.
+ */
+export interface ValidationCounts {
+  total: number
+  validated: number
+  /** No translation (text) or no recording (audio) yet. */
+  waiting: number
+  /** Approved an earlier version, not this one. Inside "left". */
+  changed: number
+}
+
+export interface ValidationProgress {
+  text: ValidationCounts
+  audio: ValidationCounts
+}
 
 /** Per-assignee rollup for the manager workload view (mirrors the server). */
 export interface AssigneeWorkload {
@@ -46,6 +76,10 @@ export interface OrgWorkloadAssignment {
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  /** AQU-1969: a validate assignment's own-approval progress. */
+  validation?: ValidationProgress
 }
 
 /** A single open assignment in the caller's inbox (mirrors the server). */
@@ -88,9 +122,13 @@ export interface MyAssignment {
   laneId?: string | null
   deadline: string | null
   note: string | null
+  /** AQU-1969: for a validate assignment, the lines theirs to approve and the ones they have. */
   cellsTotal: number
   cellsDone: number
   createdAt: number
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  validation?: ValidationProgress
 }
 
 /**
@@ -130,6 +168,8 @@ export interface GivenAssignment {
   targetLang: string
   cellsTotal: number
   cellsDone: number
+  /** AQU-1969: absent on older servers. */
+  kind?: AssignmentKind
 }
 
 /**
@@ -148,6 +188,11 @@ export async function getAssignmentsGivenByMe(jwt: string, projectId: string): P
 /** An inbox assignment with its project name, from the org-wide read. */
 export interface MyOrgAssignment extends MyAssignment {
   projectName: string
+  /**
+   * Media redesign slice 2: what the assignment's language delivers. Null when
+   * nobody has chosen; absent from an older server. Both read as Text.
+   */
+  laneDelivers?: LaneDelivers | null
 }
 
 /**
@@ -193,6 +238,39 @@ export async function getProjectAssignments(
   return ((await res.json()) as { roster: AssigneeWorkload[] }).roster
 }
 
+/** AQU-1969: one open validate assignment on the Team card (mirrors the server). */
+export interface ValidationAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  /** The lane it is pinned to, as the legacy tag. */
+  targetLang: string
+  laneName?: string | null
+  deadline: string | null
+  validation: ValidationProgress
+}
+
+/**
+ * AQU-1969: the Team card's whole read — the per-person translate roster
+ * `getProjectAssignments` returns, plus each open validate assignment with its
+ * assignee's own approvals, furthest behind first. One request: the server
+ * answers both from the same route, behind the same floors. `validations` is
+ * empty from a server that predates it.
+ */
+export async function getProjectTeamProgress(
+  jwt: string,
+  projectId: string,
+): Promise<{ roster: AssigneeWorkload[]; validations: ValidationAssignment[] }> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/all`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  const body = (await res.json()) as { roster: AssigneeWorkload[]; validations?: ValidationAssignment[] }
+  return { roster: body.roster, validations: body.validations ?? [] }
+}
+
 /**
  * One live assignment covering ONE planning unit, with that person's OWN
  * progress inside it (mirrors UnitAssignment on the server — AQU-1278).
@@ -225,6 +303,15 @@ export interface UnitAssignment {
   validated: number
   recorded: number
   audioValidated: number
+  /** AQU-1969: absent on older servers, which only had translate assignments. */
+  kind?: AssignmentKind
+  /**
+   * AQU-1969: a validate assignment's own approvals inside this unit, in the
+   * ASSIGNMENT's lane (an approval belongs to one language). The four counts
+   * above are still the unit's lines in the viewed lane; a validate row reads
+   * this instead.
+   */
+  validation?: ValidationProgress
   /**
    * AQU-1278: the same counts per chapter, canonically ordered, so the panel
    * can name WHERE a person's outstanding work is and which chapters of the
@@ -390,6 +477,8 @@ export interface CreateAssignmentArgs {
   laneId?: string
   deadline?: string | null
   note?: string | null
+  /** AQU-1969: omitted or 'translate' = today's assignment, the default. */
+  kind?: AssignmentKind
 }
 
 /**
@@ -420,6 +509,9 @@ export async function createAssignment(args: CreateAssignmentArgs): Promise<stri
       ...(laneId ? { laneId } : {}),
       ...(args.deadline !== undefined ? { deadline: args.deadline } : {}),
       ...(args.note !== undefined ? { note: args.note } : {}),
+      // AQU-1969: only a validate assignment names its kind, so a translate
+      // assignment's event is byte-for-byte what it was before kinds existed.
+      ...(args.kind === "validate" ? { kind: "validate" } : {}),
     },
   })
 
@@ -444,6 +536,8 @@ export interface CreateBulkFileAssignmentsArgs {
   /** AQU-538 (§3.5): one lane applied to every assignment in the batch. */
   targetLang?: string
   note?: string | null
+  /** AQU-1969: one kind applied to every assignment in the batch. */
+  kind?: AssignmentKind
 }
 
 export interface BulkFileAssignmentResult {
@@ -487,6 +581,7 @@ export async function createBulkFileAssignments(
         targetLang: args.targetLang,
         deadline: args.deadline,
         note: args.note,
+        kind: args.kind,
       }),
     ),
   )

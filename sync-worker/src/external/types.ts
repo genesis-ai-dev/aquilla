@@ -1,5 +1,6 @@
 // Shared types for the changeset engine.
 
+import type { IdentityTransport } from './identity-bridge'
 import type { TextDirection } from '../../../db/shared/text-direction'
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
@@ -8,7 +9,7 @@ import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
  *  (the compiled events are routed back through handleEventsWriteRequest). */
-export type ExternalEnv = EventsRouteEnv & {
+export type ExternalEnv = EventsRouteEnv & IdentityTransport & {
   /** AQU-730 read wall. Unset locally and in e2e. */
   /** Request-local trusted MCP delegation factory, never a network header. */
   mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
@@ -364,6 +365,11 @@ export interface PlannedEventIds {
     artifactId: string
     attachEventId: string
     selectEventId: string
+    /** AQU-2086: the take's native audio id — cell-seeded like a recorded
+     *  take's (db/shared/audio-id.ts), minted at prepare so a crash-retry
+     *  copies to and attaches the SAME id. Absent on plans staged before
+     *  AQU-2086; commit then falls back to the artifact's own audio_id. */
+    audioId?: string
   }[]
   /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
    *  event ids, pinned parent heads, and the prepare-time cut text. */
@@ -454,6 +460,20 @@ export interface ChangesetReceipt {
   committedAt: string
   /** PlanImport: the created file's id. */
   fileId?: string
+  /** AQU-2086 LinkMedia: one entry per attach that landed. */
+  media?: LinkMediaReceiptEntry[]
+}
+
+/** AQU-2086: what a committed LinkMedia command actually attached — the native
+ *  take id the app plays and lists (NOT the artifact's audio_id, which is only
+ *  the upload's storage name), with the slot and lane it took. */
+export interface LinkMediaReceiptEntry {
+  fileId: string
+  cellId: string
+  artifactId: string
+  audioId: string
+  slot: string
+  laneId?: string
 }
 
 /** AQU-1185: one applied membership change, recorded on the receipt so the

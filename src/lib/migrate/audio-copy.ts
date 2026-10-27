@@ -1,5 +1,6 @@
-// Pure planning for the fast R2→R2 audio import (scripts/migrate-audio-copy.ts
-// is the I/O shell around this). Two responsibilities:
+// Pure planning for the fast R2→R2 audio import — the I/O shells around this
+// are scripts/migrate-daemon/stages/audio.ts and scripts/migrate-all.ts. Two
+// responsibilities:
 //   1. Resolve each cell attachment to its LFS oid via the pointers tree, so the
 //      copy endpoint can locate the bytes already in R2.
 //   2. Decide the events to emit per cell: one cell.audio.attach per *copied*

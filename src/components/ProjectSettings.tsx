@@ -106,7 +106,7 @@ import {
   createProjectLane,
   renameProjectLane,
   setProjectLaneArchived,
-  setProjectLaneRecordsAudio,
+  setProjectLaneDelivers,
   fetchLaneLastChange,
   settingsEditorName,
   type LaneLastChangeResult,
@@ -121,10 +121,12 @@ import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
 import { MondayIntegrationSection } from "./ProjectSettings/MondayIntegrationSection"
+import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegrationSection"
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
-import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
@@ -164,10 +166,10 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * implemented but not ready to expose in the UI yet. Keep the code — flip this
  * flag to `true` when we want it back in settings nav + main content.
  *
- * Also re-enable the skipped smoke specs:
- *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
- *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
- *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ * Smoke coverage has to be written, not un-skipped: the three specs this note
+ * used to name (project-settings-termbase-sharing, -publish-toggle,
+ * termbase-subscribe-unsubscribe) are not in e2e/specs/projects/, and no
+ * termbase sharing spec exists anywhere under e2e/ today.
  *
  * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
  * entry points are gated here.
@@ -587,6 +589,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       code?: string | null
       /** AQU-1784: the section already warned about the duplicate inline. */
       allowDuplicateName?: boolean
+      /** Media redesign: the add form's Delivers choice. */
+      delivers?: LaneDelivers
     },
   ) => {
     const jwt = session?.jwt
@@ -601,14 +605,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
-  // AQU-1954: the "Records audio" switch on one language row.
-  const setLaneRecordsAudio = useCallback(async (laneId: string, recordsAudio: boolean) => {
+  // Media redesign slice 1: the "Delivers" choice on one language row.
+  const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
     const jwt = session?.jwt
-    if (!jwt || !id) return false
-    const result = await setProjectLaneRecordsAudio(jwt, id, laneId, recordsAudio)
-    if (result.kind !== "ok") return false
+    if (!jwt || !id) return "error"
+    const result = await setProjectLaneDelivers(jwt, id, laneId, delivers)
+    if (result.kind === "forbidden") return "forbidden"
+    if (result.kind !== "ok") {
+      return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error"
+    }
     await refreshSharedSettingsAfterWrite()
-    return true
+    return "ok"
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
@@ -1590,6 +1597,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
     { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
+    { id: "section-airtable", label: "Airtable", keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
     { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
@@ -1719,10 +1728,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "integrations",
       label: "Integrations",
-      description: "Monday.com board sync",
+      description: "Monday.com and Airtable sync",
       icon: Plug,
       hub: "Integrations",
-      sectionIds: ["section-monday"],
+      sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
@@ -1829,6 +1838,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-terminology",
       "section-termbase-sharing",
       "section-monday",
+      "section-airtable",
       "section-ai-metrics",
     ]
     const headers = new Map<string, string>()
@@ -1877,7 +1887,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
-    integrations: "Monday.com",
+    integrations: "Monday.com, Airtable",
     experimental: "This device",
   }
 
@@ -2234,8 +2244,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
-            onSetLaneRecordsAudio={isCloudProject ? setLaneRecordsAudio : undefined}
+            onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+            startAdding={focusTarget === "add-lane"}
           />
         )}
         {/* AQU-1688: facts about the target language that Bible data checks
@@ -2903,6 +2914,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <div id="section-voice">
             <SettingsGroup label={t("projectSettings.section.voice")}>
               <SettingsRow
+                label={t("projectSettings.voice.leadsManageLabel")}
+                description={t("projectSettings.voice.leadsManageDescription")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Switch
+                      checked={sharedSettingsBlob.projectLeadsManageVoices === true}
+                      onCheckedChange={(checked) => { void patchShared({ projectLeadsManageVoices: checked }) }}
+                      disabled={!canEditShared}
+                      aria-label={t("projectSettings.voice.leadsManageLabel")}
+                    />
+                  </DisabledFieldTooltip>
+                }
+              />
+              <SettingsRow
                 label="Gemini TTS"
                 description={t("projectSettings.voice.geminiKeyHelp")}
                 block
@@ -3215,6 +3240,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-monday")}
         {id && sectionsToRender.some((s) => s.id === "section-monday") && (
           <MondayIntegrationSection
+            projectId={id}
+            orgId={project?.orgId ?? null}
+            roleLevel={project?.syncRole?.level ?? null}
+          />
+        )}
+
+        {searchGroupLabel("section-airtable")}
+        {id && sectionsToRender.some((s) => s.id === "section-airtable") && (
+          <AirtableIntegrationSection
             projectId={id}
             orgId={project?.orgId ?? null}
             roleLevel={project?.syncRole?.level ?? null}

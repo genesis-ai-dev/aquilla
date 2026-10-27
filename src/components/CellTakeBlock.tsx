@@ -44,9 +44,7 @@ import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { laneLanguage } from "@/lib/lanes/lane-display"
-import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
-import { learnFromTranscriptCorrection } from "@/lib/store/transcript-corrections-store"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { saveTranscript } from "@/lib/transcript-cleanup/save"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -54,7 +52,7 @@ import { fmtShortCalendarDate } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import type { CodexCell } from "@/lib/codex-editor/types"
+import type { CodexCell, WordTiming } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
@@ -64,7 +62,8 @@ import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-rea
 import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
-import { effectiveAttachmentDurationMs } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
+import { useInRouterContext, useNavigate } from "react-router-dom"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -141,6 +140,27 @@ export interface CellTakeBlockProps {
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
   takesHistory?: ReadonlyMap<string, RecordingTextDrift>
+}
+
+type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
+
+/** The transcription badge, plus "Change model" (Preferences → Local models)
+ *  when a router is mounted to navigate with. Some isolated renders of this
+ *  block have no router; they get the badge without that action. */
+function TranscribeBadge({ routed, projectId, ...badge }: BadgeProps & { routed: boolean; projectId: string }) {
+  return routed
+    ? <RoutedTranscribeBadge projectId={projectId} {...badge} />
+    : <CellTranscribeBadge {...badge} />
+}
+
+function RoutedTranscribeBadge({ projectId, ...badge }: BadgeProps & { projectId: string }) {
+  const navigate = useNavigate()
+  return (
+    <CellTranscribeBadge
+      {...badge}
+      onChangeModel={() => navigate(`/preferences/local-models?project=${encodeURIComponent(projectId)}`)}
+    />
+  )
 }
 
 export function CellTakeBlock(props: CellTakeBlockProps) {
@@ -241,6 +261,7 @@ function CellTakeBlockView({
     })
   }, [selectedAudioId, attachment, project.id, owner.fileId, owner.id, owner.selectedAudioId, username, targetLang])
 
+  const inRouter = useInRouterContext()
   const transcribeStatus = useTranscribeStatus(selectedAudioId)
   const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
 
@@ -358,36 +379,16 @@ function CellTakeBlockView({
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
-      if (!selectedAudioId || !timings || timings.length === 0) return
-      const nextTimings = remapTranscriptTimings(timings as never, corrected)
-      if (nextTimings.length === 0) return
-      if (!attachment?.url) return
-
-      // AQU-463: the same edit that fixes THIS transcript teaches the project
-      // how ASR gets that word wrong, so the next transcription arrives already
-      // fixed. Learning is best-effort and deliberately non-blocking — the
-      // user's correction is committed below whatever happens here.
-      try {
-        const before = (timings as ReadonlyArray<{ word: string }>).map((t) => t.word).join(" ")
-        learnFromTranscriptCorrection(project.id, before, corrected)
-      } catch (err) {
-        console.warn("[transcript] learning from correction failed:", err)
-      }
-      void emitCellAudioAttach({
+      if (!selectedAudioId || !timings || timings.length === 0 || !attachment) return
+      // AQU-463 learning, the timing remap and the attach live in
+      // saveTranscript, shared with the Transcribe lens.
+      saveTranscript({
         projectId: project.id,
-        fileId: owner.fileId,
-        cellId: owner.id,
+        owner,
         audioId: selectedAudioId,
-        url: attachment.url,
-        // AQU-646: the clip's own slot, inferred only when it is absent (a
-        // hand-built stub). This attach assigns `slot` outright and deselects
-        // the clip's siblings in that slot, so guessing it moves the take.
-        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
-        timings: nextTimings,
-        ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
-        ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
-        ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
-        ...(isSourceSegmentSelected(owner) ? { transcription: corrected } : {}),
+        attachment,
+        timings: timings as WordTiming[],
+        text: corrected,
         ...(targetLang ? { targetLang } : {}),
         author: username,
       }).catch((err) => {
@@ -410,9 +411,7 @@ function CellTakeBlockView({
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
-  const keptMs = split
-    ? split.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
-    : effectiveAttachmentDurationMs(attachment)
+  const keptMs = takePlayedMs(split ?? (attachment ? [attachment] : []))
   const trackVars = takeTrackVars({
     files: project.files,
     fileId: trackFileId ?? owner.fileId,
@@ -459,7 +458,7 @@ function CellTakeBlockView({
           </span>
         )}
         {!isSection && keptMs != null && (
-          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{(keptMs / 1000).toFixed(1)}s</span>
+          <span data-testid="cell-take-length" className="tabular-nums text-muted-foreground">{formatTakeSeconds(keptMs)}s</span>
         )}
         {provenance && (
           <span
@@ -520,7 +519,9 @@ function CellTakeBlockView({
         {!readOnlyTranscript && (
           // Model download %, failures (click to expand, with Retry) and a
           // success flash — the only place a transcription reports itself.
-          <CellTranscribeBadge
+          <TranscribeBadge
+            routed={inRouter}
+            projectId={project.id}
             audioId={selectedAudioId}
             hasTimings={(timings?.length ?? 0) > 0}
             onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}

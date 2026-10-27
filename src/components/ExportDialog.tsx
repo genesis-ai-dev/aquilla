@@ -67,9 +67,11 @@ import {
   scopeAudioCellsForExport,
   unvalidatedAudioLineIds,
 } from "@/lib/export/audio-validation-scope"
+import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
+import { exportHtml } from "@/lib/export/exporters/html"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
@@ -114,7 +116,7 @@ import {
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 import { hasPackageLocators } from "@/lib/export/import-locators"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "html" | "json" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
@@ -194,6 +196,16 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.md.label",
     ext: ".md",
     descriptionKey: "importExport.format.md.description",
+    lossy: true,
+  },
+  {
+    // AQU-2182: a USFM book as one readable, self-contained web page (chapter
+    // index, numbered verses, section headings) — what Codex's "Export as
+    // HTML" gave reviewers and printers. Only shown for files imported as USFM.
+    id: "html",
+    labelKey: "importExport.format.html.label",
+    ext: ".html",
+    descriptionKey: "importExport.format.html.description",
     lossy: true,
   },
   {
@@ -403,8 +415,12 @@ interface ExportDialogProps {
   getToken: (fileId: string) => Promise<string | null>
   /** Organization identifier used for internal/beta rollout allowlists. */
   orgId?: string
-  /** Opens the import flow when an IDML locator or anchor needs repair. */
-  onReimport?: () => void
+  /** Builds a repaired IDML copy of the file being exported. The original file is not modified. */
+  onRepairIdmlCopy?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (label: string) => void
+  }) => Promise<{ name: string; unmatched: number }>
   /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
@@ -432,6 +448,9 @@ interface ExportDialogProps {
    */
   onJumpToAudioLine?: (cellId: string) => void
 }
+
+/** AQU-2073: how many line pills the unvalidated-audio note shows before "+N more". */
+const UNVALIDATED_LINE_PILLS_SHOWN = 8
 
 function profileIdFromCells(cells: readonly CellData[]): string | null {
   for (const cell of cells) {
@@ -492,7 +511,7 @@ export function ExportDialog({
   ttsSettings,
   getToken,
   orgId,
-  onReimport,
+  onRepairIdmlCopy,
   outstandingInfractionCount = 0,
   audioValidationRequirement = 1,
   onJumpToAudioLine,
@@ -954,7 +973,8 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump"] as const
+  // html is file-only for now: the whole-project zip of pages is AQU-2183.
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "json", "plain-text-dump", "html"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -973,7 +993,7 @@ export function ExportDialog({
    * one-chapter .docx would mean rebuilding the document rather than exporting
    * it. Those stay whole-file.
    */
-  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const chapterScopeFormats = ["txt", "md", "html", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
   const supportsChapterScope = (fmt: ExportFormat): boolean =>
     (chapterScopeFormats as readonly string[]).includes(fmt)
 
@@ -999,6 +1019,7 @@ export function ExportDialog({
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
       if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
+      if (f.id === "html") return activeFileType === "usfm" // AQU-2182: the readable page is a USFM book's
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1048,6 +1069,39 @@ export function ExportDialog({
     bytes: ArrayBuffer
     downloadName: string
   } | null>(null)
+  const [repairingCopy, setRepairingCopy] = useState(false)
+
+  const repairCopy = async () => {
+    if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
+    setRepairingCopy(true)
+    setStatus({
+      kind: "busy",
+      msg: t("importExport.dialog.repairingIdmlCopy", { fileName: activeFileName }),
+    })
+    try {
+      const result = await onRepairIdmlCopy({
+        fileId: activeFileId,
+        fileName: activeFileName,
+        onProgress: (label) => setStatus({ kind: "busy", msg: label }),
+      })
+      setStatus({
+        kind: "ok",
+        msg: result.unmatched > 0
+          ? t("importExport.dialog.repairIdmlCopyDoneUnmatched", {
+              fileName: result.name,
+              count: result.unmatched,
+            })
+          : t("importExport.dialog.repairIdmlCopyDone", { fileName: result.name }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: error instanceof Error ? error.message : t("importExport.dialog.repairIdmlCopyNeedsOriginal"),
+      })
+    } finally {
+      setRepairingCopy(false)
+    }
+  }
 
   const selectedFormat = formatOptions.find((f) => f.id === format)!
   const isLossy = selectedFormat.lossy
@@ -1145,6 +1199,13 @@ export function ExportDialog({
     () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
     [audioSourceCells, audioValidationRequirement],
   )
+  /** AQU-2073: those lines named for the note's pills — a line's reference
+   *  ("JHN 6:5"), or "L3" the way the by-line export numbers its files. */
+  const unvalidatedAudioPills = useMemo(() => {
+    const labels = audioLineLabels(audioSourceCells)
+    return unvalidatedAudioLines.map((id) => ({ id, label: labels.get(id) ?? id }))
+  }, [audioSourceCells, unvalidatedAudioLines])
+  const [showAllUnvalidatedLines, setShowAllUnvalidatedLines] = useState(false)
 
   /**
    * The cells the AUDIO deliverables export from, with the content mode
@@ -1839,6 +1900,15 @@ export function ExportDialog({
           case "md":
             blob = exportMarkdownStructured(filteredCells)
             break
+          case "html":
+            // AQU-2182: scoped like the other text formats — hidden cells,
+            // validated-only and the chapter range are already applied above.
+            blob = exportHtml(filteredCells, {
+              fileName: activeFileName,
+              validatedOnly,
+              lang: targetLanguage,
+            })
+            break
           case "tsv":
             blob = exportTsv(filteredCells)
             break
@@ -2003,34 +2073,67 @@ export function ExportDialog({
    */
   const renderUnvalidatedAudioNote = () => {
     if (unvalidatedAudioLines.length === 0) return null
+    // AQU-2073 (Sam, 2026-10-20): every such line by name, each one click
+    // away, instead of a "Show me" that only reached the first. A long file
+    // shows the first few and "+N more", which opens the rest in place.
+    const shown = showAllUnvalidatedLines
+      ? unvalidatedAudioPills
+      : unvalidatedAudioPills.slice(0, UNVALIDATED_LINE_PILLS_SHOWN)
+    const hidden = unvalidatedAudioPills.length - shown.length
+    const pillClass =
+      "rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium tabular-nums " +
+      "text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 " +
+      "dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/50"
     return (
-      <p
+      <div
         data-testid="export-audio-unvalidated-note"
-        className="text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+        className="flex flex-col gap-1.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
       >
-        {t(
-          validatedOnly
-            ? "importExport.dialog.audioUnvalidatedOmittedNote"
-            : "importExport.dialog.audioUnvalidatedNote",
-          { count: unvalidatedAudioLines.length },
-        )}
+        <p className="m-0">
+          {t(
+            validatedOnly
+              ? "importExport.dialog.audioUnvalidatedOmittedNote"
+              : "importExport.dialog.audioUnvalidatedNote",
+            { count: unvalidatedAudioLines.length },
+          )}
+        </p>
         {onJumpToAudioLine && (
-          <>
-            {" "}
-            <button
-              type="button"
-              className="underline underline-offset-2 hover:no-underline"
-              onClick={() => {
-                // The dialog covers the line it is about to show.
-                onOpenChange(false)
-                onJumpToAudioLine(unvalidatedAudioLines[0])
-              }}
-            >
-              {t("importExport.dialog.audioUnvalidatedJump")}
-            </button>
-          </>
+          <ul
+            className="m-0 flex list-none flex-wrap gap-1 p-0"
+            aria-label={t("importExport.dialog.audioUnvalidatedLinesAria")}
+          >
+            {shown.map(({ id, label }) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  className={pillClass}
+                  aria-label={t("importExport.dialog.audioUnvalidatedShowLine", { line: label })}
+                  data-testid="export-audio-unvalidated-line"
+                  onClick={() => {
+                    // The dialog covers the line it is about to show.
+                    onOpenChange(false)
+                    onJumpToAudioLine(id)
+                  }}
+                >
+                  {label}
+                </button>
+              </li>
+            ))}
+            {hidden > 0 && (
+              <li>
+                <button
+                  type="button"
+                  className="rounded-full px-2 py-0.5 text-[11px] font-medium text-amber-800 underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-300"
+                  data-testid="export-audio-unvalidated-more"
+                  onClick={() => setShowAllUnvalidatedLines(true)}
+                >
+                  {t("importExport.dialog.audioUnvalidatedMore", { count: hidden })}
+                </button>
+              </li>
+            )}
+          </ul>
         )}
-      </p>
+      </div>
     )
   }
 
@@ -2970,11 +3073,8 @@ export function ExportDialog({
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      handleOpenChange(false)
-                      onReimport?.()
-                    }}
-                    disabled={!onReimport}
+                    onClick={() => { void repairCopy() }}
+                    disabled={!onRepairIdmlCopy || repairingCopy}
                   >
                     {t("importExport.dialog.repairByReimporting")}
                   </Button>

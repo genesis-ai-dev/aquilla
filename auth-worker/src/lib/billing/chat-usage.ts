@@ -1,26 +1,17 @@
 import type { Env } from '../../types'
 import { readProviderCostCents } from '../../../../db/shared/billing-cost'
-import { recordUsageProviderRef, releaseWorkspaceUsage, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
+import { recordUsageProviderRef, releaseWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
 import { boundRequestCostCents, readRateCard } from './rate-card'
-import { weeklyUsageActive } from './usage-mode'
 
 /** Server-enforced output cap while metering; clients cannot raise it. */
 export const METERED_MAX_OUTPUT_TOKENS = 4096
 
 export interface ChatUsage { orgId: number; requestId: string }
 
-/** Kept for callers; see `usage-mode.ts` for the off/rehearsal/enforce policy. */
-export function chatUsageRehearsalAllowed(env: Env, requestUrl: string) {
-  return weeklyUsageActive(env, requestUrl) === 'on'
-}
-export async function admitChatUsage(env: Env, input: {
-  orgId: number; userId: number; projectId: string; requestId: string
-  model: string; promptChars: number; maxOutputTokens: number
-}) {
-  const { model, promptChars, maxOutputTokens, ...request } = input
-  const maxRawCostCents = boundRequestCostCents(await readRateCard(env), { model, promptChars, maxOutputTokens })
-  const result = await reserveWorkspaceUsage(env.AQUILLA_PG, { ...request, rail: 'llm', maxRawCostCents })
-  return result.created
+/** The reservation bound for one OpenRouter call, priced from the live rate
+ *  card (admitPaidCall reads it only when the meter reserves). */
+export function openRouterEstimate(env: Env, input: { model: string; promptChars: number; maxOutputTokens: number }) {
+  return async () => boundRequestCostCents(await readRateCard(env), input)
 }
 
 /** Never discard valid generated content because accounting needs recovery.

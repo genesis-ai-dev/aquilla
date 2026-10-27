@@ -547,6 +547,20 @@ describe("the link into the editor (AQU-1278)", () => {
     expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
   })
 
+  // AQU-1974: the done mark used to be exactly what hid this link.
+  it("keeps the link on a unit marked done with work left, however far from finished", async () => {
+    const onGoToFirstOpen = vi.fn()
+    const getToken = withSections([section("GEN 1")])
+    renderInspector(
+      unit({ sectionKey: "GEN", fileName: "Whole Bible", filledCount: 100, validatedCount: 60, doneAt: NOW, doneBy: "randall" }),
+      true, false, getToken, { onGoToFirstOpen },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-unit-shortfall")).toHaveTextContent("40 cells to validate")
+    fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
+    expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
+  })
+
   it("gives a unit that is not nearly complete no link at all", async () => {
     // Deliberate, and flagged for re-confirmation at build review: "the first
     // outstanding cell" is not a useful place to stand when nearly everything

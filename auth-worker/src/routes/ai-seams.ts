@@ -146,7 +146,8 @@ aiSeams.post(
     }
 
     let answers: ReturnType<typeof parseSeamAnswers> | null = null
-    const called = await callJev(c.env, buildSeamRequest(cells), SEAM_TIMEOUT_MS)
+    const called = await callJev(c.env, buildSeamRequest(cells), SEAM_TIMEOUT_MS,
+      { projectId: input.projectId, userId: user.id })
     if (called.ok) answers = parseSeamAnswers(called.body, cells.length - 1)
     else console.warn(`[ai-seams] classification ${called.reason}; using heuristic seams`)
 

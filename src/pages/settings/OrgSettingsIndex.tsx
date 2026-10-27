@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, SlidersHorizontal, SpellCheck, Workflow } from "lucide-react"
+import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, SlidersHorizontal, SpellCheck, Table2, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -63,6 +63,12 @@ export function OrgSettingsIndex() {
             hint={t("knowledgeBase.orgDescription")}
           />
           <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint="Board sync" />
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "airtable")}
+            icon={Table2}
+            title="Airtable"
+            hint={t("settings.airtable.navHint")}
+          />
         </NavList>
 
         <NavList label={t("billing.settings.peopleProjects")}>

@@ -291,6 +291,20 @@ export function laneOfBacktranslationEvent(payload: unknown): string {
   return typeof lang === 'string' ? lang : ''
 }
 
+/**
+ * AQU-1408: the lane tag a `cell.gloss.set` event names.
+ *
+ * Same rule as {@link laneOfBacktranslationEvent} — a gloss is not a cells row
+ * and takes no part in the AD-2 chain, so it stays out of {@link laneOfEvent}
+ * too. Separate function rather than a shared one because the two kinds can
+ * diverge (a gloss has no `polished` dimension) and a shared helper would hide
+ * that the day one of them grows a second lane field.
+ */
+export function laneOfGlossEvent(payload: unknown): string {
+  const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
+  return typeof lang === 'string' ? lang : ''
+}
+
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
 // generated column + GIN index on every cells write, so the projection emits no
 // FTS statements (the old SQLite FTS5 cells_fts shadow-table upkeep is gone).
@@ -616,7 +630,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1253,6 +1267,21 @@ export function buildEventProjectionStmts(
               )
               .bind(sp.transcription, event.projectId, event.fileId, event.cellId),
           )
+          // 0186: a hand edit of the transcript makes it the editor's, so the
+          // segment's AI-cleanup mark goes (the attach path clears it the same
+          // way when new timings arrive without one).
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cell_audio SET transcript_ai = NULL
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND role = 'source'
+                    AND transcript_ai IS NOT NULL`,
+              )
+              .bind(event.projectId, event.fileId, event.cellId),
+          )
+          if (!opts?.deferFileCounters)
+            stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
+          return ['cells', 'files', 'cell_audio']
         }
       }
 
@@ -1425,6 +1454,14 @@ export function buildEventProjectionStmts(
             )
             .bind(...dependentBinds, ...dependentGateBinds),
         )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_glosses
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
         // Morph analysis is written by the /import-morph route, never by an
         // event — so this DELETE is its only cleanup path anywhere. Harmless
         // on replay for the same reason as the rest.
@@ -1467,6 +1504,19 @@ export function buildEventProjectionStmts(
               ...dependentGateBinds,
             ),
         )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_glosses
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND ${backtranslationLaneMatchSql()}${dependentGateAnd}`,
+            )
+            .bind(
+              ...dependentBinds,
+              ...backtranslationLaneMatchBinds(event.projectId, lane),
+              ...dependentGateBinds,
+            ),
+        )
       }
 
       // LAST, deliberately: every statement above tests this row's head with
@@ -1500,9 +1550,10 @@ export function buildEventProjectionStmts(
             'comments',
             'cell_waivers',
             'cell_backtranslations',
+            'cell_glosses',
             'cell_word_morph',
           ]
-        : ['cells', 'files', 'cell_validators', 'cell_backtranslations']
+        : ['cells', 'files', 'cell_validators', 'cell_backtranslations', 'cell_glosses']
     }
 
     case 'source.cell.restore': {
@@ -1538,6 +1589,7 @@ export function buildEventProjectionStmts(
         'comments',
         'cell_waivers',
         'cell_backtranslations',
+        'cell_glosses',
         'cell_word_morph',
       ]
     }
@@ -1941,8 +1993,9 @@ case 'cell.audio.attach': {
             `INSERT INTO cell_audio (
               project_id, file_id, cell_id, audio_id, slot, url, mime_type,
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
-              timings_json, selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
+              timings_json, asr_text, asr_model, transcript_ai,
+              selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
                       ${attachPieceOf ? attachPieceLaneSql() : audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
@@ -1955,6 +2008,17 @@ case 'cell.audio.attach': {
               trim_start_ms      = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms),
               trim_end_ms        = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms),
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
+              -- 0186: what ASR heard survives every correction — only an attach
+              -- that carries an asr field (a new ASR run) replaces it.
+              asr_text           = COALESCE(excluded.asr_text, cell_audio.asr_text),
+              asr_model          = COALESCE(excluded.asr_model, cell_audio.asr_model),
+              -- 0186: the AI-cleanup mark is the transcript's, not the clip's.
+              -- New timings without it mean someone else's transcript now
+              -- (a human correction, or fresh ASR), so it goes; an attach with
+              -- no timings (a trim, a duration heal) leaves it alone.
+              transcript_ai      = CASE WHEN excluded.transcript_ai IS NOT NULL THEN excluded.transcript_ai
+                                        WHEN excluded.timings_json IS NOT NULL THEN NULL
+                                        ELSE cell_audio.transcript_ai END,
               selected           = 1,
               deleted            = 0,
               event_id           = excluded.event_id,
@@ -2008,6 +2072,9 @@ case 'cell.audio.attach': {
             p.trimStartMs ?? null,
             p.trimEndMs ?? null,
             p.timings ? JSON.stringify(p.timings) : null,
+            p.asr && typeof p.asr.text === 'string' ? p.asr.text : null,
+            p.asr && typeof p.asr.model === 'string' ? p.asr.model : null,
+            p.transcriptAi ? JSON.stringify(p.transcriptAi) : null,
             event.id,
             event.serverTs,
             // AQU-490: 'source' only when the attach says so — an import
@@ -3015,6 +3082,54 @@ case 'cell.audio.attach': {
           ),
       )
       return ['cell_backtranslations']
+    }
+
+    case 'cell.gloss.set': {
+      // AQU-1408 §1. Non-chain-mutating, exactly like the back-translation
+      // above: does NOT move cells.event_id, does NOT touch cell_validators or
+      // endorsement_count. Keyed by the target commit the gloss reads, so a
+      // later edit of that cell leaves this row addressable as the reading of
+      // the commit it actually described rather than silently re-pointing.
+      //
+      // An empty `glossText` is a real write, not a no-op: it is how a
+      // contributor withdraws a correction and asks for the computed gloss
+      // back. The read route returns it and the client treats "" as absent, so
+      // deleting the row here would make an un-correction invisible to every
+      // other member until they reloaded.
+      const p = event.payload as EventPayloads['cell.gloss.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      const lane = laneOfGlossEvent(p)
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_glosses (
+              project_id, file_id, cell_id, target_event_id,
+              gloss_text, author, event_id, server_seq, created_at, lane_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ${laneIdResolveSql('target')})
+            ON CONFLICT(project_id, file_id, cell_id, target_event_id) DO UPDATE SET
+              gloss_text  = excluded.gloss_text,
+              author      = excluded.author,
+              event_id    = excluded.event_id,
+              server_seq  = excluded.server_seq,
+              created_at  = excluded.created_at,
+              lane_id     = COALESCE(excluded.lane_id, cell_glosses.lane_id)`,
+          )
+          .bind(
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.targetEventId,
+            p.glossText,
+            event.author,
+            event.id,
+            event.serverSeq ?? null,
+            event.serverTs,
+            ...laneIdResolveBinds('target', event.projectId, lane),
+          ),
+      )
+      return ['cell_glosses']
     }
 
     case 'assignment.create':

@@ -34,6 +34,8 @@ test("BIA · ghost text that reads the source verse", async ({ page }) => {
   const cellId = seeded.cellIds[seeded.rowOf(REF)]
   const ws = await openSeededProject(page, seeded)
   const assist = new TypingAssist(page, ws)
+  // Off by default (AQU-2117): opt in through the real switch before typing.
+  await assist.enableGhostText()
 
   const show = new Showcase(page, {
     persona: "p1-field-translator",

@@ -33,9 +33,6 @@ export function PericopeSuggestions({
 
   if (suggestions.length === 0) return null
 
-  const book = suggestions[0]!.book
-  const bookName = getBookName(book) ?? book
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -71,8 +68,10 @@ export function PericopeSuggestions({
                 }}
               >
                 <span className="text-sm font-medium tabular-nums">
+                  {/* AQU-2158: each row names its own book, so a range can
+                      never be relabelled with the first row's book. */}
                   {t("editor.pericope.range", {
-                    book: bookName,
+                    book: getBookName(suggestion.book) ?? suggestion.book,
                     start: verseLabel(suggestion.start),
                     end: verseLabel(suggestion.end),
                   })}

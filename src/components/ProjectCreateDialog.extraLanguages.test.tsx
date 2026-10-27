@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 import { toast } from "@/components/ui/toast"
 
@@ -301,19 +302,19 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       language: "English",
     })
     expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
-      { name: "", language: "French" },
-      { name: "", language: "lang-1" },
-      { name: "", language: "lang-2" },
-      { name: "", language: "lang-3" },
-      { name: "", language: "lang-4" },
-      { name: "", language: "lang-5" },
-      { name: "", language: "lang-6" },
-      { name: "", language: "lang-7" },
-      { name: "", language: "lang-8" },
-      { name: "", language: "lang-9" },
-      { name: "", language: "Swahili" },
-      { name: "", language: "Yoruba" },
-      { name: "", language: "Hausa" },
+      { name: "", language: "French", delivers: "text" },
+      { name: "", language: "lang-1", delivers: "text" },
+      { name: "", language: "lang-2", delivers: "text" },
+      { name: "", language: "lang-3", delivers: "text" },
+      { name: "", language: "lang-4", delivers: "text" },
+      { name: "", language: "lang-5", delivers: "text" },
+      { name: "", language: "lang-6", delivers: "text" },
+      { name: "", language: "lang-7", delivers: "text" },
+      { name: "", language: "lang-8", delivers: "text" },
+      { name: "", language: "lang-9", delivers: "text" },
+      { name: "", language: "Swahili", delivers: "text" },
+      { name: "", language: "Yoruba", delivers: "text" },
+      { name: "", language: "Hausa", delivers: "text" },
     ])
   })
 
@@ -363,9 +364,9 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       language: "English",
     })
     expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
-      { name: "", language: "French" },
-      { name: "", language: "es" },
-      { name: "", language: "pt-BR" },
+      { name: "", language: "French", delivers: "text" },
+      { name: "", language: "es", delivers: "text" },
+      { name: "", language: "pt-BR", delivers: "text" },
     ])
 
     expect(mockCreateProject).toHaveBeenCalledTimes(1)
@@ -385,6 +386,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", expect.any(String), {
       name: "",
       language: "French",
+      delivers: "text",
     })
   })
 
@@ -410,6 +412,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockCreateProjectLane).toHaveBeenCalledWith("tok", expect.any(String), {
       name: "",
       language: "Swahili",
+      delivers: "text",
     })
   })
 
@@ -490,5 +493,55 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByText(/import a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+  })
+  // Media redesign slice 1 (Sam, Oct 22): each target language picks what it
+  // delivers, preset to Text.
+  it("lets each target language pick what it delivers, every one starting at Text", async () => {
+    openDialogWithBasics({ target: "Swahili" })
+    addExtraLanguage("French")
+    expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Text")
+    expect(screen.getByTestId("create-target-lang-delivers-1")).toHaveTextContent("Text")
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("combobox", { name: "What Swahili delivers" }))
+    await user.click(await screen.findByRole("option", { name: "Audio" }))
+    expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Audio")
+
+    await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
+    })
+    expect(mockCreateProjectLane.mock.calls.map((call) => call[2])).toEqual([
+      { name: "", language: "Swahili", delivers: "audio" },
+      { name: "", language: "French", delivers: "text" },
+    ])
+  })
+
+  it("gives each pasted overflow language its own choice, preset to Text", async () => {
+    openDialogWithBasics()
+    fillToBoxLimit()
+    fireEvent.change(screen.getByTestId("create-bulk-target-langs"), {
+      target: { value: "Swahili, Yoruba" },
+    })
+    const list = screen.getByTestId("create-bulk-target-langs-delivers")
+    expect(list.querySelectorAll("li")).toHaveLength(2)
+    expect(screen.getByRole("combobox", { name: "What Swahili delivers" })).toHaveTextContent("Text")
+    expect(screen.getByRole("combobox", { name: "What Yoruba delivers" })).toHaveTextContent("Text")
+
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("combobox", { name: "What Yoruba delivers" }))
+    await user.click(await screen.findByRole("option", { name: "Text and audio" }))
+
+    await screen.findByTestId("project-create-destination")
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    await waitFor(() => {
+      expect(mockCreateProjectLane).toHaveBeenCalledTimes(12)
+    })
+    const calls = mockCreateProjectLane.mock.calls.map((call) => call[2])
+    expect(calls.slice(-2)).toEqual([
+      { name: "", language: "Swahili", delivers: "text" },
+      { name: "", language: "Yoruba", delivers: "text_and_audio" },
+    ])
   })
 })

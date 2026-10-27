@@ -111,7 +111,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
           // The linked subtitle's assignment when there is one — see
           // `voiceCellId`. Falls back to this cell's own, which is every
           // non-cue arrangement.
-          args.voiceCellId ?? cell.id,
+          // AQU-2125: this cell itself (not its id) so its character is found.
+          args.voiceCellId ?? cell,
           cell.ttsSettings?.voiceId,
         ).id,
       // AQU-1978: the languages of the LANES this voice belongs to. The

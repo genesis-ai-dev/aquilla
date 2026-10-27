@@ -41,6 +41,10 @@ import {
 } from "@/components/ui/message-scroller"
 import { AgentEmptyState } from "./AgentEmptyState"
 import { AgentUsageRing } from "./AgentUsageRing"
+import { AiMeter } from "@/components/billing/AiMeter"
+import { useAiMeter } from "@/hooks/useAiMeter"
+import { meterView } from "@/lib/billing/ai-meter"
+import { ROLE } from "@/lib/frontier/roles"
 import type { CreditsDialProps } from "./CreditsDial"
 import { AgentRunView } from "./AgentRunView"
 import { PassageCard } from "./cards/PassageCard"
@@ -57,6 +61,8 @@ export interface AgentDockViewProps {
   /** Org credit gauge for the composer's usage ring (maintainer+ only;
    *  everyone else sees the latest run's budget %). */
   credits?: CreditsDialProps | null
+  /** AQU-2068: the meter's "Use your own key" CTA opens the AI setup dialog. */
+  onUseOwnKey?: () => void
   /** Current user's project role level (project.syncRole.level). */
   roleLevel: number | null
   /** Current file/cell location — automatically sent as run context. */
@@ -107,6 +113,7 @@ function ScopedAgentDockView({
   jwt,
   author,
   credits,
+  onUseOwnKey,
   roleLevel,
   context,
   rules,
@@ -128,6 +135,13 @@ function ScopedAgentDockView({
   // message (and the reply about to stream) is in view even if the user had
   // scrolled up to read history.
   const [sendSignal, setSendSignal] = useState(0)
+  // AQU-2068: the org's % meter. Re-read once a run settles; at 100% new
+  // agent runs stop here instead of failing on the server.
+  const meter = meterView(useAiMeter(credits?.jwt ?? null, credits?.orgId ?? null, state.isStreaming ? -1 : state.runs.length))
+  const aiPaused = meter.kind === "metered" && meter.level === "exhausted"
+  const meterProps = credits
+    ? { view: meter, orgId: credits.orgId, canManage: credits.orgRoleLevel >= ROLE.MAINTAINER, onUseOwnKey, agent: true }
+    : null
   const composerRef = useRef<ChatComposerHandle>(null)
   const draftStore = composerDraftStore(draftScope)
   const { attachments, attachmentError: attachError } = useComposerDraft(draftStore)
@@ -351,11 +365,14 @@ function ScopedAgentDockView({
         </MessageScrollerProvider>
       )}
 
+      {aiPaused && meterProps ? (
+        <AiMeter {...meterProps} className="mx-2 mb-2 rounded-lg border bg-card p-3" />
+      ) : null}
       <ChatComposer
         ref={composerRef}
         draftScope={draftScope}
         isStreaming={state.isStreaming}
-        isConfigured={Boolean(jwt)}
+        isConfigured={Boolean(jwt) && !aiPaused}
         onSend={({ text, chips }) => sendPrompt(text, chips)}
         onStop={stop}
         compact
@@ -421,7 +438,7 @@ function ScopedAgentDockView({
             >
               {uploading ? <Spinner /> : <Paperclip />}
             </InputGroupButton>
-            <AgentUsageRing credits={credits} runs={state.runs} isStreaming={state.isStreaming} />
+            <AgentUsageRing meter={meterProps} runs={state.runs} />
           </>
         }
       />

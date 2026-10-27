@@ -19,10 +19,9 @@ import { createMenuHandle } from "@/components/ui/menu-parts"
 import { FileActionMenu, type FileReorderActions } from "./FileActionMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercent } from "@/lib/progress/progress-percent"
-import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
-
-interface FileStats { translated: number; validated: number; total: number }
+import { fileProgressView, type FileStats } from "@/lib/progress/file-summary-progress"
 
 interface FileRowProps {
   file: FileReference
@@ -87,9 +86,34 @@ export function FileRow(props: FileRowProps) {
     }
   }, [editing, file.name])
 
-  // AQU-1493: never 100 while a cell is outstanding.
-  const translatedPct = progress ? progressPercent(progress.translated, progress.total) : 0
-  const validatedPct = progress ? progressPercent(progress.validated, progress.total) : 0
+  // AQU-1493: never 100 while a cell is outstanding. Text and audio carries
+  // its text half separately (its `translated` / `validated` are the lines
+  // started / done), so its text bar reads the same figures a file holding
+  // both reads when nobody has chosen.
+  const bothLanguage = progress?.delivers === "text_and_audio"
+  const translatedPct = progress
+    ? progressPercent(bothLanguage ? progress.textTranslated ?? progress.translated : progress.translated, progress.total) : 0
+  const validatedPct = progress
+    ? progressPercent(bothLanguage ? progress.textValidated ?? progress.validated : progress.validated, progress.total) : 0
+  // AQU-2111: and the audio half, for a project whose target language has no
+  // written form. `recorded` absent means this row has no audio figures — an
+  // older sync-worker, or the live count before the attachment map lands — and
+  // absent must never draw as "0% recorded", which is the bug being fixed.
+  // An Audio language's started / done lines ARE its recorded / approved ones.
+  const audioLanguage = progress?.delivers === "audio"
+  const recordedPct = progress
+    ? progressPercent(progress.recorded ?? (audioLanguage ? progress.translated : 0), progress.total) : 0
+  const audioValidatedPct = progress
+    ? progressPercent(progress.audioValidated ?? (audioLanguage ? progress.validated : 0), progress.total) : 0
+  // The display rule AQU-2110 settled: audio only when there is no target text
+  // in this lane, both when there is, text alone when there is no audio. What
+  // the language delivers wins where someone has chosen (media redesign). Text
+  // and audio draws its text and its audio as two bars, the same as a file
+  // holding both when nobody has chosen; it owes audio, so its audio bar shows
+  // before the first recording, as an Audio language's does.
+  const view = fileProgressView(progress)
+  const showText = view !== "audio"
+  const showAudio = view !== "text" && (audioLanguage || bothLanguage || (progress?.recorded ?? 0) > 0)
   const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
@@ -242,7 +266,19 @@ export function FileRow(props: FileRowProps) {
               data-testid="file-row-progress-slot"
               aria-label={
                 progress && progress.total > 0
-                  ? t("nav.fileRow.progressAriaLabel", { translated: translatedPct, validated: validatedPct })
+                  ? showText
+                    ? showAudio
+                      ? t("nav.fileRow.progressWithAudioAriaLabel", {
+                          translated: translatedPct,
+                          validated: validatedPct,
+                          recorded: recordedPct,
+                          audioValidated: audioValidatedPct,
+                        })
+                      : t("nav.fileRow.progressAriaLabel", { translated: translatedPct, validated: validatedPct })
+                    : t("nav.fileRow.audioProgressAriaLabel", {
+                        recorded: recordedPct,
+                        audioValidated: audioValidatedPct,
+                      })
                   : undefined
               }
             >
@@ -251,12 +287,27 @@ export function FileRow(props: FileRowProps) {
                   light one — where there were two side-by-side bars in amber
                   and emerald. Drawn from the same two percentages the slot's
                   label reads out. */}
+              {/* AQU-2111: with both media the slot holds two thinner stacked
+                  tracks — text above, audio below — so the 50px reservation
+                  (and therefore where every row's name truncates) is
+                  untouched. A file with one medium keeps the single 8px bar. */}
               {progress && progress.total > 0 && (
-                <ProgressSplitBar
-                  segments={textProgressSegments({ validated: validatedPct, translated: translatedPct, total: 100 })}
-                  height={8}
-                  className="w-full"
-                />
+                <span className="flex w-full flex-col gap-0.5">
+                  {showText && (
+                    <ProgressSplitBar
+                      segments={textProgressSegments({ validated: validatedPct, translated: translatedPct, total: 100 })}
+                      height={showAudio ? 4 : 8}
+                      className="w-full"
+                    />
+                  )}
+                  {showAudio && (
+                    <ProgressSplitBar
+                      segments={audioProgressSegments({ validated: audioValidatedPct, recorded: recordedPct, total: 100 })}
+                      height={showText ? 4 : 8}
+                      className="w-full"
+                    />
+                  )}
+                </span>
               )}
             </div>
           )}

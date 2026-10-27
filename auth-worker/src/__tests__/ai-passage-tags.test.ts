@@ -14,7 +14,7 @@ import { env } from "cloudflare:test"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
-import { resolvePassageTagUrl } from "../routes/ai-passage-tags"
+import { resolveDecisionsUrl as resolvePassageTagUrl } from "../lib/jev/client"
 import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import {
   nodeQuestionId,

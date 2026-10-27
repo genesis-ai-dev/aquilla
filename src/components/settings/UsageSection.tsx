@@ -13,6 +13,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
+import { OrgAiMeter } from "@/components/billing/AiMeter"
+import { useActiveOrgOptional } from "@/context/OrgContext"
+import { ROLE } from "@/lib/frontier/roles"
 
 /** Inline hook — only used by UsageSection. */
 function useUserUsage(jwt: string | null): {
@@ -92,6 +95,7 @@ export function UsageSection() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { data, loading } = useUserUsage(jwt)
+  const activeOrg = useActiveOrgOptional()?.activeOrg ?? null
 
   if (!jwt) return null
 
@@ -105,6 +109,12 @@ export function UsageSection() {
 
   return (
     <SettingsGroup label={t("onboarding.timeWindow.thisWeek")}>
+      {/* AQU-2068: the workspace's one % meter, the same as on the org overview. */}
+      {activeOrg ? (
+        <SettingsRow label={activeOrg.name ?? t("billing.meter.sectionTitle")} block>
+          <OrgAiMeter jwt={jwt} orgId={activeOrg.id} canManage={activeOrg.role.level >= ROLE.MAINTAINER} />
+        </SettingsRow>
+      ) : null}
       <SettingsRow label={t("autopilot.inspector.activity.title")} block>
         {loading ? (
           <div className="flex items-center text-muted-foreground">

@@ -20,6 +20,7 @@ const orgContext = vi.hoisted(() => ({
   activeOrgId: null as number | null,
   isAllOrgs: false,
   orgs: [] as { id: number; name: string; role?: { level: number; name: string } }[],
+  guestOrgs: [] as { id: number; name: string | null }[],
   accessibleProjects: [] as Array<{
     id: string
     name?: string

@@ -1,4 +1,5 @@
 import { t } from "@/lib/i18n/standalone"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { buildTranscriptionRequest, type TranscriptionRequestExample } from "./transcription-request"
 import { autoRouteIsOpenRouter } from "./asr-catalog"
@@ -94,6 +95,21 @@ export function hostedLanguageTag(tag?: string): string | undefined {
   return /^[A-Za-z]{2,3}(-[A-Za-z0-9]{1,8})*$/.test(value) ? value : undefined
 }
 
+/**
+ * The hosted model did not answer (a 5xx from our route). The message is an
+ * English match key for ai-error.ts ("hosted transcription model
+ * unavailable"), which turns it into copy that names the way out: retry, or
+ * pick another model in Preferences → Local models.
+ */
+export class HostedTranscriptionUnavailableError extends Error {
+  readonly status: number
+  constructor(status: number) {
+    super(`Hosted transcription model unavailable (${status}).`)
+    this.name = "HostedTranscriptionUnavailableError"
+    this.status = status
+  }
+}
+
 /** AQU-1681: the per-user limit refused the request (429 `rate_limited`). */
 export class TranscriptionRateLimitedError extends Error {
   readonly retryAfterSeconds: number
@@ -140,9 +156,8 @@ async function postWindow(
   if (response.ok) return await response.json() as HostedPart
   const failure = await response.json().catch(() => null) as { error?: string } | null
   const code = failure?.error ?? ""
-  if (["weekly_ai_allowance_exhausted", "credit_cap_exceeded"].includes(code)) {
-    throw new Error(t("settings.transcription.capacityExceeded"))
-  }
+  const refused = aiRefusalError(response.status, failure)
+  if (refused) throw refused
   if (response.status === 403 && code === "zero_shot_disabled") throw new ZeroShotDisabledError()
   // `zero_shot_examples_required` is the server branch's name for the same answer.
   if (response.status === 400 && (code === "zs_no_examples" || code === "zero_shot_examples_required")) {
@@ -152,6 +167,7 @@ async function postWindow(
   if (response.status === 429 && code === "rate_limited") {
     throw new TranscriptionRateLimitedError(retryAfterSeconds(response))
   }
+  if (response.status >= 500) throw new HostedTranscriptionUnavailableError(response.status)
   throw new Error(`Hosted transcription failed (${response.status}). Try again.`)
 }
 

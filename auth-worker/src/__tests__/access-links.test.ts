@@ -174,6 +174,19 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
     expect(jwtSub(body.access_token)).toBe("translator")
   })
 
+  it("kills the link once the bound account gains access outside the project (stale-link takeover)", async () => {
+    const token = await setup("4821")
+    // Account later joins an unrelated project of its own.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('own-proj', 'Own', NULL, 2)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('own-proj', 2, 700, 2)",
+    ).run()
+    const res = await redeem(token, "4821")
+    expect(res.status).toBe(401)
+  })
+
   it("treats a wrong PIN as a dead link and increments the attempt counter", async () => {
     const token = await setup("4821")
     const res = await redeem(token, "0000")
@@ -231,6 +244,26 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
       .bind(token)
       .first<{ failed_attempts: number }>()
     expect(row?.failed_attempts).toBe(N)
+  })
+
+  it("revokes the link once lifetime failures hit the cap, even after lockouts expire", async () => {
+    // [Pen test] Auth & session mgmt (2026-10-26): failed_attempts never reset
+    // between lockouts, so a short PIN could be ground down ~96 guesses/day.
+    const token = await setup("4821")
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_access_links SET failed_attempts = 49, locked_until = NULL WHERE token = ?",
+    )
+      .bind(token)
+      .run()
+    expect((await redeem(token, "0000")).status).toBe(401)
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT revoked_at FROM project_access_links WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ revoked_at: string | null }>()
+    expect(row?.revoked_at).not.toBeNull()
+    // The correct PIN no longer works.
+    expect((await redeem(token, "4821")).status).toBe(401)
   })
 
   it("resets the attempt counter on a successful redemption", async () => {

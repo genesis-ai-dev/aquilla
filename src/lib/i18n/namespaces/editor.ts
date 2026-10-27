@@ -345,6 +345,10 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    // AQU-2110 — the audio pair, shown instead of (audio-only file) or beside
+    // (file with text and takes) the two above.
+    "editor.milestone.percentRecorded": "{percent}% recorded",
+    "editor.milestone.percentAudioValidated": "{percent}% audio validated",
     // AQU-515 — pericope suggestions, offered beside the division picker when
     // the open file addresses scripture.
     "editor.pericope.trigger": "Suggested passages",
@@ -1269,6 +1273,22 @@ export const editor = defineNamespace({
     // AQU-1566: a caption track on a linked video with no rows can become the
     // file's rows. It asks first, because the track leaves the timeline.
     "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    // AQU-1684: hiding a track is personal — this screen only — and there is
+    // always a way back, the "Hidden tracks" menu in the timeline's toolbar.
+    "editor.timeline.trackHide": "Hide track",
+    "editor.timeline.trackHideCount": plural({
+      one: "Hide {count} track",
+      other: "Hide {count} tracks",
+    }),
+    "editor.timeline.trackHideBusy": "Can't hide a track while it's recording or being dragged",
+    "editor.timeline.hiddenTracks": plural({
+      one: "Hidden tracks ({count})",
+      other: "Hidden tracks ({count})",
+    }),
+    "editor.timeline.hiddenTracksAria": "Tracks you have hidden on this timeline",
+    "editor.timeline.hiddenTracksNote": "Hidden for you, on this device",
+    "editor.timeline.showTrack": "Show {name}",
+    "editor.timeline.showAllTracks": "Show all tracks",
     "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
     "editor.timeline.useAsRowsBody":
       "Its captions become rows you can translate in the Text view. The track " +
@@ -2094,6 +2114,14 @@ export const editor = defineNamespace({
       "Built statistically from this project's translated pairs — no AI involved. " +
       "It's only as good as the corpus so far: expect rough, literal, sometimes " +
       "wrong word choices. Use it as a hint, not a reading.",
+    "editor.bt.glossEditTooltip": "Correct this gloss",
+    "editor.bt.glossEditAria": "Correct the statistical gloss",
+    "editor.bt.glossCorrected": "Corrected by a translator",
+    "editor.bt.glossEditHint":
+      "Your correction replaces the gloss for everyone on this project, and " +
+      "teaches these word choices to the glosses of other cells. Clear the box " +
+      "to go back to the computed gloss.",
+    "editor.bt.glossContributorRequired": "Contributor+ required to correct the gloss",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
     "editor.transcript.editTooltip": "Correct the transcript",
@@ -2296,6 +2324,12 @@ export const editor = defineNamespace({
       one: "Validated {count} repeated row",
       other: "Validated {count} repeated rows",
     }, "count"),
+    // AQU-2176 — the dialog that names them.
+    "editor.repetition.validatedBody": plural({
+      one: "This row was signed off with yours. Choose it to go to it.",
+      other: "These rows were signed off with yours. Choose one to go to it.",
+    }, "count"),
+    "editor.repetition.validatedRowNumber": "Row {number}",
     "editor.repetition.unvalidatedRepeats": plural({
       one: "{count} repeated row has this text but isn't validated",
       other: "{count} repeated rows have this text but aren't validated",
@@ -2416,10 +2450,27 @@ export const editor = defineNamespace({
       },
       "editor.repetition.validated": {
         description:
-          "Toast confirming that the repeated rows were filled in and marked " +
-          "validated. Paired with an Undo action.",
+          "Title of the dialog confirming that the repeated rows were filled in " +
+          "and marked validated. The dialog lists those rows and carries Undo, " +
+          "Done, and sometimes 'Ask me each time'.",
         placeholders: {
           count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validatedBody": {
+        description:
+          "Body of that dialog, under the title. Explains that these rows were " +
+          "validated as a side effect of the row the reviewer validated " +
+          "themselves, and that each listed row is clickable and jumps the " +
+          "editor to it. 'Signed off' means 'marked as validated'.",
+      },
+      "editor.repetition.validatedRowNumber": {
+        description:
+          "Label for one listed row in that dialog: the row's position in the " +
+          "file, as the editor's left gutter numbers it. Sits beside the row's " +
+          "reference or timecode, so keep it very short.",
+        placeholders: {
+          number: "The row's number in the file, already formatted. Never empty.",
         },
       },
       "editor.repetition.unvalidatedRepeats": {
@@ -3544,6 +3595,55 @@ export const editor = defineNamespace({
           "this track's captions into the file's own rows (after a confirmation).",
         maxLength: 32,
       },
+      "editor.timeline.trackHide": {
+        description:
+          "Item in a timeline track's right-click menu (and its ⋯ menu) on the Media " +
+          "view. It hides the track's lane on this person's own screen only — nothing " +
+          "is deleted or muted, and nobody else is affected. A 'track' is one row of the " +
+          "timeline, e.g. the source audio or a dub track.",
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideCount": {
+        description:
+          "The same item when several timeline tracks are selected: hides all of them " +
+          "on this person's own screen.",
+        placeholders: { count: "How many tracks will be hidden; it also selects the plural form." },
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideBusy": {
+        description:
+          "Hover text on the greyed-out 'Hide track' item while that track is recording " +
+          "a take or being dragged, which is when it may not be hidden.",
+      },
+      "editor.timeline.hiddenTracks": {
+        description:
+          "Label of a toolbar menu button on the Media view's timeline, shown only while " +
+          "the person has hidden some tracks. Opening it lists those tracks so each can " +
+          "be shown again. Keep the count in brackets after the words.",
+        placeholders: { count: "How many tracks are hidden; it also selects the plural form." },
+        maxLength: 26,
+      },
+      "editor.timeline.hiddenTracksAria": {
+        description:
+          "Screen-reader name of that 'Hidden tracks' menu button.",
+      },
+      "editor.timeline.hiddenTracksNote": {
+        description:
+          "A heading at the top of the 'Hidden tracks' menu saying that hiding applies " +
+          "only to this person, on this device — collaborators still see the tracks.",
+        maxLength: 40,
+      },
+      "editor.timeline.showTrack": {
+        description:
+          "Item in the 'Hidden tracks' menu that brings one hidden timeline track back " +
+          "into view.",
+        placeholders: { name: "The track's own name, e.g. 'Source audio' or a name someone gave it. Content, never translate." },
+      },
+      "editor.timeline.showAllTracks": {
+        description:
+          "Last item in the 'Hidden tracks' menu: brings every hidden track back into view.",
+        maxLength: 30,
+      },
       "editor.timeline.useAsRowsTitle": {
         description:
           "Heading of the confirmation that item opens. A question; the answer " +
@@ -3944,6 +4044,32 @@ export const editor = defineNamespace({
           "reviewer has marked validated. Validated is a stronger state than " +
           "translated, so the two words must stay clearly different.",
         maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentRecorded": {
+        description:
+          "AQU-2110: first line of the AUDIO progress figure in the picker row — " +
+          "the share of the division's lines that carry a recording. Shown instead " +
+          "of the two text lines on a file whose target language has no written " +
+          "form (recordings, no text), and beside them on a file that has both. " +
+          "Same fixed column as editor.milestone.percentTranslated, so it must fit " +
+          "one short line; a marker icon and a magenta swatch carry the meaning " +
+          "visually, this wording is hover text and what a screen reader reads.",
+        maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentAudioValidated": {
+        description:
+          "AQU-2110: second line of that audio figure — the share of the division's " +
+          "lines whose recording has been signed off (every chosen take meets the " +
+          "project's audio validation requirement). Must read as distinct from " +
+          "editor.milestone.percentValidated, which is about the TEXT; on a file " +
+          "showing both, the two sit side by side.",
+        maxLength: 24,
         placeholders: {
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
@@ -4432,13 +4558,13 @@ export const editor = defineNamespace({
         description:
           "Label of the switch that draws bold and italic runs as small inline " +
           "blocks inside the cell, once a translation has been placed into those " +
-          "runs. An empty untranslated cell stays blank. Regular text stays " +
-          "ordinary, so the translator types around those blocks and can click or " +
-          "arrow into one to type that phrase in bold or italic. An empty block " +
-          "in a placed translation shows a faint name until they type. Consecutive " +
-          "regular runs are one typing space: an empty one shows a single faint " +
-          "Regular, with no box and no gap between the runs. Applies to this " +
-          "browser only.",
+          "runs. An empty untranslated cell stays blank and can still be typed. " +
+          "After the words are in the runs, the cell stops accepting typing so " +
+          "the side of a bold or italic block can be dragged, like resizing a " +
+          "window, to take in or give back whole words. Turning the switch off " +
+          "makes the cell editable again. An empty block shows a faint name. " +
+          "Consecutive regular runs stay one sentence, with no box. Applies to " +
+          "this browser only.",
         maxLength: 32,
       },
       "editor.view.lowMemory": {
@@ -8081,6 +8207,39 @@ export const editor = defineNamespace({
           "is computed from the project's own pairs with no AI, its quality tracks " +
           "how much has been translated so far, and it should be treated as a hint. " +
           "The honesty here is the point — do not soften it.",
+      },
+      "editor.bt.glossEditTooltip": {
+        description:
+          "AQU-1408. Tooltip on the pencil that opens the statistical gloss for " +
+          "editing. 'Correct' rather than 'edit': the gloss is a computed guess " +
+          "and the user is fixing it, not authoring from scratch. Imperative.",
+        maxLength: 24,
+      },
+      "editor.bt.glossEditAria": {
+        description:
+          "AQU-1408. Accessible name of the same pencil button. Spells out what is " +
+          "being corrected, since a screen-reader user has no section heading " +
+          "adjacent to the control.",
+      },
+      "editor.bt.glossCorrected": {
+        description:
+          "AQU-1408. Small badge beside the statistical-gloss heading when the text " +
+          "shown is a human correction rather than the computed gloss. A reader " +
+          "who cannot tell the two apart cannot weigh either.",
+        maxLength: 26,
+      },
+      "editor.bt.glossEditHint": {
+        description:
+          "AQU-1408. Small print under the gloss edit box. Three points, in order: " +
+          "the correction is shared with the project, it also teaches other cells' " +
+          "glosses, and an empty box restores the computed gloss. The third point " +
+          "is the only discoverable path back, so keep it.",
+      },
+      "editor.bt.glossContributorRequired": {
+        description:
+          "AQU-1408. Tooltip on the disabled gloss pencil for a member below " +
+          "contributor. Says the required level outright rather than hiding the " +
+          "control, so the member knows what to ask for.",
       },
       "editor.bt.alignment": {
         description:

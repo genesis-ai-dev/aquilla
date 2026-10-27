@@ -13,7 +13,7 @@
 // and this board can never disagree about the total.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
-import { markProjectMondayLinksDirty } from '../../../db/shared/monday-dirty'
+import { markProjectSyncLinksDirty } from '../../../db/shared/progress-sync-dirty'
 import { verifyTokenForProject } from '../auth'
 import { ROLE } from './role-policy'
 import { checkProjectMembershipDetailed } from './membership'
@@ -64,6 +64,12 @@ export interface PlanUnit {
    * every unit that existed before AQU-1278.
    */
   audioTotalCount: number | null
+  /**
+   * Media redesign slice 2: lines with BOTH their text and their recording
+   * validated, at the project's two thresholds — what a "Text and audio"
+   * language counts as done. Read off the unit's own rows.
+   */
+  bothValidatedCount: number
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null
@@ -126,6 +132,8 @@ function toUnit(
       // required validator count, so the histograms have to come with the row.
       audio_validator_histogram: row.audio_validator_histogram ?? null,
       structural_audio_validator_histogram: row.structural_audio_validator_histogram ?? null,
+      text_audio_validator_histogram: row.text_audio_validator_histogram ?? null,
+      structural_text_audio_validator_histogram: row.structural_text_audio_validator_histogram ?? null,
     },
     validationCount,
     countStructural,
@@ -150,6 +158,7 @@ function toUnit(
     // which costs nothing on a sheet whose structural share is zero and keeps
     // one path for both shapes.
     audioTotalCount: row.audio_total_count == null ? null : Number(row.audio_total_count),
+    bothValidatedCount: c.bothValidatedCount ?? 0,
     lastEditAt: row.last_edit_at == null ? null : Number(row.last_edit_at),
     targetDate: row.target_date ?? null,
     doneAt: row.done_at == null ? null : Number(row.done_at),
@@ -264,7 +273,7 @@ export async function handlePlanRequest(
     // and changed its question — the one kind of change none of the DATA
     // parts of this key can ever express.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:va${validationCountAudio}:s3${structuralTag}"`
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:va${validationCountAudio}:s4${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -350,7 +359,7 @@ export async function handlePlanRequest(
   // target date, schedule). Mark its link dirty; the identity worker's
   // 5-minute flush pushes it. Pushing from here would need the identity
   // worker's Monday token, so this path waits for the cron.
-  await markProjectMondayLinksDirty(db, [projectId])
+  await markProjectSyncLinksDirty(db, [projectId])
 
   const { results } = await db
     .prepare(readPlanUnitsSql('AND u.file_id = ? AND u.section_key = ?'))

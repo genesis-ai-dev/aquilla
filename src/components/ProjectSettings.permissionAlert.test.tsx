@@ -255,7 +255,10 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     const source = screen.getByLabelText(/source language/i)
     expect(source).toBeDisabled()
     await expectTooltip(source, /Only Maintainers can modify/)
-    expect(screen.getByTestId("lane-language-target-lane")).toBeDisabled()
+    // Media redesign: one floor gates the whole card, so the row's ⋯ menu is
+    // locked too, and the card says View only.
+    expect(screen.getByTestId("lane-menu-target-lane")).toBeDisabled()
+    expect(screen.getByTestId("languages-view-only")).toBeTruthy()
   })
 
   it("a contributor below the unset default sees the language fields locked, naming Project leads", async () => {
@@ -279,7 +282,8 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     currentLanguageEditFloor = 500
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/source language/i)).not.toBeDisabled()
-    expect(screen.getByTestId("lane-language-target-lane")).not.toBeDisabled()
+    expect(screen.getByTestId("lane-menu-target-lane")).not.toBeDisabled()
+    expect(screen.queryByTestId("languages-view-only")).toBeNull()
   })
 
   it("lowering the language floor does not unlock any other shared field", async () => {

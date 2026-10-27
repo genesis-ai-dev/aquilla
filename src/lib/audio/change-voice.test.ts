@@ -31,6 +31,7 @@ const {
   generateSlotOverVoiceChange,
   originalTakeId,
   voiceChangedWithReference,
+  voiceConversionKey,
   voiceReferenceFingerprint,
 } = await import("./change-voice")
 const { getTtsStatus, ttsStatusKey } = await import("./tts")
@@ -38,6 +39,7 @@ const { getTtsStatus, ttsStatusKey } = await import("./tts")
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as FrontierSession
 const narrator: Voice = { id: "v-narr", name: "Narrator", referenceAudioId: "ref1.wav" } as Voice
 const stock: Voice = { id: "preset-narrator", name: "Stock" } as Voice
+const hearth: Voice = { id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" } as Voice
 
 function att(over: Partial<CodexCellAttachment> = {}): CodexCellAttachment {
   return { url: "frontier-audio://x.webm", type: "audio", ...over }
@@ -246,5 +248,40 @@ describe("changeCellVoice", () => {
     const ok = await changeCellVoice({ projectId: "p1", cell: cell(), voice: narrator, session, author: "dev" })
     expect(ok).toBe(false)
     expect(getTtsStatus(ttsStatusKey("GEN 1:1"))).toEqual({ kind: "error", message: "Voice cloning (Seed-VC) failed (502): boom" })
+  })
+})
+
+describe("library (character) voices", () => {
+  it("pin conversions to a namespaced model key, never colliding with a reference clip", () => {
+    expect(voiceConversionKey(hearth)).toBe("library:narrator-hearth")
+    expect(voiceConversionKey(narrator)).toBe("ref1.wav")
+    expect(voiceConversionKey(stock)).toBeNull()
+  })
+
+  it("can change a take without a reference clip, and ignore the quality knob once done", () => {
+    expect(changeVoiceBlocker(cell(), hearth, 25)).toBeNull()
+    const done = `vc-${voiceReferenceFingerprint("library:narrator-hearth")}-q10-audio-GEN_1_1-9-q.wav`
+    const c = cell({
+      selectedAudioId: done,
+      attachments: {
+        "rec.webm": att({ slot: "recording" }),
+        [done]: att({ slot: "recording", voiceId: "v-hearth", referenceAudioId: "rec.webm" }),
+      },
+    })
+    // Same character, a different Seed-VC quality pick: still up to date.
+    expect(changeVoiceBlocker(c, hearth, 40)).toBe("up-to-date")
+  })
+
+  it("converts through the library voice, with no reference clip or diffusion steps", async () => {
+    convertToCloneVoice.mockResolvedValue({
+      audioId: "vc-1234abcd-q10-audio-GEN_1_1-9-q", ext: "wav", url: "frontier-audio://vc-1234abcd-q10-audio-GEN_1_1-9-q.wav", bytes: 3,
+    })
+    await changeVoiceForCell({ projectId: "p1", cell: cell(), voice: hearth, session, author: "dev", diffusionSteps: 25 })
+    const sent = convertToCloneVoice.mock.calls[0][0]
+    expect(sent).toMatchObject({ libraryVoiceId: "narrator-hearth", sourceAudioId: "audio-GEN_1_1-1-abc.webm" })
+    expect(sent).not.toHaveProperty("referenceAudioId")
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({
+      voiceId: "v-hearth", label: "Take 1 → Hearth",
+    }))
   })
 })

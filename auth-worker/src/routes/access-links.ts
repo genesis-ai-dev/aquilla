@@ -38,6 +38,7 @@ import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
   ROLE,
+  type Env,
   type ProjectAccessLinkRow,
 } from "../types"
 import { resolveProjectRole, isLinkRoleLevel } from "../services/project-permissions"
@@ -61,6 +62,13 @@ const DEFAULT_LINK_TTL_MS = 90 * 24 * 60 * 60 * 1000
 // resets the counter.
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_MS = 15 * 60 * 1000
+// [Pen test] Auth & session mgmt (2026-10-26): failed_attempts is only reset on
+// success, so once past MAX_FAILED_ATTEMPTS every post-lockout wrong guess
+// re-locked immediately -- an endless ~96 guesses/day, enough to exhaust a
+// 4-digit PIN inside the 90-day TTL. At this lifetime failure count the link
+// is revoked outright; the project lead re-mints (a legitimate holder with the
+// right PIN never gets near this).
+const MAX_LIFETIME_FAILED_ATTEMPTS = 50
 
 // One error for every failure path so a wrong PIN is indistinguishable from a
 // dead link (no token/PIN oracle).
@@ -72,6 +80,47 @@ function clampLinkRole(level: number): number {
   if (n < ROLE.VIEWER) n = ROLE.VIEWER
   if (!isLinkRoleLevel(n)) n = LINK_ROLE_CAP
   return n
+}
+
+/**
+ * True when the bound account has gained access outside the link's own
+ * project/org since mint. Looser than the mint check on purpose: a translator
+ * added to a sibling project in the SAME org keeps a working link (no UX
+ * regression); membership in another org, or in a project of another org /
+ * no org, kills it.
+ */
+async function hasDivergedFootprint(
+  db: Env["AQUILLA_PG"],
+  userId: number,
+  projectId: string,
+): Promise<boolean> {
+  const proj = await db
+    .prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  const orgId = proj?.org_id ?? null
+  const row =
+    orgId === null
+      ? await db
+          .prepare(
+            `SELECT 1 FROM project_members WHERE user_id = ? AND project_id != ?
+             UNION ALL
+             SELECT 1 FROM org_members WHERE user_id = ?`,
+          )
+          .bind(userId, projectId, userId)
+          .first()
+      : await db
+          .prepare(
+            `SELECT 1 FROM project_members pm
+               JOIN projects p ON p.id = pm.project_id
+              WHERE pm.user_id = ? AND pm.project_id != ?
+                AND p.org_id IS DISTINCT FROM ?
+             UNION ALL
+             SELECT 1 FROM org_members WHERE user_id = ? AND org_id != ?`,
+          )
+          .bind(userId, projectId, orgId, userId, orgId)
+          .first()
+  return !!row
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -307,10 +356,14 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
                 locked_until = CASE
                   WHEN failed_attempts + 1 >= ? THEN ?
                   ELSE locked_until
+                END,
+                revoked_at = CASE
+                  WHEN failed_attempts + 1 >= ? THEN CURRENT_TIMESTAMP
+                  ELSE revoked_at
                 END
           WHERE token = ?`,
       )
-        .bind(MAX_FAILED_ATTEMPTS, lockIfTripped, token)
+        .bind(MAX_FAILED_ATTEMPTS, lockIfTripped, MAX_LIFETIME_FAILED_ATTEMPTS, token)
         .run()
     } catch (err) {
       console.error("[access-links] attempt bump failed:", err)
@@ -329,6 +382,18 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     .first<{ username: string }>()
   if (!boundUser) {
     // Bound account was deleted after mint — the link is dead.
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+
+  // [Pen test] Authorization & access control (2026-10-20): the mint-time
+  // footprint check only holds while the account stays a pure translator
+  // account. Redemption mints a FULL login session, so a link outliving the
+  // account's "fresh" status (up to 90 days) let whoever holds the PIN —
+  // typically the minting project lead — sign in as a user who has since
+  // joined other orgs/projects. Re-check at redeem; a diverged account's link
+  // is dead (indistinguishable from any other dead link).
+  if (await hasDivergedFootprint(c.env.AQUILLA_PG, link.user_id, link.project_id)) {
     await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }

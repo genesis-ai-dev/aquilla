@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   planUnitIsNearlyComplete,
+  planUnitShowsWayToWork,
   planUnitStatus,
   planUnitLabel,
   planUnitId,
@@ -323,6 +324,54 @@ describe("AQU-1954: a project that says it records audio", () => {
     // that records audio would lose its text bar.
     const untouched = unit({ fileId: "new" })
     expect(textFileIds([recorded, untouched]).has("new")).toBe(true)
+  })
+})
+
+// Media redesign slice 1: the board reads what the language DELIVERS instead
+// of guessing from what a file holds, once the language says. Audio and Text
+// and audio write "Records audio" on, so the audio half needs nothing new.
+describe("the language says what it delivers", () => {
+  const ruth = counts(45, 0, 0, 0, 0, { fileId: "ruth", fileName: "Ruth", sectionKey: "RUT" })
+
+  it("Audio: no text anywhere, an AUD bar only, and \"45 to record\", never \"45 to translate\" (P1.2)", () => {
+    const rows = [ruth]
+    expect(textFileIds(rows, "audio").size).toBe(0)
+    expect(planHasText(rows, "audio")).toBe(false)
+    expect(planHasAudio(rows, true)).toBe(true)
+    const shortfall = planUnitShortfall(ruth, audioFileIds(rows, true).has("ruth"), textFileIds(rows, "audio").has("ruth"))
+    expect(shortfall).toMatchObject({ toTranslate: 0, toValidate: 0, toRecord: 45 })
+    expect(planShortfallParts(shortfall)).toEqual([{ kind: "record", count: 45 }])
+  })
+
+  it("Audio: an untouched book reads Not started, the first take moves it to In progress (P1.3)", () => {
+    const rows = [ruth]
+    const audioFiles = audioFileIds(rows, true)
+    expect(planUnitStatus(ruth, NOW, audioFiles, textFileIds(rows, "audio"))).toBe("not_started")
+    const recordedOne = { ...ruth, audioCount: 1 }
+    expect(planUnitStatus(recordedOne, NOW, audioFiles, textFileIds([recordedOne], "audio"))).toBe("in_progress")
+  })
+
+  it("Text and audio: text is owed on every file, even one that holds only recordings (P1.6)", () => {
+    const recordingsOnly = counts(10, 0, 0, 6, 6, { fileId: "takes" })
+    expect(textFileIds([recordingsOnly]).has("takes")).toBe(false)
+    expect(textFileIds([recordingsOnly], "text_and_audio").has("takes")).toBe(true)
+    const shortfall = planUnitShortfall(recordingsOnly, true, true)
+    expect(planShortfallParts(shortfall).map((p) => p.kind)).toEqual(["translate", "record"])
+  })
+
+  it("Text, and a language nobody has chosen for, keep the board's evidence exactly as before", () => {
+    const recordingsOnly = counts(10, 0, 0, 6, 6, { fileId: "takes" })
+    const written = counts(10, 4, 2, 0, 0, { fileId: "text" })
+    const rows = [recordingsOnly, written]
+    for (const delivers of ["text", null, undefined] as const) {
+      expect([...textFileIds(rows, delivers)]).toEqual([...textFileIds(rows)])
+      expect(planSummary(rows, NOW, false, delivers)).toEqual(planSummary(rows, NOW))
+    }
+  })
+
+  it("the summary strip follows the choice like the rows do", () => {
+    const rows = [counts(22, 0, 0, 22, 22, { fileId: "a" }), counts(23, 0, 0, 0, 0, { fileId: "b" })]
+    expect(planSummary(rows, NOW, true, "audio")).toMatchObject({ total: 2, nearlyComplete: 1 })
   })
 })
 
@@ -1090,5 +1139,26 @@ describe("text expectation (AQU-955)", () => {
       const sorted = sortNearlyComplete(units, audioFileIds(units), textFileIds(units))
       expect(sorted.map((u) => u.sectionKey)).toEqual(["MAT", "MRK"])
     })
+  })
+})
+
+// AQU-1974: the ways to a unit's remaining cells (row link, chapter names,
+// inspector link, grid badges, prefetch) are a separate question from "nearly
+// complete", which keeps deciding grouping and the status pill.
+describe("planUnitShowsWayToWork", () => {
+  const DONE = Date.parse("2026-08-20T00:00:00Z")
+  it("is nearly-complete for a unit nobody marked done", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 3), NOW)).toBe(true)
+    expect(planUnitShowsWayToWork(shortBy(1000, 300), NOW)).toBe(false)
+  })
+
+  it("is true for a unit marked done with any work left, however much", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 3, { doneAt: DONE }), NOW)).toBe(true)
+    expect(planUnitShowsWayToWork(shortBy(1000, 400, { doneAt: DONE }), NOW)).toBe(true)
+    expect(planUnitIsNearlyComplete(shortBy(1000, 3, { doneAt: DONE }), NOW)).toBe(false)
+  })
+
+  it("is false for a unit marked done with nothing left", () => {
+    expect(planUnitShowsWayToWork(shortBy(1000, 0, { doneAt: DONE }), NOW)).toBe(false)
   })
 })

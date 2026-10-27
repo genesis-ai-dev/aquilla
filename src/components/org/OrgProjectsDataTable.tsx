@@ -17,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   attentionRank,
   audioPct,
+  portfolioDeliversText,
   translatedPct,
   validatedPct,
   type PortfolioProject,
@@ -395,7 +396,10 @@ export function OrgProjectsDataTable({
         },
         {
           id: "translated",
-          accessorFn: (p) => translatedPct(p),
+          // Media redesign slice 1: a project with no text to translate sorts
+          // last and shows a dash, not a 0% that reads like a stalled project.
+          accessorFn: (p) => missingLast(portfolioDeliversText(p) ? translatedPct(p) : undefined),
+          sortUndefined: SORT_MISSING_LAST,
           header: ({ column }) => (
             <DataTableColumnHeader
               column={column}
@@ -406,6 +410,17 @@ export function OrgProjectsDataTable({
           ),
           meta: { align: "right", className: embedded ? "w-[6rem] whitespace-nowrap" : "w-[6.5rem]" },
           cell: ({ row }) => {
+            if (!portfolioDeliversText(row.original)) {
+              return (
+                <div
+                  data-testid="project-table-translated-value"
+                  className="text-right text-muted-foreground"
+                  aria-label={t("org.orgHome.table.noTextToTranslateAria")}
+                >
+                  —
+                </div>
+              )
+            }
             const pct = progressPercentOfFraction(translatedPct(row.original))
             return (
               <div

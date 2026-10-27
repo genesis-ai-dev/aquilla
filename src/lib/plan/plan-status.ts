@@ -19,6 +19,7 @@ import {
 } from "@/lib/frontier/portfolio"
 import { getBookName, isKnownBookCode, getBookOrdinal } from "@/lib/file-labeling/bible-book-names"
 import { progressPercent } from "@/lib/progress/progress-percent"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** One row of the plan: progress for the active lane plus the PM's marks. */
 export interface PlanUnit {
@@ -43,6 +44,12 @@ export interface PlanUnit {
    * subtitle file with a linked cue sheet.
    */
   audioTotalCount?: number | null
+  /**
+   * Media redesign slice 2: lines with both their text and their recording
+   * validated — what a "Text and audio" language counts as done. Absent from
+   * a worker that predates it, which reads as none.
+   */
+  bothValidatedCount?: number
   lastEditAt: number | null
   /** Calendar date 'YYYY-MM-DD', lane-independent. Null when unplanned. */
   targetDate: string | null
@@ -246,7 +253,19 @@ export function planUnitExpectsText(
  * switch says audio is expected, not that text is not, and passing it here
  * would call every untouched file of a language that records audio audio-only.
  */
-export function textFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
+export function textFileIds(
+  units: readonly PlanUnit[],
+  /**
+   * Media redesign slice 1: what the plan's language delivers. A language
+   * that SAYS what it delivers is not guessed at: Audio owes no text on any
+   * file, Text and audio owes it on every file. Text, and a language nobody
+   * has chosen for, keep the evidence below exactly as before, so no board
+   * moves until someone chooses.
+   */
+  delivers?: LaneDelivers | null,
+): ReadonlySet<string> {
+  if (delivers === "audio") return new Set()
+  if (delivers === "text_and_audio") return new Set(units.map((u) => u.fileId))
   const audioFiles = audioFileIds(units)
   const filesWithText = new Set<string>()
   const allFiles = new Set<string>()
@@ -485,6 +504,32 @@ export function planUnitIsNearlyComplete(
 }
 
 /**
+ * AQU-1974: does this unit get the ways to its remaining cells — the row's
+ * shortfall link and chapter names, the inspector's "Go to first…", the grid's
+ * count badges and the section prefetch?
+ *
+ * A nearly-complete unit does (AQU-1278). So does a unit somebody marked done
+ * that still has work in it, which its row already says in amber (AQU-1494):
+ * the mark is a lead saying the book is finished, so what is left is exactly
+ * what they need to reach, however far from the nearly-complete threshold it
+ * is. Before this, the mark was what hid it.
+ *
+ * Deliberately a separate question from `planUnitIsNearlyComplete`, which still
+ * decides grouping and the status pill: a done unit stays in Done.
+ */
+export function planUnitShowsWayToWork(
+  u: PlanUnit,
+  now: number,
+  audioFiles?: ReadonlySet<string>,
+  textFiles?: ReadonlySet<string>,
+): boolean {
+  if (u.doneAt == null) return planUnitIsNearlyComplete(u, now, audioFiles, textFiles)
+  const hasAudio = audioFiles ? audioFiles.has(u.fileId) : planUnitExpectsAudio(u)
+  const hasText = textFiles ? textFiles.has(u.fileId) : planUnitExpectsText(u)
+  return planUnitShortfall(u, hasAudio, hasText).worst > 0
+}
+
+/**
  * Within a group the soonest deadline is the most urgent, so target date
  * ascending; undated units sort last (they carry no claim about when), then
  * by label so the order is stable between renders.
@@ -666,11 +711,18 @@ export interface PlanSummary {
  * numbers above the board quietly shrink. `plan-status.test.ts` asserts the
  * buckets sum to the unit count; keep that test.
  */
-export function planSummary(units: readonly PlanUnit[], now: number, recordsAudio = false): PlanSummary {
+export function planSummary(
+  units: readonly PlanUnit[],
+  now: number,
+  recordsAudio = false,
+  /** Media redesign slice 1: what the language delivers; see `textFileIds`. */
+  delivers?: LaneDelivers | null,
+): PlanSummary {
   // AQU-1954: the strip counts the groups the board draws, so it follows the
-  // language's "Records audio" switch exactly as they do.
+  // language's "Records audio" switch exactly as they do — and, since media
+  // redesign slice 1, its "Delivers" choice.
   const audioFiles = audioFileIds(units, recordsAudio)
-  const textFiles = textFileIds(units)
+  const textFiles = textFileIds(units, delivers)
   let done = 0
   let overdue = 0
   let inFlight = 0
@@ -772,6 +824,6 @@ export function planHasAudio(units: readonly PlanUnit[], recordsAudio = false): 
  * fully audio-only project, where a text bar pinned at 0% is the thing the PM
  * had to look past to find the number they came for.
  */
-export function planHasText(units: readonly PlanUnit[]): boolean {
-  return textFileIds(units).size > 0
+export function planHasText(units: readonly PlanUnit[], delivers?: LaneDelivers | null): boolean {
+  return textFileIds(units, delivers).size > 0
 }

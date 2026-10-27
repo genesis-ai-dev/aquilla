@@ -4,8 +4,15 @@ import {
   audioPct,
   deadlineStatus,
   portfolioActivityStatus,
+  portfolioCountsByLanguage,
+  portfolioDeliversText,
+  portfolioMeasure,
+  portfolioTextMeasure,
+  progressPct,
+  startedPct,
   projectNeedsPortfolioAttention,
   summarizePortfolioProjects,
+  textValidatedPct,
   translatedPct,
   validatedPct,
   type PortfolioMetricsProject,
@@ -111,5 +118,127 @@ describe("summarizePortfolioProjects", () => {
       overdueCount: 0,
       attentionCount: 0,
     })
+  })
+})
+
+// Media redesign slice 1: each language counts by what it delivers. A project
+// whose languages all deliver Text (or have not chosen) reads its project-wide
+// figures exactly as before; with an Audio or a Text and audio language the
+// project is measured language by language (gap 5).
+describe("measuring a project by what its languages deliver", () => {
+  const lane = (over: Record<string, unknown>) => ({
+    role: "target" as const,
+    lastEditAt: NOW,
+    totalCells: 45,
+    filledCells: 0,
+    validatedCells: 0,
+    audioTotalCells: 45,
+    audioCells: 0,
+    validatedAudioCells: 0,
+    bothValidatedCells: 0,
+    ...over,
+  })
+
+  it("leaves a Text project, and one nobody has chosen for, exactly as it was", () => {
+    for (const delivers of ["text", null, undefined]) {
+      const p = project({
+        totalCells: 100, filledCells: 60, validatedCells: 30, audioCells: 40,
+        lanes: [lane({ delivers, totalCells: 999, filledCells: 1, validatedCells: 1, audioCells: 40 })],
+      })
+      expect(portfolioCountsByLanguage(p)).toBe(false)
+      expect(portfolioMeasure(p)).toEqual({ total: 100, started: 60, done: 30, headline: 60 })
+      expect(translatedPct(p)).toBe(0.6)
+      expect(validatedPct(p)).toBe(0.3)
+      expect(progressPct(p)).toBe(0.6)
+      expect(startedPct(p)).toBe(0.6)
+      expect(portfolioDeliversText(p)).toBe(true)
+    }
+  })
+
+  it("measures an Audio project by its recordings: 45 lines, 17 recorded, 9 approved (P1.4)", () => {
+    const p = project({
+      totalCells: 45, filledCells: 0, audioCells: 17,
+      lanes: [{ role: "source" as const, lastEditAt: null }, lane({ delivers: "audio", audioCells: 17, validatedAudioCells: 9 })],
+    })
+    expect(portfolioMeasure(p)).toEqual({ total: 45, started: 17, done: 9, headline: 9 })
+    expect(validatedPct(p)).toBe(9 / 45)
+    expect(progressPct(p)).toBe(9 / 45)
+    expect(startedPct(p)).toBe(17 / 45)
+    expect(portfolioDeliversText(p)).toBe(false)
+    expect(translatedPct(p)).toBe(0)
+  })
+
+  it("reads an Audio project as started from its first recording, and Stalled only when it goes quiet (P1.5)", () => {
+    const recorded = project({
+      totalCells: 22, filledCells: 0, lastEditAt: NOW - 20 * DAY,
+      lanes: [lane({ delivers: "audio", audioCells: 2, lastEditAt: NOW - DAY })],
+    })
+    expect(portfolioActivityStatus(recorded, NOW)).toBe("active")
+    const quiet = project({
+      totalCells: 22, filledCells: 0, lastEditAt: NOW - 20 * DAY,
+      lanes: [lane({ delivers: "audio", audioCells: 2, lastEditAt: NOW - 20 * DAY })],
+    })
+    expect(portfolioActivityStatus(quiet, NOW)).toBe("stalled")
+    const untouched = project({ totalCells: 22, filledCells: 0, lanes: [lane({ delivers: "audio" })] })
+    expect(portfolioActivityStatus(untouched, NOW)).toBe("not-started")
+  })
+
+  it("counts a Text and audio line done only on both halves (P1.6)", () => {
+    const p = project({
+      totalCells: 10, filledCells: 9, validatedCells: 7,
+      lanes: [lane({
+        delivers: "text_and_audio", totalCells: 10, filledCells: 9, validatedCells: 7,
+        audioTotalCells: 10, audioCells: 6, validatedAudioCells: 6, bothValidatedCells: 4,
+      })],
+    })
+    expect(portfolioMeasure(p)).toEqual({ total: 10, started: 9, done: 4, headline: 4 })
+    expect(validatedPct(p)).toBe(0.4)
+    expect(portfolioDeliversText(p)).toBe(true)
+  })
+
+  it("sums each language's done lines over all their lines, and translated over the text ones (gap 5)", () => {
+    const p = project({
+      totalCells: 90, filledCells: 22, validatedCells: 11,
+      lanes: [
+        lane({ delivers: "text", filledCells: 22, validatedCells: 11 }),
+        lane({ delivers: "audio", audioCells: 30, validatedAudioCells: 22 }),
+      ],
+    })
+    expect(portfolioMeasure(p)).toEqual({ total: 90, started: 52, done: 33, headline: 44 })
+    expect(translatedPct(p)).toBe(22 / 45)
+  })
+
+  it("measures the Progress card's text tiles over the text languages only, so Validated shares Translated's denominator", () => {
+    const p = project({
+      totalCells: 90, filledCells: 30, validatedCells: 20,
+      lanes: [
+        lane({ delivers: "text", filledCells: 30, validatedCells: 20 }),
+        lane({ delivers: "audio", audioCells: 10, validatedAudioCells: 6 }),
+      ],
+    })
+    // The seeded walk project: French 30 translated and 20 validated beside a
+    // Swahili Audio language with 6 approved. Validated reads 20 of 45, not
+    // 26 of 90.
+    expect(portfolioTextMeasure(p)).toEqual({ total: 45, started: 30, done: 20, headline: 30 })
+    expect(textValidatedPct(p)).toBe(20 / 45)
+    expect(translatedPct(p)).toBe(30 / 45)
+    const both = project({
+      totalCells: 20, filledCells: 9, validatedCells: 7,
+      lanes: [
+        lane({ delivers: "text_and_audio", totalCells: 10, filledCells: 9, validatedCells: 7, audioCells: 6, validatedAudioCells: 6, bothValidatedCells: 4 }),
+        lane({ delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 10, validatedAudioCells: 10 }),
+      ],
+    })
+    expect(portfolioTextMeasure(both)).toEqual({ total: 10, started: 9, done: 4, headline: 4 })
+    const textOnly = project({ totalCells: 100, filledCells: 60, validatedCells: 30, lanes: [lane({ delivers: null })] })
+    expect(portfolioTextMeasure(textOnly)).toEqual({ total: 100, started: 60, done: 30, headline: 60 })
+  })
+
+  it("keeps an audio-only project out of the translated mean, not at 0", () => {
+    const text = project({ totalCells: 10, filledCells: 5 })
+    const audio = project({ totalCells: 45, filledCells: 0, lanes: [lane({ delivers: "audio", audioCells: 45, validatedAudioCells: 45 })] })
+    const summary = summarizePortfolioProjects([text, audio], NOW)
+    expect(summary.avgTranslatedPct).toBe(0.5)
+    expect(summary.avgValidatedPct).toBe(0.5)
   })
 })

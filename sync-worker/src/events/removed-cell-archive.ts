@@ -76,6 +76,7 @@ const ROW_TABLES = [
   ['validators', 'cell_validators'],
   ['waivers', 'cell_waivers'],
   ['backtranslations', 'cell_backtranslations'],
+  ['glosses', 'cell_glosses'],
   ['morph', 'cell_word_morph'],
 ] as const
 
@@ -100,13 +101,14 @@ export function buildRemovedCellArchiveStmt(
     .prepare(
       `INSERT INTO removed_cell_archive
          (delete_event_id, project_id, file_id, cell_id, deleted_by, deleted_ts,
-          cells_rows, validators, waivers, backtranslations, morph, audio, links, comments)
+          cells_rows, validators, waivers, backtranslations, glosses, morph, audio, links, comments)
        SELECT ?, ?, ?, ?, ?, ?,
          COALESCE((SELECT jsonb_agg(to_jsonb(c) - 'value_tsv') FROM cells c
                     WHERE c.project_id = ? AND c.file_id = ? AND c.cell_id = ?), '[]'::jsonb),
          ${rowsOf('cell_validators')},
          ${rowsOf('cell_waivers')},
          ${rowsOf('cell_backtranslations')},
+         ${rowsOf('cell_glosses')},
          ${rowsOf('cell_word_morph')},
          COALESCE((SELECT jsonb_agg(jsonb_build_object(
                      'audio_id', a.audio_id, 'selected', a.selected, 'event_id', a.event_id))
@@ -137,6 +139,7 @@ export function buildRemovedCellArchiveStmt(
       ...cell, // validators
       ...cell, // waivers
       ...cell, // backtranslations
+      ...cell, // glosses
       ...cell, // morph
       ...cell, // audio
       event.projectId,

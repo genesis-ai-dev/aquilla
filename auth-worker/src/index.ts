@@ -90,6 +90,7 @@ import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiTranscriptCleanupRoutes from "./routes/ai-transcript-cleanup"
 import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
@@ -116,11 +117,13 @@ import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
+import airtableRoutes from "./routes/airtable"
+import langquestRoutes from "./routes/langquest"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
-import { flushDirtyLinks } from "./lib/monday/push"
+import { flushDirtyLinks } from "./lib/integrations/push"
 import { createRequestMemo } from "./lib/request-memo"
 import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { pruneAuthRateLimitEvents } from "./utils/rate-limit"
@@ -391,6 +394,11 @@ app.route("/api/v2/access-links", accessLinksRoutes)
 // push engine (routes/monday.ts). OAuth callback + inbound webhook routes are
 // deliberately unauthenticated (browser redirect / Monday-signed JWT).
 app.route("/api/v2/monday", mondayRoutes)
+// Airtable integration (AQU-804): the same shape as Monday's, connected with a
+// personal access token instead of OAuth. Its pushes ride Monday's triggers
+// (lib/integrations/push.ts), including the sync-worker nudge above.
+app.route("/api/v2/airtable", airtableRoutes)
+app.route("/api/v2/langquest", langquestRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
@@ -442,6 +450,7 @@ app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // (memory → Jev verify). Same session auth and per-user window as the seam
 // route; never fails its caller.
 app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+app.route("/api/v1/ai/transcript-cleanup", aiTranscriptCleanupRoutes)
 // Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
 // first). One batched Jev call per passage; never fails its caller.
 app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)
@@ -536,7 +545,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 
 // Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
 // of work, each isolated so one failing cannot take the others down:
-//   1. flush Monday board links whose push was debounced (dirty_at set),
+//   1. flush Monday and Airtable links whose push was debounced (dirty_at set),
 //      oldest first, capped at 20 per run;
 //   2. sweep stranded contextual runs (dead driver / parked with spans left);
 //   3. the v3 react watcher — projects with agentMode.react on react to human

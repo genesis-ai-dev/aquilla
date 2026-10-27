@@ -158,6 +158,20 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     await vi.waitFor(() => expect(queued.removes).toEqual([P2]))
   })
 
+  // AQU-1767 (Sam's walk, 2026-10-15): this tab said 2.4s for a split take the
+  // recorder called 2.3s — the same pieces, rounded two ways.
+  it("says a split take's length as the recorder does: its pieces' kept parts summed, tenths rounded down", () => {
+    draw({
+      [T1]: audio({ label: "Take 1 · 1", trimEndMs: 1200 }),
+      [P2]: audio({ label: "Take 1 · 2", trimStartMs: 2000, trimEndMs: 3150, pieceOf: T1 }),
+      [T2]: audio({ url: "frontier-audio://audio-c1-3.webm", label: "Take 2 · 1", trimEndMs: 1200 }),
+      [Q2]: audio({ url: "frontier-audio://audio-c1-3.webm", label: "Take 2 · 2", trimStartMs: 2000, trimEndMs: 3150, pieceOf: T2 }),
+    })
+    // 1.2s + 1.15s = 2.35s; the gap between the pieces does not play.
+    expect(screen.getByTestId("cell-take-length")).toHaveTextContent("2.3s")
+    expect(within(screen.getByTestId("tab-other-takes")).getByTestId(`take-length-${T2}`)).toHaveTextContent("2.3s")
+  })
+
   it("lists another split take as one row, chosen and deleted whole", async () => {
     queued.removes = []
     draw({

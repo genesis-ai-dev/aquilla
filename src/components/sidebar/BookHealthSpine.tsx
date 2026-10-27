@@ -5,6 +5,7 @@ import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { healthRibbonColor, healthRibbonOpacity } from "@/lib/health/health-ribbon"
 import { PROGRESS_COLOR, progressColorAt } from "@/lib/progress/progress-palette"
+import type { MilestoneProgressView } from "@/lib/progress/milestone-progress-view"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -17,9 +18,27 @@ export interface BookHealthCell {
    * the entire point of the setting: a chapter title left alone is finished
    * business, not an outstanding task.
    */
-  stage: "untranslated" | "automatic" | "validated" | "excluded"
+  stage: "untranslated" | "automatic" | "validated" | "excluded" | "recorded" | "audioValidated"
   health?: number
   hasIssue?: boolean
+  /**
+   * AQU-2159: the text under an `automatic` square is an AI draft nobody has
+   * validated (the target's `ai_suggestion`). Drawn in the progress palette's
+   * AI stripes; a line a person typed and nobody has validated yet is the
+   * translated blue. Absent on every other square.
+   */
+  aiDrafted?: boolean
+  /**
+   * What the line holds, on a square drawn from its status in a language that
+   * counts its recordings (Text and audio, or a language that delivers
+   * nothing chosen yet but has recordings). The square only says started or
+   * done; this lets its label say which part is there, so a line with only a
+   * recording is not read out as translated. Absent on every other square.
+   */
+  lineParts?: {
+    text: "none" | "typed" | "validated"
+    audio: "none" | "recorded" | "approved"
+  }
 }
 
 export interface BookHealthChapter {
@@ -31,6 +50,23 @@ export interface BookHealthChapter {
   cells?: BookHealthCell[]
   /** True when the backend supplied percentages rather than raw cell counts. */
   percentagesOnly?: boolean
+  /**
+   * AQU-2112: the audio pair, in the same unit as `translated`/`validated` —
+   * `audioRecorded` is lines carrying a take of their own, `audioValidated`
+   * those whose every chosen take meets the project's audio requirement.
+   *
+   * OPTIONAL, and absent means "audio is not counted here": a text-only file
+   * carries neither key and reads exactly as it did before. A fabricated 0
+   * would instead claim nothing is recorded.
+   */
+  audioRecorded?: number
+  audioValidated?: number
+  /**
+   * Which figures this chapter shows, decided once for the WHOLE file by
+   * whoever built these chapters (AQU-2110's rule, shared). Absent is "text",
+   * so every existing caller is unchanged.
+   */
+  progressView?: MilestoneProgressView
 }
 
 interface ChapterVisual {
@@ -61,14 +97,65 @@ function automaticScores(chapter: BookHealthChapter): number[] {
 /*
  * AQU-1764: WHERE THE SQUARES SAY PROGRESS, THEY USE THE SHARED PROGRESS
  * PALETTE. A validated square is the text-validated blue and a translated
- * square with no health score the translated blue (it was amber at 0.28,
- * which said "in review" in a colour that means Due soon elsewhere). A square
- * WITH a score keeps the red-amber-green health tint, and the untranslated
- * slate, the hollow excluded heading and the amber issue ring stay as they
- * are: those are about quality, not progress.
+ * square the translated blue (it was amber at 0.28, which said "in review" in
+ * a colour that means Due soon elsewhere).
+ *
+ * AQU-2159: and a square says ONLY progress. An AI draft nobody has validated
+ * is the palette's AI stripes, the ones the Progress card and every progress
+ * bar draw for AI drafts. It used to take the red-amber-green health tint of
+ * its score, and a low score read as pink: the same family as a recorded
+ * line in an audio language's grid, so the two grids side by side said "AI
+ * draft" and "recorded" in one colour. Blue is text, magenta is audio, slate
+ * is nothing yet. The score still reads out in the chapter tooltip, and the
+ * amber ring still marks a line an automatic check flagged — on a line that
+ * has text (`showsIssue`).
  */
 
+/** Nothing recorded, nothing translated: the faint slate every surface uses. */
+const UNTOUCHED_VISUAL: ChapterVisual = Object.freeze({
+  color: "rgb(148 163 184 / 0.22)",
+  opacity: 0.22,
+  measured: false,
+})
+
+/** AQU-2112: a chapter's view — absent means text, as it always did. */
+function viewOf(chapter: BookHealthChapter): MilestoneProgressView {
+  return chapter.progressView ?? "text"
+}
+
+/*
+ * AQU-2112: THE AUDIO TWIN OF `chapterVisual`, in the palette's magenta
+ * tones. Same shape of decision — fully signed off, then "there is a take
+ * here but it has not passed", then a partial share — with no health step at
+ * all: health scores a translation's TEXT, and an audio-only chapter has
+ * none. A chapter whose takes are all validated reads complete here, where
+ * the text rule held it at the untranslated slate however many were signed
+ * off, because the only flag it ever consulted was the text one.
+ */
+function audioChapterVisual(chapter: BookHealthChapter): ChapterVisual {
+  const recorded = chapter.audioRecorded ?? 0
+  const validated = chapter.audioValidated ?? 0
+  if (chapter.total > 0 && validated >= chapter.total) {
+    return { color: PROGRESS_COLOR.audioValidated, score: 100, opacity: 1, measured: true }
+  }
+  if (recorded > validated) {
+    // Recorded and not yet signed off — the recorded tone says a take exists
+    // without claiming it passed.
+    return { color: PROGRESS_COLOR.audioRecorded, opacity: 1, measured: false }
+  }
+  if (validated > 0) {
+    const ratio = chapter.total > 0 ? validated / chapter.total : 0
+    const opacity = 0.28 + (0.52 * ratio)
+    return { color: progressColorAt(PROGRESS_COLOR.audioValidated, opacity), opacity, measured: false }
+  }
+  return UNTOUCHED_VISUAL
+}
+
 function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
+  // A file with recordings and no target text is measured in audio alone.
+  // "both" keeps the text colour: the text figures there are unchanged and
+  // the audio ones stand beside them.
+  if (viewOf(chapter) === "audio") return audioChapterVisual(chapter)
   if (chapter.total > 0 && chapter.validated >= chapter.total) {
     return { color: PROGRESS_COLOR.textValidated, score: 100, opacity: 1, measured: true }
   }
@@ -99,7 +186,22 @@ function chapterVisual(chapter: BookHealthChapter): ChapterVisual {
     return { color: progressColorAt(PROGRESS_COLOR.textValidated, opacity), opacity, measured: false }
   }
 
-  return { color: "rgb(148 163 184 / 0.22)", opacity: 0.22, measured: false }
+  return UNTOUCHED_VISUAL
+}
+
+/**
+ * AQU-2112: the colour of a bucket holding audio squares, or null when it
+ * holds none. Read before health and before the text stages, because an audio
+ * square has no text under it to score or to call untranslated.
+ */
+function audioBucketColor(cells: BookHealthCell[]): string | null {
+  if (!cells.some((cell) => cell.stage === "audioValidated" || cell.stage === "recorded")) return null
+  const validated = cells.filter((cell) => cell.stage === "audioValidated").length
+  if (validated === cells.length) return PROGRESS_COLOR.audioValidated
+  if (validated > 0) {
+    return progressColorAt(PROGRESS_COLOR.audioValidated, 0.25 + (0.55 * validated / cells.length))
+  }
+  return PROGRESS_COLOR.audioRecorded
 }
 
 function matrixColumns(cellCount: number): number {
@@ -107,79 +209,183 @@ function matrixColumns(cellCount: number): number {
   return Math.min(MAX_MATRIX_COLUMNS, cellCount)
 }
 
-function cellBucketVisual(cells: BookHealthCell[]): { color: string; issue: boolean } {
-  const automatic = cells
-    .filter((cell) => cell.stage === "automatic" && cell.health !== undefined)
-    .map((cell) => cell.health!)
-  const score = median(automatic)
-  if (score !== undefined) {
-    const opacity = healthRibbonOpacity({
-      stage: "automatic",
-      rawScore: score,
-      smoothedScore: score,
-      evidenceWeight: 1,
-    })
-    return {
-      color: healthRibbonColor(score, opacity),
-      issue: cells.some((cell) => cell.hasIssue),
-    }
-  }
+interface CellBucketVisual {
+  /** The inline fill, or null when the square is drawn with the AI stripes. */
+  color: string | null
+  /**
+   * AQU-2159: draw the shared `bg-progress-ai` stripes instead of a fill.
+   * Stripes are a background-image, so a striped square takes no inline
+   * background colour at all. AQU-2164: only an AI draft is striped.
+   */
+  stripes: boolean
+  issue: boolean
+}
+
+/**
+ * AQU-2159: whether a square draws the amber "an automatic check flagged
+ * this line" ring. Only a line with text has anything to flag: an
+ * untranslated line is flagged for being empty, which its slate already
+ * says, and ringing every one of them buried the few flags worth reading.
+ * Whether text sits under the line is decided where the flag is read
+ * (`chapter-health.ts` sets `hasIssue` only on a line whose text is not
+ * empty), not from the stage here: an audio square's stage reports a take,
+ * so a recorded line with text can still carry a flag. The stage check below
+ * keeps an untranslated or excluded square clear whoever builds the cells.
+ */
+function showsIssue(cell: BookHealthCell): boolean {
+  return Boolean(cell.hasIssue) && cell.stage !== "untranslated" && cell.stage !== "excluded"
+}
+
+/*
+ * AQU-2159: THE GRID CARRIES PROGRESS, NOT QUALITY. A drafted line nobody
+ * had validated was tinted by its health score, and at 7px a low score reads
+ * as pink — near enough to the magenta of a recorded take that a Text
+ * language's weak drafts and an Audio language's recordings looked alike
+ * (Sam, Oct 24). An AI draft nobody has validated is now drawn with the same
+ * stripes the Progress card and the progress bars already use for AI
+ * drafts, which leaves the grid three colour families — blue for text,
+ * magenta for audio, grey for nothing yet — and no score-dependent colour
+ * anywhere in it.
+ *
+ * AQU-2164: ONLY an AI draft. The `automatic` stage means "has text, nobody
+ * has validated it", whoever wrote it, so striping every such square drew a
+ * person's own typed translation as an AI draft. A line a person typed is
+ * the translated blue, as the Progress card and the bars already say.
+ *
+ * The score is not lost, it has moved: it stays in the chapter's "N
+ * automatic warnings" line, in the chapter tooltip's median, and in the
+ * check drawer. Note there is deliberately NO branch on `health` here —
+ * drawing a scored draft differently from an unscored one is exactly what
+ * made the colour mean quality.
+ */
+function cellBucketVisual(cells: BookHealthCell[]): CellBucketVisual {
+  const issue = cells.some(showsIssue)
+  const audio = audioBucketColor(cells)
+  if (audio) return { color: audio, stripes: false, issue }
 
   const validated = cells.filter((cell) => cell.stage === "validated").length
   if (validated === cells.length) {
-    return {
-      color: PROGRESS_COLOR.textValidated,
-      issue: cells.some((cell) => cell.hasIssue),
-    }
+    return { color: PROGRESS_COLOR.textValidated, stripes: false, issue }
   }
   if (validated > 0) {
     // A bucket of several cells, partly validated: the validated blue at the
     // validated share's strength.
     return {
       color: progressColorAt(PROGRESS_COLOR.textValidated, 0.25 + (0.55 * validated / cells.length)),
-      issue: cells.some((cell) => cell.hasIssue),
+      stripes: false,
+      issue,
     }
   }
-  if (cells.some((cell) => cell.stage === "automatic")) {
-    return {
-      color: PROGRESS_COLOR.textTranslated,
-      issue: cells.some((cell) => cell.hasIssue),
-    }
-  }
-  return {
-    color: "rgb(148 163 184 / 0.2)",
-    issue: cells.some((cell) => cell.hasIssue),
-  }
+  const automatic = cells.filter((cell) => cell.stage === "automatic")
+  if (automatic.some((cell) => cell.aiDrafted)) return { color: null, stripes: true, issue }
+  if (automatic.length > 0) return { color: PROGRESS_COLOR.textTranslated, stripes: false, issue }
+  return { color: "rgb(148 163 184 / 0.2)", stripes: false, issue }
+}
+
+/** Both halves of a line, the part that is there first. */
+function linePartsLabel(parts: NonNullable<BookHealthCell["lineParts"]>, aiDrafted: boolean): string {
+  const text = parts.text === "validated"
+    ? "text validated"
+    : parts.text === "typed"
+      ? (aiDrafted ? "AI draft, not validated yet" : "translated, not validated yet")
+      : "no text yet"
+  const audio = parts.audio === "approved"
+    ? "recording approved"
+    : parts.audio === "recorded" ? "recorded, not validated yet" : "not recorded yet"
+  return parts.text === "none" ? `${audio}; ${text}` : `${text}; ${audio}`
 }
 
 function cellDescription(cell: BookHealthCell, index: number): string {
   const prefix = `Cell ${index + 1}`
-  const warning = cell.hasIssue ? " · automatic warning" : ""
+  // AQU-2159: announced in exactly the places the amber ring is drawn, so
+  // the label and the square cannot disagree.
+  const warning = showsIssue(cell) ? " · automatic warning" : ""
   // Says WHY it is grey. Without this the square is indistinguishable from a
   // faint untranslated one to anyone reading it with a screen reader.
   if (cell.stage === "excluded") return `${prefix}: heading — not counted toward progress${warning}`
+  // AQU-2112: an audio square announces the TAKE. Without this a signed-off
+  // recording was read out as "untranslated", which is the bug in words.
+  if (cell.stage === "audioValidated") return `${prefix}: audio validated${warning}`
+  if (cell.stage === "recorded") return `${prefix}: recorded, awaiting audio validation${warning}`
+  if (cell.lineParts && (cell.stage === "validated" || cell.stage === "automatic")) {
+    return `${prefix}: ${linePartsLabel(cell.lineParts, cell.aiDrafted === true)}${warning}`
+  }
   if (cell.stage === "validated") return `${prefix}: human validated${warning}`
+  // AQU-2159: says what the square shows. It read out a health score the
+  // square no longer draws, and never said the line was an AI draft.
   if (cell.stage === "automatic") {
-    return cell.health === undefined
-      ? `${prefix}: automatic health awaiting evidence${warning}`
-      : `${prefix}: automatic health ${Math.round(cell.health)}%${warning}`
+    return cell.aiDrafted
+      ? `${prefix}: AI draft, not validated yet${warning}`
+      : `${prefix}: translated, not validated yet${warning}`
   }
   return `${prefix}: untranslated${warning}`
 }
 
+/**
+ * AQU-2112: the figure beside a chapter's name — the share that is SIGNED
+ * OFF, in whichever unit the file is measured in. An audio-only chapter reads
+ * its audio-validated share, where it used to read a text figure that can
+ * never move on a language with no written form; a chapter with both reads
+ * the text figure it always did, with the audio one beside it.
+ */
+function chapterFigures(chapter: BookHealthChapter): { text: string | null; audio: string | null } {
+  const view = viewOf(chapter)
+  const figure = (part: number) => chapter.percentagesOnly ? `${part}%` : `${part}/${chapter.total}`
+  return {
+    text: view === "audio" ? null : figure(chapter.validated),
+    audio: view === "text" ? null : figure(chapter.audioValidated ?? 0),
+  }
+}
+
+/**
+ * The "x translated · y recorded" line under a chapter with no square map.
+ *
+ * AQU-2112: both halves are keyed. The translated half was two unkeyed
+ * literals in the JSX above (carried as suppressed i18n debt); it had to be
+ * touched to make room for the audio half, and a word a reader sees is not
+ * made translatable by moving it into a function, so it got a key instead.
+ */
+function chapterProgressWords(chapter: BookHealthChapter, t: TFunction): string {
+  const view = viewOf(chapter)
+  const parts: string[] = []
+  if (view !== "audio") {
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentTranslated", { translated: chapter.translated })
+      : t("agentWorkspace.chapterCountTranslated", { translated: chapter.translated, total: chapter.total }))
+  }
+  if (view !== "text") {
+    const recorded = chapter.audioRecorded ?? 0
+    parts.push(chapter.percentagesOnly
+      ? t("agentWorkspace.chapterPercentRecorded", { recorded })
+      : t("agentWorkspace.chapterCountRecorded", { recorded, total: chapter.total }))
+  }
+  return parts.join(" · ")
+}
+
 function chapterTooltip(chapter: BookHealthChapter, visual: ChapterVisual, t: TFunction) {
-  const issueCount = chapter.cells?.filter((cell) => cell.hasIssue).length ?? 0
+  const issueCount = chapter.cells?.filter(showsIssue).length ?? 0
   const untranslated = Math.max(0, chapter.total - chapter.translated)
   const automatic = Math.max(0, chapter.translated - chapter.validated)
+  const view = viewOf(chapter)
+  const audioRecorded = chapter.audioRecorded ?? 0
+  const audioValidated = chapter.audioValidated ?? 0
   return (
     <div className="space-y-1">
       <p className="font-medium">{chapter.label}</p>
-      {chapter.percentagesOnly ? (
+      {view === "audio" ? null : chapter.percentagesOnly ? (
         <p>{t("agentWorkspace.chapterPercentProgress", { validated: chapter.validated, translated: chapter.translated })}</p>
       ) : (
         <p>{t("agentWorkspace.chapterCountProgress", { validated: chapter.validated, automatic, untranslated })}</p>
       )}
-      {visual.score !== undefined && visual.score < 100 ? (
+      {view === "text" ? null : chapter.percentagesOnly ? (
+        <p>{t("agentWorkspace.chapterAudioPercentProgress", { validated: audioValidated, recorded: audioRecorded })}</p>
+      ) : (
+        <p>{t("agentWorkspace.chapterAudioCountProgress", { validated: audioValidated, recorded: audioRecorded, total: chapter.total })}</p>
+      )}
+      {/* AQU-2112: health scores a translation's TEXT, so an audio-only
+          chapter gets no health line rather than a line about text it does
+          not have. A chapter with both keeps the line it had. */}
+      {view === "audio" ? null : visual.score !== undefined && visual.score < 100 ? (
         <p>{t("agentWorkspace.chapterMedianHealth", { score: Math.round(visual.score) })}</p>
       ) : visual.score === 100 ? (
         <p>{t("agentWorkspace.chapterAllValidated")}</p>
@@ -225,6 +431,7 @@ export function BookHealthSpine({
 
   function renderChapter(chapter: BookHealthChapter) {
         const visual = chapterVisual(chapter)
+        const figures = chapterFigures(chapter)
         const chapterCells = chapter.cells ?? []
         const isLong = chapterCells.length > COLLAPSED_CELL_LIMIT
         const isExpanded = expandedChapters.has(chapter.key)
@@ -250,8 +457,16 @@ export function BookHealthSpine({
               >
                 <span className="flex min-w-0 items-baseline justify-between gap-2">
                   <span className="truncate font-medium text-foreground">{chapter.label}</span>
-                  <span className="shrink-0 tabular-nums">
-                    {chapter.percentagesOnly ? `${chapter.validated}%` : `${chapter.validated}/${chapter.total}`}
+                  <span className="flex shrink-0 items-baseline gap-1 tabular-nums">
+                    {figures.text !== null && <span data-progress-figure="text">{figures.text}</span>}
+                    {figures.audio !== null && (
+                      // AQU-2112: the audio figure is drawn in the palette's
+                      // audio-validated tone, so a glance tells which unit a
+                      // number is in when a file carries both.
+                      <span data-progress-figure="audio" style={{ color: PROGRESS_COLOR.audioValidated }}>
+                        {figures.audio}
+                      </span>
+                    )}
                   </span>
                 </span>
 
@@ -270,29 +485,32 @@ export function BookHealthSpine({
                       // fainter point on it — exactly the wrong message. An
                       // outline is visibly not on the scale at all.
                       const excluded = cell.stage === "excluded"
+                      // AQU-2159: the hollow heading wins over the stripes —
+                      // an excluded cell is an outline with no fill at all.
+                      const aiDraft = tick.stripes && !excluded
                       return (
                         <span
                           key={cell.id}
                           data-testid="book-health-cell"
                           data-excluded={excluded || undefined}
+                          data-ai-draft={aiDraft || undefined}
                           role="img"
                           aria-label={cellDescription(cell, cellIndex)}
                           title={cellDescription(cell, cellIndex)}
                           className={cn(
                             "size-[7px] rounded-[1px]",
+                            aiDraft && "bg-progress-ai",
                             excluded && "ring-1 ring-inset ring-slate-400/50 dark:ring-slate-500/50",
                             tick.issue && "ring-1 ring-inset ring-amber-500",
                           )}
-                          style={{ backgroundColor: excluded ? "transparent" : tick.color }}
+                          style={aiDraft ? undefined : { backgroundColor: excluded ? "transparent" : tick.color ?? undefined }}
                         />
                       )
                     })}
                   </span>
                 ) : (
                   <span className="mt-0.5 block truncate text-[9px] text-muted-foreground/80">
-                    {chapter.percentagesOnly
-                      ? `${chapter.translated}% translated`
-                      : `${chapter.translated}/${chapter.total} translated`}
+                    {chapterProgressWords(chapter, t)}
                     {visual.measured && visual.score !== undefined && visual.score < 100
                       ? ` · health ${Math.round(visual.score)}`
                       : ""}

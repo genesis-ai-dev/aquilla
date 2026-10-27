@@ -18,16 +18,24 @@
 // Auth mirrors the /audio handler exactly: a sync-token JWT scoped to
 // (projectId, fileId). Reading the project-scoped reference clip is gated by the
 // verified projectId claim.
+//
+// Library voices (character voices built by infra/modal/voice_forge.py) take the
+// same route with `libraryVoiceId` in place of `referenceAudioId`: there is no
+// reference clip to read, the voice is a trained RVC model on Modal, and the
+// call goes to VOICE_FORGE_URL instead of Seed-VC. Everything else — auth, size
+// caps, throttle, metering, the R2 write and the response — is shared.
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
-import { checkAiSpendCeiling } from "../../db/shared/ai-spend-ceiling"
+import { LIBRARY_VOICE_CONVERT_GPU, modalGpuRawCents, VOICE_CONVERT_GPU } from "../../db/shared/audio-price-card"
+import { entitleProjectAiCall, releaseQuietly, settleQuietly } from "./ai-metering"
 // Shared with the Inworld proxy: both bound their one upstream subrequest with
 // AbortSignal.timeout and need the same DOMException check to tell a blown
 // deadline apart from a dead upstream.
 import { isAbortTimeout } from "./inworld-tts"
 import { logVendorTimeout, VENDOR_TIMEOUT_MS } from "../../shared/vendor-timeouts"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../db/shared/rate-limit"
+import { customVoiceBelongsTo, isCustomVoiceId } from "./custom-voice"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -37,6 +45,10 @@ export interface VoiceConvertEnv {
   SEED_VC_URL?: string
   /** Shared secret matching the Modal `seed-vc-auth` secret's SEED_VC_TOKEN. */
   SEED_VC_TOKEN?: string
+  /** Voice-forge Modal endpoint for library voices, e.g. https://<acct>--voice-forge-web.modal.run/convert */
+  VOICE_FORGE_URL?: string
+  /** Shared secret matching the Modal `voice-forge-auth` secret's VOICE_FORGE_TOKEN. */
+  VOICE_FORGE_TOKEN?: string
   /** Postgres shim — backs the per-user conversion throttle (AQU-1854)
    *  and the platform spend ceiling (AQU-1869). */
   AQUILLA_PG?: AquillaDb
@@ -44,6 +56,8 @@ export interface VoiceConvertEnv {
   AI_DAILY_SPEND_CEILING_USD?: string
   /** Deployment profile; "test" bypasses the spend-ceiling read cache. */
   ENVIRONMENT?: string
+  /** off | shadow | enforce (db/shared/ai-entitlement.ts, AQU-2061). */
+  BILLING_METER_MODE?: string
 }
 
 // AQU-1854: ceiling on every clip this route buffers. Conversion is the one
@@ -95,6 +109,18 @@ function clipTooLarge(what: string): Response {
 }
 
 const VOICE_CONVERT_PATH = "/api/v1/voice/convert"
+
+/** Library voice ids are voice_forge.py voice dirs: `[a-z0-9][a-z0-9_-]{1,40}`. */
+const LIBRARY_VOICE_ID_RE = /^[a-z0-9][a-z0-9_-]{1,40}$/
+
+/**
+ * What a converted clip's fingerprint is taken over. A clone voice is pinned to
+ * its reference clip; a library voice to its model id, namespaced so the two can
+ * never collide. Mirrored by `voiceConversionKey` in src/lib/audio/change-voice.ts.
+ */
+export function libraryVoiceKey(libraryVoiceId: string): string {
+  return `library:${libraryVoiceId}`
+}
 
 /** R2 key for a project's reference voice clip (project-scoped, not per-file). */
 export function voiceRefObjectKey(
@@ -230,8 +256,8 @@ function clampSteps(raw: unknown): number {
 
 /**
  * POST /api/v1/voice/convert (multipart/form-data)
- *   fields: projectId, fileId, referenceAudioId, [sourceAudioId], [cellId],
- *           [diffusionSteps]
+ *   fields: projectId, fileId, referenceAudioId | libraryVoiceId,
+ *           [sourceAudioId], [cellId], [diffusionSteps] (Seed-VC only)
  *   files:  [source]  — required unless sourceAudioId is given
  *
  * Returns { ok, audioId, ext, objectName, url, bytes }. Returns null when the
@@ -246,10 +272,6 @@ export async function handleVoiceConvertRequest(
   if (request.method !== "POST") {
     return new Response("method not allowed", { status: 405 })
   }
-  if (!env.SEED_VC_URL || !env.SEED_VC_TOKEN) {
-    return new Response("voice conversion not configured", { status: 503 })
-  }
-
   // AQU-1854: formData() buffers the entire multipart body, so the declared
   // length is checked before parsing rather than after. The per-clip checks
   // below are the backstop for a missing or lying Content-Length.
@@ -268,16 +290,29 @@ export async function handleVoiceConvertRequest(
   const projectId = String(form.get("projectId") ?? "")
   const fileId = String(form.get("fileId") ?? "")
   const referenceAudioId = String(form.get("referenceAudioId") ?? "")
+  const libraryVoiceId = String(form.get("libraryVoiceId") ?? "")
   const sourceAudioId = form.get("sourceAudioId")
   const sourceEntry = form.get("source")
-  if (!projectId || !fileId || !referenceAudioId) {
+  if (!projectId || !fileId || (!referenceAudioId && !libraryVoiceId)) {
     return new Response("missing projectId, fileId, or referenceAudioId", { status: 400 })
+  }
+  if (referenceAudioId && libraryVoiceId) {
+    return new Response("send referenceAudioId or libraryVoiceId, not both", { status: 400 })
   }
   // projectId/fileId/referenceAudioId are form fields (unlike /audio, whose
   // ids are URL-path segments matched by `[^/]+`) and land directly in an R2
   // key below, so reject anything that could act as a path separator there.
-  if (!isPathSafeId(projectId) || !isPathSafeId(fileId) || !isPathSafeId(referenceAudioId)) {
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)
+    || (referenceAudioId && !isPathSafeId(referenceAudioId))) {
     return new Response("invalid projectId, fileId, or referenceAudioId", { status: 400 })
+  }
+  if (libraryVoiceId && !LIBRARY_VOICE_ID_RE.test(libraryVoiceId)) {
+    return new Response("invalid libraryVoiceId", { status: 400 })
+  }
+  const upstreamUrl = libraryVoiceId ? env.VOICE_FORGE_URL : env.SEED_VC_URL
+  const upstreamToken = libraryVoiceId ? env.VOICE_FORGE_TOKEN : env.SEED_VC_TOKEN
+  if (!upstreamUrl || !upstreamToken) {
+    return new Response("voice conversion not configured", { status: 503 })
   }
 
   // Auth: sync-token scoped to this (projectId, fileId), same as /audio.
@@ -295,6 +330,12 @@ export async function handleVoiceConvertRequest(
   // token can't trigger billed work.
   if (verified.claims.role < WRITE_ROLE_LEVEL) {
     return new Response("insufficient role", { status: 403 })
+  }
+  // A custom voice is a real person's voice, trained under one project's consent
+  // record (custom-voice.ts). It is usable only from that project.
+  if (libraryVoiceId && isCustomVoiceId(libraryVoiceId)
+    && !(await customVoiceBelongsTo(env, projectId, libraryVoiceId))) {
+    return new Response("voice not found in this project", { status: 404 })
   }
 
   // AQU-1854: per-user throttle. Unlike TTS this route had no volumetric
@@ -316,14 +357,6 @@ export async function handleVoiceConvertRequest(
       { error: "rate_limited", message: "Too many requests, slow down." },
       { status: 429, headers: { "Retry-After": String(conversionLimit.retryAfterSeconds) } },
     )
-  }
-
-  // Platform daily spend ceiling (AQU-1869). Checked before the R2 reads and
-  // the Modal call: a conversion starts an L40S GPU container, and the point
-  // of the ceiling is that nothing paid starts once the floor is hit.
-  const spendCeiling = await checkAiSpendCeiling(db, env, "voice-convert")
-  if (!spendCeiling.ok) {
-    return Response.json(spendCeiling.body, { status: spendCeiling.status })
   }
 
   // Resolve the source clip: inline upload, or an existing R2 recording.
@@ -356,25 +389,43 @@ export async function handleVoiceConvertRequest(
     return new Response("provide a source file or sourceAudioId", { status: 400 })
   }
 
-  // Resolve the reference clip (project-scoped).
-  const refObj = await env.SNAPSHOTS.get(voiceRefObjectKey(env, projectId, referenceAudioId))
-  if (!refObj) return new Response("reference audio not found", { status: 404 })
-  if (refObj.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
-  const refBlob = await refObj.blob()
-  if (refBlob.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
-
-  // Call Seed-VC on Modal. It expects multipart source + reference and returns
-  // a wav. The shared secret travels in X-Auth-Token, never to the browser.
+  // Build the Modal request. Seed-VC wants source + the project-scoped
+  // reference clip; the voice forge wants source + the trained voice's id. The
+  // shared secret travels in X-Auth-Token, never to the browser.
   const modalForm = new FormData()
   modalForm.append("source", sourceBlob, "source")
-  modalForm.append("reference", refBlob, "reference")
-  modalForm.append("diffusion_steps", String(clampSteps(form.get("diffusionSteps"))))
+  if (libraryVoiceId) {
+    modalForm.append("voice_id", libraryVoiceId)
+  } else {
+    const refObj = await env.SNAPSHOTS.get(voiceRefObjectKey(env, projectId, referenceAudioId))
+    if (!refObj) return new Response("reference audio not found", { status: 404 })
+    if (refObj.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
+    const refBlob = await refObj.blob()
+    if (refBlob.size > MAX_VOICE_CLIP_BYTES) return clipTooLarge("reference clip")
+    modalForm.append("reference", refBlob, "reference")
+    modalForm.append("diffusion_steps", String(clampSteps(form.get("diffusionSteps"))))
+  }
+  const gpu = libraryVoiceId ? LIBRARY_VOICE_CONVERT_GPU : VOICE_CONVERT_GPU
+
+  // The one entitlement check (AQU-2065), which also runs the platform daily
+  // spend ceiling (AQU-1869): nothing paid starts once the floor is hit. GPU
+  // work stays metered even for a BYOK org (spec Q9). The bound is a run that
+  // lasts until our timeout; settlement uses the time the call took.
+  const entitled = await entitleProjectAiCall(db, env, {
+    projectId, userId: verified.claims.userId, rail: "gpu", provider: "modal", houseKey: upstreamToken,
+    estimateRawCents: modalGpuRawCents(gpu, SEED_VC_REQUEST_TIMEOUT_MS / 1000),
+    requestId: crypto.randomUUID(),
+  })
+  if (!entitled.ok) return entitled.response
+  const { grant } = entitled
+  const gpuCost = (startedAt: number) => modalGpuRawCents(gpu, (Date.now() - startedAt) / 1000)
 
   let modalRes: Response
+  const startedAt = Date.now()
   try {
-    modalRes = await fetch(env.SEED_VC_URL, {
+    modalRes = await fetch(upstreamUrl, {
       method: "POST",
-      headers: { "X-Auth-Token": env.SEED_VC_TOKEN },
+      headers: { "X-Auth-Token": grant.key.apiKey },
       body: modalForm,
       // AQU-1854: without this a hung GPU held the Worker invocation open until
       // the platform killed it, which surfaced as a spinner that never resolved
@@ -382,6 +433,8 @@ export async function handleVoiceConvertRequest(
       signal: AbortSignal.timeout(SEED_VC_REQUEST_TIMEOUT_MS),
     })
   } catch (err) {
+    // A timeout or dropped connection may follow GPU work: the reservation
+    // stays held for reconciliation.
     if (isAbortTimeout(err)) {
       logVendorTimeout("modalVoiceConvert", err)
       return new Response(
@@ -394,17 +447,31 @@ export async function handleVoiceConvertRequest(
   }
   if (!modalRes.ok) {
     const detail = await modalRes.text().catch(() => "")
+    // Seed-VC and the voice forge both check the token and the form before
+    // they touch the GPU, so a 4xx other than 408 is proven free; anything
+    // else may have run.
+    if (modalRes.status >= 400 && modalRes.status < 500 && modalRes.status !== 408) {
+      await releaseQuietly(grant, "voice-convert")
+    } else {
+      await settleQuietly(grant, gpuCost(startedAt), "voice-convert")
+    }
+    // A custom voice still training is the caller's to wait out, not an outage.
     return new Response(`voice conversion failed (${modalRes.status}): ${detail}`.trim(), {
-      status: 502,
+      status: modalRes.status === 409 ? 409 : 502,
     })
   }
   const convertedBytes = await modalRes.arrayBuffer()
+  await settleQuietly(grant, gpuCost(startedAt), "voice-convert")
 
   // Write the result as a new cell-audio object (same layout as client uploads),
   // so the client only needs to attach the returned audioId.
   const cellIdField = form.get("cellId")
   const cellId = typeof cellIdField === "string" && cellIdField ? cellIdField : null
-  const audioId = convertedAudioId(referenceAudioId, cellId, clampSteps(form.get("diffusionSteps")))
+  const audioId = convertedAudioId(
+    libraryVoiceId ? libraryVoiceKey(libraryVoiceId) : referenceAudioId,
+    cellId,
+    clampSteps(form.get("diffusionSteps")),
+  )
   const ext = "wav"
   const objectName = `${audioId}.${ext}`
   await env.SNAPSHOTS.put(audioObjectKey(env, projectId, fileId, objectName), convertedBytes, {

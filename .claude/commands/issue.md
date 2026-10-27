@@ -56,7 +56,8 @@ Parse `$ARGUMENTS`:
   it. If it has no project, put it in `Prototype Debugging` and say so.
 - **`next`** (or empty) → `list_issues` filtered to team `Aquilla` + status `Todo` (the
   agent-ready queue — **never `Triage`/`Backlog`**), across every project — the V1 projects
-  and `Prototype Debugging` alike. Skip anything labelled `HITL`. Pick the
+  and `Prototype Debugging` alike. Skip anything labelled `HITL` (a veto on top of status, per
+  `AGENTS.md` → "the pickup contract"). Pick the
   highest-priority / lowest-numbered one and operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
   Create the issue first (`save_issue` with the team, a project per the placement rule —
@@ -69,9 +70,11 @@ Parse `$ARGUMENTS`:
   don't invent your own). Create with status **`Triage`** (`086173c5-…`) — **every new issue
   is born in `Triage`, never `Todo`**, no matter how agent-ready it looks. ⚠️ The templates
   embed status `Todo`; an explicitly passed `state` overrides that — confirm the create
-  response actually says `Triage`, and re-save if not. Leave it **unassigned**: the team's
-  rotation auto-assigns at create time — if the response shows an assignee, clear it with a
-  follow-up `assignee: null` save. Set an **`Area` label** (pass it in `labels` on
+  response actually says `Triage`, and re-save if not. Leave it **unassigned** — don't pass
+  `assignee`; the team's Triage Responsibility is **No action** in Linear, so nothing
+  auto-assigns at create time (if the response does show an assignee, the setting has
+  drifted — clear it with a follow-up `assignee: null` save). Set an **`Area` label** (pass
+  it in `labels` on
   `save_issue`): the team's `Area` label group holds the codebase areas —
   `list_issue_labels` for the live list; every issue carries exactly one. Then:
   - **Interactive session** (a human just typed this command): the invocation *is* the

@@ -14,6 +14,7 @@ import {
   textFileIds,
 } from "@/lib/plan/plan-status"
 import { progressPercent } from "./progress-percent"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 const HEADER = [
   "Unit",
@@ -63,7 +64,13 @@ function isoDate(ms: number | null): string {
 }
 
 /** RFC 4180: CRLF line endings, quotes doubled inside quoted fields. */
-export function planRowsToCsv(units: readonly PlanUnit[], now: number, recordsAudio = false): string {
+export function planRowsToCsv(
+  units: readonly PlanUnit[],
+  now: number,
+  recordsAudio = false,
+  /** Media redesign slice 1: what the language delivers; see `textFileIds`. */
+  delivers?: LaneDelivers | null,
+): string {
   // AQU-1278: whether audio is EXPECTED is decided per file across the whole
   // export, the same way the board decides it. Omitting this set makes
   // `planUnitStatus` fall back to the row's own `audioCount`, which is right
@@ -78,7 +85,7 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number, recordsAu
   // an audio-only project exports as Not started however much of it is
   // recorded — the export is what a PM forwards, so it has to say what the
   // board says.
-  const textFiles = textFileIds(units)
+  const textFiles = textFileIds(units, delivers)
   const rows = units.map((u) => [
     planUnitLabel(u),
     STATUS_TEXT[planUnitStatus(u, now, audioFiles, textFiles)],

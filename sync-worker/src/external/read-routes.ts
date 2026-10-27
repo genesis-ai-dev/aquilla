@@ -77,6 +77,7 @@ import { handleExternalActivityRequest } from "./activity-route"
 import { handleExternalPendingChangesetsRequest } from "./pending-changesets-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
+import { loadEffectiveChecks } from "./effective-checks"
 import {
   authenticateAndScope,
   authenticateCredential,
@@ -537,9 +538,22 @@ async function handleExternalProjectSettings(
     authed.ctx.role,
     current.settings,
   )
+  // AQU-2192: `settings` holds only overrides (a default-on built-in check is
+  // never stored), so the checks actually in force ride beside it. PatchSettings
+  // still patches `settings`, never these.
+  const checks = await loadEffectiveChecks(
+    env.AQUILLA_PG as AquillaDb,
+    env.LANE_READ_WALL,
+    projectId,
+    Number(authed.ctx.credential.userId),
+    authed.ctx.role,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
     settings,
+    builtinChecks: checks.builtinChecks,
+    builtinChecksByLane: checks.builtinChecksByLane,
     version: current.version,
     updatedAt: current.updatedAt,
   })

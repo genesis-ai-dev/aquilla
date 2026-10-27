@@ -188,14 +188,17 @@ reopen without a *new* `rules.*` orphan.
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
 > **Status: `terminology.page.*` (16 keys) swept on 2026-10-16, `candidates.*` (11) on
-> 2026-10-19** — see those runs' entries at the bottom of this file for the proof and the
-> per-slice recipe. **24 of the 51 remain**, all in the one remaining five-prefix slice:
-> `libraryStats.*` (7), `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3),
-> `conceptDialog.*` (2), plus the 6 already-orphaned keys listed below. **All four
-> `duplicate-exceptions.ts` entries live in that last slice**, so it is the only one that has
-> to touch that file. The `page.*` and `candidates.*` lists below are kept as the record of
-> what went; do not re-derive them. Note `candidates.ngramLength` was NOT one of the 11 — it
-> is live in `CellTranscribeBadge.tsx`; see the 2026-10-19 entry.
+> 2026-10-19, `libraryStats.*` (7) + `conceptDialog.*` (2) on 2026-10-26** — see those runs'
+> entries at the bottom of this file for the proof and the per-slice recipe. **15 of the 51
+> remain**: `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3), plus the 6
+> already-orphaned keys listed below. Three of the four `duplicate-exceptions.ts` entries
+> went with the 2026-10-26 slice; **the fourth, `terminology.common.statusLabel`, is still
+> there and its key is still orphaned**, so the remaining slice still has to touch that file.
+> The swept lists below are kept as the record of what went; do not re-derive them. Note
+> `candidates.ngramLength` was NOT one of the 11 — it is live in `CellTranscribeBadge.tsx`;
+> see the 2026-10-19 entry. **The catalog is 11 locales now, not 9** (`es`, `pt` joined), so
+> budget ~30 lines per key, not ~25 — the 15-key remainder is ~450 lines and wants splitting
+> in two.
 
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
@@ -1149,16 +1152,20 @@ lint output is byte-identical to baseline except for the one directive that goes
 before the run and returns nothing after. Non-test `as any` / `: any` hits left in the SPA
 after this run, for whoever picks the theme up next:
 
-- `src/hooks/useProjectSettings.ts:560` (`...(existing.completionSettings ?? ({} as any))`)
+- ~~`src/hooks/useProjectSettings.ts:560` (`...(existing.completionSettings ?? ({} as any))`)
   and `:918` (`;(next as any)[key] = (snapTarget as any)[key]` inside a generic key-copy
-  loop). **Not taken**: both need the surrounding settings-merge generics understood, not a
-  cast swapped — `:918` in particular is a keyof-indexed write across two object types and
-  tightening it is a real typing exercise, not a mechanical one.
+  loop).~~ **DONE 2026-10-21** — see that run's entry. Both were taken, and the read above
+  was right that `:918` is a typing exercise: it needed a second generic helper
+  (`copySettingsKeyToRecord`) beside the existing `copySettingsKey`, because that write
+  targets a `ProjectRecord` and not the `ProjectWideSettings` the existing helper takes.
 - `sync-worker/src/__tests__/helpers/in-memory-db.ts` (4) — test helper, frozen zone.
 - Everything else `grep` reports for `:\s*any\b` in `src`, `auth-worker/src`,
   `sync-worker/src`, `agent-worker/src` and `worker/` is the English word "any" in prose
   comments (checked line by line; ~35 of them). Do not re-derive that list — the pattern
-  is noisy and the real set is the two `useProjectSettings.ts` lines above.
+  is noisy. **And do not trust it as an enumeration either**: it missed
+  `ProjectWorkspace.tsx`'s `let _lastImportWrite: Promise<any>`, which matches neither
+  `as any` nor `:\s*any\b`. The authoritative enumeration is the
+  `@typescript-eslint/no-explicit-any` **disable list** — see the 2026-10-21 entry.
 
 ## Unused `eslint-disable` directives — DANGEROUS theme; read the 2026-10-09 entry first
 
@@ -1797,7 +1804,14 @@ booted and passed in 18.8s.
   `src/lib/completion/completion-service.ts`, `auth-worker/src/{index,routes/chat,types}.ts`
   and `scripts/{dev-stack,e2e-up}.ts` — all already framed as "former"/"folded in".
 
-### Deferred: the same drift in `auth-worker/` (3 lines, 2 files)
+### Deferred: the same drift in `auth-worker/` (3 lines, 2 files) — DONE 2026-10-23
+
+> **Status: closed by the 2026-10-23 run** (see that entry at the bottom of this file). All
+> three `apps/sync/` pointers were swapped to `sync-worker/`, and the `types.ts:394`
+> judgement call this entry asked for came back **reword, not path-swap**: `UserRow` declares
+> 8 columns where the live `users` table has 11, so "mirrors" was untrue as well as pointing
+> at an abandoned path. The line numbers below have since shifted (`:394` → `:455`,
+> `:451`/`:565` → `:516`/`:630`); the text below is kept as the record of what was found.
 
 - `auth-worker/src/routes/sync-token.ts:8` ("must match apps/sync/src/auth.ts
   SyncTokenClaims"), `auth-worker/src/types.ts:451` (same pointer) and
@@ -1914,7 +1928,10 @@ The root gate (`pnpm lint`/`build`/`test`) ran out of the box after
 test:e2e:smoke` did **not** — it died four times in a row, each time on a different missing
 prerequisite. Recipe, in order, so the next run does not rediscover it:
 
-1. **Chromium revision gap — now fatal, not just the six media failures.** The container
+1. **Chromium revision gap — now fatal, not just the six media failures.**
+   **>>> OBSOLETE as of 2026-10-23: the container ships `chromium-1243` natively (Chrome for
+   Testing 153.0.8010.12) and `@playwright/test@1.63.0` resolves straight to it. Do NOT apply
+   the shim below — see the 2026-10-23 entry. <<<** The container
    ships rev **1194** (`/opt/pw-browsers/chromium-1194`, Chromium 141.0.7390.37) while
    `@playwright/test@1.63.0` resolves `chromium.executablePath()` to rev **1243**, so
    `refuseMissingPlaywrightChromium()` (`scripts/lib/worktree-install-guard.ts:150`) exits
@@ -2252,3 +2269,608 @@ recipe plus the 2026-10-09 `--ignore-scripts` install is now complete enough to 
 The `pkill` traps both earlier entries record were avoided by never using `pkill -f` at all:
 `ps -eo pid,args | grep -E "[w]orkerd serve|[w]rangler dev"` reported no strays and nothing
 needed killing.
+
+## 2026-10-21 — type-tightening run: the last three `any`s in non-test source
+
+**Done this run** (theme 3, type tightening; 2 files, 34 insertions / 11 deletions, no test
+file touched): the three remaining `@typescript-eslint/no-explicit-any` sites in non-test
+source are gone, and with them all three `eslint-disable` directives. Two of the three were
+the ones the 2026-09 `(window as any)` entry queued and declined; the third that entry never
+saw (see the methodology note below).
+
+- **`src/components/ProjectWorkspace.tsx:643`** — `let _lastImportWrite: Promise<any>`, the
+  FRO-249 module-level serialization chain for `handleImported`'s
+  `getProject`→`updateProject` read-modify-write. The `any` was there because the slot is
+  seeded with `Promise.resolve(undefined)` and then reassigned to a chain that resolves with
+  a `ProjectRecord`, and `const baseProject = await _lastImportWrite` 40 lines later reads
+  the slot's type, not the chain's. Fixed by naming the appended link in a local
+  (`thisImportWrite`), assigning the slot from it, and awaiting the local — so the slot can
+  honestly be `Promise<ProjectRecord | undefined>` (it has to admit its seed) while the await
+  stays `ProjectRecord`. **Runtime-identical**: it is the same promise object in both places,
+  and the assignment is the statement immediately before the await, so no interleaving can
+  swap the slot in between.
+- **`src/hooks/useProjectSettings.ts:631`** — `...(existing.completionSettings ?? ({} as any))`.
+  Narrowed to `...((existing.completionSettings ?? {}) as CompletionSettings)`. This is still
+  an assertion and the comment now says why rather than waving at "runtime migration state":
+  `CompletionSettings` has five required keys (`endpoint`, `model`, `maxTokens`,
+  `temperature`, `systemPrompt`), the server sends only `systemPrompt`, and a project that
+  has never had AI settings written has no `completionSettings` at all — so the merged object
+  is deliberately partial until the settings editor fills the rest in. Making it honest at the
+  type level means widening `ProjectRecord.completionSettings`, which is a schema question,
+  not a cleanup. **The improvement is scope, not safety**: the assertion now covers one named
+  shape instead of erasing all checking on the spread.
+- **`src/hooks/useProjectSettings.ts:1014`** — `;(next as any)[key] = (snapTarget as any)[key]`
+  in the forbidden-write IDB rollback. The 2026-09 entry called this "a real typing exercise,
+  not a mechanical one" and that was correct: the file already has `copySettingsKey<K extends
+  keyof ProjectWideSettings>` (whose own doc-comment says it exists "because the call sites
+  below used to cast the value away"), but it takes a `ProjectWideSettings` target and *this*
+  write targets a `ProjectRecord`. Added a second generic beside it,
+  `copySettingsKeyToRecord`, which writes through `Object.assign(target, { [key]: source[key] })`
+  — the record and the settings object only partly overlap, so a settings key the record does
+  not declare still has to land, and a keyed assignment cannot express that. Loop head now
+  reads `Object.keys(partial) as (keyof ProjectWideSettings)[]`, matching the file's own
+  idiom at `rollbackRejectedKeys`.
+
+### Methodology: enumerate `any` from the disable list, never from a regex
+
+This is the reusable part. `@typescript-eslint/no-explicit-any` arrives via
+`tseslint.configs.recommended` (`eslint.config.js:34`) and is turned **off only for test
+files** (`eslint.config.js:186`), so:
+
+- At baseline `pnpm lint` reported **zero** `no-explicit-any` violations repo-wide — all 34
+  mentions of the rule in the output were `Unused eslint-disable directive` warnings, every
+  one of them in a frozen test file where the rule is off anyway.
+- Therefore every `any` in non-test source *had* to carry a disable, and
+  `grep -rn "no-explicit-any"` over `src` + the four worker packages + `e2e` + `scripts` +
+  `parity` + `packages` + `tools`, minus test files, was the complete set: exactly three.
+- After the run that same grep returns **nothing**. Non-test source is `any`-free, and the
+  claim is proven by the linter rather than argued.
+
+A regex over `any` cannot do this. The 2026-09 survey ran one, concluded "the real set is the
+two `useProjectSettings.ts` lines", and missed `Promise<any>` entirely — it matches neither
+`as any` nor `:\s*any\b`. Future type-tightening runs: start from the disable list.
+
+**Not a guard.** Nothing stops the next `any` + disable from landing; making the rule an
+error, or banning the directive, is an `eslint.config.js` change that would move the lint
+gate and was out of this run's scope. Worth a ticket if the invariant is meant to hold.
+
+### Baseline 2026-10-21 (`origin/dev` `b3afcf31`)
+
+- `pnpm lint` — **exit 0**, 1076 problems (0 errors, 1076 warnings).
+- `pnpm build` — **exit 0** (`tsc -b` + `vite build` + brand check).
+- `pnpm test` — **exit 1**: `Test Files 1 failed | 2063 passed | 2 skipped (2066)`,
+  `Tests 1 failed | 23242 passed | 23 skipped (23266)`, 1618s.
+
+The one red is **pre-existing and full-suite-only**:
+`src/components/ProjectSettings/ExperimentalFlagsSection.test.tsx` >
+"keeps checking WIP off until explicitly enabled and persists the flag" — a
+`expect(…).not.toBeInTheDocument()` that finds `Checking link creator` present. Run in
+isolation the file is **12/12 green**, so this is another member of the
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) full-suite-only family
+(alongside `TeamsList`, `ArchivedProjects` and `OrgContext` already in this ledger), not a
+logic failure. Frozen for this run either way, and not a file this diff touches.
+
+### Final gate 2026-10-21
+
+- `pnpm lint` — exit 0, **1076 problems (0 errors)**, and the per-rule histogram is
+  **identical** to baseline. The raw diff is non-empty but is *only* line-number shifts
+  inside the two edited files (the diff adds 23 lines to `ProjectWorkspace.tsx` and
+  `useProjectSettings.ts` above existing warnings). Note the gate-ordering trap from
+  2026-10-14 was avoided by `rm -rf packages/idml-roundtrip/dist` before the comparison lint,
+  since the baseline lint had run before any `tsc -b`.
+- `pnpm build` — exit 0.
+- `pnpm test` — exit 1, `Test Files 1 failed | 2063 passed | 2 skipped (2066)`,
+  `Tests 1 failed | 23242 passed | 23 skipped (23266)`, 1526s — **identical counts to
+  baseline, and the same single test**. Red-to-same-red on the pre-existing flake,
+  green-to-green on all 23242 others.
+- `pnpm run test:e2e:guard` — exit 0, 7 files / 67 tests (this also confirms the Chromium
+  revision shim satisfies `refuseMissingPlaywrightChromium()`).
+- Smoke (`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`) — **96 passed, 6 failed, 16.3m**,
+  the whole stack booted first try. The six are *precisely* the standing
+  Chromium-revision-gap media set at the line numbers the 2026-10-16 and 2026-10-19 entries
+  recorded: `import-and-edit.smoke.spec.ts:177`, `:338` × 3 (YouTube srt/vtt/sbv caption
+  exports), `import-media-captions.smoke.spec.ts:132` × 2 (embedded m4a/mp4). Zero new
+  failures, so no A/B arm was needed. **The suite is 102 tests now, not 101**, so the
+  expected figure in this container becomes **96/102** — the best recorded here (95/101 on
+  2026-10-19 and 2026-10-12, 93/101 on 2026-10-16, 92/99 on 2026-10-14). The
+  `collab/bt-edit-locked-for-reviewer.smoke.spec.ts:79` and
+  `collab/commit-chain-linear.smoke.spec.ts` flakes earlier entries flagged did **not**
+  recur. These six cannot be this diff in any case: it changes three type annotations and
+  one local binding and cannot reach media decode.
+
+Bundle-hash comparison was deliberately **not** used as the proof here, unlike the 2026-10-09
+`eslint-disable` run: that theme's edits were source-identical no-ops, so a hash difference
+was itself the finding. This run changes real source (a new local binding, a new helper
+function), so a differing chunk hash is the expected outcome and carries no information. The
+proof is unchanged tests, green-to-green, plus `tsc -b`.
+
+### Container setup 2026-10-21: the 2026-10-19 recipe held verbatim, with two additions
+
+Both standing recipes worked with no modification — `pnpm install --ignore-scripts` for the
+root (the plain `pnpm i` still dies in `onnxruntime-node`'s postinstall with `read
+ECONNRESET`), the rev-1194→1243 Chromium double symlink, Postgres `listen_addresses` +
+`pg_ctl start` + `create role aquilla` over the unix socket + `E2E_PG_ADMIN_URL`, and
+`npm ci --legacy-peer-deps` in all three worker packages (exit 0 each, all three
+`package-lock.json` verified untouched afterwards). Two things worth adding:
+
+1. **A failed `pnpm i` leaves `node_modules` unlinked, and the symptom is misleading.** The
+   first `pnpm i` aborts in the postinstall *after* resolution but *before* linking, leaving
+   71 entries in `node_modules` and **no `node_modules/.bin` directory at all**. A gate run
+   at that point fails with a missing-binary error that looks nothing like a network problem.
+   Go straight to `--ignore-scripts`; do not retry the plain install (the retry fails
+   identically, ~90s wasted). `pnpm rebuild` was again not needed for any gate.
+2. **`pg_ctl -w start` exceeds the 180s foreground tool timeout and that is not a failure.**
+   The call gets moved to the background and never writes a completion line, but the daemon
+   *is* up — `pgrep -af "postgres -D"` and a `PGPASSWORD=… psql -h 127.0.0.1 -U aquilla`
+   probe both confirm it. Verify with a probe, as the 2026-10-19 entry says; do not re-issue
+   the start (that is what leaves the stale `postmaster.pid`).
+
+## 2026-10-23 — doc-drift run: comment path pointers that no longer resolve
+
+**Done this run** (theme 6, comment/doc drift; 7 files, comment-only, 22 insertions / 18
+deletions, no test file touched). The 2026-10-14 run fixed the abandoned-layout pointers in
+`src/`; this run finishes the job in `auth-worker/` — the slice that entry explicitly
+deferred for wanting its own baseline — and adds four more dangling pointers a fresh,
+*resolving* survey turned up that the 2026-10-14 sweep could not see.
+
+Every replacement was verified to resolve before the edit:
+
+- **`auth-worker/src/routes/sync-token.ts:8`** and **`auth-worker/src/types.ts:516`** —
+  `apps/sync/src/auth.ts` → `sync-worker/src/auth.ts`. `SyncTokenClaims` is declared at
+  `sync-worker/src/auth.ts:7`, so both "must match" claims now point at the interface they
+  are pinned to.
+- **`auth-worker/src/types.ts:630`** — `mirrors src/lib/frontier/roles.ts and apps/sync/.`
+  → `… and sync-worker/src/events/role-policy.ts.` All three ladders were diffed: VIEWER 100
+  / COMMENTER 200 / REVIEWER 300 / CONTRIBUTOR 400 / PROJECT_LEAD 500 / MAINTAINER 600 /
+  OWNER 700, identical in `auth-worker/src/types.ts`, `src/lib/frontier/roles.ts:30` and
+  `sync-worker/src/events/role-policy.ts:7`.
+- **`auth-worker/src/types.ts:455`** — `apps/identity/migrations/0001_initial.sql`. This is
+  the one the 2026-10-14 entry flagged as needing a judgement call rather than a path swap,
+  and the check it asked for says *reword*: `UserRow` does **not** mirror the live table.
+  `db/postgres/schema.sql:27-46` declares 11 columns; `UserRow` declares 8, omitting
+  `display_name`, `avatar_url` and `email_verified_at`. It is read off
+  `SELECT * FROM users` (`auth-worker/src/auth/jwt.ts:195,211`), so the three absent columns
+  really do come back at runtime, untyped — and they *are* read elsewhere under their own
+  inline row types (`services/access-payload.ts:243-246`, `services/access-audit.ts:56,141`).
+  Reworded to say exactly that, pointing at the live schema. Note a bare path swap to
+  `auth-worker/migrations/0001_initial.sql` (which does exist) would have been wrong twice
+  over: live framing on a file CLAUDE.md keeps only as a historical D1 record, *and* a
+  "mirrors" claim that is not true.
+- **`auth-worker/src/lib/omni-asr.ts:2`** and **`auth-worker/src/types.ts:189`** —
+  `infra/modal/omnilingual_asr.py` → `infra/modal/omni_asr.py`. The file was never at the
+  long name; `infra/modal/omni_asr.py` is the Omnilingual ASR Modal app (its own header says
+  so). The spec pointer on the same line (`docs/superpowers/specs/2026-10-16-omnilingual-asr.md`)
+  resolves and was left alone.
+- **`src/lib/sync/invites.ts:5,11,366`** — all three invite-route pointers were missing the
+  package's `src/` segment. `auth-worker/routes/invites.ts` → `auth-worker/src/routes/invites.ts`
+  (×2; `POST /api/v2/invites/multi` confirmed at `routes/invites.ts:95`). The third,
+  `auth-worker/routes/projects-invites.ts`, has **no** such file under any prefix — the
+  single-project endpoints live in `auth-worker/src/routes/projects.ts` (`POST
+  /:projectId/invites` at `:2037`), so it was re-pointed there, not `src/`-prefixed.
+- **`src/lib/parsers/types.ts:413`** — `src/lib/audio/voice-library.ts` does not exist and
+  never has. The pre-built cast the field describes is `src/lib/audio/character-voices.ts`
+  (`CHARACTER_VOICES`, ids like `narrator-hearth`, each carrying the `voice_forge.py` voice
+  id sent as `libraryVoiceId` — the exact field this comment annotates). The sibling pointer
+  `infra/modal/voice_forge.py` on the next line resolves and was left alone.
+- **`src/lib/migrate/audio-copy.ts:1`** — `scripts/migrate-audio-copy.ts` does not exist.
+  The two real I/O shells are `scripts/migrate-daemon/stages/audio.ts:10` and
+  `scripts/migrate-all.ts:59`, the only importers of this module's three exports. Named both.
+- **`src/components/ProjectSettings.tsx:168-171`** — the highest-value one, and the only edit
+  that changes a claim rather than a path. The termbase-sharing feature-flag note told the
+  next reader to "re-enable the skipped smoke specs" and named three:
+  `project-settings-termbase-sharing`, `project-settings-termbase-publish-toggle`,
+  `termbase-subscribe-unsubscribe`. **None of the three exists**, and not merely at those
+  paths: `git log --all --diff-filter=D -- 'e2e/specs/projects/*termbase*'` and
+  `git log --all --name-only -- 'e2e/specs/**/*termbase*'` are both **empty**, so they were
+  never committed on any ref this container has. A `grep -rln -i termbase e2e/` finds only
+  `helpers/seed-project.ts`, `specs/terminology/merge-duplicates.spec.ts` and
+  `recordings/specs/aquilla-tools.showcase.ts` — no sharing/publish/subscribe coverage
+  anywhere. Reworded to say the coverage has to be *written*, not un-skipped, keeping the
+  original names in prose so the intent survives. `TermbaseSharingSection.tsx` (the other
+  thing that paragraph claims is live) was verified present at
+  `src/components/ProjectSettings/TermbaseSharingSection.tsx`.
+
+### Methodology: resolve the pointer, don't just regex it
+
+The reusable part, and a correction to how the 2026-10-14 survey was run. A regex that
+harvests path-shaped tokens out of comments and checks them against `git ls-files` produces
+mostly noise, in two specific ways that each cost an iteration here:
+
+1. **`(?:ts|tsx)` alternation silently truncates `.tsx`.** `ts` matches first and leaves the
+   `x` behind, so every correct `.tsx` pointer reports as a missing `.ts` file. That faked
+   ten findings in the first pass (`src/App.ts`, `src/components/ImportDialog.ts`,
+   `org/ProjectOverview.ts`, `…/AgentMemoryTab.ts`, `…/LanguageProfileSlots.ts`, …) — all of
+   which are fine. Put `tsx` first in the alternation.
+2. **A relative pointer must be resolved against the *containing file's* directory**, not
+   matched by suffix against the tree. `./evaluate.ts` in `db/shared/bible-checks/compile.ts`
+   resolves perfectly; a suffix test on the literal `./evaluate.ts` never matches anything.
+   The second pass (`os.path.normpath(os.path.join(os.path.dirname(f), m))`) cut ~40
+   candidates to 5, of which 3 were still false positives — `webviews/.../importers/...`
+   paths in `src/lib/export/vtt-voice.ts`, `src/lib/export/exporters/docx.ts` and
+   `src/lib/parsers/obs.ts`, where the `.../` elision parses as a relative prefix.
+
+**And the filter that actually decides a finding is not mechanical at all**: of ~55 surviving
+repo-rooted candidates, most are correct and must be left alone. Three categories, each with
+a precedent this ledger already set:
+
+- **Another repo's path.** `docs/agent-api.md` in the four `langquest` files is *LangQuest's*
+  doc — `lib/langquest/client.ts:3` says "LangQuest documents it in its own repo" in the same
+  sentence. Likewise `apps/web/worker/agent/view.ts` (LangQuest's), `packages/types/src/
+  patterns/scripture.ts` (Tabitha's), `src/schemas/bkp.ts` + `src/bkp/README.md` (the
+  pipeline repo's), `src/projectManager/…`, `src/exportHandler/…`, `src/gitlab/…` (the
+  codex-editor extension's, per SPEC.md), and every `04-features/*.md` /
+  `05-user-stories/*.md` / `aquilla-specs/…` (the specs repo's).
+- **Package-relative shorthand.** `src/index.ts` cited from eleven `auth-worker/src/routes/*`
+  files means `auth-worker/src/index.ts`; `shared/tools/file-extension.ts` really is at the
+  repo root. Both resolve under their package prefix.
+- **Historical framing, which this ledger has held correct since 2026-09-02.** Every
+  `frontier-server/cloudflare/src/...` pointer in `auth-worker/src/{auth/jwt,middleware/auth,
+  routes/auth,routes/orgs,routes/projects,routes/users}.ts` is introduced by "Ported from" or
+  "Adapted from". Six files, untouched on purpose. **Live framing on a dead path is the
+  finding; a dead path named as history is not.**
+
+### Deliberately left as candidates
+
+- **`src/components/timeline/timeline-pane-layout.ts:28`** cites
+  `docs/qa/browser-passes/browser-verify-media-table-sync.mjs` as a pass that "already logs
+  the real height … on every run", from which the file's own estimated constant is to be
+  trued up. `docs/qa/` does not exist at all; `scripts/browser-verify/` holds seven unrelated
+  passes (`aqu-1068-*`, `aqu-1278-*`) and nothing matching media-table-sync, and
+  `git log --all -S` did not establish where the pass went. **Why deferred**: the honest
+  rewrite has to say whether the measurement is still obtainable, and that is a judgement
+  about a QA artifact's fate, not a path swap — the one case in this survey where I could not
+  name a verified replacement. **Proof needed**: find the pass (or confirm it was never
+  committed), then either re-point the comment or restate the constant as owed with no pass
+  behind it.
+- `src/partner-integrations/biblica/bible-swap/bibleVerseIndexSerialize.ts` — re-verified
+  **still dead** this run (word-boundary grep for all four exports across the whole tree
+  returns only this ledger). Still partner-owned, so still Biblica's call; the 2026-10-14
+  entry's terms stand unchanged.
+
+### Baseline 2026-10-23 (`origin/dev` `fdb2457a`) — trunk is GREEN on all four gates
+
+The second all-green baseline in this ledger (2026-10-14 was the first), and the first with
+**zero** failing tests in the root suite — no member of the issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) full-suite-only flake family
+appeared at all.
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 1078 problems, 0 errors |
+| `pnpm build` | **exit 0** (`tsc -b` + `vite build` + brand check) |
+| `pnpm test` | **exit 0** — 2096 files passed / 2 skipped (2098); 23610 tests passed / 23 skipped (23633), 2364s |
+| `cd auth-worker && npm test` | **exit 0** — 373 files passed (373); 4400 passed / 2 expected fail (4402), 1234s |
+
+Worth recording against the 2026-10-21 figures: the root suite has grown 2066 → 2098 files
+and 23266 → 23633 tests in two days, and its `ExperimentalFlagsSection.test.tsx` red is gone.
+
+### Container setup 2026-10-23: two standing recipes are now OBSOLETE
+
+1. **The Chromium revision gap is closed. Do not apply the rev-1194→1243 double-symlink
+   shim.** `/opt/pw-browsers/` now ships `chromium-1243` and
+   `chromium_headless_shell-1243` natively (Chrome for Testing **153.0.8010.12**), and
+   `@playwright/test@1.63.0` resolves `chromium.executablePath()` straight to
+   `/opt/pw-browsers/chromium-1243/chrome-linux64/chrome`. The headless shell is already
+   named `chrome-headless-shell`, so both traps in `headlessShellPresent()` that the
+   2026-10-14 entry documented are moot. The four-run-old shim recipe is dead weight —
+   **and the six "standing" media failures it was blamed for should be re-measured against
+   this browser rather than assumed.**
+2. **`pnpm install --ignore-scripts` still required, for the reason on record.** Plain
+   `pnpm i` dies in `onnxruntime-node`'s postinstall exactly as the 2026-10-19 entry says
+   (and leaves `node_modules/.bin` empty, which is that entry's trap #1 — confirmed again:
+   71 entries, no `.bin`). `--ignore-scripts` then links in 4.6s. No `pnpm rebuild` needed
+   for any gate.
+3. **Postgres recipe held verbatim** (uncomment `listen_addresses`, `pg_ctl start`,
+   `create role aquilla` over the unix socket as `postgres`), including its documented
+   quirk: the `pg_ctl -w start` wrapper gets killed at the harness time limit while the
+   daemon keeps running. Verify with `pgrep -af "postgres -D"` plus a `PGPASSWORD=… psql -h
+   127.0.0.1 -U aquilla` probe; do not re-issue the start.
+4. **`npm ci --legacy-peer-deps` still required in all three worker packages** (auth-worker's
+   ERESOLVE on `vitest@5.0.1` vs `@cloudflare/vitest-pool-workers`'s `peer vitest@^4.1.0` is
+   unchanged on trunk — still worth the ticket the 2026-10-14 entry asked for). All three
+   `package-lock.json` files verified untouched after.
+
+### The 30-minute background-command cap bites the auth-worker suite specifically
+
+A refinement of the 2026-10-19 entry's trap #2. That entry's advice — "run each gate as its
+own background command" — is **not sufficient for `cd auth-worker && npm test`**: the suite
+takes **1234s alone** but ran past the harness's 30-minute ceiling under contention with the
+root suite and was killed having written only its 10-line preamble, with no `GATE_EXIT`
+sentinel and no partial results. Two things make this worse than it looks: vitest's reporter
+buffers to a non-TTY, so a healthy run and a hung one look **identical** (10 lines either
+way) for 20 minutes; and the kill notice reads as a suite problem rather than a harness
+timeout.
+
+**Recipe**: run the long suites `setsid nohup`-detached, writing their own `GATE_EXIT=`
+sentinel, and watch the sentinel from a separate monitor — a detached process is outside the
+harness's process group and cannot be reaped at 30 minutes. Decide "is it alive?" from
+`ps -eo etime,pcpu` showing fresh short-lived `vitest/dist/workers/forks.js` children at
+>100% CPU, never from the log's line count. And do not run the root and auth-worker suites
+concurrently — **measured on both sides of this run's own diff**: the root suite took
+**2364s** sharing the box with auth-worker (baseline) and **1427s** with it to itself (final
+gate), a 1.66x penalty on identical test counts, and that contention is what pushed
+auth-worker over the 30-minute cap in the first place. Run them one after the other.
+
+### Final gate 2026-10-23
+
+- `pnpm lint` — exit 0, 1078 problems (0 errors). The raw log is **byte-identical** to the
+  baseline log: not one warning even shifted a line number, because every edited comment sits
+  in a file whose warnings are elsewhere. (`rm -rf packages/idml-roundtrip/dist` before this
+  run, per the 2026-10-14 gate-ordering trap.)
+- `pnpm build` — exit 0.
+- `pnpm test` — exit 0, `Test Files 2096 passed | 2 skipped (2098)`,
+  `Tests 23610 passed | 23 skipped (23633)`, **1427s** — counts identical to baseline,
+  green-to-green on all 23610.
+- `cd auth-worker && npm test` — exit 0, `Test Files 373 passed (373)`,
+  `Tests 4400 passed | 2 expected fail (4402)` — identical to baseline.
+- `pnpm run test:e2e:guard` — exit 0, 7 files / 67 tests.
+- Smoke (`npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`) — **95 passed, 7 failed, 14.4m**;
+  the stack booted first try. Both failure groups accounted for below.
+
+### Smoke 2026-10-23: the media set SHRANK 6 → 3, and four collab failures are trunk's
+
+The expected figure in this container changes, so future runs should re-baseline against this
+rather than the 2026-10-19/21 numbers.
+
+- **The three surviving media failures** are `editor/import-and-edit.smoke.spec.ts:338` × 3,
+  the YouTube srt/vtt/sbv caption exports, at exactly the documented line.
+- **Three documented media failures now PASS**: `import-and-edit.smoke.spec.ts:177` (imported
+  video keeps its authenticated picture) and `import-media-captions.smoke.spec.ts:132` × 2
+  (embedded m4a/mp4). This is the predicted consequence of the revision gap closing — those
+  three were failing against a deliberately mismatched browser, and against the real rev-1243
+  Chromium they are green. **The remaining three at `:338` are therefore NOT
+  revision-gap artifacts** and want their own look; they are the first media failures in this
+  ledger that survive a correct browser.
+- **The four `ProjectSync socket failed before it was ready: WebSocket is closed before the
+  connection is established` failures are pre-existing**, proven by an A/B arm rather than
+  argued: `git checkout --detach origin/dev` in the same container with the same
+  `node_modules`, then the same two spec files — **4 failed / 7 passed**, same error, same
+  file, overlapping lines (dev: `commit-chain-linear` :250, :283, :373, :373; branch:
+  `commit-chain-linear` :250, :373, :373 and `concurrent-edit-throttled` :88). The exact line
+  set moves between runs, which is itself the signature of boot/timing instability rather
+  than a logic failure. This is the same `collab/commit-chain-linear.smoke.spec.ts` family the
+  2026-10-16 entry flagged and 2026-10-19/21 saw not recur — it is back, and it reproduces
+  with **zero diff**.
+- The A/B worked out far cheaper than a full second smoke run (**2.6m** for two spec files vs
+  14.4m) because `e2e-shard.ts` takes spec-path fragments as positional args:
+  `npx tsx scripts/e2e-shard.ts 1 -- collab/commit-chain-linear.smoke.spec
+  collab/concurrent-edit-throttled.smoke.spec`. Worth reusing — detach onto `origin/dev` in
+  place rather than building a worktree, since the installed `node_modules` carries over.
+
+**Why none of the 7 can be this diff, independent of the A/B**: every changed line in all
+seven files begins `//` or ` *`. Comments do not survive `tsc`/esbuild, so the emitted
+JavaScript is identical by construction — and a comment cannot reach WebSocket establishment
+or media decode. The byte-identical lint log and the identical test counts across 2096 + 373
+files are the routine's actual proof; the A/B arm is belt-and-braces for the one group that
+fell outside the documented set.
+
+## 2026-10-26 — dead-key run: the `libraryStats.*` + `conceptDialog.*` half of the five-prefix slice
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 14 files,
+277 deletions / 0 insertions, no test file touched): the 9 orphaned keys under
+`terminology.libraryStats.*` (7) and `terminology.conceptDialog.*` (2), plus the three
+`duplicate-exceptions.ts` entries that die with them. This is the **first half of the third
+and last slice** the 2026-10-07 budget arithmetic prescribed; **15 of the 24 remain**
+(`reviewQueue.*` 6, `importDialog.*` 6, `common.*` 3), plus the 6 already-orphaned keys the
+2026-09-21 plan entry lists separately.
+
+- **The two `── TerminologyPage.tsx: … ──` section headers went whole**, because both of
+  their sections lost every key: `── TerminologyPage.tsx: ConceptDialog (add/edit concept
+  form) ──` and `── TerminologyPage.tsx: LibraryStatsHeader ──`. No survivor needed
+  re-pointing, so neither the `rules.ts` precedent (re-point a header that keeps one key)
+  nor the `loadingLabel` precedent (reword a context note that names a dead container) was
+  needed this time. `── TerminologyPage.tsx: TermbaseImportDialog ──` is still there and
+  still wholly orphaned — it is the next slice's.
+- **All 9 keys carry a per-key `context.keys` entry**, so the namespace lost 18 entries for 9
+  keys — the opposite of the `page.*` (2 of 16) and `candidates.*` (5 of 11) slices, where a
+  strip script asserting two hits per key would have tripped. Six of the nine are
+  placeholder-free plain labels that `requiresOwnContextEntry()` would have exempted; they
+  simply had entries anyway. **The per-key hit count in this namespace is not predictable —
+  find the entries, don't assume a ratio.**
+- **Three of the four `duplicate-exceptions.ts` entries the 2026-09-21 plan predicted are
+  gone**: `terminology.libraryStats.enforcedLabel`, `…libraryStats.infringedLabel` and
+  `…conceptDialog.renderingPlaceholder`. Each sat in a group of **exactly two** keys, so the
+  survivor (`terminology.termDetail.verdictEnforced`, `…verdictInfringed`,
+  `terminology.editor.renderingLabel` respectively) stops colliding altogether and needs no
+  exception of its own — the "other half needs a re-check" the plan asked for, checked and
+  answered. The fourth, `terminology.common.statusLabel`, is **still live in that file and
+  its key is still orphaned**: it is in the next slice, and its pair
+  (`org.orgHome.projectsPanel.statusLabel`) will need the same two-key check then.
+- **The catalog is 11 locales now, not 9.** `es` and `pt` joined
+  `src/lib/i18n/messages/` since the 2026-10-19 slice, so one key costs **22** generated
+  lines (11 catalog + 11 `source-hashes.json`) instead of 18, and the measured per-key cost
+  rises from ~25 lines to **~30** (277/9). **The remaining 15-key slice is
+  therefore ~450 lines, not the ~375 a 2026-10-19 extrapolation would predict** — split it
+  again (e.g. `importDialog.*` 6 + `conceptDialog`-style leftovers, then `reviewQueue.*` 6 +
+  `common.*` 3), or expect to overrun.
+
+**Proof** (all of it run, none argued):
+
+- **Orphan status verified per key, not per prefix**, with the same literal search the three
+  prior slices used (the full key, plus the namespace-stripped suffix in each of the three
+  quote styles) across `src e2e scripts worker auth-worker/src sync-worker/src
+  agent-worker/src parity packages` outside `src/lib/i18n/`. All 9 miss. The same sweep run
+  over all 24 remaining keys **found three live ones among the `common.*` prefix** —
+  `noRenderings` (`TerminologyMergeDialog.tsx`), `columnVerdict`, `statusApproved`,
+  `statusSuggested`, `statusOld`, `occurrenceCount` (`TerminologyTermDetail.tsx`,
+  `TerminologyViolationsInbox.tsx`) — confirming the plan entry's `common.*` count of 3
+  (`managed`, `notesLabel`, `statusLabel`) is still exactly right and that a
+  `terminology.common.` prefix grep would be wrong by six keys.
+- **The i18n hard guards were simulated before the edit**, reusing the 2026-10-07/19 recipe —
+  a throwaway `tsx` script importing the real `NAMESPACES`, `DUPLICATE_EXCEPTIONS` and
+  `plurals` modules and re-implementing `no-duplicates.test.ts`'s three hard assertions
+  against the catalog with the 9 keys and 3 exceptions removed **in memory**:
+
+  | | before | after |
+  | --- | --- | --- |
+  | catalog keys (plural forms flattened) | 9045 | 9036 |
+  | unexcused duplicate groups | 287 | **287** |
+  | `DUPLICATE_EXCEPTIONS` entries | 133 | 130 |
+  | exceptions for a missing key | 0 | **0** |
+  | exceptions whose key no longer collides | 0 | **0** |
+  | groups left with ≥2 unexcused keys beside an excused one | 0 | **0** |
+
+  None of the 9 strings is in a collision group that survives the deletion, so the warning
+  count does not move at all. `LEGACY_CONTEXT_GAPS` is `[]` on trunk, so there was no
+  carve-out to re-check.
+- **No deleted key is cited by a surviving context entry.** The only cross-citations are
+  `libraryStats.infringedLabel`'s context and exception reasons naming
+  `libraryStats.enforcedLabel` — both inside the slice. Neither
+  `terminology.termDetail.verdictEnforced`'s nor `terminology.editor.renderingLabel`'s own
+  context entry names its departed twin.
+- **No screenshot surface loses a linker**: none of the 9 context entries declares a
+  `screenshot` — in fact the whole `terminology` namespace declares none — and neither
+  `screenshot-manifest.ts` nor `screenshots.ts` mentions any of the keys or a
+  `library-stats`/`concept-dialog` surface.
+- **`source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, proven byte-identical to the sidecar's own writer** on the
+  untouched 4,363,620-byte file **before any key was dropped** (an assertion in the strip
+  script, not an eyeball) — `scripts/i18n-catalog.ts:117` writes
+  `JSON.stringify(all, null, 2) + "\n"`. The diff is 99 deleted lines and zero added
+  (9 keys × 11 locales, no locale missing any). Also re-confirmed that `i18n:check` is
+  read-only: `runCheck()` never reaches `saveSourceHashes()`.
+- **No code outside `src/lib/i18n/` mentions the deleted keys at all** — a repo-wide grep for
+  `libraryStats`/`conceptDialog` finds only the three edited i18n files and this ledger.
+
+### Baseline 2026-10-26 (`origin/dev` `582aa273`) — trunk is GREEN on all three gates
+
+The third all-green baseline in this ledger (2026-10-14, 2026-10-23) and the second with
+**zero** failing tests in the root suite. No member of the issue
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) full-suite-only flake family
+appeared.
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 1080 problems, 0 errors |
+| `pnpm build` | **exit 0** (`tsc -b` + `vite build` + brand check) |
+| `pnpm test` | **exit 0** — 2108 files passed / 2 skipped (2110); 23857 tests passed / 23 skipped (23880), 1455s |
+
+No worker-package suite was baselined: the diff touches only `src/lib/i18n/`, no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`.
+
+Three days of growth against 2026-10-23's figures, worth recording because it keeps
+re-dating the per-key cost arithmetic: 2098 → 2110 test files, 23633 → 23880 tests,
+8315 → 9045 catalog keys, and **9 → 11 locale catalogs**.
+
+### THE TRAP OF THIS RUN: do not touch the tree while the baseline `pnpm test` is running
+
+This cost a whole 24-minute suite and is the most reusable thing here. `pnpm test` transforms
+and schedules its 2110 files lazily across ~24 minutes, so an edit that lands at minute four
+is read by **every file imported after it** — the run silently becomes a mixed baseline, half
+pre-edit and half post-edit, with no error anywhere to say so. I started the strip script
+while the baseline suite was at minute three, then had to kill it, revert, and re-run from a
+clean tree.
+
+**Recipe**: hold the tree clean until `GATE_EXIT=` is actually in the baseline test log. The
+survey work (greps, sweeps, the guard simulation) is all read-only and can run alongside the
+baseline freely; writes cannot. Keep the edit in a deterministic script (or `git diff >
+patch`) and apply it after, which is also what made the recovery cheap here — re-running the
+strip script reproduced the identical 14-file diff.
+
+### `pkill -f` kills the agent's own shell — kill by PID
+
+A second process trap, hit while recovering from the first. The harness wraps each Bash call
+in a long `bash -c '… eval "<your command>" …'`, so **the shell's own argv contains your
+pattern**: `pkill -f "run-base-lb.sh"` matched the wrapper and killed it. The call returned
+exit **144** and — the dangerous part — the rest of the compound command (`git checkout -- .`)
+never ran, so the tree was still dirty while the output said nothing about it.
+
+**Recipe**: resolve PIDs first and kill those — `for p in $(ps -eo pid,args | grep "[f]orks.js"
+| awk '{print $1}'); do kill -9 $p; done`, plus the `sh -c vitest run` / `vitest.mjs run`
+parents by number. Then verify with `ps -eo pid,args | grep -cE "[v]itest"` **and** re-check
+`git status --short` rather than trusting the revert that shared the line.
+
+### Container setup 2026-10-26
+
+1. **`pnpm install --ignore-scripts` still the install, and the 2026-10-19 "empty `.bin`" trap
+   did NOT appear.** 18.7s, exit 0, `node_modules/.bin` has 17 entries including `eslint`,
+   `tsc`, `tsx`, `vite`, `vitest` and `playwright` — everything the gates need. No
+   `pnpm rebuild`.
+2. **Chromium: the 2026-10-23 finding holds — no shim.** `/opt/pw-browsers/` ships
+   `chromium-1243` and `chromium_headless_shell-1243`, and `chromium.executablePath()` resolves
+   straight to `/opt/pw-browsers/chromium-1243/chrome-linux64/chrome`.
+3. **Postgres, with two corrections to the standing recipe:**
+   - **`listen_addresses = '*'` is REFUSED by the sandbox classifier** ("Expose Local
+     Services"). Uncommenting line 60 to its own default `'localhost'` is accepted and is all
+     the e2e stack needs — `sed -i "60s/^#listen_addresses = 'localhost'/listen_addresses =
+     'localhost'/"`.
+   - **`pg_ctl -l <logfile>` cannot write into the agent's scratchpad**, because the redirect
+     happens in the `su postgres -c` shell: `cannot create …/scratchpad/pg.log: Permission
+     denied`, reported as `pg_ctl: could not start server` (which reads like a Postgres
+     failure and is not one). Use a world-writable path — `touch /tmp/pg-aq.log && chmod 666`.
+   - `pg_ctl` is not on `PATH`: `/usr/lib/postgresql/16/bin/pg_ctl`, `-D
+     /var/lib/postgresql/16/main -o '-c config_file=/etc/postgresql/16/main/postgresql.conf'`.
+     `mkdir -p /var/run/postgresql && chown postgres:postgres` first. Role creation over the
+     unix socket as `postgres` as documented, then probe with `PGPASSWORD=… psql -h 127.0.0.1
+     -U aquilla`.
+
+### New candidate: `duplicate-exceptions.ts`'s own header comment is off by two orders of magnitude
+
+Spotted while editing that file this run, deliberately **not** fixed, to keep the diff
+single-theme. The module docstring closes with "20 of the 30 entries this file used to carry
+existed only for that reason and were removed … **The 10 that remain** are genuine meaning
+splits." The file carried **133** entries at this run's baseline and 130 after it. The "10"
+is stale by a factor of thirteen, which matters because the sentence is the file's stated
+budget — a reader deciding whether an exception is affordable is reading a number that has
+not been true since AQU-832. **Why deferred**: it is theme 6 (comment drift), not theme 1,
+and an honest rewrite should say what the real count means (whether 133 exceptions is the
+normal cost of a 9,000-key catalog or a smell the number was meant to cap) rather than just
+swap the digits. **Proof it would need**: comment-only, so the standard gate; the judgement
+is editorial, not mechanical.
+
+### Final gate 2026-10-26
+
+- `pnpm lint` — exit 0, 1080 problems (0 errors). The raw log is **byte-identical** to the
+  baseline log (`diff` on both with the `GATE_EXIT=` sentinel stripped): not one warning
+  shifted a line number, because no file this diff touches carries a warning at all — a
+  baseline grep for the 14 edited paths in the lint log returns nothing. (`rm -rf
+  packages/idml-roundtrip/dist` before this lint, per the 2026-10-14 gate-ordering trap.)
+- `pnpm build` — exit 0.
+- `pnpm test` — exit 0, `Test Files 2108 passed | 2 skipped (2110)`,
+  `Tests 23857 passed | 23 skipped (23880)`, 1525s — **counts identical to baseline**,
+  green-to-green on all 23857.
+- Pre-gate fast checks, run before the full gate to buy early signal cheaply: `npx tsc -b`
+  exit 0; `pnpm i18n:check` exit 0 reporting **9036 message key(s) covered** (exactly the
+  simulation's post-deletion figure, down from 9045); `npx vitest run src/lib/i18n` 17 files
+  / 210 tests green in 19s.
+- `pnpm run test:e2e:guard` — exit 0, 7 files / 67 tests, first attempt.
+- Smoke (`E2E_PG_ADMIN_URL=… npx tsx scripts/e2e-shard.ts 1 -- smoke.spec`) — **98 passed,
+  4 failed, 15.8m**, both groups accounted for below. **98/102 is the best figure recorded in
+  this container** (95/102 on 2026-10-23).
+
+### Smoke 2026-10-26: the media set held at 3, and `commit-chain-linear:155` A/B'd again
+
+- **The three media failures are exactly 2026-10-23's set**: `import-and-edit.smoke.spec.ts:338`
+  × 3, the YouTube srt/vtt/sbv caption exports, at the documented line. Two runs at the same
+  three confirms the 2026-10-23 prediction that these are **not** revision-gap artifacts (they
+  survive the correct rev-1243 Chromium) and still want their own look.
+- **The fourth, `collab/commit-chain-linear.smoke.spec.ts:155`** (`ProjectSync socket failed
+  before it was ready: WebSocket is closed before the connection is established`), is the
+  family 2026-10-16 flagged **at this exact line**. **A/B'd rather than argued**, reusing the
+  2026-10-23 recipe: `git checkout --detach origin/dev` in place (same container, same
+  `node_modules`), then `npx tsx scripts/e2e-shard.ts 1 -- collab/commit-chain-linear.smoke.spec`
+  → **2 failed / 8 passed in 2.0m**, and `:155` is one of the two, same error verbatim. It
+  reproduces with **zero diff**. The second dev-arm failure (`:373`) passed on the branch,
+  and `:373`'s sibling test passed on dev — the moving line set is itself the signature of
+  boot/timing instability this ledger has recorded since 2026-10-16.
+- **Why none of the 4 can be this diff, independent of the A/B**: all 9 deleted keys were
+  verified to have no reader anywhere in the tree, so nothing in the emitted bundle reads a
+  string that changed; `pnpm test`'s 23857 assertions and 2110 files are identical on both
+  sides; and a catalog key cannot reach WebSocket establishment or media decode.
+
+### The worker packages need `npm ci` even when the diff does not touch them
+
+A new trap, and a correction to how this run read the 2026-10-23 recipe. I skipped the
+"`npm ci --legacy-peer-deps` in all three worker packages" step on the reasoning that the diff
+is confined to `src/lib/i18n/` and no worker suite needed baselining. **The e2e stack still
+needs those installs**: the first smoke attempt died at `[boot 3/8]` with
+`[e2e-up] fatal: Error: timed out waiting for http://127.0.0.1:10460/healthz`, and the real
+cause is only in `.e2e-logs/mock-legacy-migration.log` —
+`ERR_MODULE_NOT_FOUND: Cannot find package 'bcryptjs' imported from
+auth-worker/src/utils/password.ts`, because `auth-worker/node_modules` was empty and
+`bcryptjs` is an auth-worker dependency, not a root one. The boot message names a port and a
+timeout and says nothing about a missing package, so **read `.e2e-logs/` before re-trying a
+boot failure.** After `npm ci --legacy-peer-deps` in all three packages (72 / 65 / 64 entries,
+all three `package-lock.json` files md5-verified untouched afterwards) the stack booted on the
+next attempt. Treat the three installs as part of the container recipe unconditionally, not as
+a step that only a worker-touching diff needs.

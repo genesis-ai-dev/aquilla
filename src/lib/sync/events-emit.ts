@@ -666,6 +666,11 @@ export interface CellAudioAttachInput {
   /** AQU-1767: born a PIECE of this take (the group's root). Fill-only on the
    *  server — a re-attach can never move a take into or out of a group. */
   pieceOf?: string
+  /** Two-step transcription: what ASR heard (before learned corrections).
+   *  Only the transcription path sends it; the server keeps it through corrections. */
+  asr?: { text: string; model: string }
+  /** Provenance of an AI cleanup. New timings without it clear the server's mark. */
+  transcriptAi?: { model: string; at: number; changes: number }
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -736,6 +741,8 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
+      ...(input.asr !== undefined ? { asr: input.asr } : {}),
+      ...(input.transcriptAi !== undefined ? { transcriptAi: input.transcriptAi } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -1456,6 +1463,49 @@ export async function emitCellBacktranslationSet(
       ...(input.btHtml !== undefined ? { btHtml: input.btHtml } : {}),
       targetEventId: input.targetEventId,
       polished: input.polished,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellGlossSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The corrected gloss. Empty withdraws the correction. */
+  glossText: string
+  /** Current projected head of the target cell this gloss reads. */
+  targetEventId: string
+  /** Lane whose translation this gloss reads. */
+  targetLang?: string
+  /** The lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * AQU-1408 §1: emit a `cell.gloss.set` event — non-chain-mutating (parentId
+ * omitted), like `cell.backtranslation.set`. The payload pins the correction to
+ * the target commit it reads, so a later edit of that cell falls the UI back to
+ * the freshly computed gloss instead of showing a reading of words that are
+ * gone.
+ */
+export async function emitCellGlossSet(
+  input: CellGlossSetInput,
+): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.gloss.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      glossText: input.glossText,
+      targetEventId: input.targetEventId,
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

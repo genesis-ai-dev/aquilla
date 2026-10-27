@@ -82,6 +82,7 @@ import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
 
 export interface TargetAudioItem {
@@ -776,8 +777,12 @@ function TargetAudioChip({
   const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
   // AQU-646 stage 5. Withheld while a state glyph holds the corner — see the
   // button's own comment — and needing the same room the record mic does.
-  const showPlayButton = Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  // Sam's decision: a hidden line's takes are drawn faded, and neither play
+  // nor take a new recording from here.
+  const hiddenLine = isHiddenCell(cell)
+  const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
   const showRecordButton =
+    !hiddenLine &&
     editable &&
     Boolean(onOpenRecording) &&
     fitsBadges &&
@@ -938,6 +943,7 @@ function TargetAudioChip({
       {...(syncFailed ? { "data-sync-failed": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
+      {...(hiddenLine ? { "data-hidden-line": "" } : {})}
       // AQU-646 stage 6F: the flag the LANE lifts itself by, so the drag
       // readout above this chip is not painted over by a neighbouring row. Set
       // here rather than reported upward because the drag already lives in this
@@ -1062,6 +1068,8 @@ function TargetAudioChip({
         "hover:brightness-105",
         selected === "take" && "ring-2 ring-sky-500",
         selected === "line" && "ring-1 ring-sky-500/50",
+        // Sam's decision: faded like the table's revealed hidden row.
+        hiddenLine && "opacity-60",
       )}
     >
       {drag && (
@@ -1394,7 +1402,7 @@ function TargetAudioChip({
             {t("editor.timeline.takeMenuSplit")}
           </ContextMenuItem>
         )}
-        {takeMenu?.reRecord && (
+        {takeMenu?.reRecord && !hiddenLine && (
           <ContextMenuItem data-testid="tl-take-menu-rerecord" onClick={() => takeMenu.reRecord?.(cell.id)}>
             <Mic className="h-3.5 w-3.5" />
             {t("editor.timeline.takeMenuReRecord")}
@@ -1654,6 +1662,8 @@ export function TargetAudioLane({
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
+          // A hidden line is not recorded onto from the timeline.
+          if (isHiddenCell(cell)) return []
           // SUB-53: an un-dubbed verse's slot is just its original's length,
           // so the button sits over exactly where the dub will land.
           const span = layout?.spanFor(cell, "source") ?? null

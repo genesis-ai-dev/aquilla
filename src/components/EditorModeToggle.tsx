@@ -10,13 +10,14 @@
 // speaker chips and generate controls (the old standalone Voice Studio).
 
 import { useSyncExternalStore, type ComponentType } from "react"
-import { Mic2, Pencil, AudioWaveform, Bot } from "lucide-react"
+import { Mic2, Pencil, AudioWaveform, Bot, Captions } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { audioLensLabelKey } from "@/lib/editor/audio-lens-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-export type EditorLens = "text" | "audio"
+/** "transcribe": the two-step transcription view (ASR, then AI cleanup). */
+export type EditorLens = "text" | "audio" | "transcribe"
 
 /** Tailwind `md` — at/above this, the mode labels sit beside the icons. */
 const MD_MIN_WIDTH_QUERY = "(min-width: 768px)"
@@ -80,6 +81,7 @@ export function EditorModeToggle({
       <TabsList>
         <ModeTab value="text" label={t("editor.lens.text")} icon={Pencil} labeled={labeled} />
         <ModeTab value="audio" label={secondLabel} icon={SecondIcon} labeled={labeled} />
+        <ModeTab value="transcribe" label={t("nav.lens.transcribe")} icon={Captions} labeled={labeled} />
         {(onAgentSelect || agentActive) ? (
           <ModeTab value="agent" label={t("nav.dock.agentTab")} icon={Bot} labeled={labeled} />
         ) : null}

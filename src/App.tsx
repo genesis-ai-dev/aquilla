@@ -7,25 +7,13 @@ import { OrgOverview } from "@/components/org/OrgOverview"
 import { OrgProjectsPage } from "@/components/org/OrgProjectsPage"
 import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
-import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
-import { AssignedToMe } from "@/components/org/AssignedToMe"
-import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
-import { JoinPage } from "@/components/JoinPage"
-import { AccessLinkPage } from "@/components/AccessLinkPage"
-import { JoinOrgPage } from "@/components/JoinOrgPage"
-import { VerifyEmailPage } from "@/components/VerifyEmailPage"
-import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
-import { ResetPassword } from "@/pages/ResetPassword"
-import { BillingSelection } from "@/pages/BillingSelection"
 import { Login } from "@/pages/Login"
-import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
 import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
-import { Preferences, PreferencesDialog } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
@@ -33,6 +21,7 @@ import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
 import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
 import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
+import { OfflineLaunchResume } from "@/components/OfflineLaunchResume"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
@@ -76,6 +65,48 @@ import { BuildJobNotifier } from "@/components/tools/builder/BuildJobNotifier"
 import { ProjectElevationBoundary } from "@/components/ProjectElevationBoundary"
 import { RedirectToProjectOverview } from "@/components/RedirectToProjectOverview"
 
+// AQU-2093: pages most visits never open (invites, onboarding, billing, account
+// recovery, preferences, the assigned and archived lists) load when visited,
+// so their code stays off the first load.
+const SharedProjectsPage = lazy(() =>
+  import("@/components/org/SharedProjectsPage").then((m) => ({ default: m.SharedProjectsPage })),
+)
+const AssignedToMe = lazy(() =>
+  import("@/components/org/AssignedToMe").then((m) => ({ default: m.AssignedToMe })),
+)
+const ArchivedProjects = lazy(() =>
+  import("@/components/org/ArchivedProjects").then((m) => ({ default: m.ArchivedProjects })),
+)
+const JoinPage = lazy(() =>
+  import("@/components/JoinPage").then((m) => ({ default: m.JoinPage })),
+)
+const AccessLinkPage = lazy(() =>
+  import("@/components/AccessLinkPage").then((m) => ({ default: m.AccessLinkPage })),
+)
+const JoinOrgPage = lazy(() =>
+  import("@/components/JoinOrgPage").then((m) => ({ default: m.JoinOrgPage })),
+)
+const VerifyEmailPage = lazy(() =>
+  import("@/components/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })),
+)
+const OnboardingWizard = lazy(() =>
+  import("@/components/onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
+)
+const BillingSelection = lazy(() =>
+  import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
+)
+const ResetPassword = lazy(() =>
+  import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
+)
+const PrivacyPolicy = lazy(() =>
+  import("@/pages/PrivacyPolicy").then((m) => ({ default: m.PrivacyPolicy })),
+)
+const Preferences = lazy(() =>
+  import("@/pages/Preferences").then((m) => ({ default: m.Preferences })),
+)
+const PreferencesDialog = lazy(() =>
+  import("@/pages/Preferences").then((m) => ({ default: m.PreferencesDialog })),
+)
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
   import("@/components/ProjectWorkspace").then((m) => ({
@@ -138,6 +169,9 @@ const OrgSettingsProviders = lazy(() =>
 )
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
+)
+const OrgSettingsAirtable = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAirtable })),
 )
 const OrgSettingsRules = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRules })),
@@ -345,6 +379,7 @@ export default function App() {
       <OfflineSyncManagerMount />
       <UnsyncedOfflineWorkGuard />
       <OfflineShutdownGuard />
+      <OfflineLaunchResume />
       <LocalLlmConfigMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
@@ -427,7 +462,7 @@ function AppRoutes() {
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
         <Route path="/billing/select" element={<BillingSelection />} />
-        {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
+        {/* AQU-270: account recovery — public, no auth required */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
@@ -446,9 +481,9 @@ function AppRoutes() {
           <Route index element={<OrgHomeRoute />} />
           <Route path="overview" element={<OrgOverview />} />
           <Route path="projects" element={<OrgProjectsPage />} />
-          <Route path="assigned" element={<AssignedToMe />} />
-          <Route path="archived" element={<ArchivedProjects />} />
-          <Route path="archived/files" element={<ArchivedProjects />} />
+          <Route path="assigned" element={<OrgLazyRoute><AssignedToMe /></OrgLazyRoute>} />
+          <Route path="archived" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
+          <Route path="archived/files" element={<OrgLazyRoute><ArchivedProjects /></OrgLazyRoute>} />
           <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
@@ -477,6 +512,7 @@ function AppRoutes() {
           <Route path="settings/rules" element={<OrgLazyRoute><OrgSettingsRules /></OrgLazyRoute>} />
           <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
+          <Route path="settings/airtable" element={<OrgLazyRoute><OrgSettingsAirtable /></OrgLazyRoute>} />
         </Route>
 
         {/* Project routes stay flat (not nested under /orgs).
@@ -524,8 +560,8 @@ function AppRoutes() {
       </Suspense>
       {backgroundLocation ? (
         <Routes>
-          <Route path="/preferences" element={<PreferencesDialog />} />
-          <Route path="/preferences/:section" element={<PreferencesDialog />} />
+          <Route path="/preferences" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
+          <Route path="/preferences/:section" element={<LazyRoute><PreferencesDialog /></LazyRoute>} />
           <Route path="/project/:id/settings" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
           <Route path="/project/:id/settings/:section" element={<ProjectElevationBoundary><LazyRoute><ProjectSettingsDialog /></LazyRoute></ProjectElevationBoundary>} />
         </Routes>

@@ -25,6 +25,7 @@ import { formatByteLimit } from "./i18n/format"
 import { normalizeLocale } from "./i18n/locales"
 import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
+import type { SpeakerAssignment } from "./import/cast-from-speakers"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
@@ -58,6 +59,7 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
+import { alignReimportedIdmlFile, type IdmlReimportAlignHost } from "./idml/align-reimported-targets"
 // Partner readers are NOT imported here — they arrive on the `edition` descriptor
 // passed to `importPartnerNotes`, so this module still compiles with the
 // partner-integrations folders deleted. See docs/PARTNER-INTEGRATIONS.md.
@@ -100,6 +102,7 @@ import {
 } from "./import/normalized-manifest"
 import { ImportService } from "./import/import-service"
 import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
+import type { SubtitleCueRepair } from "./parsers/core-types"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
@@ -503,6 +506,10 @@ export interface ImportResult {
   /** Paratext-parity chapter/verse + marker findings (AQU-1731), USFM only.
    *  Carried as codes + refs and translated in the preview. */
   structureFindings?: UsfmStructureFinding[]
+  /** Subtitle cue counts from the parse core (AQU-2119). Turned into preview
+   *  notices by `preparedParsedFile`; absent when nothing was repaired or
+   *  refused. */
+  cueRepair?: SubtitleCueRepair
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -548,6 +555,12 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
+  /** IDML Update Existing: after reconcile, place each kept translation into
+   *  the new style runs. Absent when AI completion is not configured. */
+  alignReimportedIdml?: IdmlReimportAlignHost
+  /** Replaces the upload phase label, for example while styles are aligning. */
+  onPhase?: (label: string) => void
+  onAlignProgress?: (done: number, total: number) => void
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
@@ -595,7 +608,37 @@ function preparedParsedFile(
   if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
     throw new Error(t("importExport.errors.noImportableContent", { fileName: file.name, fileType }))
   }
-  return { fileType, results }
+  return { fileType, results: results.map(withSubtitleCueNotices) }
+}
+
+/** AQU-2119: turn the parse core's subtitle cue counts into preview notices.
+ *  The core carries numbers only, so the wording is resolved here — the same
+ *  split `structureFindings` uses. A repaired cue is reported rather than
+ *  passed over in silence because the alternative, before the repair existed,
+ *  was losing it; a cue the parser still refused is reported for the same
+ *  reason. */
+function withSubtitleCueNotices(result: ImportResult): ImportResult {
+  const repair = result.cueRepair
+  if (!repair) return result
+  const notices: ImportPreviewNotice[] = []
+  if (repair.repairedShortForm > 0) {
+    notices.push({
+      code: "subtitle-short-form-timestamps",
+      severity: "warning",
+      message: t("importExport.notices.subtitleShortFormTimestamps", {
+        count: repair.repairedShortForm,
+      }),
+    })
+  }
+  if (repair.droppedCues > 0) {
+    notices.push({
+      code: "subtitle-cues-unreadable",
+      severity: "warning",
+      message: t("importExport.notices.subtitleCuesUnreadable", { count: repair.droppedCues }),
+    })
+  }
+  if (notices.length === 0) return result
+  return { ...result, importNotices: [...(result.importNotices ?? []), ...notices] }
 }
 
 async function prepareSandboxImport(
@@ -640,7 +683,7 @@ export interface ImportFileResult {
   refs: FileReference[]
   /** Speaker→cellId pairs from every subtitle cue, sharing the same cellIds as
    *  the uploaded cells (single parse). Empty for non-subtitle formats. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
   skipped?: { book: string; reason: string }[]
 }
 
@@ -827,9 +870,9 @@ export async function prepareImportFile(
       if (analysisError) {
         prepared.results = prepared.results.map((result) => ({
           ...result,
-          importNotices: [{
-            code: "basic-parser-fallback",
-            severity: "warning",
+          importNotices: [...(result.importNotices ?? []), {
+            code: "basic-parser-fallback" as const,
+            severity: "warning" as const,
             message: t("importExport.notices.basicParserFallback"),
           }],
         }))
@@ -1523,7 +1566,7 @@ function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
  */
 export function buildBulkCellsWithSpeakers(strings: TranslatableString[]): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1533,10 +1576,11 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    speakerAsCastName?: boolean
   },
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 export function buildBulkCellsWithSpeakers(
   strings: TranslatableString[],
@@ -1546,10 +1590,18 @@ export function buildBulkCellsWithSpeakers(
     profileId?: string
     profileVersion?: string
     normalizedFile?: NormalizedImportFile
+    /**
+     * AQU-2125: write each string's speaker onto its line as the line's
+     * character (`metadata.cast_name`), so the import can cast the character
+     * once instead of every line. Only for a fresh import: on a re-import the
+     * incoming metadata wins the reconcile merge, so sending a name would
+     * overwrite a character someone has since corrected.
+     */
+    speakerAsCastName?: boolean
   } = {},
 ): {
   cells: BulkImportCell[]
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 } {
   const normalizedFile = options.normalizedFile ?? normalizeTranslatableStrings(strings, {
     fileName: options.fileName ?? "import",
@@ -1563,16 +1615,23 @@ export function buildBulkCellsWithSpeakers(
     throw new Error("Normalized import unit count does not match parsed string count")
   }
   const cells: BulkImportCell[] = []
-  const speakerPairs: { cellId: string; speaker: string | undefined }[] = []
+  const speakerPairs: SpeakerAssignment[] = []
   let prevCellId: string | null = null
   for (let seq = 0; seq < strings.length; seq++) {
     const str = strings[seq]
     const unit = normalizedFile.units[seq]
     const cellId = str.id || uuidv7()
+    const speaker = str.speaker?.trim()
+    const castNamed = Boolean(options.speakerAsCastName && speaker)
     const metadata = {
       ...(str.metadata ?? {}),
+      ...(castNamed ? { cast_name: speaker } : {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // AQU-2184: the paragraph's own USFM marker, so the HTML export can
+      // tell a \q2 poetry line from a \p paragraph. Deliberately NOT inside
+      // `aquillaImport` — re-import replaces that envelope wholesale.
+      ...(str.paragraphMarker ? { paragraphMarker: str.paragraphMarker } : {}),
     }
     cells.push({
       id: uuidv7(),
@@ -1594,7 +1653,7 @@ export function buildBulkCellsWithSpeakers(
       // into the bulk POST body verbatim → cells.metadata JSONB on the server.
       metadata,
     })
-    speakerPairs.push({ cellId, speaker: str.speaker })
+    speakerPairs.push({ cellId, speaker: str.speaker, ...(castNamed ? { castNamed: true } : {}) })
     prevCellId = cellId
   }
   return { cells, speakerPairs }
@@ -1637,7 +1696,7 @@ export interface EmitParsedFileResult {
   ref: FileReference
   /** (cellId, speaker) pairs from the same `buildBulkCellsWithSpeakers` call
    *  that produced the uploaded cells — cellIds are guaranteed to match. */
-  speakerPairs: { cellId: string; speaker: string | undefined }[]
+  speakerPairs: SpeakerAssignment[]
 }
 
 /**
@@ -1675,6 +1734,7 @@ export async function emitParsedFile(
   // call that mints the cellIds — avoids the double-parse cellId mismatch.
   const { cells, speakerPairs } = buildBulkCellsWithSpeakers(result.strings, {
     normalizedFile: normalized,
+    speakerAsCastName: !existingFileId,
   })
 
   // AQU-1859: a fresh import runs inside a resumable session, so a chunk that
@@ -1770,6 +1830,31 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   })
+
+  if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
+    try {
+      await alignReimportedIdmlFile({
+        projectId: ctx.projectId,
+        fileId,
+        lane: ctx.targetLang,
+        getToken: ctx.getToken,
+        host: ctx.alignReimportedIdml,
+        sourceLanguage: ctx.sourceLanguage ?? "",
+        targetLanguage: ctx.targetLanguage ?? "",
+        signal: ctx.signal,
+        onProgress: (done, total) => {
+          ctx.onPhase?.(t("importExport.upload.aligningIdmlStyles", {
+            fileName: result.name,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }))
+          ctx.onAlignProgress?.(done, total)
+        },
+      })
+    } catch (error) {
+      console.warn("[idml-reimport] style alignment failed", error)
+    }
+  }
 
   return {
     ref: {
@@ -2454,7 +2539,16 @@ export async function importParatextAsTarget(
         group: cell.ref,
         globalReferences: [cell.ref],
         type: cell.type,
-        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+        ...(cell.paragraphStart
+          ? {
+              paragraphStart: true,
+              metadata: {
+                paragraphStart: true,
+                // AQU-2184: poetry level for the HTML export's page.
+                ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
+              },
+            }
+          : {}),
       }))
       const normalized = normalizeTranslatableStrings(strings, {
         fileName: bookPlan.displayName,

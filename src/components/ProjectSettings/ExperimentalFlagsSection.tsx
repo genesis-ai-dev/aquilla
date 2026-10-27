@@ -61,20 +61,34 @@ export function ExperimentalFlagsSection({
   onSetSmartExtensionsEnabled?: (enabled: boolean) => void
 }) {
   const { t } = useI18n()
-  const [flags, setFlags] = useState<Record<string, boolean> | undefined>(undefined)
+  // Tagged with the project they belong to: the settings route reuses this
+  // component across projects, and one project's toggles must never be shown
+  // for, or merged into, the next one's.
+  const [state, setState] = useState<{ projectId: string; flags: Record<string, boolean> } | undefined>(undefined)
+  const flags = state?.projectId === projectId ? state.flags : undefined
 
   // Seed from IDB directly — the parent's `project` comes from the server
-  // read hook, which never carries device-local flags.
+  // read hook, which never carries device-local flags. A key the user has
+  // already toggled keeps the user's value: the read can resolve after that
+  // click with a snapshot from before its write, and replacing the state
+  // wholesale reverted the switch while IDB kept the new value (AQU-1947).
   useEffect(() => {
     let cancelled = false
     void getProject(projectId).then((local) => {
-      if (!cancelled) setFlags(local?.experimentalFlags)
+      if (cancelled) return
+      setState((prev) => ({
+        projectId,
+        flags: { ...local?.experimentalFlags, ...(prev?.projectId === projectId ? prev.flags : undefined) },
+      }))
     })
     return () => { cancelled = true }
   }, [projectId])
 
   const setFlag = useCallback((key: string, value: boolean) => {
-    setFlags((prev) => ({ ...prev, [key]: value }))
+    setState((prev) => ({
+      projectId,
+      flags: { ...(prev?.projectId === projectId ? prev.flags : undefined), [key]: value },
+    }))
     void (async () => {
       const patched = await patchProject(projectId, (latest) => ({
         ...latest,

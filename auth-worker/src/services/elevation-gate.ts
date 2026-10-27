@@ -16,7 +16,7 @@
 
 import type { Context } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
-import { hasActiveElevation } from "../middleware/platform-admin"
+import { hasActiveElevation, isPlatformAdmin } from "../middleware/platform-admin"
 import { resolveGenuineProjectRole } from "./project-permissions"
 import { getOrgMemberRole } from "./org-permissions"
 import type { AuthUser, RoleResolution } from "../types"
@@ -77,8 +77,13 @@ export async function roleWithoutUnelevatedAdmin(
  *
  * `getEffectiveOrgRole` returns `Math.max(membership ?? 0, 700)` for a platform
  * operator and plain membership for everyone else, so the genuine membership
- * row IS the de-escalated answer — for a non-admin the two are already equal,
- * which is why this needs no admin check of its own.
+ * row IS the de-escalated answer — for a non-admin the two are already equal.
+ *
+ * OPS-49 makes that equality explicit rather than merely true, so the helper is
+ * cheap enough to sit in a request guard (routes/_integration-helpers.ts): a
+ * non-admin returns on the memoised `platform_admins` lookup the role resolvers
+ * have already done this request, instead of paying an `admin_elevations` read
+ * and a second `org_members` read to be told what it was handed.
  */
 export async function orgLevelWithoutUnelevatedAdmin(
   c: Context<AuthHonoEnv>,
@@ -87,6 +92,7 @@ export async function orgLevelWithoutUnelevatedAdmin(
   effectiveLevel: number | null,
 ): Promise<number | null> {
   if (effectiveLevel == null) return null
+  if (!(await isPlatformAdmin(c))) return effectiveLevel
   if (await hasActiveElevation(c)) return effectiveLevel
   return getOrgMemberRole(c.env, orgId, user.id)
 }

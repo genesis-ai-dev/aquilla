@@ -43,6 +43,16 @@ export function voiceReferenceFingerprint(referenceAudioId: string): string {
   return h.toString(16).padStart(8, "0")
 }
 
+/**
+ * What a voice's conversions are pinned to: a clone voice's reference clip, or a
+ * library voice's model id (namespaced). Null when the voice can't convert.
+ * Mirrors `libraryVoiceKey` in sync-worker/src/voice-convert.ts.
+ */
+export function voiceConversionKey(voice: Voice): string | null {
+  if (voice.libraryVoiceId) return `library:${voice.libraryVoiceId}`
+  return voice.referenceAudioId ?? null
+}
+
 /** True when an audioId names a Change voice conversion. */
 export function isVoiceChangedAudioId(audioId: string): boolean {
   return audioId.startsWith(VOICE_CHANGED_PREFIX)
@@ -172,10 +182,13 @@ export function changeVoiceBlocker(
 ): ChangeVoiceBlocker | null {
   const take = changeVoiceSourceTake(cell)
   if (!take) return "no-take"
-  if (!voice.referenceAudioId) return "not-cloned"
+  const key = voiceConversionKey(voice)
+  if (!key) return "not-cloned"
   const sameVoice = take.attachment.voiceId === voice.id
-    && voiceChangedWithReference(take.audioId, voice.referenceAudioId)
-  const sameQuality = diffusionSteps == null || voiceChangedSteps(take.audioId) === diffusionSteps
+    && voiceChangedWithReference(take.audioId, key)
+  // Library voices have no quality knob: one RVC pass, so any take is current.
+  const sameQuality = diffusionSteps == null || voice.libraryVoiceId != null
+    || voiceChangedSteps(take.audioId) === diffusionSteps
   if (sameVoice && sameQuality) return "up-to-date"
   return null
 }
@@ -214,7 +227,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
   if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
   const take = changeVoiceSourceTake(cell)
   if (!take) throw new Error("This line has no take to change.")
-  if (!voice.referenceAudioId) throw new Error(`${voice.name} has no reference clip — clone a voice first.`)
+  if (!voiceConversionKey(voice)) throw new Error(`${voice.name} has no reference clip — clone a voice first.`)
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
   const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
@@ -223,7 +236,9 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     projectId,
     fileId: cell.fileId,
     cellId: cell.id,
-    referenceAudioId: voice.referenceAudioId,
+    ...(voice.libraryVoiceId
+      ? { libraryVoiceId: voice.libraryVoiceId }
+      : { referenceAudioId: voice.referenceAudioId }),
     sourceAudioId,
     diffusionSteps: args.diffusionSteps,
     getSyncToken,

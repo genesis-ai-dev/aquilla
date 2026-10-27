@@ -131,6 +131,35 @@ describe('assignment.create — book scope', () => {
   })
 })
 
+describe('assignment.create — kind (AQU-1969)', () => {
+  it('stores a validate assignment as validate, and anything else as translate', async () => {
+    const { db, snapshot } = await makeTestDb({ cells: seededCells() })
+    const base = {
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }],
+      scopeLabel: 'Genesis',
+      assigneeUserId: 42,
+    }
+    const validate = await authorizeAssignment('assignment.create', { ...base, assignmentId: 'as-v', kind: 'validate' })
+    await db.batch(handleAssignmentEvent(db, validate, 2000, 1).stmts)
+    // Every event written before the field existed carries no kind.
+    const legacy = await authorizeAssignment('assignment.create', { ...base, assignmentId: 'as-t' })
+    await db.batch(handleAssignmentEvent(db, legacy, 2001, 2).stmts)
+    // A value no client sends is not a reason to fail the whole batch on the
+    // column's CHECK: it is the translate assignment it would have been.
+    const odd = await authorizeAssignment('assignment.create', { ...base, assignmentId: 'as-x', kind: 'review' })
+    await db.batch(handleAssignmentEvent(db, odd, 2002, 3).stmts)
+
+    const t = await snapshot()
+    const kindOf = (id: string) => t.assignments.find((a) => a.assignment_id === id)?.kind
+    expect(kindOf('as-v')).toBe('validate')
+    expect(kindOf('as-t')).toBe('translate')
+    expect(kindOf('as-x')).toBe('translate')
+    // The scope resolves exactly as a translate assignment's does.
+    expect(t.assignments.find((a) => a.assignment_id === 'as-v')!.cells_total).toBe(3)
+  })
+})
+
 describe('assignment.create — cells scope (AQU-1628)', () => {
   it('resolves exactly the named source cells, not the whole file', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })

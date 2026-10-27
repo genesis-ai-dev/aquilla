@@ -1,8 +1,9 @@
 // AQU-553 (Slice 5): the per-member lane/file scopes editor in MembersPanel.
 //
 // Pins: the editor renders only for lead+ callers (callerMaxRole >= 500) over
-// scopable members (roleLevel < 500), stays hidden below that floor and for
-// leads themselves, and Save issues the replace-set (onSave = the PUT).
+// members below project lead. A project lead's lanes are shown read-only and
+// point at the language Staff menu (AQU-2054). Maintainers and above have no
+// scope row. Save issues the replace-set (onSave = the PUT).
 
 import { describe, it, expect, vi } from "vitest"
 import type { ReactElement } from "react"
@@ -50,6 +51,17 @@ function lead(userId = 3): MembersPanelMember {
   }
 }
 
+function maintainer(userId = 7): MembersPanelMember {
+  return {
+    userId,
+    username: "maya",
+    roleLevel: 600,
+    roleName: "maintainer",
+    source: "override",
+    isLocked: false,
+  }
+}
+
 function scopeConfig(
   onSave: MembersPanelScopeConfig["onSave"],
   scopesByUser: MembersPanelScopeConfig["scopesByUser"] = {},
@@ -90,6 +102,7 @@ describe("MembersPanel scopes editor", () => {
       />,
     )
     expect(screen.getByTestId("member-scopes-2")).toBeInTheDocument()
+    expect(screen.queryByTestId("member-lead-lanes-2")).not.toBeInTheDocument()
   })
 
   // AQU-645: the scopes editor is collapsed by default — one compact header row
@@ -197,7 +210,7 @@ describe("MembersPanel scopes editor", () => {
     expect(screen.queryByTestId("member-scopes-2")).not.toBeInTheDocument()
   })
 
-  it("hides the scopes editor for a lead member (leads stay unscoped)", () => {
+  it("shows an unscoped project lead as seeing every lane, without an editor", () => {
     renderPanel(
       <MembersPanel
         {...baseProps()}
@@ -207,6 +220,45 @@ describe("MembersPanel scopes editor", () => {
       />,
     )
     expect(screen.queryByTestId("member-scopes-3")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /save scopes/i })).not.toBeInTheDocument()
+    const row = screen.getByTestId("member-lead-lanes-3")
+    expect(row).toHaveTextContent("Every lane")
+    expect(row).toHaveTextContent("To change these lanes, use Staff… on the language.")
+  })
+
+  it("shows a lane-limited project lead's lanes and points to Staff, without an editor", () => {
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        members={[lead()]}
+        callerMaxRole={600}
+        scopeConfig={scopeConfig(vi.fn(), {
+          3: [{ kind: "lane", value: "es" }],
+        })}
+      />,
+    )
+    expect(screen.queryByTestId("member-scopes-3")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Lane Spanish")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /save scopes/i })).not.toBeInTheDocument()
+    const row = screen.getByTestId("member-lead-lanes-3")
+    expect(row).toHaveTextContent("Spanish")
+    expect(row).not.toHaveTextContent("Every lane")
+    expect(row).toHaveTextContent("To change these lanes, use Staff… on the language.")
+  })
+
+  it("shows no scope row for a maintainer", () => {
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        members={[maintainer()]}
+        callerMaxRole={600}
+        scopeConfig={scopeConfig(vi.fn(), {
+          7: [{ kind: "lane", value: "es" }],
+        })}
+      />,
+    )
+    expect(screen.queryByTestId("member-scopes-7")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("member-lead-lanes-7")).not.toBeInTheDocument()
   })
 
   it("does not render any scope UI when scopeConfig is absent", () => {
@@ -254,5 +306,28 @@ describe("MembersPanel scopes editor", () => {
     // Collapse again and confirm the summary advanced past "Full access".
     fireEvent.click(toggle)
     await waitFor(() => expect(toggle).toHaveTextContent("1 lane"))
+  })
+})
+
+describe("MembersPanel search when the roster is hidden", () => {
+  it("leaves the username field usable for a project lead when the list is visible", () => {
+    renderPanel(<MembersPanel {...baseProps()} callerMaxRole={500} />)
+    expect(screen.getByRole("textbox")).toBeEnabled()
+  })
+
+  it("disables the username field and shows the reason", () => {
+    const reason = "Contributors cannot view the member list."
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        callerMaxRole={600}
+        searchDisabledReason={reason}
+      />,
+    )
+    const field = screen.getByRole("textbox")
+    expect(field).toBeDisabled()
+    expect(field).toHaveAttribute("aria-describedby", "member-search-disabled-reason")
+    expect(screen.getByText(reason)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
   })
 })

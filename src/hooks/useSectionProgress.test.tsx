@@ -80,7 +80,7 @@ describe('useSectionProgress', () => {
     )
     expect(invalidate).not.toHaveBeenCalled()
     rerender({ count: 2 })
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', ''))
   })
 
   it('revalidates when the structural-cell policy changes (AQU-1083)', async () => {
@@ -96,7 +96,7 @@ describe('useSectionProgress', () => {
     )
     expect(invalidate).not.toHaveBeenCalled()
     rerender({ countStructural: false })
-    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1'))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', ''))
   })
 
   it('does not revalidate on a re-render that changes neither policy', async () => {
@@ -114,5 +114,20 @@ describe('useSectionProgress', () => {
     rerender({ label: 'b' })
     rerender({ label: 'c' })
     expect(invalidate).not.toHaveBeenCalled()
+  })
+})
+
+describe('useSectionProgress — lane (AQU-2118)', () => {
+  it('reads, and revalidates, the lane it is given', () => {
+    resource.mockReturnValue({ progress: null, loading: true, error: false, retry: vi.fn() })
+    const getToken = vi.fn(async () => 'token')
+    const { rerender } = renderHook(
+      ({ count }: { count: number }) => useSectionProgress('project-1', 'file-1', count, getToken, true, 'fr'),
+      { initialProps: { count: 1 } },
+    )
+    expect(resource).toHaveBeenLastCalledWith('project-1', 'file-1', getToken, 'fr')
+    // A policy flip revalidates THAT lane's record, not the default lane's.
+    rerender({ count: 2 })
+    expect(invalidate).toHaveBeenCalledWith('project-1', 'file-1', 'fr')
   })
 })

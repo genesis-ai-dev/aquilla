@@ -71,7 +71,16 @@ refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
-count first).
+count first). **The restore copies rows, not blobs**, so every audio take it
+brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
+playback on `dev.aquilla.app` 404s;
+`pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
+referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
+what the nightly cleanup protects — the same reference queries, shared in
+`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
+`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+(`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
+refuses any destination but the dev bucket and any database but the dev branch.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -104,15 +113,24 @@ secret, which fails as an opaque upstream `401` rather than a missing-key error.
 **Never rotate an identity or sync secret with bare `wrangler secret put`.** That command
 is a one-shot: it patches the live Worker and immediately shifts traffic to a new version
 Cloudflare derives from the running one. The derived version keeps the script etag and
-every binding — and drops the custom version tag. Both API Workers' environment guards
-(`auth-worker/src/environment-guard.ts`, `sync-worker/src/environment-guard.ts`) require
-`CF_VERSION_METADATA.tag` to name the Worker and environment serving a first-party API
-host, so the rotation lands a hard `503 Worker deployment configuration does not match
-this API environment` with correct secrets and correct bindings. That is what took dev
-sync offline on 2026-09-22.
+every binding — and drops the custom version tag. A dashboard secret edit does the same.
+Cloudflare has no setting that stops that untagged version from taking traffic.
 
-`scripts/cloudflare-secret-rotate.mjs` is the supported path, and it keeps the guard
-fail-closed rather than loosening it:
+**Untagged versions are served, wrongly tagged versions are refused.** Both API Workers'
+environment guards (`auth-worker/src/environment-guard.ts`,
+`sync-worker/src/environment-guard.ts`) check the plain-text bindings (and, for sync,
+`AUTH_WORKER_URL` and `DEPLOYMENT_WORKER_NAME`) on every first-party API request, and
+return `503 Worker deployment configuration does not match this API environment` on any
+mismatch. A `CF_VERSION_METADATA.tag` that names a different Worker or environment is
+also a `503`. A **missing** tag is not: the guard serves the request and logs one
+`[environment-guard] … is serving an untagged version` warning per isolate. The guards
+used to refuse a missing tag too; that turned secret edits into full outages — dev sync
+on 2026-09-22, and every production sign-in on 2026-10-20 after three `wrangler secret
+put`s on `aquilla-identity`. The warning in Workers Logs is now the signal that a version
+went out outside the repo deployers; recover it as described below.
+
+`scripts/cloudflare-secret-rotate.mjs` is still the supported path, because it keeps a
+tagged, verified version live:
 
 ```bash
 printf %s "$KEY" | pnpm run secrets:rotate sync development SYNC_SECRET_KEY
@@ -139,8 +157,8 @@ the source of truth the deployers enforce. **Web secrets** rotate by re-running
 version is verified against an immutable preview origin, which a patched version has none
 of.
 
-A rotation that has already gone out the old way is recovered the same way any untagged
-version is: re-run that surface's verified deployment
+A rotation that has already gone out the old way keeps serving, but untagged. Bring it
+back under the deployers the same way as any untagged version: re-run that surface's verified deployment
 (`pnpm run deploy:aquilla:dev:sync`, …), which stages and promotes a properly tagged
 version with the new secret value intact.
 
@@ -156,11 +174,21 @@ its job. Keep this section in step with that manifest — a contract test assert
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
 | Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
 | Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
-| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
-| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
+| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
+| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
 and sync Workers in the same environment must hold the identical value.
+
+`VOICE_FORGE_URL` and `VOICE_FORGE_TOKEN` point the sync Worker's `/audio/voice-convert`
+route at the Modal `voice-forge` speech-to-speech service for character-library voices
+(`infra/modal/voice_forge.py`); the token must equal the `VOICE_FORGE_TOKEN` in that
+app's `voice-forge-auth` Modal secret. Both sync Workers require them: development
+since the character voice library (#1576), production since custom voice training
+(#1589) made the forge a production dependency. A Worker without them answers a
+library-voice conversion with `503 voice conversion not configured` and a training
+start with `503 voice training not configured`; cloned-voice conversions still go to
+Seed-VC and are unaffected.
 
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,

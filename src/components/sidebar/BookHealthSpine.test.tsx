@@ -48,7 +48,7 @@ describe("BookHealthSpine", () => {
 
   })
 
-  it("paints progress squares in the shared progress palette and leaves quality squares alone (AQU-1764)", () => {
+  it("paints progress squares in the shared progress palette and draws AI drafts as stripes (AQU-1764 / AQU-2159)", () => {
     render(
       <BookHealthSpine
         chapters={[{
@@ -59,8 +59,8 @@ describe("BookHealthSpine", () => {
           total: 5,
           cells: [
             { id: "v", stage: "validated", health: 100 },
-            { id: "t", stage: "automatic" },
-            { id: "s", stage: "automatic", health: 20, hasIssue: true },
+            { id: "t", stage: "automatic", aiDrafted: true },
+            { id: "s", stage: "automatic", health: 20, hasIssue: true, aiDrafted: true },
             { id: "u", stage: "untranslated" },
             { id: "x", stage: "excluded" },
           ],
@@ -68,16 +68,136 @@ describe("BookHealthSpine", () => {
         onChapterClick={vi.fn()}
       />,
     )
-    const [validated, translated, scored, untranslated, excluded] =
-      screen.getAllByTestId("book-health-cell").map((cell) => cell.style.backgroundColor)
-    // Validated, and translated with no health score yet (amber, before).
-    expect(validated).toBe("var(--progress-text-validated)")
-    expect(translated).toBe("var(--progress-text-translated)")
-    // A scored square keeps its health tint; the untranslated slate and the
-    // hollow excluded heading are unchanged.
-    expect(scored).toMatch(/^rgb\(/)
-    expect(untranslated).toBe("rgb(148 163 184 / 0.2)")
-    expect(excluded).toBe("transparent")
+    const [validated, drafted, scored, untranslated, excluded] = screen.getAllByTestId("book-health-cell")
+
+    expect(validated.style.backgroundColor).toBe("var(--progress-text-validated)")
+    // AQU-2159: a draft nobody has validated is the shared AI stripes — a
+    // background-image utility, so no inline fill at all — and a LOW SCORE
+    // CHANGES NOTHING. The pink tint a score used to give it was mistaken for
+    // the magenta of a recorded take.
+    for (const draft of [drafted, scored]) {
+      expect(draft).toHaveAttribute("data-ai-draft", "true")
+      expect(draft.className).toContain("bg-progress-ai")
+      expect(draft.style.backgroundColor).toBe("")
+    }
+    // The untranslated slate and the hollow excluded heading are unchanged,
+    // and neither is striped.
+    expect(untranslated.style.backgroundColor).toBe("rgb(148 163 184 / 0.2)")
+    expect(excluded.style.backgroundColor).toBe("transparent")
+    expect(untranslated).not.toHaveAttribute("data-ai-draft")
+    expect(excluded).not.toHaveAttribute("data-ai-draft")
+  })
+
+  it("rings a flagged line only when it has text (AQU-2159)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "chapter-5",
+          label: "Mark 5",
+          translated: 1,
+          validated: 0,
+          total: 3,
+          cells: [
+            { id: "d", stage: "automatic", health: 20, hasIssue: true },
+            { id: "u", stage: "untranslated", hasIssue: true },
+            { id: "x", stage: "excluded", hasIssue: true },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [drafted, untranslated, excluded] = screen.getAllByTestId("book-health-cell")
+
+    expect(drafted.className).toContain("ring-amber-500")
+    expect(drafted).toHaveAccessibleName(/automatic warning/)
+    // An infraction on a line with nothing in it drew an amber ring around an
+    // empty square, which reads as "this blank is wrong". Same for a heading
+    // that is not being scored at all. The chapter's "N automatic warnings"
+    // line still counts them.
+    expect(untranslated.className).not.toContain("ring-amber-500")
+    expect(excluded.className).not.toContain("ring-amber-500")
+    expect(untranslated).toHaveAccessibleName("Cell 2: untranslated")
+    expect(excluded).toHaveAccessibleName("Cell 3: heading — not counted toward progress")
+  })
+
+  it("keeps the quality score out of a square's label (AQU-2159)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "chapter-6",
+          label: "Mark 6",
+          translated: 1,
+          validated: 0,
+          total: 1,
+          cells: [{ id: "d", stage: "automatic", health: 20 }],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("book-health-cell")).toHaveAccessibleName("Cell 1: translated, not validated yet")
+  })
+
+  it("stripes only an AI draft: a line a person typed stays the translated blue (AQU-2164)", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 3,
+          cells: [
+            { id: "low", stage: "automatic", health: 12, aiDrafted: true },
+            { id: "unscored", stage: "automatic", aiDrafted: true },
+            { id: "typed", stage: "automatic", health: 12 },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [low, unscored, typed] = screen.getAllByTestId("book-health-cell")
+    for (const square of [low, unscored]) {
+      expect(square).toHaveClass("bg-progress-ai")
+      expect(square).toHaveAttribute("data-ai-draft", "true")
+      // No inline fill at all, so nothing red sits over the stripes.
+      expect(square.style.backgroundColor).toBe("")
+      expect(square).toHaveAccessibleName(/AI draft, not validated yet/)
+    }
+    expect(typed).not.toHaveClass("bg-progress-ai")
+    expect(typed.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet")
+  })
+
+  it("says which part a Text and audio line holds, so a recording alone is not called translated", () => {
+    render(
+      <BookHealthSpine
+        chapters={[{
+          key: "ruth-1",
+          label: "Ruth 1",
+          translated: 3,
+          validated: 1,
+          total: 5,
+          cells: [
+            { id: "rec", stage: "automatic", lineParts: { text: "none", audio: "recorded" } },
+            { id: "rec-ok", stage: "automatic", lineParts: { text: "none", audio: "approved" } },
+            { id: "typed", stage: "automatic", lineParts: { text: "typed", audio: "none" } },
+            { id: "text-ok", stage: "automatic", lineParts: { text: "validated", audio: "recorded" } },
+            { id: "done", stage: "validated", lineParts: { text: "validated", audio: "approved" } },
+          ],
+        }]}
+        onChapterClick={vi.fn()}
+      />,
+    )
+    const [rec, recOk, typed, textOk, done] = screen.getAllByTestId("book-health-cell")
+    expect(rec).toHaveAccessibleName("Cell 1: recorded, not validated yet; no text yet")
+    expect(rec).toHaveAttribute("title", "Cell 1: recorded, not validated yet; no text yet")
+    expect(recOk).toHaveAccessibleName("Cell 2: recording approved; no text yet")
+    expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet; not recorded yet")
+    expect(textOk).toHaveAccessibleName("Cell 4: text validated; recorded, not validated yet")
+    expect(done).toHaveAccessibleName("Cell 5: text validated; recording approved")
+    // The colours are today's: the label is the only change.
+    expect(rec.style.backgroundColor).toBe("var(--progress-text-translated)")
+    expect(done.style.backgroundColor).toBe("var(--progress-text-validated)")
   })
 
   it("navigates by chapter label", () => {

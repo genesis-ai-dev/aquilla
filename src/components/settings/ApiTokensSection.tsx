@@ -573,6 +573,26 @@ function MintTokenDialog({
       ),
     [projects, orgId],
   )
+  // AQU-2102: Base UI only renders a chosen option's label on the closed trigger
+  // when the Select is handed the value → label mapping; without it the trigger
+  // prints the raw stored value — an org id, a project uuid, `90d`. The labels
+  // here are the same ones the options render, so the two can't drift.
+  const orgItems = useMemo(
+    () =>
+      orgOptions.map((o) => ({
+        value: String(o.id),
+        label: o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id }),
+      })),
+    [orgOptions, t],
+  )
+  const projectItems = useMemo(
+    () => projectOptions.map((p) => ({ value: p.id, label: p.name })),
+    [projectOptions],
+  )
+  const expiryItems = useMemo(
+    () => EXPIRY_PRESETS.map((p) => ({ value: p.id, label: t(p.labelKey) })),
+    [t],
+  )
   const selectedProject = projectOptions.find((p) => p.id === projectId) ?? null
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
@@ -722,7 +742,11 @@ function MintTokenDialog({
 
             <Field>
               <FieldLabel htmlFor="token-org">{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
-              <Select value={orgId} onValueChange={(value) => setOrgId(value ?? "")}>
+              <Select
+                items={orgItems}
+                value={orgId}
+                onValueChange={(value) => setOrgId(value ?? "")}
+              >
                 <SelectTrigger id="token-org" className="w-full">
                   <SelectValue placeholder={t("onboarding.apiTokens.orgPlaceholder")} />
                 </SelectTrigger>
@@ -743,7 +767,11 @@ function MintTokenDialog({
 
             <Field>
               <FieldLabel htmlFor="token-project">{t("common.project")}</FieldLabel>
-              <Select value={projectId} onValueChange={(value) => setProjectId(value ?? "")}>
+              <Select
+                items={projectItems}
+                value={projectId}
+                onValueChange={(value) => setProjectId(value ?? "")}
+              >
                 <SelectTrigger id="token-project" className="w-full">
                   <SelectValue placeholder={t("onboarding.apiTokens.projectPlaceholder")} />
                 </SelectTrigger>
@@ -762,6 +790,7 @@ function MintTokenDialog({
             <Field>
               <FieldLabel htmlFor="token-expiry">{t("onboarding.apiTokens.expiryLabel")}</FieldLabel>
               <Select
+                items={expiryItems}
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >

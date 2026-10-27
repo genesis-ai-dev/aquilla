@@ -60,7 +60,8 @@ export interface TimingModeControlProps {
   mode: AudioTimingMode
   /** Change THIS FILE's choice. Absent = below project lead: read-only. */
   onChange?(mode: AudioTimingMode): void
-  /** The file is timed to a film, so it can only follow its source. */
+  /** A subtitle import with its film linked (AQU-1704): it can only follow its
+   *  source, so the choice shows as plain text with an (i) saying why. */
   filmTimed?: boolean
   /** The file has no times and no source audio: nothing to follow, so it can
    *  only follow its recordings (board 24). */

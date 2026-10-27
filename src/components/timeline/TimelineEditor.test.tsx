@@ -1567,7 +1567,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
   })
 
-  it("a file timed to a film only follows its source: plain text and an (i), even for a lead (AQU-2204)", async () => {
+  it("a subtitle import with its film only follows its source: plain text and an (i), even for a lead (AQU-1704)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
     const control = screen.getByTestId("tl-timing-mode")
     expect(control).toHaveAttribute("data-mode", "dubbing")
@@ -1575,6 +1575,16 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
     await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
+  })
+
+  it("any other file with a film can still be switched by a lead (Oct 27)", async () => {
+    const onChange = vi.fn()
+    renderAt("dubbing", { onChangeTimingMode: onChange, coreMediaUrl: "https://cdn.test/ep1/master.m3u8" })
+    const control = screen.getByTestId("tl-timing-mode")
+    expect(control).not.toHaveAttribute("data-locked")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    expect(onChange).toHaveBeenCalledWith("audioFirst")
   })
 
   // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the

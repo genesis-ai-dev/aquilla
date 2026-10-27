@@ -163,7 +163,8 @@ describe('atomic imported text track publication', () => {
   it('enforces both the maintainer role and project track setting', async () => {
     expect(await publishImportedTrack(store.db, { ...args(), role: 500 }))
       .toMatchObject({ ok: false, status: 403 })
-    await store.pg.query(`UPDATE project_settings SET settings='{}'`)
+    // AQU-2214: an explicit no, since an absent key now reads as the ON default.
+    await store.pg.query(`UPDATE project_settings SET settings='{"allowTrackEditing":false}'`)
     expect(await publishImportedTrack(store.db, args()))
       .toMatchObject({ ok: false, status: 403 })
     expect(await store.rows('events')).toHaveLength(0)

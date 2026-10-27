@@ -166,15 +166,20 @@ export interface ProjectWideSettings {
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
    *
-   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
-   * floor change: `file.track.set` is already maintainer-floored, so this
-   * answers *whether*, not *who*, and with it off the write is refused even to
-   * an owner. Multi-track is capability for clients who want it; a project that
-   * never turns it on should not be able to tell it was built.
+   * ON UNLESS EXPLICITLY TURNED OFF (AQU-2214, Sam, after the ETEN demo). It
+   * shipped the other way round — multi-track read as capability for the
+   * clients who asked for it, so a project that never turned it on was not
+   * supposed to be able to tell it was built. Adding a track turned out to be
+   * the ordinary case, so the DEFAULT flipped and the gate did not: it is
+   * still a SECOND gate rather than a floor change (`file.track.set` is
+   * already maintainer-floored, so this answers *whether*, not *who*), and an
+   * explicit `false` here — or inherited from the org — still refuses the
+   * write to an owner. Only the unset reading changed, on the client and at
+   * the perimeter alike; a project or org that already chose keeps its choice.
    *
    * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
-   * ship, and a new setting defaulting to off must not silently take an
-   * existing capability away from every project that has one. They stay
+   * shipped before the setting existed, which must not take an existing
+   * capability away from a project that switches this OFF. They stay
    * maintainer-only, which is what they were.
    *
    * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.

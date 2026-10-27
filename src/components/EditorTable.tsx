@@ -5681,7 +5681,7 @@ function EditorRow({
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
-    timingLocked, canUnlockTiming, onOpenTimingSettings,
+    timingLocked, canUnlockTiming, onOpenTimingSettings, followsRecordings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -6049,6 +6049,9 @@ function EditorRow({
    */
   const timestampsReason = !hasTiming(cell)
     ? null // an untimed row in a timed file — nothing to edit yet
+    : followsRecordings
+      // AQU-2204: following its recordings, a file shows no source times.
+      ? t("editor.cellMenu.timestampsFollowsRecordings")
     : (cell.medium ?? "text") === "media"
       ? t("editor.row.mediaRemoveReason")
       : idmlConfiguration
@@ -8714,7 +8717,9 @@ function EditorRow({
                 baseline, while nothing below the text mirrors anything — so an
                 always-on strip here would be wasted height on every scripture
                 row in the app. */}
-            {contextIsTimecode && (
+            {/* AQU-2204: a file that follows its recordings shows no source
+                time anywhere, so the cue's timecode line goes too. */}
+            {contextIsTimecode && !followsRecordings && (
               <div
                 data-testid="source-timing-line"
                 data-context-kind="timecode"

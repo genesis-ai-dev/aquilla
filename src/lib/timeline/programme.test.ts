@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   buildProgramme,
   cellStartProgrammeSec,
+  programmeLines,
   programmeToSource,
   programmeToTarget,
   slotAtProgrammeSec,
@@ -310,5 +311,86 @@ describe("withoutHiddenTakes", () => {
     expect(out.byCellId.get("a")).toMatchObject({ targetWindow: null, clock: "source" })
     expect(out.byCellId.get("b")).toMatchObject({ targetWindow: null, clock: null })
     expect(out.byCellId.get("c")).toBe(prog.slots[2])
+  })
+})
+
+// AQU-2204 (Sam, Oct 26): a file with NO times at all (an audio Bible book)
+// following its recordings lays its lines out in order — each at its
+// recording's length, or a stand-in from its text.
+describe("lines with no times (AQU-2204)", () => {
+  const untimed = (id: string, takeMs?: number, seq = 0): CellData => {
+    const takeId = `audio-${id}-take.webm`
+    return {
+      id,
+      fileId: "f1",
+      original: id,
+      translated: "",
+      medium: "text",
+      sequenceIndex: seq,
+      ...(takeMs != null ? { selectedAudioId: takeId } : {}),
+      attachments: takeMs != null ? { [takeId]: { type: "audio", url: "frontier-audio://t", durationMs: takeMs } } : {},
+    } as unknown as CellData
+  }
+
+  it("are left out without a stand-in, as before", () => {
+    expect(buildProgramme([untimed("a"), untimed("b")]).slots).toHaveLength(0)
+  })
+
+  it("take a stand-in length when given one, and a recording's length once recorded", () => {
+    const prog = buildProgramme([untimed("a"), untimed("b", 3_000)], { standInLenSec: () => 2 })
+    expect(prog.slots.map((s) => [s.cellId, s.startSec, s.slotLenSec, s.standIn ?? false])).toEqual([
+      ["a", 0, 2, true],
+      ["b", 2, 3, false],
+    ])
+    // A stand-in has nothing to play, and no source window to invent.
+    expect(prog.slots[0].clock).toBeNull()
+    expect(prog.slots[0].sourceWindow).toBeNull()
+    expect(prog.slots[1].clock).toBe("target")
+    expect(prog.totalSec).toBe(5)
+  })
+
+  it("a timed file never gets stand-ins", () => {
+    const prog = buildProgramme([verse("v1", 0, 3, { durationMs: 2_000 })], { standInLenSec: () => 9 })
+    expect(prog.slots[0].standIn).toBeUndefined()
+  })
+})
+
+describe("programmeLines: the one list the timeline and the transport share (AQU-2204)", () => {
+  it("is the timed media cells when there are any", () => {
+    const cells = [verse("v2", 5, 9), verse("v1", 0, 5), { ...verse("t", 1, 2), medium: "text" } as CellData]
+    expect(programmeLines(cells)).toEqual({ lines: [cells[1], cells[0]], untimed: false })
+  })
+
+  it("is every line in order when nothing is timed", () => {
+    const a = { id: "a", fileId: "f1", medium: "text", original: "a" } as unknown as CellData
+    const b = { id: "b", fileId: "f1", medium: "text", original: "b" } as unknown as CellData
+    expect(programmeLines([a, b])).toEqual({ lines: [a, b], untimed: true })
+  })
+
+  it("is empty, and not untimed, for an empty file", () => {
+    expect(programmeLines([])).toEqual({ lines: [], untimed: false })
+  })
+})
+
+// AQU-2204 (Sam, Oct 26): a pause someone left before a take stays inside its
+// line when the file follows its recordings.
+describe("buildProgramme — a pause before the take (AQU-2204)", () => {
+  const placed = (offsetMs: number) => ({ durationMs: 3_000, targetOffsetMs: offsetMs }) as never
+
+  it("keeps the pause inside the line: the take starts after it and the line is that much longer", () => {
+    // Original 0-2 (2 s); take 3 s placed 0.8 s after the line's start.
+    const prog = buildProgramme([verse("v1", 0, 2, placed(800)), verse("v2", 2, 4, { durationMs: 1_000 })])
+    const [s1, s2] = prog.slots
+    expect(s1.targetLeadSec).toBeCloseTo(0.8, 5)
+    expect(s1.slotLenSec).toBeCloseTo(3.8, 5)
+    expect(s1.clock).toBe("target")
+    expect(s2.startSec).toBeCloseTo(3.8, 5)
+  })
+
+  it("a take that starts on its line, or before it, has no pause", () => {
+    const prog = buildProgramme([verse("v1", 0, 2, placed(0)), verse("v2", 2, 4, placed(-300))])
+    expect(prog.slots[0].targetLeadSec).toBeUndefined()
+    expect(prog.slots[1].targetLeadSec).toBeUndefined()
+    expect(prog.slots[0].slotLenSec).toBeCloseTo(3, 5)
   })
 })

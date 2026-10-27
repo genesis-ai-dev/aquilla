@@ -15,6 +15,7 @@ import { subtitleSpanSec, targetChipGeom, type SpanSec, type TargetChipGeom } fr
 import {
   buildProgramme,
   fileSpanToProgrammeSpan,
+  type BuildProgrammeOptions,
   type Programme,
   type ProgrammeSlot,
 } from "./programme"
@@ -87,8 +88,12 @@ function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | n
   }
 }
 
-function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellData[]): TimelineLayout {
-  const programme = buildProgramme(dialogue)
+function audioFirstLayout(
+  _cells: readonly CellData[],
+  dialogue: readonly CellData[],
+  opts?: BuildProgrammeOptions,
+): TimelineLayout {
+  const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
 
   /**
@@ -147,10 +152,13 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
         usingFallback: false,
       }
     }
+    // AQU-2204: a pause someone left before the take stays inside its line,
+    // so the take starts that far into the slot.
+    const start = slot.startSec + (slot.targetLeadSec ?? 0)
     return {
-      anchor,
-      start: slot.startSec,
-      end: slot.startSec + slot.targetLenSec,
+      anchor: start - trimStartSec,
+      start,
+      end: start + slot.targetLenSec,
       trimStartSec,
       trimEndSec,
       durationSec,
@@ -208,8 +216,10 @@ export function buildTimelineLayout(
   cells: readonly CellData[],
   dialogue: readonly CellData[],
   mediaDurationSec?: number | null,
+  /** AQU-2204: stand-in lengths for lines with no times (audio-first only). */
+  programmeOptions?: BuildProgrammeOptions,
 ): TimelineLayout {
   return mode === "audioFirst"
-    ? audioFirstLayout(cells, dialogue)
+    ? audioFirstLayout(cells, dialogue, programmeOptions)
     : dubbingLayout(cells, mediaDurationSec)
 }

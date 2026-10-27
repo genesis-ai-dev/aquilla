@@ -8717,7 +8717,9 @@ function EditorRow({
                 baseline, while nothing below the text mirrors anything — so an
                 always-on strip here would be wasted height on every scripture
                 row in the app. */}
-            {contextIsTimecode && (
+            {/* AQU-2204: a file that follows its recordings shows no source
+                time anywhere, so the cue's timecode line goes too. */}
+            {contextIsTimecode && !followsRecordings && (
               <div
                 data-testid="source-timing-line"
                 data-context-kind="timecode"

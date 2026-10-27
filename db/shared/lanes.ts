@@ -53,6 +53,7 @@ import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
 import { grantNewLaneStmt } from "./lane-grants"
+import { seedLaneProgressStmt } from "./lane-progress"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
@@ -764,17 +765,21 @@ export async function insertTargetLane(
   const existing = await listProjectLanes(db, projectId)
   const position = existing.reduce((max, row) => Math.max(max, row.position), -1) + 1
   const delivers = lane.delivers ?? "text"
-  await db
-    .prepare(
-      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position,
-                          delivers, records_audio)
-       VALUES (?, ?, 'target', ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position,
-      delivers, deliversRecordsAudio(delivers),
-    )
-    .run()
+  // The new language owes every file from now on: its progress rows land with
+  // it, or each reader would count it short until every file was next edited.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position,
+                            delivers, records_audio)
+         VALUES (?, ?, 'target', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position,
+        delivers, deliversRecordsAudio(delivers),
+      ),
+    seedLaneProgressStmt(db, projectId),
+  ])
 }
 
 /**
@@ -989,14 +994,17 @@ export async function setTargetLaneArchived(
     if (!stillActive) return { status: "last_lane" }
   }
   const archivedAt = archived ? new Date().toISOString() : null
-  await db
+  const update = db
     .prepare(
       `UPDATE lanes
           SET archived_at = ?, updated_at = now()
         WHERE project_id = ? AND id = ? AND role = 'target'`,
     )
     .bind(archivedAt, projectId, laneId)
-    .run()
+  // A language coming back is counted again, so it needs a row for every
+  // file, including any added while it was archived and never edited since.
+  if (archived) await update.run()
+  else await db.batch([update, seedLaneProgressStmt(db, projectId)])
   return { status: "ok", lane: { ...current, archivedAt } }
 }
 

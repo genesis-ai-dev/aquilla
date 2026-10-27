@@ -26,12 +26,20 @@
 // the files that are still wrong, so a capped run's leftovers are the next run's
 // first results by construction, and a repaired file drops out of the selector
 // instead of having to be remembered.
+//
+// It also re-projects files that have no row for one of their project's lanes
+// (`missingLaneProgressFilesSql`): a language added since a file was last
+// recomputed, by a path that did not write its rows, read as owing nothing in
+// that file. Those are counted apart (`laneRows=N`), because they are not the
+// write-path regression `repaired=N` is the alarm for; an import that adds a
+// language is expected to leave some.
 
 import { makePostgres, withLongOperationTimeout } from "../../db/shim/postgres"
 import { scheduledDeploymentEnvironmentError } from "./environment-guard"
 import {
   audioStaleProgressFilesSql,
   fullProgressRecomputeStmts,
+  missingLaneProgressFilesSql,
 } from "./events/progress-projection"
 
 export interface ProgressSelfHealCronEnv {
@@ -74,13 +82,17 @@ export interface ProgressSelfHealSweepOptions {
 export interface ProgressSelfHealSweepReport {
   /** Stale files this run picked up — at most `maxRepairs`. */
   filesSelected: number
+  /** Files re-projected because their rows were behind their audio (the alarm). */
   filesRepaired: number
+  /** Files re-projected only because a lane of the project had no row for them. */
+  laneRowsRepaired: number
   /**
    * Stale files still outstanding when the run stopped at its cap, counted
    * after the repairs landed, so it is the exact number the next run will take.
    * 0 whenever the run was not capped.
    */
   remaining: number
+  /** Every file re-projected, for either reason. */
   repaired: Array<{ projectId: string; fileId: string }>
   errors: string[]
 }
@@ -88,6 +100,19 @@ export interface ProgressSelfHealSweepReport {
 interface StaleFileRow {
   project_id: string
   id: string
+  /** Behind its audio; false when it is only missing a lane's row. */
+  audio: boolean
+}
+
+/** Both selectors as one, a file picked by both counted as audio-stale. */
+function staleFilesSql(byProject: boolean): string {
+  return `SELECT project_id, id, BOOL_OR(audio) AS audio
+            FROM (SELECT project_id, id, TRUE AS audio
+                    FROM (${audioStaleProgressFilesSql({ byProject })}) audio_stale
+                  UNION ALL
+                  SELECT project_id, id, FALSE AS audio
+                    FROM (${missingLaneProgressFilesSql({ byProject })}) missing_lane) both_kinds
+           GROUP BY project_id, id`
 }
 
 /**
@@ -105,19 +130,20 @@ export async function sweepStaleAudioProgress(
   const report: ProgressSelfHealSweepReport = {
     filesSelected: 0,
     filesRepaired: 0,
+    laneRowsRepaired: 0,
     remaining: 0,
     repaired: [],
     errors: [],
   }
 
   const byProject = options.onlyProjectId !== undefined
-  const selector = audioStaleProgressFilesSql({ byProject })
+  const selector = staleFilesSql(byProject)
   // One row past the cap, purely to learn whether there IS a remainder without
   // counting the whole set on a healthy night. The exact count comes later, and
   // only when this tells us it is worth asking for.
-  const binds: unknown[] = byProject ? [options.onlyProjectId] : []
+  const binds: unknown[] = byProject ? [options.onlyProjectId, options.onlyProjectId] : []
   const { results } = await db
-    .prepare(`SELECT project_id, id FROM (${selector}) stale
+    .prepare(`SELECT project_id, id, audio FROM (${selector}) stale
                ORDER BY project_id, id LIMIT ?`)
     .bind(...binds, maxRepairs + 1)
     .all<StaleFileRow>()
@@ -145,7 +171,8 @@ export async function sweepStaleAudioProgress(
           .bind(file.project_id),
         ...fullProgressRecomputeStmts(db, file.project_id, file.id, now),
       ])
-      report.filesRepaired += 1
+      if (file.audio) report.filesRepaired += 1
+      else report.laneRowsRepaired += 1
       report.repaired.push({ projectId: file.project_id, fileId: file.id })
     } catch (err) {
       report.errors.push(`${file.project_id}/${file.id}: ${String(err)}`)
@@ -168,6 +195,7 @@ export function formatProgressSelfHealReport(report: ProgressSelfHealSweepReport
   const parts = [
     `selected=${report.filesSelected}`,
     `repaired=${report.filesRepaired}`,
+    report.laneRowsRepaired ? `laneRows=${report.laneRowsRepaired}` : "",
     `remaining=${report.remaining}`,
     report.errors.length ? `errors=${report.errors.length}` : "",
   ].filter(Boolean)

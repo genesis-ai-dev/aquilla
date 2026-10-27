@@ -129,7 +129,10 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   project's whole history, and the nightly progress self-heal sweep (AQU-2145,
   `src/progress-selfheal-cron.ts`; `POST /admin/progress-selfheal?projectId=…` on demand)
   that re-projects files whose progress rows fell behind their own audio events — its
-  `repaired=N` log line is the alarm for a write-path regression — and the external
+  `repaired=N` log line is the alarm for a write-path regression — and files missing a
+  row for one of their project's lanes (`laneRows=N`, not an alarm: "Add language" and
+  unarchive write those rows themselves via `db/shared/lane-progress.ts`, but imports
+  and migrations that add a language leave them to the sweep) — and the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and

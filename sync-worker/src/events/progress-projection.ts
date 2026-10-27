@@ -235,6 +235,46 @@ export function audioStaleProgressFilesSql(
 }
 
 /**
+ * The files the self-heal re-projects because a lane of their project has no
+ * file row for them. Rows are written per file, for every lane the project has
+ * at that moment, so a language added since a file was last recomputed has
+ * none for it; adding a language in settings writes them
+ * (`seedLaneProgressStmt`, db/shared/lane-progress.ts), but an import, a
+ * migration or the Agent API can add one without, and files the projection
+ * never reached have none for any lane. Each read as owing nothing.
+ *
+ * Every lane counts, archived ones too, because the recompute writes them all
+ * — a file is then whole and drops out, so this is self-terminating like the
+ * audio selector. Deleted files are left out (nothing reads them), and so is a
+ * file with no visible, live source cell, for the reason given above.
+ *
+ * Selects (project_id, id); binds the project id when `byProject`.
+ */
+export function missingLaneProgressFilesSql(
+  opts: { byProject?: boolean } = {},
+): string {
+  return `SELECT f.project_id, f.id
+            FROM files f
+           WHERE f.deleted_at IS NULL${opts.byProject ? ' AND f.project_id = ?' : ''}
+             AND EXISTS (
+               SELECT 1 FROM lanes l
+                WHERE l.project_id = f.project_id
+                  AND NOT EXISTS (
+                    SELECT 1 FROM file_section_progress p
+                     WHERE p.project_id = f.project_id AND p.file_id = f.id
+                       AND p.scope = 'file' AND p.section_key = '' AND p.lane_id = l.id
+                  )
+             )
+             AND EXISTS (
+               SELECT 1 FROM cells s
+                WHERE s.project_id = f.project_id AND s.file_id = f.id
+                  AND s.side = 'source'
+                  AND ${visibleSourceSql('s')}
+                  AND ${liveSourceSql('s')}
+             )`
+}
+
+/**
  * Media redesign slice 1: the files whose progress rows predate the joint
  * text × audio histogram (migration 0187) — a recording counted in the audio
  * histogram and nothing in the joint one, which a recompute by this code can

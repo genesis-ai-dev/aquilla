@@ -185,7 +185,8 @@ def _ctc_viterbi(log_probs: "object", targets: list[int], blank: int) -> list[in
 # (plus slack) means the container is gone even if @modal.exit never ran.
 state = modal.Dict.from_name("aquilla-omni-asr-state", create_if_missing=True)
 ZS_SCALEDOWN_SEC = 600
-STALE_AFTER_SEC = ZS_SCALEDOWN_SEC + 60
+CTC_SCALEDOWN_SEC = 300
+STALE_AFTER_SEC = {"zs": ZS_SCALEDOWN_SEC + 60, "ctc": CTC_SCALEDOWN_SEC + 60}
 
 
 def _set_state(model: str, value: str) -> None:
@@ -194,7 +195,7 @@ def _set_state(model: str, value: str) -> None:
 
 def _get_state(model: str) -> str:
     entry = state.get(model)
-    if not entry or time.time() - entry["ts"] > STALE_AFTER_SEC:
+    if not entry or time.time() - entry["ts"] > STALE_AFTER_SEC[model]:
         return "cold"
     return entry["state"]
 
@@ -205,24 +206,39 @@ def _gpu_name() -> str:
     return torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu"
 
 
-@app.cls(image=image, gpu="L4", volumes={WEIGHTS_DIR: weights}, timeout=600,
-         scaledown_window=300, max_containers=4)
+# A list, not one type: when Modal has no L4 free, a cold request waited ~100 s
+# in the GPU queue (2026-10-27). CTC 1B fits on either card; the A10G is in the
+# price table (db/shared/omni-asr-cost.ts), so it is not billed at the top rate.
+@app.cls(image=image, gpu=["L4", "A10G"], volumes={WEIGHTS_DIR: weights}, timeout=600,
+         scaledown_window=CTC_SCALEDOWN_SEC, max_containers=4)
 class OmniCTC:
     @modal.enter()
     def load(self) -> None:
         from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
 
+        _set_state("ctc", "starting")
         t0 = time.time()
         self.pipe = ASRInferencePipeline(model_card="omniASR_CTC_1B")
         self.aligner = _Aligner()
         weights.commit()
         self.load_sec = time.time() - t0
+        _set_state("ctc", "ready")
         print(f"[ctc] loaded in {self.load_sec:.1f}s on {_gpu_name()}", flush=True)
+
+    @modal.exit()
+    def unload(self) -> None:
+        _set_state("ctc", "cold")
+
+    @modal.method()
+    def ping(self) -> None:
+        """No-op used by /warm: calling it starts a container."""
+        _set_state("ctc", "ready")
 
     @modal.method()
     def transcribe(self, audio: bytes, lang: str | None = None) -> dict:
         import torch
 
+        _set_state("ctc", "ready")  # heartbeat: a busy container is not stale
         t0 = time.time()
         wav = _decode_wav(audio)
         if wav.shape[0] / SAMPLE_RATE >= MAX_AUDIO_SEC:
@@ -291,7 +307,7 @@ class OmniZS:
 
 # ── Web API ──────────────────────────────────────────────────────────────────
 # One CPU ASGI app, so the auth-worker uses a single base URL:
-#   POST /transcribe   POST /warm   GET /status?model=zs
+#   POST /transcribe   POST /warm   GET /status?model=ctc|zs
 # Example audio is fetched here, on CPU, so GPU time (which is billed) is not
 # spent waiting on R2.
 
@@ -375,8 +391,7 @@ def api():
             raise HTTPException(status_code=401, detail="bad shared secret")
 
     def status_body(model: str) -> dict:
-        s = "ready" if model == "ctc" else _get_state("zs")
-        return {"state": s, "estGpuSecPerAudioSec": float(
+        return {"state": _get_state(model), "estGpuSecPerAudioSec": float(
             os.environ.get(f"OMNI_EST_{model.upper()}", EST_GPU_SEC_PER_AUDIO_SEC[model]))}
 
     @web.get("/status")
@@ -389,10 +404,13 @@ def api():
     @web.post("/warm")
     def warm(payload: dict, x_omni_secret: str | None = Header(default=None)):
         check(x_omni_secret)
-        if payload.get("model", "zs") == "zs" and _get_state("zs") == "cold":
-            _set_state("zs", "starting")
-            OmniZS().ping.spawn()
-        return status_body("zs")
+        model = payload.get("model", "zs")
+        if model not in ("ctc", "zs"):
+            raise HTTPException(status_code=400, detail="model must be ctc or zs")
+        if _get_state(model) == "cold":
+            _set_state(model, "starting")
+            (OmniCTC() if model == "ctc" else OmniZS()).ping.spawn()
+        return status_body(model)
 
     @web.post("/transcribe")
     def transcribe(payload: dict, x_omni_secret: str | None = Header(default=None)):
@@ -405,6 +423,10 @@ def api():
         if not audio:
             raise HTTPException(status_code=400, detail="missing audio")
         if model == "ctc":
+            # A cold CTC request still waits for the container (it loads in
+            # ~8 s); "starting" lets /status show the wait to everyone else.
+            if _get_state("ctc") == "cold":
+                _set_state("ctc", "starting")
             return OmniCTC().transcribe.remote(audio, payload.get("lang") or None)
         if model != "zs":
             raise HTTPException(status_code=400, detail="model must be ctc or zs")

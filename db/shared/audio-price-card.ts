@@ -32,12 +32,11 @@ export const INWORLD_VOICE_PUBLISH_CENTS = 0
 export const MIN_RESERVATION_CENTS = 0.01
 
 /** Modal GPUs the audio services run on, cents per GPU-second. Omnilingual's
- *  table plus the T4 that diarization runs on. */
+ *  table (which holds the A10G that custom voice training also uses, at Modal's
+ *  $1.10/h list price) plus the T4 that diarization runs on. */
 export const MODAL_GPU_CENTS_PER_SEC: Readonly<Record<string, number>> = {
   ...OMNI_GPU_CENTS_PER_SEC,
   'NVIDIA T4': 0.0164,
-  // Modal list price $1.10/h — custom voice training (infra/modal/voice_forge.py `train`).
-  'NVIDIA A10G': 0.0306,
 }
 /** infra/modal/diarization.py `gpu="T4"`; infra/modal/seed_vc.py runs on L40S. */
 export const DIARIZATION_GPU = 'NVIDIA T4'

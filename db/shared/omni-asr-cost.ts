@@ -8,6 +8,8 @@
 /** Keyed on the CUDA device name the service reports as `gpu`. */
 export const OMNI_GPU_CENTS_PER_SEC: Readonly<Record<string, number>> = {
   'NVIDIA L4': 0.0222,
+  // CTC's fallback when Modal has no L4 free (infra/modal/omni_asr.py).
+  'NVIDIA A10G': 0.0306,
   'NVIDIA L40S': 0.0542,
 }
 /** An unrecognised GPU name (Modal moved the class, or a new card) bills at
@@ -21,8 +23,9 @@ export function omniGpuCentsPerSec(gpu: string): number {
 
 export type OmniModel = 'ctc' | 'zs'
 
-/** GPU each model runs on, for the admission bound (spec §8). */
-export const OMNI_MODEL_GPU: Record<OmniModel, string> = { ctc: 'NVIDIA L4', zs: 'NVIDIA L40S' }
+/** GPU each model runs on, for the admission bound (spec §8). CTC may land on
+ * its A10G fallback, so the bound uses the dearer of its two cards. */
+export const OMNI_MODEL_GPU: Record<OmniModel, string> = { ctc: 'NVIDIA A10G', zs: 'NVIDIA L40S' }
 
 /** GPU-seconds per audio-second used only for the reservation bound. The
  * Modal spike measured ≈0.09 (CTC) and 0.3–0.45 (ZS, 10 examples); these leave

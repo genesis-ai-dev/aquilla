@@ -200,6 +200,28 @@ describe("cell-audio projection", () => {
     expect(insert.args).toContain("omni-ctc")
   })
 
+  // The Transcribe lens's "Clear" (src/lib/transcript-cleanup/save.ts
+  // clearTranscript) has no column-level NULL to send: both columns COALESCE.
+  // It clears by sending an EMPTY asr text and EMPTY timings, which must bind
+  // as values (not NULL), so they replace what was stored.
+  it("attach: an empty asr text and empty timings replace the stored ones (Clear)", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [],
+        asr: { text: "", model: "omni-ctc" },
+      }),
+      [],
+    )
+    const insert = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!
+    expect(insert.args).toContain("[]")
+    expect(insert.args).toContain("")
+  })
+
   // The "Cleaned up" mark must describe the transcript as it reads NOW. Once a
   // person corrects it (new timings, no mark) it is theirs; a trim or a
   // duration heal (no timings) says nothing about the words and leaves it.

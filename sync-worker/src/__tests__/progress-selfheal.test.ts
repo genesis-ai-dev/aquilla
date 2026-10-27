@@ -278,6 +278,91 @@ describe('AQU-2145 progress self-heal sweep', () => {
     })
   })
 
+  describe('a lane with no row for a file', () => {
+    /** A text-only file with `verses` source lines, projected for the lanes it has now. */
+    async function seedTextFile(fileId: string, verses: number): Promise<void> {
+      await test.pg.query(
+        `INSERT INTO files (project_id, id, name, event_id, created_at) VALUES ($1, $2, $2, 'ev-file', $3)`,
+        [P, fileId, TS],
+      )
+      for (let i = 1; i <= verses; i++) {
+        await test.pg.query(
+          `INSERT INTO cells (project_id, file_id, cell_id, side, lane_id, value, canonical_ref,
+                              event_id, last_edit_at)
+           VALUES ($1, $2, $3, 'source', $4, 'In the beginning', $5, $6, $7)`,
+          [P, fileId, `c${i}`, `${P}-src`, `GEN 1:${i}`, `ev-${fileId}-${i}`, TS],
+        )
+      }
+      await recompute(test, P, fileId)
+    }
+
+    async function laneFileTotal(laneId: string, fileId: string) {
+      const { rows } = await test.pg.query<{ total_count: number }>(
+        `SELECT total_count FROM file_section_progress
+          WHERE project_id = $1 AND file_id = $2 AND scope = 'file' AND lane_id = $3`,
+        [P, fileId, laneId],
+      )
+      return rows[0]?.total_count
+    }
+
+    it('re-projects a file a language added later has no row for, and counts it apart from the alarm', async () => {
+      // LAN Party, 2026-10-27: French and Samoan were added after most files
+      // were last edited, so each read 3,038 lines short of what it owes.
+      await seedLanes(test, P)
+      await seedTextFile('mark', 3)
+      await test.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES ('fr', $1, 'target', 'French', 'French', 2)`,
+        [P],
+      )
+      expect(await laneFileTotal('fr', 'mark')).toBeUndefined()
+
+      const report = await sweepStaleAudioProgress(sweepEnv(test))
+      expect(report.repaired).toEqual([{ projectId: P, fileId: 'mark' }])
+      expect(report.laneRowsRepaired).toBe(1)
+      expect(report.filesRepaired).toBe(0)
+      expect(formatProgressSelfHealReport(report)).toBe('selected=1 repaired=0 laneRows=1 remaining=0')
+      expect(await laneFileTotal('fr', 'mark')).toBe(3)
+
+      const again = await sweepStaleAudioProgress(sweepEnv(test))
+      expect(again.filesSelected).toBe(0)
+    })
+
+    it('counts an archived lane as missing too, and leaves deleted files alone', async () => {
+      await seedLanes(test, P)
+      await seedTextFile('kept', 2)
+      await seedTextFile('deleted', 2)
+      await test.pg.query(`UPDATE files SET deleted_at = $2 WHERE project_id = $1 AND id = 'deleted'`, [P, TS])
+      await test.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at)
+         VALUES ('old', $1, 'target', 'Old', 'Old', 2, now())`,
+        [P],
+      )
+
+      const report = await sweepStaleAudioProgress(sweepEnv(test))
+      expect(report.repaired.map((r) => r.fileId)).toEqual(['kept'])
+      expect(await laneFileTotal('old', 'kept')).toBe(2)
+    })
+
+    it('shares the cap with the audio repairs, a file picked by both counting as audio', async () => {
+      await seedLanes(test, P)
+      await seedAudioFile(test, P, 'a-audio')
+      await seedAudioEvent(test, P, 'a-audio', 90)
+      await seedTextFile('b-text', 2)
+      await test.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES ('fr', $1, 'target', 'French', 'French', 2)`,
+        [P],
+      )
+
+      const first = await sweepStaleAudioProgress(sweepEnv(test), { maxRepairs: 1 })
+      expect(first.repaired.map((r) => r.fileId)).toEqual(['a-audio'])
+      expect(first.filesRepaired).toBe(1)
+      expect(first.remaining).toBe(1)
+      const second = await sweepStaleAudioProgress(sweepEnv(test), { maxRepairs: 1 })
+      expect(second.repaired.map((r) => r.fileId)).toEqual(['b-text'])
+      expect(second.laneRowsRepaired).toBe(1)
+    })
+  })
+
   describe('the per-run cap', () => {
     it('stops at the cap and reports the exact remainder', async () => {
       await seedLanes(test, P)

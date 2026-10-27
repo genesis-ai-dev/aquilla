@@ -60,9 +60,19 @@ describe("buildProgramme — laying the verses out", () => {
     expect(prog.totalSec).toBe(18)
   })
 
-  it("the ORIGINAL wins the slot when it is the longer side", () => {
-    const prog = buildProgramme([verse("v1", 0, 9, { durationMs: 4_000 })])
-    expect(prog.slots[0]).toMatchObject({ sourceLenSec: 9, targetLenSec: 4, slotLenSec: 9, clock: "source" })
+  // AQU-2204 (Sam, Oct 27): "Make 'Follows recordings' really follow the
+  // recordings." Free timing used to give the line the longer of the two.
+  it("a line is as long as its take even when the original runs longer — the original is cut where the line ends (AQU-2204)", () => {
+    const prog = buildProgramme([verse("v1", 0, 9, { durationMs: 4_000 }), verse("v2", 9, 12, { durationMs: 2_000 })])
+    expect(prog.slots[0]).toMatchObject({ sourceLenSec: 4, targetLenSec: 4, slotLenSec: 4, cardLenSec: 4, clock: "target" })
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 4 })
+    expect(prog.slots[1].startSec).toBe(4)
+  })
+
+  it("a line with no take takes its stand-in length, not its original's (AQU-2204)", () => {
+    const prog = buildProgramme([verse("v1", 0, 9), verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 2.5, clock: "source", standIn: true })
+    expect(prog.slots[1].startSec).toBe(2.5)
   })
 
   it("the TRANSLATION clocks the slot when it is the longer side", () => {
@@ -88,7 +98,8 @@ describe("buildProgramme — laying the verses out", () => {
     ])
     expect(trimmed.slots[0]).toMatchObject({ targetLenSec: 5, slotLenSec: 5 })
     expect(trimmed.slots[1].startSec).toBe(5)
-    expect(trimmed.totalSec).toBe(9)
+    // v2 is as long as its 3 s take (AQU-2204), not its 4 s original.
+    expect(trimmed.totalSec).toBe(8)
   })
 
   it("a take whose length isn't known borrows the original's, and gets no playback window", () => {
@@ -161,18 +172,18 @@ describe("buildProgramme — laying the verses out", () => {
 describe("looking a position up", () => {
   const prog = buildProgramme([
     verse("v1", 0, 6, { durationMs: 11_000 }), // slot 0→11: original 6s, translation 11s
-    verse("v2", 6, 16, { durationMs: 4_000 }), // slot 11→21: original 10s, translation 4s
+    verse("v2", 6, 16, { durationMs: 4_000 }), // slot 11→15: the translation's 4s; the original is cut there (AQU-2204)
   ])
 
   it("finds the verse a programme second falls in", () => {
     expect(slotAtProgrammeSec(prog, 0)?.cellId).toBe("v1")
     expect(slotAtProgrammeSec(prog, 10.9)?.cellId).toBe("v1")
     expect(slotAtProgrammeSec(prog, 11)?.cellId).toBe("v2")
-    expect(slotAtProgrammeSec(prog, 20.9)?.cellId).toBe("v2")
+    expect(slotAtProgrammeSec(prog, 14.9)?.cellId).toBe("v2")
   })
 
   it("past the end, or before the start, is nothing", () => {
-    expect(slotAtProgrammeSec(prog, 21)).toBeNull()
+    expect(slotAtProgrammeSec(prog, 15)).toBeNull()
     expect(slotAtProgrammeSec(prog, -1)).toBeNull()
     expect(slotAtProgrammeSec(prog, Number.NaN)).toBeNull()
   })
@@ -190,10 +201,12 @@ describe("looking a position up", () => {
     expect(programmeToSource(prog, 6)).toBeNull()
     expect(programmeToSource(prog, 10.9)).toBeNull()
     expect(programmeToTarget(prog, 10.9)).toMatchObject({ clipSec: 10.9 })
-    // v2 is the other way round: the translation runs out first.
+    // v2's original runs longer than its translation, so it is cut where the
+    // translation ends (AQU-2204): both stop at 4 s.
     expect(programmeToTarget(prog, 11 + 3.9)?.clipSec).toBeCloseTo(3.9, 6)
+    expect(programmeToSource(prog, 11 + 3.9)?.clipSec).toBeCloseTo(9.9, 6)
     expect(programmeToTarget(prog, 11 + 4)).toBeNull()
-    expect(programmeToSource(prog, 11 + 9.9)?.clipSec).toBeCloseTo(15.9, 6)
+    expect(programmeToSource(prog, 11 + 4)).toBeNull()
   })
 
   it("a head trim joins the clip past the trim", () => {
@@ -210,12 +223,14 @@ describe("looking a position up", () => {
     expect(sourceFileSecToProgramme(prog, 5)).toBe(5)
     // v2's original starts at file second 6 — now shown at programme second 11.
     expect(sourceFileSecToProgramme(prog, 6)).toBe(11)
-    expect(sourceFileSecToProgramme(prog, 15)).toBe(20)
+    expect(sourceFileSecToProgramme(prog, 9)).toBe(14)
+    // Past the take's end the original is cut, so it isn't on the programme.
+    expect(sourceFileSecToProgramme(prog, 15)).toBeNull()
     expect(sourceFileSecToProgramme(prog, 99)).toBeNull()
   })
 
   it("round-trips a source position through both directions", () => {
-    for (const fileSec of [0, 3.25, 6, 12, 15.75]) {
+    for (const fileSec of [0, 3.25, 6, 8, 9.75]) {
       const prog2 = sourceFileSecToProgramme(prog, fileSec)!
       expect(programmeToSource(prog, prog2)?.clipSec).toBeCloseTo(fileSec, 6)
     }

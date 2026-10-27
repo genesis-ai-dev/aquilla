@@ -3675,6 +3675,20 @@ describe("the project timing lock", () => {
     expect(grips("s1").length).toBeGreaterThan(0)
   })
 
+  it("never draws them on a book or document's text, unlocked or not (AQU-1758)", () => {
+    // A book opens on the timeline since the Audio view went. Dragging a verse
+    // would give it a time, and quietly start timing the book.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+        sequenceOrdered
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
+  })
+
   it("takes them away when it is locked — with no film linked, Sam's case", () => {
     render(
       <TimelineEditor

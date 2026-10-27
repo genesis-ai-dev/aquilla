@@ -986,7 +986,9 @@ function progFinish(): void {
 function progAdvance(): void {
   const next = progNextPlayable(progIndex + 1)
   if (next < 0) {
+    const ctx = activeContext
     progFinish()
+    notifyRanOut(ctx)
     return
   }
   void progPlaySlot(next, null, true, false, /* seamless */ true)
@@ -1774,6 +1776,26 @@ export function setQueueTimingMode(mode: AudioTimingMode): void {
 
 export function getQueueTimingMode(): AudioTimingMode {
   return timingMode
+}
+
+// ── AQU-1758: playback that ran off the end of its lines ────────────────────
+//
+// Not a stop and not a pause: the last line played out and there was nothing
+// after it. A book's timeline holds one chapter, and so does the run it
+// starts, so this is where the workspace carries Play all on into the next
+// chapter. Listeners are told after the queue has gone idle, so starting a new
+// run from one is safe.
+const ranOutListeners = new Set<(ctx: PlayContext) => void>()
+
+/** Hear when a run plays to the end of its lines. Returns the unsubscribe. */
+export function onQueueRanOut(listener: (ctx: PlayContext) => void): () => void {
+  ranOutListeners.add(listener)
+  return () => { ranOutListeners.delete(listener) }
+}
+
+function notifyRanOut(ctx: PlayContext | null): void {
+  if (!ctx) return
+  for (const listener of [...ranOutListeners]) listener(ctx)
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -3311,8 +3333,10 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     audio.onpause = null // don't let the pause handler flash a "paused" state
     audio.pause()
     if (plan.kind === "stop") {
+      const ctx = activeContext
       setState(IDLE)
       disposeCurrent()
+      notifyRanOut(ctx)
       return
     }
     void playAt(plan.index)

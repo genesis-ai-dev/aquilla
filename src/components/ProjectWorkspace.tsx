@@ -213,7 +213,11 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+import {
+  chapterOfCell, nextPlayableChapter, resolveTimelineChapter, sequenceTimelineCells, type TimelineChapter,
+} from "@/lib/timeline/sequence-timeline"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
@@ -669,6 +673,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 let _lastImportWrite: Promise<ProjectRecord | undefined> = Promise.resolve(undefined)
 const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 
@@ -2467,15 +2472,17 @@ export function ProjectWorkspace() {
     [project?.lanes, t],
   )
   // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
-  // the plain text table — audioLens (the per-row voice-panel mode) applies
-  // only to sequence-ordered voice-over files now. With it null, useCellIds
-  // serves the full time-sorted list (text mode) under the timeline.
+  // the plain text table. AQU-1758 (Oct 27): so does every other file — the
+  // Audio view, which replaced a book's source column with per-line voice
+  // cards, is gone. A book or document lays its lines out from its recordings,
+  // one chapter at a time, with dashed stand-ins for lines not yet recorded.
   const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
-  /** Media lens on a time-ordered file = the timeline STACKED over the always-
-   *  rendered text table (one EditorTable instance across both lenses — the
-   *  imperative ref, selection singleton, and presence claims stay single). */
-  const timelineStacked = lens === "audio" && activeFileTimeOrdered
+  const activeFileOnTimeline = Boolean(activeFileForLens)
+  /** Media lens = the timeline STACKED over the always-rendered text table
+   *  (one EditorTable instance across both lenses — the imperative ref,
+   *  selection singleton, and presence claims stay single). */
+  const timelineStacked = lens === "audio" && activeFileOnTimeline
   // 2026-08-07 (wire b): a text-table row click points the timeline at that
   // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
   // identity-stable (mirror ref) because it rides in editorActionsValue.
@@ -2487,8 +2494,12 @@ export function ProjectWorkspace() {
   // cell rail's "Play from this cue". The row-click path (EditorActionsContext
   // types this as a one-argument call) can never set it, so a row click keeps
   // its cue-only contract by construction rather than by convention.
+  // AQU-1758: set below, once a book's chapters are known — a row of another
+  // chapter brings its chapter onto the timeline with it.
+  const showChapterOfCellRef = useRef<(cellId: string) => void>(() => {})
   const handleMediaRowActivate = useCallback((cellId: string, opts?: { play?: boolean }) => {
     if (!timelineStackedRef.current) return
+    showChapterOfCellRef.current(cellId)
     activateNonceRef.current += 1
     setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current, play: opts?.play === true })
     // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
@@ -2501,7 +2512,7 @@ export function ProjectWorkspace() {
   const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
   const audioLens = useMemo<AudioLensContext | null>(
     () =>
-      lens === "audio" && audioProject && !activeFileTimeOrdered
+      lens === "audio" && audioProject && !activeFileOnTimeline
         ? {
             voices: tts.voices,
             settings: tts.laneSettings,
@@ -2563,7 +2574,7 @@ export function ProjectWorkspace() {
           }
         : null,
     [
-      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
+      lens, audioProject, activeFileOnTimeline, tts.voices, tts.laneSettings, tts.defaultVoiceId,
       tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
       tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
     ],
@@ -2857,15 +2868,15 @@ export function ProjectWorkspace() {
   const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
-  // control greys "Follows source" out. Only a time-ordered file has the
-  // timeline (and so the control); a sequence-ordered book opens in the Audio
-  // view and keeps today's playback.
+  // control greys "Follows source" out. AQU-1758: every file has the timeline
+  // (and so the control) since the Audio view went, so a book with no
+  // reading of its source follows its recordings.
   const timingNothingToFollow = useMemo(
     () =>
-      activeFileTimeOrdered &&
+      activeFileOnTimeline &&
       Boolean(activeFileId) &&
       hasNothingToFollow(readAtVersion(cellStoreVersion, getActiveCells).filter((c) => c.fileId === activeFileId)),
-    [activeFileTimeOrdered, activeFileId, cellStoreVersion, getActiveCells],
+    [activeFileOnTimeline, activeFileId, cellStoreVersion, getActiveCells],
   )
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
@@ -7931,7 +7942,8 @@ export function ProjectWorkspace() {
   // through this so no path skips the trace. Self-no-ops when the lens isn't
   // changing, the file isn't time-ordered, or there's nothing to trace.
   const switchLens = useCallback((next: EditorLens) => {
-    const timeOrdered = Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    // AQU-1758: every file has the timeline in Media, so every file traces.
+    const timeOrdered = Boolean(activeFile)
     // AQU-646's trace belongs to the TEXT ↔ MEDIA pair alone: those two lenses
     // share the mounted table, and the timeline whose selection it carries only
     // exists in Media. AQU-2153: a switch through Transcribe is not that pair —
@@ -11981,7 +11993,7 @@ export function ProjectWorkspace() {
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
     lens === "audio" &&
-    Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    Boolean(activeFile)
   // Per-file audio attachments for the Media timeline's missing-clip badge.
   // Timeline cells carry no attachments, so the badge probe resolves the
   // selected clip's take from this read. Gated on timeline visibility so no
@@ -12924,8 +12936,12 @@ export function ProjectWorkspace() {
       // Source audio row for the video's own sound. Not in Free timing, where
       // the video is hidden and silent.
       hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
+      // AQU-1758: a book or document, and whether it has a source recording
+      // of its own.
+      sequenceOrdered: !activeFileTimeOrdered,
+      hasSourceAudio: audioMergedCells.some((c) => sourceClipAudioForCell(c) != null),
     }),
-    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode, activeFileTimeOrdered],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no
@@ -13477,6 +13493,84 @@ export function ProjectWorkspace() {
   const playingCueCellId = fileTransport.running
     ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
     : null
+
+  // ── AQU-1758: a book or document on the timeline, one chapter at a time ──
+  //
+  // The timeline shows the chapter the table (and its chapter picker) is on;
+  // while playback is on a line of this file, the chapter of that line. The
+  // timeline, the bottom strip's Play all and every timeline seek share ONE
+  // list of lines (`timelineCells`), so the programme they each lay out is
+  // the same one. Headings, section breaks and hidden lines stay off unless
+  // recorded (lib/timeline/sequence-timeline.ts).
+  const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
+  const [tableChapterKey, setTableChapterKey] = useState<string | null>(null)
+  const timelineChapters = useMemo<readonly TimelineChapter[]>(
+    () => sequenceTimeline
+      ? readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
+        .map((entry) => ({ key: entry.key, cellIds: entry.cellIds }))
+      : EMPTY_TIMELINE_CHAPTERS,
+    [sequenceTimeline, cellStore, cellStoreVersion],
+  )
+  const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
+  const timelineChapter = useMemo(
+    () => sequenceTimeline
+      ? resolveTimelineChapter({ chapters: timelineChapters, chosenKey: tableChapterKey, queueCellId: queueCellOnFile })
+      : null,
+    [sequenceTimeline, timelineChapters, tableChapterKey, queueCellOnFile],
+  )
+  const timelineCells = useMemo(
+    () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, timelineChapter) : audioMergedCells),
+    [sequenceTimeline, audioMergedCells, timelineChapter],
+  )
+  // The bottom strip reads its own audio and merges it in; it gets the same
+  // lines by id.
+  const timelineBarCells = useMemo(() => {
+    if (!sequenceTimeline) return legacyCells
+    const ids = new Set(timelineCells.map((c) => c.id))
+    return legacyCells.filter((c) => ids.has(c.id))
+  }, [sequenceTimeline, legacyCells, timelineCells])
+  // Moving to another chapter while playback is PAUSED on a line of this one
+  // ends that playback, so the timeline can follow; a run that is playing
+  // keeps the timeline on its own chapter until it is paused or ends.
+  const handleTableChapterChange = useCallback((key: string | null) => {
+    setTableChapterKey(key)
+  }, [])
+  const queueChapterKey = chapterOfCell(timelineChapters, queueCellOnFile)?.key ?? null
+  useEffect(() => {
+    if (!sequenceTimeline || !tableChapterKey || !queueChapterKey || queueChapterKey === tableChapterKey) return
+    if (getQueueState().kind === "paused") stopQueue()
+  }, [sequenceTimeline, tableChapterKey, queueChapterKey])
+  // Picking a chapter mid-playback is navigation away from what is playing:
+  // it stops, and the timeline shows the chapter picked.
+  const queueChapterKeyRef = useRef(queueChapterKey)
+  queueChapterKeyRef.current = queueChapterKey
+  const handleChapterPicked = useCallback((key: string) => {
+    const playing = queueChapterKeyRef.current
+    if (playing && playing !== key) stopQueue()
+    setTableChapterKey(key)
+  }, [])
+  // Play all carries on into the next chapter: when a run of this file's
+  // chapter plays out, the next chapter with anything to play starts.
+  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
+  useLayoutEffect(() => {
+    chapterRunRef.current = sequenceTimeline ? { chapters: timelineChapters, cells: audioMergedCells } : null
+    showChapterOfCellRef.current = (cellId) => {
+      const chapter = sequenceTimeline ? chapterOfCell(timelineChapters, cellId) : null
+      if (chapter) setTableChapterKey(chapter.key)
+    }
+  })
+  useEffect(() => onQueueRanOut((ctx) => {
+    const run = chapterRunRef.current
+    if (!run || ctx.snapshot) return
+    const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
+    if (!played) return
+    const linesOf = (chapter: TimelineChapter) => sequenceTimelineCells(run.cells, chapter)
+    const next = nextPlayableChapter(run.chapters, played.key, (chapter) => hasAnyPlayableAudio(linesOf(chapter)))
+    if (!next) return
+    setTableChapterKey(next.key)
+    // After the queue's own bookkeeping for the run that ended.
+    queueMicrotask(() => startQueue({ ...ctx, cells: linesOf(next) }, 0))
+  }), [])
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -14638,20 +14732,22 @@ export function ProjectWorkspace() {
     if (videoIsTransport) return
     if (!project?.id) return
     const qs = getQueueState()
+    // AQU-1758: the timeline's own lines — on a book, its chapter — so the
+    // seconds it hands over mean the same thing to the queue.
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      audioMergedCells.some((c) => c.id === qs.cellId)
+      timelineCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       seekQueueToTime(sec)
       return
     }
     if (!frontierSession?.jwt) return // cueing needs a session to mint audio tokens
     startQueueAtTime(
-      { cells: audioMergedCells, projectId: project.id, session: frontierSession },
+      { cells: timelineCells, projectId: project.id, session: frontierSession },
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
+  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue
@@ -14699,7 +14795,7 @@ export function ProjectWorkspace() {
     const qs = getQueueState()
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      audioMergedCells.some((c) => c.id === qs.cellId)
+      timelineCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       // "loading" counts as playing for the toggle: Space during a readiness
       // gate cancels the pending start rather than futilely resuming it.
@@ -14714,12 +14810,12 @@ export function ProjectWorkspace() {
     // one (AQU-666), and mark that explicit so a missing clip is surfaced
     // there rather than skipped past (AQU-660).
     const from = timelineSelectedCellId
-      ? audioMergedCells.findIndex((c) => c.id === timelineSelectedCellId)
+      ? timelineCells.findIndex((c) => c.id === timelineSelectedCellId)
       : -1
-    const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
+    const ctx = { cells: timelineCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
+  }, [project?.id, timelineCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -16778,7 +16874,9 @@ export function ProjectWorkspace() {
                     inert={!dock.view.isOpen("tl") || undefined}
                   >
                   <TimelineEditor
-                    cells={audioMergedCells}
+                    cells={timelineCells}
+                    // AQU-1758: a book's text has no times to drag it to.
+                    sequenceOrdered={!activeFileTimeOrdered}
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
                     onChipActivated={jumpToCellIdFollowing}
@@ -17174,10 +17272,9 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            // AQU-1642: in the Audio view too — the line the bottom bar is
-            // playing is marked. Its card's controls reach the run through
-            // the Audio view's place (`audioLens.place`), not through here.
-            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
+            // AQU-1642 / AQU-1758: on a book or document too — the line the
+            // bottom strip is playing is marked.
+            playingCueCellId={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered) ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -17256,6 +17353,9 @@ export function ProjectWorkspace() {
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            // AQU-1758: a book's timeline shows the chapter the table is on.
+            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               )}
               </div>
@@ -17273,7 +17373,8 @@ export function ProjectWorkspace() {
               // the panels, so no fold or full screen ever hides it.
               <VoicePlaybackBar
                 variant="strip"
-                cells={legacyCells}
+                // AQU-1758: on a book, the chapter on the timeline.
+                cells={timelineBarCells}
                 projectId={project.id}
                 session={frontierSession ?? null}
                 settings={tts.laneSettings}

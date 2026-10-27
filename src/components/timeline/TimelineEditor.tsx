@@ -215,6 +215,12 @@ export interface TimelineEditorProps {
    *  (Renamed from `onRetime` when the source row was frozen.) */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
   /**
+   * AQU-1758: the file is in reading order (a Bible book, a document), not
+   * timed. Its text chips never drag: a drag would give a verse a time, and
+   * quietly turn the book into a timed file one verse at a time.
+   */
+  sequenceOrdered?: boolean
+  /**
    * AQU-646: the project's timing lock. When on, every imported row and cue is
    * frozen for everyone — including project leads, which Sam asked for
    * explicitly. Lines someone added here are exempt: they carry no imported
@@ -1157,6 +1163,7 @@ export function TimelineEditor({
   editable,
   fileId,
   onRetimeSubtitle,
+  sequenceOrdered = false,
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
@@ -3868,7 +3875,8 @@ export function TimelineEditor({
               <LinkedVideoLanePrompt
                 onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
             ) : undefined}
-            retimable={!audioFirst}
+            // AQU-1758: nor on a book or document, whichever way it is timed.
+            retimable={!audioFirst && !sequenceOrdered}
             // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
             //
             // This used to read `subtitleFileWithFootage ? isUserAddedLine :

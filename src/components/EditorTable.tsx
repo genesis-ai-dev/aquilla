@@ -1209,6 +1209,14 @@ interface EditorTableProps {
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
   /**
+   * AQU-1758: the chapter (milestone key) the table is on, whenever it
+   * changes — the one the chapter picker names. A book's timeline shows this
+   * chapter. Null when the file has no chapters.
+   */
+  onActiveChapterChange?: (key: string | null) => void
+  /** AQU-1758: a chapter was picked in the chapter picker (not scrolled to). */
+  onChapterPicked?: (key: string) => void
+  /**
    * ProjectWorkspace's parallelBiblesPanelActive: the editor, on a scripture
    * file. Bible data shows only then (AQU-1685).
    */
@@ -1275,6 +1283,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  onActiveChapterChange,
+  onChapterPicked,
   bibleOpen = false,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
@@ -2568,6 +2578,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   [cellStore, cellStoreVersion, fileCellIds, viewportBook])
   const pericopeSuggestions = usePericopeSuggestions(pericopeResume)
 
+  // AQU-1758: tell the workspace which chapter the table is on, so a book's
+  // timeline can show the same one.
+  const reportedChapter = milestoneNavigationItems.length > 0 && activeChapterLabel ? activeChapterLabel : null
+  useEffect(() => {
+    onActiveChapterChange?.(reportedChapter)
+  }, [onActiveChapterChange, reportedChapter])
+
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
     const subsection = idmlMilestoneNavigation
@@ -2575,6 +2592,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
     if (!targetCellId) return
+    onChapterPicked?.(key)
     onNavigateToCell?.(targetCellId)
     setChapterNavigationSelection({
       fileId: audioFileId,
@@ -2596,7 +2614,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, clearVoiceFilter, idmlMilestoneNavigation, milestoneNavigation, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
+  }, [audioFileId, clearVoiceFilter, idmlMilestoneNavigation, milestoneNavigation, onChapterPicked, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
 
   /**
    * Open a suggested passage (AQU-515) — land on the first cell inside the

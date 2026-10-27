@@ -1584,7 +1584,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
+    { id: "section-voice", label: "Voice", keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },

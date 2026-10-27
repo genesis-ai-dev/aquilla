@@ -1628,6 +1628,10 @@ export function buildBulkCellsWithSpeakers(
       ...(castNamed ? { cast_name: speaker } : {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // AQU-2184: the paragraph's own USFM marker, so the HTML export can
+      // tell a \q2 poetry line from a \p paragraph. Deliberately NOT inside
+      // `aquillaImport` — re-import replaces that envelope wholesale.
+      ...(str.paragraphMarker ? { paragraphMarker: str.paragraphMarker } : {}),
     }
     cells.push({
       id: uuidv7(),
@@ -2535,7 +2539,16 @@ export async function importParatextAsTarget(
         group: cell.ref,
         globalReferences: [cell.ref],
         type: cell.type,
-        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+        ...(cell.paragraphStart
+          ? {
+              paragraphStart: true,
+              metadata: {
+                paragraphStart: true,
+                // AQU-2184: poetry level for the HTML export's page.
+                ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
+              },
+            }
+          : {}),
       }))
       const normalized = normalizeTranslatableStrings(strings, {
         fileName: bookPlan.displayName,

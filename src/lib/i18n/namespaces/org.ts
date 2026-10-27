@@ -201,6 +201,13 @@ export const org = defineNamespace({
     "org.orgHome.pctTranslated": "{pct}% translated",
     "org.orgHome.pctValidated": "{pct}% validated",
     "org.orgHome.pctRecorded": "{pct}% recorded",
+    // AQU-2178 / AQU-2179: the two halves of "{pct}% validated", for the rows
+    // that sit under no column headings and so must name their own figures —
+    // the project overview's archived languages, and the org projects table's
+    // expanded per-language rows. A row prints only the halves its language
+    // owes, so neither key ever stands in for a missing figure.
+    "org.orgHome.pctTextValidated": "{pct}% text validated",
+    "org.orgHome.pctAudioValidated": "{pct}% audio validated",
     // AQU-883: the project directory backs shared/guest projects; its failure used to
     // be indistinguishable from an empty list, so it gets its own announced state.
     "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
@@ -941,10 +948,6 @@ export const org = defineNamespace({
     "org.overviewLaneTable.addLanguageAction": "Add language",
     "org.overviewLaneTable.archivedGroup": "Archived ({count})",
     "org.overviewLaneTable.archivedBadge": "Archived",
-    // AQU-2178: an archived language's row sits under no column headings, so
-    // each validation figure says which half it is.
-    "org.overviewLaneTable.pctTextValidated": "{pct}% text validated",
-    "org.overviewLaneTable.pctAudioValidated": "{pct}% audio validated",
 
     // -- ProjectLaneSubRows: expanded per-lane detail for an OrgHome project row --
     "org.projectLaneSubRows.noActivity": "No activity",
@@ -1163,6 +1166,10 @@ export const org = defineNamespace({
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
     "org.membersPanel.scopesToggleLabel": "Scopes",
     "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
+    // AQU-2054: a project lead can be limited to lanes. Share shows those
+    // lanes and names where they are changed; it does not edit them.
+    "org.membersPanel.leadEveryLane": "Every lane",
+    "org.membersPanel.leadLaneChangeHint": "To change these lanes, use Staff… on the language.",
     "org.membersPanel.lanesLegend": "Lanes",
     "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
@@ -2069,6 +2076,27 @@ export const org = defineNamespace({
           "Percentage-validated figure on OrgHome — used both as the org-card summary line ('{pct}% validated') and as the accessible name for a project row's validated-percent cell.",
         placeholders: { pct: "Whole-number validated percentage, e.g. 20." },
       },
+      "org.orgHome.pctTextValidated": {
+        description:
+          "A language's validated-TEXT figure on the rows that carry no column " +
+          "headings — the project overview's archived languages, and the org projects " +
+          "table's expanded per-language rows. Unlike the Languages table's 'Text " +
+          "Validated' header this one names itself in a short lower-case phrase after " +
+          "the percentage. 'text' distinguishes it from the audio figure beside it " +
+          "(org.orgHome.pctAudioValidated) — the share of the language's lines whose " +
+          "TRANSLATION a reviewer has signed off, not its recordings. Shown only for a " +
+          "language that delivers text.",
+        placeholders: { pct: "Whole-number text-validated percentage, e.g. 20." },
+      },
+      "org.orgHome.pctAudioValidated": {
+        description:
+          "A language's approved-RECORDINGS figure on the rows that carry no column " +
+          "headings, the twin of org.orgHome.pctTextValidated and shown only for a " +
+          "language that owes audio. 'audio' distinguishes it from the text figure " +
+          "beside it — the share of the language's lines whose RECORDING a reviewer has " +
+          "approved, not its translations.",
+        placeholders: { pct: "Whole-number audio-validated percentage, e.g. 20." },
+      },
       "org.orgHome.organizationsPanel.countFraction": {
         description:
           "Subheading under 'Organizations' on the all-orgs dashboard, showing how many of the caller's organizations match the current filter: '{shown} of {total}'.",
@@ -2777,27 +2805,6 @@ export const org = defineNamespace({
           "on the project overview, marking that language lane as archived (retired). It " +
           "describes the lane, so where the word must agree with a noun it agrees with " +
           "the word used for a language lane.",
-      },
-      "org.overviewLaneTable.pctTextValidated": {
-        description:
-          "An archived language's validated-TEXT figure inside the expanded Archived " +
-          "group on the project overview. Those rows sit under no column headings, so " +
-          "unlike the table's 'Text Validated' header this one names itself in a short " +
-          "lower-case phrase after the percentage. 'text' distinguishes it from the " +
-          "audio figure beside it (org.overviewLaneTable.pctAudioValidated) — the share " +
-          "of the language's lines whose TRANSLATION a reviewer has signed off, not its " +
-          "recordings.",
-        placeholders: { pct: "Whole-number text-validated percentage, e.g. 20." },
-      },
-      "org.overviewLaneTable.pctAudioValidated": {
-        description:
-          "An archived language's approved-RECORDINGS figure inside the expanded " +
-          "Archived group on the project overview, the twin of " +
-          "org.overviewLaneTable.pctTextValidated and shown only for a language that " +
-          "owes audio. 'audio' distinguishes it from the text figure beside it — the " +
-          "share of the language's lines whose RECORDING a reviewer has approved, not " +
-          "its translations.",
-        placeholders: { pct: "Whole-number audio-validated percentage, e.g. 20." },
       },
       "org.orgProjectsDataTable.unitsColumn": {
         description:

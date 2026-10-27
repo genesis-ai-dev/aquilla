@@ -61,7 +61,8 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -406,6 +407,18 @@ export function AssignModal({
   // up with nothing to choose, and that is a different sentence.
   const noStaffedLanes =
     Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
+  // AQU-2194: with nobody on the project to give language work to, the picker
+  // holds only the caller (and perhaps the project's maintainers and owners)
+  // and nothing says why: people who only reach the project through the
+  // organisation are left out (AQU-676), and nobody has been staffed on the
+  // new language yet. Say so, and where people are added (the language's
+  // Staff… on the project Overview). Self-assign mode, a missing roster and
+  // the no-staffed-lanes line above already say their own piece.
+  const showStaffHint =
+    !isSelfAssignMode &&
+    !rosterUnavailable &&
+    !noStaffedLanes &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
   // AQU-1977: given the project's own lanes, a pick that names none of them —
   // an empty default on a project that has no '' lane — reads as the first.
   const laneValue =
@@ -935,6 +948,9 @@ export function AssignModal({
             </Select>
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
+            )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
             )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (

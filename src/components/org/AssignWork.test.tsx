@@ -79,6 +79,18 @@ describe("AssignWork", () => {
     expect(screen.getByRole("button", { name: "Assign…" })).toBeInTheDocument()
   })
 
+  it("AQU-2128: the deadline label says (optional) once", () => {
+    rosterOk()
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const label = screen.getByText((_, node) => {
+      return node?.tagName === "LABEL" && node.getAttribute("for") === "assign-work-deadline"
+    })
+    const text = (label.textContent ?? "").replace(/\s+/g, " ").trim()
+    expect(text).toBe("Deadline (optional)")
+    expect(text.match(/\(optional\)/g)).toEqual(["(optional)"])
+  })
+
   it("AQU-1969: sends Translate by default and Validate when chosen", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-kind")
@@ -209,6 +221,27 @@ describe("AssignWork", () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalled())
     expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("laneId")
     expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("targetLang")
+  })
+
+  it("AQU-2194: says why nobody else can be picked once the roster has loaded", async () => {
+    // wendi is the only one on the project; kofi reaches it only through the
+    // organisation, so AQU-676 leaves him out of the picker.
+    rosterOk([
+      { userId: 5, username: "wendi", role: { level: 600, name: "maintainer", source: "creator" }, secondarySources: [] },
+      { userId: 7, username: "kofi", role: { level: 400, name: "contributor", source: "org" }, secondarySources: [] },
+    ])
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    const hint = await screen.findByTestId("assign-work-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+  })
+
+  it("AQU-2194: stays quiet when someone else is on the project", async () => {
+    rosterOk()
+    renderAssign()
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    expect(screen.queryByTestId("assign-work-staff-hint")).toBeNull()
   })
 
   it("opens, loads members, and emits a book-scope assignment.create", async () => {
@@ -838,5 +871,28 @@ describe("AssignWork overlap warning (AQU-1510)", () => {
     fireEvent.click(await screen.findByText("GEN 2"))
     await waitFor(() => expect(mockUnit).toHaveBeenCalled())
     expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
+  })
+
+  it("AQU-2130: warns about an assignment made since the form was opened", async () => {
+    rosterOk()
+    mockUnit.mockResolvedValue([])
+    mockCreate.mockResolvedValue("as-new")
+    renderAssign()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    await pickSelectOption(/^assignee$/i, /^anna$/)
+    await waitFor(() => expect(mockUnit).toHaveBeenCalledWith("jwt", "p1", "f1", "", ""))
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }))
+    expect(await screen.findByRole("button", { name: "Assign…" })).toBeInTheDocument()
+
+    const callsBeforeReopen = mockUnit.mock.calls.length
+    mockUnit.mockResolvedValue([wholeBook()])
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+
+    await waitFor(() => expect(mockUnit.mock.calls.length).toBeGreaterThan(callsBeforeReopen))
+    expect(mockUnit).toHaveBeenLastCalledWith("jwt", "p1", "f1", "", "")
+    expect(await screen.findByTestId("assignment-overlap")).toHaveTextContent(/anna already holds/i)
   })
 })

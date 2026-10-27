@@ -14,6 +14,7 @@ import { createHash } from "node:crypto"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import type { Editor } from "@tiptap/core"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -244,6 +245,7 @@ function renderTable(
     onAlignStyles?: () => void | Promise<boolean>
     isCompletionConfigured?: boolean
     isCompletionAvailable?: boolean
+    onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   },
 ) {
   const qc = new QueryClient()
@@ -267,6 +269,7 @@ function renderTable(
           onCompleteSingle={() => {}}
           onCompleteBatch={() => {}}
           onAlignStyles={options?.onAlignStyles}
+          onOptimisticEdit={options?.onOptimisticEdit}
           healthMap={new Map()}
           lineNumbersEnabled={false}
           cellLabelsEnabled={false}
@@ -402,6 +405,73 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // handler blurs it and hands focus back to the grid row (AQU-297), losing
     // the caret with it.
     expect(document.activeElement).toBe(editorSurface)
+  })
+
+  // ── AQU-2206 regression guard ──────────────────────────────────────────────
+  //
+  // AQU-2173 fixed the anchor CAPTURE; the insertion still ignored it. The Add
+  // Footnote dialog's autofocused text field pulls focus out of the cell, the
+  // editor's blur deactivates the row, and the live editor is gone by the time
+  // Add runs — so the row commits the stored text itself. That path appended the
+  // marker, which put every footnote at the end of the cell however good the
+  // anchor was, and made the dialog's Target preview a lie. This drives the real
+  // path: select a word, open the `⋯`, add the note, and read the committed text.
+  it("AQU-2206: a footnote added over a selection commits the marker at the anchor, not the end of the cell", async () => {
+    const onOptimisticEdit = vi.fn()
+    renderTable({ onOpenComments: vi.fn() }, new Map(), {
+      cellStore: makeStore("cell-1"),
+      onOptimisticEdit,
+    })
+
+    // Click into the cell so the editor mounts and can hold a selection.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const surface = document.querySelector(".ProseMirror") as HTMLElement & { editor?: Editor }
+    const editor = surface.editor!
+    act(() => {
+      fireEvent.focus(surface)
+      // "bon|jour|" — a phrase that is NOT at the end of the cell, which is the
+      // whole point: appending and splicing differ only for such a phrase.
+      editor.commands.insertContent(" le monde")
+      editor.commands.setTextSelection({ from: 1, to: 1 + "bonjour".length })
+    })
+
+    // Open the `⋯` the way a pointer does. base-ui reads the interaction type
+    // to decide whether to pull focus into the popup, and a focus pull here
+    // deactivates the cell before the rail can read its anchor (AQU-2173).
+    const row = surface.closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    const addFootnote = await screen.findByRole("button", { name: "Add footnote" })
+    // The cell is still live, so there is an anchor left to capture.
+    expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    // The rail captures the anchor on mouse-DOWN, before focus can move.
+    fireEvent.mouseDown(addFootnote)
+    fireEvent.click(addFootnote)
+
+    // What the dialog's autofocused field does to the cell: focus leaves the
+    // editor, the row deactivates, and the live editor unmounts.
+    act(() => { fireEvent.blur(surface) })
+
+    const noteField = await screen.findByRole("textbox", { name: "Footnote text" })
+    fireEvent.change(noteField, { target: { value: "bonjour: a greeting" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add footnote" }))
+
+    await waitFor(() => {
+      expect(onOptimisticEdit).toHaveBeenCalled()
+    })
+    const committed = onOptimisticEdit.mock.calls.at(-1)![1].value as string
+    // The marker sits where the preview promised — right after the anchored
+    // phrase — and the rest of the cell still follows it.
+    expect(committed).toMatch(/^bonjour\\f [^]*?\\f\* le monde$/)
+    expect(committed.endsWith(" le monde")).toBe(true)
+    expect(committed).toContain("a greeting")
   })
 
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {

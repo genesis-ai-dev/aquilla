@@ -169,6 +169,15 @@ export interface CellData {
    *  continuation cells — drives paragraph grouping (`deriveParagraphs`) and
    *  the paragraph-draft UI affordance. Never derived from the target row. */
   paragraphStart?: boolean
+  /** AQU-2184: the USFM marker that opened this cell's paragraph — "p", "m",
+   *  "q1", "pi2", … — from the SOURCE row's `metadata.paragraphMarker`.
+   *  Present only where `paragraphStart` is, and only on USFM/Paratext
+   *  imports made since AQU-2184; absent everywhere else, where a consumer
+   *  must fall back to plain prose. Source-only for the same reason
+   *  `paragraphStart` is: the book's structure is the source's, and a
+   *  translation that carries no markers still reads in the source's
+   *  paragraphs and poetry lines. */
+  paragraphMarker?: string
   /** AQU-1422: true while this cell is parked with "Hide cell". Read from the
    *  SOURCE row's `hidden` flag and NEVER from the target row — hiding is per
    *  cell, not per lane, and a target row created after the hide carries no flag
@@ -395,6 +404,10 @@ export function buildCellData(
   // D1 paragraph grouping flag: source-only, strict boolean (metadata is
   // Record<string, unknown> — non-boolean junk must not leak through as truthy).
   const paragraphStart = source?.metadata?.paragraphStart === true
+  // AQU-2184: same strict read — a non-string value in the JSONB bucket must
+  // not reach consumers as a marker name.
+  const rawParagraphMarker = source?.metadata?.paragraphMarker
+  const paragraphMarker = typeof rawParagraphMarker === "string" && rawParagraphMarker !== "" ? rawParagraphMarker : undefined
 
   return {
     id: cellId,
@@ -432,6 +445,7 @@ export function buildCellData(
     cameraState,
     metadata,
     paragraphStart: paragraphStart || undefined,
+    paragraphMarker: paragraphStart ? paragraphMarker : undefined,
     // AQU-1422: source row only, deliberately — see the field's doc comment.
     hidden: source?.hidden === true ? true : undefined,
   }

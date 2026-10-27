@@ -319,13 +319,117 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     const defaultRow = screen.getByTestId("project-lane-row-p1-")
     expect(defaultRow).toHaveTextContent("en-target")
     expect(defaultRow).toHaveTextContent("68%")
-    expect(defaultRow).toHaveTextContent("40% validated")
+    // AQU-2179: the figure names which half it is, as on the overview's
+    // Languages table. These languages owe no audio, so that half is absent.
+    expect(defaultRow).toHaveTextContent("40% text validated")
     // AQU-1764: the row's bar is the shared two-part bar, not a translated-only fill.
     expect(barParts(defaultRow)).toEqual(["textValidated 40%", "textTranslated 28%"])
 
     const esRow = screen.getByTestId("project-lane-row-p1-es")
     expect(esRow).toHaveTextContent("22%")
-    expect(esRow).toHaveTextContent("8% validated")
+    expect(esRow).toHaveTextContent("8% text validated")
+  })
+
+  // AQU-2179: these rows draw the same per-language figures as the project
+  // overview's Languages table (AQU-2178), so they must split "N% validated"
+  // the same way — a language's validated TEXT and its approved RECORDINGS
+  // over its own audio total — and print only the halves it owes. A single
+  // mixed "done" share here would contradict the overview for one language.
+  describe("text validated / audio validated (AQU-2179)", () => {
+    // A = Text, B = Audio, C = Text and audio, D = Text with nothing recorded.
+    const deliversLanes = [
+      { lane: "a", delivers: "text" as const, totalCells: 100, filledCells: 60, validatedCells: 40, lastEditAt: now },
+      {
+        lane: "b",
+        delivers: "audio" as const,
+        totalCells: 100,
+        filledCells: 50,
+        validatedCells: 0,
+        audioCells: 50,
+        audioTotalCells: 100,
+        validatedAudioCells: 10,
+        lastEditAt: now,
+      },
+      {
+        lane: "c",
+        delivers: "text_and_audio" as const,
+        totalCells: 100,
+        filledCells: 70,
+        validatedCells: 30,
+        audioCells: 40,
+        audioTotalCells: 100,
+        validatedAudioCells: 20,
+        bothValidatedCells: 15,
+        lastEditAt: now,
+      },
+      { lane: "d", delivers: "text" as const, totalCells: 100, filledCells: 20, validatedCells: 5, lastEditAt: now },
+    ]
+
+    function expandDeliversProject() {
+      renderTable([baseProject({ id: "p1", name: "Gospels", lanes: deliversLanes })])
+      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+    }
+
+    it("prints both halves for a language that delivers text and audio", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-c")
+      expect(row).toHaveTextContent("30% text validated")
+      expect(row).toHaveTextContent("20% audio validated")
+    })
+
+    it("shows no text-validated figure for an Audio language", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-b")
+      expect(within(row).queryByTestId("project-lane-text-validated-p1-b")).not.toBeInTheDocument()
+      expect(row).toHaveTextContent("10% audio validated")
+    })
+
+    it("shows no audio-validated figure — never 0% — for a Text language with nothing recorded", () => {
+      expandDeliversProject()
+      const row = screen.getByTestId("project-lane-row-p1-d")
+      expect(row).toHaveTextContent("5% text validated")
+      expect(within(row).queryByTestId("project-lane-audio-validated-p1-d")).not.toBeInTheDocument()
+      expect(row).not.toHaveTextContent("0% audio validated")
+    })
+
+    // The audio half is approved recordings over the LANGUAGE's own audio
+    // total, exactly as laneAudioValidatedPct measures it for the overview
+    // table and the Progress card's tile — never over the project's total.
+    it("measures the audio half against the language's own audio total", () => {
+      renderTable([
+        baseProject({
+          id: "p1",
+          name: "Gospels",
+          totalCells: 400,
+          lanes: [
+            ...deliversLanes.slice(0, 3),
+            {
+              lane: "d",
+              delivers: "audio" as const,
+              totalCells: 100,
+              filledCells: 20,
+              validatedCells: 0,
+              audioCells: 20,
+              audioTotalCells: 40,
+              validatedAudioCells: 10,
+              lastEditAt: now,
+            },
+          ],
+        }),
+      ])
+      fireEvent.click(screen.getByTestId("lane-chip-overflow-p1"))
+      // 10 approved of the language's own 40, not of the project's 400.
+      expect(screen.getByTestId("project-lane-row-p1-d")).toHaveTextContent("25% audio validated")
+    })
+
+    // Older servers send no per-language audio counts. Measuring those against
+    // the project's denominator is the one way this row could disagree with
+    // the overview, so the row says nothing about audio instead.
+    it("omits the audio half when the server sent no per-language audio counts", () => {
+      expandDeliversProject()
+      expect(within(screen.getByTestId("project-lane-row-p1-a")).queryByTestId("project-lane-audio-validated-p1-a"))
+        .not.toBeInTheDocument()
+    })
   })
 
   // AQU-1474: the default lane is an explicit, empty `?lane=`, never a bare

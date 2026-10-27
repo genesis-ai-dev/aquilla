@@ -48,7 +48,9 @@ async function writeMinimalDocx(filePath: string): Promise<void> {
  *  - "Export to another format" → Web page (AQU-2182) turns a USFM book into
  *    one self-contained HTML file: chapter index, superscript verse numbers,
  *    the committed translation, and markup typed into a cell escaped rather
- *    than rendered.
+ *    than rendered. The verses of one USFM paragraph flow together in it
+ *    (AQU-2184) — the layout the book was imported with, which only the real
+ *    import path can put in the cells' metadata.
  *
  * What this does NOT cover:
  *  - USFM/PPTX reconstructed round-trips other than the original-vs-injected
@@ -220,8 +222,16 @@ test("Web page export writes the USFM book as one readable HTML file (AQU-2182)"
   expect(html).toContain('<sup class="verse-number">1</sup> AQU2182-')
   expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;")
   expect(html).not.toContain("<b>bold</b>")
+  // AQU-2184: the fixture's `\p` opens one paragraph per chapter, and both of
+  // its verses flow inside it rather than each getting a block of its own.
+  // This is the end-to-end proof that the paragraph marker survived import —
+  // it sits between the verse spans in the raw USFM, so no unit test of the
+  // exporter alone can show it reached `cells.metadata`.
+  expect(html).toContain('<p class="para">')
+  expect(html).not.toContain('<p class="verse"')
   // A verse nobody translated still reads — as its source text, marked.
-  expect(html).toContain('class="verse untranslated"')
+  expect(html).toContain('class="para untranslated"')
   expect(html).toContain("Thus the heavens and the earth were finished.")
+  expect(html).toContain("On the seventh day God ended his work.")
   await expect(dialog.getByText(/Downloaded sample\.html/i)).toBeVisible()
 })

@@ -12,10 +12,17 @@
 // than collapsed to a generic failure: the extraction messages are authored for
 // whoever uploaded the file (AQU-1499 — "could not extract text: <reason>") and
 // are the whole reason an agent can self-correct instead of retrying blind.
+//
+// AQU-2216: the call goes over `fetchIdentity`, which prefers the `AUTH_WORKER`
+// service binding. The bare global `fetch` this used to do sent the same-zone
+// request to the zone origin, so Cloudflare answered 522 on every upload and
+// list and auth-worker never saw them — the defect AQU-2191 fixed in
+// brief-summary-bridge.ts.
 
 import type { ExternalErrorCode } from './errors'
+import { fetchIdentity, type IdentityTransport } from './identity-bridge'
 
-export interface KnowledgeBridgeEnv {
+export interface KnowledgeBridgeEnv extends IdentityTransport {
   AUTH_WORKER_URL?: string
   SYNC_SECRET_KEY?: string
 }
@@ -58,24 +65,48 @@ const BEHIND_MESSAGE =
   '/api/v2/internal/projects/:projectId/knowledge — auth-worker is behind ' +
   'sync-worker; deploy auth-worker (docs/DEPLOYMENT-ENVIRONMENTS.md)'
 
+/** Statuses Cloudflare's edge generates when it cannot get an answer from an
+ *  origin. auth-worker's knowledge routes never produce one, so one of these
+ *  proves the request never reached it (same set as brief-summary-bridge.ts). */
+const EDGE_GENERATED_STATUSES = new Set([520, 521, 522, 523, 524, 525, 526, 527, 530])
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/** Every failure writes one line a Logpush/PostHog query can find by its prefix:
+ *  a request that never reaches auth-worker leaves no trace anywhere else. */
+function fail(
+  code: ExternalErrorCode,
+  message: string,
+  context: { projectId: string; status?: number; host?: string },
+): KnowledgeBridgeResult {
+  console.error('[knowledge-bridge] failed', JSON.stringify({ code, message, ...context }))
+  return { ok: false, code, message }
+}
+
 async function callAuthWorker(
   env: KnowledgeBridgeEnv,
+  projectId: string,
   path: string,
   init: RequestInit,
 ): Promise<KnowledgeBridgeResult> {
   if (!env.AUTH_WORKER_URL || !env.SYNC_SECRET_KEY) {
-    return {
-      ok: false,
-      code: 'job_failed',
-      message: 'the knowledge base backend is not configured in this environment',
-    }
+    return fail('job_failed', 'the knowledge base backend is not configured in this environment', {
+      projectId,
+    })
   }
+  const host = hostOf(env.AUTH_WORKER_URL)
 
   let res: Response
   try {
-    res = await fetch(`${env.AUTH_WORKER_URL}${path}`, init)
+    res = await fetchIdentity(env, `${env.AUTH_WORKER_URL}${path}`, init)
   } catch {
-    return { ok: false, code: 'job_failed', message: 'knowledge base backend unreachable' }
+    return fail('job_failed', 'knowledge base backend unreachable', { projectId, host })
   }
 
   let body: unknown = undefined
@@ -88,16 +119,35 @@ async function callAuthWorker(
 
   if (res.ok) {
     if (!parsed) {
-      return { ok: false, code: 'job_failed', message: 'knowledge base backend returned an unreadable response' }
+      return fail('job_failed', 'knowledge base backend returned an unreadable response', {
+        projectId,
+        status: res.status,
+        host,
+      })
     }
     return { ok: true, status: res.status, body }
   }
 
   const err = (body as { error?: { code?: unknown; message?: unknown } } | undefined)?.error
   if (res.status === 404 && (!parsed || err === undefined)) {
-    return { ok: false, code: 'job_failed', message: BEHIND_MESSAGE }
+    return fail('job_failed', BEHIND_MESSAGE, { projectId, status: res.status, host })
   }
-  return mapUpstream(res.status, err?.code, err?.message)
+  // A 52x is CLOUDFLARE answering, not auth-worker: the edge had no origin to
+  // reach for this host. Retrying cannot clear it; the wiring is what is wrong.
+  if (EDGE_GENERATED_STATUSES.has(res.status)) {
+    return fail(
+      'job_failed',
+      `Cloudflare answered ${res.status} for ${host} — the knowledge base request never reached ` +
+        'the identity worker, so auth-worker logged nothing. The subrequest went to the zone ' +
+        'origin instead of the Worker: bind the AUTH_WORKER service binding for this ' +
+        'environment (sync-worker/wrangler.toml [[env.<env>.services]]) and redeploy sync-worker. ' +
+        'Retrying will not clear this',
+      { projectId, status: res.status, host },
+    )
+  }
+  const mapped = mapUpstream(res.status, err?.code, err?.message)
+  if (!mapped.ok) return fail(mapped.code, mapped.message, { projectId, status: res.status, host })
+  return mapped
 }
 
 /** Upload one knowledge document. `bytes` is the verbatim request body; `docName`
@@ -109,6 +159,7 @@ export async function uploadKnowledgeDoc(
 ): Promise<KnowledgeBridgeResult> {
   return callAuthWorker(
     env,
+    input.projectId,
     `/api/v2/internal/projects/${encodeURIComponent(input.projectId)}/knowledge`,
     {
       method: 'POST',
@@ -130,6 +181,7 @@ export async function listKnowledgeDocs(
 ): Promise<KnowledgeBridgeResult> {
   return callAuthWorker(
     env,
+    input.projectId,
     `/api/v2/internal/projects/${encodeURIComponent(input.projectId)}/knowledge`,
     {
       method: 'GET',

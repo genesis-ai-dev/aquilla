@@ -363,6 +363,71 @@ describe('GET /api/v1/external/projects/:projectId/knowledge', () => {
   })
 })
 
+// AQU-2216: the bridge must reach the identity WORKER, not the zone origin. A
+// bare global `fetch` to AUTH_WORKER_URL went to the zone origin in deployed
+// environments, so Cloudflare answered 522 on every upload and list (the same
+// defect AQU-2191 fixed for the brief-summary render).
+describe('transport to auth-worker (AQU-2216)', () => {
+  /** The `AUTH_WORKER` binding stand-in, typed as the real `Fetcher.fetch` so
+   *  `mock.calls[0][0]` type-checks. */
+  function bindingMock() {
+    return vi.fn<Fetcher['fetch']>(async () =>
+      Response.json({ docs: [{ id: 'doc-1', name: 'guide.md' }] }, { status: 200 }),
+    )
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('lists through the AUTH_WORKER binding and never calls global fetch', async () => {
+    const binding = bindingMock()
+    const token = await credToken({ credentialId: CRED_VIEWER, userId: 3, username: 'viewer' })
+    const res = (await handleExternalKnowledgeRequest(listReq(token), {
+      ...makeEnv(),
+      AUTH_WORKER: { fetch: binding },
+    }))!
+    expect(res.status).toBe(200)
+    expect(binding).toHaveBeenCalledTimes(1)
+    expect(String(binding.mock.calls[0][0])).toBe(
+      `${AUTH_URL}/api/v2/internal/projects/${PROJECT}/knowledge`,
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('uploads through the AUTH_WORKER binding and never calls global fetch', async () => {
+    const binding = bindingMock()
+    const token = await credToken({ credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    await handleExternalKnowledgeRequest(
+      uploadReq(token, 'guide.md', new TextEncoder().encode('# Style guide\n')),
+      { ...makeEnv(), AUTH_WORKER: { fetch: binding } },
+    )
+    expect(binding).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to global fetch when no binding exists (local dev, self-hosted)', async () => {
+    const token = await credToken({ credentialId: CRED_VIEWER, userId: 3, username: 'viewer' })
+    await handleExternalKnowledgeRequest(listReq(token), makeEnv())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a Cloudflare 522 as a wiring fault, not a retryable failure, and logs it', async () => {
+    stubAuthWorker(() => new Response('<html>522</html>', { status: 522 }))
+    const token = await credToken({ credentialId: CRED_VIEWER, userId: 3, username: 'viewer' })
+    const res = (await handleExternalKnowledgeRequest(listReq(token), makeEnv()))!
+    const body = (await res.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe('job_failed')
+    expect(body.error.message).toContain('never reached the identity worker')
+    expect(body.error.message).toContain('AUTH_WORKER')
+    expect(body.error.message).not.toContain('knowledge base request failed (522)')
+    expect(console.error).toHaveBeenCalledWith(
+      '[knowledge-bridge] failed',
+      expect.stringContaining('"status":522'),
+    )
+  })
+})
+
 describe('discovery map', () => {
   it('publishes both knowledge endpoints so an agent can find them', async () => {
     const res = handleExternalDiscoveryRequest(new Request('https://w/api/v1/external'))!

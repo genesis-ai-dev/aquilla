@@ -71,7 +71,7 @@ import { audioLineLabels } from "@/lib/export/audio-line-labels"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
-import { exportHtml } from "@/lib/export/exporters/html"
+import { exportHtml, hasBibleVerses } from "@/lib/export/exporters/html"
 import { exportTsv } from "@/lib/export/exporters/tsv"
 import { exportCsv } from "@/lib/export/exporters/csv"
 import { exportXliff12Structured } from "@/lib/export/exporters/xliff12-structured"
@@ -201,8 +201,8 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
   {
     // AQU-2182: a USFM book as one readable, self-contained web page (chapter
     // index, numbered verses, section headings) — what Codex's "Export as
-    // HTML" gave reviewers and printers. Only shown for a Scripture book
-    // (HTML_PAGE_FILE_TYPES).
+    // HTML" gave reviewers and printers. Only shown for a Bible book
+    // (offersHtmlPage).
     id: "html",
     labelKey: "importExport.format.html.label",
     ext: ".html",
@@ -326,18 +326,6 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   csv: "csv",
   tsv: "tsv",
 }
-
-/**
- * The file types that are one Scripture book, which is what the Web page
- * export lays out (title, chapter index, numbered verses).
- *
- * AQU-2210: `"codex"` is what every book of a migrated Codex project is stored
- * as (AQU-997) — the very teams AQU-2182 brought Codex's "Export as HTML" back
- * for — and it never matched the original `=== "usfm"` test. The page is built
- * from the cell array, not the USFM side-car, so a Codex book needs nothing a
- * USFM book has that it lacks.
- */
-const HTML_PAGE_FILE_TYPES: ReadonlySet<string> = new Set(["usfm", "codex"])
 
 interface ExportDialogProps {
   open: boolean
@@ -1015,6 +1003,17 @@ export function ExportDialog({
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
   /**
+   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM file is one
+   * by definition; a `codex` file only when its lines carry Bible verse
+   * references — migrated Codex projects also store dubbing episodes, Pilgrim's
+   * Progress and commentaries as `codex`, and only the lines tell them apart.
+   */
+  const offersHtmlPage = useMemo(
+    () => activeFileType === "usfm" || (activeFileType === "codex" && hasBibleVerses(cells)),
+    [activeFileType, cells],
+  )
+
+  /**
    * What the fold offers, in what order.
    *
    * For a dubbing file the two audio exports and the subtitle round-trip are
@@ -1032,7 +1031,7 @@ export function ExportDialog({
       if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
       if (f.id === "idml") return activeFileType === "idml" // only for idml imports
       if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
-      if (f.id === "html") return activeFileType != null && HTML_PAGE_FILE_TYPES.has(activeFileType) // AQU-2182/AQU-2210
+      if (f.id === "html") return offersHtmlPage // AQU-2182/AQU-2210: a Bible book only
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
       return true
@@ -1053,7 +1052,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId])
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -1061,6 +1060,14 @@ export function ExportDialog({
   useEffect(() => {
     if (format === "sdbh-xml" && !hasSdbhFiles) setFormat("tsv")
   }, [format, hasSdbhFiles])
+
+  // Web page comes and goes per file inside one project (a migrated project can
+  // hold Bible books beside Pilgrim's Progress), while the remembered fold
+  // format is restored per project — so a page remembered from Ruth must not
+  // stay selected, unseen, on a file that is not offered it.
+  useEffect(() => {
+    if (format === "html" && !offersHtmlPage) setFormat(nativeFormatId ?? "tsv")
+  }, [format, offersHtmlPage, nativeFormatId])
 
   // Reset scope to "file" when switching to a file-only format.
   useEffect(() => {

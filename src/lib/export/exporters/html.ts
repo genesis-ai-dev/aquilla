@@ -67,6 +67,21 @@ export interface HtmlExportOptions {
 export type HtmlExportCell = Pick<CellData, "translated" | "group" | "type" | "paragraphStart" | "paragraphMarker"> &
   Parameters<typeof effectiveSourceText>[0]
 
+/**
+ * Does this file read as a Bible book — does any line carry a Bible verse
+ * reference (a known book code with a chapter and verse, `RUT 1:1`)?
+ *
+ * AQU-2210: a `codex` file is not always Scripture. Migrated projects hold
+ * dubbing episodes (`TheChosen-101-en-5-2 1:cue-…`), Pilgrim's Progress
+ * (`PilgrimsProgress 1:13`) and commentaries under the same type, and the file
+ * row cannot tell them apart (no book code; Codex's corpus marker is not
+ * migrated). The lines can, by the same reference test that numbers a verse
+ * on the page — so a file offered the page gets numbered verses.
+ */
+export function hasBibleVerses(cells: readonly Pick<CellData, "group">[]): boolean {
+  return cells.some((cell) => parseScriptureReference(cell.group)?.verse != null)
+}
+
 export function exportHtml(cells: readonly HtmlExportCell[], opts: HtmlExportOptions = {}): Blob {
   return new Blob([buildHtmlPage(cells, opts)], { type: "text/html;charset=utf-8" })
 }

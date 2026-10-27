@@ -4265,6 +4265,7 @@ export function TimelineEditor({
           source. */}
       {!hideTimingMode && (
         <TimingModeControl
+          size="bar"
           mode={timingMode}
           onChange={onChangeTimingMode}
           filmTimed={timingFilmTimed}

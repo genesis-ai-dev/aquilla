@@ -67,6 +67,8 @@ export interface TimingModeControlProps {
   sourceUnavailable?: boolean
   /** How long the file comes out with each choice, in seconds (null = none). */
   lengths?: Partial<Record<AudioTimingMode, number | null>>
+  /** "bar": sized like the media view's top bar buttons (28 px, 0.8 rem). */
+  size?: "default" | "bar"
   className?: string
 }
 
@@ -103,8 +105,9 @@ export function TimingInfoButton({ label, text, testId }: { label: string; text:
 }
 
 export function TimingModeControl({
-  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, className,
+  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, size = "default", className,
 }: TimingModeControlProps) {
+  const bar = size === "bar"
   const t = useT()
   // A film-timed file is shown as following its source whatever reaches here,
   // and a file with nothing to follow as following its recordings: the
@@ -130,14 +133,17 @@ export function TimingModeControl({
       data-testid="tl-timing-mode"
       data-mode={shown}
       data-locked={filmTimed ? "film" : changeable ? undefined : "role"}
-      className={cn("inline-flex shrink-0 items-center gap-1 text-[11px]", className)}
+      className={cn("inline-flex shrink-0 items-center gap-1", bar ? "text-[0.8rem]" : "text-[11px]", className)}
     >
       {changeable ? (
         <DropdownMenu>
           <DropdownMenuTrigger
             data-testid="tl-timing-mode-trigger"
             aria-label={t("editor.timeline.timingMenuAria", { mode: name })}
-            className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-foreground/80 hover:bg-muted aria-expanded:bg-muted"
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border border-border bg-background text-foreground/80 hover:bg-muted aria-expanded:bg-muted",
+              bar ? "h-7 px-2.5" : "h-6 px-2",
+            )}
           >
             <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <span className="text-muted-foreground">{t("editor.timeline.timingLabel")}</span>
@@ -193,7 +199,7 @@ export function TimingModeControl({
       ) : (
         <span
           data-testid={`tl-timing-mode-${shown}`}
-          className="inline-flex h-6 items-center gap-1 px-1 text-foreground/70"
+          className={cn("inline-flex items-center gap-1 px-1 text-foreground/70", bar ? "h-7" : "h-6")}
         >
           <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
           <span className="text-muted-foreground">{t("editor.timeline.timingLabel")}</span>

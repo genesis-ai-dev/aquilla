@@ -117,7 +117,7 @@ export async function handleMigrateIngestRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url)
   if (url.pathname !== INGEST_PATH) return null
-  if (request.method !== 'POST') {
+  if (request.method !== 'POST' && request.method !== 'GET') {
     return new Response('method not allowed', { status: 405 })
   }
   if (!env.SYNC_SECRET_KEY) {
@@ -129,6 +129,9 @@ export async function handleMigrateIngestRequest(
   }
   if (!env.AQUILLA_PG) {
     return new Response('AQUILLA_PG binding not configured', { status: 500 })
+  }
+  if (request.method === 'GET') {
+    return Response.json({ capabilities: ['audio-history-attach-v1', 'audio-projection-repair-v1'] }, { headers: { 'Cache-Control': 'no-store' } })
   }
   const db = env.AQUILLA_PG
   const pipelined = typeof db.batchPipelined === 'function'

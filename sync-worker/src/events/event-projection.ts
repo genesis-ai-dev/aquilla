@@ -1945,6 +1945,77 @@ case 'cell.audio.attach': {
       // lane the event names (`targetLang`, carried since AQU-1462).
       const audioRole = p.role === 'source' ? 'source' : 'dub'
       const audioLane = laneOfAudioEvent(event.payload)
+      const restoreProjection = p.restoreProjectionOf !== undefined
+      if ((p.historyOnly || restoreProjection) && (p.pieceOf || p.transcription != null
+        || p.asr != null || p.transcriptAi != null || p.voiceId != null || p.referenceAudioId != null
+        || p.label != null || p.trimStartMs != null || p.trimEndMs != null || p.timings != null)) {
+        throw new Error('Historical audio recovery only supports original legacy recordings')
+      }
+      if (restoreProjection && (typeof p.restoreProjectionOf !== 'string' || !p.restoreProjectionOf
+        || p.restoreProjectionOf === event.id || p.historyOnly || audioRole !== 'dub' || audioLane)) throw new Error('Invalid audio projection repair')
+      if (restoreProjection) {
+        // Repair a missing legacy projection from its ORIGINAL logged event.
+        // A new repair ID gets past replay filtering, but the reconstructed row
+        // keeps its original provenance, timestamp and surviving votes. Never
+        // overwrite a live/deleted row or deselect a concurrent app recording.
+        stmts.push(db.prepare(`INSERT INTO cell_audio (
+          project_id, file_id, cell_id, audio_id, slot, url, mime_type, duration_ms,
+          selected, deleted, event_id, created_ts, role, created_by, lane_id, validator_count
+        ) SELECT original.project_id, original.file_id, original.cell_id, ?, ?, ?, ?, ?,
+          CASE WHEN EXISTS (SELECT 1 FROM cell_audio a WHERE a.project_id = original.project_id
+            AND a.file_id = original.file_id AND a.cell_id = original.cell_id
+            AND a.slot = ? AND a.selected = 1 AND a.deleted = 0)
+            OR EXISTS (SELECT 1 FROM (SELECT choice.payload FROM events choice
+              WHERE choice.project_id = original.project_id AND choice.file_id = original.file_id
+                AND choice.cell_id = original.cell_id AND choice.kind = 'cell.audio.select'
+                AND choice.payload::jsonb->>'slot' = ?
+              ORDER BY choice.server_seq DESC LIMIT 1) latest
+              WHERE latest.payload::jsonb->>'audioId' IS DISTINCT FROM ?) THEN 0 ELSE 1 END,
+          0, original.id, original.server_ts, ?, original.author, ${audioLaneResolveSql()},
+          (SELECT COUNT(*) FROM cell_audio_validators v WHERE v.project_id = original.project_id
+            AND v.file_id = original.file_id AND v.cell_id = original.cell_id AND v.audio_id = ?)
+        FROM events original
+        WHERE original.id = ? AND original.project_id = ? AND original.file_id = ? AND original.cell_id = ?
+          AND original.kind = 'cell.audio.attach'
+          AND original.payload::jsonb->>'audioId' = ? AND original.payload::jsonb->>'url' = ?
+          AND original.payload::jsonb->>'slot' = ?
+          AND (original.payload::jsonb->>'mimeType') IS NOT DISTINCT FROM ?
+          AND (original.payload::jsonb->>'durationMs')::bigint IS NOT DISTINCT FROM ?::bigint
+          AND original.payload::jsonb - ARRAY['audioId','url','slot','mimeType','durationMs'] = '{}'::jsonb
+          AND NOT EXISTS (SELECT 1 FROM events removed WHERE removed.project_id = original.project_id
+            AND removed.file_id = original.file_id AND removed.cell_id = original.cell_id
+            AND removed.kind = 'cell.audio.remove' AND removed.payload::jsonb->>'audioId' = ?)
+        ON CONFLICT(project_id, file_id, cell_id, audio_id) DO NOTHING`).bind(
+          p.audioId, p.slot, p.url, p.mimeType ?? null, p.durationMs ?? null, p.slot, p.slot, p.audioId,
+          audioRole, ...audioLaneResolveBinds(event.projectId, audioRole, audioLane), p.audioId,
+          p.restoreProjectionOf, event.projectId, event.fileId, event.cellId, p.audioId, p.url,
+          p.slot, p.mimeType ?? null, p.durationMs ?? null, p.audioId,
+        ))
+        return ['cell_audio']
+      }
+      // AQU-2218: recovering an old take must not select it, undo an app
+      // deletion, replace its bytes, or disturb another lane. Persist this
+      // behavior in the event payload so projection rebuilds agree with ingest.
+      // ON CONFLICT also protects an app write that races this import.
+      if (p.historyOnly === true) {
+        stmts.push(db.prepare(
+          `INSERT INTO cell_audio (
+            project_id, file_id, cell_id, audio_id, slot, url, mime_type,
+            duration_ms, selected, deleted, event_id, created_ts, role, created_by, lane_id
+          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ${audioLaneResolveSql()}
+          WHERE NOT EXISTS (SELECT 1 FROM events removed
+            WHERE removed.project_id = ? AND removed.file_id = ? AND removed.cell_id = ?
+              AND removed.kind = 'cell.audio.remove' AND removed.payload::jsonb->>'audioId' = ?
+              AND removed.server_seq < (SELECT server_seq FROM events WHERE id = ? AND project_id = ?))
+          ON CONFLICT(project_id, file_id, cell_id, audio_id) DO NOTHING`,
+        ).bind(
+          event.projectId, event.fileId, event.cellId, p.audioId, p.slot, p.url,
+          p.mimeType ?? null, p.durationMs ?? null, event.id, event.clientTs,
+          audioRole, event.author, ...audioLaneResolveBinds(event.projectId, audioRole, audioLane),
+          event.projectId, event.fileId, event.cellId, p.audioId, event.id, event.projectId,
+        ))
+        return ['cell_audio']
+      }
       // Deselect any other clip in the same slot, then upsert this one as the
       // selected, live clip. `audio_id != ?` so the deselect never touches the
       // row we're about to (re)insert as selected.

@@ -1,0 +1,250 @@
+--- a/src/lib/migrate/audio.ts
++++ b/src/lib/migrate/audio.ts
+@@ -12 +12 @@
+-import { audioAttachEventId, audioSelectEventId, audioValidateEventId } from "./ids"
++import { audioAttachEventId, audioProjectionRepairEventId, audioSelectEventId, audioValidateEventId } from "./ids"
+@@ -136,0 +137,18 @@
++  /** Append an immutable historical take without selecting or resurrecting it. */
++  historyOnly?: boolean
++}
++
++/** Only for a separately audited missing projection of the CURRENT source take.
++ * The executor must verify the original event, absent destination row, no delete
++ * or newer app selection, and exact source bytes immediately before applying.
++ * The repair fills only an absent row from its original logged attach and
++ * surviving votes. It never replaces a row or another selected take. */
++export function selectedAudioProjectionRepairEvent(
++  cellId: string, a: AudioImport, opts: AudioEventOptions,
++  proof: { originalEventId: string; sourceOid: string; sourceSelectedAudioId: string },
++): IngestEvent {
++  const event = audioAttachEvent(cellId, a, { ...opts, historyOnly: false })
++  if (proof.originalEventId !== event.id || proof.sourceSelectedAudioId !== a.legacyAudioId
++    || !/^[a-f0-9]{64}$/.test(proof.sourceOid)) throw new Error("Invalid selected audio projection repair proof")
++  return { ...event, id: audioProjectionRepairEventId(event.id, proof.sourceOid),
++    payload: { ...(event.payload as Record<string, unknown>), restoreProjectionOf: event.id } }
+@@ -151,0 +170 @@
++      ...(opts.historyOnly ? { historyOnly: true } : {}),
+--- a/src/lib/migrate/audio-copy.ts
++++ b/src/lib/migrate/audio-copy.ts
+@@ -98 +98 @@
+-  opts: AudioEventOptions,
++  opts: AudioEventOptions & { preserveUnselectedHistory?: boolean },
+@@ -102 +102,4 @@
+-    events.push(audioAttachEvent(cellId, take, opts))
++    events.push(audioAttachEvent(cellId, take, {
++      ...opts,
++      historyOnly: opts.preserveUnselectedHistory === true && take.aquillaAudioId !== selectedAquillaAudioId,
++    }))
+--- /dev/null
++++ b/scripts/migrate-daemon/recording-proof.ts
+@@ -0,0 +1,76 @@
++import { createHash } from 'node:crypto'
++import { parseCodexNotebook } from '../../src/lib/codex-editor/parse-codex'
++import type { CodexCell } from '../../src/lib/codex-editor/types'
++import { collectAllCellAudio, type AudioImport } from '../../src/lib/migrate/audio'
++import { normalizeAttachmentPath } from '../../src/lib/migrate/audio-copy'
++
++const metadataKeys = ['sizeBytes', 'sampleRate', 'channels', 'durationSec', 'bitrateKbps']
++
++export function recordingMetadata(cell: CodexCell, take: AudioImport): Record<string, unknown> {
++  const att = (cell.metadata.attachments as unknown as Record<string, Record<string, unknown>> | undefined)?.[take.legacyAudioId] ?? {}
++  const nested = (att.metadata ?? {}) as Record<string, unknown>
++  return Object.fromEntries(metadataKeys.map(key => [key, att[key] ?? nested[key] ?? null]))
++}
++
++export function recordingBinding(file: string, cellId: string, take: AudioImport, metadata?: Record<string, unknown>): string {
++  return JSON.stringify([file, cellId, take.legacyAudioId, normalizeAttachmentPath(take.diskRelPath), take.slot,
++    take.createdBy ?? null, take.createdAt ?? null, take.mimeType ?? null, take.durationMs ?? null,
++    ...metadataKeys.map(key => metadata?.[key] ?? null)])
++}
++
++export interface RecordingProof {
++  projectId: number
++  sha: string
++  file: string
++  cellId: string
++  take: AudioImport
++  audioMetadata?: Record<string, unknown>
++}
++
++/** Bind audited evidence to the same live recording in BOTH revisions. A text
++ * edit elsewhere in its notebook is irrelevant; a changed, deleted, duplicated
++ * or moved recording is not. No filenames, display names or timestamps alone
++ * authorize recovery. The caller still verifies the identified bytes. */
++export async function revalidateRecordingProofs<T extends RecordingProof>(
++  entries: T[], projectId: number, sha: string,
++  read: (sha: string, file: string) => Promise<Uint8Array | null>,
++  record: (proof: Record<string, unknown>) => void = () => {},
++): Promise<T[]> {
++  if (!Number.isSafeInteger(projectId) || projectId < 1 || !/^[a-f0-9]{40}$/.test(sha)) throw Error('Invalid source identity')
++  const results: T[] = []
++  const cache = new Map<string, Promise<Map<string, number> | null>>()
++  const index = (ref: string, file: string) => {
++    const key = `${ref}:${file}`
++    let pending = cache.get(key)
++    if (!pending) {
++      pending = (async () => {
++        const bytes = await read(ref, file)
++        if (bytes === null) return null
++        const counts = new Map<string, number>()
++        for (const cell of parseCodexNotebook(Buffer.from(bytes).toString('utf8')).cells) {
++          for (const take of collectAllCellAudio(cell)) {
++            const binding = recordingBinding(file, cell.metadata.id, take, recordingMetadata(cell, take))
++            counts.set(binding, (counts.get(binding) ?? 0) + 1)
++          }
++        }
++        return counts
++      })()
++      cache.set(key, pending)
++    }
++    return pending
++  }
++  for (const entry of entries) {
++    if (entry.projectId !== projectId) continue
++    if (!/^[a-f0-9]{40}$/.test(entry.sha) || !/^[^/\\]+\.codex$/.test(entry.file)
++      || !entry.cellId || !entry.take?.legacyAudioId || !entry.take.diskRelPath) throw Error('Invalid recording evidence')
++    const key = recordingBinding(entry.file, entry.cellId, entry.take, entry.audioMetadata)
++    const old = await index(entry.sha, entry.file)
++    const current = await index(sha, entry.file)
++    const accepted = old?.get(key) === 1 && current?.get(key) === 1
++    record({ code: accepted ? 'historical-recording-revalidated' : 'historical-recording-changed', projectId,
++      sha, previousSha: entry.sha, file: entry.file, cellId: entry.cellId,
++      bindingSha256: createHash('sha256').update(key).digest('hex') })
++    if (accepted) results.push({ ...entry, sha })
++  }
++  return results
++}
+--- a/scripts/migrate-daemon/pointer-recovery.ts
++++ b/scripts/migrate-daemon/pointer-recovery.ts
+@@ -12,10 +12,2 @@
+-// Include association and all imported metadata: a shared filename is never evidence.
+-const audioMetadataKeys=['sizeBytes','sampleRate','channels','durationSec','bitrateKbps']
+-export function recordingMetadata(cell:CodexCell,take:AudioImport):Record<string,unknown> {
+- const att=(cell.metadata.attachments as unknown as Record<string,Record<string,unknown>>|undefined)?.[take.legacyAudioId]??{}
+- const nested=(att.metadata??{}) as Record<string,unknown>
+- return Object.fromEntries(audioMetadataKeys.map(key=>[key,att[key]??nested[key]??null]))
+-}
+-export function recordingBinding(file:string,cellId:string,take:AudioImport,audioMetadata?:Record<string,unknown>):string {
+- return JSON.stringify([file,cellId,take.legacyAudioId,normalizeAttachmentPath(take.diskRelPath),take.slot,take.createdBy??null,take.createdAt??null,take.mimeType??null,take.durationMs??null,...audioMetadataKeys.map(key=>audioMetadata?.[key]??null)])
+-}
++import {recordingBinding, recordingMetadata} from './recording-proof'
++export {recordingBinding, recordingMetadata} from './recording-proof'
+--- a/scripts/migrate-daemon/revalidate-history.ts
++++ b/scripts/migrate-daemon/revalidate-history.ts
+@@ -3 +2,0 @@
+-import {createHash} from 'node:crypto'
+@@ -5,2 +4 @@
+-/** Carry proof across an unrelated commit only when the entire source notebook
+- * is byte-identical to the previously audited revision of the same project. */
++import {revalidateRecordingProofs} from './recording-proof'
+@@ -8,17 +6,6 @@
+- const result=entries.filter(e=>e.projectId===projectId&&e.sha===sha)
+- const groups=new Map<string,HistoricalPointerRepair[]>()
+- for(const e of entries){
+-  if(e.projectId!==projectId||e.sha===sha)continue
+-  if(!/^[a-f0-9]{40}$/.test(e.sha)||path.basename(e.file)!==e.file||!e.file.endsWith('.codex'))throw Error('Invalid historical source reference')
+-  const key=e.sha+':'+e.file;groups.set(key,[...(groups.get(key)??[]),e])
+- }
+- for(const group of groups.values()){
+-  const e=group[0],file=path.join(dir,'files/target',e.file)
+-  const currentBytes=readCurrent?await readCurrent(e.file):fs.existsSync(file)?fs.readFileSync(file):null
+-  if(currentBytes===null)continue
+-  const previous=await read(e.sha,e.file),current=Buffer.from(currentBytes)
+-  if(previous===null||!current.equals(Buffer.from(previous))){record({code:'historical-notebook-changed',projectId,sha,previousSha:e.sha,file:e.file});continue}
+-  result.push(...group.map(entry=>({...entry,sha})))
+-  record({code:'historical-notebook-revalidated',projectId,sha,previousSha:e.sha,file:e.file,sha256:createHash('sha256').update(current).digest('hex'),references:group.length})
+- }
+- return result
++ return revalidateRecordingProofs(entries,projectId,sha,async(ref,file)=>{
++  if(ref!==sha)return read(ref,file)
++  if(readCurrent)return readCurrent(file)
++  const f=path.join(dir,'files/target',file)
++  return fs.existsSync(f)?fs.readFileSync(f):null
++ },record)
+--- a/scripts/migrate-daemon/historical-policy.ts
++++ b/scripts/migrate-daemon/historical-policy.ts
+@@ -0,0 +1 @@
++import {revalidateRecordingProofs} from './recording-proof'
+@@ -6 +7 @@
+-export function loadHistoricalPolicy(file:string|undefined,projectId:number,sha:string) {
++export async function loadHistoricalPolicy(file:string|undefined,projectId:number,sha:string,read:(sha:string,file:string)=>Promise<Uint8Array|null>) {
+@@ -9,0 +11,5 @@
++ // Validate the complete operator manifest before filtering by project/revision.
++ for(const e of [...doc.gaps,...doc.recoveries])if(!Number.isSafeInteger(e.projectId)||e.projectId<1||!(/^[a-f0-9]{40}$/).test(e.sha)||!e.reason||!e.take?.legacyAudioId||!e.file||!e.cellId)throw Error("Invalid historical policy entry")
++ for(const e of doc.recoveries)if(!e.verifiedAt||!(/^[a-f0-9]{64}$/).test(e.oid??"")||!Number.isSafeInteger(e.size)||e.size<0)throw Error("Invalid verified recovery")
++ doc.gaps=await revalidateRecordingProofs(doc.gaps,projectId,sha,read)
++ doc.recoveries=await revalidateRecordingProofs(doc.recoveries,projectId,sha,read)
+--- a/scripts/migrate-daemon/loop.ts
++++ b/scripts/migrate-daemon/loop.ts
+@@ -318,0 +319 @@
++    if(!this.ctx.config.dryRun)await this.ctx.sync.requireAudioHistoryCapability()
+@@ -330 +331,6 @@
+-    const policy=loadHistoricalPolicy(this.ctx.config.historicalPolicy,project.gitlab_id,job.sha)
++    const policy=await loadHistoricalPolicy(this.ctx.config.historicalPolicy,project.gitlab_id,job.sha,async(ref,file)=>{
++      if(ref!==job.sha){const body=await this.ctx.gitlab.rawFile(project.gitlab_id,'files/target/'+file,ref);return body===null?null:Buffer.from(body)}
++      const p='files/target/'+file;if(!source.entries.has(p))return null
++      for await(const f of source.readFiles([p]))return f.bytes
++      return null
++    })
+--- a/scripts/migrate-daemon/stages/audio.ts
++++ b/scripts/migrate-daemon/stages/audio.ts
+@@ -275,0 +276 @@
++      preserveUnselectedHistory: true,
+--- a/scripts/migrate-daemon/http.ts
++++ b/scripts/migrate-daemon/http.ts
+@@ -137,0 +138,9 @@
++  async requireAudioHistoryCapability(): Promise<void> {
++    const check = async (base:string, secret:string, route:string) => {
++      const res=await retryingFetch(`${base}${route}`,{headers:{...this.headers(),Authorization:`Bearer ${secret}`},signal:AbortSignal.timeout(60_000)},this.retry)
++      const body=await res.json() as {capabilities?:string[]}
++      if(!Array.isArray(body.capabilities)||!['audio-history-attach-v1','audio-projection-repair-v1'].every(c=>body.capabilities?.includes(c)))throw Error('Historical audio import requires compatible ingestion AND application projection workers')
++    }
++    await check(this.base,this.secret,'/migrate/ingest')
++    if(this.direct)await check(this.direct.base,this.direct.secret,'/migrate/readiness')
++  }
+--- a/scripts/migrate-daemon/__tests__/audio.test.ts
++++ b/scripts/migrate-daemon/__tests__/audio.test.ts
+@@ -288,3 +288,4 @@
+-  const policy=loadHistoricalPolicy(policyPath,47,sha)!
+-  expect(loadHistoricalPolicy(policyPath,48,sha)).toBeUndefined()
+-  expect(loadHistoricalPolicy(policyPath,47,'b'.repeat(40))).toBeUndefined()
++  const read=async(ref:string)=>ref===sha?Buffer.from(JSON.stringify(doc)):null
++  const policy=(await loadHistoricalPolicy(policyPath,47,sha,read))!
++  expect(await loadHistoricalPolicy(policyPath,48,sha,read)).toBeUndefined()
++  expect(await loadHistoricalPolicy(policyPath,47,'b'.repeat(40),read)).toBeUndefined()
+--- a/src/lib/migrate/ids.ts
++++ b/src/lib/migrate/ids.ts
+@@ -19,0 +20,6 @@
++
++/** Audited repair of a missing audio projection whose original event is already
++ * logged. Keep that original event/ledger entry; this repair has its own stable
++ * identity, tied to the verified source bytes. Never use it for routine retries. */
++export const audioProjectionRepairEventId = (originalEventId: string, sourceOid: string): string =>
++  u5(`audio-projection-repair:v1:${originalEventId}:${sourceOid}`)
+--- a/scripts/migrate-daemon/__tests__/http.test.ts
++++ b/scripts/migrate-daemon/__tests__/http.test.ts
+@@ -47,0 +48,18 @@
++  it("admits recovery only when both ingestion and replay workers support it, using reads only", async () => {
++    const capabilities=['audio-history-attach-v1','audio-projection-repair-v1'];
++    for(const broken of [null,'public','private'] as const){
++      const requests:string[]=[];
++      vi.stubGlobal('fetch',vi.fn(async(url:string,init:RequestInit)=>{
++        requests.push(url);expect(init.method??'GET').toBe('GET');expect(init.body).toBeUndefined();
++        expect((init.headers as Record<string,string>)['x-migrate-runner']).toBe('runner');
++        return Response.json({capabilities:url.includes(broken??'never')?[]:capabilities});
++      }));
++      const client=new SyncClient('https://public','public-secret','runner',noSleep,false,1,{
++        base:'https://private',secret:'private-secret',destination:'expected',identity:()=>({gitlabId:1,orgId:1,teamId:null}),
++      });
++      if(broken)await expect(client.requireAudioHistoryCapability()).rejects.toThrow('Historical audio import requires compatible');
++      else await expect(client.requireAudioHistoryCapability()).resolves.toBeUndefined();
++      expect(requests).toEqual(broken==='public'?['https://public/migrate/ingest']:['https://public/migrate/ingest','https://private/migrate/readiness']);
++    }
++  })
++
+@@ -99 +117 @@
+-  it("listProjectsByActivity stops at the high-water mark", async () => {
++  it("inventories older-activity projects too, so their changed heads cannot be missed", async () => {
+@@ -107 +125 @@
+-    expect(out).toEqual([1])
++    expect(out).toEqual([1, 2])

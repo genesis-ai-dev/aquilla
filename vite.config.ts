@@ -250,6 +250,7 @@ export default defineConfig(({ mode }) => ({
             "auth-worker/**",
             "sync-worker/**",
             "agent-worker/**",
+            "monitor-worker/**",
             "worker/**",
             // The Zapier app has its own package.json + jest suite (cd zapier && npm test).
             "zapier/**",

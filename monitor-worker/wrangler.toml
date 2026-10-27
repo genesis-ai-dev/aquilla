@@ -1,0 +1,123 @@
+# The unnamed profile is local-only. Live deploys must select a named profile;
+# a bare `wrangler deploy` therefore cannot overwrite the production Worker.
+name = "aquilla-monitor-local"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+
+# =============================================================================
+# monitor-worker — uptime checks with Discord alerts (see README.md).
+#
+# A cron runs every minute, probes each MONITOR_TARGETS entry, and posts to a
+# Discord channel webhook when a target goes down, stays down (reminder), or
+# recovers. Down alerts mention DISCORD_MENTION_ROLE_IDS / _USER_IDS.
+#
+# No routes: the Worker serves /status and /test-alert on workers.dev only.
+#
+# Secrets (per env, `wrangler secret put NAME --env <env>`):
+#   DISCORD_WEBHOOK_URL   required — the channel webhook URL
+#   HEARTBEAT_URL         optional — external dead-man's-switch URL
+#   MONITOR_ADMIN_TOKEN   optional — enables POST /test-alert
+# =============================================================================
+
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+
+[observability]
+enabled = true
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ENVIRONMENT_LABEL = "local"
+MONITOR_TARGETS = '[{"id":"identity","name":"Identity API (local)","url":"http://localhost:8787/healthz","expectBodyIncludes":"\"ok\":true"}]'
+FAILURE_THRESHOLD = "3"
+RECOVERY_THRESHOLD = "2"
+REMINDER_MINUTES = "60"
+DISCORD_MENTION_ROLE_IDS = ""
+DISCORD_MENTION_USER_IDS = ""
+
+[[durable_objects.bindings]]
+name = "MONITOR_STATE"
+class_name = "MonitorState"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MonitorState"]
+
+# ---------------------------------------------------------------------------
+# Production — watches aquilla.app and api.aquilla.app.
+# Each named env must re-declare every binding (they are NOT inherited).
+# Set DISCORD_MENTION_ROLE_IDS to the role that should be paged (see README).
+# ---------------------------------------------------------------------------
+[env.production]
+name = "aquilla-monitor"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+
+[env.production.build]
+command = "bash ../scripts/verify-deploy-branch.sh release"
+
+[env.production.observability]
+enabled = true
+
+[env.production.triggers]
+crons = []
+
+[env.production.vars]
+ENVIRONMENT_LABEL = "production"
+MONITOR_TARGETS = '''[
+  {"id":"web","name":"Web app","url":"https://aquilla.app/login","expectBodyIncludes":"id=\"root\""},
+  {"id":"identity","name":"Identity API","url":"https://api.aquilla.app/identity/healthz","expectBodyIncludes":"\"ok\":true"}
+]'''
+FAILURE_THRESHOLD = "3"
+RECOVERY_THRESHOLD = "2"
+REMINDER_MINUTES = "60"
+DISCORD_MENTION_ROLE_IDS = "1564768432677847051,1564768540450361497"
+DISCORD_MENTION_USER_IDS = ""
+
+[[env.production.durable_objects.bindings]]
+name = "MONITOR_STATE"
+class_name = "MonitorState"
+
+[[env.production.migrations]]
+tag = "v1"
+new_sqlite_classes = ["MonitorState"]
+
+# ---------------------------------------------------------------------------
+# Development — watches dev.aquilla.app and api.dev.aquilla.app. Leave the
+# mention ids empty (or point the webhook at a quieter channel) so a dev
+# outage does not page the team.
+# ---------------------------------------------------------------------------
+[env.development]
+name = "aquilla-monitor-dev"
+account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
+workers_dev = true
+
+[env.development.observability]
+enabled = true
+
+[env.development.triggers]
+# Enable after the development sync health route returns 200.
+crons = []
+
+[env.development.vars]
+ENVIRONMENT_LABEL = "development"
+MONITOR_TARGETS = '''[
+  {"id":"web","name":"Web app","url":"https://dev.aquilla.app/login","expectBodyIncludes":"id=\"root\""},
+  {"id":"identity","name":"Identity API","url":"https://api.dev.aquilla.app/identity/healthz","expectBodyIncludes":"\"ok\":true"},
+  {"id":"sync","name":"Sync API (Postgres + R2)","url":"https://api.dev.aquilla.app/sync/health","expectBodyIncludes":"\"ok\":true"}
+]'''
+FAILURE_THRESHOLD = "3"
+RECOVERY_THRESHOLD = "2"
+REMINDER_MINUTES = "120"
+DISCORD_MENTION_ROLE_IDS = ""
+DISCORD_MENTION_USER_IDS = ""
+
+[[env.development.durable_objects.bindings]]
+name = "MONITOR_STATE"
+class_name = "MonitorState"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["MonitorState"]

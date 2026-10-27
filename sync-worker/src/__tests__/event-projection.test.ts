@@ -996,6 +996,11 @@ describe('isChainMutatingKind', () => {
     // row and never advances the source head (a hide must not make every
     // lane's translation go stale under AD-9) — non-chain-mutating by design.
     'source.cell.visibility.set': false,
+    // AQU-2185: a hand-set section name moves only cells.milestone_label on
+    // the shared source row and likewise never advances the source head —
+    // naming a division says nothing about whether the text changed, so it
+    // must not make every lane's translation stale under AD-9.
+    'source.cell.milestone.set': false,
     'source.cell.restore': false,
     'target.cell.create': true,
     'target.cell.commit': true,

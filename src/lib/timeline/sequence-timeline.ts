@@ -14,10 +14,10 @@
 //     section break sits on the timeline like any line — its take, or a dashed
 //     stand-in from its words. Not counted, it stays off unless recorded.
 //     HIDDEN (parked) lines stay off unless recorded, whatever the setting.
-//   - A LONG FILE WITH NO CHAPTERS SHOWS IN PARTS (Sam's decision 1): over 90
-//     minutes, it is cut at line boundaries into the fewest roughly equal
-//     parts of 90 minutes or less, and a part behaves like a chapter. 90 is the
-//     longest film we have (71:59) plus about a fifth, rounded up.
+//   - A LONG FILE WITH NO CHAPTERS SHOWS IN PARTS (Sam's decision 1, and his
+//     ruling of Oct 28): over 60 minutes, it is cut at line boundaries into
+//     the fewest roughly equal parts of 60 minutes or less, and a part
+//     behaves like a chapter. A file that follows its source never splits.
 //
 // Pure. The workspace feeds the chapters from the cell store's own navigation
 // index (the one the chapter picker reads) and the cells from the merged read.
@@ -35,7 +35,7 @@ export interface TimelineChapter {
 
 /** The longest a timeline shows at once, in seconds, before a file with no
  *  chapters is shown in parts. */
-export const PART_MAX_SEC = 90 * 60
+export const PART_MAX_SEC = 60 * 60
 
 /**
  * True for a line that is not drawn on a sequence file's timeline: a hidden

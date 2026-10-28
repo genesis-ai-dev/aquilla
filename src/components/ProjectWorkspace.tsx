@@ -13451,7 +13451,7 @@ export function ProjectWorkspace() {
   //
   // The timeline shows ONE SCOPE at a time: a chapter of a book (the one the
   // table and its chapter picker are on), or — for a file with no chapters
-  // whose timeline runs over 90 minutes — a part (the one holding the line at
+  // whose timeline runs over 60 minutes — a part (the one holding the line at
   // the top of the table). While playback is on a line of this file, it shows
   // that line's scope instead. The timeline, the bottom strip's Play all and
   // every timeline seek share ONE list of lines (`timelineCells`), so the

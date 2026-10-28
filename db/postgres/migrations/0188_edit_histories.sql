@@ -17,7 +17,7 @@
 -- the signed-in person's own row. Nothing else reads it, so it gets no RLS
 -- policy and is listed in scripts/rls-coverage.test.ts's UNCOVERED map.
 --
--- Idempotent and additive. (0185 and 0186 are taken by sibling branches.)
+-- Idempotent and additive. (Renumbered after dev took 0185–0187.)
 
 CREATE TABLE IF NOT EXISTS edit_histories (
     project_id  TEXT    NOT NULL,

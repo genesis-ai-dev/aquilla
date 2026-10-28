@@ -336,7 +336,7 @@ describe("ExperimentalFlagsSection — Smart Extensions switch (AQU-1937)", () =
 
 describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () => {
   function rowText(name: string): string {
-    const toggle = screen.getByRole("switch", { name, exact: true })
+    const toggle = screen.getByRole("switch", { name })
     const row = toggle.closest("div.flex")
     expect(row).not.toBeNull()
     return row?.textContent ?? ""

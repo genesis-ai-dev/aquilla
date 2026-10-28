@@ -5149,10 +5149,13 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
           linkedVideoEmpty={{ captionTrackCount: 0 }} />,
       )
       const column = screen.getByTestId("tl-scroll")
-      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      const canvas = screen.getByTestId("tl-canvas")
+      const laneWidthPx = () => parseFloat(canvas.dataset.filePx ?? "")
       // The walk's file: an empty Free timing timeline is about two seconds,
-      // far shorter than the view, so the column cannot scroll at all.
+      // far shorter than the view, so the column cannot scroll at all — and
+      // its ground still runs to the view's edge (Sam, Oct 28).
       expect(laneWidthPx()).toBeLessThan(200)
+      expect(canvas.style.width).toBe("900px")
 
       const check = (zoomStep: number) => {
         const where = `after ${zoomStep} zoom-in(s)`
@@ -5178,6 +5181,7 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
         fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
         flush()
         expect(laneWidthPx()).toBeGreaterThan(before)
+        expect(canvas.style.width).toBe(`${Math.max(900, laneWidthPx())}px`)
         check(i)
       }
       fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))

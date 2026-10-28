@@ -1,6 +1,8 @@
 # systemd unit for the self-hosted Omnilingual ASR server.
 # Install: see infra/selfhost/README.md
 [Unit]
+# Never give up retrying (at boot the GPU driver or network may lag behind).
+StartLimitIntervalSec=0
 Description=Aquilla Omnilingual ASR (self-hosted)
 After=network-online.target
 Wants=network-online.target

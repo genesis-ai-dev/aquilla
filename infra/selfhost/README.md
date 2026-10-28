@@ -94,6 +94,10 @@ set `OMNI_ASR_PRIMARY_URL = "https://omni-asr.aquilla.app"` in the
 environment's `[vars]` block in `auth-worker/wrangler.toml`. The secret stays
 `OMNI_SHARED_SECRET`.
 
+To set or change the box's secret, run `infra/selfhost/set-secret.sh user@box`
+from any machine with ssh access. It prompts for the secret (hidden), writes it
+over ssh, restarts the server and checks the public URL accepts it.
+
 **Set the box's secret first.** `OMNI_SHARED_SECRET` in the box's env file must
 equal that environment's worker secret before the URL goes in. A mismatch makes
 the box answer 401, and a 4xx is never retried on Modal, so every transcription

@@ -524,7 +524,6 @@ describe("TargetAudioLane — the silence inside a split take (AQU-1758)", () =>
     renderWithTooltips(
       <TargetAudioLane
         {...base}
-        audioFirst
         layout={layout}
         items={[
           { cell: c, kind: "take", audioId: SPLIT_TAKE, pieceIndex: 0, pieceCount: 2 },

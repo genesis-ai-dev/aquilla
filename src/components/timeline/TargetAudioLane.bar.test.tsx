@@ -87,10 +87,14 @@ describe("the bar's height", () => {
 })
 
 describe("the bar's colour", () => {
-  it("is the track hue at 34% (the medium bar)", () => {
+  it("is the track's strip colour, matching the strip at its far left (Oct 28)", () => {
     render(<TargetAudioLane {...base} color="violet" items={[item()]} />)
     expect(bar()!.className).toContain("bg-[color:var(--tl-track-bar)]")
-    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar")).toBe("rgba(134, 93, 235, 0.34)")
+    // Sam, Oct 28: the track's strip colour, the same as the strip at its far left.
+    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar")).toBe("oklch(0.595 0.140 292.4)")
+    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar")).toBe(
+      screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-strip"),
+    )
   })
 
   it("turns red with the chip at fault: a warning still beats the track colour", () => {

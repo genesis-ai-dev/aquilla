@@ -140,7 +140,9 @@ describe("the alphas", () => {
       "--tl-track-ground": "rgba(0, 195, 205, 0.12)",
       "--tl-track-played": "rgba(0, 195, 205, 0.27)",
       "--tl-track-frame": "rgba(0, 195, 205, 0.26)",
-      "--tl-track-bar": "rgba(0, 195, 205, 0.34)",
+      // Sam, Oct 28: the name bar is the strip colour, with dark ink on it.
+      "--tl-track-bar": "oklch(0.744 0.140 201.3)",
+      "--tl-track-bar-ink": "#1c1f24",
       "--tl-track-wave": "oklch(0.55 0.125 201.3)",
       "--tl-track-line": "oklch(0.544 0.078 201.3)",
       "--tl-track-strip": "oklch(0.744 0.140 201.3)",
@@ -188,7 +190,7 @@ describe("the class vocabulary", () => {
 
   it("fills the waveform and the name bar from their own variables", () => {
     expect(TRACK_WAVE_FILL_CLASS).toBe("fill-[color:var(--tl-track-wave)]")
-    expect(TRACK_BAR_CLASS).toBe("bg-[color:var(--tl-track-bar)]")
+    expect(TRACK_BAR_CLASS).toBe("bg-[color:var(--tl-track-bar)] text-[color:var(--tl-track-bar-ink)]")
   })
 
   it("draws the gutter strip and the dot in the strip colour", () => {
@@ -407,13 +409,13 @@ describe("the folder band is visible in both themes", () => {
 
 // ── AQU-2235: the waveform look's exact values (boards 51 and 53) ───────────
 describe("the waveform look", () => {
-  it("is Sam's values: ground 12, played 27, frame 26, bar 34; waveform 90, not yet 30; muted 50", () => {
-    expect(WAVE_LOOK).toEqual({ ground: 0.12, played: 0.27, frame: 0.26, bar: 0.34, wave: 0.9, unplayed: 0.3, muted: 0.5 })
+  it("is Sam's values: ground 12, played 27, frame 26; waveform 90, not yet 30; muted 50; the bar in the strip colour", () => {
+    expect(WAVE_LOOK).toEqual({ ground: 0.12, played: 0.27, frame: 0.26, wave: 0.9, unplayed: 0.3, muted: 0.5 })
     const green = trackHueVars("green")
     expect(green["--tl-track-ground"]).toBe("rgba(12, 193, 135, 0.12)")
     expect(green["--tl-track-played"]).toBe("rgba(12, 193, 135, 0.27)")
     expect(green["--tl-track-frame"]).toBe("rgba(12, 193, 135, 0.26)")
-    expect(green["--tl-track-bar"]).toBe("rgba(12, 193, 135, 0.34)")
+    expect(green["--tl-track-bar"]).toBe(green["--tl-track-strip"])
   })
 
   // Board 53, to the third decimal: oklch(0.55 0.14 <hue>), and the P3

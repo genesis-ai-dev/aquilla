@@ -311,7 +311,10 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
     "--tl-track-ground": hexToRgba(hex, WAVE_LOOK.ground),
     "--tl-track-played": hexToRgba(hex, WAVE_LOOK.played),
     "--tl-track-frame": hexToRgba(hex, WAVE_LOOK.frame),
-    "--tl-track-bar": hexToRgba(hex, WAVE_LOOK.bar),
+    // Sam, Oct 28: the name bar takes the track's strip colour, matching the
+    // strip at the track's far left (first chosen as the hue at 34%).
+    "--tl-track-bar": stripColorFor(hex),
+    "--tl-track-bar-ink": barInkFor(hex),
     "--tl-track-wave": waveColorCss(hex),
     "--tl-track-line": playLineColorCss(hex),
     "--tl-track-strip": stripColorFor(hex),
@@ -328,7 +331,6 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
  *                 corner", so the two strengths of the old ladder are one
  *   played  27%   the part of a playing take already heard
  *   frame   26%   1 px
- *   bar     34%   the name bar along a timeline clip's top ("medium")
  *
  * and the waveform itself is `oklch(0.55 0.14 <hue>)` (track-oklch) at
  * `wave`, dropping to `unplayed` on the part of a playing take not yet heard.
@@ -339,7 +341,6 @@ export const WAVE_LOOK = {
   ground: 0.12,
   played: 0.27,
   frame: 0.26,
-  bar: 0.34,
   /** The waveform's opacity, at rest and on the part already played. */
   wave: 0.9,
   /** …and on the part of a playing take not yet played. */
@@ -357,6 +358,22 @@ export const WAVE_LOOK = {
  */
 function stripColorFor(hex: string): string {
   return PALETTE_HEXES.has(hex) ? stripColorCss(hex) : hex
+}
+
+/**
+ * The name bar's text on its strip colour. The palette's strips all sit at
+ * oklch lightness 0.60–0.77, where dark ink reads at 4:1 or better and white
+ * falls under 3.5:1, in either theme. Any other colour picks by its own
+ * luminance.
+ */
+function barInkFor(hex: string): string {
+  if (PALETTE_HEXES.has(hex)) return "#1c1f24"
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return "#1c1f24"
+  const n = parseInt(m[1], 16)
+  const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }
+  const lum = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return lum > 0.18 ? "#1c1f24" : "#ffffff"
 }
 
 // The class vocabulary, in the one module that also owns the variables so the
@@ -390,7 +407,7 @@ export const TRACK_CHIP_GENERATED_CLASS =
  *  (`WAVE_LOOK.wave`, or `unplayed` on the part not yet played). */
 export const TRACK_WAVE_FILL_CLASS = "fill-[color:var(--tl-track-wave)]"
 /** The name bar along a timeline clip's top (AQU-2235, board 54). */
-export const TRACK_BAR_CLASS = "bg-[color:var(--tl-track-bar)]"
+export const TRACK_BAR_CLASS = "bg-[color:var(--tl-track-bar)] text-[color:var(--tl-track-bar-ink)]"
 /** The gutter's 4px identity bar. A CLASS ON THE ROW'S ROOT, never a new
  *  element — see the note at its call site in TimelineEditor. AQU-2235: in the
  *  strip colour, the waveform's chroma at the track's own lightness. */
@@ -436,7 +453,8 @@ export const NEUTRAL_TRACK_VARS: Record<string, string> = {
   "--tl-track-ground": "color-mix(in oklab, var(--foreground) 5%, var(--background))",
   "--tl-track-played": "color-mix(in oklab, var(--foreground) 11%, var(--background))",
   "--tl-track-frame": "color-mix(in oklab, var(--foreground) 12%, var(--background))",
-  "--tl-track-bar": "color-mix(in oklab, var(--foreground) 14%, var(--background))",
+  "--tl-track-bar": "color-mix(in oklab, var(--foreground) 24%, var(--background))",
+  "--tl-track-bar-ink": "var(--foreground)",
   "--tl-track-wave": "color-mix(in oklab, var(--foreground) 62%, var(--background))",
   "--tl-track-line": "color-mix(in oklab, var(--foreground) 80%, var(--background))",
   "--tl-track-strip": "color-mix(in oklab, var(--foreground) 24%, var(--background))",

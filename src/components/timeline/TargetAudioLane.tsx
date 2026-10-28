@@ -99,7 +99,7 @@ import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 /** AQU-2235: a glyph in the name bar's right end — record, ⋯, play. No
  *  button is drawn around it (board 54); the bar's height is its target. */
 const BAR_GLYPH_CLASS =
-  "inline-flex h-full w-3.5 items-center justify-center rounded-[3px] text-foreground/80 outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+  "inline-flex h-full w-3.5 items-center justify-center rounded-[3px] text-current opacity-80 outline-none hover:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
 
 export interface TargetAudioItem {
   cell: CellData

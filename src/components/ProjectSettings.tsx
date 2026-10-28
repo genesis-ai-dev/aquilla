@@ -147,7 +147,7 @@ import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-se
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, SELECT_LIST_BELOW, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
-import { InfoTip } from "@/components/ui/info-tip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -783,6 +783,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
   const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
   const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
+  // Sam, Oct 28: each (i) opens its explanation beneath the setting's title.
+  const [lockInfoOpen, toggleLockInfo] = useInfoOpen()
+  const [trackEditingInfoOpen, toggleTrackEditingInfo] = useInfoOpen()
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
   // shows while the project follows the organization, and where "Set for this
@@ -3115,7 +3118,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 {/* AQU-1768: while the project follows the organization the
                     box shows the organization's choice. Ticking it sets the
                     choice for this project, and the menu beside it follows
-                    (Sam, Oct 28). The long explanation sits behind the (i). */}
+                    (Sam, Oct 28). The (i) opens the long explanation beneath
+                    the title, and closes it again. */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
@@ -3123,11 +3127,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   disabled={!canEditShared}
                   onCheckedChange={(checked) => setTimingLocked(checked)}
                 />
-                <span className="flex min-w-0 flex-1 items-center gap-1 text-sm">
-                  <label htmlFor="timing-locked">{t("projectSettings.timeline.lockLabel")}</label>
-                  <InfoTip label={t("projectSettings.timeline.lockInfoAria")} testId="settings-timing-locked-info">
-                    {t("projectSettings.timeline.lockHint")}
-                  </InfoTip>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="timing-locked">{t("projectSettings.timeline.lockLabel")}</label>
+                    <InfoToggle
+                      open={lockInfoOpen}
+                      onToggle={toggleLockInfo}
+                      label={t("projectSettings.timeline.lockInfoAria")}
+                      controls="settings-timing-locked-explanation"
+                      testId="settings-timing-locked-info"
+                    />
+                  </span>
+                  <InfoReveal open={lockInfoOpen} id="settings-timing-locked-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.lockHint")}</span>
+                  </InfoReveal>
                 </span>
                 <OrgDefaultSource
                   id="timing-locked-source"
@@ -3152,11 +3165,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   disabled={!canEditShared}
                   onCheckedChange={(checked) => setAllowTrackEditing(checked)}
                 />
-                <span className="flex min-w-0 flex-1 items-center gap-1 text-sm">
-                  <label htmlFor="allow-track-editing">{t("projectSettings.timeline.trackEditingLabel")}</label>
-                  <InfoTip label={t("projectSettings.timeline.trackEditingInfoAria")} testId="settings-allow-track-editing-info">
-                    {t("projectSettings.timeline.trackEditingHint")}
-                  </InfoTip>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="allow-track-editing">{t("projectSettings.timeline.trackEditingLabel")}</label>
+                    <InfoToggle
+                      open={trackEditingInfoOpen}
+                      onToggle={toggleTrackEditingInfo}
+                      label={t("projectSettings.timeline.trackEditingInfoAria")}
+                      controls="settings-allow-track-editing-explanation"
+                      testId="settings-allow-track-editing-info"
+                    />
+                  </span>
+                  <InfoReveal open={trackEditingInfoOpen} id="settings-allow-track-editing-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.trackEditingHint")}</span>
+                  </InfoReveal>
                 </span>
                 <OrgDefaultSource
                   id="allow-track-editing-source"

@@ -287,11 +287,20 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(true)
   })
 
-  it("the long explanations sit behind (i)s, not on the page", () => {
+  it("each (i) opens its explanation beneath the title on a click, and closes it on another", () => {
     renderSettings()
-    expect(screen.getByTestId("settings-timing-locked-info")).toBeInTheDocument()
-    expect(screen.getByTestId("settings-allow-track-editing-info")).toBeInTheDocument()
-    expect(screen.queryByText(/the handles are gone from every/)).toBeNull()
+    const info = screen.getByTestId("settings-timing-locked-info")
+    const text = document.getElementById("settings-timing-locked-explanation") as HTMLElement
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text.textContent).toMatch(/the handles are gone from every/)
+    // Clicking the (i) beside a label never ticks its box.
+    expect(isChecked(box("settings-timing-locked"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
+    expect((document.getElementById("settings-allow-track-editing-explanation") as HTMLElement).dataset.open).toBe("false")
   })
 
   it("'Set for this project' starts from the organization's value and saves only once edited", async () => {

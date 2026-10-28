@@ -220,6 +220,7 @@ import {
   splitIntoParts, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { layOutProgramme } from "@/lib/timeline/programme"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -2487,6 +2488,9 @@ export function ProjectWorkspace() {
   // first-party extension editor keeps its own Audio lens (apiRev 4), and the
   // bottom bar it has always had (below).
   const activeFileOnTimeline = Boolean(activeFileForLens) && (activeFileTimeOrdered || !extensionEditorActive)
+  // AQU-1758 (Sam's decision 7): the Film button and the timeline's Sources
+  // menu, together, by the project's setting (unset: off for books).
+  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files)
   /** Media lens = the timeline STACKED over the always-rendered text table
    *  (one EditorTable instance across both lenses — the imperative ref,
    *  selection singleton, and presence claims stay single). */
@@ -16853,6 +16857,7 @@ export function ProjectWorkspace() {
                     cells={timelineCells}
                     // AQU-1758: a book's text has no times to drag it to.
                     sequenceOrdered={!activeFileTimeOrdered}
+                    showSources={filmAndSourcesOn}
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
                     onChipActivated={jumpToCellIdFollowing}

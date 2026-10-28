@@ -297,3 +297,35 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     expect("timingLocked" in sent && sent.timingLocked === undefined).toBe(true)
   })
 })
+
+// AQU-1758 (Sam's decision 7): the media view's Film button and the timeline's
+// Sources menu, behind one setting beside track editing. Unset, a project of
+// books and documents hides them and any other shows them.
+describe("ProjectSettings — film and sources (AQU-1758)", () => {
+  const bookFiles = [{ id: "f1", name: "Ruth", type: "usfm", orderedBy: "sequence" }]
+  const filmFiles = [{ id: "f2", name: "Episode 1.vtt", type: "vtt", orderedBy: "time" }]
+
+  it("reads OFF on a book project that never chose", () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(false)
+    expect(box("settings-film-and-sources-info")).toHaveAttribute("aria-label", "About the film and sources tools")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("reads ON on any other project that never chose", () => {
+    currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+  })
+
+  it("saves the choice a maintainer makes", async () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    fireEvent.click(box("settings-film-and-sources"))
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).filmAndSources).toBe(true)
+  })
+})

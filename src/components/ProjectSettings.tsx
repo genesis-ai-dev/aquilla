@@ -16,6 +16,8 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
+import { TimingInfoButton } from "@/components/timeline/TimingModeControl"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
@@ -262,6 +264,8 @@ interface Baseline {
   cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
+  /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
+  filmAndSources: boolean | null
   timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -324,6 +328,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
@@ -356,6 +361,7 @@ const BLOB_BACKED_KEYS = [
   "allowSelfValidationAudio",
   "cellEditingFloor",
   "allowTrackEditing",
+  "filmAndSources",
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
@@ -781,6 +787,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState<boolean | null>(null)
   const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
   const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
+  const [filmAndSources, setFilmAndSources] = useState<boolean | null>(null)
   const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
@@ -864,6 +871,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setAllowSelfValidationAudio(b.allowSelfValidationAudio)
     setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
+    setFilmAndSources(b.filmAndSources)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -941,6 +949,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio: setAllowSelfValidationAudio,
       cellEditingFloor: setCellEditingFloor,
       allowTrackEditing: setAllowTrackEditing,
+      filmAndSources: setFilmAndSources,
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
@@ -1059,6 +1068,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
       cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
+      filmAndSources !== baseline.filmAndSources ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -1081,6 +1091,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
+    filmAndSources,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
@@ -1300,6 +1311,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
       if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
+      if (filmAndSources !== baseline.filmAndSources) { sharedUpdates.filmAndSources = filmAndSources ?? undefined; changedFieldLabels.push("film and sources") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
@@ -1399,6 +1411,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         allowSelfValidationAudio,
         cellEditingFloor,
         allowTrackEditing,
+        filmAndSources,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -1469,7 +1482,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
-    cellEditingFloor, timingLocked, allowTrackEditing,
+    cellEditingFloor, timingLocked, allowTrackEditing, filmAndSources,
     bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
@@ -1590,7 +1603,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so
     // the words a user searches for them by have to reach it.
@@ -3161,6 +3174,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? true)}
                   disabled={!canEditShared}
                   onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
+                />
+              </div>
+              {/* AQU-1758 (Sam's decision 7): the media view's dubbing tools —
+                  the Film button and the timeline's Sources menu — together.
+                  Unset, a project of books and documents hides them and any
+                  other shows them. Not a permission: nothing on the server
+                  reads it. The long explanation sits behind the (i). */}
+              <div className="flex flex-wrap items-start gap-2">
+                <Checkbox
+                  id="film-and-sources"
+                  data-testid="settings-film-and-sources"
+                  checked={filmAndSourcesShown(filmAndSources, project?.files)}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setFilmAndSources(checked)}
+                />
+                <label htmlFor="film-and-sources" className="min-w-0 flex-1 text-sm">
+                  {t("projectSettings.timeline.filmAndSourcesLabel")}
+                </label>
+                <TimingInfoButton
+                  label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                  text={t("projectSettings.timeline.filmAndSourcesInfo")}
+                  testId="settings-film-and-sources-info"
                 />
               </div>
             </CardContent>

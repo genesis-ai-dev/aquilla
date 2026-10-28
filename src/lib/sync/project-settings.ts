@@ -197,6 +197,14 @@ export interface ProjectWideSettings {
    */
   allowTrackEditing?: boolean
   /**
+   * AQU-1758 (Sam's decision 7): does the media view show its dubbing tools —
+   * the top bar's Film button and the timeline's Sources menu? Unset, a
+   * project of books and documents hides them and any other shows them
+   * (lib/media/film-and-sources.ts). Only shows or hides controls; it is not
+   * a permission, and nothing on the server reads it.
+   */
+  filmAndSources?: boolean
+  /**
    * AQU-1246: does this project get the experimental Autopilot surface at all?
    *
    * OFF unless an owner or lead explicitly turns it on, and OFF means the

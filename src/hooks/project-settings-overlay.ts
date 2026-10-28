@@ -91,6 +91,9 @@ export function overlaySettings(
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
   assign("allowTrackEditing", settings.allowTrackEditing ?? orgDefaults?.media?.allowTrackEditing)
+  // AQU-1758: Film and Sources in the media view. No org default: unset, the
+  // project's kind decides (lib/media/film-and-sources.ts).
+  assign("filmAndSources", settings.filmAndSources)
   // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
   // overview or the gate reads false everywhere and an opted-in project would
   // see no Autopilot at all — the surfaces render only when this is on (or the

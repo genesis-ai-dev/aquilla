@@ -3559,6 +3559,26 @@ describe("who may use the Check tools", () => {
   })
 })
 
+// AQU-1758 (Sam's decision 7): Sources sits behind the project's "film and
+// sources" setting, off by default for a project of books and documents.
+describe("the Sources menu follows the project's film and sources setting", () => {
+  const props = {
+    cells: [{ id: "s1", fileId: "f1", original: "One", translated: "", startTime: 0, endTime: 2 }] as unknown as CellData[],
+    fileId: "f1", coreMediaUrl: null, editable: true, onRetimeSubtitle: () => {},
+    onRequestImportCharacters: () => {}, canImportCharacters: true,
+  }
+
+  it("shows it when the setting is on", () => {
+    render(<TimelineEditor {...props} showSources />)
+    expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
+  })
+
+  it("hides it when the setting is off", () => {
+    render(<TimelineEditor {...props} showSources={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).not.toBeInTheDocument()
+  })
+})
+
 // ── Sources is project setup (Sam, 2026-08-18) ───────────────────────────
 //
 // The film, the audio cues and the character sheets are all attached before

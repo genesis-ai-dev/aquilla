@@ -222,6 +222,12 @@ export interface TimelineEditorProps {
    */
   sequenceOrdered?: boolean
   /**
+   * AQU-1758 (Sam's decision 7): the Sources menu shows — the project's
+   * "film and sources" setting, off by default for a project of books and
+   * documents. Absent reads as shown.
+   */
+  showSources?: boolean
+  /**
    * AQU-646: the project's timing lock. When on, every imported row and cue is
    * frozen for everyone — including project leads, which Sam asked for
    * explicitly. Lines someone added here are exempt: they carry no imported
@@ -1170,6 +1176,7 @@ export function TimelineEditor({
   fileId,
   onRetimeSubtitle,
   sequenceOrdered = false,
+  showSources = true,
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
@@ -2281,6 +2288,9 @@ export function TimelineEditor({
     // name, Change, Hide or Show — and the other sources follow under their
     // own heading.
     if (film && coreMediaUrl) {
+      // A film already linked keeps its controls whatever the project's
+      // "film and sources" setting says (AQU-1758, Sam's decision 7), so it
+      // can still be shown and hidden; the other sources follow the setting.
       items.push({ id: "film-name", type: "label", label: film.name })
       if (onRequestLinkVideo) {
         items.push({
@@ -2294,6 +2304,12 @@ export function TimelineEditor({
           ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
           : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
       items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
+    }
+    // AQU-1758 (Sam's decision 7): everything else in Sources is behind the
+    // project's "film and sources" setting.
+    if (!showSources) return items.filter((item) => item.id !== "sources-heading")
+    if (film && coreMediaUrl) {
+      // The film's rows are above.
     } else if (onRequestLinkVideo) {
       items.push({
         id: "film",
@@ -2389,7 +2405,7 @@ export function TimelineEditor({
     if (items.at(-1)?.id === "sources-heading") items.pop()
     return items
   }, [
-    film, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
+    film, showSources, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
     onRequestAlignScript, canAlignScript,

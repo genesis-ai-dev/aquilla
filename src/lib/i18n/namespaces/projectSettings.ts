@@ -388,6 +388,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
+    "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
+    "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
+    "projectSettings.timeline.filmAndSourcesInfo":
+      "Shows the Film button in the media view's top bar, for linking a video, and the timeline's Sources menu, for importing audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -1578,6 +1583,21 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.timeline.filmAndSourcesLabel": {
+        description:
+          "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +
+          "dubbing tools — the Film button (link a video) and the timeline's Sources menu.",
+      },
+      "projectSettings.timeline.filmAndSourcesInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button beside that checkbox, which opens the longer " +
+          "explanation (projectSettings.timeline.filmAndSourcesInfo).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfo": {
+        description:
+          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' and 'Film' " +
+          "are the names of those two controls in the media view.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

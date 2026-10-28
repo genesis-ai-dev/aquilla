@@ -76,6 +76,36 @@ describe("POST /api/v1/ai/transcript-cleanup", () => {
     expect(((await res.json()) as CleanupBody).result.kind).toBe("too-different")
   })
 
+  // AQU-2226: a reasoning model can spend the whole max_tokens thinking. The
+  // reply then stops mid-way (finish_reason "length"). Reading what it did
+  // write as "no change needed" would tell the user ASR was already right.
+  it("never reads a reply cut off at max_tokens as a result, and logs it", async () => {
+    const jwt = await seedLead()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        finish_reason: "length",
+        message: { content: JSON.stringify({ text: "ni eema akaenda kwa mji kapernaumu", notes: [] }) },
+      }],
+      usage: { cost: 0.0004, completion_tokens: 1200, completion_tokens_details: { reasoning_tokens: 1180 } },
+    }), { status: 200 }))
+    const res = await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body() }, cleanupEnv())
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as CleanupBody).result.kind).toBe("invalid")
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("cut off at max_tokens"), expect.objectContaining({ reasoningTokens: 1180 }))
+  })
+
+  // Without effort "none", gpt-5.6-luna reasons for ~1,450 tokens a call and
+  // cut off 49 of 60 Blackfoot replies at the old 1,200 cap (AQU-2226).
+  it("asks OpenRouter for no reasoning, so thinking cannot use up the budget", async () => {
+    const jwt = await seedLead()
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(reply({ text: "ni Yesu akaenda mjini kapernaumu" }))
+    const openRouter = Object.assign(cleanupEnv(), { OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1" })
+    await app.request("/api/v1/ai/transcript-cleanup", { method: "POST", headers: authHeader(jwt), body: body() }, openRouter)
+    const sent = JSON.parse(String(fetchSpy.mock.calls[0][1]?.body)) as { reasoning?: { effort?: string } }
+    expect(sent.reasoning?.effort).toBe("none")
+  })
+
   it("passes an upstream failure through as a 502, not a cleanup", async () => {
     const jwt = await seedLead()
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("boom", { status: 500 }))

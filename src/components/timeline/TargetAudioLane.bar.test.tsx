@@ -202,6 +202,22 @@ describe("the bar's right end", () => {
     expect(ids).toEqual(["tl-target-c1-record", "tl-target-c1-more"])
   })
 
+  // The play button (top left before the bar) joins them from 120px wide, so
+  // the name keeps room to be double-clicked beside all three.
+  it("adds the play button only where the name keeps room beside it", () => {
+    const factory = () => ({ prime: async () => "ready" as const, play: () => ({ stop() {}, isPlaying: () => false, positionSec: () => null, audible: true }) })
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({ durationMs: 3000 })]} onOpenRecording={vi.fn()} takeMenu={menu()} previewFactory={factory} />)
+    // 3 s at 40 px/s = 120px.
+    expect(Array.from(screen.getByTestId("tl-target-c1-bar-hover").children).map((c) => c.getAttribute("data-testid"))).toEqual(
+      ["tl-target-c1-play", "tl-target-c1-record", "tl-target-c1-more"],
+    )
+    unmount()
+    render(<TargetAudioLane {...base} items={[item({ durationMs: 2000 })]} onOpenRecording={vi.fn()} takeMenu={menu()} previewFactory={factory} />)
+    // 2 s = 80px: record and ⋯ only.
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+  })
+
   it("draws the glyphs bare, with no button around them", () => {
     render(<TargetAudioLane {...base} items={[item()]} onOpenRecording={vi.fn()} takeMenu={menu()} />)
     for (const id of ["record", "more"]) {
@@ -293,6 +309,24 @@ describe("double-click the name to rename", () => {
     )
     fireEvent.doubleClick(screen.getByTestId("tl-target-c1-p2-name"))
     expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 2")
+  })
+
+  // A real browser never delivers that double-click to the name: the press
+  // starts the chip's move drag, whose pointer capture sends the click and the
+  // double-click to the chip. So the chip asks where it landed.
+  it("renames when the double-click reaches the chip but landed on the name (the drag's pointer capture)", () => {
+    const actions = menu()
+    const onSeek = vi.fn()
+    render(<TargetAudioLane {...base} items={[item()]} takeMenu={actions} onSeek={onSeek} />)
+    const name = screen.getByTestId("tl-target-c1-name")
+    name.getBoundingClientRect = () => ({ left: 405, top: 11, right: 450, bottom: 25, width: 45, height: 14, x: 405, y: 11, toJSON: () => ({}) })
+    fireEvent.doubleClick(screen.getByTestId("tl-target-c1"), { clientX: 420, clientY: 18 })
+    expect(actions.rename).toHaveBeenCalledWith("c1", TAKE, "Take 2")
+    expect(onSeek).not.toHaveBeenCalled()
+    // …and off the name, on the waveform, it is still the jump to the line.
+    fireEvent.doubleClick(screen.getByTestId("tl-target-c1"), { clientX: 420, clientY: 40 })
+    expect(onSeek).toHaveBeenCalledWith("c1")
+    expect(actions.rename).toHaveBeenCalledTimes(1)
   })
 
   it("still jumps to the line on a double-click over the waveform", () => {

@@ -49,6 +49,7 @@ import {
   NAME_BAR_CHECK_MIN_W_PX,
   NAME_BAR_HOVER_MIN_W_PX,
   NAME_BAR_NAME_MIN_W_PX,
+  NAME_BAR_PLAY_MIN_W_PX,
   NAME_BAR_VOICE_MIN_W_PX,
   nameBarPx,
   slotButtonPx,
@@ -951,11 +952,11 @@ function TargetAudioChip({
   const barShowsName = paintedPx >= NAME_BAR_NAME_MIN_W_PX
   const barShowsVoice = voiceName != null && paintedPx >= NAME_BAR_VOICE_MIN_W_PX
   // On hover the record button and the ⋯ take the check's place from 60px
-  // (board 54); the play button (top left before the bar) joins them when
-  // there is room for three. The ⋯ alone stays at ANY width — AQU-1758 (Sam,
+  // (board 54); the play button (top left before the bar) joins them from
+  // 120px, where the name still has room beside all three. The ⋯ alone stays at ANY width — AQU-1758 (Sam,
   // decision 4) gave a narrow take the same ⋯ — so the menu is never only a
   // right-click away.
-  const barPlay = canPlayHere && paintedPx >= NAME_BAR_HOVER_MIN_W_PX + 16
+  const barPlay = canPlayHere && paintedPx >= NAME_BAR_PLAY_MIN_W_PX
   const barRecord = canRecordHere && paintedPx >= NAME_BAR_HOVER_MIN_W_PX
   const barMore = showMoreButton
   const barHasHover = barPlay || barRecord || barMore
@@ -969,6 +970,15 @@ function TargetAudioChip({
           takeMenu.rename?.(cell.id, chip.item.audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)
         }
       : undefined
+  // The name's node, because a real double-click on it does NOT arrive there:
+  // the press starts the chip's move drag, which captures the pointer on the
+  // chip, so the browser delivers the click and the double-click to the chip
+  // itself. The chip's own double-click asks whether it landed on the name.
+  const nameRef = useRef<HTMLSpanElement | null>(null)
+  const onName = (e: React.MouseEvent) => {
+    const r = nameRef.current?.getBoundingClientRect()
+    return r != null && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+  }
 
   async function togglePreview() {
     if (previewRef.current) {
@@ -1164,6 +1174,11 @@ function TargetAudioChip({
       onDoubleClick={(e) => {
         // Not from the play or record button in a corner, and not a blade cut.
         if (blade || (e.target as Element).closest?.('[role="button"]')) return
+        // AQU-2235: on the take's name, it renames (see `nameRef`).
+        if (renameFromBar && onName(e)) {
+          renameFromBar(e)
+          return
+        }
         onSeek?.(cell.id)
       }}
       onPointerEnter={() => setHovered(true)}
@@ -1374,8 +1389,11 @@ function TargetAudioChip({
           button drawn around them.
 
           The corner state glyph keeps its priority order — missing >
-          sync-failed > loading > saving — and leads the bar, before the
-          sparkle: a state outranks an identity, as it did in the corner.
+          sync-failed > loading > saving — at the bar's RIGHT end, before the
+          check: never on the left, where it would push the name along the
+          moment it appeared (the transport's "loading" appears on the very
+          click that selects a take, and moved the name out from under the
+          second click of a double-click — found in the browser).
 
           The hover glyphs keep BOTH their `stopPropagation` calls (see the
           note these buttons have always carried): without the pointerdown one
@@ -1393,31 +1411,6 @@ function TargetAudioChip({
           style={{ height: barH, fontSize: barH >= 14 ? 10 : 9, lineHeight: `${barH}px` }}
         >
           <span className="flex min-w-0 flex-1 items-center gap-[5px]">
-            {showLeftGlyph && (
-              <span
-                title={
-                  leftGlyph === "missing"
-                    ? MISSING_AUDIO_MESSAGE
-                    : leftGlyph === "syncFailed"
-                      ? t("audio.takesStrip.syncFailedTooltip")
-                      : leftGlyph === "loading"
-                        ? t("editor.timeline.takeLoading")
-                        : t("editor.timeline.takeSaving")
-                }
-                data-testid={`tl-target-${testKey}-${leftGlyph}`}
-                className="flex flex-none"
-              >
-                {leftGlyph === "missing" ? (
-                  <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
-                ) : leftGlyph === "syncFailed" ? (
-                  <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
-                ) : leftGlyph === "loading" ? (
-                  <Spinner className="h-2.5 w-2.5" />
-                ) : (
-                  <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
-                )}
-              </span>
-            )}
             {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
             {chip.item.kind === "generated" && paintedPx >= 18 && (
               // Still the only mark of an AI voice; it leads the bar.
@@ -1427,6 +1420,7 @@ function TargetAudioChip({
             )}
             {barShowsName && (
               <span
+                ref={nameRef}
                 data-testid={`tl-target-${testKey}-name`}
                 className="min-w-0 truncate font-semibold"
                 onDoubleClick={renameFromBar}
@@ -1469,6 +1463,31 @@ function TargetAudioChip({
               </span>
             )}
           </span>
+          {showLeftGlyph && (
+            <span
+              title={
+                leftGlyph === "missing"
+                  ? MISSING_AUDIO_MESSAGE
+                  : leftGlyph === "syncFailed"
+                    ? t("audio.takesStrip.syncFailedTooltip")
+                    : leftGlyph === "loading"
+                      ? t("editor.timeline.takeLoading")
+                      : t("editor.timeline.takeSaving")
+              }
+              data-testid={`tl-target-${testKey}-${leftGlyph}`}
+              className="flex flex-none"
+            >
+              {leftGlyph === "missing" ? (
+                <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+              ) : leftGlyph === "syncFailed" ? (
+                <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+              ) : leftGlyph === "loading" ? (
+                <Spinner className="h-2.5 w-2.5" />
+              ) : (
+                <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+              )}
+            </span>
+          )}
           {barHasHover && (
             <span
               data-testid={`tl-target-${testKey}-bar-hover`}

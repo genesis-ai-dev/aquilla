@@ -226,6 +226,10 @@ export const NAME_BAR_NAME_MIN_W_PX = 44
 export const NAME_BAR_CHECK_MIN_W_PX = 28
 /** The hover glyphs at the right end (record and ⋯, the play beside them). */
 export const NAME_BAR_HOVER_MIN_W_PX = 60
+/** …and the play button joining them, only where the name keeps room to be
+ *  double-clicked beside all three (found in the browser: at 80px the three
+ *  glyphs left the name a few pixels, so the double-click landed on play). */
+export const NAME_BAR_PLAY_MIN_W_PX = 120
 
 export const TL_ROW_H_CLASS = "h-[var(--tl-row-h,66px)]"
 export const TL_CHIP_BOX_CLASS = "top-[var(--tl-chip-top,10px)] h-[var(--tl-chip-h,46px)]"

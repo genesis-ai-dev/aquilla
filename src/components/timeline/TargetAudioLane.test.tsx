@@ -1460,14 +1460,18 @@ describe("TargetAudioLane — the sparkle on generated chips", () => {
   })
 
   // In the bar a state and the sparkle no longer fight for one corner: the
-  // state glyph goes first (a state outranks an identity), the sparkle after.
-  it("follows the corner state glyph in the bar", () => {
+  // sparkle keeps leading the bar and the state glyph sits at its right end,
+  // where appearing never moves the name.
+  it("keeps leading the bar beside a corner state glyph, which sits at the right end", () => {
     render(
       <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
     )
+    const bar = screen.getByTestId("tl-target-c1-bar")
     const missing = screen.getByTestId("tl-target-c1-missing")
     const glyph = screen.getByTestId("tl-target-c1-generated")
-    expect(missing.nextElementSibling).toBe(glyph)
+    expect(bar.firstElementChild?.firstElementChild).toBe(glyph)
+    expect(missing.parentElement).toBe(bar)
+    expect(bar.firstElementChild?.contains(missing)).toBe(false)
   })
 
   it("is withheld from a chip too narrow to hold it", () => {

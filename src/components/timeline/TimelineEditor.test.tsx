@@ -1279,8 +1279,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip1 = screen.getByTestId("tl-target-v1")
     // v2's original waits for v1's TRANSLATION, not v1's original.
     expect(px(v2, "left")).toBeGreaterThanOrEqual(px(chip1, "left") + px(chip1, "width") - 0.5)
-    // …and each original keeps its own real length.
-    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 10, 5)
+    // …and each original is drawn as long as it sounds: v1's whole 6 s, v2's
+    // 10 s cut at its 4 s take (AQU-2204: only the recordings set a line's length).
+    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 4, 5)
   })
 
   it("a verse's two sides share a left edge", () => {
@@ -1381,8 +1382,8 @@ describe("TimelineEditor — audio-first mode", () => {
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
     expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
     expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
-    // Following the recordings each verse is as long as its longer side: 11 + 10.
-    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("21.0 s")
+    // Following the recordings each verse is as long as its take: 11 + 4.
+    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
     expect(screen.getByTestId("tl-timing-menu-mute-note")).toHaveTextContent(
       "Muting a track only changes what you hear. It never moves anything.",
     )

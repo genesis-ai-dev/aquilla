@@ -51,9 +51,9 @@ export interface ProgrammeSlot {
   /** What the ORIGINAL's card is drawn at: its real audible length, or the
    *  whole verse when there is no original audio to be honest about. */
   cardLenSec: number
-  /** max(sourceLenSec, targetLeadSec + targetLenSec) — the verse's footprint.
-   *  Every part of it is covered by audio (or by a pause someone left before
-   *  the take), which is what lets the clock run without skipping. */
+  /** The verse's footprint: targetLeadSec + targetLenSec when it has a take
+   *  of known length (AQU-2204: only the recordings set it), else its
+   *  stand-in or its own span. */
   slotLenSec: number
   /**
    * Which side runs long enough to clock the slot, or null when neither side
@@ -167,15 +167,9 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
 
     // An untimed line has no window into any source recording to play.
     const hasSourceClip = !untimed && sourceClipAudioForCell(cell) != null
-    const sourceWindow: Window | null =
-      hasSourceClip && typeof cell.startTime === "number" && typeof cell.endTime === "number"
-        ? { start: cell.startTime, end: cell.endTime }
-        : null
-    // A verse whose source clip is gone (generated-voice-only, or a lone take)
-    // has NO original to hear. Letting its section span reserve room anyway
-    // would leave a stretch of the verse that nothing can play — and the clock
-    // would have to skip it, which is exactly what this design avoids.
-    const sourceLenSec = sourceWindow ? nominalLenSec : 0
+    const fullSourceStart = hasSourceClip && typeof cell.startTime === "number" && typeof cell.endTime === "number"
+      ? cell.startTime
+      : null
 
     const pieces = resolveTargetPieces(cell)
     const target = pieces[0] ?? null
@@ -203,22 +197,36 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     const leadGeom = !untimed && targetWindow && !split ? targetChipGeom(cell, att) : null
     const rawLeadSec = leadGeom && typeof cell.startTime === "number" ? leadGeom.anchor - cell.startTime : 0
     const targetLeadSec = rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0
-    const targetSpanSec = target ? targetLeadSec + targetLenSec : 0
-
-    const audibleLenSec = Math.max(sourceLenSec, targetSpanSec)
-    // Nothing playable at all: keep the section's own length so its card is
-    // still readable. Playback skips such a verse outright.
-    const slotLenSec = audibleLenSec > 0 ? audibleLenSec : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
-    const clock: ProgrammeSlot["clock"] =
-      sourceWindow && targetWindow
-        ? targetSpanSec > sourceLenSec
-          ? "target"
-          : "source"
-        : sourceWindow
-          ? "source"
-          : targetWindow
-            ? "target"
-            : null
+    // AQU-2204 (Sam, Oct 27): FOLLOWING THE RECORDINGS, ONLY THE RECORDINGS
+    // SET A LINE'S LENGTH. Today's Free timing followed both (each line the
+    // longer of its source and its take); the source no longer has a say:
+    //   - a line with a take lasts the pause someone left before it plus the take;
+    //   - a take whose length isn't known yet keeps the line's own span, which
+    //     its chip already borrows;
+    //   - a line with no take lasts its stand-in length, from its words (the
+    //     caller's estimator), else its own span;
+    // and the source sounds only as long as the line lasts: cut where it ends.
+    const recordedLenSec = targetWindow ? targetLeadSec + targetLenSec : 0
+    const usesStandIn = !target && (untimed || Boolean(opts?.standInLenSec))
+    const unrecordedLenSec = untimed
+      ? nominalLenSec
+      : opts?.standInLenSec
+        ? Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+        : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
+    const slotLenSec = recordedLenSec > 0
+      ? recordedLenSec
+      : target
+        ? Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
+        : unrecordedLenSec
+    // A verse whose source clip is gone (generated-voice-only, or a lone take)
+    // has NO original to hear; one that runs past the line is cut at its end.
+    const sourceLenSec = fullSourceStart != null ? Math.min(nominalLenSec, slotLenSec) : 0
+    const sourceWindow: Window | null =
+      fullSourceStart != null ? { start: fullSourceStart, end: fullSourceStart + sourceLenSec } : null
+    // The take clocks its line (the source never outlasts it now); a line with
+    // no take is clocked by its source, else nothing plays and playback steps
+    // over it.
+    const clock: ProgrammeSlot["clock"] = targetWindow ? "target" : sourceWindow ? "source" : null
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -232,7 +240,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       sourceWindow,
       targetWindow,
       ...(split ? { targetPieces: split.pieces } : {}),
-      ...(untimed && !target ? { standIn: true as const } : {}),
+      ...(usesStandIn ? { standIn: true as const } : {}),
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
     }
     slots.push(slot)

@@ -939,9 +939,9 @@ export const editor = defineNamespace({
       "Lines keep their times from the source, and its pauses stay. Only a project lead or above can change this.",
     "editor.timeline.timingModeFree": "Follows recordings",
     "editor.timeline.timingModeFreeHint":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer.",
+      "Lines play back to back, each as long as its recording.",
     "editor.timeline.timingModeFreeHintLocked":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer. Only a project lead or above can change this.",
+      "Lines play back to back, each as long as its recording. Only a project lead or above can change this.",
     "editor.timeline.timingLabel": "Timing:",
     "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
     "editor.timeline.timingInfoAria": "About timing",
@@ -6302,8 +6302,8 @@ export const editor = defineNamespace({
       "editor.timeline.timingModeFreeHint": {
         description:
           "One-line description under 'Follows recordings' in the Timing dropdown. 'Back to " +
-          "back' means each line starts where the previous one ends; each line lasts as long " +
-          "as its recording, or as its source line when that is longer.",
+          "back' means each line starts where the previous one ends; each line lasts exactly " +
+          "as long as its recording (the source is cut where the line ends).",
       },
       "editor.timeline.timingModeFreeHintLocked": {
         description:

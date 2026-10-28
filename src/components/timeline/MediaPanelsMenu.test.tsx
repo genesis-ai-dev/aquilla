@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
-import { MediaPanelsMenu } from "./MediaPanelsMenu"
+import { fireEvent, screen } from "@testing-library/react"
+import { MediaPanelsMenu, type MediaPanelsMenuProps } from "./MediaPanelsMenu"
 import { dockView, startDockLayout, type DockLayout, type DockPresence } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 /** A dock as the menu sees it: the real view over a layout, spies for the moves. */
 function fakeDock(layout: DockLayout, presence: DockPresence = { film: true }, extra: Partial<MediaDock> = {}): MediaDock {
@@ -14,76 +15,97 @@ function fakeDock(layout: DockLayout, presence: DockPresence = { film: true }, e
     panelsOpen: true,
     setPanelsOpen: vi.fn(),
     show: vi.fn(),
+    fold: vi.fn(),
     restore: vi.fn(),
     resetLayout: vi.fn(),
     ...extra,
   } as unknown as MediaDock
 }
 
-const where = (id: string) => screen.getByTestId(`panels-where-${id}`).textContent
+function draw(dock: MediaDock, over: Partial<MediaPanelsMenuProps> = {}) {
+  return renderWithTooltips(
+    <MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} {...over} />,
+  )
+}
 
+// Sam, Oct 28: PANELS — Film and Text, each ✓ while it shows, with its key —
+// then Reset layout and its (i). The status line is the status ring's, and
+// the timeline is always there (⌥1 still works).
 describe("MediaPanelsMenu", () => {
-  it("lists the timeline, the film and the text, where each is, with their keys", () => {
-    render(<MediaPanelsMenu dock={fakeDock(startDockLayout())} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} />)
-    expect(screen.getByText("Panels on this file")).toBeInTheDocument()
-    expect(where("timeline")).toBe("The centre, always")
-    expect(where("film")).toBe("Bottom left · showing")
-    expect(where("text")).toBe("Bottom right · showing")
-    // Nothing is out of sight, so nothing offers Show.
-    expect(screen.queryByTestId("panels-show-film")).toBeNull()
-    expect(screen.getByTestId("panels-row-film")).toHaveTextContent(/⌥2|Alt\+2/)
+  it("lists the film and the text as rows to show or hide, with their keys — no Timeline row, no status line", () => {
+    // A status handed in (as the workspace used to) is not drawn any more.
+    draw(fakeDock(startDockLayout()), { ...({ status: <span>Live · Synced · 5 lines · 0 done</span> } as object) })
+    expect(screen.getByTestId("panels-heading")).toHaveTextContent(/^Panels$/)
+    expect(screen.queryByText("Panels on this file")).toBeNull()
+    expect(screen.queryByTestId("panels-row-timeline")).toBeNull()
+    expect(screen.queryByText(/Live|Synced|lines · 0 done/)).toBeNull()
+    const film = screen.getByTestId("panels-row-film")
+    expect(film).toHaveAttribute("aria-pressed", "true")
+    expect(film).toHaveTextContent(/^Film(⌥2|Alt\+2)$/)
+    expect(screen.getByTestId("panels-row-text")).toHaveTextContent(/^Text(⌥3|Alt\+3)$/)
+    // Where a panel sits is in its tooltip; nothing says "showing".
+    expect(screen.queryByText(/showing/)).toBeNull()
+    expect(screen.queryByTestId("panels-where-film")).toBeNull()
   })
 
-  it("offers Show for a folded panel, and a panel behind a tab says so", () => {
+  it("says where each panel sits in the row's tooltip", async () => {
+    draw(fakeDock(startDockLayout()))
+    await expectTooltip(screen.getByTestId("panels-row-film"), /^Bottom left$/)
+  })
+
+  it("hides a showing panel, shows one out of sight, and names a tab behind another", async () => {
     const layout: DockLayout = {
       ...startDockLayout(),
       areas: { ll: ["film", "text"], lr: [] },
       active: { ll: "film", lr: null },
-      folded: { tl: true, ll: false, lr: false },
     }
     const dock = fakeDock(layout)
-    render(<MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} />)
-    expect(where("timeline")).toBe("The centre, always · folded")
-    expect(where("text")).toBe("Bottom left · a tab behind Film")
-    fireEvent.click(screen.getByTestId("panels-show-timeline"))
-    expect(dock.show).toHaveBeenCalledWith("timeline")
-    fireEvent.click(screen.getByTestId("panels-show-text"))
+    draw(dock)
+    const text = screen.getByTestId("panels-row-text")
+    expect(text).toHaveAttribute("aria-pressed", "false")
+    await expectTooltip(text, "Bottom left · a tab behind Film")
+    fireEvent.click(text)
     expect(dock.show).toHaveBeenCalledWith("text")
+    fireEvent.click(screen.getByTestId("panels-row-film"))
+    expect(dock.fold).toHaveBeenCalledWith("ll")
   })
 
-  it("while full screen: names what it folded and restores just that", () => {
+  it("while full screen: one short line, the folded list in its tooltip, and Restore", async () => {
     const layout: DockLayout = {
       ...startDockLayout(),
       folded: { tl: false, ll: true, lr: true },
       fullUndo: ["ll", "lr", "left:files"],
     }
     const dock = fakeDock(layout, { film: true }, { fullRegion: "tl", canRestore: true })
-    render(<MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} />)
-    expect(screen.getByTestId("panels-full-note")).toHaveTextContent(
-      "Full screen folded the bottom left, the bottom right, the left panel. Restoring unfolds just those.",
-    )
-    expect(where("timeline")).toBe("The centre, always · full screen")
+    draw(dock)
+    const note = screen.getByTestId("panels-full-note")
+    expect(note).toHaveTextContent(/^Full screen is onRestore\s*Esc$/)
+    await expectTooltip(note, "Full screen folded the bottom left, the bottom right, the left panel. Restoring unfolds just those.")
     fireEvent.click(screen.getByTestId("panels-restore"))
     expect(dock.restore).toHaveBeenCalled()
   })
 
-  it("leaves the film out on a file without one, and says so under Free timing", () => {
-    const { rerender } = render(
-      <MediaPanelsMenu dock={fakeDock(startDockLayout(), { film: false })} fileName="Ruth" kind="scripture" filmHiddenByTiming={false} />,
-    )
+  it("leaves the film out on a file without one, and says why under Free timing", async () => {
+    const { rerender } = draw(fakeDock(startDockLayout(), { film: false }), { kind: "scripture", fileName: "Ruth" })
     expect(screen.queryByTestId("panels-row-film")).toBeNull()
     rerender(
       <MediaPanelsMenu dock={fakeDock(startDockLayout(), { film: false })} fileName="Ruth" kind="plain" filmHiddenByTiming />,
     )
-    expect(where("film")).toBe("Hidden in Free timing")
-    expect(screen.queryByTestId("panels-show-film")).toBeNull()
+    const film = screen.getByTestId("panels-row-film")
+    expect(film).toBeDisabled()
+    expect(film).toHaveAttribute("aria-pressed", "false")
+    expect(film).toHaveAttribute("aria-description", "Hidden in Free timing")
   })
 
-  it("resets the layout, and lists the keys", () => {
+  it("resets the layout; what Reset does and the keys are behind its (i)", async () => {
     const dock = fakeDock(startDockLayout())
-    render(<MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} />)
+    draw(dock)
     fireEvent.click(screen.getByTestId("panels-reset"))
     expect(dock.resetLayout).toHaveBeenCalled()
-    expect(screen.getByTestId("panels-keys")).toHaveTextContent(/Panels .+ · Full screen .+ · Fold .+ · Restore Esc/)
+    // No shortcut line in the menu itself…
+    expect(screen.queryByTestId("panels-keys")).toBeNull()
+    // …it is in the (i), with what Reset does.
+    const info = screen.getByRole("button", { name: "About your layout" })
+    await expectTooltip(info, /Remembered for you, for this file\..*Panels .+ · Full screen .+ · Fold .+ · Restore Esc/)
   })
 })

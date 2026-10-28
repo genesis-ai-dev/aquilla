@@ -2,17 +2,23 @@
 // "Lean chrome: your mix", Oct 24.)
 //
 // A folded panel leaves nothing behind, so this is the way back to every one
-// of them: where each panel is, a Show button for each one out of sight, the
-// way out of full screen, and Reset layout. ⌘\ opens it from anywhere in the
-// media view.
+// of them: the film and the text, each a row you click to show or hide (✓
+// while it shows) with its key, where it sits in the row's tooltip; the way
+// out of full screen; and Reset layout, with the shortcuts behind its (i).
+// ⌘\ opens it from anywhere in the media view.
+//
+// Sam, Oct 28 ("a little bit too much going on… redundancy with the status
+// circle"): no status line — Live / Synced and the line counts are the top
+// bar's status ring's — and no Timeline row: it is always there, and ⌥1
+// still brings it back.
 
-import type { ReactNode } from "react"
-import { LayoutGrid, RotateCcw, Shrink } from "lucide-react"
+import { Check, LayoutGrid, RotateCcw, Shrink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 import { undoTargets, type DockPanel } from "./media-dock-layout"
 import type { MediaFileKind } from "./media-layout-start"
 import { dockKeys, usePanelNames } from "./MediaPanelChrome"
@@ -32,11 +38,9 @@ export interface MediaPanelsMenuProps {
   kind: MediaFileKind
   /** A film is linked but Free timing hides it: the Film row says so. */
   filmHiddenByTiming: boolean
-  /** Live · Synced and the status line, at the top. */
-  status?: ReactNode
 }
 
-export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming, status }: MediaPanelsMenuProps) {
+export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: MediaPanelsMenuProps) {
   const t = useT()
   const names = usePanelNames()
   const keys = dockKeys()
@@ -45,54 +49,43 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming, stat
 
   const stateWords = (parts: Array<string | null | false>) => parts.filter(Boolean).join(" · ")
 
-  const row = (id: "timeline" | DockPanel, n: number) => {
+  const row = (id: DockPanel, n: number) => {
     let where: string
     let showing: boolean
-    if (id === "timeline") {
-      showing = v.isOpen("tl")
-      where = stateWords([
-        t("editor.dock.whereTimeline"),
-        !showing && t("editor.dock.stateFolded"),
-        full === "tl" && t("editor.dock.stateFull"),
-      ])
-    } else if (id === "film" && filmHiddenByTiming) {
-      showing = true
+    let toggle: (() => void) | null = null
+    if (id === "film" && filmHiddenByTiming) {
+      showing = false
       where = t("editor.dock.filmHiddenByTiming")
     } else {
       const area = v.areaOf(id)!
       const active = v.activeOf(area)
       showing = v.isShowing(id)
+      // Where it sits, and why it is out of sight when it is — never "showing".
       where = stateWords([
         names.area(area),
         !v.isOpen(area)
           ? t("editor.dock.stateFolded")
-          : active !== id && active
-            ? t("editor.dock.stateBehind", { panel: names.panel(active) })
-            : t("editor.dock.stateShowing"),
+          : active !== id && active && t("editor.dock.stateBehind", { panel: names.panel(active) }),
         full === area && t("editor.dock.stateFull"),
       ])
+      toggle = showing ? () => dock.fold(area) : () => dock.show(id)
     }
     return (
-      <div key={id} className="flex items-center gap-2 py-1" data-testid={`panels-row-${id}`}>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold">{names.panel(id)}</div>
-          <div className="truncate text-[11.5px] text-muted-foreground" data-testid={`panels-where-${id}`}>
-            {where}
-          </div>
-        </div>
-        {!showing && (
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
-            data-testid={`panels-show-${id}`}
-            onClick={() => dock.show(id)}
-          >
-            {t("editor.dock.show")}
-          </Button>
-        )}
-        <span className="w-8 shrink-0 text-end text-xs text-muted-foreground">{keys.show(n)}</span>
-      </div>
+      <AppTooltip key={id} content={where} side="left">
+        <button
+          type="button"
+          data-testid={`panels-row-${id}`}
+          aria-pressed={showing}
+          aria-description={where}
+          disabled={!toggle}
+          onClick={() => toggle?.()}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50 disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
+        >
+          <Check className={cn("size-3.5 shrink-0", !showing && "invisible")} aria-hidden />
+          <span className="min-w-0 flex-1 truncate">{names.panel(id)}</span>
+          <span className="shrink-0 text-xs font-normal text-muted-foreground">{keys.show(n)}</span>
+        </button>
+      </AppTooltip>
     )
   }
 
@@ -119,53 +112,61 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming, stat
           }
         />
       </AppTooltip>
-      <PopoverContent align="end" className="w-[380px] gap-2 p-3" data-testid="panels-menu">
-        {status && <div className="border-b border-border pb-2">{status}</div>}
+      <PopoverContent align="end" className="w-64 gap-1.5 p-2" data-testid="panels-menu">
         {full && dock.canRestore && (
-          <div
-            data-testid="panels-full-note"
-            className="flex flex-col gap-2 rounded-md bg-sky-50 p-2 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200"
-          >
-            <span>{t("editor.dock.fullNote", { folded: foldedNames.join(", ") })}</span>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              className="self-start"
-              data-testid="panels-restore"
-              onClick={() => {
-                dock.restore()
-                dock.setPanelsOpen(false)
-              }}
+          // One short line; what full screen folded is in its tooltip.
+          <AppTooltip content={t("editor.dock.fullNote", { folded: foldedNames.join(", ") })} side="left">
+            <div
+              data-testid="panels-full-note"
+              className="flex items-center gap-2 rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200"
             >
-              <Shrink />
-              {t("editor.dock.restore")}
-              <span className="font-normal text-muted-foreground">{keys.restore}</span>
-            </Button>
-          </div>
+              <span className="min-w-0 flex-1 truncate">{t("editor.dock.fullOn")}</span>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-testid="panels-restore"
+                aria-label={t("editor.dock.restore")}
+                onClick={() => {
+                  dock.restore()
+                  dock.setPanelsOpen(false)
+                }}
+              >
+                <Shrink />
+                {t("editor.dock.restoreShort")}
+                <span className="font-normal text-muted-foreground">{keys.restore}</span>
+              </Button>
+            </div>
+          </AppTooltip>
         )}
-        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t("editor.dock.panelsOnFile")}
+        <div className="px-2 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground" data-testid="panels-heading">
+          {t("editor.dock.panels")}
         </div>
         <div className="flex flex-col">
-          {row("timeline", 1)}
           {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
           {row("text", 3)}
         </div>
-        <div className="flex flex-col gap-1.5 border-t border-border pt-2">
-          <div className="flex items-center gap-2">
-            <Button type="button" size="xs" variant="outline" data-testid="panels-reset" onClick={dock.resetLayout}>
-              <RotateCcw />
-              {t("editor.dock.resetLayout")}
-            </Button>
-            <VoiceInfoTip
-              label={t("editor.dock.resetInfoAria")}
-              content={`${t("editor.dock.rememberedNote", { file: fileName })} ${t(START_KEY[kind])}`}
-            />
-          </div>
-          <div className="text-[11px] text-muted-foreground" data-testid="panels-keys">
-            {t("editor.dock.keysHint", { panels: keys.panels, full: keys.full, fold: keys.fold, restore: keys.restore })}
-          </div>
+        <div className="flex items-center gap-1 border-t border-border pt-1.5">
+          <button
+            type="button"
+            data-testid="panels-reset"
+            onClick={dock.resetLayout}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50"
+          >
+            <RotateCcw className="size-3.5 shrink-0" aria-hidden />
+            {t("editor.dock.resetLayout")}
+          </button>
+          <VoiceInfoTip
+            label={t("editor.dock.resetInfoAria")}
+            content={
+              <span className="flex flex-col gap-1.5" data-testid="panels-reset-info">
+                <span>{`${t("editor.dock.rememberedNote", { file: fileName })} ${t(START_KEY[kind])}`}</span>
+                <span data-testid="panels-keys">
+                  {t("editor.dock.keysHint", { panels: keys.panels, full: keys.full, fold: keys.fold, restore: keys.restore })}
+                </span>
+              </span>
+            }
+          />
         </div>
       </PopoverContent>
     </Popover>

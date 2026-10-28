@@ -1267,6 +1267,7 @@ export const editor = defineNamespace({
     "editor.dock.restoreTip": "Restore the other panels ({keys})",
     "editor.dock.fullScreen": "Full screen: fold everything else",
     "editor.dock.restore": "Restore the other panels",
+    "editor.dock.restoreShort": "Restore",
     "editor.dock.foldAreaTip": "Fold this area ({keys}). Nothing is left behind; the Panels button brings it back.",
     "editor.dock.foldTimelineTip": "Fold the timeline ({keys}). Nothing is left behind; the Panels button brings it back.",
     "editor.dock.foldArea": "Fold this area",
@@ -1286,15 +1287,12 @@ export const editor = defineNamespace({
     "editor.dock.timing": "Timing",
     "editor.dock.panels": "Panels",
     "editor.dock.panelsTip": "Panels · {keys}",
-    "editor.dock.panelsOnFile": "Panels on this file",
-    "editor.dock.whereTimeline": "The centre, always",
     "editor.dock.stateFolded": "folded",
-    "editor.dock.stateShowing": "showing",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
-    "editor.dock.show": "Show",
     "editor.dock.filmHiddenByTiming": "Hidden in Free timing",
     "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
+    "editor.dock.fullOn": "Full screen is on",
     "editor.dock.foldedTimeline": "the timeline",
     "editor.dock.foldedBottomLeft": "the bottom left",
     "editor.dock.foldedBottomRight": "the bottom right",
@@ -2896,45 +2894,29 @@ export const editor = defineNamespace({
       "editor.dock.panels": {
         description:
           "Label of the button at the top right of the media view that lists its " +
-          "panels, shows any that are folded, and resets the layout.",
+          "panels, shows any that are folded, and resets the layout — and the heading " +
+          "over the list of panels in its menu (shown in capitals there).",
         maxLength: 14,
       },
       "editor.dock.panelsTip": {
         description: "Tooltip of the Panels button, with its keyboard shortcut.",
         placeholders: { keys: "The shortcut, e.g. ⌘\\ or Ctrl+\\. Never translate." },
       },
-      "editor.dock.panelsOnFile": {
-        description: "Heading over the list of panels in the Panels menu (Timeline, Film, Text).",
-      },
-      "editor.dock.whereTimeline": {
-        description:
-          "Where the timeline is, in the Panels menu: it is always in the middle " +
-          "of the layout and never moves (it can only be folded).",
-      },
       "editor.dock.stateFolded": {
         description:
-          "Lower-case word joined after a place with ' · ' in the Panels menu " +
+          "Lower-case word joined after a place with ' · ' in a Panels menu row's tooltip " +
           "(e.g. 'Bottom left · folded'): the panel is folded away.",
-      },
-      "editor.dock.stateShowing": {
-        description:
-          "Lower-case word joined after a place with ' · ' in the Panels menu " +
-          "(e.g. 'Bottom right · showing'): the panel is on screen.",
       },
       "editor.dock.stateBehind": {
         description:
-          "Joined after a place with ' · ' in the Panels menu: the panel shares " +
+          "Joined after a place with ' · ' in a Panels menu row's tooltip: the panel shares " +
           "its area with another and is the tab not currently shown.",
         placeholders: { panel: "The panel that is shown in front: 'Film' or 'Text'." },
       },
       "editor.dock.stateFull": {
         description:
-          "Lower-case words joined after a place with ' · ' in the Panels menu: " +
+          "Lower-case words joined after a place with ' · ' in a Panels menu row's tooltip: " +
           "this panel is full screen, everything else folded.",
-      },
-      "editor.dock.show": {
-        description: "Button on a folded or hidden panel's row in the Panels menu that brings it back on screen.",
-        maxLength: 10,
       },
       "editor.dock.filmHiddenByTiming": {
         description:
@@ -2942,9 +2924,21 @@ export const editor = defineNamespace({
           "the file is in Free timing — which hides the film, because the " +
           "re-flowed audio no longer follows the original footage.",
       },
+      "editor.dock.fullOn": {
+        description:
+          "The one short line at the top of the Panels menu while a panel is full screen, " +
+          "beside its Restore button. Its tooltip is editor.dock.fullNote.",
+        maxLength: 24,
+      },
+      "editor.dock.restoreShort": {
+        description:
+          "The Restore button on that line: unfolds what full screen folded. Its screen-reader " +
+          "name is editor.dock.restore. Short.",
+        maxLength: 12,
+      },
       "editor.dock.fullNote": {
         description:
-          "Note at the top of the Panels menu while a panel is full screen: what " +
+          "Tooltip of the full-screen line in the Panels menu: what " +
           "full screen folded, and that restoring unfolds only those.",
         placeholders: {
           folded:
@@ -2974,7 +2968,7 @@ export const editor = defineNamespace({
       "editor.dock.resetInfoAria": {
         description:
           "Screen-reader name of the small (i) button beside Reset layout, whose " +
-          "tooltip explains that the layout is remembered per person and per file.",
+          "tooltip explains that the layout is remembered per person and per file, and lists the layout's keys.",
       },
       "editor.dock.rememberedNote": {
         description:
@@ -2995,7 +2989,7 @@ export const editor = defineNamespace({
         description: "Tooltip text behind the (i) beside Reset layout, for any other kind of file.",
       },
       "editor.dock.keysHint": {
-        description: "Footer line of the Panels menu listing the layout's keyboard shortcuts.",
+        description: "Last line of the tooltip behind the (i) beside Reset layout in the Panels menu: the layout's keyboard shortcuts.",
         placeholders: {
           panels: "Shortcut, e.g. ⌘\\. Never translate.",
           full: "Shortcut, e.g. ⌘⇧F. Never translate.",

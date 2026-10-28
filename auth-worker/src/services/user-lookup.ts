@@ -142,3 +142,42 @@ export async function searchUsersByScopedPrefix(
     .all<LookedUpUser>()
   return result.results ?? []
 }
+
+/**
+ * AQU-2238: resolve a username OR an email address to a user id.
+ *
+ * Staffing a team with someone from outside the org starts from whatever the
+ * inviter has to hand, and that is usually an email — the person is not on the
+ * org roster, so no picker can offer their username. Username resolution runs
+ * first and keeps `lookupUserByUsername`'s exact semantics, so every existing
+ * caller behaves identically; the email branch is a fallback that only fires
+ * when the identifier looks like an address and matched no username.
+ *
+ * Email matching is case-insensitive (the signup and login paths canonicalize
+ * with LOWER(), see routes/auth.ts). `idx_users_email_ci` — UNIQUE on
+ * LOWER(email) — means at most one account can match, so the two-row ceiling
+ * is the same defense in depth the username fallback keeps: against a legacy
+ * fixture or partially migrated database that violates the invariant, the
+ * lookup fails closed rather than granting access to an arbitrary account.
+ */
+export async function lookupUserByUsernameOrEmail(
+  env: Env,
+  identifier: string,
+): Promise<LookedUpUser | null> {
+  const byUsername = await lookupUserByUsername(env, identifier)
+  if (byUsername) return byUsername
+
+  const trimmed = identifier.trim()
+  if (!trimmed.includes("@")) return null
+
+  const matches = await env.AQUILLA_PG.prepare(
+    `SELECT id, username FROM users
+      WHERE LOWER(email) = LOWER(?)
+      ORDER BY id ASC
+      LIMIT 2`,
+  )
+    .bind(trimmed)
+    .all<LookedUpUser>()
+  const rows = matches.results ?? []
+  return rows.length === 1 ? rows[0] : null
+}

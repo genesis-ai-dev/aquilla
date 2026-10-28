@@ -525,34 +525,40 @@ export function useMediaDock(input: UseMediaDockInput) {
     // the group, is sized back out (Sam, Oct 28: Film and Text ticked, the
     // row below the timeline drawn empty). Reproduced in WebKit: after a move
     // and a fold, Text was ticked and its area 0 px wide. The layout is the
-    // truth, and the sizes follow it both ways.
-    const shut = (r: DockRegion | "body") => {
-      const px = safeSize(r)
-      return px !== null && isFoldSized(px)
-    }
-    if (view.isOpen("tl") && view.bodyOpen && (shut("tl") || shut("body"))) {
-      repairsRef.current++
-      safeResize("tl", tlHeight())
-    } else if (!view.isOpen("tl") && view.bodyOpen && shut("body")) {
-      repairsRef.current++
-      safeResize("body", "100%")
-    }
-    const both = view.isOpen("ll") && view.isOpen("lr")
-    for (const r of ["ll", "lr"] as const) {
-      if (!view.isOpen(r) || !shut(r)) continue
-      repairsRef.current++
-      if (!both) {
-        safeResize(r, "100%")
-      } else if (filmArea) {
-        // The film at its remembered width, leaving the text its minimum.
-        const other = filmArea === "ll" ? "lr" : "ll"
-        const row = (safeSize("ll") ?? 0) + (safeSize("lr") ?? 0)
-        const room = row > 0 ? row - minWidthOf(other) : filmWidth()
-        safeResize(filmArea, Math.max(minWidthOf(filmArea), Math.min(filmWidth(), room)))
-      } else {
-        safeResize(r, "50%")
+    // truth, and the sizes follow it both ways. On the next frame: in this
+    // commit the group may still hold the area at its folded pin (max 0), and
+    // a resize now would be clamped straight back to zero.
+    const reopenShut = () => {
+      const shut = (r: DockRegion | "body") => {
+        const px = safeSize(r)
+        return px !== null && isFoldSized(px)
+      }
+      if (view.isOpen("tl") && view.bodyOpen && (shut("tl") || shut("body"))) {
+        repairsRef.current++
+        safeResize("tl", tlHeight())
+      } else if (!view.isOpen("tl") && view.bodyOpen && shut("body")) {
+        repairsRef.current++
+        safeResize("body", "100%")
+      }
+      const both = view.isOpen("ll") && view.isOpen("lr")
+      for (const r of ["ll", "lr"] as const) {
+        if (!view.isOpen(r) || !shut(r)) continue
+        repairsRef.current++
+        if (!both) {
+          safeResize(r, "100%")
+        } else if (filmArea) {
+          // The film at its remembered width, leaving the text its minimum.
+          const other = filmArea === "ll" ? "lr" : "ll"
+          const row = (safeSize("ll") ?? 0) + (safeSize("lr") ?? 0)
+          const room = row > 0 ? row - minWidthOf(other) : filmWidth()
+          safeResize(filmArea, Math.max(minWidthOf(filmArea), Math.min(filmWidth(), room)))
+        } else {
+          safeResize(r, "50%")
+        }
       }
     }
+    const frame = requestAnimationFrame(reopenShut)
+    return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the latest sizes through the closures
   }, [safeResize, safeSize, timelineStacked, view])
 

@@ -2051,8 +2051,8 @@ export const editor = defineNamespace({
     // — Write failures surfaced on the row ————————————————————————
     "editor.write.saveFailed": "Could not save — please try again",
     "editor.write.refusedTitle": plural({
-      one: "Your change wasn't saved",
-      other: "{count} of your changes weren't saved",
+      one: "{count} change wasn't saved",
+      other: "{count} changes weren't saved",
     }),
     "editor.write.refusedDetail": "{cell}: {reason}. The line now shows what was saved.",
     "editor.write.saveSourceFailed": "Could not save source edit — please try again",
@@ -7892,6 +7892,9 @@ export const editor = defineNamespace({
           "the line's language could not be identified). The edit is undone on " +
           "screen; this tells the user it did not save, so they can redo it.",
         maxLength: 48,
+        placeholders: {
+          count: "How many of the user's changes the server refused.",
+        },
       },
       "editor.write.refusedDetail": {
         description:

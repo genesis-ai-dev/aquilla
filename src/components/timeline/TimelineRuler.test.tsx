@@ -37,6 +37,8 @@ describe("TimelineRuler", () => {
     expect(screen.getByText("0:30")).toBeInTheDocument()
     fireEvent.click(ruler, { clientX: 1000 }) // 26.3 s, past the end
     expect(onScrub).toHaveBeenCalledWith(20)
+    // The 0:30 label at the very edge must not make the track scroll sideways.
+    expect(ruler.className).toContain("overflow-x-clip")
   })
 
   it("is the file's own width when the file is the longer", () => {

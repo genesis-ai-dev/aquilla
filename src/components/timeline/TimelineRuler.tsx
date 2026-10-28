@@ -104,7 +104,12 @@ function TimelineRulerImpl({
       // relative -> sticky is safe: sticky is still "positioned", so the
       // absolutely positioned ticks below keep this element as their
       // containing block.
-      className="sticky top-0 z-20 h-7 cursor-col-resize touch-none select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
+      //
+      // overflow-x-clip: a label on a tick at the very edge (a short file's
+      // ruler runs to the view's edge) must not widen the track and make it
+      // scroll sideways by its own few pixels. Clip, not hidden: no scroll
+      // container, so sticky holds, and the 1 px seam below still shows.
+      className="sticky top-0 z-20 h-7 overflow-x-clip cursor-col-resize touch-none select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
       style={{ width: `${width}px` }}
       onPointerDown={scrub.onPointerDown}
       onClick={(e) => {

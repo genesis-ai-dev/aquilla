@@ -112,7 +112,8 @@ describe("TargetAudioLane — overflow warnings", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} color="0d9488" />)
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip).toHaveAttribute("data-overflow", "none")
-    expect(chip.className).toContain("bg-[color:var(--tl-track-take)]")
+    // AQU-2235: the take look's 12% ground.
+    expect(chip.className).toContain("bg-[color:var(--tl-track-ground)]")
     expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-hue")).toBe("#0d9488")
   })
 
@@ -130,10 +131,12 @@ describe("TargetAudioLane — overflow warnings", () => {
     // …and no inline fill anywhere to have overridden it.
     expect(offender.style.backgroundColor).toBe("")
     // A chip on the same track that is behaving keeps its identity class.
-    expect(screen.getByTestId("tl-target-c2").className).toContain("bg-[color:var(--tl-track-take)]")
+    expect(screen.getByTestId("tl-target-c2").className).toContain("bg-[color:var(--tl-track-ground)]")
   })
 
-  it("uses the lighter alpha for a generated voice", () => {
+  // AQU-2235 (Sam, Oct 25): "make the only distinction between AI and non-AI
+  // the little star in the corner" — a generated voice wears the same ground.
+  it("draws a generated voice on the same ground as a recorded take", () => {
     render(
       <TargetAudioLane
         {...base}
@@ -141,7 +144,7 @@ describe("TargetAudioLane — overflow warnings", () => {
         color="0d9488"
       />,
     )
-    expect(screen.getByTestId("tl-target-c1").className).toContain("bg-[color:var(--tl-track-gen)]")
+    expect(screen.getByTestId("tl-target-c1").className).toContain("bg-[color:var(--tl-track-ground)]")
   })
 
   it("draws a preset id and a picked hex through the same one mechanism", () => {
@@ -1331,14 +1334,19 @@ describe("TargetAudioLane — the track's colour", () => {
     expect(laneOf().className).not.toContain("bg-[color:var(--tl-track")
   })
 
-  it("draws a take at 67% and a generated voice at 33%", () => {
+  // AQU-2235 (Sam, Oct 25, board 51): a 12% ground in a 26% frame, for a
+  // recorded take and a generated voice alike.
+  it("draws a take and a generated voice alike: a 12% ground in a 26% frame", () => {
     const { unmount } = render(<TargetAudioLane {...base} color="cyan" items={[item({}, 4000)]} />)
-    expect(classesOf()).toContain("bg-[color:var(--tl-track-take)]")
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(classesOf()).toContain("border-[color:var(--tl-track-frame)]")
+    expect(laneOf().style.getPropertyValue("--tl-track-ground")).toBe("rgba(0, 195, 205, 0.12)")
+    expect(laneOf().style.getPropertyValue("--tl-track-frame")).toBe("rgba(0, 195, 205, 0.26)")
     unmount()
 
     const generated = { ...item({}, 4000), kind: "generated" as const }
     render(<TargetAudioLane {...base} color="cyan" items={[generated]} />)
-    expect(classesOf()).toContain("bg-[color:var(--tl-track-gen)]")
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-ground)]")
     // BOTH chips are washes now, so both read against the page rather than
     // against the hue — ink chosen for the hue would be wrong at these alphas.
     expect(classesOf()).toContain("text-foreground")
@@ -1347,7 +1355,8 @@ describe("TargetAudioLane — the track's colour", () => {
 
   it("defaults to green for a track nobody has coloured", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
-    expect(hueOf()).toBe("#40c06e")
+    // AQU-2235: the new green, the recording bar's hue (was #40c06e).
+    expect(hueOf()).toBe("#0cc187")
   })
 
   it("takes a picked hex as readily as a preset id", () => {
@@ -1367,7 +1376,7 @@ describe("TargetAudioLane — the track's colour", () => {
   // half of that bargain: the old client draws the default rather than nothing.
   it("falls back to the default for an id this build cannot name", () => {
     render(<TargetAudioLane {...base} color="ultramarine-2" items={[item({}, 4000)]} />)
-    expect(hueOf()).toBe("#40c06e")
+    expect(hueOf()).toBe("#0cc187")
   })
 
   // THE ONE THAT MATTERS MOST. `cn` resolves last-wins per utility group, and
@@ -1690,9 +1699,9 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     expect(screen.getByTestId("tl-target-c1-playline").style.left).toBe("20px")
   })
 
-  // ── The progress fill (Sam, same round): the unplayed side drops to the
-  // hover rung and the chip re-fills behind the line — the SoundCloud pattern
-  // in the palette's own ladder.
+  // ── The progress fill (Sam, same round): the unplayed side stays on the
+  // resting ground and the chip fills one rung up behind the line — AQU-2235
+  // (Sam, Oct 25): played 27%, not yet 12%, and the waveform split 90 / 30.
   it("dims the unplayed side on press and re-fills behind the playhead", async () => {
     const stub = stubPreview()
     render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
@@ -1702,8 +1711,8 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     await pressPlay()
     // The identity fill is muted and the split gradient takes the slot…
     expect(chip.className).toContain("bg-transparent")
-    expect(chip.className).toContain("var(--tl-track-take)_var(--tl-play-x")
-    expect(chip.className).toContain("var(--tl-track-hover)_var(--tl-play-x")
+    expect(chip.className).toContain("var(--tl-track-played)_var(--tl-play-x")
+    expect(chip.className).toContain("var(--tl-track-ground)_var(--tl-play-x")
     // …split at 0 while the decode is still in flight (whole chip = "not yet"),
     frame()
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("0px")
@@ -1717,7 +1726,7 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("")
   })
 
-  it("a generated voice re-fills to its own lighter rung", async () => {
+  it("a generated voice re-fills exactly as a recorded take does", async () => {
     const stub = stubPreview()
     render(
       <TargetAudioLane
@@ -1727,7 +1736,7 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
       />,
     )
     await pressPlay()
-    expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-gen)_var(--tl-play-x")
+    expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-played)_var(--tl-play-x")
   })
 
   it("never repaints a red at-fault chip — the warning still beats playback", async () => {

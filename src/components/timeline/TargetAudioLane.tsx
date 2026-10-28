@@ -86,7 +86,7 @@ import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
+import { CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass, chipPlaylineClass } from "@/components/audio/chip-classes"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 
 /** AQU-1758: the take's-voice label needs a full-height chip (46 px by
@@ -228,6 +228,11 @@ export interface TargetAudioLaneProps {
    * those need namespacing the same way.
    */
   laneTestId?: string
+  /**
+   * AQU-2235 (Sam's board 51 suggestion): this track is muted, so every take
+   * on it is drawn at half strength.
+   */
+  muted?: boolean
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -345,8 +350,11 @@ function TargetAudioChip({
   peaks,
   preview,
   layout,
+  muted = false,
 }: {
   chip: ChipGeometry
+  /** AQU-2235: the take's track is muted — drawn at half strength. */
+  muted?: boolean
   /** AQU-2215: the lane's layout, for the one question only it can answer —
    *  what a MOVE on this chip means, and what to store for it. Absent outside
    *  a timeline (this lane's own tests), which is dubbing's own behaviour. */
@@ -1153,7 +1161,8 @@ function TargetAudioChip({
         left: `${secToPx(paintedStart, pxPerSec)}px`,
         width: `${paintedPx}px`,
         // Same rule as every other chip, its own smaller cap (was rounded-md).
-        borderRadius: `${chipRadiusPx(paintedPx, 6)}px`,
+        // AQU-2235: 4px on a clip under 24px tall (board 51).
+        borderRadius: `${chipRadiusPx(paintedPx, chipH < 24 ? 4 : 6)}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
@@ -1195,6 +1204,8 @@ function TargetAudioChip({
         selected === "line" && "ring-1 ring-sky-500/50",
         // Sam's decision: faded like the table's revealed hidden row.
         hiddenLine && "opacity-60",
+        // AQU-2235: a muted track's takes at half strength.
+        muted && "opacity-50",
       )}
     >
       {drag && (
@@ -1230,6 +1241,9 @@ function TargetAudioChip({
           x0={waveform.x0}
           x1={waveform.x1}
           chipH={chipH}
+          // AQU-2235: full strength where it has played, 30% where it has not.
+          playing={previewing && !geom.usingFallback && overflow !== "overlap"}
+          fault={overflow === "overlap"}
         />
       )}
       {canResize && (
@@ -1467,7 +1481,8 @@ function TargetAudioChip({
           aria-hidden
           ref={playlineRef}
           data-testid={`tl-target-${testKey}-playline`}
-          className={CHIP_PLAYLINE_CLASS}
+          // AQU-2235: in the track's darkened hue.
+          className={chipPlaylineClass(chipH)}
         />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does
@@ -1761,6 +1776,7 @@ export function TargetAudioLane({
   previewFactory,
   color,
   laneTestId = "tl-target-lane",
+  muted = false,
 }: TargetAudioLaneProps) {
   const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
@@ -2076,6 +2092,7 @@ export function TargetAudioLane({
             currentUsername={session?.username ?? ""}
             peaks={peaksFor.get(chip.item.audioId)}
             preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
+            muted={muted}
           />
         ) : null,
       )}

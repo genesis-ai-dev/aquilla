@@ -2434,7 +2434,9 @@ export function AudioRecordingModal({
                       // keeps its place, and without it so a long line still
                       // leaves the takes drawer its room (Sam, 2026-09-28).
                       height={40}
-                      kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+                      // AQU-2235: a generated voice carries its sparkle on any
+                      // track, as the takes list reads it (off the take).
+                      kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId || Boolean(readyAtt.voiceId) ? "generated" : "take"}
                       trackVars={readyTrackVars}
                       strategy="eager"
                       validation={readyBadge === "self" || readyBadge === "full" ? readyBadge : null}

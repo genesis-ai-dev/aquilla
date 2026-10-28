@@ -282,11 +282,12 @@ describe("RecordingTakes — heard lines, tracks and what a take is checked agai
     expect(within(main).getByTestId("cell-take-track")).toHaveTextContent("Target audio")
     expect(within(added).getByTestId("cell-take-track")).toHaveTextContent("Track")
     expect(within(added).getByTestId("cell-take-label")).toHaveTextContent("Take 1")
-    // The dot wears the added track's magenta, stored on the SUBTITLE file.
+    // The dot wears the added track's magenta, stored on the SUBTITLE file —
+    // in the strip colour, the waveform's chroma at its own lightness (AQU-2235).
     const dot = within(added).getByTestId("cell-take-track").querySelector("span[aria-hidden]") as HTMLElement
-    const magenta = document.createElement("span")
-    magenta.style.background = trackHueVarsFor("audio", "magenta")["--tl-track-hue"]
-    expect(dot.style.background).toBe(magenta.style.background)
+    expect(trackHueVarsFor("audio", "magenta")["--tl-track-strip"]).toBe("oklch(0.597 0.140 355.7)")
+    expect(dot.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.597 0.140 355.7)")
+    expect(dot.className).toContain("bg-[color:var(--tl-track-strip)]")
   })
 
   it("gives a trimmed take the length that plays", () => {

@@ -3031,14 +3031,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     // become the row's firstElementChild, which the drop-indent test reads.
     const audio = named("Target audio") as HTMLElement
     expect(audio.className).toContain("border-l-4")
-    expect(audio.className).toContain("border-l-[color:var(--tl-track-hue)]")
-    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+    // AQU-2235: in the strip colour — the waveform's chroma at the track's own
+    // lightness — and the green is the new one (#0cc187, was #40c06e).
+    expect(audio.className).toContain("border-l-[color:var(--tl-track-strip)]")
+    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#0cc187")
+    expect(audio.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.718 0.140 162.7)")
 
     // A source row is not PICKABLE, but it still has a colour of its own and
     // is now drawn the same way — that is the whole of this change.
     const source = named("Source text") as HTMLElement
     expect(source.className).toContain("border-l-4")
     expect(source.style.getPropertyValue("--tl-track-hue")).toBe("#8b93a3")
+    // …and keeps its own grey as its strip: a derived row's colour never moves.
+    expect(source.style.getPropertyValue("--tl-track-strip")).toBe("#8b93a3")
 
     // …and every row's hue is its own, not one shared default.
     const dubs = named("Dubs") as HTMLElement // the folder

@@ -14,6 +14,9 @@ import {
   TRACK_HOVER_CLASS,
   TRACK_HUES,
   TRACK_LANE_TINT_CLASS,
+  TRACK_BAR_CLASS,
+  TRACK_WAVE_FILL_CLASS,
+  WAVE_LOOK,
   hexToRgba,
   isColorableKind,
   hueForTrack,
@@ -34,10 +37,21 @@ describe("the palette", () => {
       "cyan", "azure", "violet", "magenta", "amber", "green",
     ])
     // Coral is gone and two were retuned by eye (Sam, 2026-08-27): magenta
-    // toward red with more saturation, amber brightened to 92% HSB.
+    // toward red with more saturation, amber brightened to 92% HSB. AQU-2235
+    // (Sam, Oct 25, board 53): green moved from #40c06e to the recording bar's
+    // hue at its old lightness.
     expect(TRACK_HUES.map((h) => h.hex)).toEqual([
-      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#40c06e",
+      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#0cc187",
     ])
+  })
+
+  // AQU-2235: nothing stored changes — a track keeps the id "green", and the id
+  // simply means the new green. (A literal hex a briefly-shipped picker wrote is
+  // the user's own colour and is left alone, the old green included.)
+  it("moves green by its id, so a stored track draws the new green", () => {
+    expect(parseTrackHue("green")).toBe("#0cc187")
+    expect(parseTrackHue("green-teal")).toBe("#0cc187")
+    expect(parseTrackHue("40c06e")).toBe("#40c06e")
   })
 
   it("gives every hue an id, a hex and a name to translate", () => {
@@ -122,6 +136,14 @@ describe("the alphas", () => {
       "--tl-track-hover-fill": "rgba(0, 195, 205, 0.45)",
       "--tl-track-gen": "rgba(0, 195, 205, 0.33)",
       "--tl-track-take": "rgba(0, 195, 205, 0.67)",
+      // AQU-2235: the waveform look.
+      "--tl-track-ground": "rgba(0, 195, 205, 0.12)",
+      "--tl-track-played": "rgba(0, 195, 205, 0.27)",
+      "--tl-track-frame": "rgba(0, 195, 205, 0.26)",
+      "--tl-track-bar": "rgba(0, 195, 205, 0.34)",
+      "--tl-track-wave": "oklch(0.55 0.125 201.3)",
+      "--tl-track-line": "oklch(0.544 0.078 201.3)",
+      "--tl-track-strip": "oklch(0.744 0.140 201.3)",
     })
   })
 
@@ -145,22 +167,33 @@ describe("the class vocabulary", () => {
     }
   })
 
-  // Sam, 2026-08-27: "put full fill color as outline of chips." An audio chip
-  // gets a definite edge rather than a soft block that dissolves into the row —
-  // and it is the same solid the gutter accent and the dot already use.
-  it("outlines both audio chips in the hue at full strength", () => {
+  // AQU-2235 (Sam, Oct 25, board 51): the solid outline of 2026-08-27 becomes
+  // a really faint frame — the hue at 26% — over a 12% ground.
+  it("frames both audio chips faintly, on the 12% ground", () => {
     for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
-      expect(cls).toContain("border-[color:var(--tl-track-hue)]")
-      // …while the FILL stays the wash that says which kind of clip it is.
-      expect(cls).not.toContain("bg-[color:var(--tl-track-hue)]")
+      expect(cls).toContain("border-[color:var(--tl-track-frame)]")
+      expect(cls).toContain("bg-[color:var(--tl-track-ground)]")
+      expect(cls).not.toContain("--tl-track-hue")
     }
   })
 
-  it("picks the body for a take and the lighter wash for a generated voice", () => {
+  // "Make the only distinction between AI and non-AI the little star in the
+  // corner" (Sam, Oct 25): the two kinds wear the same body.
+  it("draws a generated voice exactly like a recorded take", () => {
     expect(trackChipClass("take")).toBe(TRACK_CHIP_TAKE_CLASS)
     expect(trackChipClass("generated")).toBe(TRACK_CHIP_GENERATED_CLASS)
-    expect(trackChipClass("take")).toContain("--tl-track-take")
-    expect(trackChipClass("generated")).toContain("--tl-track-gen")
+    expect(TRACK_CHIP_GENERATED_CLASS).toBe(TRACK_CHIP_TAKE_CLASS)
+    expect(trackChipPlayingClass("generated")).toBe(trackChipPlayingClass("take"))
+  })
+
+  it("fills the waveform and the name bar from their own variables", () => {
+    expect(TRACK_WAVE_FILL_CLASS).toBe("fill-[color:var(--tl-track-wave)]")
+    expect(TRACK_BAR_CLASS).toBe("bg-[color:var(--tl-track-bar)]")
+  })
+
+  it("draws the gutter strip and the dot in the strip colour", () => {
+    expect(TRACK_ACCENT_CLASS).toBe("border-l-4 border-l-[color:var(--tl-track-strip)]")
+    expect(TRACK_DOT_CLASS).toBe("bg-[color:var(--tl-track-strip)]")
   })
 
   // Both chips are washes now — most of what you read against is the page — so
@@ -192,7 +225,10 @@ describe("the rows nobody picks a colour for", () => {
   it("gives each derived kind a hue of its own", () => {
     expect(hueForTrack("source-subtitles", null)).toBe("#8b93a3")
     expect(hueForTrack("source-audio", null)).toBe("#0e9bd6")
-    expect(hueForTrack("target-subtitles", null)).toBe("#40c06e")
+    // The palette's own green by reference (AQU-2235): "the same green as an
+    // untouched dub row", which a copied hex would have stopped being.
+    expect(hueForTrack("target-subtitles", null)).toBe(DEFAULT_HUE.hex)
+    expect(hueForTrack("target-subtitles", null)).toBe("#0cc187")
   })
 
   // Their colours are statements about what the row IS, so a stored value —
@@ -216,9 +252,9 @@ describe("the rows nobody picks a colour for", () => {
 
   it("publishes their hues through the same variables as everything else", () => {
     const vars = trackHueVarsFor("target-subtitles", null)
-    expect(vars["--tl-track-hue"]).toBe("#40c06e")
-    expect(vars["--tl-track-hover"]).toBe("rgba(64, 192, 110, 0.18)")
-    expect(vars["--tl-track-gen"]).toBe("rgba(64, 192, 110, 0.33)")
+    expect(vars["--tl-track-hue"]).toBe("#0cc187")
+    expect(vars["--tl-track-hover"]).toBe("rgba(12, 193, 135, 0.18)")
+    expect(vars["--tl-track-gen"]).toBe("rgba(12, 193, 135, 0.33)")
   })
 })
 
@@ -303,13 +339,14 @@ describe("which rows may be recoloured", () => {
 })
 
 describe("the preview progress fill (2026-08-27)", () => {
-  it("splits each kind's fill at the playhead, in the ladder's own rungs", () => {
-    const take = trackChipPlayingClass("take")
-    expect(take).toContain("var(--tl-track-take)_var(--tl-play-x")
-    expect(take).toContain("var(--tl-track-hover)_var(--tl-play-x")
-    const gen = trackChipPlayingClass("generated")
-    expect(gen).toContain("var(--tl-track-gen)_var(--tl-play-x")
-    expect(gen).toContain("var(--tl-track-hover)_var(--tl-play-x")
+  // AQU-2235 (Sam, Oct 25): the played side one rung UP (27%), the rest on
+  // the resting 12% ground; the waveform carries the rest of the contrast.
+  it("splits the fill at the playhead: played at 27%, not yet at the 12% ground", () => {
+    for (const kind of ["take", "generated"] as const) {
+      const cls = trackChipPlayingClass(kind)
+      expect(cls).toContain("var(--tl-track-played)_var(--tl-play-x")
+      expect(cls).toContain("var(--tl-track-ground)_var(--tl-play-x")
+    }
   })
 
   it("mutes the identity colour underneath — the gradient's washes must not stack on it", () => {
@@ -365,5 +402,51 @@ describe("the folder band is visible in both themes", () => {
   // The bug in one line: this is what the band used to be painted with.
   it("records that --muted is NOT usable for it, because dark defines it to the ground", () => {
     expect(tokenIn(DARK, "muted")).toBe(ground(DARK))
+  })
+})
+
+// ── AQU-2235: the waveform look's exact values (boards 51 and 53) ───────────
+describe("the waveform look", () => {
+  it("is Sam's values: ground 12, played 27, frame 26, bar 34; waveform 90, not yet 30; muted 50", () => {
+    expect(WAVE_LOOK).toEqual({ ground: 0.12, played: 0.27, frame: 0.26, bar: 0.34, wave: 0.9, unplayed: 0.3, muted: 0.5 })
+    const green = trackHueVars("green")
+    expect(green["--tl-track-ground"]).toBe("rgba(12, 193, 135, 0.12)")
+    expect(green["--tl-track-played"]).toBe("rgba(12, 193, 135, 0.27)")
+    expect(green["--tl-track-frame"]).toBe("rgba(12, 193, 135, 0.26)")
+    expect(green["--tl-track-bar"]).toBe("rgba(12, 193, 135, 0.34)")
+  })
+
+  // Board 53, to the third decimal: oklch(0.55 0.14 <hue>), and the P3
+  // maximum where a hue cannot reach 0.14 (cyan, amber).
+  it("gives every waveform oklch(0.55 0.14) in its track's own hue, capped at P3", () => {
+    const wave = (id: string) => trackHueVars(id)["--tl-track-wave"]
+    expect(wave("cyan")).toBe("oklch(0.55 0.125 201.3)")
+    expect(wave("azure")).toBe("oklch(0.55 0.140 252.4)")
+    expect(wave("violet")).toBe("oklch(0.55 0.140 292.4)")
+    expect(wave("magenta")).toBe("oklch(0.55 0.140 355.7)")
+    expect(wave("amber")).toBe("oklch(0.55 0.132 77.8)")
+    expect(wave("green")).toBe("oklch(0.55 0.140 162.7)")
+  })
+
+  it("gives every strip and dot the waveform's chroma at the track's own lightness", () => {
+    const strip = (id: string) => trackHueVars(id)["--tl-track-strip"]
+    expect(strip("cyan")).toBe("oklch(0.744 0.140 201.3)")
+    expect(strip("azure")).toBe("oklch(0.625 0.140 252.4)")
+    expect(strip("violet")).toBe("oklch(0.595 0.140 292.4)")
+    expect(strip("magenta")).toBe("oklch(0.597 0.140 355.7)")
+    expect(strip("amber")).toBe("oklch(0.774 0.140 77.8)")
+    expect(strip("green")).toBe("oklch(0.718 0.140 162.7)")
+  })
+
+  // The derived rows' fixed colours are statements about what the row is.
+  it("leaves the source rows' own strip colours as they are", () => {
+    expect(trackHueVarsFor("source-subtitles", null)["--tl-track-strip"]).toBe("#8b93a3")
+    expect(trackHueVarsFor("source-audio", null)["--tl-track-strip"]).toBe("#0e9bd6")
+  })
+
+  it("draws the play line in the track darkened with its hue held", () => {
+    // oklch(from <track> calc(l * 0.731) calc(c * 0.617) h)
+    expect(trackHueVars("green")["--tl-track-line"]).toBe("oklch(0.525 0.095 162.7)")
+    expect(trackHueVars("azure")["--tl-track-line"]).toBe("oklch(0.457 0.106 252.4)")
   })
 })

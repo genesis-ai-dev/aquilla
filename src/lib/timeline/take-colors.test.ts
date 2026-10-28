@@ -25,13 +25,14 @@ describe("takeTrackVars", () => {
     expect(hue(takeTrackVars({ files, fileId: "f1", slot: "trk-es" }))).toBe("#da2b84")
   })
 
+  // AQU-2235: the default green is the new one (#0cc187, was #40c06e).
   it("uses the media view's default green where nobody has picked a colour", () => {
-    expect(hue(takeTrackVars({ files, fileId: "f2", slot: "recording" }))).toBe("#40c06e")
-    expect(hue(takeTrackVars({ files: undefined, fileId: "f1" }))).toBe("#40c06e")
+    expect(hue(takeTrackVars({ files, fileId: "f2", slot: "recording" }))).toBe("#0cc187")
+    expect(hue(takeTrackVars({ files: undefined, fileId: "f1" }))).toBe("#0cc187")
   })
 
   it("never draws a take in grey, even when its track is gone", () => {
-    expect(hue(takeTrackVars({ files, fileId: "f1", slot: "trk-deleted" }))).toBe("#40c06e")
+    expect(hue(takeTrackVars({ files, fileId: "f1", slot: "trk-deleted" }))).toBe("#0cc187")
   })
 
   it("draws a source-audio section in the source row's fixed blue", () => {

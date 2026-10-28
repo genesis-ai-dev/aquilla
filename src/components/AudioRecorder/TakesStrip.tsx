@@ -695,7 +695,10 @@ export function TakesStrip({
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              {(tab || piecesList) && (
+              {/* AQU-2235 (Sam's board 52): every takes list carries the take's
+                  56 × 20 shape — the recording window's too, not only the
+                  Recording tab's. */}
+              {(
                 <TakeRowWave
                   projectId={projectId}
                   fileId={fileId}

@@ -22,7 +22,7 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react"
 import { CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -38,6 +38,7 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
@@ -445,7 +446,7 @@ function CellTakeBlockView({
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         {trackName && !isSection && (
           <span data-testid="cell-take-track" className="flex items-center gap-1.5 font-medium">
-            <span aria-hidden className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: trackVars["--tl-track-hue"] }} />
+            <span aria-hidden className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${TRACK_DOT_CLASS}`} style={trackVars as CSSProperties} />
             {trackName}
             <span aria-hidden className="font-normal text-muted-foreground">·</span>
           </span>
@@ -660,8 +661,10 @@ function CellTakeBlockView({
         kept={kept}
         height={56}
         // In its track's colour (Sam, 2026-09-26): a source section in the
-        // source row's lighter blue, a take in its own track's.
-        kind={isGenerated || isSection ? "generated" : "take"}
+        // source row's blue, a take in its own track's. AQU-2235: "generated"
+        // now only adds the sparkle — the two kinds are drawn alike — so a
+        // source section, which is no AI voice, is drawn as a take.
+        kind={isGenerated ? "generated" : "take"}
         trackVars={trackVars}
         strategy={project.audioMediaStrategy ?? "lazy"}
         {...(piecesWindow ? { pieces: piecesWindow } : {})}

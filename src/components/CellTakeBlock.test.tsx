@@ -206,7 +206,8 @@ describe("its colour", () => {
 
   it("is the media view's default green where nobody picked one", () => {
     draw()
-    expect(hue()).toBe("#40c06e")
+    // AQU-2235: the new green (was #40c06e).
+    expect(hue()).toBe("#0cc187")
   })
 
   it("is an added track's own colour for a take made on it", () => {
@@ -220,7 +221,7 @@ describe("its colour", () => {
     expect(hue()).toBe("#eba720")
   })
 
-  it("is the source row's lighter blue for a source-audio section", () => {
+  it("is the source row's blue for a source-audio section, drawn as a take with no sparkle", () => {
     const source = "audio-mark-reading-1700000000-src.wav"
     const owner = {
       ...cueOwner(), startTime: 17.6, endTime: 23.1, selectedAudioId: source,
@@ -228,7 +229,10 @@ describe("its colour", () => {
     } as unknown as CellData
     draw({ owner, project: withFiles({ "target-audio": { color: "violet" } }) })
     expect(hue()).toBe("#0e9bd6")
-    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-gen)]")
+    // AQU-2235: the two kinds share one body now; "generated" only adds the
+    // sparkle, and a section of the source recording is no AI voice.
+    expect(screen.getByTestId("cell-take-waveform").className).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(screen.queryByTestId("cell-take-waveform-generated")).toBeNull()
   })
 })
 

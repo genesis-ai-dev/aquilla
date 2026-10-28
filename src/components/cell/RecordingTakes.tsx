@@ -14,7 +14,7 @@
 // that plays is validated here as from the line's audio check (Sam,
 // 2026-09-30); the listed takes show their validation read-only.
 
-import { useMemo } from "react"
+import { useMemo, type CSSProperties } from "react"
 import { AudioLines, Mic, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -35,6 +35,7 @@ import { audioIdSeededWith } from "@/lib/audio/upload"
 import { groupSelection, groupTakesByTrack, originalRecordingId, piecesOf, playingTakeId, type TakeGroup } from "@/lib/audio/take-groups"
 import { DEFAULT_TARGET_TRACK_ID, GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackVars, tracksForTakesIn } from "@/lib/timeline/take-colors"
+import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { fmtClock } from "@/components/timeline/format"
 import { CellTakeBlock } from "@/components/CellTakeBlock"
@@ -245,14 +246,13 @@ function OwnerTakes({
               <div data-testid="rec-tab-track-heading" className="flex items-center gap-2 text-xs font-medium">
                 <span
                   aria-hidden
-                  className="inline-block h-2.5 w-2.5 rounded-full"
-                  style={{
-                    background: takeTrackVars({
-                      files: project.files,
-                      fileId: trackFileId,
-                      slot: isDefault ? RECORDING_SLOT : group.takes[0]?.slot,
-                    })["--tl-track-hue"],
-                  }}
+                  // AQU-2235: the track's dot, in its strip colour.
+                  className={`inline-block h-2.5 w-2.5 rounded-full ${TRACK_DOT_CLASS}`}
+                  style={takeTrackVars({
+                    files: project.files,
+                    fileId: trackFileId,
+                    slot: isDefault ? RECORDING_SLOT : group.takes[0]?.slot,
+                  }) as CSSProperties}
                 />
                 {group.name || t("editor.recordingTab.addedTrack")}
               </div>

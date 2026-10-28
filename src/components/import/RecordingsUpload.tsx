@@ -189,8 +189,8 @@ async function inBatches<T>(items: readonly T[], size: number, fn: (item: T) => 
   }))
 }
 
-/** "Genesis 1:3", or "line 12" for a document. */
-export function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
+/** "Genesis 1:3", or "Welcome letter · 12" for a document's line. */
+function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
   const m = line.ref ? /^([1-3]?[A-Z]{2,3})\s+(\d+:\S+)$/.exec(line.ref) : null
   if (m) return `${file.bookCode ? englishBookName(file.bookCode) : file.name} ${m[2]}`
   return `${file.name} · ${position + 1}`
@@ -392,8 +392,8 @@ function ReviewBody({
   const { locale } = useI18n()
   const fmt = (n: number) => formatNumber(n, locale)
   const { targets } = ready
-  const matched = assignments.filter((a) => a.cellIds && a.fileId)
-  const unmatched = assignments.filter((a) => !a.cellIds || !a.fileId)
+  const matched = useMemo(() => assignments.filter((a) => a.cellIds && a.fileId), [assignments])
+  const unmatched = useMemo(() => assignments.filter((a) => !a.cellIds || !a.fileId), [assignments])
   const uploadCount = matched.length
   const lineIds = new Set(matched.flatMap((a) => a.cellIds!.map((id) => `${a.fileId}\u0000${id}`)))
   const lineById = useMemo(() => {

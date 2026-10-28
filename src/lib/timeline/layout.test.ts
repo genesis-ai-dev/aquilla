@@ -301,7 +301,9 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
       expect(l.retimeAnchorSec(vague[0], attOf(vague[0]), 1.5)).toBeNull()
     })
 
-    it("a split take's pieces are not movable — they sit end to end from the line's start", () => {
+    // AQU-1758 (Sam's decision 3): each piece of a split take can be dragged;
+    // where it lands is stored on the piece.
+    it("a split take's pieces are movable, each stored on itself", () => {
       const TAKE = "audio-a-1700000000-take.wav"
       const PIECE = "audio-a-1700000500-piece.wav"
       const cell = {
@@ -313,8 +315,31 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
         },
       } as unknown as CellData
       const l = buildTimelineLayout("audioFirst", [cell], [cell])
-      expect(l.canRetimeTarget(cell, cell.attachments![TAKE] as never)).toBe(false)
-      expect(l.retimeAnchorSec(cell, cell.attachments![PIECE] as never, 1.8)).toBeNull()
+      expect(l.canRetimeTarget(cell, cell.attachments![TAKE] as never)).toBe(true)
+      // The second piece dragged to 1.8 s: 1.8 s from the line's start.
+      expect(l.retimeAnchorSec(cell, cell.attachments![PIECE] as never, 1.8)).toBeCloseTo(1.8)
+      // Drawn where it was placed.
+      const placed = { ...cell, attachments: { ...cell.attachments, [PIECE]: { ...cell.attachments![PIECE], targetOffsetMs: 1800 } } } as unknown as CellData
+      const l2 = buildTimelineLayout("audioFirst", [placed], [placed])
+      expect(l2.targetGeom(placed, placed.attachments![PIECE] as never)!.start).toBeCloseTo(1.8)
+    })
+
+    // AQU-1758 (Sam's decision 3): a Bible verse has no line start — the
+    // pause is measured from its slot's start, stored on the take.
+    it("a take on a line with no times moves its pause, stored from the slot's start", () => {
+      const takeId = "audio-u-1700000000-take.webm"
+      const first = { id: "x", fileId: "f1", original: "In the beginning", translated: "", medium: "text" } as unknown as CellData
+      const cell = {
+        id: "u", fileId: "f1", original: "", translated: "", medium: "text",
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_000 } },
+      } as unknown as CellData
+      const l = buildTimelineLayout("audioFirst", [first, cell], [first, cell], null, { standInLenSec: () => 2 })
+      expect(l.canRetimeTarget(cell, cell.attachments![takeId] as never)).toBe(true)
+      // Its slot starts at 2 s (after the 2 s stand-in); dragged to 3.25 s.
+      expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 3.25)).toBeCloseTo(1.25)
+      // Dragged back before its slot: no pause.
+      expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 1.5)).toBe(0)
     })
   })
 })

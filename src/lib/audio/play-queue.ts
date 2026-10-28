@@ -812,7 +812,7 @@ function progTargetFor(cell: CellData): TargetAudioRef | null {
 
 /** Which pieces a slot's joined clip holds, for matching a prefetched one. */
 function progJoinKey(slot: ProgrammeSlot): string {
-  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}`).join("|") ?? ""
+  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}+${p.gapBeforeSec ?? 0}`).join("|") ?? ""
 }
 
 /**
@@ -822,7 +822,7 @@ function progJoinKey(slot: ProgrammeSlot): string {
  */
 async function resolveJoinedSrc(
   url: string,
-  pieces: readonly { start: number; end: number }[],
+  pieces: readonly { start: number; end: number; gapBeforeSec?: number }[],
   projectId: string,
   fileId: string,
   session: FrontierSession,

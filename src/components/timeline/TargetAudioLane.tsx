@@ -1820,13 +1820,26 @@ export function TargetAudioLane({
   // AQU-2204: a pause someone left before a take, drawn lightly as part of
   // its line — following the recordings, the line keeps it (programme
   // `targetLeadSec`) and the take starts after it.
+  //
+  // AQU-1758 (Sam's decision 3): so is the silence someone dragged open
+  // between two pieces of a split take — deliberate, and the line's own.
   const leadGaps = audioFirst
     ? [...new Map(chips.flatMap((chip) => {
         const slot = layout?.programme?.byCellId.get(chip.item.cell.id)
-        const lead = slot?.targetLeadSec ?? 0
-        if (!slot || lead <= 0) return []
-        if (!isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) return []
-        return [[slot.cellId, { cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }] as const]
+        if (!slot) return []
+        const out: (readonly [string, { key: string; cellId: string; leftPx: number; widthPx: number }])[] = []
+        const lead = slot.targetLeadSec ?? 0
+        if (lead > 0 && isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) {
+          out.push([`lead-${slot.cellId}`, { key: `lead-${slot.cellId}`, cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }])
+        }
+        for (const piece of slot.targetPieces ?? []) {
+          const gap = piece.gapBeforeSec ?? 0
+          if (gap <= 0) continue
+          const from = slot.startSec + piece.atSec - gap
+          if (!isVisible(from, from + gap, viewStartSec, viewEndSec)) continue
+          out.push([`gap-${piece.audioId}`, { key: `gap-${piece.audioId}`, cellId: slot.cellId, leftPx: secToPx(from, pxPerSec), widthPx: secToPx(gap, pxPerSec) }])
+        }
+        return out
       })).values()]
     : []
 
@@ -1941,12 +1954,12 @@ export function TargetAudioLane({
           </div>
         )
       })}
-      {leadGaps.map(({ cellId, leftPx, widthPx }) => (
-        <AppTooltip key={`lead-${cellId}`} content={t("editor.timeline.takeLeadPause")}>
+      {leadGaps.map(({ key, cellId, leftPx, widthPx }) => (
+        <AppTooltip key={key} content={t(key.startsWith("lead-") ? "editor.timeline.takeLeadPause" : "editor.timeline.takePiecePause")}>
           <div
             role="img"
-            aria-label={t("editor.timeline.takeLeadPause")}
-            data-testid={`tl-target-lead-${cellId}`}
+            aria-label={t(key.startsWith("lead-") ? "editor.timeline.takeLeadPause" : "editor.timeline.takePiecePause")}
+            data-testid={key.startsWith("lead-") ? `tl-target-lead-${cellId}` : `tl-target-${key}`}
             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
             className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
           />

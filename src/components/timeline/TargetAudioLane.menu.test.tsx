@@ -503,3 +503,39 @@ describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
     expect(screen.queryByTestId("tl-target-c1-more")).toBeNull()
   })
 })
+
+// AQU-1758 (Sam's decision 3): following the recordings, a gap someone
+// dragged open between two pieces of a take is deliberate silence, drawn
+// lightly the way the pause before a take is.
+describe("TargetAudioLane — the silence inside a split take (AQU-1758)", () => {
+  it("draws the gap between two pieces as a pause, with its own words", async () => {
+    const SPLIT_TAKE = "audio-c1-1700000000-take.wav"
+    const SPLIT_PIECE = "audio-c1-1700000500-piece.wav"
+    const c = {
+      id: "c1", fileId: "f1", original: "", translated: "", medium: "text",
+      selectedAudioId: SPLIT_TAKE,
+      attachments: {
+        [SPLIT_TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+        [SPLIT_PIECE]: { type: "audio", url: "frontier-audio://t", slot: "recording", pieceOf: SPLIT_TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700, targetOffsetMs: 2000 },
+      },
+    } as unknown as CellData
+    const { buildTimelineLayout } = await import("@/lib/timeline/layout")
+    const layout = buildTimelineLayout("audioFirst", [c], [c], null, { standInLenSec: () => 2 })
+    renderWithTooltips(
+      <TargetAudioLane
+        {...base}
+        audioFirst
+        layout={layout}
+        items={[
+          { cell: c, kind: "take", audioId: SPLIT_TAKE, pieceIndex: 0, pieceCount: 2 },
+          { cell: c, kind: "take", audioId: SPLIT_PIECE, pieceIndex: 1, pieceCount: 2 },
+        ]}
+      />,
+    )
+    const gap = screen.getByTestId(`tl-target-gap-${SPLIT_PIECE}`)
+    // 0.7 s at 40 px/s, starting where the first piece ends (1.3 s).
+    expect(gap.style.width).toBe("28px")
+    expect(gap.style.left).toBe("52px")
+    expect(gap).toHaveAttribute("aria-label", "A pause someone left between two parts of this take")
+  })
+})

@@ -972,6 +972,7 @@ export const editor = defineNamespace({
     "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
     "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
     "editor.timeline.takeLeadPause": "A pause someone left before this take",
+    "editor.timeline.takePiecePause": "A pause someone left between two parts of this take",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -6589,6 +6590,13 @@ export const editor = defineNamespace({
       "editor.timeline.timingLengthHours": {
         description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
         placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
+      },
+      "editor.timeline.takePiecePause": {
+        description:
+          "Hover text and screen-reader name of the light band drawn between two pieces of a take " +
+          "that was cut in two and then pulled apart on the timeline: a deliberate silence inside " +
+          "the line, which plays as silence. Like takeLeadPause, for the gap inside the take.",
+        maxLength: 60,
       },
       "editor.timeline.takeLeadPause": {
         description:

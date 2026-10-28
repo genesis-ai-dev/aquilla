@@ -75,7 +75,7 @@ export interface ProgrammeSlot {
    * skip between them — and lays them out end to end. Absent for a take
    * never split.
    */
-  targetPieces?: { audioId: string; start: number; end: number }[]
+  targetPieces?: ProgrammePiece[]
   /**
    * AQU-2204: the line has no times of its own and no recording, so its
    * length is a STAND-IN from its text (lib/timeline/stand-in). It is drawn
@@ -93,8 +93,41 @@ export interface ProgrammeSlot {
   targetLeadSec?: number
 }
 
+/**
+ * AQU-1767 / AQU-1758: one piece of a split take — its window on the
+ * recording's clock, where it sits in the line's slot (`atSec`, from the
+ * slot's start), and the silence left before it after the piece in front
+ * (`gapBeforeSec`, absent when they touch). The silence is someone's: a piece
+ * dragged away from the one before it (Sam: deliberate silence, which belongs
+ * to the line and plays as silence).
+ */
+export interface ProgrammePiece {
+  audioId: string
+  start: number
+  end: number
+  atSec: number
+  gapBeforeSec?: number
+}
+
 /** A pause shorter than this is a placement wobble, not a pause. */
 export const MIN_TARGET_LEAD_SEC = 0.05
+
+/**
+ * AQU-2204 / AQU-1758: the pause a take (or a piece of one) asks for before
+ * it, measured from its line's start — the stored placement (`targetOffsetMs`,
+ * through the anchor rungs on a timed line). On a line with NO times there is
+ * no line start to measure from, so the take's own offset is read as the
+ * pause from the start of its slot (Sam's decision 3). Zero when nobody
+ * placed it.
+ */
+function pauseAskedSec(cell: CellData, att: NonNullable<CellData["attachments"]>[string] | undefined, untimed: boolean): number {
+  if (untimed) {
+    const ms = att?.targetOffsetMs
+    return typeof ms === "number" && Number.isFinite(ms) ? ms / 1000 : 0
+  }
+  const geom = targetChipGeom(cell, att)
+  return geom && typeof cell.startTime === "number" ? geom.anchor - cell.startTime : 0
+}
 
 export interface BuildProgrammeOptions {
   /**
@@ -177,8 +210,27 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     const att = target ? cell.attachments?.[target.audioId] : undefined
     // AQU-1767: a split take sounds as all its pieces, back to back — but only
     // when every piece's length is known; otherwise its first piece, as before.
+    // AQU-1758 (Sam's decision 3): each piece sits where it was placed, never
+    // over the one before it; a gap someone dragged open between two pieces is
+    // deliberate silence inside the line, joined into the copy as silence.
     const split = pieces.length > 1 ? splitWindows(cell, pieces) : null
-    const effMs = split ? split.totalMs : effectiveAttachmentDurationMs(att)
+    let placedPieces: ProgrammePiece[] | null = null
+    let splitLeadSec = 0
+    let splitSpanMs = 0
+    if (split) {
+      let prevEnd = 0
+      placedPieces = split.pieces.map((p, i) => {
+        const asked = pauseAskedSec(cell, cell.attachments?.[p.audioId], untimed)
+        const floor = i === 0 ? 0 : prevEnd
+        const atSec = asked - floor >= MIN_TARGET_LEAD_SEC ? asked : floor
+        const gap = atSec - floor
+        prevEnd = atSec + (p.end - p.start)
+        return { ...p, atSec, ...(i > 0 && gap > 0 ? { gapBeforeSec: gap } : {}) }
+      })
+      splitLeadSec = placedPieces[0].atSec
+      splitSpanMs = (prevEnd - splitLeadSec) * 1000
+    }
+    const effMs = split ? splitSpanMs : effectiveAttachmentDurationMs(att)
     // A dub whose length genuinely isn't known borrows the section's, which is
     // what its chip already draws at (targetChipGeom's `usingFallback`). It
     // gets no playback window — there's no honest trim to play.
@@ -193,10 +245,14 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     // AQU-2204: a pause someone left before the take stays inside its line.
     // It is where the take was PLACED (its clip's start against the line's),
     // never a head trim, which only removes the start of the recording. Only a
-    // whole take with a known length on a line with times can carry one — a
-    // split take's pieces sit end to end from the slot's start.
-    const leadGeom = !untimed && targetWindow && !split ? targetChipGeom(cell, att) : null
-    const rawLeadSec = leadGeom && typeof cell.startTime === "number" ? leadGeom.anchor - cell.startTime : 0
+    // take with a known length can carry one. AQU-1758: on a line with no
+    // times too (measured from the slot's start), and a split take's first
+    // piece carries the take's.
+    const rawLeadSec = !targetWindow
+      ? 0
+      : split
+        ? splitLeadSec
+        : pauseAskedSec(cell, att, untimed)
     const targetLeadSec = rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0
     // AQU-2204 (Sam, Oct 27): FOLLOWING THE RECORDINGS, ONLY THE RECORDINGS
     // SET A LINE'S LENGTH. Today's Free timing followed both (each line the
@@ -240,7 +296,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       clock,
       sourceWindow,
       targetWindow,
-      ...(split ? { targetPieces: split.pieces } : {}),
+      ...(placedPieces ? { targetPieces: placedPieces } : {}),
       ...(usesStandIn ? { standIn: true as const } : {}),
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
     }
@@ -429,13 +485,14 @@ export function targetRatio(slot: ProgrammeSlot): number | null {
  * AQU-2215 (Sam, Oct 27): whether a take on this line can carry a PAUSE
  * before it — exactly the conditions `buildProgramme` keeps one under, so a
  * take the timeline lets you drag is always a take whose new pause the
- * programme reads back. A line with no times of its own has nothing to
- * measure a pause from; a split take's pieces sit end to end from the slot's
- * start; a take of unknown length has no window. None of the three can hold
- * one, and letting a chip be dragged anyway would spring it back.
+ * programme reads back. A take of unknown length has no window, so it cannot
+ * hold one, and letting its chip be dragged would spring it back.
  */
-export function canCarryTargetLead(cell: CellData, slot: ProgrammeSlot): boolean {
-  return sectionLenSec(cell) > 0 && slot.targetWindow != null && slot.targetPieces == null
+export function canCarryTargetLead(_cell: CellData, slot: ProgrammeSlot): boolean {
+  // AQU-1758 (Sam's decision 3): a line with no times of its own measures
+  // the pause from its slot's start, and a split take's pieces each carry
+  // one. Only a take of unknown length stays where it is.
+  return slot.targetWindow != null
 }
 
 /**

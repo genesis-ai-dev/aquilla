@@ -101,4 +101,23 @@ describe("Free timing — a split take", () => {
     // The line runs as long as both pieces together, not its first piece.
     expect(getQueueProgress().duration).toBeCloseTo(2.5)
   })
+
+  // AQU-1758 (Sam's decision 3): a gap someone dragged open between two
+  // pieces is deliberate silence, and it plays as silence.
+  it("plays a gap dragged open between the pieces as silence", async () => {
+    const placed = {
+      ...line,
+      attachments: {
+        ...line.attachments,
+        [`${PIECE}.wav`]: { ...line.attachments![`${PIECE}.wav`], targetOffsetMs: 2000 },
+      },
+    } as unknown as CellData
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor([placed]), 0)
+    await settle()
+    const dub = FakeAudio.instances.find((a) => a.src.startsWith("blob:test/"))!
+    // 1.3 s, then 0.7 s of silence, then 1.2 s.
+    expect(blobs[Number(dub.src.split("/").pop()) - 1].size).toBe(44 + 3.2 * 48000 * 2)
+    expect(getQueueProgress().duration).toBeCloseTo(3.2)
+  })
 })

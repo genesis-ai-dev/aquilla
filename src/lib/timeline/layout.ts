@@ -160,16 +160,15 @@ function audioFirstLayout(
         usingFallback: true,
       }
     }
-    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit end to end in
-    // the line's slot, in the order they come in the recording — the way its
-    // joined copy plays them. A piece is known by where it starts in the
-    // recording; pieces never share audio, so no two start in the same place.
+    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit in the line's
+    // slot in the order they come in the recording — the way its joined copy
+    // plays them. A piece is known by where it starts in the recording;
+    // pieces never share audio, so no two start in the same place. AQU-1758:
+    // each where it was placed (`atSec`), the gaps between them silence.
     const pieces = slot.targetPieces
     const at = pieces ? pieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
     if (pieces && at >= 0) {
-      let offset = 0
-      for (let i = 0; i < at; i++) offset += pieces[i].end - pieces[i].start
-      const start = slot.startSec + offset
+      const start = slot.startSec + pieces[at].atSec
       return {
         anchor: start - trimStartSec,
         start,
@@ -239,9 +238,11 @@ function audioFirstLayout(
     retimeAnchorSec: (cell, _att, audibleStartSec) => {
       const slot = slotOf(cell)
       if (!slot || !canCarryTargetLead(cell, slot)) return null
-      // `canCarryTargetLead` is what makes this cast safe: it is true only for
-      // a line with a real span, so `startTime` is a finite number.
-      return (cell.startTime as number) + leadSecForMove(slot, audibleStartSec)
+      // AQU-1758: a line with no times of its own stores the pause from its
+      // slot's start (a line start of 0), on the take — or on the piece, for
+      // a split take, each piece where it was dragged.
+      const lineStart = typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
+      return lineStart + leadSecForMove(slot, audibleStartSec)
     },
   }
 }

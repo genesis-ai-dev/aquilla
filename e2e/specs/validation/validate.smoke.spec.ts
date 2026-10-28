@@ -1,6 +1,7 @@
 import { expect, test } from "../../helpers/multi-user"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import {
+  commitTargetServerSide,
   jwtFor,
   openSeededProject,
   readProjectedCells,
@@ -42,12 +43,17 @@ test("directly editing a target cell auto-validates it (self-validated, emerald)
 //
 // The settings read that carries the lane rows is HELD until the editor is on
 // screen, so the test sits in that window deliberately instead of hoping a
-// fast machine does not skip it. While held, the editor must be read-only and
-// say so; once released, the edit must land on the lane — after a reload, in
-// the database, validated on the new text.
+// fast machine does not skip it. While held, the editor must say so and show
+// no rows — paired with the `''` fallback lane they read "— empty" although
+// row 1 has a translation (AQU-1901) — and accept no edit; once released, the
+// row shows its translation, and the edit must land on the lane — after a
+// reload, in the database, validated on the new text.
 test("an edit made as soon as the project opens lands on its lane, with its validation (AQU-1901)", async ({ alice }) => {
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Open and edit ${Date.now()}` })
+  // Like the adversarial fixture: row 1 already translated on the lane.
+  const seededTranslation = `Hapo mwanzo ${Date.now()}`
+  await commitTargetServerSide(jwt, seeded, seeded.cellIds[0], seededTranslation, "alice")
 
   const settingsPath = `/api/v2/projects/${seeded.projectId}/settings`
   let releaseSettings: () => void = () => {}
@@ -82,17 +88,18 @@ test("an edit made as soon as the project opens lands on its lane, with its vali
   ])
   const ws = new Workspace(alice)
   if (!/\/editor\/file\//.test(alice.url())) await ws.openFileBySubstring(seeded.fileName)
-  await ws.waitForEditor(seeded.cellIds[0])
 
-  // The window: rows on screen, languages not loaded. Read-only, and it says so.
-  await expect(alice.getByTestId("lanes-loading-banner")).toBeVisible()
-  await expect(
-    ws.cellRow(0).locator('[data-cell-type="target"] [data-target-read-view]').first(),
-  ).toHaveAttribute("aria-readonly", "true")
+  // The window: languages not loaded. It says so, and shows no row at all —
+  // so none can read "empty", and there is nothing to type into.
+  await expect(alice.getByTestId("lanes-loading-banner")).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByTestId("cell-area-lanes-loading")).toBeVisible()
+  await expect(ws.cellRows()).toHaveCount(0)
 
-  // Let the lanes arrive; the editor goes live on its own.
+  // Let the lanes arrive; the rows appear on their lane, translation and all.
   releaseSettings()
+  await ws.waitForEditor(seeded.cellIds[0])
   await expect(alice.getByTestId("lanes-loading-banner")).toBeHidden({ timeout: 30_000 })
+  await expect(ws.cellRow(0)).toContainText(seededTranslation)
 
   const text = `Mwanzo ${Date.now()}`
   await ws.editCell(0, text)
@@ -114,4 +121,47 @@ test("an edit made as soon as the project opens lands on its lane, with its vali
   expect(row!.targetLang ?? "").not.toBe("")
   expect(row!.laneId ?? "").not.toBe("")
   expect(rejected).toEqual([])
+})
+
+// AQU-1901: /events answers 200 and lists a refused write in `rejected[]`; the
+// flusher drops it, since retrying fails the same way. Before, nothing else
+// happened: the line kept the typed text and the status chip went back to
+// "Synced", so an edit that never saved looked saved. The refusal is injected
+// (a 422 like AQU-1900's for a write with no lane) because a real client no
+// longer sends one — the point is what the reader sees when the server says no.
+test("an edit the server refuses is undone and announced, not left looking saved (AQU-1901)", async ({ alice }) => {
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { name: `Refused edit ${Date.now()}` })
+  const saved = `Hapo mwanzo ${Date.now()}`
+  await commitTargetServerSide(jwt, seeded, seeded.cellIds[0], saved, "alice")
+  const ws = await openSeededProject(alice, seeded)
+  await expect(ws.cellRow(0)).toContainText(saved, { timeout: 30_000 })
+
+  await alice.route(
+    (url) => url.pathname.endsWith("/events"),
+    async (route) => {
+      const request = route.request()
+      if (request.method() !== "POST") return route.continue()
+      const { events } = request.postDataJSON() as { events: Array<{ id: string; kind: string }> }
+      const refused = events.filter((e) => e.kind === "target.cell.commit" || e.kind === "cell.validate")
+      if (refused.length === 0) return route.continue()
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          accepted: [],
+          rejected: refused.map((e) => ({ id: e.id, status: 422, reason: "no lane named" })),
+        }),
+      })
+    },
+  )
+
+  const typed = `Not saved ${Date.now()}`
+  await ws.editCell(0, typed)
+
+  await expect(alice.getByText(/(wasn't|weren't) saved/).first()).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByText(/no lane named/).first()).toBeVisible()
+  // The line goes back to what the server has.
+  await expect(ws.cellRow(0)).toContainText(saved, { timeout: 30_000 })
+  await expect(ws.cellRow(0)).not.toContainText(typed)
 })

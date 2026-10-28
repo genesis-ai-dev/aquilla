@@ -353,9 +353,12 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
   })
 
-  it("states that length as the Timing control does, while it plays too", () => {
-    render(<TimingModeControl mode="audioFirst" sourceUnavailable lengths={{ audioFirst: 87.94 }} />)
-    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("1 min 28 s long")
+  it("states that length as the Timing menu does, while it plays too", async () => {
+    // Board 55: the length is in the Timing menu, beside each choice.
+    render(<TimingModeControl mode="audioFirst" onChange={() => {}} sourceUnavailable lengths={{ audioFirst: 87.94 }} />)
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("1 min 28 s")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 79.46, playing: true, duration: 87.94 }))
     render(strip())
     expect(screen.getByTestId("transport-time")).toHaveTextContent("1:19 / 1:28")

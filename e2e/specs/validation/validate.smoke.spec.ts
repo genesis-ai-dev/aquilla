@@ -51,8 +51,9 @@ test("directly editing a target cell auto-validates it (self-validated, emerald)
 test("an edit made as soon as the project opens lands on its lane, with its validation (AQU-1901)", async ({ alice }) => {
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Open and edit ${Date.now()}` })
-  // Like the adversarial fixture: row 1 already translated on the lane.
-  const seededTranslation = `Hapo mwanzo ${Date.now()}`
+  // Like the adversarial fixture: row 1 already translated on the lane. No
+  // digits: a number the source lacks raises a health popover on click.
+  const seededTranslation = "Hapo mwanzo Mungu aliumba"
   await commitTargetServerSide(jwt, seeded, seeded.cellIds[0], seededTranslation, "alice")
 
   const settingsPath = `/api/v2/projects/${seeded.projectId}/settings`
@@ -101,20 +102,21 @@ test("an edit made as soon as the project opens lands on its lane, with its vali
   await expect(alice.getByTestId("lanes-loading-banner")).toBeHidden({ timeout: 30_000 })
   await expect(ws.cellRow(0)).toContainText(seededTranslation)
 
+  // The edit goes on the next row, which has no translation yet.
   const text = `Mwanzo ${Date.now()}`
-  await ws.editCell(0, text)
-  await ws.expectSelfValidated(0)
+  await ws.editCell(1, text)
+  await ws.expectSelfValidated(1)
 
   // Survives a reload — it is on the server, not only in the optimistic echo.
   await alice.reload()
   await ws.waitForEditor(seeded.cellIds[0])
-  await expect(ws.cellRow(0)).toContainText(text, { timeout: 30_000 })
-  await ws.expectSelfValidated(0)
+  await expect(ws.cellRow(1)).toContainText(text, { timeout: 30_000 })
+  await ws.expectSelfValidated(1)
 
   // And it is on the lane: the projected target row carries the lane's tag and
   // id, holds the new text, and is validated.
   const targets = await readProjectedCells(jwt, seeded, "target")
-  const row = targets.find((cell) => cell.cellId === seeded.cellIds[0])
+  const row = targets.find((cell) => cell.cellId === seeded.cellIds[1])
   expect(row, JSON.stringify(targets)).toBeDefined()
   expect(row!.value).toBe(text)
   expect(row!.validated).toBe(true)
@@ -132,7 +134,8 @@ test("an edit made as soon as the project opens lands on its lane, with its vali
 test("an edit the server refuses is undone and announced, not left looking saved (AQU-1901)", async ({ alice }) => {
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Refused edit ${Date.now()}` })
-  const saved = `Hapo mwanzo ${Date.now()}`
+  // No digits: a number the source lacks raises a health popover on click.
+  const saved = "Hapo mwanzo Mungu aliumba"
   await commitTargetServerSide(jwt, seeded, seeded.cellIds[0], saved, "alice")
   const ws = await openSeededProject(alice, seeded)
   await expect(ws.cellRow(0)).toContainText(saved, { timeout: 30_000 })
@@ -156,7 +159,7 @@ test("an edit the server refuses is undone and announced, not left looking saved
     },
   )
 
-  const typed = `Not saved ${Date.now()}`
+  const typed = "Neno hili halikuhifadhiwa"
   await ws.editCell(0, typed)
 
   await expect(alice.getByText(/(wasn't|weren't) saved/).first()).toBeVisible({ timeout: 30_000 })

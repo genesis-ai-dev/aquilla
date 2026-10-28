@@ -2293,21 +2293,51 @@ export function ProjectWorkspace() {
   // without this the line kept the typed text and the chip went back to
   // "Synced". Undo it the way a dead-letter is undone (above), and say so.
   // Flows that report their own refusals (AI drafts) claim them first.
+  //
+  // Unlike a dead-letter, a refusal leaves the server exactly as it was, so
+  // nothing that reads "what changed" will ever correct the line: the edit
+  // wrote the typed text into the store's own row, the drain's delta read
+  // finds no change, and the plain targeted revalidate is discarded when that
+  // drain bumps the store's generation mid-flight. So read the refused cells
+  // back here and install the server's rows directly — unless the reader has
+  // edited one again since (its freshness floor moved past the read).
+  const refusedEditProjectId = project?.id
   useEffect(() => {
+    if (!refusedEditProjectId || !activeFileId) return
+    const projectId = refusedEditProjectId
+    const fileId = activeFileId
     return subscribeRejected((entries) => {
       const refused = laneWriteRejections(entries)
       if (refused.length === 0) return
+      const restore = new Set<string>()
       for (const entry of refused) {
-        if (entry.fileId !== activeFileId) continue
+        if (entry.fileId !== fileId) continue
         const key = laneCellKey(entry.cellId)
         if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === entry.id) {
           pendingTargetCommitHeadsRef.current.delete(key)
         }
         cellStore.clearOptimisticForCell(entry.cellId)
-        revalidateCell(entry.cellId)
+        restore.add(entry.cellId)
+      }
+      if (restore.size > 0) {
+        const cellIds = [...restore]
+        void (async () => {
+          const startSeq = cellStore.getWriteSeq()
+          const mint = await getTokenForProjectFile(projectId, fileId)
+          if (!mint.token) return
+          const rows = await fetchCellsByIds(projectId, fileId, cellIds, mint.token)
+          for (const cellId of cellIds) {
+            const floor = cellStore.getFreshnessFloor(cellId)
+            if (floor !== undefined && floor > startSeq) continue
+            cellStore.replaceRowsForCell(cellId, rows.filter((row) => row.cellId === cellId))
+          }
+        })().catch((err) => {
+          console.warn("[refused-edit] could not read the refused cells back:", err)
+          for (const cellId of cellIds) revalidateCell(cellId)
+        })
       }
       const first = refused[0]
-      const label = first.fileId === activeFileId
+      const label = first.fileId === fileId
         ? (cellStore.getCellSummary(first.cellId)?.cellLabel || first.cellId)
         : first.cellId
       toast.add({
@@ -2316,7 +2346,7 @@ export function ProjectWorkspace() {
         description: t("editor.write.refusedDetail", { cell: label, reason: first.reason }),
       })
     })
-  }, [activeFileId, cellStore, laneCellKey, revalidateCell, t])
+  }, [refusedEditProjectId, activeFileId, cellStore, laneCellKey, revalidateCell, getTokenForProjectFile, t])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return

@@ -4710,7 +4710,11 @@ export function TimelineEditor({
                 through it would still be perfectly legible; this paints
                 `bg-background` and lays the same tint back over it, reproducing
                 today's composite to the pixel. */}
-            <div className="relative z-10 h-7 border-b border-border bg-background">
+            {/* z-40, above the track names (z-30, raised for the folder band
+                below): they scroll UNDER this header, as the chips slide under
+                the ruler. Above the divider rule too, so the header draws that
+                pixel itself (border-r, on the rule's own column). */}
+            <div className="relative z-40 h-7 border-b border-r border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE TOGGLE LIVES HERE, AND ITS POSITIONING IS ABSOLUTE FOR A
                   REASON THAT IS NOT COSMETIC. This spacer is the ruler's

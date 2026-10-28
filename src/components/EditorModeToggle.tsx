@@ -1,6 +1,7 @@
-// Text / Audio-or-Media / Agent switch in the chapter navigation row.
-// Compact viewports stay icon-only with a tooltip; md+ (768px, same as the
-// Check file control in this row) shows the label beside the icon.
+// Text / Audio-or-Media / Transcribe / Agent switch, in every view's bar.
+// The views are icons, named on hover; the open one keeps its label beside
+// its icon from md (768px) up (canvas board 55, option E — Sam, Oct 28: "the
+// consolidation should not be exclusive to media view").
 // The editor lenses read the SAME cell list. For non-time-ordered files the toggle is local
 // state over one mounted editor, so scroll/selection carry over directly; for
 // time-ordered (media) files the editors swap and the workspace TRACES the
@@ -19,7 +20,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 /** "transcribe": the two-step transcription view (ASR, then AI cleanup). */
 export type EditorLens = "text" | "audio" | "transcribe"
 
-/** Tailwind `md` — at/above this, the mode labels sit beside the icons. */
+/** Tailwind `md` — at/above this, the open view's label sits beside its icon. */
 const MD_MIN_WIDTH_QUERY = "(min-width: 768px)"
 
 function useIsMdUp(): boolean {
@@ -37,9 +38,6 @@ function useIsMdUp(): boolean {
 interface Props {
   lens: EditorLens
   onChange: (lens: EditorLens) => void
-  /** "active": only the open view keeps its label; the others are icons with
-   *  their names on hover (the media view's top bar, canvas board 55). */
-  labels?: "all" | "active"
   /** Open the full Agent workbench. Agent is a destination rather than a
    * persisted editor lens, so selecting it delegates navigation to the shell. */
   onAgentSelect?: () => void
@@ -58,12 +56,11 @@ export function EditorModeToggle({
   onAgentSelect,
   agentActive = false,
   timeOrdered = false,
-  labels = "all",
 }: Props) {
   const t = useT()
   const wide = useIsMdUp()
   const current = agentActive ? "agent" : lens
-  const labeledFor = (value: string) => wide && (labels === "all" || value === current)
+  const labeledFor = (value: string) => wide && value === current
   // AQU-353: the canonical lens label is shared with every other entry point
   // that toggles this lens (e.g. the sidebar "More" item) via audioLensLabelKey,
   // so they never diverge (this used to say "Audio" while the sidebar said

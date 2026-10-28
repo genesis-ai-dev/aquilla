@@ -16675,7 +16675,7 @@ export function ProjectWorkspace() {
               // then History. Right: the status ring, the views, Panels, ⋯.
               // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                afterTools={<HistoryPanel onResult={reportHistory} size="bar" />}
+                afterTools={<HistoryPanel onResult={reportHistory} />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -16693,7 +16693,6 @@ export function ProjectWorkspace() {
                       ? cloneElement(fileChapterToolbar, {
                           // History sits on the left of this bar.
                           historyControl: undefined,
-                          lensLabels: "active",
                           beforeMenu: (
                             <MediaPanelsMenu
                               dock={dock}
@@ -17046,7 +17045,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* On the right, as in the Text view (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div className="flex shrink-0 justify-end border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}

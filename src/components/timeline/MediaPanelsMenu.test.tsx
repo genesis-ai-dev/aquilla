@@ -28,17 +28,21 @@ function draw(dock: MediaDock, over: Partial<MediaPanelsMenuProps> = {}) {
   )
 }
 
-// Sam, Oct 28: PANELS — Film and Text, each ✓ while it shows, with its key —
-// then Reset layout and its (i). The status line is the status ring's, and
-// the timeline is always there (⌥1 still works).
+// Sam, Oct 28: PANELS — Timeline, Film and Text, each ✓ while it shows, with
+// its key — then Reset layout and its (i). The status line is the status
+// ring's.
 describe("MediaPanelsMenu", () => {
-  it("lists the film and the text as rows to show or hide, with their keys — no Timeline row, no status line", () => {
+  it("lists the timeline, the film and the text as rows to show or hide, with their keys — no status line", () => {
     // A status handed in (as the workspace used to) is not drawn any more.
     draw(fakeDock(startDockLayout()), { ...({ status: <span>Live · Synced · 5 lines · 0 done</span> } as object) })
     expect(screen.getByTestId("panels-heading")).toHaveTextContent(/^Panels$/)
     expect(screen.queryByText("Panels on this file")).toBeNull()
-    expect(screen.queryByTestId("panels-row-timeline")).toBeNull()
     expect(screen.queryByText(/Live|Synced|lines · 0 done/)).toBeNull()
+    const rows = screen.getAllByRole("button").filter((b) => b.dataset.testid?.startsWith("panels-row-"))
+    expect(rows.map((b) => b.dataset.testid)).toEqual(["panels-row-timeline", "panels-row-film", "panels-row-text"])
+    const timeline = screen.getByTestId("panels-row-timeline")
+    expect(timeline).toHaveAttribute("aria-pressed", "true")
+    expect(timeline).toHaveTextContent(/^Timeline(⌥1|Alt\+1)$/)
     const film = screen.getByTestId("panels-row-film")
     expect(film).toHaveAttribute("aria-pressed", "true")
     expect(film).toHaveTextContent(/^Film(⌥2|Alt\+2)$/)
@@ -46,6 +50,24 @@ describe("MediaPanelsMenu", () => {
     // Where a panel sits is in its tooltip; nothing says "showing".
     expect(screen.queryByText(/showing/)).toBeNull()
     expect(screen.queryByTestId("panels-where-film")).toBeNull()
+  })
+
+  // Sam, Oct 28: "Why does the timeline not show up in panels?" Its corner's
+  // Fold folds it to nothing, and this row is the way back.
+  it("folds the timeline from its row, and brings a folded timeline back", async () => {
+    const open = fakeDock(startDockLayout())
+    const { unmount } = draw(open)
+    await expectTooltip(screen.getByTestId("panels-row-timeline"), /^Across the top$/)
+    fireEvent.click(screen.getByTestId("panels-row-timeline"))
+    expect(open.fold).toHaveBeenCalledWith("tl")
+    unmount()
+    const folded = fakeDock({ ...startDockLayout(), folded: { tl: true, ll: false, lr: false } })
+    draw(folded)
+    const row = screen.getByTestId("panels-row-timeline")
+    expect(row).toHaveAttribute("aria-pressed", "false")
+    await expectTooltip(row, /^Across the top · folded$/)
+    fireEvent.click(row)
+    expect(folded.show).toHaveBeenCalledWith("timeline")
   })
 
   it("says where each panel sits in the row's tooltip", async () => {

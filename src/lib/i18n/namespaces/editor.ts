@@ -1286,6 +1286,7 @@ export const editor = defineNamespace({
     "editor.dock.timing": "Timing",
     "editor.dock.panels": "Panels",
     "editor.dock.panelsTip": "Panels · {keys}",
+    "editor.dock.whereTimeline": "Across the top",
     "editor.dock.stateFolded": "folded",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
@@ -2898,6 +2899,11 @@ export const editor = defineNamespace({
       "editor.dock.panelsTip": {
         description: "Tooltip of the Panels button, with its keyboard shortcut.",
         placeholders: { keys: "The shortcut, e.g. ⌘\\ or Ctrl+\\. Never translate." },
+      },
+      "editor.dock.whereTimeline": {
+        description:
+          "Where the timeline is, in the hover text of its row in the Panels menu: it " +
+          "always runs across the top of the media view and never moves (it can only be folded).",
       },
       "editor.dock.stateFolded": {
         description:

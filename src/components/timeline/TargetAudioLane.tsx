@@ -1888,32 +1888,6 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
-  // AQU-2204: a pause someone left before a take, drawn lightly as part of
-  // its line — following the recordings, the line keeps it (programme
-  // `targetLeadSec`) and the take starts after it.
-  //
-  // AQU-1758 (Sam's decision 3): so is the silence someone dragged open
-  // between two pieces of a split take — deliberate, and the line's own.
-  const leadGaps = audioFirst
-    ? [...new Map(chips.flatMap((chip) => {
-        const slot = layout?.programme?.byCellId.get(chip.item.cell.id)
-        if (!slot) return []
-        const out: (readonly [string, { key: string; cellId: string; leftPx: number; widthPx: number }])[] = []
-        const lead = slot.targetLeadSec ?? 0
-        if (lead > 0 && isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) {
-          out.push([`lead-${slot.cellId}`, { key: `lead-${slot.cellId}`, cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }])
-        }
-        for (const piece of slot.targetPieces ?? []) {
-          const gap = piece.gapBeforeSec ?? 0
-          if (gap <= 0) continue
-          const from = slot.startSec + piece.atSec - gap
-          if (!isVisible(from, from + gap, viewStartSec, viewEndSec)) continue
-          out.push([`gap-${piece.audioId}`, { key: `gap-${piece.audioId}`, cellId: slot.cellId, leftPx: secToPx(from, pxPerSec), widthPx: secToPx(gap, pxPerSec) }])
-        }
-        return out
-      })).values()]
-    : []
-
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
@@ -2025,17 +1999,11 @@ export function TargetAudioLane({
           </div>
         )
       })}
-      {leadGaps.map(({ key, cellId, leftPx, widthPx }) => (
-        <AppTooltip key={key} content={t(key.startsWith("lead-") ? "editor.timeline.takeLeadPause" : "editor.timeline.takePiecePause")}>
-          <div
-            role="img"
-            aria-label={t(key.startsWith("lead-") ? "editor.timeline.takeLeadPause" : "editor.timeline.takePiecePause")}
-            data-testid={key.startsWith("lead-") ? `tl-target-lead-${cellId}` : `tl-target-${key}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
-          />
-        </AppTooltip>
-      ))}
+      {/* Deliberate silence — a pause someone left before a take, or between
+          two pieces of one — is drawn as nothing at all: plain timeline, no
+          band, no words (Sam, Oct 28: "It's silence… we could just leave it
+          empty"). It still counts in the line's length and plays as silence;
+          the take simply starts where the pause ends. */}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}

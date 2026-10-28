@@ -1426,7 +1426,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+  it("following the recordings, a pause someone left before a take is plain timeline, and the line keeps it (AQU-2204)", () => {
     const takeId = "audio-p1-1700000000-take.webm"
     const placed = cell({
       id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
@@ -1441,10 +1441,15 @@ describe("TimelineEditor — audio-first mode", () => {
         onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
       />,
     )
-    const gap = screen.getByTestId("tl-target-lead-p1")
-    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
-    // The take starts where the pause ends.
-    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+    // Sam, Oct 28: the silence is drawn as nothing — no band, no words.
+    expect(screen.queryByTestId("tl-target-lead-p1")).toBeNull()
+    expect(screen.queryByRole("img", { name: /pause/i })).toBeNull()
+    // …but it is still the line's: the 2 s take starts half a second in, and
+    // the line is 2.5 s long (its text card spans pause and take).
+    const take = screen.getByTestId("tl-target-p1")
+    const perSec = px(take, "width") / 2
+    expect(px(take, "left")).toBeCloseTo(0.5 * perSec, 0)
+    expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
   })
 
   // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to

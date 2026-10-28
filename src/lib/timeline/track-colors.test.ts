@@ -41,7 +41,7 @@ describe("the palette", () => {
     // (Sam, Oct 25, board 53): green moved from #40c06e to the recording bar's
     // hue at its old lightness.
     expect(TRACK_HUES.map((h) => h.hex)).toEqual([
-      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#23c179",
+      "#00c3cd", "#2489eb", "#865deb", "#d62e90", "#eba720", "#23c179",
     ])
   })
 
@@ -241,7 +241,7 @@ describe("the rows nobody picks a colour for", () => {
   })
 
   it("keeps a pickable row's own colour, and its default", () => {
-    expect(hueForTrack("target-audio", "magenta")).toBe("#da2b84")
+    expect(hueForTrack("target-audio", "magenta")).toBe("#d62e90")
     expect(hueForTrack("audio", "cyan")).toBe("#00c3cd")
     expect(hueForTrack("target-audio", null)).toBe(DEFAULT_HUE.hex)
   })
@@ -426,7 +426,7 @@ describe("the waveform look", () => {
     expect(wave("cyan")).toBe("oklch(0.577 0.131 201.3)")
     expect(wave("azure")).toBe("oklch(0.458 0.140 252.4)")
     expect(wave("violet")).toBe("oklch(0.428 0.140 292.4)")
-    expect(wave("magenta")).toBe("oklch(0.430 0.140 355.7)")
+    expect(wave("magenta")).toBe("oklch(0.429 0.140 350.5)")
     expect(wave("amber")).toBe("oklch(0.607 0.140 77.8)")
     expect(wave("green")).toBe("oklch(0.550 0.140 156.9)")
     // The same gap under every name bar (the strip colour), to the third decimal.
@@ -442,7 +442,7 @@ describe("the waveform look", () => {
     expect(strip("cyan")).toBe("oklch(0.744 0.140 201.3)")
     expect(strip("azure")).toBe("oklch(0.625 0.140 252.4)")
     expect(strip("violet")).toBe("oklch(0.595 0.140 292.4)")
-    expect(strip("magenta")).toBe("oklch(0.597 0.140 355.7)")
+    expect(strip("magenta")).toBe("oklch(0.596 0.140 350.5)")
     expect(strip("amber")).toBe("oklch(0.774 0.140 77.8)")
     expect(strip("green")).toBe("oklch(0.717 0.140 156.9)")
   })

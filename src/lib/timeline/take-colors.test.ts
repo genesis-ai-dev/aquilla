@@ -22,7 +22,7 @@ describe("takeTrackVars", () => {
   })
 
   it("draws a take on an added track in that track's own colour", () => {
-    expect(hue(takeTrackVars({ files, fileId: "f1", slot: "trk-es" }))).toBe("#da2b84")
+    expect(hue(takeTrackVars({ files, fileId: "f1", slot: "trk-es" }))).toBe("#d62e90")
   })
 
   // AQU-2235: the default green is the new one (#23c179 since Oct 28; was #0cc187, and #40c06e before that).

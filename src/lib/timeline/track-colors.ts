@@ -94,8 +94,11 @@ export const TRACK_HUES: readonly TrackHue[] = [
   { id: "violet", labelKey: "editor.timeline.colorViolet", hex: "#865deb" },
   // Sam, 2026-08-27, tuning by eye: asked for magenta shifted toward red with
   // more saturation, then set the value himself — a deeper, far more saturated
-  // rose than the computed step landed on (S 68%, L 51%).
-  { id: "magenta", labelKey: "editor.timeline.colorMagenta", hex: "#da2b84" },
+  // rose than the computed step landed on (S 68%, L 51%). Sam, Oct 28:
+  // "Magenta needs a small nudge away from red" — hue 355.7 → 350.5, the
+  // lightness and chroma unchanged (#da2b84 → #d62e90), the same size of step
+  // the green took. Tracks store the id "magenta", so every one follows.
+  { id: "magenta", labelKey: "editor.timeline.colorMagenta", hex: "#d62e90" },
   // …"increase the brightness of amber to about 92%" — HSB brightness 77%→92%,
   // hue and saturation untouched, so it gets more luminous rather than paler.
   { id: "amber", labelKey: "editor.timeline.colorAmber", hex: "#eba720" },

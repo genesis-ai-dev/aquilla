@@ -285,8 +285,8 @@ describe("RecordingTakes — heard lines, tracks and what a take is checked agai
     // The dot wears the added track's magenta, stored on the SUBTITLE file —
     // in the strip colour, the waveform's chroma at its own lightness (AQU-2235).
     const dot = within(added).getByTestId("cell-take-track").querySelector("span[aria-hidden]") as HTMLElement
-    expect(trackHueVarsFor("audio", "magenta")["--tl-track-strip"]).toBe("oklch(0.597 0.140 355.7)")
-    expect(dot.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.597 0.140 355.7)")
+    expect(trackHueVarsFor("audio", "magenta")["--tl-track-strip"]).toBe("oklch(0.596 0.140 350.5)")
+    expect(dot.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.596 0.140 350.5)")
     expect(dot.className).toContain("bg-[color:var(--tl-track-strip)]")
   })
 

@@ -482,6 +482,11 @@ export class Workspace {
 
   /** Index of the editor row whose source contains this text. */
   async cellIndexBySource(text: string): Promise<number> {
+    // A restored row can render before its latest source text hydrates.
+    // Wait for the requested source, rather than taking a one-time snapshot.
+    await expect(
+      this.cellRows().locator('[data-cell-type="source"]').filter({ hasText: text }).first(),
+    ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     const count = await this.cellRows().count()
     for (let index = 0; index < count; index += 1) {
       const source = await this.cellRow(index).locator('[data-cell-type="source"]').innerText()

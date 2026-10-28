@@ -569,6 +569,10 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
     mimeType?: string

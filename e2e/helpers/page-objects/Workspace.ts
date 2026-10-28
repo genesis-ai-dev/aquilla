@@ -221,6 +221,12 @@ export class Workspace {
 
   async pauseMedia(): Promise<void> {
     await this.page.getByRole("button", { name: "Pause", exact: true }).click()
+    // The queue and its slaved picture settle asynchronously. A completed
+    // click is not proof that the following seek runs against paused media.
+    await expect(this.page.getByRole("button", { name: "Play all", exact: true }))
+      .toBeVisible()
+    await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement) =>
+      element.paused)).toBe(true)
   }
 
   async waitForLinkedVideo(): Promise<void> {
@@ -482,12 +488,18 @@ export class Workspace {
 
   /** Index of the editor row whose source contains this text. */
   async cellIndexBySource(text: string): Promise<number> {
-    const count = await this.cellRows().count()
-    for (let index = 0; index < count; index += 1) {
-      const source = await this.cellRow(index).locator('[data-cell-type="source"]').innerText()
-      if (source.includes(text)) return index
-    }
-    throw new Error(`No source cell contains ${JSON.stringify(text)}`)
+    // A row can mount from cached state before the freshly reconciled source
+    // arrives. Wait for the requested content, not just the editor shell.
+    let index = -1
+    await expect.poll(async () => {
+      const sources = await this.cellRows().locator('[data-cell-type="source"]').allInnerTexts()
+      index = sources.findIndex(source => source.includes(text))
+      return index
+    }, {
+      timeout: EDITOR_READY_TIMEOUT_MS,
+      message: `No source cell contains ${JSON.stringify(text)}`,
+    }).toBeGreaterThanOrEqual(0)
+    return index
   }
 
   private uploadFilesCard(): Locator {

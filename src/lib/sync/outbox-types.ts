@@ -385,6 +385,10 @@ export interface OutboxEventPayloads {
   // Audio attachments. Bytes already live in R2 before these are emitted.
   "cell.audio.attach": {
     audioId: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     url: string
     /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
      *  extra target-audio track addresses its takes by its own track id. The

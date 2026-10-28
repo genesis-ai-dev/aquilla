@@ -686,7 +686,7 @@ export const editor = defineNamespace({
     "editor.selection.voiceTogetherSeedVcNotConfigured":
       "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
     "editor.selection.voiceTogetherSeedVcFailed":
-      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
+      "Voice conversion couldn't re-voice these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",

@@ -259,6 +259,8 @@ test("offline edits drain after repeated reconnects with the same author", async
     const commits = history.filter((event) => event.kind === "target.cell.commit" && (event.payload as { value?: unknown }).value === value)
     expect(commits).toHaveLength(1)
     expect(commits[0].author).toBe("alice")
+  }
+})
 
 // AQU-2239: the server may accept a connection and never answer.
 test("logout clears local access when revocation never responds", async ({ alice }) => {

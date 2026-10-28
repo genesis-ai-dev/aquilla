@@ -1,0 +1,359 @@
+import { describe, expect, it } from "vitest"
+import { BookNameIndex, bookKey } from "./book-names"
+import { readName } from "./read-name"
+import {
+  matchRecordings,
+  planJobs,
+  readRecordings,
+  targetsWanted,
+  type Assignment,
+  type BulkInputFile,
+  type MatchScope,
+  type ProjectFileInfo,
+  type TargetFile,
+  type TargetLine,
+} from "./match"
+
+const MB = 1024 * 1024
+
+function audio(path: string, size = 1000): BulkInputFile {
+  const name = path.split("/").pop()!
+  return { name, path, size, type: name.endsWith(".txt") ? "text/plain" : "audio/wav" }
+}
+
+/** A Bible book with `chapters[c-1]` verses in chapter c, plus a title line. */
+function book(fileId: string, code: string, name: string, chapters: number[], opts: { recorded?: string[] } = {}): TargetFile {
+  const lines: TargetLine[] = [{ cellId: `${fileId}-title`, ref: code, text: name, structural: true, hasRecording: false }]
+  chapters.forEach((count, ci) => {
+    for (let v = 1; v <= count; v++) {
+      const ref = `${code} ${ci + 1}:${v}`
+      lines.push({ cellId: `${fileId}:${ci + 1}:${v}`, ref, text: `text of ${ref}`, structural: false, hasRecording: opts.recorded?.includes(ref) ?? false })
+    }
+  })
+  return { fileId, name, bookCode: code, lines }
+}
+
+function doc(fileId: string, name: string, count: number): TargetFile {
+  return {
+    fileId,
+    name,
+    bookCode: null,
+    lines: Array.from({ length: count }, (_, i) => ({ cellId: `${fileId}#${i + 1}`, ref: null, text: `line ${i + 1}`, structural: false, hasRecording: false })),
+  }
+}
+
+function run(files: BulkInputFile[], targets: TargetFile[], scope: MatchScope, index = new BookNameIndex()) {
+  const projectFiles: ProjectFileInfo[] = targets.map((t) => ({ fileId: t.fileId, name: t.name, bookCode: t.bookCode }))
+  const read = readRecordings(files, { scope, index, projectFiles, maxBytes: 2048 * MB })
+  const map = new Map(targets.map((t) => [t.fileId, t]))
+  const assignments = matchRecordings(read, map)
+  return { read, assignments, jobs: planJobs(assignments, read) }
+}
+
+const by = (assignments: Assignment[], files: BulkInputFile[], name: string) =>
+  assignments.find((a) => files[a.index].name === name)!
+
+describe("bookKey and the book table", () => {
+  it("reads ordinals and Roman numerals as digits, and leaves Isaiah alone", () => {
+    expect(bookKey("I Samuel")).toBe("1samuel")
+    expect(bookKey("First Samuel")).toBe("1samuel")
+    expect(bookKey("II Kings")).toBe("2kings")
+    expect(bookKey("Isaiah")).toBe("isaiah")
+    expect(bookKey("Is")).toBe("is")
+  })
+
+  it("trusts a one- or two-letter form only right before a number", () => {
+    const index = new BookNameIndex()
+    expect(readName("Ps 23.mp3", index).book?.code).toBe("PSA")
+    expect(readName("this is take.mp3", index).book).toBeNull()
+  })
+
+  it("prefers what the project calls a book", () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Kejadian", "GEN")
+    expect(readName("Kejadian 1-1.mp3", index).book).toEqual({ code: "GEN", fromProject: true })
+  })
+})
+
+describe("readName", () => {
+  const index = new BookNameIndex()
+  it.each([
+    ["Genesis 1-1.mp3", "GEN", [1, 1]],
+    ["Gen 1.1.wav", "GEN", [1, 1]],
+    ["1 Samuel 3-4.mp3", "1SA", [3, 4]],
+    ["1Sam_3_4.m4a", "1SA", [3, 4]],
+    ["GEN 1-1.mp3", "GEN", [1, 1]],
+    ["GEN_001_001.wav", "GEN", [1, 1]],
+    ["01_GEN_001_001.wav", "GEN", [1, 1]],
+    ["Song of Songs 2-3.mp3", "SNG", [2, 3]],
+    ["创世记1章1节.mp3", "GEN", [1, 1]],
+    ["创世记第一章第三节.mp3", "GEN", [1, 3]],
+    ["诗篇23篇1节.mp3", "PSA", [23, 1]],
+    ["ENGESV_JHN_03_16_2023.mp3", "JHN", [3, 16]],
+  ])("%s", (name, code, numbers) => {
+    const r = readName(name, index)
+    expect(r.book?.code).toBe(code)
+    expect(r.numbers.map((n) => n.value).slice(0, numbers.length)).toEqual(numbers)
+  })
+
+  it("stops the reference at the first ordinary word", () => {
+    const r = readName("Genesis 1-1 ENGESV 2023.mp3", index)
+    expect(r.numbers.map((n) => n.value)).toEqual([1, 1])
+  })
+
+  it("keeps a dotted reference whole when there is no extension", () => {
+    expect(readName("Gen 1.1", index).numbers.map((n) => n.value)).toEqual([1, 1])
+  })
+})
+
+describe("matching inside one Bible book", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25, 24])
+  const scope: MatchScope = { kind: "file", fileId: "gen" }
+
+  it("a well-named book lands every verse by name", () => {
+    const files = ["Genesis 1-1.mp3", "Genesis 1-2.mp3", "Genesis 2-10.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments.map((a) => [a.method, a.cellIds])).toEqual([
+      ["name", ["gen:1:1"]],
+      ["name", ["gen:1:2"]],
+      ["name", ["gen:2:10"]],
+    ])
+  })
+
+  it("mixed spellings all find their verse", () => {
+    const files = ["Gen 1.3.mp3", "GEN_001_004.wav", "genesis 1-5.m4a", "Ge1_6.mp3", "01_GEN_001_007.wav"].map((n) => audio(n))
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:3", "gen:1:4", "gen:1:5", "gen:1:6", "gen:1:7"])
+  })
+
+  it("numbers alone are chapter and verse inside a book", () => {
+    const files = ["1-1.mp3", "001_002.mp3", "1.3.mp3", "2:4.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments.map((a) => [a.method, a.cellIds?.[0]])).toEqual([
+      ["number", "gen:1:1"],
+      ["number", "gen:1:2"],
+      ["number", "gen:1:3"],
+      ["number", "gen:2:4"],
+    ])
+  })
+
+  it("drops a book number every file shares (01_001_001)", () => {
+    const files = ["01_001_001.wav", "01_001_002.wav", "01_002_001.wav"].map((n) => audio(n))
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:1", "gen:1:2", "gen:2:1"])
+  })
+
+  it("a range is one recording over every verse it covers", () => {
+    const files = ["Genesis 1-1-3.mp3", "Genesis 1:4-6.mp3", "1-7-8.mp3"].map((n) => audio(n))
+    const { assignments, jobs } = run(files, [gen], scope)
+    expect(assignments.map((a) => a.cellIds)).toEqual([
+      ["gen:1:1", "gen:1:2", "gen:1:3"],
+      ["gen:1:4", "gen:1:5", "gen:1:6"],
+      ["gen:1:7", "gen:1:8"],
+    ])
+    expect(jobs.every((j) => j.kind === "range")).toBe(true)
+  })
+
+  it("a range may cross into the next chapter", () => {
+    const files = [audio("Genesis 1:30-2:2.mp3")]
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments[0].cellIds).toEqual(["gen:1:30", "gen:1:31", "gen:2:1", "gen:2:2"])
+  })
+
+  it("a chapter with no verse covers the whole chapter", () => {
+    const { assignments } = run([audio("Genesis 3.mp3")], [gen], scope)
+    expect(assignments[0].cellIds).toHaveLength(24)
+    expect(assignments[0].read).toBe("Genesis 3")
+  })
+
+  it("parts of one verse become one job in order, whatever the suffix", () => {
+    const files = ["Genesis 1-1b.mp3", "Genesis 1-1a.mp3", "Genesis 1-2 end.mp3", "Genesis 1-2 beginning.mp3", "Genesis 1-3 part 2.mp3", "Genesis 1-3 part 1.mp3", "Genesis 1-4_2.mp3", "Genesis 1-4_1.mp3"].map((n) => audio(n))
+    const { jobs } = run(files, [gen], scope)
+    const pieces = jobs.filter((j) => j.kind === "pieces")
+    expect(pieces.map((j) => [j.cellId, j.files.map((i) => files[i].name)])).toEqual([
+      ["gen:1:1", ["Genesis 1-1a.mp3", "Genesis 1-1b.mp3"]],
+      ["gen:1:2", ["Genesis 1-2 beginning.mp3", "Genesis 1-2 end.mp3"]],
+      ["gen:1:3", ["Genesis 1-3 part 1.mp3", "Genesis 1-3 part 2.mp3"]],
+      ["gen:1:4", ["Genesis 1-4_1.mp3", "Genesis 1-4_2.mp3"]],
+    ])
+  })
+
+  it("a verse letter the project has is that verse, not a part", () => {
+    const split = book("gen", "GEN", "Genesis", [3])
+    split.lines.push({ cellId: "gen:1:4a", ref: "GEN 1:4a", text: "4a", structural: false, hasRecording: false })
+    split.lines.push({ cellId: "gen:1:4b", ref: "GEN 1:4b", text: "4b", structural: false, hasRecording: false })
+    const { assignments, jobs } = run([audio("Genesis 1-4a.mp3"), audio("Genesis 1-4b.mp3")], [split], scope)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:4a", "gen:1:4b"])
+    expect(jobs.every((j) => j.kind === "single")).toBe(true)
+  })
+
+  it("numbered takes of one verse all upload, highest last", () => {
+    const files = [audio("Genesis 1-1 take 2.mp3"), audio("Genesis 1-1 take 1.mp3")]
+    const { jobs } = run(files, [gen], scope)
+    expect(jobs).toEqual([{ kind: "single", fileId: "gen", cellId: "gen:1:1", files: [1, 0] }])
+  })
+
+  it("lists every file it will not upload, with a reason", () => {
+    const files = [
+      audio("Genesis 9-1.mp3"),
+      audio("Genesis 1-40.mp3"),
+      audio("Exodus 1-1.mp3"),
+      audio("notes.txt"),
+      audio("._Genesis 1-1.mp3"),
+      audio("Genesis 1-1.mp3"),
+      audio("Genesis 1-1 copy.mp3"),
+      audio("intro.mp3"),
+      { ...audio("Genesis 1-2.mp3"), size: 0 },
+    ]
+    const { assignments } = run(files, [gen], scope)
+    expect(by(assignments, files, "Genesis 9-1.mp3").reason).toEqual({ code: "noSuchChapter", book: "Genesis", chapter: 9 })
+    expect(by(assignments, files, "Genesis 1-40.mp3").reason).toEqual({ code: "noSuchVerse", ref: "Genesis 1:40" })
+    expect(by(assignments, files, "Exodus 1-1.mp3").reason).toEqual({ code: "otherBook", book: "Exodus", fileName: "Genesis" })
+    expect(by(assignments, files, "notes.txt").reason).toEqual({ code: "notAudio" })
+    expect(by(assignments, files, "._Genesis 1-1.mp3").reason).toEqual({ code: "systemFile" })
+    expect(by(assignments, files, "Genesis 1-1 copy.mp3").reason).toEqual({ code: "duplicate", target: "Genesis 1:1", other: "Genesis 1-1.mp3" })
+    expect(by(assignments, files, "intro.mp3").reason).toEqual({ code: "noNumber" })
+    expect(by(assignments, files, "Genesis 1-2.mp3").reason).toEqual({ code: "empty" })
+    // Never silently dropped: one answer per file.
+    expect(assignments).toHaveLength(files.length)
+  })
+
+  it("a folder with no naming scheme goes in folder order, 2 before 10", () => {
+    const files = ["New Recording 10.m4a", "New Recording 2.m4a", "New Recording 1.m4a"].map((n) => audio(`Gen/${n}`))
+    // "New Recording N" are lines that exist — so they are read by number.
+    expect(run(files, [gen], scope).assignments.map((a) => a.method)).toEqual(["number", "number", "number"])
+    const counters = ["IMG_4510.m4a", "IMG_4502.m4a", "IMG_4501.m4a"].map((n) => audio(`Gen/${n}`))
+    const { assignments } = run(counters, [gen], scope)
+    expect(assignments.map((a) => [counters[a.index].name, a.method, a.cellIds?.[0]])).toEqual([
+      ["IMG_4510.m4a", "order", "gen:1:3"],
+      ["IMG_4502.m4a", "order", "gen:1:2"],
+      ["IMG_4501.m4a", "order", "gen:1:1"],
+    ])
+  })
+
+  it("order moves as a whole when shifted, and says what falls off the end", () => {
+    const files = ["a.m4a", "b.m4a"].map((n) => audio(`x/${n}`))
+    const projectFiles = [{ fileId: "gen", name: "Genesis", bookCode: "GEN" }]
+    const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
+    const first = matchRecordings(read, new Map([["gen", gen]]))
+    const run1 = first[0].orderRun!
+    const moved = matchRecordings(read, new Map([["gen", gen]]), { orderShift: new Map([[run1, 1]]) })
+    expect(moved.map((a) => a.cellIds?.[0])).toEqual(["gen:1:2", "gen:1:3"])
+    const back = matchRecordings(read, new Map([["gen", gen]]), { orderShift: new Map([[run1, -1]]) })
+    expect(back[0].reason).toEqual({ code: "beforeFirstLine" })
+  })
+
+  it("an order run in a chapter's folder starts at that chapter, and can start anywhere", () => {
+    const files = ["IMG_4501.m4a", "IMG_4502.m4a"].map((n) => audio(`Genesis 2/${n}`))
+    const projectFiles = [{ fileId: "gen", name: "Genesis", bookCode: "GEN" }]
+    const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
+    const first = matchRecordings(read, new Map([["gen", gen]]))
+    expect(first.map((a) => [a.method, a.cellIds?.[0], a.fromFolder])).toEqual([["order", "gen:2:1", "Genesis 2"], ["order", "gen:2:2", "Genesis 2"]])
+    const run = first[0].orderRun!
+    const moved = matchRecordings(read, new Map([["gen", gen]]), { orderStart: new Map([[run, "gen:3:5"]]), orderShift: new Map([[run, 1]]) })
+    expect(moved.map((a) => a.cellIds?.[0])).toEqual(["gen:3:6", "gen:3:7"])
+  })
+
+  it("a chosen line wins and takes the line from the rule's file", () => {
+    const files = [audio("Genesis 1-1.mp3"), audio("Genesis 1-2.mp3")]
+    const projectFiles = [{ fileId: "gen", name: "Genesis", bookCode: "GEN" }]
+    const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
+    const out = matchRecordings(read, new Map([["gen", gen]]), { overrides: new Map([[1, { fileId: "gen", cellId: "gen:1:1" }]]) })
+    expect(out[1]).toMatchObject({ cellIds: ["gen:1:1"], chosen: true })
+    expect(out[0].reason).toMatchObject({ code: "duplicate", other: "Genesis 1-2.mp3" })
+  })
+
+  it("chapter from the folder, verse from the name", () => {
+    const files = ["Chapter 2/01.mp3", "Chapter 2/02.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [gen], scope)
+    expect(assignments.map((a) => [a.cellIds?.[0], a.fromFolder])).toEqual([["gen:2:1", "Chapter 2"], ["gen:2:2", "Chapter 2"]])
+  })
+})
+
+describe("matching across a whole project", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25])
+  const exo = book("exo", "EXO", "Exodus", [22])
+  const sam = book("1sa", "1SA", "1 Samuel", [28, 10, 21])
+  const project: MatchScope = { kind: "project" }
+
+  it("each file finds its book by its name, across many books", () => {
+    const files = ["Genesis 1-1.mp3", "Exod 1.2.mp3", "1Sam_3_4.mp3", "GEN_002_003.wav"].map((n) => audio(n))
+    const { assignments, read } = run(files, [gen, exo, sam], project)
+    expect(targetsWanted(read).sort()).toEqual(["1sa", "exo", "gen"])
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:1", "exo:1:2", "1sa:3:4", "gen:2:3"])
+  })
+
+  it("the folder names the book when the files do not", () => {
+    const files = ["Exodus/1-1.mp3", "Exodus/1-2.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [gen, exo], project)
+    expect(assignments.map((a) => [a.cellIds?.[0], a.fromFolder])).toEqual([["exo:1:1", "Exodus"], ["exo:1:2", "Exodus"]])
+  })
+
+  it("the project's own book names (Chinese)", () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Kitab Kejadian", "GEN")
+    const files = ["创世记 1-1.mp3", "出埃及记1章2节.mp3", "Kitab Kejadian 2-1.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [gen, exo], project, index)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:1", "exo:1:2", "gen:2:1"])
+  })
+
+  it("book numbers in front of chapter and verse", () => {
+    const files = ["01_001_001.wav", "02_001_003.wav"].map((n) => audio(n))
+    const { assignments } = run(files, [gen, exo], project)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["gen:1:1", "exo:1:3"])
+  })
+
+  it("says when a book is not in the project, or nothing names one", () => {
+    const files = [audio("Leviticus 1-1.mp3"), audio("recording.mp3")]
+    const { assignments } = run(files, [gen], project)
+    expect(assignments.map((a) => a.reason)).toEqual([{ code: "bookNotInProject", book: "Leviticus" }, { code: "noBook" }])
+  })
+})
+
+describe("matching inside a document, plain text or subtitles", () => {
+  const notes = doc("notes", "Welcome letter", 20)
+  const scope: MatchScope = { kind: "file", fileId: "notes" }
+
+  it("numbers are lines, counted from the top", () => {
+    const files = ["012.mp3", "line 13.mp3", "part_003.mp3", "Welcome letter_014.mp3", "This is 15.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [notes], scope)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["notes#12", "notes#13", "notes#3", "notes#14", "notes#15"])
+  })
+
+  it("a year every file shares is not the line", () => {
+    const files = ["LOTE_2023_001.mp3", "LOTE_2023_002.mp3", "LOTE_2023_010.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [notes], scope)
+    expect(assignments.map((a) => a.cellIds?.[0])).toEqual(["notes#1", "notes#2", "notes#10"])
+  })
+
+  it("numbered and unnumbered files: the unnumbered are listed, not guessed", () => {
+    const files = ["001.mp3", "002.mp3", "outro.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [notes], scope)
+    expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual(["notes#1", "notes#2", "noNumber"])
+  })
+
+  it("a line range and line parts", () => {
+    const files = ["004-006.mp3", "007a.mp3", "007b.mp3", "008_1.mp3", "008_2.mp3"].map((n) => audio(n))
+    const { jobs } = run(files, [notes], scope)
+    expect(jobs.map((j) => [j.kind, "cellIds" in j ? j.cellIds : j.cellId])).toEqual([
+      ["range", ["notes#4", "notes#5", "notes#6"]],
+      ["pieces", "notes#7"],
+      ["pieces", "notes#8"],
+    ])
+  })
+
+  it("past the last line is a reason, not a wrap-around", () => {
+    const { assignments } = run([audio("001.mp3"), audio("021.mp3")], [notes], scope)
+    expect(assignments[1].reason).toEqual({ code: "noSuchLine", line: 21, count: 20 })
+  })
+
+  it("no names at all: folder order", () => {
+    const files = ["b.mp3", "a.mp3", "c.mp3"].map((n) => audio(`rec/${n}`))
+    const { assignments } = run(files, [notes], scope)
+    expect(assignments.map((a) => [files[a.index].name, a.cellIds?.[0], a.method])).toEqual([
+      ["b.mp3", "notes#2", "order"],
+      ["a.mp3", "notes#1", "order"],
+      ["c.mp3", "notes#3", "order"],
+    ])
+  })
+})

@@ -146,7 +146,8 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
-import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { OrgDefaultSource, SELECT_LIST_BELOW, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { InfoTip } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -2306,7 +2307,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared || cellEditingFloor == null}
+                      disabled={!canEditShared}
                       value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
                         setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)
@@ -2320,7 +2321,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       >
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent {...SELECT_LIST_BELOW}>
                         <SelectGroup>
                           {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
                             <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
@@ -3112,20 +3113,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   below it — the pencil under it is moot while nothing moves. */}
               <div className="flex flex-wrap items-start gap-2">
                 {/* AQU-1768: while the project follows the organization the
-                    box shows the organization's choice and cannot be ticked. */}
+                    box shows the organization's choice. Ticking it sets the
+                    choice for this project, and the menu beside it follows
+                    (Sam, Oct 28). The long explanation sits behind the (i). */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
                   checked={effectiveTimingLocked}
-                  disabled={!canEditShared || timingLocked == null}
+                  disabled={!canEditShared}
                   onCheckedChange={(checked) => setTimingLocked(checked)}
                 />
-                <label htmlFor="timing-locked" className="min-w-0 flex-1 text-sm">
-                  {t("projectSettings.timeline.lockLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
+                <span className="flex min-w-0 flex-1 items-center gap-1 text-sm">
+                  <label htmlFor="timing-locked">{t("projectSettings.timeline.lockLabel")}</label>
+                  <InfoTip label={t("projectSettings.timeline.lockInfoAria")} testId="settings-timing-locked-info">
                     {t("projectSettings.timeline.lockHint")}
-                  </p>
-                </label>
+                  </InfoTip>
+                </span>
                 <OrgDefaultSource
                   id="timing-locked-source"
                   settingLabel={t("projectSettings.timeline.lockLabel")}
@@ -3146,15 +3149,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   id="allow-track-editing"
                   data-testid="settings-allow-track-editing"
                   checked={effectiveAllowTrackEditing}
-                  disabled={!canEditShared || allowTrackEditing == null}
+                  disabled={!canEditShared}
                   onCheckedChange={(checked) => setAllowTrackEditing(checked)}
                 />
-                <label htmlFor="allow-track-editing" className="min-w-0 flex-1 text-sm">
-                  {t("projectSettings.timeline.trackEditingLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
+                <span className="flex min-w-0 flex-1 items-center gap-1 text-sm">
+                  <label htmlFor="allow-track-editing">{t("projectSettings.timeline.trackEditingLabel")}</label>
+                  <InfoTip label={t("projectSettings.timeline.trackEditingInfoAria")} testId="settings-allow-track-editing-info">
                     {t("projectSettings.timeline.trackEditingHint")}
-                  </p>
-                </label>
+                  </InfoTip>
+                </span>
                 <OrgDefaultSource
                   id="allow-track-editing-source"
                   settingLabel={t("projectSettings.timeline.trackEditingLabel")}

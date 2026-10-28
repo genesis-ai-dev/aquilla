@@ -262,17 +262,36 @@ describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
 })
 
 describe("ProjectSettings — media settings follow the organization (AQU-1768)", () => {
-  it("shows the organization's choice, disabled, while the project sets none", () => {
+  it("shows the organization's choice while the project sets none", () => {
     orgMedia = { timingLocked: false, allowTrackEditing: true }
     currentProject = makeProject({ timingLocked: undefined, allowTrackEditing: undefined })
     renderSettings()
     expect(isChecked(box("settings-timing-locked"))).toBe(false)
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    const lock = box("settings-timing-locked")
-    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(true)
     expect(box("timing-locked-source").textContent).toContain("Organization default (off)")
     expect(box("allow-track-editing-source").textContent).toContain("Organization default (on)")
     expect(saveButton()).toBeNull()
+  })
+
+  it("ticking a box that follows the organization sets it for this project in one step (Sam, Oct 28)", async () => {
+    orgMedia = { timingLocked: false }
+    currentProject = makeProject({ timingLocked: undefined })
+    renderSettings()
+    const lock = box("settings-timing-locked")
+    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(false)
+    fireEvent.click(lock)
+    expect(isChecked(box("settings-timing-locked"))).toBe(true)
+    expect(box("timing-locked-source").textContent).toContain("Set for this project")
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(true)
+  })
+
+  it("the long explanations sit behind (i)s, not on the page", () => {
+    renderSettings()
+    expect(screen.getByTestId("settings-timing-locked-info")).toBeInTheDocument()
+    expect(screen.getByTestId("settings-allow-track-editing-info")).toBeInTheDocument()
+    expect(screen.queryByText(/the handles are gone from every/)).toBeNull()
   })
 
   it("'Set for this project' starts from the organization's value and saves only once edited", async () => {

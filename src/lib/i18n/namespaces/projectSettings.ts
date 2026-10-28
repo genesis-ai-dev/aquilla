@@ -383,9 +383,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
+    "projectSettings.timeline.lockInfoAria": "About locking the timings",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingInfoAria": "About adding and editing timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
@@ -767,6 +769,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.audioMedia.description":
       "Decide when audio recordings are downloaded from storage to this device. You " +
       "can switch any time without re-recording — only future loads are affected.",
+    "projectSettings.audioMedia.infoAria": "What the audio loading choices do",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
     "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
@@ -1577,6 +1580,21 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.timeline.lockInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +
+          "the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.timeline.trackEditingInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Let maintainers add and edit timeline tracks' in Project " +
+          "settings; the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.audioMedia.infoAria": {
+        description:
+          "Accessible name of the (i) beside the 'Audio loading' card's title in Project settings; the (i) " +
+          "explains what the card is for and what each of its four choices does.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

@@ -9,6 +9,7 @@ import {
   AUDIO_MEDIA_STRATEGY_LABELS, type AudioMediaStrategy,
 } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { InfoTip } from "@/components/ui/info-tip"
 
 interface Props {
   value: AudioMediaStrategy
@@ -22,12 +23,24 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("projectSettings.audioMedia.title")}</CardTitle>
+        {/* Sam, Oct 28: the card says only the four names; what each does,
+            and what the card is for, sit behind the one (i). */}
+        <CardTitle className="flex items-center gap-1">
+          {t("projectSettings.audioMedia.title")}
+          <InfoTip label={t("projectSettings.audioMedia.infoAria")} testId="settings-audio-media-info">
+            <span className="flex flex-col gap-1.5">
+              <span>{t("projectSettings.audioMedia.description")}</span>
+              {ORDER.map((id) => (
+                <span key={id}>
+                  <span className="font-medium">{t(AUDIO_MEDIA_STRATEGY_LABELS[id].nameKey)}:</span>{" "}
+                  {t(AUDIO_MEDIA_STRATEGY_LABELS[id].descriptionKey)}
+                </span>
+              ))}
+            </span>
+          </InfoTip>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {t("projectSettings.audioMedia.description")}
-        </p>
         <div className="grid gap-2 sm:grid-cols-2">
           {ORDER.map((id) => {
             const label = AUDIO_MEDIA_STRATEGY_LABELS[id]
@@ -46,7 +59,6 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                 aria-pressed={selected}
               >
                 <span className="font-medium">{t(label.nameKey)}</span>
-                <span className="text-xs text-muted-foreground">{t(label.descriptionKey)}</span>
               </button>
             )
           })}

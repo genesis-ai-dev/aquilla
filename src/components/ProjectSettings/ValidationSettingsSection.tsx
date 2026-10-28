@@ -17,7 +17,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { VALIDATION_FLOOR_ROLE_OPTIONS, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { OrgDefaultSource, orgBooleanOptionLabel } from "./OrgDefaultSource"
+import { OrgDefaultSource, SELECT_LIST_BELOW, orgBooleanOptionLabel } from "./OrgDefaultSource"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 
@@ -211,7 +211,7 @@ export function ValidationSettingsSection({
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent {...SELECT_LIST_BELOW}>
               <SelectGroup>
                 {sourceItems.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
@@ -375,7 +375,7 @@ export function ValidationSettingsSection({
               />
               <Select
                 items={ROLE_OPTIONS}
-                disabled={disabled || validationRoleFloorAudio == null}
+                disabled={disabled}
                 value={effectiveFloorAudio}
                 onValueChange={(v) =>
                   onChange({
@@ -390,7 +390,7 @@ export function ValidationSettingsSection({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent {...SELECT_LIST_BELOW}>
                   <SelectGroup>
                     {ROLE_OPTIONS.map((o) => (
                       <SelectItem key={`audio-${o.value}`} value={o.value}>
@@ -420,7 +420,7 @@ export function ValidationSettingsSection({
               />
               <Switch
                 id="allow-self-validation-audio"
-                disabled={disabled || allowSelfValidationAudio == null}
+                disabled={disabled}
                 checked={effectiveSelfAudio}
                 onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
                 aria-label={t("projectSettings.validation.allowSelfAudioLabel")}

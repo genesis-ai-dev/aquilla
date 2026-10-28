@@ -193,5 +193,39 @@ export function folderRowHPx(rowH: number): number {
 // would resolve `var(--tl-chip-h)` to nothing. With the fallbacks it resolves to
 // today's 46px, so the whole swap needs no setup change in any existing test.
 
+// ── The name bar on a take (AQU-2235; Sam, Oct 28, board 54) ───────────────
+//
+// Like Logic Pro's region header: a thin bar along a take's top edge carrying
+// its name, the voice when it is not the line's, the sparkle for an AI voice
+// and the approval mark — so nothing sits on the waveform any more, which
+// fills the height under it. Its own height gates, on the same axis as the
+// ones above.
+
+/** The bar on the timeline's 46px clips, and anything 40px or taller. */
+export const NAME_BAR_H_PX = 14
+/** …on a 30–39px clip. */
+export const NAME_BAR_SMALL_H_PX = 12
+/** From this clip height the bar is the full 14px. */
+export const NAME_BAR_FULL_FROM_H_PX = 40
+/** Under this there is no room for a bar: the clip keeps today's corner marks,
+ *  as Logic hides region names on short tracks. The same 30px the corner
+ *  furniture has always needed (`MIN_CHIP_META_H_PX`). */
+export const NAME_BAR_MIN_CLIP_H_PX = MIN_CHIP_META_H_PX
+
+/** The bar's height on a clip this tall; 0 means no bar. */
+export function nameBarPx(chipH: number): number {
+  if (!Number.isFinite(chipH) || chipH < NAME_BAR_MIN_CLIP_H_PX) return 0
+  return chipH >= NAME_BAR_FULL_FROM_H_PX ? NAME_BAR_H_PX : NAME_BAR_SMALL_H_PX
+}
+
+/** What the bar holds gives way from the right as the clip narrows (board
+ *  54): the voice first, then the name, leaving the sparkle and the colour. */
+export const NAME_BAR_VOICE_MIN_W_PX = 150
+export const NAME_BAR_NAME_MIN_W_PX = 44
+/** The approval check at the right end. */
+export const NAME_BAR_CHECK_MIN_W_PX = 28
+/** The hover glyphs at the right end (record and ⋯, the play beside them). */
+export const NAME_BAR_HOVER_MIN_W_PX = 60
+
 export const TL_ROW_H_CLASS = "h-[var(--tl-row-h,66px)]"
 export const TL_CHIP_BOX_CLASS = "top-[var(--tl-chip-top,10px)] h-[var(--tl-chip-h,46px)]"

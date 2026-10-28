@@ -15,6 +15,8 @@ vi.mock("@/components/ui/toast", async (importActual) => {
 
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { chipRadiusPx } from "@/lib/timeline/scale"
+import { RowMetricsContext } from "./useRowMetrics"
+import { chipHeightPx, chipPadPx } from "@/lib/timeline/row-metrics"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -1142,9 +1144,13 @@ describe("TargetAudioLane — corner affordances never collide (SUB-48)", () => 
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
   })
 
+  // AQU-2235: the mic lives in the name bar now, from 60px wide (board 54).
   it("a not-yet-queued narrow chip keeps the mic button at its normal threshold", () => {
-    render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1000)]} onOpenRecording={vi.fn()} />)
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1500)]} onOpenRecording={vi.fn()} />)
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+    unmount()
+    render(<TargetAudioLane {...base} items={[item({ startTime: 10, endTime: 20 }, 1000)]} onOpenRecording={vi.fn()} />)
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
   })
 })
 
@@ -1424,26 +1430,44 @@ describe("TargetAudioLane — the sparkle on generated chips", () => {
     expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
   })
 
-  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
-  // doesn't collide with the left trim handle." The handle is the leftmost 7px
-  // and is the control you reach for.
-  it("sits clear of the left trim handle, vertically centred", () => {
+  // AQU-2235 (board 54): with a name bar the sparkle LEADS the bar, clear of
+  // the waveform and of the trim handles, which start under the bar.
+  it("leads the name bar, clear of the trim handles below it", () => {
     render(<TargetAudioLane {...base} items={[generated()]} />)
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    const bar = screen.getByTestId("tl-target-c1-bar")
+    expect(bar.contains(glyph)).toBe(true)
+    expect(bar.firstElementChild?.firstElementChild).toBe(glyph)
+  })
+
+  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
+  // doesn't collide with the left trim handle." Under 30px there is no bar,
+  // and the sparkle keeps the place it had.
+  it("on a clip too short for a bar, sits clear of the left trim handle, vertically centred", () => {
+    const rowH = 40
+    const chipH = chipHeightPx(rowH)
+    render(
+      <RowMetricsContext.Provider value={{ rowH, chipH, chipPad: chipPadPx(rowH) }}>
+        <TargetAudioLane {...base} items={[generated()]} />
+      </RowMetricsContext.Provider>,
+    )
+    expect(chipH).toBeLessThan(30)
+    expect(screen.queryByTestId("tl-target-c1-bar")).toBeNull()
     const glyph = screen.getByTestId("tl-target-c1-generated")
     expect(glyph.className).toContain("left-2")
     expect(glyph.className).toContain("top-1/2")
     expect(glyph.className).toContain("-translate-y-1/2")
   })
 
-  // They occupy the same pixels: the corner badge is 14px tall at top-1, so at
-  // any height where it renders it covers the vertical centre. A missing take
-  // is a STATE; "this one is synthetic" is an identity the colour still says.
-  it("gives way to the corner state badge", () => {
+  // In the bar a state and the sparkle no longer fight for one corner: the
+  // state glyph goes first (a state outranks an identity), the sparkle after.
+  it("follows the corner state glyph in the bar", () => {
     render(
       <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
     )
-    expect(screen.getByTestId("tl-target-c1-missing")).toBeTruthy()
-    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+    const missing = screen.getByTestId("tl-target-c1-missing")
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    expect(missing.nextElementSibling).toBe(glyph)
   })
 
   it("is withheld from a chip too narrow to hold it", () => {

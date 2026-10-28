@@ -801,7 +801,6 @@ export const fr: Catalog = {
   "editor.video.chooseFile": "Choisir un fichier",
   "editor.timeline.title": "Chronologie",
   "editor.timeline.followPlayhead": "Suivre le curseur de lecture",
-  "editor.timeline.linkVideo": "Lier une vidéo",
   "editor.timeline.changeVideo": "Changer la vidéo",
   "editor.timeline.coreVideoPrompt": "URL de la vidéo principale (laisser vide pour effacer)",
   "editor.timeline.zoomIn": "Zoomer",

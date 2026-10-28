@@ -804,7 +804,6 @@ export const my: Catalog = {
   "editor.video.chooseFile": "ဖိုင်ရွေးရန်",
   "editor.timeline.title": "အချိန်ဇယား",
   "editor.timeline.followPlayhead": "ဖွင့်နေသည့်နေရာကို လိုက်ရန်",
-  "editor.timeline.linkVideo": "ဗီဒီယိုချိတ်ရန်",
   "editor.timeline.changeVideo": "ဗီဒီယိုပြောင်းရန်",
   "editor.timeline.coreVideoPrompt": "အဓိက ဗီဒီယို URL (ဖယ်ရှားရန် အလွတ်ထားပါ)",
   "editor.timeline.zoomIn": "ချဲ့ကြည့်ရန်",

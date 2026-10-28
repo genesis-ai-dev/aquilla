@@ -817,7 +817,6 @@ export const ru: Catalog = {
   "editor.video.chooseFile": "Выбрать файл",
   "editor.timeline.title": "Таймлайн",
   "editor.timeline.followPlayhead": "Следить за курсором воспроизведения",
-  "editor.timeline.linkVideo": "Привязать видео",
   "editor.timeline.changeVideo": "Изменить видео",
   "editor.timeline.coreVideoPrompt": "URL основного видео (оставьте пустым, чтобы удалить)",
   "editor.timeline.zoomIn": "Увеличить",

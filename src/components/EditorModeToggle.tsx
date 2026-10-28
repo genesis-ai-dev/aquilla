@@ -37,6 +37,9 @@ function useIsMdUp(): boolean {
 interface Props {
   lens: EditorLens
   onChange: (lens: EditorLens) => void
+  /** "active": only the open view keeps its label; the others are icons with
+   *  their names on hover (the media view's top bar, canvas board 55). */
+  labels?: "all" | "active"
   /** Open the full Agent workbench. Agent is a destination rather than a
    * persisted editor lens, so selecting it delegates navigation to the shell. */
   onAgentSelect?: () => void
@@ -55,9 +58,12 @@ export function EditorModeToggle({
   onAgentSelect,
   agentActive = false,
   timeOrdered = false,
+  labels = "all",
 }: Props) {
   const t = useT()
-  const labeled = useIsMdUp()
+  const wide = useIsMdUp()
+  const current = agentActive ? "agent" : lens
+  const labeledFor = (value: string) => wide && (labels === "all" || value === current)
   // AQU-353: the canonical lens label is shared with every other entry point
   // that toggles this lens (e.g. the sidebar "More" item) via audioLensLabelKey,
   // so they never diverge (this used to say "Audio" while the sidebar said
@@ -79,11 +85,11 @@ export function EditorModeToggle({
       className="gap-0"
     >
       <TabsList>
-        <ModeTab value="text" label={t("editor.lens.text")} icon={Pencil} labeled={labeled} />
-        <ModeTab value="audio" label={secondLabel} icon={SecondIcon} labeled={labeled} />
-        <ModeTab value="transcribe" label={t("nav.lens.transcribe")} icon={Captions} labeled={labeled} />
+        <ModeTab value="text" label={t("editor.lens.text")} icon={Pencil} labeled={labeledFor("text")} />
+        <ModeTab value="audio" label={secondLabel} icon={SecondIcon} labeled={labeledFor("audio")} />
+        <ModeTab value="transcribe" label={t("nav.lens.transcribe")} icon={Captions} labeled={labeledFor("transcribe")} />
         {(onAgentSelect || agentActive) ? (
-          <ModeTab value="agent" label={t("nav.dock.agentTab")} icon={Bot} labeled={labeled} />
+          <ModeTab value="agent" label={t("nav.dock.agentTab")} icon={Bot} labeled={labeledFor("agent")} />
         ) : null}
       </TabsList>
     </Tabs>

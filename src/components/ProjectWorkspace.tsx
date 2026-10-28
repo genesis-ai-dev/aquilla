@@ -5,7 +5,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
@@ -402,7 +402,7 @@ import { AgentWorkbench } from "./agent/AgentWorkbench"
 import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
-import { FileChapterToolbar } from "./FileChapterToolbar"
+import { FileChapterToolbar, type FileChapterToolbarProps } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -477,7 +477,7 @@ import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
 import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
-import { MediaFilmButton, MediaTopBar } from "@/components/timeline/MediaTopBar"
+import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
@@ -16669,30 +16669,13 @@ export function ProjectWorkspace() {
               />
             )}
             {timelineStacked && activeFile && project ? (
-              // Media redesign, layout (canvas board 23): ONE 40 px bar for the
-              // whole view — the film, the timeline's tools, the status ring,
-              // History, the mode toggle and Panels. It replaces the toolbar
-              // row that was here and the timeline's title row. The transport
-              // is the thin strip along the bottom of the view (below).
+              // Media redesign, layout: ONE 40 px bar for the whole view, in
+              // two groups (canvas board 55, option E). Left: the timeline's
+              // tools (Sources with the film first, Timing, a divider, Check),
+              // then History. Right: the status ring, the views, Panels, ⋯.
+              // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                film={
-                  <MediaFilmButton
-                    url={activeFile.coreMediaUrl ?? null}
-                    fallbackName={linkedVideoBaseName}
-                    hiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
-                    showing={dock.view.isShowing("film")}
-                    onHide={() => {
-                      const area = dock.view.areaOf("film")
-                      if (!area) return
-                      // A tab beside the text: show the text instead. Alone in
-                      // its area: fold the area.
-                      if (dock.view.list(area).length > 1) dock.show("text")
-                      else dock.fold(area)
-                    }}
-                    onShow={() => dock.show("film")}
-                    onLink={canPerform("file.video.set", project?.syncRole?.level ?? null) ? () => setLinkVideoOpen(true) : undefined}
-                  />
-                }
+                afterTools={<HistoryPanel onResult={reportHistory} size="bar" />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -16706,13 +16689,21 @@ export function ProjectWorkspace() {
                       {mediaStatusSync}
                       {showFileStats ? mediaStatusStats : null}
                     </MediaStatusRing>
-                    {fileChapterToolbar}
-                    <MediaPanelsMenu
-                      dock={dock}
-                      fileName={fileDisplayName(activeFile)}
-                      kind={mediaKind}
-                      filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
-                    />
+                    {fileChapterToolbar && isValidElement<FileChapterToolbarProps>(fileChapterToolbar)
+                      ? cloneElement(fileChapterToolbar, {
+                          // History sits on the left of this bar.
+                          historyControl: undefined,
+                          lensLabels: "active",
+                          beforeMenu: (
+                            <MediaPanelsMenu
+                              dock={dock}
+                              fileName={fileDisplayName(activeFile)}
+                              kind={mediaKind}
+                              filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
+                            />
+                          ),
+                        })
+                      : null}
                   </>
                 }
               />
@@ -16822,6 +16813,21 @@ export function ProjectWorkspace() {
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
+                    // Board 55: the film's own actions head the Sources menu.
+                    film={activeFile?.coreMediaUrl ? {
+                      name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
+                      hiddenByTiming: !showVideoPane,
+                      showing: dock.view.isShowing("film"),
+                      onHide: () => {
+                        const area = dock.view.areaOf("film")
+                        if (!area) return
+                        // A tab beside the text: show the text instead. Alone
+                        // in its area: fold the area.
+                        if (dock.view.list(area).length > 1) dock.show("text")
+                        else dock.fold(area)
+                      },
+                      onShow: () => dock.show("film"),
+                    } : undefined}
                     onAddLine={handleAddLine}
                     // Through the confirmation, like the table's control —
                     // the two surfaces must not differ about what removing

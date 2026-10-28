@@ -804,7 +804,6 @@ export const th: Catalog = {
   "editor.video.chooseFile": "เลือกไฟล์",
   "editor.timeline.title": "ไทม์ไลน์",
   "editor.timeline.followPlayhead": "เลื่อนตามตำแหน่งการเล่น",
-  "editor.timeline.linkVideo": "ลิงก์วิดีโอ",
   "editor.timeline.changeVideo": "เปลี่ยนวิดีโอ",
   "editor.timeline.coreVideoPrompt": "URL วิดีโอหลัก (เว้นว่างเพื่อล้างค่า)",
   "editor.timeline.zoomIn": "ขยาย",

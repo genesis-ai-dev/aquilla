@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
+import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
@@ -1347,10 +1348,10 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle, and below project lead shows the timing as plain text with its (i) (AQU-2204)", async () => {
+  it("hides the snap toggle, and below project lead shows the timing as plain text, who can change it on hover (AQU-2204, board 55)", async () => {
     // Without `onChangeTimingMode` (below the project-lead floor) the choice
     // renders as plain text — same testids, so browser passes read the mode
-    // identically either way — and the (i) says who can change it.
+    // identically either way — and its hover text says who can change it.
     renderAt("audioFirst")
     expect(inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))).toBeInTheDocument()
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
@@ -1358,18 +1359,22 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")
     expect(label.tagName).toBe("SPAN")
-    expect(label).toHaveTextContent("Timing:Follows recordings")
+    // Board 55, option E: no "Timing:" label, and no (i) in the bar.
+    expect(label).toHaveTextContent(/^Follows recordings$/)
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    expect(screen.queryByTestId("tl-timing-mode-info")).toBeNull()
     // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
+    await expectTooltip(label, /^Timing · .*Only a project lead or above can change/)
   })
 
   it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
     const onChange = vi.fn()
     renderAt("audioFirst", { onChangeTimingMode: onChange })
     const trigger = screen.getByTestId("tl-timing-mode-trigger")
-    expect(trigger).toHaveTextContent("Timing:Follows recordings")
+    // Board 55, option E: the choice and a chevron; "Timing" is its hover text.
+    expect(trigger).toHaveTextContent(/^Follows recordings$/)
+    await expectTooltip(trigger, /^Timing$/)
     fireEvent.click(trigger)
     const active = await screen.findByTestId("tl-timing-mode-audioFirst")
     const other = screen.getByTestId("tl-timing-mode-dubbing")
@@ -1393,10 +1398,13 @@ describe("TimelineEditor — audio-first mode", () => {
 
   it("the menu as drawn on board 22: a heading, each choice's file length and the muting line (AQU-2204)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
-    // Beside the (i): how long the file is with the current choice.
-    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("16.0 s long")
+    // Board 55: no length in the bar — the menu gives each choice's.
+    expect(screen.queryByTestId("tl-timing-length")).toBeNull()
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
-    expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
+    const heading = await screen.findByTestId("tl-timing-menu-heading")
+    expect(heading).toHaveTextContent("What decides how long each line is")
+    // What the bar's (i) said is beside the heading now.
+    await expectTooltip(within(heading).getByTestId("tl-timing-mode-info"), /Switching changes no recordings and no times/)
     expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
     // Following the recordings each verse is as long as its take: 11 + 4.
     expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
@@ -1533,7 +1541,7 @@ describe("TimelineEditor — audio-first mode", () => {
     await waitFor(() => expect(screen.queryByTestId("tl-timing-mode-audioFirst")).toBeNull())
   })
 
-  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", () => {
+  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", async () => {
     const book = [
       cell({ id: "b1", medium: "text", original: "In the days when the judges ruled, there was a famine in the land." }),
       cell({ id: "b2", medium: "text", original: "Short." }),
@@ -1550,8 +1558,11 @@ describe("TimelineEditor — audio-first mode", () => {
     // The longer verse takes longer to read, so it takes more room; the short
     // one is held at the 1.5 s floor.
     expect(px(c1, "width")).toBeGreaterThan(px(c2, "width") * 2)
-    // ONE (i) explains the dashed lines; nothing is parked in the Untimed strip.
-    expect(screen.getByTestId("tl-stand-in-info")).toBeInTheDocument()
+    // ONE explanation of the dashed lines — with the Timing control since
+    // board 55 (its hover text here, below project lead; the menu's foot for a
+    // lead), not an (i) in the bar. Nothing is parked in the Untimed strip.
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+    await expectTooltip(screen.getByTestId("tl-timing-mode-audioFirst"), /at a stand-in length worked out from its text/)
     expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
   })
 
@@ -1584,14 +1595,14 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
   })
 
-  it("a file timed to a film only follows its source: plain text and an (i), even for a lead (AQU-2204)", async () => {
+  it("a file timed to a film only follows its source: plain text, why on hover, even for a lead (AQU-2204)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
     const control = screen.getByTestId("tl-timing-mode")
     expect(control).toHaveAttribute("data-mode", "dubbing")
     expect(control).toHaveAttribute("data-locked", "film")
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
-    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
+    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent(/^Follows source$/)
+    await expectTooltip(screen.getByTestId("tl-timing-mode-dubbing"), /timed to the film, so it always follows its source/)
   })
 
   // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
@@ -5447,5 +5458,92 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
     expect(screen.getByTestId("tl-track-hide")).toHaveAttribute("data-disabled")
     fireEvent.pointerUp(window)
+  })
+})
+
+// Canvas board 55, option E (Sam, Oct 28): the media view's top bar in two
+// groups. Left: Sources (an icon, the film first in it), Timing (no label, no
+// length, no (i)), a thin divider, Check, then History. Add track is the + in
+// the timeline's corner; undo, redo and the blade live in the corner's ⋯.
+describe("TimelineEditor — the media view's top bar (board 55, option E)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const drawBar = (over: Record<string, unknown> = {}) => {
+    const film = { name: "a.mp4", hiddenByTiming: false, showing: true, onHide: vi.fn(), onShow: vi.fn() }
+    const onLink = vi.fn()
+    renderWithTooltips(
+      <>
+        <MediaTopBar afterTools={<span data-testid="history-stub" />} trailing={<span data-testid="trailing-stub" />} />
+        <TimelineEditor
+          fileId="f1" coreMediaUrl="https://cdn.test/a.mp4" editable timingMode="dubbing"
+          cells={[cell({ id: "d1", medium: "media", startTime: 0, endTime: 2, original: "Hello" })]}
+          onRetimeSubtitle={() => {}} onChangeTimingMode={vi.fn()}
+          onRequestLinkVideo={onLink} canLinkVideo film={film}
+          onRequestImportAudioVtt={vi.fn()} canImportAudioVtt
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+          trackEditing={{ onAdd: vi.fn(() => "t"), onLeaveFolder: vi.fn(), onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(() => "f"), onDelete: vi.fn() }}
+          onHistoryResult={vi.fn()} onCutTargets={vi.fn()}
+          {...over}
+        />
+      </>,
+    )
+    return { film, onLink }
+  }
+
+  it("lays the left side out as Sources, Timing, a divider, then History — nothing else", async () => {
+    drawBar()
+    const bar = screen.getByTestId("media-top-bar")
+    await waitFor(() => expect(within(bar).getByTestId("tl-sources-menu")).toBeInTheDocument())
+    const ids = [...bar.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"))
+    const at = (id: string) => ids.indexOf(id)
+    for (const id of ["tl-sources-menu", "tl-timing-mode", "tl-tools-divider", "history-stub", "trailing-stub"]) {
+      expect(at(id), id).toBeGreaterThanOrEqual(0)
+    }
+    expect(at("tl-sources-menu")).toBeLessThan(at("tl-timing-mode"))
+    expect(at("tl-timing-mode")).toBeLessThan(at("tl-tools-divider"))
+    expect(at("tl-tools-divider")).toBeLessThan(at("history-stub"))
+    // Timing has no label, no length and no (i) in the bar.
+    expect(bar.textContent).not.toMatch(/Timing:|long/)
+    expect(within(bar).queryByTestId("tl-timing-length")).toBeNull()
+    expect(within(bar).queryByTestId("tl-timing-mode-info")).toBeNull()
+    // Add track and the editing tools are not in the bar…
+    for (const id of ["tl-add-track", "tl-undo", "tl-redo", "tl-blade-toggle", "top-film"]) {
+      expect(within(bar).queryByTestId(id), id).toBeNull()
+    }
+    // …Add track is the + in the timeline's corner, undo in its ⋯.
+    expect(within(screen.getByTestId("tl-corner")).getByTestId("tl-add-track")).toBeInTheDocument()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
+  })
+
+  it("draws Sources as its icon and a chevron, 'Film and sources' on hover, the film first in its menu", async () => {
+    const { film, onLink } = drawBar()
+    const sources = await screen.findByTestId("tl-sources-menu")
+    expect(sources.textContent).toBe("")
+    expect(sources.querySelectorAll("svg")).toHaveLength(2)
+    await expectTooltip(sources, /^Film and sources$/)
+    fireEvent.click(sources)
+    const menu = await screen.findByRole("menu")
+    const text = menu.textContent ?? ""
+    // The film (its name, Change, Fold), then the other sources.
+    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Audio cues"].map((word) => text.indexOf(word))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    fireEvent.click(within(menu).getByTestId("top-film-hide"))
+    expect(film.onHide).toHaveBeenCalled()
+    fireEvent.click(sources)
+    fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
+    expect(onLink).toHaveBeenCalled()
+  })
+
+  it("puts the note about stand-in lines at the foot of the Timing menu", async () => {
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="bk" coreMediaUrl={null} editable timingMode="audioFirst" onChangeTimingMode={vi.fn()}
+        cells={[cell({ id: "b1", medium: "text", original: "In the days when the judges ruled." })]}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    await expectTooltip(await screen.findByTestId("tl-stand-in-info"), /at a stand-in length worked out from its text/)
   })
 })

@@ -21,9 +21,12 @@ import { cn } from "@/lib/utils"
 export interface HistoryPanelProps {
   /** Say what happened (the workspace's toast reporter). */
   onResult: (which: "undo" | "redo", result: HistoryResult) => void
+  /** "bar": the media view's top bar — a square like its neighbours, without
+   *  the count (canvas board 55). */
+  size?: "default" | "bar"
 }
 
-export function HistoryPanel({ onResult }: HistoryPanelProps) {
+export function HistoryPanel({ onResult, size = "default" }: HistoryPanelProps) {
   const t = useT()
   const fmt = useFormat()
   const view = useHistoryView()
@@ -61,10 +64,12 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
               type="button"
               aria-label={t("editor.history.panelAria")}
               data-testid="history-panel-trigger"
-              className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className={size === "bar"
+                ? "flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                : "flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"}
             >
               <History className="h-3.5 w-3.5" />
-              {view.undoSteps.length > 0 && <span className="tabular-nums">{view.undoSteps.length}</span>}
+              {size !== "bar" && view.undoSteps.length > 0 && <span className="tabular-nums">{view.undoSteps.length}</span>}
             </button>
           }
         />

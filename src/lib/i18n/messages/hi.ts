@@ -901,7 +901,6 @@ export const hi: Catalog = {
   "editor.video.chooseFile": "फ़ाइल चुनें",
   "editor.timeline.title": "समयरेखा",
   "editor.timeline.followPlayhead": "प्लेहेड का पालन करें",
-  "editor.timeline.linkVideo": "वीडियो जोड़ें",
   "editor.timeline.changeVideo": "वीडियो बदलें",
   "editor.timeline.coreVideoPrompt": "कोर वीडियो URL (साफ़ करने के लिए खाली छोड़ें)",
   "editor.timeline.zoomIn": "ज़ूम इन",

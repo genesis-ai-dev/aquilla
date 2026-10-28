@@ -801,7 +801,6 @@ export const ms: Catalog = {
   "editor.video.chooseFile": "Pilih fail",
   "editor.timeline.title": "Garis Masa",
   "editor.timeline.followPlayhead": "Ikut penanda main",
-  "editor.timeline.linkVideo": "Pautkan video",
   "editor.timeline.changeVideo": "Tukar video",
   "editor.timeline.coreVideoPrompt": "URL video teras (biar kosong untuk kosongkan)",
   "editor.timeline.zoomIn": "Zum masuk",

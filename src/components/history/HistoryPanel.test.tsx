@@ -82,4 +82,16 @@ describe("HistoryPanel", () => {
     expect(screen.getByRole("button", { name: "Undo history" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Edit history" })).toBeNull()
   })
+
+  // Canvas board 55, option E: in the media view's top bar, a square like its
+  // neighbours, without the count.
+  it("in the top bar, is its icon alone, without the count", () => {
+    add("editor.history.stepAddRow")
+    add("editor.history.stepEditText")
+    const { unmount } = render(<HistoryPanel onResult={vi.fn()} />)
+    expect(screen.getByTestId("history-panel-trigger")).toHaveTextContent("2")
+    unmount()
+    render(<HistoryPanel onResult={vi.fn()} size="bar" />)
+    expect(screen.getByTestId("history-panel-trigger").textContent).toBe("")
+  })
 })

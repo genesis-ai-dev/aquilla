@@ -928,7 +928,6 @@ export const sw: Catalog = {
   "editor.video.chooseFile": "Chagua faili",
   "editor.timeline.title": "Ratiba",
   "editor.timeline.followPlayhead": "Fuata kiashiria",
-  "editor.timeline.linkVideo": "Unganisha video",
   "editor.timeline.changeVideo": "Badilisha video",
   "editor.timeline.coreVideoPrompt": "Anwani ya video kuu (acha wazi ili kuondoa)",
   "editor.timeline.zoomIn": "Kuza ndani",

@@ -74,6 +74,8 @@ export function regionControls(dock: MediaDock, region: DockRegion): RegionLayou
 }
 
 const ICON_BTN = "text-muted-foreground hover:text-foreground"
+/** The corner squares' look, for the timeline corner's other buttons (its +). */
+export const CORNER_ICON_BTN = ICON_BTN
 
 /**
  * Full screen (or Restore), Fold, and the ⋯ the caller builds — in that order,
@@ -86,6 +88,7 @@ export function PanelControlButtons({
   menu,
   foldTip,
   compact = false,
+  leading,
 }: {
   region: DockRegion
   controls: RegionLayoutControls
@@ -94,6 +97,8 @@ export function PanelControlButtons({
   foldTip: string
   /** Room for two squares only (the narrow track names): Fold stays in the ⋯. */
   compact?: boolean
+  /** Before Full screen: the timeline corner's + (Add track, board 55). */
+  leading?: ReactNode
 }) {
   const t = useT()
   const keys = dockKeys()
@@ -102,6 +107,7 @@ export function PanelControlButtons({
     : t("editor.dock.fullScreenTip", { keys: keys.full })
   return (
     <div className="ms-auto flex shrink-0 items-center gap-px" data-testid={`dock-controls-${region}`}>
+      {leading}
       <AppTooltip content={fullTip}>
         <Button
           type="button"

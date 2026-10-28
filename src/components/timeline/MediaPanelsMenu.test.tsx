@@ -108,4 +108,12 @@ describe("MediaPanelsMenu", () => {
     const info = screen.getByRole("button", { name: "About your layout" })
     await expectTooltip(info, /Remembered for you, for this file\..*Panels .+ · Full screen .+ · Fold .+ · Restore Esc/)
   })
+
+  it("is its icon alone in the bar, with 'Panels' and its key on hover (board 55)", async () => {
+    draw(fakeDock(startDockLayout(), { film: true }, { panelsOpen: false }))
+    const button = screen.getByTestId("panels-button")
+    expect(button.textContent).toBe("")
+    expect(button).toHaveAttribute("aria-label", "Panels")
+    await expectTooltip(button, /^Panels · (⌘|Ctrl\+)\\$/)
+  })
 })

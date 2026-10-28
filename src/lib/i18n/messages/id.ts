@@ -806,7 +806,6 @@ export const id: Catalog = {
   "editor.video.chooseFile": "Pilih file",
   "editor.timeline.title": "Lini masa",
   "editor.timeline.followPlayhead": "Ikuti kepala putar",
-  "editor.timeline.linkVideo": "Tautkan video",
   "editor.timeline.changeVideo": "Ganti video",
   "editor.timeline.coreVideoPrompt": "URL video inti (kosongkan untuk menghapus)",
   "editor.timeline.zoomIn": "Perbesar",

@@ -804,7 +804,6 @@ export const zh_Hans: Catalog = {
   "editor.video.chooseFile": "选择文件",
   "editor.timeline.title": "时间轴",
   "editor.timeline.followPlayhead": "跟随播放头",
-  "editor.timeline.linkVideo": "链接视频",
   "editor.timeline.changeVideo": "更换视频",
   "editor.timeline.coreVideoPrompt": "主要视频网址（留白即可清除）",
   "editor.timeline.zoomIn": "放大",

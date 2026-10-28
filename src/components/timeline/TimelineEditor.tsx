@@ -84,18 +84,19 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
+  DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
+import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
-import { PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
+import { CORNER_ICON_BTN, PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
 import {
   deriveTracksForFile,
   type TimelineTrack,
@@ -266,6 +267,13 @@ export interface TimelineEditorProps {
    *  link dialog. The dialog lives up there because the video pane offers the
    *  same action from its could-not-load state. */
   onRequestLinkVideo?(): void
+  /**
+   * Canvas board 55, option E: the linked film's own actions, which head the
+   * Sources menu now that the top bar has no film button — its name, Change
+   * (the link dialog, which also clears it) and Hide / Show. Absent: the
+   * Sources menu's plain "Film" row, which opens the link dialog.
+   */
+  film?: { name: string; hiddenByTiming: boolean; showing: boolean; onHide(): void; onShow(): void }
   /**
    * AQU-646: add a line over a stretch of the film that has no cell of its own
    * — the "T" in the Subtitles track, and the mic in the Target audio track
@@ -1165,6 +1173,7 @@ export function TimelineEditor({
   onHistoryResult,
   onTogglePlay,
   onRequestLinkVideo,
+  film,
   onAddLine,
   canAddLine,
   canRemoveImportedCells = false,
@@ -1685,32 +1694,12 @@ export function TimelineEditor({
   const chipStripSlot = useUiSlot("media-chip-strip")
   // Media redesign, layout: the workspace's top bar, where the tools go.
   const topToolsSlot = useUiSlot("media-top-tools")
-  // The bar is ONE 40 px row, so on a narrow view the editing tools (undo,
-  // redo, the blade) step into the timeline's ⋯ rather than run under the
-  // status ring. Measured, not guessed: the tools' full width against the
-  // room the bar leaves them, kept from the last time they all showed.
+  // Board 55, option E: the bar holds what the mock-up draws and nothing
+  // more, so in it the editing tools (undo, redo, the blade) always live in
+  // the timeline corner's ⋯ — History, ⌘Z / ⌘⇧Z, B and S are the quick ways.
+  // Outside the media view (no bar) they stay in the tools row.
   const toolsRowRef = useRef<HTMLDivElement | null>(null)
-  const fullToolsWidthRef = useRef(0)
-  const [compactTools, setCompactTools] = useState(false)
-  useLayoutEffect(() => {
-    const slot = topToolsSlot
-    const row = toolsRowRef.current
-    if (!slot || !row || typeof ResizeObserver === "undefined") return
-    const check = () => {
-      const room = slot.clientWidth
-      if (!compactTools) {
-        fullToolsWidthRef.current = row.scrollWidth
-        if (row.scrollWidth > room + 1) setCompactTools(true)
-      } else if (fullToolsWidthRef.current > 0 && fullToolsWidthRef.current <= room) {
-        setCompactTools(false)
-      }
-    }
-    const ro = new ResizeObserver(check)
-    ro.observe(slot)
-    ro.observe(row)
-    check()
-    return () => ro.disconnect()
-  }, [topToolsSlot, compactTools])
+  const compactTools = Boolean(topToolsSlot)
 
   // AQU-646: bridge the audio play-queue into the timeline clock. Progress is
   // file-timeline seconds for imported media (one shared clip); the cellIdSet
@@ -2270,7 +2259,24 @@ export function TimelineEditor({
     // clean and greyed out (Sam, Oct 5 — a badge beside "Attach captions" was
     // too many words for one row).
     const trackEditingOff = t("editor.timeline.trackEditingOffHint")
-    if (onRequestLinkVideo) {
+    // Board 55, option E: with a film linked, the menu opens with it — its
+    // name, Change, Hide or Show — and the other sources follow under their
+    // own heading.
+    if (film && coreMediaUrl) {
+      items.push({ id: "film-name", type: "label", label: film.name })
+      if (onRequestLinkVideo) {
+        items.push({
+          id: "film-change", label: t("editor.dock.filmChange"), icon: Link2,
+          disabled: !canLinkVideo, testId: "top-film-change", onClick: onRequestLinkVideo,
+        })
+      }
+      items.push(film.hiddenByTiming
+        ? { id: "film-hidden", type: "label", label: t("editor.dock.filmHiddenByTiming") }
+        : film.showing
+          ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
+          : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
+      items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
+    } else if (onRequestLinkVideo) {
       items.push({
         id: "film",
         label: "Film",
@@ -2361,9 +2367,11 @@ export function TimelineEditor({
         onClick: onRequestImportCharacters,
       })
     }
+    // A heading with nothing under it says nothing.
+    if (items.at(-1)?.id === "sources-heading") items.pop()
     return items
   }, [
-    onRequestLinkVideo, canLinkVideo, coreMediaUrl,
+    film, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
     onRequestAlignScript, canAlignScript,
@@ -4142,7 +4150,69 @@ export function TimelineEditor({
       </div>
     </div>
   )
-  // Where undo, redo and the blade go while the bar is too narrow for them.
+  // Board 55, option E: Add track is a + beside "Tracks" in the corner cell,
+  // next to its Full screen / Fold / ⋯ — where the tracks are — not in the top
+  // bar; with the track names narrowed (room for two squares only) its two
+  // choices are in that ⋯.
+  //
+  // AQU-646 stage 2: ADDING A TRACK IS A BUTTON, NOT A RIGHT-CLICK (Sam,
+  // 2026-08-22). Right-click is for the tracks that already exist; a project
+  // that has just turned track editing on has none of the new ones yet, so the
+  // way in has to be somewhere you can see. It renders only when the setting
+  // is on and the person is a maintainer — the whole control, not a disabled
+  // one.
+  const addTrackItems: OverflowMenuItem[] = trackEditing ? [
+    {
+      id: "add-audio",
+      label: t("editor.timeline.trackAddTrack"),
+      icon: AudioLines,
+      onClick: () => setAddingTrack(true),
+    },
+    {
+      id: "add-folder",
+      label: t("editor.timeline.trackAddFolder"),
+      icon: FolderPlus,
+      // A folder needs no decisions — it has no alignment and holds
+      // nothing yet — so it is made immediately and named in place,
+      // rather than through a dialog whose only field is a name.
+      onClick: () => {
+        const folderId = trackEditing.onAdd({
+          kind: "folder",
+          // The STORED name, not the menu's label. Naming it
+          // `t(...)` put the creator's UI language into a synced
+          // field, so a folder made in Thai read as Thai for
+          // everyone — and being a constant, every folder on a file
+          // was called the same thing (2026-08-28).
+          name: nextFolderName(tracks),
+        })
+        setRenamingTrackId(folderId)
+      },
+    },
+  ] : []
+  const addTrackMenu = addTrackItems.length > 0 ? (
+    <OverflowMenu
+      items={addTrackItems}
+      triggerVariant="ghost"
+      triggerSize="icon-xs"
+      triggerClassName={CORNER_ICON_BTN}
+      triggerTooltip={t("editor.timeline.trackAdd")}
+      triggerIcon={Plus}
+      testId="tl-add-track"
+      ariaLabel={t("editor.timeline.trackAdd")}
+    />
+  ) : null
+  const addTrackMenuItems = addTrackItems.length > 0 ? (
+    <DropdownMenuGroup>
+      <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">{t("editor.timeline.trackAdd")}</DropdownMenuLabel>
+      {addTrackItems.map((item) => (
+        <DropdownMenuItem key={item.id} onClick={item.onClick} data-testid={`tl-menu-${item.id}`}>
+          {item.icon && <item.icon />}
+          {item.label}
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuGroup>
+  ) : null
+  // Where undo, redo and the blade go while the tools are in the top bar.
   const compactEditItems = compactTools && (onHistoryResult || (onCutTargets && editable)) ? (
     <>
       <DropdownMenuGroup>
@@ -4253,34 +4323,13 @@ export function TimelineEditor({
     </>
   )
 
-  // The timeline's tools, in the top bar's order (canvas board 23): Timing,
-  // Sources, Add track and Check, then the editing tools. The settings that
-  // the 40 px bar has no room for live in the corner ⋯ (`timelineSettings`).
+  // The timeline's tools, in the top bar's order (canvas board 55, option E):
+  // Sources (the film first in it), Timing, a thin divider, Check — then any
+  // passing notes (hidden tracks, unlocked timings, Bluetooth). Add track is
+  // the corner's +; in the bar the editing tools and the settings the 40 px
+  // bar has no room for live in the corner ⋯ (`timelineSettings`).
   const topTools = (
     <>
-      {/* AQU-2204: the file's one Timing control ("Follows source" /
-          "Follows recordings"), first in the top bar (canvas board 23).
-          `onChangeTimingMode` absent = below project lead = plain text;
-          `timingFilmTimed` = a file timed to a film, which only follows its
-          source. */}
-      {!hideTimingMode && (
-        <TimingModeControl
-          size="bar"
-          mode={timingMode}
-          onChange={onChangeTimingMode}
-          filmTimed={timingFilmTimed}
-          sourceUnavailable={timingSourceUnavailable}
-          lengths={timingLengths}
-        />
-      )}
-      {/* AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip. */}
-      {layout.programme?.slots.some((slot) => slot.standIn) && (
-        <TimingInfoButton
-          label={t("editor.timeline.standInInfoAria")}
-          text={t("editor.timeline.standInInfo")}
-          testId="tl-stand-in-info"
-        />
-      )}
       {/* AQU-646 stage 6: ONE menu for everything that attaches material to
           the file already open — the film, the heard lines, the cast — as
           distinct from the Import button, which mints a NEW file. Three
@@ -4295,57 +4344,37 @@ export function TimelineEditor({
         <OverflowMenu
           items={sourceMenuItems}
           triggerVariant="outline"
-          triggerSize="icon-sm"
-          triggerTooltip={t("editor.timeline.sourcesMenu")}
+          triggerSize="sm"
+          // Board 55, option E: its icon and a chevron, no words.
+          triggerClassName="gap-1 px-2"
+          triggerTooltip={t("editor.timeline.sourcesTip")}
           triggerIcon={FolderInput}
+          triggerBadge={<ChevronDown className="size-3 text-muted-foreground" aria-hidden />}
           testId="tl-sources-menu"
           ariaLabel={t("editor.timeline.sourcesMenuAria")}
         />
       )}
-      {/* AQU-646 stage 2: ADDING A TRACK IS A BUTTON, NOT A RIGHT-CLICK
-          (Sam, 2026-08-22). Right-click is for the tracks that already
-          exist; a project that has just turned track editing on has none
-          of the new ones yet, so the way in has to be somewhere you can
-          see. It renders only when the setting is on and the person is a
-          maintainer — the whole control, not a disabled one. */}
-      {trackEditing && (
-        <OverflowMenu
-          items={[
-            {
-              id: "add-audio",
-              label: t("editor.timeline.trackAddTrack"),
-              icon: AudioLines,
-              onClick: () => setAddingTrack(true),
-            },
-            {
-              id: "add-folder",
-              label: t("editor.timeline.trackAddFolder"),
-              icon: FolderPlus,
-              // A folder needs no decisions — it has no alignment and holds
-              // nothing yet — so it is made immediately and named in place,
-              // rather than through a dialog whose only field is a name.
-              onClick: () => {
-                const folderId = trackEditing.onAdd({
-                  kind: "folder",
-                  // The STORED name, not the menu's label. Naming it
-                  // `t(...)` put the creator's UI language into a synced
-                  // field, so a folder made in Thai read as Thai for
-                  // everyone — and being a constant, every folder on a file
-                  // was called the same thing (2026-08-28).
-                  name: nextFolderName(tracks),
-                })
-                setRenamingTrackId(folderId)
-              },
-            },
-          ]}
-          triggerVariant="outline"
-          triggerSize="icon-sm"
-          triggerTooltip={t("editor.timeline.trackAdd")}
-          triggerIcon={Plus}
-          testId="tl-add-track"
-          ariaLabel={t("editor.timeline.trackAdd")}
+      {/* AQU-2204: the file's one Timing control ("Follows source" /
+          "Follows recordings"), after Sources in the top bar (board 55).
+          `onChangeTimingMode` absent = below project lead = plain text;
+          `timingFilmTimed` = a file timed to a film, which only follows its
+          source. */}
+      {!hideTimingMode && (
+        <TimingModeControl
+          size="bar"
+          mode={timingMode}
+          onChange={onChangeTimingMode}
+          filmTimed={timingFilmTimed}
+          sourceUnavailable={timingSourceUnavailable}
+          lengths={timingLengths}
+          // AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip
+          // — at the foot of the Timing menu since board 55.
+          standInInfo={layout.programme?.slots.some((slot) => slot.standIn) ? t("editor.timeline.standInInfo") : undefined}
         />
       )}
+      {/* Board 55, option E: a thin divider between what the file is (Sources,
+          Timing) and its state (Check, then History beside it). */}
+      {topToolsSlot && <span aria-hidden data-testid="tl-tools-divider" className="mx-0.5 h-5 w-px shrink-0 bg-border" />}
       {/* Stage 4: linking mode. An explicit toggle, off by default, because
           while it is off clicking must stay exactly what it always was —
           seek, select, drag, trim. Only offered once there are cues to pair
@@ -4739,6 +4768,7 @@ export function TimelineEditor({
                   <PanelControlButtons
                     region="tl"
                     controls={layoutControls}
+                    leading={gutterCollapsed ? undefined : addTrackMenu}
                     // The narrow gutter has room for two squares: Full screen
                     // and the ⋯, which carries Fold too.
                     compact={gutterCollapsed}
@@ -4747,13 +4777,14 @@ export function TimelineEditor({
                       <TimelineMenu
                         controls={layoutControls}
                         compact={gutterCollapsed}
-                        settings={<>{compactEditItems}{timelineSettings}</>}
+                        settings={<>{gutterCollapsed ? addTrackMenuItems : null}{compactEditItems}{timelineSettings}</>}
                       />
                     }
                   />
                 ) : (
-                  <div className="ms-auto">
-                    <TimelineMenu settings={timelineSettings} />
+                  <div className="ms-auto flex items-center gap-px">
+                    {gutterCollapsed ? null : addTrackMenu}
+                    <TimelineMenu settings={<>{gutterCollapsed ? addTrackMenuItems : null}{compactEditItems}{timelineSettings}</>} />
                   </div>
                 )}
               </div>

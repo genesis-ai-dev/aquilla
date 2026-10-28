@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { layoutGlyphShape, MediaAreaStrip, MediaLayoutGlyph, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
-import { filmLabelFor, MediaFilmButton } from "./MediaTopBar"
+import { filmLabelFor } from "./MediaTopBar"
 import { dockView, foldRegion, movePanel, startDockLayout, type DockLayout } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
 
@@ -71,6 +71,15 @@ describe("the timeline's corner controls", () => {
     expect(controls.onFold).toHaveBeenCalled()
   })
 
+  it("takes the timeline's + first, before Full screen (board 55)", () => {
+    const controls = { isFull: false, canFold: true, onToggleFull: vi.fn(), onFold: vi.fn() }
+    render(
+      <PanelControlButtons region="tl" controls={controls} foldTip="Fold" leading={<button type="button" data-testid="plus">+</button>} menu={<TimelineMenu controls={controls} />} />,
+    )
+    const order = [...screen.getByTestId("dock-controls-tl").querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"))
+    expect(order.slice(0, 4)).toEqual(["plus", "dock-full-tl", "dock-fold-tl", "dock-more-tl"])
+  })
+
   it("its ⋯ leaves Full screen and Fold to the buttons beside it (Sam, Oct 27)", () => {
     const controls = { isFull: false, canFold: true, onToggleFull: vi.fn(), onFold: vi.fn() }
     render(<TimelineMenu controls={controls} settings={<span data-testid="settings">settings</span>} />)
@@ -82,29 +91,12 @@ describe("the timeline's corner controls", () => {
   })
 })
 
-describe("the top bar's Film button", () => {
+describe("the film's name (the Sources menu heads with it, board 55)", () => {
   it("names the film by its file, the folder over a playlist, or the file it belongs to", () => {
     expect(filmLabelFor("https://cdn.test/films/Episode%20207.mp4", "ep")).toBe("Episode 207.mp4")
     expect(filmLabelFor("https://cdn.test/the-chosen-207/master.m3u8", "ep")).toBe("the-chosen-207")
     expect(filmLabelFor("https://cdn.test/cmkaom6vg0000bca7bhq1x2y3/master.m3u8", "TheChosen_101")).toBe("TheChosen_101")
     expect(filmLabelFor("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "ep")).toBe("YouTube dQw4w9WgXcQ")
-  })
-
-  it("is Link video while there is none, and folds or shows the film from its menu", () => {
-    const onLink = vi.fn()
-    const { rerender } = render(
-      <MediaFilmButton url={null} fallbackName="ep" hiddenByTiming={false} showing={false} onHide={vi.fn()} onShow={vi.fn()} onLink={onLink} />,
-    )
-    fireEvent.click(screen.getByTestId("top-film"))
-    expect(onLink).toHaveBeenCalled()
-    const onHide = vi.fn()
-    rerender(
-      <MediaFilmButton url="https://cdn.test/a.mp4" fallbackName="ep" hiddenByTiming={false} showing onHide={onHide} onShow={vi.fn()} onLink={onLink} />,
-    )
-    expect(screen.getByTestId("top-film")).toHaveTextContent("Film: a.mp4")
-    fireEvent.click(screen.getByTestId("top-film"))
-    fireEvent.click(screen.getByTestId("top-film-hide"))
-    expect(onHide).toHaveBeenCalled()
   })
 })
 

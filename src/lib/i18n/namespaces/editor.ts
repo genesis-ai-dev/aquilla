@@ -894,7 +894,6 @@ export const editor = defineNamespace({
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
     "editor.timeline.followPlayhead": "Follow playhead",
-    "editor.timeline.linkVideo": "Link video",
     "editor.timeline.changeVideo": "Change video",
     "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
@@ -914,6 +913,7 @@ export const editor = defineNamespace({
     // AQU-646 stage 6: one menu for everything that attaches material to the
     // file already open, as distinct from Import, which mints a new file.
     "editor.timeline.sourcesMenu": "Sources",
+    "editor.timeline.sourcesTip": "Film and sources",
     "editor.timeline.sourcesMenuAria": "Attach material to this file",
     "editor.timeline.checkMenu": "Check",
     "editor.timeline.checkMenuLinking": "Linking",
@@ -942,7 +942,7 @@ export const editor = defineNamespace({
       "Lines play back to back, each as long as its recording.",
     "editor.timeline.timingModeFreeHintLocked":
       "Lines play back to back, each as long as its recording. Only a project lead or above can change this.",
-    "editor.timeline.timingLabel": "Timing:",
+    "editor.timeline.timingTip": "Timing",
     "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
     "editor.timeline.timingInfoAria": "About timing",
     "editor.timeline.timingInfo":
@@ -971,7 +971,6 @@ export const editor = defineNamespace({
     "editor.timeline.timingLengthSeconds": "{seconds} s",
     "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
     "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
-    "editor.timeline.timingLengthLong": "{length} long",
     "editor.timeline.takeLeadPause": "A pause someone left before this take",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
@@ -1313,8 +1312,6 @@ export const editor = defineNamespace({
     "editor.dock.statusTitle": "{file} · status",
     "editor.dock.lastSaved": "Last saved {when}",
     "editor.dock.statusCloseNote": "Esc or a click elsewhere closes this.",
-    "editor.dock.filmTip": "The film this file links: change, hide or clear",
-    "editor.dock.filmLabel": "Film: {name}",
     "editor.dock.filmChange": "Change or clear the video…",
     "editor.dock.filmHide": "Fold the film",
     "editor.dock.filmShow": "Show the film panel",
@@ -3012,15 +3009,6 @@ export const editor = defineNamespace({
       },
       "editor.dock.statusCloseNote": {
         description: "Small note at the bottom of the status popover saying how to close it.",
-      },
-      "editor.dock.filmTip": {
-        description:
-          "Tooltip of the film button in the media view's top bar, which opens a " +
-          "menu to change the linked video, clear it, or fold the film's panel.",
-      },
-      "editor.dock.filmLabel": {
-        description: "Label of the film button in the media view's top bar.",
-        placeholders: { name: "The linked video's name, taken from its address. Content, never translate." },
       },
       "editor.dock.filmChange": {
         description: "Item in the film button's menu that opens the dialog to change or clear the linked video.",
@@ -6342,13 +6330,6 @@ export const editor = defineNamespace({
           "playback; when off the user scrolls freely. 'Playhead' is the audio/video " +
           "term for the current-position marker.",
       },
-      "editor.timeline.linkVideo": {
-        description:
-          "Toolbar button when no video is attached; it asks for a video URL to use " +
-          "as the timeline's master clock. Imperative. Swaps with " +
-          "editor.timeline.changeVideo.",
-        maxLength: 18,
-      },
       "editor.timeline.changeVideo": {
         description:
           "The same toolbar button when a video is already attached; it replaces the " +
@@ -6545,11 +6526,17 @@ export const editor = defineNamespace({
           "only a project lead or above can change it, shown when this user's role is " +
           "below that floor. One key so the two sentences can be ordered naturally.",
       },
-      "editor.timeline.timingLabel": {
+      "editor.timeline.timingTip": {
         description:
-          "Label before the file's current timing choice in the timeline header, as in " +
-          "'Timing: Follows source'. Keep the colon (or your language's equivalent).",
-        maxLength: 16,
+          "Hover text of the Timing control in the media view's top bar, which shows only the current " +
+          "choice ('Follows source' / 'Follows recordings') with no label of its own.",
+        maxLength: 20,
+      },
+      "editor.timeline.sourcesTip": {
+        description:
+          "Hover text of the top bar's Sources button, which is only an icon: its menu holds the " +
+          "linked film first, then the file's other sources (audio lines, character sheets, subtitles).",
+        maxLength: 40,
       },
       "editor.timeline.timingMenuAria": {
         description:
@@ -6618,12 +6605,6 @@ export const editor = defineNamespace({
       "editor.timeline.timingLengthHours": {
         description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
         placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
-      },
-      "editor.timeline.timingLengthLong": {
-        description:
-          "Beside the Timing control: how long the file comes out with the current choice. " +
-          "For example '16.8 s long'.",
-        placeholders: { length: "The file's length, already formatted, e.g. '16.8 s' or '12 min 4 s'." },
       },
       "editor.timeline.takeLeadPause": {
         description:

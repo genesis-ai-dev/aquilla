@@ -804,7 +804,6 @@ export const ar: Catalog = {
   "editor.video.chooseFile": "اختيار ملف",
   "editor.timeline.title": "الخط الزمني",
   "editor.timeline.followPlayhead": "تتبّع مؤشّر التشغيل",
-  "editor.timeline.linkVideo": "ربط فيديو",
   "editor.timeline.changeVideo": "تغيير الفيديو",
   "editor.timeline.coreVideoPrompt": "رابط الفيديو الأساسي (اتركه فارغًا للإلغاء)",
   "editor.timeline.zoomIn": "تكبير",

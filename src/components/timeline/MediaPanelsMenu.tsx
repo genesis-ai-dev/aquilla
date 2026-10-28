@@ -104,10 +104,17 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
       <AppTooltip content={t("editor.dock.panelsTip", { keys: keys.panels })} disabled={dock.panelsOpen}>
         <PopoverTrigger
           render={
-            <Button type="button" variant="outline" size="sm" data-testid="panels-button">
+            // Board 55, option E: its icon only, on the grey of the view
+            // switch; "Panels ⌘\\" is its hover text.
+            <Button
+              type="button"
+              variant="outline"
+              size="icon-sm"
+              className="bg-muted"
+              aria-label={t("editor.dock.panels")}
+              data-testid="panels-button"
+            >
               <LayoutGrid />
-              {t("editor.dock.panels")}
-              <span className="text-xs font-normal text-muted-foreground">{keys.panels}</span>
             </Button>
           }
         />

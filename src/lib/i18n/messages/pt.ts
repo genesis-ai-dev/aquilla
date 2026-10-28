@@ -896,7 +896,6 @@ export const pt: Catalog = {
   "editor.video.chooseFile": "Escolher arquivo",
   "editor.timeline.title": "Linha do tempo",
   "editor.timeline.followPlayhead": "Seguir o indicador",
-  "editor.timeline.linkVideo": "Vincular vídeo",
   "editor.timeline.changeVideo": "Trocar vídeo",
   "editor.timeline.coreVideoPrompt": "URL do vídeo principal (deixe em branco para desvincular)",
   "editor.timeline.zoomIn": "Aumentar zoom",

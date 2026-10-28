@@ -17,10 +17,13 @@
 // correctly read as explicit.
 //
 // AQU-2212: the list ends with "Add a voice…", which opens New voice without
-// leaving the line.
+// leaving the line. A line nobody cast whose take is a person's recording
+// names that recording ("Your recording"), with a microphone for its mark,
+// not the default voice — the Audio view's field did; the circle does now
+// (AQU-1758).
 
 import { useState } from "react"
-import { Plus } from "lucide-react"
+import { Mic, Plus } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { NoCharacterAvatar, VoiceAvatar } from "./VoiceAvatar"
@@ -53,9 +56,12 @@ export interface CastGutterVoiceProps {
   countSpeakerLines?(): number
   /** Offer "Add a voice…" at the end of the list. */
   onAddVoice?(): void
+  /** What to call an uncast line's take when it is a person's recording
+   *  ("Your recording"). The default voice is named otherwise. */
+  takeLabel?: string
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, onAddVoice }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, onAddVoice, takeLabel }: CastGutterVoiceProps) {
   const t = useT()
   const [open, setOpenState] = useState(false)
   const [speakerLines, setSpeakerLines] = useState<number | null>(null)
@@ -76,14 +82,30 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
     ? castName && castName !== voice.name
       ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
-    : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
+    : takeLabel
+      ? t("audio.castGutter.recordingTooltip", { label: takeLabel })
+      : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
+  const recording = !explicit && Boolean(takeLabel)
   const avatarPx = 32
   const trigger = (
     <span className="grid place-items-center rounded-md">
       {/* Nothing is drawn for a line nobody cast — no face, no colour, no
           initial. The empty dashed ring IS the state; a faded orb read as a
           weak assignment rather than as none. */}
-      {explicit ? <VoiceAvatar voice={voice} size={avatarPx} /> : <NoCharacterAvatar size={avatarPx} />}
+      {explicit ? (
+        <VoiceAvatar voice={voice} size={avatarPx} />
+      ) : recording ? (
+        <span
+          aria-hidden
+          data-testid="gutter-voice-recording"
+          className="grid place-items-center rounded-full bg-muted text-muted-foreground"
+          style={{ width: avatarPx, height: avatarPx }}
+        >
+          <Mic className="size-3" />
+        </span>
+      ) : (
+        <NoCharacterAvatar size={avatarPx} />
+      )}
     </span>
   )
   const tooltipSide = "right"

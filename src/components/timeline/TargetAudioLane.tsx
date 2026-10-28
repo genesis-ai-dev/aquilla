@@ -37,6 +37,8 @@ import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
+import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
@@ -268,9 +270,24 @@ export interface TakeMenuActions {
   changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
   /**
    * AQU-1758: turn this line's take into a character — the New voice dialog,
-   * cloning, seeded with it. (The Audio view's voice card had this.)
+   * cloning, seeded with it. (The Audio view's voice card had this.) With
+   * `cloneTake`, it is the one-step clone's More options.
    */
   makeCharacter?(cellId: string): void
+  /**
+   * AQU-1758 / AQU-2212: "Make a character from this voice" clones THIS take
+   * in one step — name it, Add to cast — in a popover at the clip.
+   */
+  cloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that popover suggests (who recorded the take). */
+  cloneName?(cellId: string): string
+  /**
+   * AQU-2212: the one-click when the line's voice and its take disagree —
+   * "Change to …" / "Generate · …", first in the menu. Read when the menu
+   * opens; null when they agree.
+   */
+  lineVoice?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  applyLineVoice?(cellId: string): void
   /** Ask for a new name; `current` is the take's own name, if it has one. */
   rename?(cellId: string, audioId: string, current: string | null): void
   /** Delete this take, or this piece of a cut take. */
@@ -403,6 +420,8 @@ function TargetAudioChip({
   // AQU-1767: the first (or only) piece keeps the chip's historical test id;
   // later pieces add "-p2", "-p3"… so every piece is addressable.
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
+  // AQU-2212: the voice this line is being generated or re-voiced in, if any.
+  const voicingAs = useVoicingAs(cell.id)
   // AQU-1767: where the blade would cut, while it hovers over this chip.
   const [bladeX, setBladeX] = useState<number | null>(null)
   // AQU-1767: where the take was right-clicked, so "Split here" cuts there.
@@ -692,6 +711,11 @@ function TargetAudioChip({
   // playhead is inside this take (null: Split is offered but cannot cut here).
   const moreOpenRef = useRef<{ atMs: number | null } | null>(null)
   const [menuFromMore, setMenuFromMore] = useState(false)
+  // AQU-2212: the line's one-click, read as the menu opens (it resolves the
+  // line's takes, which is too much to do for every clip on every render).
+  const [menuLineVoice, setMenuLineVoice] = useState<{ action: "change" | "generate"; voiceName: string } | null>(null)
+  // AQU-1758 / AQU-2212: the one-step clone, open at this clip.
+  const [cloneOpen, setCloneOpen] = useState(false)
   function openMenuFromMore(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
@@ -1270,7 +1294,20 @@ function TargetAudioChip({
           in the tooltip. Bottom left, past the sparkle (only a generated take
           carries a voice), and only where the chip is tall and wide enough
           to read it. */}
-      {takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
+      {/* AQU-2212: while the line is being generated or re-voiced, the clip
+          says so in the take-voice label's place ("Voicing as …", the Audio
+          view card's status line). */}
+      {voicingAs && (
+        <span
+          role="status"
+          data-testid={`tl-target-${testKey}-working`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          <Spinner className="size-3 shrink-0" />
+          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+        </span>
+      )}
+      {!voicingAs && takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
         <span
           data-testid={`tl-target-${testKey}-take-voice`}
           className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
@@ -1510,9 +1547,11 @@ function TargetAudioChip({
   const isPiece = (chip.item.pieceCount ?? 1) > 1
   const canSplit = Boolean(onCutTarget) && editable
   return (
+    <>
     <ContextMenu
       onOpenChange={(open) => {
         if (!open) return
+        setMenuLineVoice(takeMenu?.applyLineVoice ? takeMenu.lineVoice?.(cell.id) ?? null : null)
         const fromMore = moreOpenRef.current
         moreOpenRef.current = null
         setMenuFromMore(fromMore != null)
@@ -1531,6 +1570,20 @@ function TargetAudioChip({
         <ContextMenuTrigger render={chipButton} />
       </AppTooltip>
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {/* AQU-2212: the line's voice and this take part ways — the one click
+            that brings them back together, first (the Audio view's card put
+            it beside the voice field). */}
+        {menuLineVoice && takeMenu?.applyLineVoice && (
+          <>
+            <ContextMenuItem data-testid="tl-take-menu-apply-voice" onClick={() => takeMenu.applyLineVoice?.(cell.id)}>
+              {menuLineVoice.action === "change" ? <AudioLines className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {menuLineVoice.action === "change"
+                ? t("editor.voice.changeTo", { voice: menuLineVoice.voiceName })
+                : t("editor.voice.generateWith", { voice: menuLineVoice.voiceName })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {canSplit && (
           <ContextMenuItem
             data-testid="tl-take-menu-split"
@@ -1611,7 +1664,15 @@ function TargetAudioChip({
         {/* AQU-1758: make a character from this take's voice — the Audio
             view's voice card had this; the take's menu is its home now. */}
         {takeMenu?.makeCharacter && !hiddenLine && (
-          <ContextMenuItem data-testid="tl-take-menu-make-character" onClick={() => takeMenu.makeCharacter?.(cell.id)}>
+          <ContextMenuItem
+            data-testid="tl-take-menu-make-character"
+            onClick={() => {
+              // AQU-2212: in one step, at the clip — once the menu has let go
+              // of focus, or it would close the popover as it opens.
+              if (takeMenu.cloneTake) setTimeout(() => setCloneOpen(true), 0)
+              else takeMenu.makeCharacter?.(cell.id)
+            }}
+          >
             <CopyPlus className="h-3.5 w-3.5" />
             {t("editor.timeline.takeMenuMakeCharacter")}
           </ContextMenuItem>
@@ -1652,6 +1713,16 @@ function TargetAudioChip({
         )}
       </ContextMenuContent>
     </ContextMenu>
+    {cloneOpen && takeMenu?.cloneTake && (
+      <CloneFromTakeButton
+        anchor={chipRef.current}
+        onClose={() => setCloneOpen(false)}
+        suggestedName={takeMenu.cloneName?.(cell.id) ?? ""}
+        onClone={(name) => takeMenu.cloneTake!(cell.id, audioId, name)}
+        onMoreOptions={() => takeMenu.makeCharacter?.(cell.id)}
+      />
+    )}
+    </>
   )
 }
 

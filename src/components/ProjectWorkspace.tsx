@@ -111,7 +111,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, Voice } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -379,7 +379,13 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
+import { cloneNameSuggestion, lineChangeQuality, lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
+import { whileVoicingAs } from "@/lib/audio/voicing-as"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -9732,9 +9738,46 @@ export function ProjectWorkspace() {
   )
   const handleMakeCharacter = useCallback((cellId: string) => {
     setMakeCharacterSeedCellId(cellId)
+    setMakeCharacterMode("clone")
     setMakeCharacterOpen(true)
   }, [])
   const makeCharacter = mayMakeCharacter ? handleMakeCharacter : undefined
+  // AQU-1758 / AQU-2212: what the Audio view's voice card did to a line, now
+  // done from where its jobs went — a pick in Media's table acts on the line,
+  // the line's Recording tab and its take's menu offer "Change to …" /
+  // "Generate · …", and the take clones in one step. The work is defined far
+  // below, beside the timeline's Regenerate and Change voice it runs through;
+  // these stay identity-stable for the editor's context.
+  const lineVoiceRef = useRef<{
+    picked: (cell: CellData, voiceId: string) => void
+    pending: (cellId: string) => { action: LineVoiceAction; voiceName: string } | null
+    apply: (cellId: string) => void
+    clone: (cellId: string, audioId: string, name: string) => Promise<void>
+    cloneName: (cellId: string) => string
+  } | null>(null)
+  // Whether a pick can read the text: the engine has to be reachable.
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const handleLineVoicePicked = useCallback(
+    (cell: CellData, voiceId: string) => lineVoiceRef.current?.picked(cell, voiceId),
+    [],
+  )
+  const handleApplyLineVoice = useCallback((cellId: string) => lineVoiceRef.current?.apply(cellId), [])
+  const handleLineVoicePending = useCallback((cellId: string) => lineVoiceRef.current?.pending(cellId) ?? null, [])
+  const handleCloneTake = useCallback(
+    (cellId: string, audioId: string, name: string) => lineVoiceRef.current?.clone(cellId, audioId, name) ?? Promise.resolve(),
+    [],
+  )
+  const cloneTake = mayMakeCharacter ? handleCloneTake : undefined
+  const handleCloneNameFor = useCallback((cellId: string) => lineVoiceRef.current?.cloneName(cellId) ?? "", [])
+  // AQU-2212: "Add a voice…" at the end of a line's voice dropdown opens New
+  // voice on the ready-made characters; the voice it adds is cast on that line.
+  const handleAddVoiceForLine = useCallback((cellId: string) => {
+    setMakeCharacterSeedCellId(cellId)
+    setMakeCharacterMode("character")
+    setMakeCharacterOpen(true)
+  }, [])
+  const addVoiceForLine = mayMakeCharacter ? handleAddVoiceForLine : undefined
   // AQU-1758: a take's voice, when it is not the line's, named on its clip.
   const timelineTakeVoice = useCallback(
     (cell: CellData, audioId: string) => takeVoiceNote(cell, audioId, tts.laneSettings),
@@ -9753,6 +9796,10 @@ export function ProjectWorkspace() {
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
     onMakeCharacter: makeCharacter, // AQU-1758: the Recording tab's take
+    onCloneTake: cloneTake, // AQU-1758 / AQU-2212: …in one step
+    onLineVoicePicked: handleLineVoicePicked, // AQU-2212: a pick acts on the line
+    onApplyLineVoice: handleApplyLineVoice, // AQU-2212: "Change to …" / "Generate · …"
+    onAddVoiceForLine: addVoiceForLine, // AQU-2212: "Add a voice…"
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
@@ -12360,7 +12407,7 @@ export function ProjectWorkspace() {
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
   const handleRegenerateTimelineVoice = useCallback(
-    async (cellId: string, slot: string) => {
+    async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
@@ -12373,7 +12420,11 @@ export function ProjectWorkspace() {
         return
       }
       toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
-      const ok = await regenerateVoiceTake({
+      // AQU-2212: a pick reads in the voice picked, before the cast settings
+      // catch up; otherwise the line's own cast voice. Named while it runs.
+      const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
+        ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
+      const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
         project,
         cell: owner.cell,
         entry: timelineAudioByCellId.get(cellId),
@@ -12384,12 +12435,13 @@ export function ProjectWorkspace() {
         laneTag: activeLane || null,
         text,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
-      }).catch(() => false)
+        ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
+      }).catch(() => false))
       toast.add(ok
         ? { type: "success", title: t("editor.timeline.regenerateDone") }
         : { type: "error", title: t("editor.timeline.regenerateFailed") })
     },
-    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, t],
+    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
   /**
@@ -12441,18 +12493,20 @@ export function ProjectWorkspace() {
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, quality: ChangeVoiceQuality) => {
+    async (cellId: string, quality: ChangeVoiceQuality, opts?: { voice?: Voice }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { cell } = owner
-      const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
+      // AQU-2212: a pick re-voices into the voice picked, before the cast
+      // settings catch up; otherwise into the line's own cast voice.
+      const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
       if (takeUsedByVoice(cell, tts.settings) || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
       toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
-      const ok = await changeCellVoice({
+      const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
         cell,
         voice,
@@ -12460,7 +12514,7 @@ export function ProjectWorkspace() {
         author: currentUsername,
         diffusionSteps,
         ...(activeLane ? { targetLang: activeLane } : {}),
-      })
+      }))
       if (ok) {
         toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
         revalidateCells?.()
@@ -12478,6 +12532,82 @@ export function ProjectWorkspace() {
     },
     [project, frontierSession, tts.settings, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
+  // AQU-1758 / AQU-2212: the Audio view card's rules (lib/audio/line-voice),
+  // run through the timeline's own Regenerate and Change voice so every way of
+  // voicing a line names its take, swaps it in and says "Voicing as …" alike.
+  // A line's take may be changed wherever the timeline is editable (the lane
+  // isn't frozen) — the same gate its take menu has. Assigned on every
+  // render, like the resolver below.
+  const lineVoiceGenerateReady = (cell: CellData): boolean =>
+    activeLaneDelivers !== "audio" && Boolean(cell.translated?.trim()) && cell.type !== "paratext" &&
+    browserOnline && backendReachable !== false
+  const lineVoiceBusy = (cellId: string): boolean => {
+    const status = getTtsStatus(ttsStatusKey(cellId))
+    return status.kind === "loading" || status.kind === "synthesizing"
+  }
+  const runLineVoice = (cellId: string, action: LineVoiceAction, voice: Voice, cell: CellData): void => {
+    if (action === "change") void handleChangeTimelineVoice(cellId, lineChangeQuality(cell), { voice })
+    else void handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, { voiceId: voice.id })
+  }
+  lineVoiceRef.current = {
+    // A pick in Media's table: assigned already (refused picks never get
+    // here); now it acts on THIS line, whatever scope the pick reached.
+    picked: (row, voiceId) => {
+      const cell = resolveTakeCellRef.current(row.id)?.cell ?? row
+      const voice = findVoice(tts.laneSettings, voiceId)
+      if (!voice || laneWriteFrozen || lineVoiceBusy(cell.id)) return
+      const action = lineVoiceActionFor(cell, voice, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+      })
+      if (action) runLineVoice(cell.id, action, voice, cell)
+    },
+    pending: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return null
+      const found = lineVoicePending(tts.laneSettings, cell, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+        canEdit: !laneWriteFrozen,
+        busy: lineVoiceBusy(cellId),
+      })
+      return found ? { action: found.action, voiceName: found.voice.name } : null
+    },
+    apply: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return
+      const found = lineVoicePending(tts.laneSettings, cell, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+        canEdit: !laneWriteFrozen,
+        busy: lineVoiceBusy(cellId),
+      })
+      if (found) runLineVoice(cellId, found.action, found.voice, cell)
+    },
+    cloneName: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      return cell ? cloneNameSuggestion(cell, currentUsername) : ""
+    },
+    // AQU-2212: Clone voice from take, without the dialog.
+    clone: async (cellId, audioId, name) => {
+      const level = project?.syncRole?.level ?? null
+      if (!project || !canManageVoices(level, project.projectLeadsManageVoices === true, activeLaneId != null)) {
+        throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
+      }
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return
+      const voice = await cloneVoiceFromTake({
+        projectId: project.id, cell, audioId, name,
+        provider: resolveTtsProvider(tts.settings),
+        // A clone rides Inworld or Gemini, which take no target language.
+        paletteIndex: tts.allVoices.length,
+        session: frontierSession ?? null,
+      })
+      const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+      await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+      toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+    },
+  }
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
   // memoised version would hand the handlers a stale set after every import.
@@ -16887,6 +17017,10 @@ export function ProjectWorkspace() {
                     changeVoiceStateFor={timelineChangeVoiceState}
                     // AQU-1758: what the Audio view's voice card did for a take.
                     onMakeCharacter={makeCharacter}
+                    onCloneTake={cloneTake}
+                    cloneNameFor={handleCloneNameFor}
+                    lineVoiceFor={handleLineVoicePending}
+                    onApplyLineVoice={handleApplyLineVoice}
                     takeVoiceFor={timelineTakeVoice}
                     onRenameTake={handleRenameTimelineTake}
                     onRemoveTake={handleRemoveTimelineTake}

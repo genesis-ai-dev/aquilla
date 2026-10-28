@@ -1370,6 +1370,7 @@ export const sw: Catalog = {
   "editor.timeline.cueLinkOrphanCues": {"forms":{"one":"{count} mstari uliosikika bila manukuu karibu","other":"{count} mistari iliyosikika bila manukuu karibu"},"countVar":"count"},
   "editor.timeline.cueLinkOrphanText": {"forms":{"one":"{count} mstari bila usemi karibu","other":"{count} mistari bila usemi karibu"},"countVar":"count"},
   "editor.voice.play": "Cheza mstari huu",
+  "editor.voice.generateWith": "Tengeneza · {voice}",
   "editor.voice.changeVoice": "Badilisha sauti",
   "editor.voice.changeVoiceNeedsClone": "{name} haina klipu ya rejeleo. Kabidhi sauti iliyoigwa ili kubadilisha toleo hili.",
   "editor.voice.changeVoiceUpToDate": "Toleo hili tayari liko katika sauti ya {name}",

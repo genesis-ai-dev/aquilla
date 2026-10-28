@@ -268,6 +268,15 @@ export interface TimelineEditorProps {
   /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
    *  leaves it out (someone who may not make voices). */
   onMakeCharacter?(cellId: string): void
+  /** AQU-1758 / AQU-2212: …in one step (name it, Add to cast) at the clip;
+   *  `onMakeCharacter` is its More options. */
+  onCloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that clone suggests (who recorded the take). */
+  cloneNameFor?(cellId: string): string
+  /** AQU-2212: "Change to …" / "Generate · …" when a line's voice and its
+   *  take disagree, first in its take's menu (lib/audio/line-voice). */
+  lineVoiceFor?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  onApplyLineVoice?(cellId: string): void
   /** AQU-1758: a take's voice, when it is not the line's — its clip names it. */
   takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
   onRenameTake?(cellId: string, audioId: string, label: string): void
@@ -1187,6 +1196,10 @@ export function TimelineEditor({
   onChangeVoice,
   changeVoiceStateFor,
   onMakeCharacter,
+  onCloneTake,
+  cloneNameFor,
+  lineVoiceFor,
+  onApplyLineVoice,
   takeVoiceFor,
   onRenameTake,
   onRemoveTake,
@@ -2681,6 +2694,13 @@ export function TimelineEditor({
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
             : {}),
           ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
+          ...(onMakeCharacter && onCloneTake
+            ? { cloneTake: onCloneTake, ...(cloneNameFor ? { cloneName: cloneNameFor } : {}) }
+            : {}),
+          // The line's own voice and its take: the line's own track only.
+          ...(slot === RECORDING_SLOT && lineVoiceFor && onApplyLineVoice
+            ? { lineVoice: lineVoiceFor, applyLineVoice: onApplyLineVoice }
+            : {}),
           ...(onRenameTake
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
             : {}),

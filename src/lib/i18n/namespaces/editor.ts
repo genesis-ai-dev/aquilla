@@ -1855,6 +1855,15 @@ export const editor = defineNamespace({
     "editor.voice.cloneSubmit": "Add to cast",
     "editor.voice.cloneMoreOptions": "More options",
     "editor.voice.clonedToast": "{name} is in the cast",
+    // AQU-2212's voice card, its jobs moved (AQU-1758): the one-click when a
+    // line's voice and its take disagree, the work in progress, and what a
+    // line nobody cast names a person's take.
+    "editor.voice.changeTo": "Change to {voice}",
+    "editor.voice.generateWith": "Generate · {voice}",
+    "editor.voice.workingAs": "Voicing as {voice}…",
+    "editor.voice.yourRecording": "Your recording",
+    "editor.voice.recordedBy": "Recorded by {name}",
+    "editor.voice.originalAudio": "Original audio",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceNeedsClone": "{name} has no reference clip. Assign a cloned voice to change this take.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
@@ -6983,6 +6992,29 @@ export const editor = defineNamespace({
           "Keep it a short label, like the English.",
         maxLength: 24,
       },
+      "editor.voice.changeTo": {
+        description:
+          "Button in a line's Recording tab, and the first item of its take's menu on the timeline, " +
+          "when the line's voice and its take disagree: re-voices the take into the voice the line is cast as.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.generateWith": {
+        description:
+          "The same button when the voice cannot re-voice the take: synthesizes the line's text in the " +
+          "named voice (the line's character, or the project's default voice).",
+        placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
+        maxLength: 32,
+      },
+      "editor.voice.workingAs": {
+        description: "Status in a line's Recording tab, and on its clip on the timeline, while its audio is being generated or re-voiced.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.yourRecording": { description: "What a line's voice circle names its take when the audio is the current user's own recording and no voice is assigned." },
+      "editor.voice.recordedBy": {
+        description: "What a line's voice circle names its take when the audio is someone's recording and no voice is assigned.",
+        placeholders: { name: "Username of the person who recorded it." },
+      },
+      "editor.voice.originalAudio": { description: "What a line's voice circle names its take when the audio is the imported original programme audio." },
       "editor.voice.changeVoice": {
         description:
           "Name of the icon on a line that already has a take, and of the button " +

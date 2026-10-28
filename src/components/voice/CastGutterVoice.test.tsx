@@ -176,6 +176,27 @@ describe("CastGutterVoice", () => {
     expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
   })
 
+  // AQU-2212: the Audio view's field named a person's recording; the circle
+  // does now (AQU-1758).
+  it("names a person's recording, not the default voice, when nobody was cast", () => {
+    ui(
+      <CastGutterVoice voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    const circle = screen.getByTestId("gutter-voice")
+    expect(circle.getAttribute("aria-label")).toContain("Your recording · pick a voice to re-voice it")
+    expect(circle.getAttribute("aria-label")).not.toContain("Narrator")
+    expect(screen.getByTestId("gutter-voice-recording")).toBeInTheDocument()
+    expect(circle).not.toHaveTextContent("NC")
+  })
+
+  it("names the cast voice, not the recording, once someone chose one", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    expect(screen.queryByTestId("gutter-voice-recording")).toBeNull()
+    expect(screen.getByTestId("gutter-voice").getAttribute("aria-label")).not.toContain("Your recording")
+  })
+
   it("read-only surfaces show the identity but no picker", () => {
     ui(
       <CastGutterVoice voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,

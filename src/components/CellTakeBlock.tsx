@@ -64,6 +64,7 @@ import { attachmentOutFrom } from "@/lib/audio/cut-take"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
+import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -145,6 +146,13 @@ export interface CellTakeBlockProps {
    * dialog, cloning, seeded with this take's line. Absent hides it.
    */
   onMakeCharacter?: () => void
+  /**
+   * AQU-1758 / AQU-2212: …in one step — name it, Add to cast — with
+   * `onMakeCharacter` as its More options (CloneFromTakeButton).
+   */
+  onCloneTake?: (name: string) => Promise<void>
+  /** The name that clone suggests (who recorded the take). */
+  cloneSuggestedName?: string
 }
 
 type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
@@ -209,6 +217,8 @@ function CellTakeBlockView({
   pieces,
   takesHistory,
   onMakeCharacter,
+  onCloneTake,
+  cloneSuggestedName,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -582,8 +592,17 @@ function CellTakeBlockView({
             />
           )}
           {/* AQU-1758: the Audio view's voice card turned a take into a
-              character; this take does now (the timeline's take menu too). */}
-          {!isSection && selectedAudioId && attachment && onMakeCharacter && (
+              character; this take does now (the timeline's take menu too),
+              in one step where it can (AQU-2212), the dialog under More
+              options. */}
+          {!isSection && selectedAudioId && attachment && onMakeCharacter && onCloneTake && editable && (
+            <CloneFromTakeButton
+              suggestedName={cloneSuggestedName}
+              onClone={onCloneTake}
+              onMoreOptions={onMakeCharacter}
+            />
+          )}
+          {!isSection && selectedAudioId && attachment && onMakeCharacter && !(onCloneTake && editable) && (
             <AppTooltip content={t("editor.timeline.takeMenuMakeCharacter")}>
               <Button
                 type="button"

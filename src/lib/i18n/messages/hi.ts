@@ -1338,6 +1338,7 @@ export const hi: Catalog = {
   "editor.timeline.cueLinkOrphanCues": {"forms":{"one":"{count} सुनी पंक्ति जिसके पास कोई उपशीर्षक नहीं","other":"{count} सुनी पंक्तियाँ जिनके पास कोई उपशीर्षक नहीं"},"countVar":"count"},
   "editor.timeline.cueLinkOrphanText": {"forms":{"one":"{count} पंक्ति जिसके पास कोई भाषण नहीं","other":"{count} पंक्तियाँ जिनके पास कोई भाषण नहीं"},"countVar":"count"},
   "editor.voice.play": "यह पंक्ति चलाएँ",
+  "editor.voice.generateWith": "बनाएँ · {voice}",
   "editor.voice.changeVoice": "आवाज़ बदलें",
   "editor.voice.changeVoiceNeedsClone": "{name} की कोई संदर्भ क्लिप नहीं। यह टेक बदलने के लिए एक क्लोन आवाज़ सौंपें।",
   "editor.voice.changeVoiceUpToDate": "यह टेक पहले से {name} की आवाज़ में है",

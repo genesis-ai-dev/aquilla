@@ -237,6 +237,7 @@ import { audioIdSeededWith } from "@/lib/audio/upload"
 import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
+import { lineTakeLabel } from "@/lib/audio/line-voice"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { namedCellRef } from "@/lib/cell-named-ref"
@@ -5629,6 +5630,7 @@ function EditorRow({
     onAiSetupNeeded, onOpenRecording,
     onOpenAttachment, attachmentsByCell, onAttachmentAdded,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
+    onLineVoicePicked, onAddVoiceForLine,
     cellStore: previewCellStore,
     onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
     timingLocked, canUnlockTiming, onOpenTimingSettings, followsRecordings,
@@ -7479,6 +7481,14 @@ function EditorRow({
   const gutterCastName =
     cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
   const gutterVoices = useMemo(() => getVoiceLibrary(ttsSettings), [ttsSettings])
+  // AQU-2212: a line nobody cast whose take is a person's recording names that
+  // recording ("Your recording"), not the default voice (lib/audio/line-voice).
+  const gutterTakeLabelRef = gutterExplicit ? null : lineTakeLabel(cell, username)
+  const gutterTakeLabel = gutterTakeLabelRef
+    ? gutterTakeLabelRef.key === "editor.voice.recordedBy"
+      ? t("editor.voice.recordedBy", { name: gutterTakeLabelRef.name })
+      : t(gutterTakeLabelRef.key)
+    : undefined
   const gutterLanguageBadge = showVoiceLanguageBadge(projectTargetLaneLanguages(project))
 
   const lineAria = t("editor.row.lineAria", { number: numberLabel ?? "" })
@@ -8153,8 +8163,13 @@ function EditorRow({
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
                     showLanguageBadge={gutterLanguageBadge}
-                    onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                    takeLabel={gutterTakeLabel}
+                    // AQU-2212: a pick acts on this line once it is accepted.
+                    onPick={(voiceId, opts) => {
+                      if (onAssignCastVoice?.(cell, voiceId, opts) !== false) onLineVoicePicked?.(cell, voiceId)
+                    }}
                     onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
+                    onAddVoice={onAddVoiceForLine ? () => onAddVoiceForLine(cell.id) : undefined}
                     countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
                   />
                 )}
@@ -9524,6 +9539,8 @@ function EditorRow({
                       project={project}
                       cell={cell}
                       linkedTakes={linkedTakes}
+                      ttsSettings={ttsSettings}
+                      voiceFromText={!audioOnlyLane}
                       cellText={visibleTranslated}
                       editable={editable}
                       username={username}

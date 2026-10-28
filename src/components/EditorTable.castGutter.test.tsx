@@ -235,6 +235,35 @@ describe("EditorTable — character gutter", () => {
     expect(opts).toEqual({ scope: "line" })
   })
 
+  // AQU-2212 (the Audio view card's rule, AQU-1758): a pick ACTS on the line,
+  // but only once the assignment was accepted.
+  it("hands an accepted pick on to act on the line, and a refused one nowhere", async () => {
+    const onLineVoicePicked = vi.fn()
+    const { unmount } = renderTable({ actions: { onAssignCastVoice: () => true, onLineVoicePicked } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByRole("button", { name: /John/ }))
+    expect(onLineVoicePicked).toHaveBeenCalledTimes(1)
+    expect(onLineVoicePicked.mock.calls[0][0].id).toBe("cell-plain")
+    expect(onLineVoicePicked.mock.calls[0][1]).toBe("v-john")
+    unmount()
+    onLineVoicePicked.mockClear()
+    renderTable({ actions: { onAssignCastVoice: () => false, onLineVoicePicked } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByRole("button", { name: /John/ }))
+    expect(onLineVoicePicked).not.toHaveBeenCalled()
+  })
+
+  it("ends the line's voice dropdown with Add a voice…, for that line (AQU-2212)", async () => {
+    const onAddVoiceForLine = vi.fn()
+    renderTable({ actions: { onAssignCastVoice: () => true, onAddVoiceForLine } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByTestId("gutter-voice-add"))
+    expect(onAddVoiceForLine).toHaveBeenCalledWith("cell-plain")
+  })
+
   // AQU-1758: the mic permission probe ran when the Audio view mounted. It
   // runs in Media now (where the recorder opens from the rows and the
   // timeline), and only for someone who may record.

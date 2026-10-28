@@ -60,6 +60,24 @@ export interface EditorActionsContextValue {
    */
   onMakeCharacter?: (cellId: string) => void
   /**
+   * AQU-1758 / AQU-2212: "Clone voice from take" in one step — name it, Add to
+   * cast. What "Make a character from this voice" does now; its More options
+   * is `onMakeCharacter`. Absent for someone who may not make voices.
+   */
+  onCloneTake?: (cellId: string, audioId: string, name: string) => Promise<void>
+  /**
+   * AQU-2212: a voice picked for a line (and accepted) acts on it — a clone or
+   * character re-voices its take, an empty line reads its text, a stock voice
+   * regenerates a generated take; never over a person's recording.
+   */
+  onLineVoicePicked?: (cell: import("@/hooks/useCells").CellData, voiceId: string) => void
+  /** AQU-2212: the one-click "Change to …" / "Generate · …" for a line whose
+   *  voice and take disagree (lib/audio/line-voice `lineVoicePending`). */
+  onApplyLineVoice?: (cellId: string) => void
+  /** AQU-2212: "Add a voice…" from a line's voice dropdown — New voice on
+   *  Characters, the voice it adds cast on that line. */
+  onAddVoiceForLine?: (cellId: string) => void
+  /**
    * 2026-08-07 (wire b): a plain row click, when the timeline is stacked
    * above the table — points the timeline at this cell (select the chip,
    * center the track, cue playback paused). The workspace's impl no-ops

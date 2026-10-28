@@ -38,19 +38,24 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         ? "warn"
         : "good"
 
+  // Sam, Oct 28: the green backed off blue "just like a hair", with the
+  // timeline's green track (AQU-2235) — hue 157, at emerald-500's own
+  // lightness and chroma, where emerald-500's 162.5 read slightly teal.
   const fillClass =
-    state === "over" ? "bg-red-500" : state === "warn" ? "bg-amber-400" : "bg-emerald-500"
+    state === "over" ? "bg-red-500" : state === "warn" ? "bg-amber-400" : "bg-[#32b877]"
 
   return (
     <div className={cn("space-y-1", className)}>
       <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
         {/* Target-window shading up to the target mark */}
         <div
-          className="absolute inset-y-0 left-0 bg-emerald-500/10"
+          data-testid="rec-duration-window"
+          className="absolute inset-y-0 left-0 bg-[#32b877]/10"
           style={{ width: `${targetPct}%` }}
         />
         {/* Fill */}
         <div
+          data-testid="rec-duration-fill"
           className={cn("absolute inset-y-0 left-0 rounded-full transition-[width,background-color] duration-100 ease-out", fillClass)}
           style={{ width: `${pct}%` }}
         />

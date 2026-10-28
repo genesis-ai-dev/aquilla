@@ -1362,7 +1362,7 @@ describe("TargetAudioLane — the track's colour", () => {
   it("defaults to green for a track nobody has coloured", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
     // AQU-2235: the new green, the recording bar's hue (was #40c06e).
-    expect(hueOf()).toBe("#0cc187")
+    expect(hueOf()).toBe("#23c179")
   })
 
   it("takes a picked hex as readily as a preset id", () => {
@@ -1382,7 +1382,7 @@ describe("TargetAudioLane — the track's colour", () => {
   // half of that bargain: the old client draws the default rather than nothing.
   it("falls back to the default for an id this build cannot name", () => {
     render(<TargetAudioLane {...base} color="ultramarine-2" items={[item({}, 4000)]} />)
-    expect(hueOf()).toBe("#0cc187")
+    expect(hueOf()).toBe("#23c179")
   })
 
   // THE ONE THAT MATTERS MOST. `cn` resolves last-wins per utility group, and

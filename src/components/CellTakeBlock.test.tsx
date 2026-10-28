@@ -206,8 +206,8 @@ describe("its colour", () => {
 
   it("is the media view's default green where nobody picked one", () => {
     draw()
-    // AQU-2235: the new green (was #40c06e).
-    expect(hue()).toBe("#0cc187")
+    // AQU-2235: the new green (#23c179 since Oct 28; was #0cc187, #40c06e).
+    expect(hue()).toBe("#23c179")
   })
 
   it("is an added track's own colour for a take made on it", () => {

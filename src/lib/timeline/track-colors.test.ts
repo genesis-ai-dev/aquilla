@@ -41,7 +41,7 @@ describe("the palette", () => {
     // (Sam, Oct 25, board 53): green moved from #40c06e to the recording bar's
     // hue at its old lightness.
     expect(TRACK_HUES.map((h) => h.hex)).toEqual([
-      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#0cc187",
+      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#23c179",
     ])
   })
 
@@ -49,8 +49,8 @@ describe("the palette", () => {
   // simply means the new green. (A literal hex a briefly-shipped picker wrote is
   // the user's own colour and is left alone, the old green included.)
   it("moves green by its id, so a stored track draws the new green", () => {
-    expect(parseTrackHue("green")).toBe("#0cc187")
-    expect(parseTrackHue("green-teal")).toBe("#0cc187")
+    expect(parseTrackHue("green")).toBe("#23c179")
+    expect(parseTrackHue("green-teal")).toBe("#23c179")
     expect(parseTrackHue("40c06e")).toBe("#40c06e")
   })
 
@@ -230,7 +230,7 @@ describe("the rows nobody picks a colour for", () => {
     // The palette's own green by reference (AQU-2235): "the same green as an
     // untouched dub row", which a copied hex would have stopped being.
     expect(hueForTrack("target-subtitles", null)).toBe(DEFAULT_HUE.hex)
-    expect(hueForTrack("target-subtitles", null)).toBe("#0cc187")
+    expect(hueForTrack("target-subtitles", null)).toBe("#23c179")
   })
 
   // Their colours are statements about what the row IS, so a stored value —
@@ -254,9 +254,9 @@ describe("the rows nobody picks a colour for", () => {
 
   it("publishes their hues through the same variables as everything else", () => {
     const vars = trackHueVarsFor("target-subtitles", null)
-    expect(vars["--tl-track-hue"]).toBe("#0cc187")
-    expect(vars["--tl-track-hover"]).toBe("rgba(12, 193, 135, 0.18)")
-    expect(vars["--tl-track-gen"]).toBe("rgba(12, 193, 135, 0.33)")
+    expect(vars["--tl-track-hue"]).toBe("#23c179")
+    expect(vars["--tl-track-hover"]).toBe("rgba(35, 193, 121, 0.18)")
+    expect(vars["--tl-track-gen"]).toBe("rgba(35, 193, 121, 0.33)")
   })
 })
 
@@ -412,9 +412,9 @@ describe("the waveform look", () => {
   it("is Sam's values: ground 12, played 27, frame 26; waveform 90, not yet 30; muted 50; the bar in the strip colour", () => {
     expect(WAVE_LOOK).toEqual({ ground: 0.12, played: 0.27, frame: 0.26, wave: 0.9, unplayed: 0.3, muted: 0.5 })
     const green = trackHueVars("green")
-    expect(green["--tl-track-ground"]).toBe("rgba(12, 193, 135, 0.12)")
-    expect(green["--tl-track-played"]).toBe("rgba(12, 193, 135, 0.27)")
-    expect(green["--tl-track-frame"]).toBe("rgba(12, 193, 135, 0.26)")
+    expect(green["--tl-track-ground"]).toBe("rgba(35, 193, 121, 0.12)")
+    expect(green["--tl-track-played"]).toBe("rgba(35, 193, 121, 0.27)")
+    expect(green["--tl-track-frame"]).toBe("rgba(35, 193, 121, 0.26)")
     expect(green["--tl-track-bar"]).toBe(`color-mix(in oklab, ${green["--tl-track-strip"]} 90%, transparent)`)
   })
 
@@ -427,7 +427,7 @@ describe("the waveform look", () => {
     expect(wave("violet")).toBe("oklch(0.55 0.140 292.4)")
     expect(wave("magenta")).toBe("oklch(0.55 0.140 355.7)")
     expect(wave("amber")).toBe("oklch(0.55 0.132 77.8)")
-    expect(wave("green")).toBe("oklch(0.55 0.140 162.7)")
+    expect(wave("green")).toBe("oklch(0.55 0.140 156.9)")
   })
 
   it("gives every strip and dot the waveform's chroma at the track's own lightness", () => {
@@ -437,7 +437,7 @@ describe("the waveform look", () => {
     expect(strip("violet")).toBe("oklch(0.595 0.140 292.4)")
     expect(strip("magenta")).toBe("oklch(0.597 0.140 355.7)")
     expect(strip("amber")).toBe("oklch(0.774 0.140 77.8)")
-    expect(strip("green")).toBe("oklch(0.718 0.140 162.7)")
+    expect(strip("green")).toBe("oklch(0.717 0.140 156.9)")
   })
 
   // The derived rows' fixed colours are statements about what the row is.
@@ -448,7 +448,7 @@ describe("the waveform look", () => {
 
   it("draws the play line in the track darkened with its hue held", () => {
     // oklch(from <track> calc(l * 0.731) calc(c * 0.617) h)
-    expect(trackHueVars("green")["--tl-track-line"]).toBe("oklch(0.525 0.095 162.7)")
+    expect(trackHueVars("green")["--tl-track-line"]).toBe("oklch(0.524 0.100 156.9)")
     expect(trackHueVars("azure")["--tl-track-line"]).toBe("oklch(0.457 0.106 252.4)")
   })
 })

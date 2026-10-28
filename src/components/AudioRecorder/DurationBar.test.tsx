@@ -64,4 +64,13 @@ describe("DurationBar — the overrun difference", () => {
     expect(row.children[1]).toContainElement(overrun())
     expect(row.children[1].textContent).toMatch(/0:02\.8/)
   })
+
+  // Sam, Oct 28: the "ok" green backed off blue a hair, with the timeline's
+  // green track — #32b877, not emerald-500.
+  it("fills in the timeline's green while the take is inside its window", () => {
+    render(<DurationBar elapsedMs={1200} targetSec={2.8} />)
+    expect(screen.getByTestId("rec-duration-fill").className).toContain("bg-[#32b877]")
+    expect(screen.getByTestId("rec-duration-fill").className).not.toContain("emerald")
+    expect(screen.getByTestId("rec-duration-window").className).toContain("bg-[#32b877]/10")
+  })
 })

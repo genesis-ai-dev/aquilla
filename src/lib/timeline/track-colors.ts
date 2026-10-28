@@ -99,13 +99,17 @@ export const TRACK_HUES: readonly TrackHue[] = [
   // …"increase the brightness of amber to about 92%" — HSB brightness 77%→92%,
   // hue and saturation untouched, so it gets more luminous rather than paler.
   { id: "amber", labelKey: "editor.timeline.colorAmber", hex: "#eba720" },
-  // AQU-2235 (Sam, Oct 25, board 53): green moves to the recording progress
-  // bar's hue (emerald-500, 162.5) at its old lightness, with the chroma eased
-  // just enough to stay on screen — so its strip, dot, ground, frame and
-  // waveform all share one hue instead of an olive waveform on a green chip.
-  // Was #40c06e. Tracks store the id "green", never the hex, so every stored
-  // track keeps its colour id and simply draws the new green.
-  { id: "green", labelKey: "editor.timeline.colorGreen", hex: "#0cc187" },
+  // AQU-2235 (Sam, Oct 25, board 53): green moved to the recording progress
+  // bar's hue at its old lightness, with the chroma eased just enough to stay
+  // on screen — so its strip, dot, ground, frame and waveform all share one
+  // hue instead of an olive waveform on a green chip. Sam, Oct 28: "back the
+  // green hue a little back away from blue… just like a hair" — emerald-500's
+  // 162.5 read ever so slightly teal, so it sits at hue 157.0, the lightness
+  // and chroma unchanged (#0cc187 → #23c179); the recording window's timing
+  // bar moved with it. Was #40c06e before Oct 25. Tracks store the id
+  // "green", never the hex, so every stored track keeps its colour id and
+  // simply draws the new green.
+  { id: "green", labelKey: "editor.timeline.colorGreen", hex: "#23c179" },
 ]
 
 const BY_ID = new Map(TRACK_HUES.map((h) => [h.id, h]))

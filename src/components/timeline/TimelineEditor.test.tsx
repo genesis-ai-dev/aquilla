@@ -3032,10 +3032,10 @@ describe("TimelineEditor — rows come from the track model", () => {
     const audio = named("Target audio") as HTMLElement
     expect(audio.className).toContain("border-l-4")
     // AQU-2235: in the strip colour — the waveform's chroma at the track's own
-    // lightness — and the green is the new one (#0cc187, was #40c06e).
+    // lightness — and the green is the new one (#23c179 since Oct 28; was #0cc187, and #40c06e before that).
     expect(audio.className).toContain("border-l-[color:var(--tl-track-strip)]")
-    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#0cc187")
-    expect(audio.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.718 0.140 162.7)")
+    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#23c179")
+    expect(audio.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.717 0.140 156.9)")
 
     // A source row is not PICKABLE, but it still has a colour of its own and
     // is now drawn the same way — that is the whole of this change.

@@ -587,3 +587,32 @@ describe("what a correction teaches the project", () => {
     expect(loadTranscriptCorrections("p1")).toEqual([])
   })
 })
+
+// AQU-981: a take in pieces — cut, or uploaded in parts — offers "Join into
+// one recording", which makes one new take of the pieces in order.
+describe("Join into one recording", () => {
+  const url = "frontier-audio://audio-c1-1700000000-a.wav"
+  const piece = (audioId: string, trimStartMs: number | null, trimEndMs: number | null, pieceOf?: string) => ({
+    audioId, url, slot: "recording", mimeType: "audio/wav", voiceId: null, referenceAudioId: null,
+    durationMs: 1200, trimStartMs, trimEndMs, label: null, ...(pieceOf ? { pieceOf } : {}),
+  })
+  const pieces = [piece("audio-c1-1-a.wav", null, 400), piece("audio-c1-2-b.wav", 400, null, "audio-c1-1-a.wav")]
+  const owner = {
+    id: "c1", fileId: "f1", original: "", translated: "",
+    selectedAudioId: "audio-c1-1-a.wav",
+    attachments: {
+      "audio-c1-1-a.wav": { type: "audio", url, trimEndMs: 400, durationMs: 1200, slot: "recording" },
+      "audio-c1-2-b.wav": { type: "audio", url, trimStartMs: 400, durationMs: 1200, slot: "recording", pieceOf: "audio-c1-1-a.wav" },
+    },
+  } as unknown as CellData
+
+  it("is offered on a split take, and not on a whole one", () => {
+    draw({ owner, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    expect(screen.getByTestId("cell-take-join").textContent).toContain("Join into one recording")
+  })
+
+  it("is not offered on a take of one piece", () => {
+    draw()
+    expect(screen.queryByTestId("cell-take-join")).toBeNull()
+  })
+})

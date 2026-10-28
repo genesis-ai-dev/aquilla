@@ -493,9 +493,6 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
-  /** AQU-1704: a subtitle import with its film linked, which can only follow
-   *  its source: the Timing control shows it as plain text with an (i). */
-  timingFilmTimed?: boolean
   /** AQU-2204 (board 24): the file has no times and no source recording, so
    *  there is nothing to follow: "Follows source" is greyed out with why. */
   timingSourceUnavailable?: boolean
@@ -1217,7 +1214,6 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
-  timingFilmTimed = false,
   timingSourceUnavailable = false,
   soundSource,
   onCollapseSection,
@@ -4174,14 +4170,12 @@ export function TimelineEditor({
             "Follows recordings"). Self-contained so the layout work can move
             it into the top bar beside the play controls as it is.
             `onChangeTimingMode` absent = below project lead = plain text;
-            `timingFilmTimed` = a subtitle import with its film, which only
-            follows its source. */}
+            nothing else ever locks it (Sam, Oct 28). */}
         {!hideTimingMode && (
           <TimingModeControl
             className="ms-2"
             mode={timingMode}
             onChange={onChangeTimingMode}
-            filmTimed={timingFilmTimed}
             sourceUnavailable={timingSourceUnavailable}
             lengths={timingLengths}
           />

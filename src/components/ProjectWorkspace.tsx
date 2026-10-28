@@ -115,7 +115,7 @@ import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemory
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { hasNothingToFollow } from "@/lib/timeline/stand-in"
-import { isAudioCueFile, isExtensionDataFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isExtensionDataFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -2816,14 +2816,12 @@ export function ProjectWorkspace() {
   // which Free timing is the whole point. Read through the same predicate the
   // resolver uses so the picker and the mode can never disagree.
   //
-  // AQU-2204 (Sam, Oct 26; corrected Oct 27): every other file TIMED TO A
-  // FILM — footage linked of any kind, or an audio cue file — only STARTS on
-  // "Follows source"; a lead can still switch it. The lock stays for the
-  // AQU-1704 subtitle import with footage.
+  // AQU-2204 (Sam, Oct 26; corrected Oct 27–28): a file TIMED TO A FILM —
+  // footage linked of any kind, or an audio cue file — only STARTS on
+  // "Follows source"; a lead can still switch it. Nothing ever locks.
   const fileHasAudioCues = (hydratedProject?.files ?? []).some(
     (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
   )
-  const timingFilmTimed = isVideoTimedSubtitleFile(activeFile)
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
   // control greys "Follows source" out. Only a time-ordered file has the
@@ -12869,7 +12867,7 @@ export function ProjectWorkspace() {
     [canEditLines, placement, insertSlots, rowActions],
   )
 
-  // (AQU-2204: `timingMode` is resolved up beside `timingFilmTimed`, so the row
+  // (AQU-2204: `timingMode` is resolved up beside the film check, so the row
   // context and the link-video prompt can read it without a TDZ hazard.)
   // AQU-646 stage 2: which rows a file derives is a question about the file,
   // and this is the only place that can answer it — tracks.ts is deliberately
@@ -13500,11 +13498,6 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646, rescoped by AQU-1704: a subtitle import with its film has no
-      // "Follows recordings" to switch to, and the control offers none.
-      // Silent because it is unreachable from the UI; this exists so no
-      // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && timingFilmTimed) return
       // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
       if (mode === "dubbing" && timingNothingToFollow) return
       if (!activeFileId) return
@@ -13520,7 +13513,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
+    [activeFileId, timingNothingToFollow, applyTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -16800,7 +16793,6 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    timingFilmTimed={timingFilmTimed}
                     timingSourceUnavailable={timingNothingToFollow}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns

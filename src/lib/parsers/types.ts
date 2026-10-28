@@ -1123,8 +1123,9 @@ export function isVideoTimedSubtitleFile(
  * the file to "Follows recordings", and a file with nothing to follow keeps
  * following its recordings when a film is linked.
  *
- * The narrower AQU-1704 rule (`isVideoTimedSubtitleFile`) still locks a
- * subtitle import with footage.
+ * Sam, Oct 28: "Nothing should ever lock." That includes a subtitle import
+ * with its film linked (`isVideoTimedSubtitleFile`), which AQU-1704 had
+ * locked: it starts on Follows source like any other file with a film.
  */
 export function isFilmTimedFile(
   file: Pick<FileReference, "coreMediaUrl"> | null | undefined,
@@ -1134,10 +1135,9 @@ export function isFilmTimedFile(
 }
 
 /**
- * Resolve a file's audio timing mode: "Follows source" ("dubbing") for a
- * subtitle import with footage, "Follows recordings" for a file with nothing to
- * follow, else the file's own choice, else "Follows source" for a file timed to
- * a film (see `isFilmTimedFile`), else the
+ * Resolve a file's audio timing mode: "Follows recordings" for a file with
+ * nothing to follow, else the file's own choice, else "Follows source" for a
+ * file timed to a film (see `isFilmTimedFile`), else the
  * project-level value (the legacy Project Settings field, kept as a read-only
  * fallback so pre-existing projects keep the mode they had chosen), else
  * "Follows source". Mixed-mode projects are allowed by design.
@@ -1169,16 +1169,6 @@ export function resolveFileTimingMode(
     timedToLinkedVideo?: boolean
   },
 ): AudioTimingMode {
-  // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
-  // import whose video is linked here. This check runs BEFORE the file's own
-  // choice, and withdrawing the mode at RESOLUTION rather than from the picker
-  // is still the point: the picker is hidden for these files, so any stored
-  // value would otherwise be one nobody can change back. That covers (a) a
-  // Free timing the user picked while the file had no video, followed by
-  // linking one (file.video.set leaves timingMode untouched), (b) a value
-  // written before AQU-646 or by an OLDER client that still offers the mode,
-  // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
-  if (isVideoTimedSubtitleFile(file)) return "dubbing"
   // AQU-2204 (board 24): nothing to follow, so it follows its recordings —
   // a film linked to a file whose lines have no times changes nothing here.
   if (opts?.nothingToFollow) return "audioFirst"

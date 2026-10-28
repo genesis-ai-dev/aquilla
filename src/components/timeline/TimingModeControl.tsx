@@ -60,9 +60,6 @@ export interface TimingModeControlProps {
   mode: AudioTimingMode
   /** Change THIS FILE's choice. Absent = below project lead: read-only. */
   onChange?(mode: AudioTimingMode): void
-  /** A subtitle import with its film linked (AQU-1704): it can only follow its
-   *  source, so the choice shows as plain text with an (i) saying why. */
-  filmTimed?: boolean
   /** The file has no times and no source audio: nothing to follow, so it can
    *  only follow its recordings (board 24). */
   sourceUnavailable?: boolean
@@ -104,22 +101,20 @@ export function TimingInfoButton({ label, text, testId }: { label: string; text:
 }
 
 export function TimingModeControl({
-  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, className,
+  mode, onChange, sourceUnavailable = false, lengths, className,
 }: TimingModeControlProps) {
   const t = useT()
-  // A film-timed file is shown as following its source whatever reaches here,
-  // and a file with nothing to follow as following its recordings: the
+  // A file with nothing to follow is shown as following its recordings: the
   // resolver already says so, and the control must never claim otherwise.
-  const shown: AudioTimingMode = filmTimed ? "dubbing" : sourceUnavailable ? "audioFirst" : mode
+  // Nothing else is ever locked (Sam, Oct 28).
+  const shown: AudioTimingMode = sourceUnavailable ? "audioFirst" : mode
   const name = t(TIMING_CHOICE_KEYS[shown].name)
-  const changeable = Boolean(onChange) && !filmTimed
-  const infoText = filmTimed
-    ? t("editor.timeline.timingLockedFilm")
-    : !changeable
-      ? t("editor.timeline.timingInfoReadOnly")
-      : sourceUnavailable
-        ? t("editor.timeline.timingInfoNothingToFollow")
-        : t("editor.timeline.timingInfo")
+  const changeable = Boolean(onChange)
+  const infoText = !changeable
+    ? t("editor.timeline.timingInfoReadOnly")
+    : sourceUnavailable
+      ? t("editor.timeline.timingInfoNothingToFollow")
+      : t("editor.timeline.timingInfo")
   const lengthOf = (m: AudioTimingMode): string | null => {
     const sec = lengths?.[m]
     return sec != null && Number.isFinite(sec) && sec > 0 ? formatFileLength(t, sec) : null
@@ -130,7 +125,7 @@ export function TimingModeControl({
     <div
       data-testid="tl-timing-mode"
       data-mode={shown}
-      data-locked={filmTimed ? "film" : changeable ? undefined : "role"}
+      data-locked={changeable ? undefined : "role"}
       className={cn("inline-flex shrink-0 items-center gap-1 text-[11px]", className)}
     >
       {changeable ? (

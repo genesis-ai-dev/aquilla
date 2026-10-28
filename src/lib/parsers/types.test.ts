@@ -196,11 +196,12 @@ describe("resolveFileTimingMode", () => {
   // picks Free timing on a video-less SRT and then links a video (which leaves
   // the stored mode in place).
   it.each(["vtt", "srt", "sbv"] as const)(
-    "%s with footage linked ignores its own stored audioFirst, whoever wrote it",
+    "%s with footage linked keeps its own stored choice — nothing locks (Sam, Oct 28)",
     (type) => {
       expect(
         resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4", timingMode: "audioFirst" }, null),
-      ).toBe("dubbing")
+      ).toBe("audioFirst")
+      expect(resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4" }, null)).toBe("dubbing")
     },
   )
 
@@ -313,10 +314,10 @@ describe("resolveFileTimingMode — nothing to follow (AQU-2204, board 24)", () 
     expect(resolveFileTimingMode({ type: "usfm" } as never, null, { nothingToFollow: true })).toBe("audioFirst")
   })
 
-  it("a film still wins: its lines are timed to it", () => {
+  it("a film does not override it: lines with no times can't follow it (Oct 27, Ruth)", () => {
     expect(
       resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, null, { nothingToFollow: true }),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
   })
 })
 
@@ -335,10 +336,11 @@ describe("resolveFileTimingMode — where each file starts (AQU-2204, board 23)"
     expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" } as never, null)).toBe("audioFirst")
   })
 
-  it("a subtitle import with its film only follows its source (AQU-1704); any other file with a film starts there", () => {
+  it("a subtitle import with its film starts on Follows source like any file with a film, and keeps a choice of its own (Oct 28: nothing locks)", () => {
+    expect(resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, { audioTimingMode: "audioFirst" })).toBe("dubbing")
     expect(
       resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst", coreMediaUrl: "https://x.test/f.mp4" } as never, null),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
     expect(resolveFileTimingMode({ type: "mp4", coreMediaUrl: "https://youtu.be/x" } as never, null)).toBe("dubbing")
     expect(
       resolveFileTimingMode({ type: "mp4", timingMode: "audioFirst", coreMediaUrl: "https://youtu.be/x" } as never, null),

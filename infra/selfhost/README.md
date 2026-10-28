@@ -80,6 +80,12 @@ sudo cloudflared service install && sudo systemctl enable --now cloudflared
 curl -s https://omni-asr.aquilla.app/healthz
 ```
 
+Without sudo (as on the LAN box, 2026-10-27): put the static
+`cloudflared-linux-amd64` release in `~/.local/bin`, write the same config to
+`~/.cloudflared/config.yml` with the credentials path under `~/.cloudflared`,
+and run `cloudflared --no-autoupdate tunnel --config ~/.cloudflared/config.yml run`
+from a systemd user unit (`cloudflared-omni.service`, `Restart=always`).
+
 When the box or the server is down, Cloudflare answers 502 or 530. The
 worker treats those as 5xx and uses Modal.
 
@@ -87,6 +93,11 @@ Then point the worker at it (see `docs/DEPLOYMENT-ENVIRONMENTS.md`):
 set `OMNI_ASR_PRIMARY_URL = "https://omni-asr.aquilla.app"` in the
 environment's `[vars]` block in `auth-worker/wrangler.toml`. The secret stays
 `OMNI_SHARED_SECRET`.
+
+**Set the box's secret first.** `OMNI_SHARED_SECRET` in the box's env file must
+equal that environment's worker secret before the URL goes in. A mismatch makes
+the box answer 401, and a 4xx is never retried on Modal, so every transcription
+in that environment would fail.
 
 ## CPU-only host
 

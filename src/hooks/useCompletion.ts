@@ -49,6 +49,7 @@ import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footn
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
+import { isRefusalReply, REFUSAL_ERROR_MESSAGE } from "@/lib/completion/refusal"
 import { fixedSlices, packSelectionIntoCalls, type GroupingCell } from "@/lib/completion/draft-grouping"
 import { isMeaningUnitDraftingEnabled } from "@/lib/completion/seams-flag"
 import type { PrecedingContextEntry } from "@/lib/completion/prompt-build"
@@ -514,6 +515,28 @@ export function useCompletion(
       // (error badge + message) instead of writing an empty draft.
       if (!result.trim()) {
         throw new Error("The AI returned an empty translation. Please try again.")
+      }
+      // AQU-2217: the model can answer a perfectly healthy request with a
+      // refusal ("I'm sorry, but I cannot assist with that request."). That is
+      // a non-empty reply, so the guard above let it through and AQU-211's
+      // auto-commit wrote the boilerplate into the cell as a real draft —
+      // which is why reload, re-login and Regenerate never cleared it. A
+      // refusal is a failed generation: nothing is committed, the previous
+      // target is untouched, and the cell shows the error badge instead.
+      if (isRefusalReply(result)) {
+        console.warn(`[completeSingle] model refused (not committed): ${cell.id}`)
+        posthog.capture("ai translation refused", {
+          provider,
+          model: modelName,
+          mode: opts?.mode ?? "single",
+          source_language: sourceLanguage,
+          target_language: targetLanguage,
+          regenerate: Boolean(opts?.regenerate),
+        })
+        setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+        setErrors((p) => new Map(p).set(lk(cell.id), REFUSAL_ERROR_MESSAGE))
+        return false
       }
       posthog.capture("ai translation completed", {
         provider,
@@ -1415,6 +1438,22 @@ export function useCompletion(
         if (!text.trim()) {
           console.warn(`[completeParagraph] empty content for cell (not committed): ${cellId}`)
           setErrors((p) => new Map(p).set(lk(cellId), `Cell not translated by model: ${cellId}`))
+          setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
+          continue
+        }
+        // AQU-2217: a refusal inside a present tag is "no translation" just
+        // like an empty one — flag it and NEVER commit the boilerplate.
+        if (isRefusalReply(text)) {
+          console.warn(`[completeParagraph] model refused for cell (not committed): ${cellId}`)
+          posthog.capture("ai translation refused", {
+            provider,
+            model: modelName,
+            mode: "paragraph",
+            source_language: sourceLanguage,
+            target_language: targetLanguage,
+            regenerate: false,
+          })
+          setErrors((p) => new Map(p).set(lk(cellId), REFUSAL_ERROR_MESSAGE))
           setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
           continue
         }

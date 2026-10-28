@@ -81,7 +81,8 @@ export function EditorModeToggle({
       }}
       className="gap-0"
     >
-      <TabsList>
+      {/* 2 px between the views (Sam, Oct 28: "we can spare a couple of pixels"). */}
+      <TabsList className="gap-0.5">
         <ModeTab value="text" label={t("editor.lens.text")} icon={Pencil} labeled={labeledFor("text")} />
         <ModeTab value="audio" label={secondLabel} icon={SecondIcon} labeled={labeledFor("audio")} />
         <ModeTab value="transcribe" label={t("nav.lens.transcribe")} icon={Captions} labeled={labeledFor("transcribe")} />

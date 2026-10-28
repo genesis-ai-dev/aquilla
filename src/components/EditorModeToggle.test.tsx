@@ -25,6 +25,11 @@ describe("EditorModeToggle", () => {
     await expectTooltip(screen.getByRole("tab", { name: "Transcribe" }), /^Transcribe$/)
   })
 
+  it("leaves 2 px between the views (Sam, Oct 28)", () => {
+    renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    expect(screen.getByRole("tablist").className).toContain("gap-0.5")
+  })
+
   it("the same in the Text, Transcribe and Agent views", () => {
     const { rerender } = renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
     const labelled = () => screen.getAllByRole("tab").filter((tab) => tab.textContent !== "").map((tab) => tab.textContent)

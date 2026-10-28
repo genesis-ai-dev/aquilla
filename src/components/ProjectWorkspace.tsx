@@ -485,7 +485,7 @@ import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
-import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
+import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -17045,8 +17045,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {/* On the right, as in the Text view (Sam, Oct 28). */}
-                  {fileChapterToolbar ? <div className="flex shrink-0 justify-end border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -17269,7 +17269,7 @@ export function ProjectWorkspace() {
             </div>
             {timelineStacked && activeFile && project ? (
               // Sam, Oct 27: the playback controls back at the bottom, in a
-              // very narrow footprint — a 28 px strip across the view, outside
+              // very narrow footprint — a 32 px strip across the view, outside
               // the panels, so no fold or full screen ever hides it.
               <VoicePlaybackBar
                 variant="strip"

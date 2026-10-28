@@ -635,7 +635,9 @@ describe("AgentWorkbench editor chrome (AQU-980)", () => {
     render(<AgentWorkbench {...workbenchProps()} editorMode={{ lens: "text", onLensChange }} />)
 
     const row = screen.getByTestId("agent-toolbar-row")
-    expect(row.className).toContain("py-2")
+    // The media view's 40 px top bar's height (Sam, Oct 28).
+    expect(row.className).toContain("min-h-10")
+    expect(row.className).toContain("py-[3px]")
     expect(row.className).toContain("ps-4")
     expect(row.className).toContain("pe-2")
     const agentMode = await within(row).findByRole("tab", { name: "Agent" })

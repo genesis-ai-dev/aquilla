@@ -32,6 +32,7 @@ import type {
   TranslatableString,
 } from "./core-types"
 import { checkUsfmStructure, type UsfmStructureFinding } from "./usfm-structure-check"
+import { detectFramesAsHundredths } from "./frame-timecode"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -165,7 +166,15 @@ function parseSubtitleFormat(
     droppedCues: Math.max(0, repaired.cueLines - strings.length),
   }
   const clean = cueRepair.repairedShortForm === 0 && cueRepair.droppedCues === 0
-  return { name, strings, ...(clean ? {} : { cueRepair }) }
+  // AQU-2197: times that are frame numbers written as hundredths. Reported,
+  // never fixed silently: only a person knows the file's frame rate.
+  const framesAsHundredths = detectFramesAsHundredths(strings)
+  return {
+    name,
+    strings,
+    ...(clean ? {} : { cueRepair }),
+    ...(framesAsHundredths ? { framesAsHundredths } : {}),
+  }
 }
 
 /**

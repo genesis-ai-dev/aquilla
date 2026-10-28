@@ -379,6 +379,16 @@ function ImportCharactersContent({
                     })}
                   </p>
                 )}
+                {plan?.timecode && (plan.timecode.frameRate || plan.matchedByWords > 0) && (
+                  <p
+                    data-testid="import-characters-timecode"
+                    className="mt-1 text-muted-foreground"
+                  >
+                    {plan.timecode.frameRate
+                      ? t("editor.timeline.charactersTimecodeRate", { rate: plan.timecode.frameRate })
+                      : t("editor.timeline.charactersTimecodeNoRate")}
+                  </p>
+                )}
                 {(plan ?? audioPlan)!.cameraDisagreements > 0 && (
                   <p
                     data-testid="import-characters-camera-warning"

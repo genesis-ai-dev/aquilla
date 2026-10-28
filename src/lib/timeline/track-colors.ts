@@ -337,7 +337,8 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
  *   played  27%   the part of a playing take already heard
  *   frame   26%   1 px
  *
- * and the waveform itself is `oklch(0.55 0.14 <hue>)` (track-oklch) at
+ * and the waveform itself is its track's colour 0.167 darker, chroma 0.14
+ * (track-oklch; Oct 28 — it was oklch(0.55 0.14 <hue>) for every track) at
  * `wave`, dropping to `unplayed` on the part of a playing take not yet heard.
  * Like the ladder above, every value is an alpha over the theme's own ground,
  * so dark mode follows by itself.
@@ -414,7 +415,7 @@ export const TRACK_CHIP_TAKE_CLASS =
 /** A generated voice: the same as a recorded take (AQU-2235). */
 export const TRACK_CHIP_GENERATED_CLASS =
   "border-[color:var(--tl-track-frame)] bg-[color:var(--tl-track-ground)] text-foreground"
-/** The waveform's fill: oklch(0.55 0.14 <hue>). Opacity is the caller's
+/** The waveform's fill: its track 0.167 darker (track-oklch). Opacity is the caller's
  *  (`WAVE_LOOK.wave`, or `unplayed` on the part not yet played). */
 export const TRACK_WAVE_FILL_CLASS = "fill-[color:var(--tl-track-wave)]"
 /** The name bar along a timeline clip's top (AQU-2235, board 54). */

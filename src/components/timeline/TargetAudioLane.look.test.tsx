@@ -1,7 +1,8 @@
 // AQU-2235: the waveform look on the timeline's take chips (Sam, Oct 25,
 // boards 51–53 of the Media Redesign canvas).
 //
-//   ground 12% · frame 1px at 26% · waveform oklch(0.55 0.14 <hue>) at 90%
+//   ground 12% · frame 1px at 26% · waveform 0.167 darker than its track
+//   (Oct 28; it was oklch(0.55 0.14 <hue>) for every track) at 90%
 //   playing: played ground 27% + waveform 90%, not yet 12% + waveform 30%,
 //            a 1.5px line in the darkened hue
 //   AI voice: the same values · muted track: the whole clip at 50%
@@ -55,7 +56,7 @@ describe("the take look on a timeline chip", () => {
     expect(lane.getPropertyValue("--tl-track-ground")).toBe("rgba(36, 137, 235, 0.12)")
     expect(lane.getPropertyValue("--tl-track-frame")).toBe("rgba(36, 137, 235, 0.26)")
     expect(lane.getPropertyValue("--tl-track-played")).toBe("rgba(36, 137, 235, 0.27)")
-    expect(lane.getPropertyValue("--tl-track-wave")).toBe("oklch(0.55 0.140 252.4)")
+    expect(lane.getPropertyValue("--tl-track-wave")).toBe("oklch(0.458 0.140 252.4)")
   })
 
   it("draws the waveform in the track's deep shade at 90%, with no hover lift", () => {

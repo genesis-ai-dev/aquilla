@@ -1,9 +1,11 @@
 // The OKLCH arithmetic behind a track's waveform and strip colours. (AQU-2235)
 //
 // Sam's waveform look (Oct 25, boards 51–53 of the Media Redesign canvas) gives
-// every track's waveform the SAME lightness and chroma, oklch(0.55 0.14), in
-// that track's own hue — so a waveform reads as equally strong in every colour
-// — and every strip and dot the waveform's chroma at the track's OWN lightness.
+// every strip and dot chroma 0.14 at the track's OWN lightness, and every
+// waveform the same chroma one fixed step DARKER than its track (Sam, Oct 28:
+// "Shouldn't the waveforms be equally darker than the track color?" — at one
+// lightness for all, 0.55, a waveform sat 0.17 under green's name bar but only
+// 0.05 under violet's and magenta's, so those bars and waveforms read alike).
 // Both are written as CSS `oklch()`, not hex, so a wide-gamut (P3) screen shows
 // the full chroma and an sRGB screen maps it down by itself. A hue that cannot
 // reach 0.14 even in P3 (cyan, amber) takes its P3 maximum instead, found the
@@ -81,17 +83,21 @@ export function oklchCss(L: number, C: number, hDeg: number): string {
   return `oklch(${L.toFixed(3)} ${C.toFixed(3)} ${hDeg.toFixed(1)})`
 }
 
-/** Every waveform's lightness and chroma cap (Sam, Oct 25). */
-export const WAVE_L = 0.55
+/** How much darker a waveform is than its track: green's step under the
+ *  Oct 25 look (0.717 → 0.55), so green is unchanged and the rest match it. */
+export const WAVE_DARKER = 0.167
+/** Every waveform's chroma cap, and every strip's (Sam, Oct 25). */
 export const WAVE_C = 0.14
 /** The play line: the track darkened with its hue held (board 51). */
 export const LINE_KL = 0.731
 export const LINE_KC = 0.617
 
-/** A track's waveform colour: oklch(0.55 0.14 <its hue>), capped at P3. */
+/** A track's waveform colour: its track's lightness less WAVE_DARKER, chroma
+ *  0.14 capped at P3, in its hue. */
 export function waveColorCss(hex: string): string {
-  const { h } = hexToOklch(hex)
-  return `oklch(0.55 ${maxP3Chroma(WAVE_L, h, WAVE_C).toFixed(3)} ${h.toFixed(1)})`
+  const { l, h } = hexToOklch(hex)
+  const L = Math.round((l - WAVE_DARKER) * 1000) / 1000
+  return oklchCss(L, maxP3Chroma(L, h, WAVE_C), h)
 }
 
 /** A track's strip and dot: the waveform's chroma at the track's own lightness. */

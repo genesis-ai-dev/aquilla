@@ -143,7 +143,7 @@ describe("the alphas", () => {
       // Sam, Oct 28: the name bar is the strip colour, with dark ink on it.
       "--tl-track-bar": "color-mix(in oklab, oklch(0.744 0.140 201.3) 90%, transparent)",
       "--tl-track-bar-ink": "#1c1f24",
-      "--tl-track-wave": "oklch(0.55 0.125 201.3)",
+      "--tl-track-wave": "oklch(0.577 0.131 201.3)",
       "--tl-track-line": "oklch(0.544 0.078 201.3)",
       "--tl-track-strip": "oklch(0.744 0.140 201.3)",
     })
@@ -418,16 +418,23 @@ describe("the waveform look", () => {
     expect(green["--tl-track-bar"]).toBe(`color-mix(in oklab, ${green["--tl-track-strip"]} 90%, transparent)`)
   })
 
-  // Board 53, to the third decimal: oklch(0.55 0.14 <hue>), and the P3
-  // maximum where a hue cannot reach 0.14 (cyan, amber).
-  it("gives every waveform oklch(0.55 0.14) in its track's own hue, capped at P3", () => {
+  // Sam, Oct 28: "Shouldn't the waveforms be equally darker than the track
+  // color?" Each waveform is its track's lightness less 0.167 (green's step
+  // under the Oct 25 look, so green is unchanged), chroma 0.14 capped at P3.
+  it("makes every waveform the same step darker than its own track, in its hue, capped at P3", () => {
     const wave = (id: string) => trackHueVars(id)["--tl-track-wave"]
-    expect(wave("cyan")).toBe("oklch(0.55 0.125 201.3)")
-    expect(wave("azure")).toBe("oklch(0.55 0.140 252.4)")
-    expect(wave("violet")).toBe("oklch(0.55 0.140 292.4)")
-    expect(wave("magenta")).toBe("oklch(0.55 0.140 355.7)")
-    expect(wave("amber")).toBe("oklch(0.55 0.132 77.8)")
-    expect(wave("green")).toBe("oklch(0.55 0.140 156.9)")
+    expect(wave("cyan")).toBe("oklch(0.577 0.131 201.3)")
+    expect(wave("azure")).toBe("oklch(0.458 0.140 252.4)")
+    expect(wave("violet")).toBe("oklch(0.428 0.140 292.4)")
+    expect(wave("magenta")).toBe("oklch(0.430 0.140 355.7)")
+    expect(wave("amber")).toBe("oklch(0.607 0.140 77.8)")
+    expect(wave("green")).toBe("oklch(0.550 0.140 156.9)")
+    // The same gap under every name bar (the strip colour), to the third decimal.
+    const L = (css: string) => Number(/oklch\(([\d.]+)/.exec(css)![1])
+    for (const id of ["cyan", "azure", "violet", "magenta", "amber", "green"]) {
+      const v = trackHueVars(id)
+      expect(L(v["--tl-track-strip"]) - L(v["--tl-track-wave"]), id).toBeCloseTo(0.167, 3)
+    }
   })
 
   it("gives every strip and dot the waveform's chroma at the track's own lightness", () => {

@@ -48,6 +48,9 @@ const BANNED_KEYWORDS = [
   "reindex", "cluster", "lock", "listen", "notify", "unlisten", "discard",
   "refresh", "comment", "security", "begin", "commit", "rollback",
   "savepoint", "abort", "into",
+  // `TABLE x` is a bare relation reference with no FROM/JOIN, so
+  // scanRelations() cannot see it and scopeRelations() would not scope it.
+  "table",
 ] as const
 
 // Functions with side effects (or abuse value) that survive the keyword scan
@@ -238,7 +241,8 @@ function scanRelations(masked: string): RelationScan {
     const keyword = kwMatch[0].toLowerCase()
     const at = kwMatch.index
     // `IS [NOT] DISTINCT FROM` is a comparison operator, not a FROM clause.
-    if (keyword === "from" && /\bdistinct\s*$/i.test(masked.slice(0, at))) continue
+    // A bare `DISTINCT FROM` (empty select list) is a real FROM clause.
+    if (keyword === "from" && /\bis\s+(?:not\s+)?distinct\s*$/i.test(masked.slice(0, at))) continue
     let i = at + kwMatch[0].length
     // A FROM list is comma-separated; each JOIN brings exactly one.
     for (;;) {

@@ -4,6 +4,7 @@
 // the rate the frame numbers imply; the message says which, and "Use a
 // different frame rate" is there for the person who knows better.
 
+import { useEffect } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -21,7 +22,9 @@ const sampleStart = () => written.find((s) => s.original === SAMPLE_CUE.text)!.s
 
 function Harness({ cues, filmUrl }: { cues: readonly TranslatableString[]; filmUrl?: string }) {
   const frames = useFramesAsHundredths(cues, { filmUrl })
-  written = frames.cues
+  // Written from an effect, not during render: a component that reassigns a
+  // module variable is impure, and the react-hooks lint rejects it.
+  useEffect(() => { written = frames.cues }, [frames.cues])
   return frames.state ? <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} /> : null
 }
 

@@ -23,8 +23,13 @@ import { es } from "./es"
 import { pt } from "./pt"
 import { sw } from "./sw"
 import { hi } from "./hi"
+import { ha } from "./ha"
+import { ur } from "./ur"
+import { bn } from "./bn"
+import { am } from "./am"
+import { pa } from "./pa"
 
-export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, id, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant, ru, fr, es, pt, sw, hi }
+export const CATALOGS: Record<string, Catalog> = { en, th, my, ms, id, ar, "zh-Hans": zh_Hans, "zh-Hant": zh_Hant, ru, fr, es, pt, sw, hi, ha, ur, bn, am, pa }
 
 /** Reject locale-only keys before publishing an invalid catalog. */
 export function unknownCatalogKeys(catalogs: Record<string, Record<string, unknown>> = CATALOGS): string[] {

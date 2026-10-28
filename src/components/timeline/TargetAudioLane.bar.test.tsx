@@ -91,10 +91,11 @@ describe("the bar's colour", () => {
     render(<TargetAudioLane {...base} color="violet" items={[item()]} />)
     expect(bar()!.className).toContain("bg-[color:var(--tl-track-bar)]")
     // Sam, Oct 28: the track's strip colour, the same as the strip at its far left.
-    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar")).toBe("oklch(0.595 0.140 292.4)")
+    // …at 90% opacity.
     expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar")).toBe(
-      screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-strip"),
+      "color-mix(in oklab, oklch(0.595 0.140 292.4) 90%, transparent)",
     )
+    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.595 0.140 292.4)")
   })
 
   it("turns red with the chip at fault: a warning still beats the track colour", () => {

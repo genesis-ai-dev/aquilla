@@ -312,8 +312,9 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
     "--tl-track-played": hexToRgba(hex, WAVE_LOOK.played),
     "--tl-track-frame": hexToRgba(hex, WAVE_LOOK.frame),
     // Sam, Oct 28: the name bar takes the track's strip colour, matching the
-    // strip at the track's far left (first chosen as the hue at 34%).
-    "--tl-track-bar": stripColorFor(hex),
+    // strip at the track's far left, at 90% opacity (first chosen as the hue
+    // at 34%).
+    "--tl-track-bar": barColorFor(stripColorFor(hex)),
     "--tl-track-bar-ink": barInkFor(hex),
     "--tl-track-wave": waveColorCss(hex),
     "--tl-track-line": playLineColorCss(hex),
@@ -358,6 +359,12 @@ export const WAVE_LOOK = {
  */
 function stripColorFor(hex: string): string {
   return PALETTE_HEXES.has(hex) ? stripColorCss(hex) : hex
+}
+
+/** The name bar: a strip colour at 90% opacity (Sam, Oct 28). */
+export const NAME_BAR_OPACITY = 0.9
+function barColorFor(strip: string): string {
+  return `color-mix(in oklab, ${strip} ${Math.round(NAME_BAR_OPACITY * 100)}%, transparent)`
 }
 
 /**
@@ -453,7 +460,7 @@ export const NEUTRAL_TRACK_VARS: Record<string, string> = {
   "--tl-track-ground": "color-mix(in oklab, var(--foreground) 5%, var(--background))",
   "--tl-track-played": "color-mix(in oklab, var(--foreground) 11%, var(--background))",
   "--tl-track-frame": "color-mix(in oklab, var(--foreground) 12%, var(--background))",
-  "--tl-track-bar": "color-mix(in oklab, var(--foreground) 24%, var(--background))",
+  "--tl-track-bar": "color-mix(in oklab, color-mix(in oklab, var(--foreground) 24%, var(--background)) 90%, transparent)",
   "--tl-track-bar-ink": "var(--foreground)",
   "--tl-track-wave": "color-mix(in oklab, var(--foreground) 62%, var(--background))",
   "--tl-track-line": "color-mix(in oklab, var(--foreground) 80%, var(--background))",

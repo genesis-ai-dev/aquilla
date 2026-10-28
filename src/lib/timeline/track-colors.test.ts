@@ -141,7 +141,7 @@ describe("the alphas", () => {
       "--tl-track-played": "rgba(0, 195, 205, 0.27)",
       "--tl-track-frame": "rgba(0, 195, 205, 0.26)",
       // Sam, Oct 28: the name bar is the strip colour, with dark ink on it.
-      "--tl-track-bar": "oklch(0.744 0.140 201.3)",
+      "--tl-track-bar": "color-mix(in oklab, oklch(0.744 0.140 201.3) 90%, transparent)",
       "--tl-track-bar-ink": "#1c1f24",
       "--tl-track-wave": "oklch(0.55 0.125 201.3)",
       "--tl-track-line": "oklch(0.544 0.078 201.3)",
@@ -415,7 +415,7 @@ describe("the waveform look", () => {
     expect(green["--tl-track-ground"]).toBe("rgba(12, 193, 135, 0.12)")
     expect(green["--tl-track-played"]).toBe("rgba(12, 193, 135, 0.27)")
     expect(green["--tl-track-frame"]).toBe("rgba(12, 193, 135, 0.26)")
-    expect(green["--tl-track-bar"]).toBe(green["--tl-track-strip"])
+    expect(green["--tl-track-bar"]).toBe(`color-mix(in oklab, ${green["--tl-track-strip"]} 90%, transparent)`)
   })
 
   // Board 53, to the third decimal: oklch(0.55 0.14 <hue>), and the P3

@@ -3557,6 +3557,7 @@ describe("who may use the Check tools", () => {
     )
     expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
   })
+
 })
 
 // ── Sources is project setup (Sam, 2026-08-18) ───────────────────────────
@@ -5514,11 +5515,11 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
   })
 
-  it("draws Sources as its icon and a chevron, 'Film and sources' on hover, the film first in its menu", async () => {
+  it("draws Sources as its icon alone, 'Film and sources' on hover, the film first in its menu", async () => {
     const { film, onLink } = drawBar()
     const sources = await screen.findByTestId("tl-sources-menu")
     expect(sources.textContent).toBe("")
-    expect(sources.querySelectorAll("svg")).toHaveLength(2)
+    expect(sources.querySelectorAll("svg")).toHaveLength(1)
     await expectTooltip(sources, /^Film and sources$/)
     fireEvent.click(sources)
     const menu = await screen.findByRole("menu")

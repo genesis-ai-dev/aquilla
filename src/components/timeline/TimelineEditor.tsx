@@ -4344,12 +4344,11 @@ export function TimelineEditor({
         <OverflowMenu
           items={sourceMenuItems}
           triggerVariant="outline"
-          triggerSize="sm"
-          // Board 55, option E: its icon and a chevron, no words.
-          triggerClassName="gap-1 px-2"
+          triggerSize="icon-sm"
+          // Board 55, option E: its icon alone — no chevron (Sam, Oct 28:
+          // "shouldn't have a dropdown arrow"), like Check beside it.
           triggerTooltip={t("editor.timeline.sourcesTip")}
           triggerIcon={FolderInput}
-          triggerBadge={<ChevronDown className="size-3 text-muted-foreground" aria-hidden />}
           testId="tl-sources-menu"
           ariaLabel={t("editor.timeline.sourcesMenuAria")}
         />

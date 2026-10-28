@@ -97,16 +97,31 @@ describe("MediaPanelsMenu", () => {
     expect(film).toHaveAttribute("aria-description", "Hidden in Free timing")
   })
 
-  it("resets the layout; what Reset does and the keys are behind its (i)", async () => {
+  it("resets the layout; its (i) opens what Reset does and the keys beneath it, and closes them (Sam, Oct 28)", () => {
     const dock = fakeDock(startDockLayout())
     draw(dock)
     fireEvent.click(screen.getByTestId("panels-reset"))
-    expect(dock.resetLayout).toHaveBeenCalled()
-    // No shortcut line in the menu itself…
-    expect(screen.queryByTestId("panels-keys")).toBeNull()
-    // …it is in the (i), with what Reset does.
+    expect(dock.resetLayout).toHaveBeenCalledTimes(1)
+    // Shut at first: nothing to read, nothing to Tab to.
+    const note = screen.getByTestId("panels-reset-info")
+    expect(note).toHaveAttribute("data-open", "false")
+    expect(note).toHaveAttribute("aria-hidden", "true")
     const info = screen.getByRole("button", { name: "About your layout" })
-    await expectTooltip(info, /Remembered for you, for this file\..*Panels .+ · Full screen .+ · Fold .+ · Restore Esc/)
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(info).toHaveAttribute("aria-controls", "panels-reset-info")
+    // A click opens it in place, under Reset layout — not a hover card.
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(note).toHaveAttribute("data-open", "true")
+    expect(note).not.toHaveAttribute("aria-hidden", "true")
+    expect(note).toHaveTextContent(/^Remembered for you, for this file\..*Episode 101/)
+    expect(screen.getByTestId("panels-keys")).toHaveTextContent(/Panels .+ · Full screen .+ · Fold .+ · Restore Esc/)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    // The (i) never resets the layout, and a second click shuts it.
+    expect(dock.resetLayout).toHaveBeenCalledTimes(1)
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(note).toHaveAttribute("data-open", "false")
   })
 
   it("is its icon alone in the bar, with 'Panels' and its key on hover (board 55)", async () => {

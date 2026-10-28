@@ -6,15 +6,14 @@ import {
   chapterOfCell,
   hasRealChapters,
   nextPlayableChapter,
-  PART_MAX_SEC,
   resolveTimelineChapter,
   scopeCells,
   sequenceTimelineCells,
-  splitIntoParts,
   staysOffSequenceTimeline,
+  timelineChaptersOf,
   type TimelineChapter,
-  type TimelineLineSpan,
 } from "./sequence-timeline"
+import { layOutProgramme } from "./programme"
 
 const line = (id: string, opts: { type?: string; hidden?: boolean; recorded?: boolean } = {}): CellData =>
   ({
@@ -153,59 +152,45 @@ describe("which divisions are chapters", () => {
   })
 })
 
-// Sam's decision 1 (60 minutes, his ruling of Oct 28): over an hour, a file
-// with no chapters shows in parts.
-describe("a long file's parts", () => {
-  /** `n` lines of `lenSec` each, end to end from 0. */
-  const even = (n: number, lenSec: number): TimelineLineSpan[] =>
-    Array.from({ length: n }, (_, i) => ({ cellId: `l${i}`, startSec: i * lenSec, lenSec }))
-
-  it("is the whole file at 60 minutes or less", () => {
-    expect(PART_MAX_SEC).toBe(3600)
-    expect(splitIntoParts(even(300, 12))).toEqual([]) // exactly 60:00
-    expect(splitIntoParts(even(10, 60))).toEqual([])
+// Sam, Oct 28: the long-file parts are dropped. A file with no chapters
+// shows WHOLE on the timeline, however long; a book still goes one chapter at
+// a time.
+describe("a file with no chapters, however long", () => {
+  it("shows all of a 100-minute document's lines on the timeline", () => {
+    // 500 recorded lines of 12 s: 1 h 40 min. The table pages a file with no
+    // chapters in 50-line "Part"s; those are not chapters.
+    const lines = Array.from({ length: 500 }, (_, i) => ({
+      id: `l${i}`,
+      fileId: "f1",
+      medium: "text",
+      original: `Line ${i}`,
+      translated: "",
+      selectedAudioId: `audio-l${i}-take.webm`,
+      attachments: { [`audio-l${i}-take.webm`]: { type: "audio", url: "frontier-audio://t", durationMs: 12_000 } },
+    }) as unknown as CellData)
+    const navigation = Array.from({ length: 10 }, (_, k) => ({
+      key: `part-${k + 1}`,
+      kind: "part",
+      cellIds: lines.slice(k * 50, k * 50 + 50).map((l) => l.id),
+    }))
+    const chapters = timelineChaptersOf(navigation)
+    expect(chapters).toEqual([])
+    const shown = scopeCells(
+      sequenceTimelineCells(lines, null),
+      resolveTimelineChapter({ chapters, chosenKey: "part-2", queueCellId: "l300" }),
+    )
+    expect(shown).toHaveLength(500)
+    const { programme } = layOutProgramme(shown)
+    expect(programme.slots).toHaveLength(500)
+    expect(programme.totalSec).toBeCloseTo(6000, 5)
   })
 
-  it("splits a 61-minute file, and not a 60-minute one", () => {
-    expect(splitIntoParts(even(300, 12))).toHaveLength(0) // 60:00
-    const parts = splitIntoParts(even(305, 12)) // 61:00
-    expect(parts).toHaveLength(2)
-    for (const p of parts) expect(p.endSec - p.startSec).toBeLessThanOrEqual(PART_MAX_SEC)
-  })
-
-  it("is the fewest roughly equal parts, each 60 minutes or less, cut at line boundaries", () => {
-    const parts = splitIntoParts(even(500, 12)) // 1 h 40 min
-    expect(parts.map((p) => p.cellIds.length)).toEqual([250, 250])
-    expect(parts.map((p) => [p.startSec, p.endSec])).toEqual([[0, 3000], [3000, 6000]])
-    expect(parts.map((p) => `${p.key} ${p.index + 1}/${p.count}`)).toEqual(["part:1 1/2", "part:2 2/2"])
-    // Every line in exactly one part, in order.
-    expect(parts.flatMap((p) => p.cellIds)).toEqual(even(500, 12).map((l) => l.cellId))
-  })
-
-  it("takes a third part only when two would not fit", () => {
-    expect(splitIntoParts(even(600, 12)).map((p) => p.cellIds.length)).toEqual([300, 300]) // 2 h: two of 60
-    const three = splitIntoParts(even(601, 12)).map((p) => p.cellIds.length)
-    expect(three).toHaveLength(3)
-    expect(Math.max(...three) - Math.min(...three)).toBeLessThanOrEqual(1)
-  })
-
-  it("measures a timed file from its first line, with the gaps between lines", () => {
-    // A subtitle file just under 2 hours: a line every 10 s, each 6 s long, from 0:30.
-    const lines = Array.from({ length: 700 }, (_, i) => ({ cellId: `c${i}`, startSec: 30 + i * 10, lenSec: 6 }))
-    const parts = splitIntoParts(lines)
-    expect(parts).toHaveLength(2)
-    for (const p of parts) expect(p.endSec - p.startSec).toBeLessThanOrEqual(PART_MAX_SEC)
-    expect(parts[0].startSec).toBe(30)
-  })
-
-  it("never cuts a line: one longer than 60 minutes is a part of its own", () => {
-    const lines = [
-      { cellId: "a", startSec: 0, lenSec: 60 },
-      { cellId: "long", startSec: 60, lenSec: 6000 },
-      { cellId: "b", startSec: 6060, lenSec: 60 },
-    ]
-    const parts = splitIntoParts(lines)
-    expect(parts.flatMap((p) => p.cellIds)).toEqual(["a", "long", "b"])
-    expect(parts.some((p) => p.cellIds.length === 1 && p.cellIds[0] === "long")).toBe(true)
+  it("keeps a book's own chapters, one at a time", () => {
+    const chapters = timelineChaptersOf([
+      { key: "RUT 1", kind: "chapter", cellIds: ["v1", "v2"] },
+      { key: "RUT 2", kind: "chapter", cellIds: ["v3"] },
+    ])
+    expect(chapters.map((c) => c.key)).toEqual(["RUT 1", "RUT 2"])
+    expect(resolveTimelineChapter({ chapters, chosenKey: "RUT 2", queueCellId: null })?.key).toBe("RUT 2")
   })
 })

@@ -1148,9 +1148,6 @@ interface EditorTableProps {
   onActiveChapterChange?: (key: string | null) => void
   /** AQU-1758: a chapter was picked in the chapter picker (not scrolled to). */
   onChapterPicked?: (key: string) => void
-  /** AQU-1758: the line at the top of the table, whenever it changes — a long
-   *  file's timeline shows the part holding it. */
-  onViewportCellChange?: (cellId: string | null) => void
   /**
    * ProjectWorkspace's parallelBiblesPanelActive: the editor, on a scripture
    * file. Bible data shows only then (AQU-1685).
@@ -1219,7 +1216,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   chapterNavTrailing,
   onActiveChapterChange,
   onChapterPicked,
-  onViewportCellChange,
   bibleOpen = false,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
@@ -2521,10 +2517,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   useEffect(() => {
     onActiveChapterChange?.(reportedChapter)
   }, [onActiveChapterChange, reportedChapter])
-  const reportedViewportCell = viewportCellId ?? null
-  useEffect(() => {
-    onViewportCellChange?.(reportedViewportCell)
-  }, [onViewportCellChange, reportedViewportCell])
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)

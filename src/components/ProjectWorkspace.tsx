@@ -216,10 +216,9 @@ import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
 import {
-  chapterOfCell, hasRealChapters, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
-  splitIntoParts, type TimelineChapter,
+  chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
-import { layOutProgramme } from "@/lib/timeline/programme"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -13576,46 +13575,29 @@ export function ProjectWorkspace() {
     ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
     : null
 
-  // ── AQU-1758: a book or document on the timeline, one chapter at a time,
-  //    and a long file with no chapters in parts ──
+  // ── AQU-1758: a book or document on the timeline, one chapter at a time ──
   //
-  // The timeline shows ONE SCOPE at a time: a chapter of a book (the one the
-  // table and its chapter picker are on), or — for a file with no chapters
-  // whose timeline runs over 60 minutes — a part (the one holding the line at
-  // the top of the table). While playback is on a line of this file, it shows
-  // that line's scope instead. The timeline, the bottom strip's Play all and
-  // every timeline seek share ONE list of lines (`timelineCells`), so the
-  // programme they each lay out is the same one. On a book, headings follow
-  // "Count headings as translatable content" and hidden lines stay off unless
-  // recorded (lib/timeline/sequence-timeline.ts).
-  //
-  // Parts apply where the timeline lays its lines out end to end — a book or
-  // document, or a file following its recordings with no film and no audio
-  // cues. A file following its source draws the film's own clock, which a
-  // part cannot start partway into, so it stays whole.
+  // A book's timeline shows ONE CHAPTER at a time: the one the table and its
+  // chapter picker are on, or, while playback is on a line of this file, that
+  // line's chapter. A file with no chapters shows WHOLE, however long (Sam,
+  // Oct 28: the long-file parts are dropped — the timeline draws only the
+  // clips in view, so length costs nothing). The timeline, the bottom strip's
+  // Play all and every timeline seek share ONE list of lines
+  // (`timelineCells`), so the programme they each lay out is the same one. On
+  // a book, headings follow "Count headings as translatable content" and
+  // hidden lines stay off unless recorded (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
-  const laidOutTimeline = timelineEditorVisible && (
-    sequenceTimeline || (timingMode === "audioFirst" && !activeFile?.coreMediaUrl && audioCueSibling === null)
-  )
   const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
-  // The lines a book's timeline may draw at all, before any scope.
+  // The lines a book's timeline may draw at all, before any chapter.
   const timelineLines = useMemo(
     () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, null, countStructuralCells) : audioMergedCells),
     [sequenceTimeline, audioMergedCells, countStructuralCells],
   )
   const timelineScopes = useMemo<readonly TimelineChapter[]>(() => {
-    if (!laidOutTimeline) return EMPTY_TIMELINE_CHAPTERS
-    if (sequenceTimeline) {
-      const entries = readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex())
-      if (hasRealChapters(entries)) return entries.map((entry) => ({ key: entry.key, cellIds: entry.cellIds }))
-    }
-    const { programme } = layOutProgramme(timelineLines)
-    const parts = splitIntoParts(programme.slots.map((slot) => ({
-      cellId: slot.cellId, startSec: slot.startSec, lenSec: slot.slotLenSec,
-    })))
-    return parts.length > 0 ? parts : EMPTY_TIMELINE_CHAPTERS
-  }, [laidOutTimeline, sequenceTimeline, cellStore, cellStoreVersion, timelineLines])
-  const scopedByParts = timelineScopes.length > 0 && timelineScopes[0].key.startsWith("part:")
+    if (!sequenceTimeline) return EMPTY_TIMELINE_CHAPTERS
+    const chapters = timelineChaptersOf(readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex()))
+    return chapters.length > 0 ? chapters : EMPTY_TIMELINE_CHAPTERS
+  }, [sequenceTimeline, cellStore, cellStoreVersion])
   const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
@@ -13634,22 +13616,13 @@ export function ProjectWorkspace() {
     const ids = new Set(timelineCells.map((c) => c.id))
     return legacyCells.filter((c) => ids.has(c.id))
   }, [audioMergedCells, legacyCells, timelineCells])
-  // A book's chapter comes from the table's chapter picker; a part, from the
-  // line at the top of the table.
-  const scopesRef = useRef({ scopes: timelineScopes, byParts: scopedByParts })
-  scopesRef.current = { scopes: timelineScopes, byParts: scopedByParts }
+  // A book's chapter comes from the table's chapter picker.
   const handleTableChapterChange = useCallback((key: string | null) => {
-    if (!scopesRef.current.byParts) setChosenScopeKey(key)
+    setChosenScopeKey(key)
   }, [])
-  const handleTableViewportCell = useCallback((cellId: string | null) => {
-    const { scopes, byParts } = scopesRef.current
-    if (!byParts) return
-    const part = chapterOfCell(scopes, cellId)
-    if (part) setChosenScopeKey(part.key)
-  }, [])
-  // Moving to another scope while playback is PAUSED on a line of this one
+  // Moving to another chapter while playback is PAUSED on a line of this one
   // ends that playback, so the timeline can follow; a run that is playing
-  // keeps the timeline on its own scope until it is paused or ends.
+  // keeps the timeline on its own chapter until it is paused or ends.
   const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
   useEffect(() => {
     if (!chosenScopeKey || !queueChapterKey || queueChapterKey === chosenScopeKey) return
@@ -13660,13 +13633,12 @@ export function ProjectWorkspace() {
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const handleChapterPicked = useCallback((key: string) => {
-    if (scopesRef.current.byParts) return
     const playing = queueChapterKeyRef.current
     if (playing && playing !== key) stopQueue()
     setChosenScopeKey(key)
   }, [])
-  // Play all carries on into the next chapter or part: when a run of this
-  // file's scope plays out, the next one with anything to play starts.
+  // Play all carries on into the next chapter: when a run of this file's
+  // chapter plays out, the next chapter with anything to play starts.
   const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
   useLayoutEffect(() => {
     chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
@@ -17461,9 +17433,8 @@ export function ProjectWorkspace() {
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
             // AQU-1758: a book's timeline shows the chapter the table is on.
-            onActiveChapterChange={laidOutTimeline ? handleTableChapterChange : undefined}
-            onChapterPicked={laidOutTimeline ? handleChapterPicked : undefined}
-            onViewportCellChange={laidOutTimeline ? handleTableViewportCell : undefined}
+            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               )}
               </div>

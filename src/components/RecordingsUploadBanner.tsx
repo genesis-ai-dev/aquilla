@@ -24,6 +24,7 @@ const FAILURE_KEY: Record<BulkFailureCode, MessageKey> = {
   offline: "recordingsUpload.failures.offline",
   network: "recordingsUpload.failures.network",
   server: "recordingsUpload.failures.server",
+  refused: "recordingsUpload.failures.refused",
   tooShort: "recordingsUpload.failures.tooShort",
   decode: "recordingsUpload.failures.decode",
   other: "recordingsUpload.failures.other",

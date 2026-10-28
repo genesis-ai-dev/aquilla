@@ -317,6 +317,7 @@ export function RecordingsReview({
   return (
     <ReviewBody
       ready={ready!}
+      fileOrder={projectFiles.map((f) => f.id)}
       assignments={assignments}
       jobs={jobs}
       chosen={chosen}
@@ -366,6 +367,8 @@ export function RecordingsReview({
 
 interface ReviewBodyProps {
   ready: Extract<Phase, { kind: "ready" }>
+  /** The project's files in sidebar order, so the books list in that order. */
+  fileOrder: readonly string[]
   assignments: Assignment[]
   jobs: UploadJob[]
   chosen: ChosenFile[]
@@ -383,7 +386,7 @@ interface ReviewBodyProps {
 }
 
 function ReviewBody({
-  ready, assignments, jobs, chosen, file, languageLabel, editing, setEditing, starting, error, onOverride, onShift, onStartAt, onCancel, onConfirm,
+  ready, fileOrder, assignments, jobs, chosen, file, languageLabel, editing, setEditing, starting, error, onOverride, onShift, onStartAt, onCancel, onConfirm,
 }: ReviewBodyProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -442,11 +445,14 @@ function ReviewBody({
       const hit = lineById.get(`${a.fileId}\u0000${a.cellIds![0]}`)
       return hit ? hit.file.lines.indexOf(hit.line) : 0
     }
-    return [...byFile.entries()].map(([fileId, list]) => ({
-      file: targets.get(fileId)!,
-      rows: [...list].sort((a, b) => position(a) - position(b) || (partsOf.get(a.index)?.n ?? 0) - (partsOf.get(b.index)?.n ?? 0) || (a.take ?? 0) - (b.take ?? 0)),
-    }))
-  }, [matched, lineById, targets, partsOf])
+    const rank = (fileId: string) => { const i = fileOrder.indexOf(fileId); return i < 0 ? Infinity : i }
+    return [...byFile.entries()]
+      .sort(([a], [b]) => rank(a) - rank(b))
+      .map(([fileId, list]) => ({
+        file: targets.get(fileId)!,
+        rows: [...list].sort((a, b) => position(a) - position(b) || (partsOf.get(a.index)?.n ?? 0) - (partsOf.get(b.index)?.n ?? 0) || (a.take ?? 0) - (b.take ?? 0)),
+      }))
+  }, [matched, lineById, targets, partsOf, fileOrder])
 
   const pickerLines = useMemo(() => {
     const out: { value: string; label: string; fileId: string; cellId: string }[] = []
@@ -483,7 +489,7 @@ function ReviewBody({
           {languageLabel ? t("recordingsUpload.pick.language", { language: languageLabel }) : t("recordingsUpload.pick.languageDefault")}
         </p>
         {[...runs.entries()].map(([run, info], runIndex) => (
-          <div key={run} className="flex flex-wrap items-center gap-2 pt-1 text-xs text-muted-foreground" data-testid="recordings-order-run">
+          <div key={run} className="flex flex-col gap-1.5 pt-1 text-xs text-muted-foreground" data-testid="recordings-order-run">
             <span>
               {t("recordingsUpload.preview.orderNote", {
                 count: fmt(info.count),
@@ -491,6 +497,7 @@ function ReviewBody({
                 first: info.first?.read ?? "—",
               })}
             </span>
+            <span className="flex flex-wrap items-center gap-2">
             <Button type="button" size="xs" variant="outline" onClick={() => onShift(run, -1)} data-testid="recordings-order-earlier">
               <ArrowUp className="h-3 w-3" />
               {t("recordingsUpload.preview.orderEarlier")}
@@ -513,6 +520,7 @@ function ReviewBody({
                 {t("recordingsUpload.preview.orderStartAt")}
               </Button>
             )}
+            </span>
           </div>
         ))}
       </div>
@@ -576,7 +584,7 @@ function ReviewBody({
                   return (
                     <li
                       key={a.index}
-                      className="flex items-center gap-2 text-xs"
+                      className="flex items-baseline gap-2 text-xs"
                       data-testid="recordings-row"
                       data-name={chosen[a.index]?.file.name}
                       data-target={a.read}
@@ -585,7 +593,7 @@ function ReviewBody({
                       <span className="w-28 shrink-0 truncate font-mono text-muted-foreground" title={a.read}>{a.read}</span>
                       <span className="min-w-0 flex-1 truncate text-foreground/80" title={hit?.line.text}>{hit?.line.text}</span>
                       <span className="w-40 shrink-0 truncate text-muted-foreground" title={chosen[a.index]?.path}>{chosen[a.index]?.file.name}</span>
-                      <span className="w-44 shrink-0 truncate text-muted-foreground" title={notes.join(" · ")} data-testid="recordings-how">
+                      <span className="w-48 shrink-0 leading-snug text-muted-foreground" data-testid="recordings-how">
                         {notes.join(" · ")}
                         {recorded && (
                           <span className="text-amber-700 dark:text-amber-400"> · {t("recordingsUpload.preview.hasRecording")}</span>

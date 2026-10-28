@@ -126,7 +126,7 @@ describe("bulk upload engine", () => {
     uploadFailures = [new Error("audio upload failed (403): forbidden")]
     await startBulkUpload(request([{ kind: "single", fileId: "f1", cellId: "c1", files: [0] }], [file("two.wav")], { targetLabel: () => "Genesis 1:2" }))
     expect(getBulkUploadState()?.failed).toEqual([
-      { index: 0, name: "two.wav", target: "Genesis 1:2", code: "other", message: "audio upload failed (403): forbidden" },
+      { index: 0, name: "two.wav", target: "Genesis 1:2", code: "refused", message: "audio upload failed (403): forbidden" },
     ])
     // "Try them again" runs only the failures.
     await retryFailedBulkUploads()

@@ -92,7 +92,7 @@ const KEYS = {
     "recordingsUpload.rules.parts":
       "A verse in several files, such as “1-1a” and “1-1b”, “part 1” and “part 2”, “_1” and “_2”, or “beginning” and “end”, becomes the pieces of one recording, in that order. You can join them into one recording afterwards.",
     "recordingsUpload.rules.order":
-      "By order: when no file in a folder has a number in its name, the files go onto the lines in folder order, sorted so that 2 comes before 10.",
+      "By order: when no file in a folder has a verse or line number in its name (phone recordings such as “IMG_4521”, or no numbers at all), the files go onto the lines in folder order, sorted so that 2 comes before 10. A folder named for a chapter starts at that chapter.",
     "recordingsUpload.rules.existing":
       "A line that already has a recording keeps it in its take list, and the new recording becomes the one that plays.",
     "recordingsUpload.rules.unmatched": "A file that can't be placed is listed with the reason, and it is not uploaded.",
@@ -135,8 +135,8 @@ const KEYS = {
     "recordingsUpload.preview.noLines": "No line matches",
     "recordingsUpload.preview.dontUpload": "Don't upload",
     "recordingsUpload.preview.orderNote": plural({
-      one: "{count} file in {folder} has no number in its name, so it goes onto the lines in folder order, starting at {first}.",
-      other: "{count} files in {folder} have no numbers in their names, so they go onto the lines in folder order, starting at {first}.",
+      one: "{count} file in {folder} has no verse or line number in its name, so it goes onto the lines in folder order, starting at {first}.",
+      other: "{count} files in {folder} have no verse or line numbers in their names, so they go onto the lines in folder order, starting at {first}.",
     }),
     "recordingsUpload.preview.orderEarlier": "Start one line earlier",
     "recordingsUpload.preview.orderLater": "Start one line later",
@@ -178,6 +178,7 @@ const KEYS = {
     "recordingsUpload.failures.offline": "You went offline before it uploaded.",
     "recordingsUpload.failures.network": "The connection dropped while it uploaded, even after trying again.",
     "recordingsUpload.failures.server": "The server didn't accept it, even after trying again.",
+    "recordingsUpload.failures.refused": "The server refused it, so it wasn't tried again. It said: {message}",
     "recordingsUpload.failures.tooShort": "One of its parts is too short to be a piece of its own.",
     "recordingsUpload.failures.decode": "One of its parts couldn't be read as audio, so the parts couldn't be joined.",
     "recordingsUpload.failures.other": "It couldn't be uploaded: {message}",

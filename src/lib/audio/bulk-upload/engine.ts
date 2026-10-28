@@ -47,7 +47,7 @@ const RETRY_DELAYS_MS = [2_000, 6_000, 15_000] as const
 /** The attachments read is poked at most this often per file while it runs. */
 const NOTIFY_EVERY_MS = 1_500
 
-export type BulkFailureCode = "offline" | "network" | "server" | "tooShort" | "decode" | "other"
+export type BulkFailureCode = "offline" | "network" | "server" | "refused" | "tooShort" | "decode" | "other"
 
 export interface BulkFailure {
   /** Input index of the file (the first file of a job of pieces). */
@@ -198,6 +198,8 @@ function classify(err: unknown): JobError {
   // anchored, because "audio upload failed (403)" contains "load failed".
   if (err instanceof TypeError || /^(failed to fetch|load failed)$|networkerror/i.test(message)) return new JobError("network", message)
   if (/\((5\d\d|429|408)\)/.test(message)) return new JobError("server", message)
+  // Any other HTTP answer is a refusal: retrying would only be refused again.
+  if (/\((4\d\d)\)/.test(message)) return new JobError("refused", message)
   return new JobError("other", message)
 }
 

@@ -48,6 +48,8 @@ APPLIO_DIR = "/applio"
 SR_TRAIN = 40000
 DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
 DEFAULT_SAMPLE_TEXT = "Every voice tells a story. Listen closely, and you will hear mine."
+# Every character's preview reads the same line, so the cast compares like for like.
+PREVIEW_TEXT = "This is a sample of a default Aquilla synthetic voice."
 BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 # LibriTTS-R transcripts (CC-BY 4.0; the underlying books are public domain) give the
 # corpus a wide spread of sentence shapes. Only the text column is used.
@@ -274,6 +276,37 @@ class Qwen:
         vol.commit()
         return stats
 
+    @modal.method()
+    def preview_read(self, voice_id: str, text: str = PREVIEW_TEXT, n: int = 4) -> bytes:
+        """The character reading `text` (cloned from its anchor), best of n by ECAPA
+        similarity among takes at a sane pace. Fed through the trained RVC model by
+        `preview_sample`, so the preview is what Change voice actually produces."""
+        import io
+
+        import numpy as np
+        import soundfile as sf
+
+        vol.reload()
+        vdir = _voice_dir(voice_id)
+        spec = json.loads((vdir / "spec.json").read_text())
+        anchor = vdir / "anchor.wav"
+        a_wav, a_sr = sf.read(anchor)
+        a_emb = self._embed(a_wav, a_sr)
+        prompt = self.base_model.create_voice_clone_prompt(
+            ref_audio=str(anchor), ref_text=spec["sample_text"], x_vector_only_mode=False)
+        wavs, sr = self.base_model.generate_voice_clone(
+            text=[text] * n, language=["English"] * n, voice_clone_prompt=prompt)
+        best, best_sim = wavs[0], -1.0
+        for w in wavs:
+            spc = len(w) / sr / max(len(text), 1)
+            e = self._embed(w, sr)
+            sim = float(np.dot(e, a_emb) / (np.linalg.norm(e) * np.linalg.norm(a_emb)))
+            if 0.035 <= spc <= 0.13 and sim > best_sim:
+                best, best_sim = w, sim
+        buf = io.BytesIO()
+        sf.write(buf, best, sr, format="WAV")
+        return buf.getvalue()
+
 
 @app.function(image=applio_image, gpu="A10G", volumes={FORGE: vol}, timeout=3 * 3600, cpu=8, memory=32768,
               max_containers=10)
@@ -318,27 +351,30 @@ def _weights(voice_id: str) -> tuple[str, str]:
 def convert_audio(voice_id: str, source: bytes, transpose: int | None = None, index_rate: float = 0.0) -> dict:
     """Re-voice `source` into `voice_id`. index_rate stays ~0 so the synthetic corpus's
     English phones don't leak into other languages."""
+    import math
+    import subprocess
     import sys
 
-    os.chdir(APPLIO_DIR)
-    sys.path.insert(0, APPLIO_DIR)
-    import core
-
     vol.reload()
-    import subprocess
-
     raw, src, out = Path("/tmp/src.bin"), Path("/tmp/src.wav"), Path("/tmp/out.wav")
     raw.write_bytes(source)
     # Cell takes arrive as webm/opus, m4a or wav; Applio's loader wants plain PCM.
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ac", "1", str(src)], check=True)
+    # Pitch is measured BEFORE Applio is imported: with /applio first on sys.path and
+    # its `core` loaded, librosa's numba-cached pyin fails to load ("module 'numba'
+    # has no attribute 'core'") on a cold container.
     if transpose is None:
         stats = json.loads((_voice_dir(voice_id) / "corpus.json").read_text())["stats"]
         src_f0 = _median_f0(str(src))
         transpose = 0
         voice_f0 = stats.get("voice_median_f0") or stats["anchor_median_f0"]
         if src_f0 > 0 and voice_f0 > 0:
-            import math
             transpose = max(-12, min(12, round(12 * math.log2(voice_f0 / src_f0))))
+
+    os.chdir(APPLIO_DIR)
+    sys.path.insert(0, APPLIO_DIR)
+    import core
+
     pth, idx = _weights(voice_id)
     core.run_infer_script(pitch=transpose, index_rate=index_rate, volume_envelope=1.0, protect=0.33,
                           f0_method="rmvpe", input_path=str(src), output_path=str(out), pth_path=pth,
@@ -377,6 +413,17 @@ def forge_voice(spec: dict, minutes: float = 20.0, epochs: int = 150) -> dict:
     (vdir / "card.json").write_text(json.dumps(card, indent=2))
     vol.commit()
     return {"voice_id": vid, "wall_seconds": round(time.time() - t0, 1)}
+
+
+@app.function(image=qwen_image, volumes={FORGE: vol}, timeout=1800)
+def preview_sample(voice_id: str, text: str = PREVIEW_TEXT) -> dict:
+    """PREVIEW_TEXT in the character's voice, through its RVC model; saved as preview.wav."""
+    read = Qwen().preview_read.remote(voice_id, text)
+    res = convert_audio.remote(voice_id, read, 0)
+    vol.reload()
+    (_voice_dir(voice_id) / "preview.wav").write_bytes(res["wav"])
+    vol.commit()
+    return {"voice_id": voice_id, "wav": res["wav"]}
 
 
 @app.function(image=qwen_image, volumes={FORGE: vol})
@@ -623,3 +670,16 @@ def catalog(out_dir: str, spec_file: str = "infra/modal/voice_forge_cast.json"):
         for name, data in files.items():
             (Path(out_dir) / vid / name).write_bytes(data)
         print("fetched", vid, sorted(files))
+
+
+@app.local_entrypoint()
+def previews(out_dir: str = "public/character-voices", spec_file: str = "infra/modal/voice_forge_cast.json"):
+    """Re-read every character's preview with PREVIEW_TEXT; writes out_dir/<voice_id>.wav."""
+    ids = [s["voice_id"] for s in json.loads(Path(spec_file).read_text())]
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    for res in preview_sample.map(ids, return_exceptions=True):
+        if isinstance(res, Exception):
+            print("failed", res)
+            continue
+        (Path(out_dir) / f"{res['voice_id']}.wav").write_bytes(res["wav"])
+        print("wrote", res["voice_id"])

@@ -252,6 +252,8 @@ describe("SharePanel — member scopes wiring", () => {
         { kind: "lane", value: "lnde0001" },
       ])
       expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[9]).toBeUndefined()
+      // Alice is the caller and holds Spanish only, so that is all she can grant.
+      expect(lastMembersPanelProps?.scopeConfig?.grantableLaneValues).toEqual(["lnes0001"])
     })
   })
 

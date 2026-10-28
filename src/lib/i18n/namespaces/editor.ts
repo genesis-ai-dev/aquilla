@@ -939,9 +939,9 @@ export const editor = defineNamespace({
       "Lines keep their times from the source, and its pauses stay. Only a project lead or above can change this.",
     "editor.timeline.timingModeFree": "Follows recordings",
     "editor.timeline.timingModeFreeHint":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer.",
+      "Lines play back to back, each as long as its recording.",
     "editor.timeline.timingModeFreeHintLocked":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer. Only a project lead or above can change this.",
+      "Lines play back to back, each as long as its recording. Only a project lead or above can change this.",
     "editor.timeline.timingLabel": "Timing:",
     "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
     "editor.timeline.timingInfoAria": "About timing",
@@ -1797,6 +1797,17 @@ export const editor = defineNamespace({
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.play": "Play this line",
     "editor.voice.clone": "Clone voice from take",
+    "editor.voice.cloneTitle": "Make a voice from this take",
+    "editor.voice.cloneNamePlaceholder": "Voice name",
+    "editor.voice.cloneNameAriaLabel": "Name for the new voice",
+    "editor.voice.cloneSubmit": "Add to cast",
+    "editor.voice.cloneMoreOptions": "More options",
+    "editor.voice.clonedToast": "{name} is in the cast",
+    "editor.voice.changeTo": "Change to {voice}",
+    "editor.voice.workingAs": "Voicing as {voice}…",
+    "editor.voice.yourRecording": "Your recording",
+    "editor.voice.recordedBy": "Recorded by {name}",
+    "editor.voice.originalAudio": "Original audio",
     "editor.voice.generateFromText": "Generate audio from text",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
@@ -6291,8 +6302,8 @@ export const editor = defineNamespace({
       "editor.timeline.timingModeFreeHint": {
         description:
           "One-line description under 'Follows recordings' in the Timing dropdown. 'Back to " +
-          "back' means each line starts where the previous one ends; each line lasts as long " +
-          "as its recording, or as its source line when that is longer.",
+          "back' means each line starts where the previous one ends; each line lasts exactly " +
+          "as long as its recording (the source is cut where the line ends).",
       },
       "editor.timeline.timingModeFreeHintLocked": {
         description:
@@ -6737,6 +6748,29 @@ export const editor = defineNamespace({
           "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
+      "editor.voice.cloneTitle": { description: "Heading of the small popover that turns a line's audio take into a reusable voice." },
+      "editor.voice.cloneNamePlaceholder": { description: "Placeholder of the name field in that popover." },
+      "editor.voice.cloneNameAriaLabel": { description: "Accessible label of the name field in that popover." },
+      "editor.voice.cloneSubmit": { description: "Button in that popover: creates the voice from the take and adds it to the project's cast. Short." },
+      "editor.voice.cloneMoreOptions": { description: "Link in that popover: opens the full New voice dialog instead." },
+      "editor.voice.clonedToast": {
+        description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
+        placeholders: { name: "The new voice's name, e.g. 'Ana'." },
+      },
+      "editor.voice.changeTo": {
+        description: "Button beside a line's voice field: re-voices the line's audio into the voice it is cast as.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.workingAs": {
+        description: "Status beside a line's voice field while its audio is being generated or re-voiced.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.yourRecording": { description: "Shown in a line's voice field when the audio is the current user's own recording and no voice is assigned." },
+      "editor.voice.recordedBy": {
+        description: "Shown in a line's voice field when the audio is someone's recording and no voice is assigned.",
+        placeholders: { name: "Username of the person who recorded it." },
+      },
+      "editor.voice.originalAudio": { description: "Shown in a line's voice field when the audio is the imported original programme audio." },
       "editor.voice.clone": {
         description:
           "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +

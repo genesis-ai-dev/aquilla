@@ -181,6 +181,7 @@ import {
   ruleFixPreflight,
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
+  canRestructureTracks,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -371,7 +372,9 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -1535,6 +1538,7 @@ export function ProjectWorkspace() {
   // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  const [makeCharacterMode, setMakeCharacterMode] = useState<"clone" | "character">("clone")
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
   // File the sidebar context menu asked to assign; null means "use the
@@ -2525,6 +2529,31 @@ export function ProjectWorkspace() {
             // Turn this line's take into a reusable Cast character.
             onMakeCharacterFromCell: (cellId) => {
               setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("clone")
+              setMakeCharacterOpen(true)
+            },
+            // AQU-2212: Clone voice from take, without the dialog.
+            onCloneTake: async (cell, audioId, name) => {
+              const level = project?.syncRole?.level ?? null
+              if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
+                throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
+              }
+              const voice = await cloneVoiceFromTake({
+                projectId: audioProject.id, cell, audioId, name,
+                provider: resolveTtsProvider(tts.settings),
+                // A clone rides Inworld or Gemini, which take no target language.
+                paletteIndex: tts.allVoices.length,
+                session: frontierSession ?? null,
+              })
+              const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+              await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+              toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+            },
+            // "Add a voice…" opens New voice on the ready-made characters; the
+            // voice it adds is cast on the line it was opened from.
+            onAddVoice: (cellId) => {
+              setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("character")
               setMakeCharacterOpen(true)
             },
             place: audioViewPlace,
@@ -2533,6 +2562,7 @@ export function ProjectWorkspace() {
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
       tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
+      tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
     ],
   )
 
@@ -3799,17 +3829,17 @@ export function ProjectWorkspace() {
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
-  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
-  // explicit act). The picker's scope (Oct 23) says how far it reaches: this
+  // gutter's picker. The assignment itself never synthesizes; in the Audio
+  // view the card then acts on the picked line (AQU-2212). The picker's scope (Oct 23) says how far it reaches: this
   // line, this character's lines in the file, or — AQU-2125 — the character
   // itself in every episode, cast once rather than line by line.
   // Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
-    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }) => {
+    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }): boolean => {
       const level = project?.syncRole?.level ?? null
       if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
         toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
-        return
+        return false
       }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
@@ -3819,6 +3849,7 @@ export function ProjectWorkspace() {
             .map((c) => c.id)
         : []
       tts.assignPick({ scope: opts?.scope ?? "line", lineId: cell.id, castName, fileLineIds, voiceId })
+      return true
     },
     [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t],
   )
@@ -13075,19 +13106,17 @@ export function ProjectWorkspace() {
   // which the server floors at maintainer — the same clearance, read the same
   // way, as the timing mode beside it. The gate is "don't pass the callback":
   // below the floor the gutter has no grip, no grab cursor and no tab stop.
-  const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
-  // AQU-646 stage 2: RESTRUCTURING is doubly gated — the same maintainer floor
-  // AND the project's `allowTrackEditing` setting, which is off unless somebody
-  // turned it on. Two independent conditions, and the server checks both
-  // separately (track-editing-authority.ts), so this is the affordance rather
-  // than the permission.
-  //
-  // RENAME AND REORDER ARE DELIBERATELY NOT IN HERE. Both already ship, and a
-  // new setting defaulting to off must not silently take an existing capability
-  // away from every project that has one — so they stay on `canReorderTracks`'
-  // clearance alone. That split is why the editor takes `onRenameTrack` as its
-  // own prop instead of folding it into `trackEditing`.
-  const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const trackRoleLevel = serverRoleLevel ?? project?.syncRole?.level ?? 0
+  const canReorderTracks = trackRoleLevel >= ROLE.MAINTAINER
+  // AQU-646 stage 2 / AQU-2214: RESTRUCTURING is doubly gated — the same
+  // maintainer floor AND the project's `allowTrackEditing`, which is ON unless
+  // somebody turned it off. Both clauses, and why rename and reorder are not
+  // among them, live in `canRestructureTracks` so a test pins the rule without
+  // rendering this component.
+  const canEditTracks = canRestructureTracks({
+    roleLevel: trackRoleLevel,
+    allowTrackEditing: project?.allowTrackEditing,
+  })
   /**
    * AQU-1565 / AQU-1566: who is offered captions as rows, the timeline's
    * Attach captions, and the upload of the original recording. One pure
@@ -15110,6 +15139,7 @@ export function ProjectWorkspace() {
     onClearCastVoice: handleClearCastVoice,
     onCloneVoice: (cellId) => {
       setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterMode("clone")
       setMakeCharacterOpen(true)
     },
   })
@@ -18036,6 +18066,14 @@ export function ProjectWorkspace() {
             setMakeCharacterSeedCellId(null)
           }}
           seedCellId={makeCharacterSeedCellId}
+          initialMode={makeCharacterMode}
+          // Added from a line's dropdown: cast it on that line too.
+          onAdded={makeCharacterMode === "character" && makeCharacterSeedCellId
+            ? (voice) => {
+                const cell = audioMergedCells.find((c) => c.id === makeCharacterSeedCellId)
+                if (cell) handleAssignCastVoice(cell, voice.id)
+              }
+            : undefined}
           tts={tts}
           projectId={project.id}
           fileId={activeFileId}

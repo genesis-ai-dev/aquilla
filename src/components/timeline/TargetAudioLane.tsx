@@ -79,6 +79,7 @@ import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
 import type { PeaksTarget } from "@/lib/audio/peaks-loader"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
+import type { ProgrammeSlot } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
@@ -222,6 +223,11 @@ interface ChipGeometry {
   item: TargetAudioItem
   geom: TargetChipGeom
   section: { start: number; end: number }
+  /** AQU-2215: this take's line in the programme, when there is one. The move
+   *  gesture needs its start: following the recordings a take moves inside
+   *  its own line, so the line's start is the floor the drag stops at. Null in
+   *  dubbing mode, where there is no programme. */
+  slot: ProgrammeSlot | null
   resizable: boolean
   /** SUB-53: how the translation compares to the original — audio-first shows
    *  this instead of the amber/red warnings, because running long is the
@@ -303,8 +309,13 @@ function TargetAudioChip({
   currentUsername = "",
   peaks,
   preview,
+  layout,
 }: {
   chip: ChipGeometry
+  /** AQU-2215: the lane's layout, for the one question only it can answer —
+   *  what a MOVE on this chip means, and what to store for it. Absent outside
+   *  a timeline (this lane's own tests), which is dubbing's own behaviour. */
+  layout?: TimelineLayout
   // AQU-646 stage 7: NO `color` PROP. The hue reaches this chip as inherited
   // CSS custom properties set on the lane root, so there is nothing to thread
   // and nothing to keep in step — see `trackHueVars`.
@@ -364,6 +375,9 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // This chip's own take: its length, its trims and its placement. The geometry
+  // and the drag both read it, so it is resolved once here.
+  const chipAtt = cell.attachments?.[chip.item.audioId]
   // AQU-1767: the first (or only) piece keeps the chip's historical test id;
   // later pieces add "-p2", "-p3"… so every piece is addressable.
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
@@ -406,10 +420,10 @@ function TargetAudioChip({
   // height gate below reads exactly as it did before it existed.
   const { chipH } = useRowMetrics()
   // SUB-48: this clip is saved on this device but its event is still queued.
-  const pendingSync = Boolean(cell.attachments?.[chip.item.audioId]?.pendingSync)
+  const pendingSync = Boolean(chipAtt?.pendingSync)
   // AQU-924: saved on this device, and its attach event will NOT reach the
   // server without user action (quarantined / out of retries).
-  const syncFailed = Boolean(cell.attachments?.[chip.item.audioId]?.syncFailed)
+  const syncFailed = Boolean(chipAtt?.syncFailed)
   // AQU-490: validated at a GLANCE, and deliberately not a control.
   //
   // This is a 16px hover corner with play and record already in it; a popover
@@ -418,7 +432,7 @@ function TargetAudioChip({
   // scrub past them — the vote itself lives on the four surfaces that have
   // room for it. The source clip is excluded, so an imported film's own
   // soundtrack never wears a tick.
-  const chipTake = cell.attachments?.[chip.item.audioId]
+  const chipTake = chipAtt
   // AQU-490, corrected 2026-09-22: the SAME state machine the gutter reduces
   // through, not a boolean. A boolean could only ever mean "done", so a chip
   // wore a double check the moment ONE person had signed it off — which, at a
@@ -469,6 +483,19 @@ function TargetAudioChip({
       // bound. Identical arithmetic — the second reads "this chip's END may not
       // fall below `minAudibleEndSec`", which for a fixed length is a floor on
       // its start.
+      //
+      // AQU-2215: NONE OF THAT APPLIES WHEN THE FILE FOLLOWS ITS RECORDINGS.
+      // Every line owns its own stretch of the track there and grows to hold
+      // whatever is dragged into it, so there is no neighbour to collide with
+      // and no section to keep contact with — what the drag changes is the
+      // pause before the take, inside its own line. One bound is left: the
+      // line's own start, because a pause cannot be negative (dragging left
+      // shortens it back to none and stops).
+      if (audioFirst) {
+        const floor = chip.slot?.startSec ?? start
+        const bounded = Math.max(start, floor)
+        return { start: bounded, end: bounded + len }
+      }
       start = Math.min(start, maxAudibleStartSec(section), nextChipStartSec ?? Infinity)
       start = Math.max(start, minAudibleEndSec(section) - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
       return { start, end: start + len }
@@ -542,7 +569,12 @@ function TargetAudioChip({
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
   const headOverlapSec =
     headTrespass && !geom.usingFallback && !prevChip?.usingFallback ? overlaps.headSec : null
-  const canMove = editable && Boolean(onRetimeTarget)
+  // AQU-2215: following the recordings, only a take that can hold a pause
+  // before its line is movable — a split take's pieces and a take of unknown
+  // length are placed end to end and have nowhere to go, so they keep the
+  // locked chip they have always had rather than springing back from a drag.
+  const canMove =
+    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt) ?? true)
   // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
   // hide one (Sam lost a whole take under one). The logical span is untouched
   // — overflow warnings, trims, snapping and playback all still use the true
@@ -691,8 +723,21 @@ function TargetAudioChip({
       setDrag(null)
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
-        const anchor = s.start - geom.trimStartSec
-        if (Math.abs(s.start - geom.start) > 0.0005) onRetimeTarget?.(cell.id, anchor, chip.item.audioId)
+        // AQU-2215: the layout inverts the drag, because only it knows what
+        // clock the chip was drawn on — the file clock in dubbing, the
+        // programme clock when following the recordings, where what moved is
+        // the take's pause before its line. Either way what comes back is the
+        // FILE-clock anchor, which is the only thing stored.
+        const anchor = layout
+          ? layout.retimeAnchorSec(cell, chipAtt, s.start)
+          : s.start - geom.trimStartSec
+        if (anchor == null) return
+        // Compared on the FILE clock for the same reason, so a drag that ends
+        // up asking for the placement the take already has — a nudge under the
+        // pause threshold, say — records no history step at all.
+        const placed = targetChipGeom(cell, chipAtt)
+        if (placed && Math.abs(anchor - placed.anchor) <= 0.0005) return
+        onRetimeTarget?.(cell.id, anchor, chip.item.audioId)
         return
       }
       // Resize = trim. Commit the COMPLETE trim state; at-the-edge clears.
@@ -1558,6 +1603,7 @@ export function TargetAudioLane({
       item,
       geom,
       section,
+      slot,
       // No honest length to trim on fallback chips; in DUBBING a take-only
       // section plays via the MASTER (which ignores dub trims), so a handle
       // there would lie. Audio-first plays the dub as its own clip, trims and
@@ -1846,6 +1892,7 @@ export function TargetAudioLane({
             nextMeetSec={meetAfter[i]}
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
+            layout={layout}
             pxPerSec={pxPerSec}
             selected={
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false

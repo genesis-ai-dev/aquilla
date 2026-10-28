@@ -1071,6 +1071,43 @@ describe("executeDraft", () => {
     expect(out.text.split("\n")[0]).toContain('notice: ref "GEN 1" matched nothing in file "Mark"')
   })
 
+  // AQU-2217: the drafting model can wrap a refusal in a well-formed {i,t}
+  // entry. A refusal is not a translation, so it must never be staged as a
+  // reviewable changeset entry — it joins `missed` like an absent entry.
+  it("never stages a refusal as a draft, and reports the cell as missed", async () => {
+    await seedWorld()
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls++
+      const content = calls === 1
+        ? "compact evidence"
+        : JSON.stringify([
+            { i: 1, t: "I'm sorry, but I cannot assist with that request." },
+            { i: 2, t: "Y cuando estuvo solo" },
+          ])
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+    const { ctx } = draftCtx()
+    const out = await executeDraft(
+      env.AQUILLA_PG,
+      { ref: "MRK 4" },
+      ctx,
+      { model: "m", apiKey: "k", url: "https://mock/x" },
+    )
+
+    expect(out.ok).toBe(true)
+    const values = out.proposal!.events.map((e) => (e.payload as { value: string }).value)
+    expect(values).toEqual(["Y cuando estuvo solo"])
+    expect(values.join("\n")).not.toContain("cannot assist")
+    // The refused cell is reported so the orchestrator re-runs it, and it is
+    // not listed among the drafted rows.
+    expect(out.text).toContain("No draft returned for: MRK 4:3")
+    expect(out.data?.cells?.map((c) => c.ref)).toEqual(["MRK 4:10"])
+  })
+
   // AQU-1468: a failed draft that asks "which file?" carries the candidates so
   // the client can render buttons; the error text is unchanged.
   it("passes the file candidates through when the draft scope is ambiguous", async () => {

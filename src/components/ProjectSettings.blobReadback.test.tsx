@@ -231,10 +231,10 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     expect(screen.getByTestId("settings-timing-locked")).not.toBeChecked()
   })
 
-  it("allowTrackEditing", () => {
-    currentSettings = { allowTrackEditing: true }
+  it("allowTrackEditing (absent means ON since AQU-2214, so a stored false must show off)", () => {
+    currentSettings = { allowTrackEditing: false }
     renderSettings("audio-media")
-    expect(screen.getByTestId("settings-allow-track-editing")).toBeChecked()
+    expect(screen.getByTestId("settings-allow-track-editing")).not.toBeChecked()
   })
 
   it("draftContext.precedingTargetCells", () => {

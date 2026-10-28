@@ -68,6 +68,7 @@ import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services
 import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
 import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 import {
   applyTeamMemberLaneGrants,
@@ -1367,6 +1368,14 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
       403,
     )
   }
+  // AQU-1579: the match above is only a string compare. Refuse before the
+  // invite is claimed so an unverified account cannot spend it.
+  const unverified = await emailBoundInviteUnverified(
+    c.env.AQUILLA_PG,
+    user.id,
+    invite.email,
+  )
+  if (unverified) return c.json(unverified, 403)
 
   const org = await c.env.AQUILLA_PG.prepare(
     "SELECT id, name FROM organizations WHERE id = ?",

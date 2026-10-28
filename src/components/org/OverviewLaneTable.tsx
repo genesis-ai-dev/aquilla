@@ -79,7 +79,7 @@ import type { ProjectMember } from "@/lib/frontier/members"
 import type { AssignLaneOption, TeamLaneAttachment } from "@/lib/sync/assignment-lane"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
-import { textProgressSegments } from "@/lib/progress/progress-palette"
+import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 
 export interface OverviewLaneTableProps {
@@ -225,7 +225,9 @@ function LaneProgressBar({ lane, dimmed = false }: {
   return (
     <span className="flex items-center gap-2">
       <ProgressSplitBar
-        segments={textProgressSegments({ validated, translated, total: 100 })}
+        segments={laneDeliversAudioOnly(lane)
+          ? audioProgressSegments({ validated, recorded: translated, total: 100 })
+          : textProgressSegments({ validated, translated, total: 100 })}
         height={6}
         className={dimmed ? "w-16 opacity-70" : "w-16"}
       />

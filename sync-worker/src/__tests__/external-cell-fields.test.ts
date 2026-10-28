@@ -428,6 +428,8 @@ describe('SetTrackOverride — apply', () => {
   it('a RESTRUCTURING patch is refused while allowTrackEditing is off — even for an OWNER', async () => {
     const env = makeEnv(tdb.db)
     const owner = await memberToken(tdb, ROLE.OWNER)
+    // AQU-2214: the project has to say no out loud — unset is the ON default.
+    await setSettings(tdb, { timingLocked: false, allowTrackEditing: false })
     const denied = await prepare(env, owner, [
       { kind: 'SetTrackOverride', fileId: FILE, trackId: 'target-audio', patch: null },
     ])

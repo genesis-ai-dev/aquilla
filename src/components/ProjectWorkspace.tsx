@@ -17794,6 +17794,8 @@ export function ProjectWorkspace() {
           onOpenChange={setAiSetupOpen}
           project={project}
           onUpdated={handleProjectUpdated}
+          patchSettings={patchSettings}
+          canEditShared={projectSettings?.canEdit ?? false}
         />
       )}
       {/* FRO-192: Assign work modal */}

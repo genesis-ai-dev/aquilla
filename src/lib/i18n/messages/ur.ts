@@ -5549,7 +5549,6 @@ export const ur: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "اپنی API key چسپاں کریں",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "بغیر تصدیق کے لیے خالی چھوڑ دیں",
   "projectSettings.advancedLlm.apiKeyHelp": "بطور Authorization: Bearer <key> بھیجی جاتی ہے۔ آپ کے براؤزر میں محفوظ؛ Frontier پر کبھی اپ لوڈ نہیں۔",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "اس آلے پر رہتی ہے — ساتھیوں کے ساتھ شیئر نہیں۔",
   "projectSettings.advancedLlm.modelLabel": "ماڈل",
   "projectSettings.advancedLlm.modelManualLabel": "ماڈل (اگر فہرست میں نہ ہو)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "ماڈل id لکھیں",

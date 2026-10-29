@@ -4661,7 +4661,6 @@ export const th: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "วางคีย์ API ของคุณ",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "เว้นว่างไว้หากไม่ต้องการยืนยันตัวตน",
   "projectSettings.advancedLlm.apiKeyHelp": "ส่งเป็น Authorization: Bearer <key> จัดเก็บไว้ในเบราว์เซอร์ของคุณเท่านั้น ไม่มีการอัปโหลดไปยัง Frontier",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "อยู่บนอุปกรณ์นี้เท่านั้น — ไม่แชร์กับผู้ร่วมงาน",
   "projectSettings.advancedLlm.modelLabel": "โมเดล",
   "projectSettings.advancedLlm.modelManualLabel": "โมเดล (หากไม่มีในรายการ)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "พิมพ์รหัสโมเดล",

@@ -80,6 +80,7 @@ import {
   presetLabel,
 } from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import { draftingSettingsFrom } from "@/lib/completion/drafting-settings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
@@ -346,6 +347,19 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
+  // AQU-2259: the team's drafting settings and model choice.
+  "provider",
+  "endpoint",
+  "model",
+  "maxTokens",
+  "temperature",
+  "llmHealthPenalty",
+  "top_k",
+  "contextSize",
+  "main_chat_language",
+  "fewShotExampleFormat",
+  "completionBatchSize",
+  "validationBatchSize",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -680,6 +694,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
     : null
+  // AQU-2259: the AI cards are shared now, so a locked one says why once, at
+  // its top, rather than on a hover over each of its fourteen controls.
+  const sharedLockedLine = canEditShared ? null
+    : reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : t("projectSettings.permission.onlyRoleCanModify", { role: privilegedRole })
 
   // AQU-1086: the language fields sit behind the org's configurable
   // languageEditMinRole, so their lock hint must name the role the user
@@ -931,6 +950,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+      provider: setProvider,
+      endpoint: setEndpoint,
+      model: setModel,
+      maxTokens: setMaxTokens,
+      temperature: setTemperature,
+      llmHealthPenalty: setLlmHealthPenalty,
+      top_k: setTopK,
+      contextSize: setContextSize,
+      main_chat_language: setMainChatLanguage,
+      fewShotExampleFormat: setFewShotExampleFormat,
+      completionBatchSize: setCompletionBatchSize,
+      validationBatchSize: setValidationBatchSize,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -969,6 +1000,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
+    // The preset picker follows the endpoint, as it does when the page seeds.
+    if (changed.includes("endpoint")) {
+      setPresetId((prev) =>
+        sameSetting(prev, presetIdForEndpoint(seed.endpoint)) ? presetIdForEndpoint(hydrated.endpoint) : prev,
+      )
+    }
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -986,36 +1023,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
-      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
       // Connect (and the auto-probe after a key/endpoint pause) is the moment
-      // the user believes BYOK is ready. Persist immediately so the workspace
-      // sparkle gate sees Custom OpenRouter without a second "Save changes".
-      if (id && provider === "custom") {
+      // the user believes BYOK is ready. Persist this DEVICE's part at once —
+      // the project's AI key and the "chooser answered" flag — so the
+      // workspace sparkle gate stops asking. AQU-2259: the provider, endpoint
+      // and model are the team's settings now, so they wait for "Save
+      // changes" like every other shared field, rather than changing what
+      // everyone drafts with because someone pressed Connect.
+      if (id && provider === "custom" && apiKey.trim()) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (latest) {
           const nextCompletion = buildCompletionSettings(latest.completionSettings, {
-            provider: "custom",
-            endpoint: trimmedEndpoint,
-            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-            model: chosenModel,
+            apiKey: apiKey.trim(),
           })
           await updateProject({
             ...latest,
             completionSettings: nextCompletion,
             aiProviderChosen: true,
           })
-          setBaseline((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  provider: "custom",
-                  endpoint: trimmedEndpoint,
-                  apiKey,
-                  model: chosenModel,
-                }
-              : prev,
-          )
+          setBaseline((prev) => (prev ? { ...prev, apiKey } : prev))
         }
       }
     } catch (err) {
@@ -1191,21 +1218,31 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // everything on the page was written.
     const changedFieldLabels: string[] = []
     try {
+      // AQU-2259: the drafting settings (the AI Instructions card), the model
+      // choice and the Health penalty are the team's settings, so they go to
+      // the shared settings below. Only the project's AI key stays on this
+      // device, where it always lived.
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
-      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
       if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
-      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
-      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
-      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
-      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
-      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
-      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
-      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
-      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
+      let draftingChanged = false
+      const noteDrafting = (changed: boolean, label: string) => {
+        if (!changed) return
+        draftingChanged = true
+        changedFieldLabels.push(label)
+      }
+      noteDrafting(provider !== baseline.provider, "AI provider")
+      noteDrafting(endpoint.trim() !== baseline.endpoint, "endpoint")
+      noteDrafting(model !== baseline.model, "model")
+      noteDrafting(maxTokens !== baseline.maxTokens, "max tokens")
+      noteDrafting(temperature !== baseline.temperature, "temperature")
+      noteDrafting(llmHealthPenalty !== baseline.llmHealthPenalty, "health penalty")
+      noteDrafting(topK !== baseline.top_k, "examples retrieved")
+      noteDrafting(contextSize !== baseline.contextSize, "context window")
+      noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, "validated examples only")
+      noteDrafting(fewShotExampleFormat !== baseline.fewShotExampleFormat, "reference example format")
+      noteDrafting(mainChatLanguage !== baseline.main_chat_language, "assisted language")
+      noteDrafting(completionBatchSize !== baseline.completionBatchSize, "AI completions batch size")
+      noteDrafting(validationBatchSize !== baseline.validationBatchSize, "batch validation size")
 
       const localUpdates: Partial<ProjectRecord> = {}
       // AQU-765: rename. Trim first so a whitespace-only entry is rejected
@@ -1260,6 +1297,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (geminiKeyChanged) changedFieldLabels.push("voice API key")
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
+        || draftingChanged
       if (hasLocalWork) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (!latest) throw new Error("Project not found")
@@ -1275,11 +1313,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           ...localUpdates,
           completionSettings: nextCompletion,
           ttsSettings: nextTtsSettings,
-          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+          ...(Object.keys(completionUpdates).length > 0 || draftingChanged ? { aiProviderChosen: true } : {}),
         })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
+      // AQU-2259: the whole drafting value, not only the changed fields — the
+      // key is replaced as one object, so a partial one would reset the rest.
+      if (draftingChanged) {
+        sharedUpdates.draftingSettings = draftingSettingsFrom({
+          provider,
+          endpoint: endpoint.trim(),
+          model,
+          maxTokens,
+          temperature,
+          llmHealthPenalty,
+          top_k: topK,
+          contextSize,
+          useOnlyValidatedExamples,
+          main_chat_language: mainChatLanguage,
+          fewShotExampleFormat,
+          completionBatchSize,
+          validationBatchSize,
+        })
+      }
       // AQU-1771: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default.
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push("validation count") }
@@ -2486,13 +2543,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 />
               </NavList>
             ) : null}
-            <SettingsGroup label={t("projectSettings.section.aiInstructions")}>
+            <SettingsGroup label={t("projectSettings.section.aiInstructions")} description={sharedLockedLine}>
               <SettingsRow
                 label={<label htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</label>}
                 description={t("projectSettings.ai.topKDescription", { defaultCount: DEFAULT_APPROVED_EXAMPLE_COUNT })}
                 control={
                   <Input
                     id="top-k"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={20}
@@ -2510,6 +2568,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
                   <Input
                     id="completion-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={50}
@@ -2533,6 +2592,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="validation-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={0}
                     max={500}
@@ -2557,6 +2617,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="context-size" aria-label={t("projectSettings.ai.contextWindowLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2577,6 +2638,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="main-chat-language"
+                    disabled={!canEditShared}
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
                     placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
@@ -2608,6 +2670,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="few-shot-example-format" aria-label={t("projectSettings.ai.referenceExampleFormatLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2659,6 +2722,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <div id="section-advanced-llm">
             <SettingsGroup
+              description={sharedLockedLine}
               label={
                 <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
                   <span>{t("projectSettings.advancedLlm.summary")}</span>
@@ -2677,6 +2741,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   name="provider"
                   value={provider}
                   onValueChange={(value) => setProvider(value as CompletionProvider)}
+                  disabled={!canEditShared}
                   className="flex flex-col gap-2"
                 >
                   <label className="flex items-start gap-2 text-sm">
@@ -2718,6 +2783,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
+                        disabled={!canEditShared}
                       >
                         <SelectTrigger id="preset" aria-label={t("projectSettings.advancedLlm.presetLabel")} className="w-56 bg-background">
                           <SelectValue />
@@ -2759,6 +2825,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                           lastModelFetchKeyRef.current = null
                         }}
                         placeholder="http://localhost:8000"
+                        disabled={!canEditShared}
                         className="flex-1 bg-background"
                         aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
@@ -2779,7 +2846,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </>
                       )
                     }
-                    description={t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
+                    description={t("projectSettings.deviceOnly")}
                     block
                   >
                     <ApiKeyField
@@ -2804,7 +2871,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     <SettingsRow
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
+                        <Select value={model} onValueChange={(value) => setModel(value ?? "")} disabled={!canEditShared}>
                           <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
                             <SelectValue />
                           </SelectTrigger>
@@ -2827,6 +2894,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       control={
                         <Input
                           id="mdl-manual"
+                    disabled={!canEditShared}
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
                           placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : t("projectSettings.advancedLlm.modelPlaceholder")}
@@ -2854,6 +2922,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   control={
                     <Input
                       id="mdl-frontier"
+                    disabled={!canEditShared}
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
                       placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
@@ -2869,6 +2938,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="mt"
+                    disabled={!canEditShared}
                     type="number"
                     value={maxTokens}
                     onChange={(e) => setMaxTokens(Number(e.target.value))}
@@ -2887,6 +2957,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       step={0.05}
                       value={[temperature]}
                       onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
+                      disabled={!canEditShared}
                     />
                   </div>
                 }
@@ -2902,6 +2973,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       step={0.05}
                       value={[llmHealthPenalty]}
                       onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                      disabled={!canEditShared}
                     />
                   </div>
                 }
@@ -2930,7 +3002,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               />
               <SettingsRow
                 label="Gemini TTS"
-                description={t("projectSettings.voice.geminiKeyHelp")}
+                description={
+                  <>
+                    {t("projectSettings.voice.geminiKeyHelp")}
+                    <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                  </>
+                }
                 block
               >
                 <ApiKeyField
@@ -3172,7 +3249,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {/* i18n-exempt "git" is a project-origin kind, not copy */}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
-            <SettingsGroup label={t("projectSettings.section.gitSync")}>
+            <SettingsGroup label={t("projectSettings.section.gitSync")} description={t("projectSettings.deviceOnly")}>
               <SettingsRow
                 label={withStyledTerms(
                   t("projectSettings.gitSync.originLabel", {

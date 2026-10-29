@@ -5557,7 +5557,6 @@ export const sw: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Bandika ufunguo wako wa API",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Acha wazi bila uhalalishaji",
   "projectSettings.advancedLlm.apiKeyHelp": "Inatumwa kama Authorization: Bearer <key>. Inahifadhiwa katika kivinjari chako; haipakiwi kamwe kwa Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Hubaki katika kifaa hiki — haishirikiwi na washirika.",
   "projectSettings.advancedLlm.modelLabel": "Modeli",
   "projectSettings.advancedLlm.modelManualLabel": "Modeli (ikiwa haijaorodheshwa)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Andika kitambulisho cha modeli",

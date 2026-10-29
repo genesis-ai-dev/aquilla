@@ -5563,7 +5563,6 @@ export const am: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "API ቁልፍዎን ይለጥፉ",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "ያለ ማረጋገጫ ለመተው ባዶ ይተዉ",
   "projectSettings.advancedLlm.apiKeyHelp": "እንደ Authorization: Bearer <key> ይላካል። በአሳሽዎ ውስጥ ይቀመጣል፤ ወደ Frontier ፈጽሞ አይሰቀልም።",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "በዚህ መሣሪያ ላይ ይቆያል — ከተባባሪዎች ጋር አይጋራም።",
   "projectSettings.advancedLlm.modelLabel": "ሞዴል",
   "projectSettings.advancedLlm.modelManualLabel": "ሞዴል (ካልተዘረዘረ)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "የሞዴል id ይተይቡ",

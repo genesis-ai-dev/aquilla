@@ -5449,7 +5449,6 @@ export const hi: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "अपनी API कुंजी चिपकाएँ",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "बिना प्रमाण के खाली छोड़ें",
   "projectSettings.advancedLlm.apiKeyHelp": "Authorization: Bearer <key> के रूप में भेजी जाती है। आपके ब्राउज़र में रहती है; Frontier पर कभी अपलोड नहीं।",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "इस डिवाइस पर रहती है — सहयोगियों के साथ साझा नहीं।",
   "projectSettings.advancedLlm.modelLabel": "मॉडल",
   "projectSettings.advancedLlm.modelManualLabel": "मॉडल (यदि सूची में न हो)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "एक मॉडल आईडी लिखें",

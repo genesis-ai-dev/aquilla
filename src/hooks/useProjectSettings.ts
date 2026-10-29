@@ -21,6 +21,7 @@ import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/proje
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
+import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
@@ -900,6 +901,28 @@ export function useProjectSettings(
       // by local cache. A fresh hook instance will retry on next mount.
     })()
   }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
+
+  // AQU-2259: upload this browser's old drafting settings once, when the team
+  // has none yet. Isolated in its own hook because the rule is not final.
+  const onDraftingUploadResponse = useCallback((response: ProjectSettingsResponse, wrote: boolean) => {
+    if (!aliveRef.current || !projectId) return
+    writeServerConfirmed(response)
+    broadcastProjectSettingsUpdated({
+      projectId,
+      version: response.version,
+      origin: instanceIdRef.current,
+    })
+    if (wrote) posthog.capture("project drafting settings uploaded", { project_id: projectId })
+  }, [projectId, writeServerConfirmed])
+  useDraftingSettingsUpload({
+    projectId,
+    jwt,
+    canEdit,
+    hasFetched,
+    server,
+    runSerialized,
+    onServerResponse: onDraftingUploadResponse,
+  })
 
   const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
     // Gate logic for local apply vs. server write:

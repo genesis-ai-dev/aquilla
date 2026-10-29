@@ -4669,7 +4669,6 @@ export const ar: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "الصق مفتاح API الخاص بك",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "اتركه فارغًا لعدم المصادقة",
   "projectSettings.advancedLlm.apiKeyHelp": "يُرسَل كـ Authorization: Bearer <key>. يُخزَّن محليًا في متصفحك؛ لا يُرفَع أبدًا إلى Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "يبقى على هذا الجهاز — لا يُشارَك مع المتعاونين.",
   "projectSettings.advancedLlm.modelLabel": "النموذج",
   "projectSettings.advancedLlm.modelManualLabel": "النموذج (إن لم يكن مدرجًا)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "اكتب معرّف النموذج",

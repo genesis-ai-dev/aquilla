@@ -2,6 +2,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import { readBibleEnrichments } from "../../db/shared/bible-enrichments"
+import { readDraftingSettings } from "../../db/shared/drafting-settings"
+import { applyDraftingSettings } from "@/lib/completion/drafting-settings"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 
 /**
@@ -52,13 +54,19 @@ export function overlaySettings(
   if (lanes) {
     draft().lanes = lanes
   }
-  if (settings.systemPrompt != null) {
-    if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
-      draft().completionSettings = buildCompletionSettings(
-        record.completionSettings,
-        { systemPrompt: settings.systemPrompt },
-      )
-    }
+  // AQU-2259: the team's drafting settings replace this browser's copy of
+  // them. Validated on the way in, so a malformed field reads as its default.
+  // The record keeps only what the blob never carries: this device's project
+  // AI key, and the instructions (overlaid from `systemPrompt` just below).
+  let completion = record.completionSettings
+  const drafting = readDraftingSettings(settings.draftingSettings)
+  if (drafting) completion = applyDraftingSettings(completion, drafting)
+  if (settings.systemPrompt != null && completion?.systemPrompt !== settings.systemPrompt) {
+    completion = buildCompletionSettings(completion, { systemPrompt: settings.systemPrompt })
+  }
+  if (completion !== record.completionSettings
+    && JSON.stringify(completion ?? null) !== JSON.stringify(record.completionSettings ?? null)) {
+    draft().completionSettings = completion
   }
   assign("rules", settings.rules)
   assign("rulePenalties", settings.rulePenalties)

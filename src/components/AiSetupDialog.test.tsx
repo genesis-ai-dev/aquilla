@@ -5,6 +5,7 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const saveSettings = vi.hoisted(() => vi.fn(async () => undefined))
+const patchSettings = vi.hoisted(() => vi.fn(async () => ({ kind: "ok" as const })))
 const clearUserProviderOverride = vi.hoisted(() => vi.fn())
 const overrideState = vi.hoisted(() => ({ current: null as { endpoint: string; apiKey?: string } | null }))
 
@@ -50,7 +51,7 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   }
 }
 
-function renderDialog(project: ProjectRecord = makeProject()) {
+function renderDialog(project: ProjectRecord = makeProject(), canEditShared = true) {
   const onOpenChange = vi.fn()
   const onUpdated = vi.fn()
   render(
@@ -65,6 +66,8 @@ function renderDialog(project: ProjectRecord = makeProject()) {
                 onOpenChange={onOpenChange}
                 project={project}
                 onUpdated={onUpdated}
+                patchSettings={patchSettings}
+                canEditShared={canEditShared}
               />
             }
           />
@@ -81,6 +84,7 @@ function projectKeyOption() {
 
 beforeEach(() => {
   saveSettings.mockClear()
+  patchSettings.mockClear()
   clearUserProviderOverride.mockClear()
   overrideState.current = null
 })
@@ -94,15 +98,28 @@ describe("AiSetupDialog", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
   })
 
-  it("marks the project chosen and saves Frontier on Continue", async () => {
+  it("marks the project chosen on Continue, leaving a project already on Frontier as it is", async () => {
     const { onOpenChange } = renderDialog()
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "frontier" }),
-      expect.objectContaining({ aiProviderChosen: true }),
-    )
+    expect(saveSettings).toHaveBeenCalledWith({}, expect.objectContaining({ aiProviderChosen: true }))
+    expect(patchSettings).not.toHaveBeenCalled()
     expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  // AQU-2259: the provider is the team's setting now.
+  it("moves the whole project back to Frontier through the shared settings", async () => {
+    renderDialog(makeProject({
+      completionSettings: {
+        provider: "custom", endpoint: "https://openrouter.ai/api/v1", model: "x/y", maxTokens: 16384, temperature: 0.3,
+      } as ProjectRecord["completionSettings"],
+    }))
+    fireEvent.click(screen.getByRole("button", { name: /Frontier AI/i }))
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    await waitFor(() => expect(patchSettings).toHaveBeenCalled())
+    expect(patchSettings).toHaveBeenCalledWith({
+      draftingSettings: expect.objectContaining({ provider: "frontier", model: "" }),
+    })
   })
 
   it("shows a personal override option when Preferences already has one", () => {
@@ -127,20 +144,46 @@ describe("AiSetupDialog", () => {
     expect(saveSettings).not.toHaveBeenCalled()
   })
 
-  it("saves a project OpenRouter key and closes on Continue", async () => {
+  it("saves the team's OpenRouter choice to the project and the key to this device", async () => {
     const { onOpenChange } = renderDialog()
     fireEvent.click(projectKeyOption())
     fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: "sk-or-user" } })
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
+    expect(patchSettings).toHaveBeenCalledWith({
+      draftingSettings: expect.objectContaining({ provider: "custom", endpoint: "https://openrouter.ai/api/v1" }),
+    })
+    expect(JSON.stringify(patchSettings.mock.calls)).not.toContain("sk-or-user")
     expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "custom",
-        endpoint: "https://openrouter.ai/api/v1",
-        apiKey: "sk-or-user",
-      }),
+      { apiKey: "sk-or-user" },
       expect.objectContaining({ aiProviderChosen: true }),
     )
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it("says who can change the project's provider when this person can't", async () => {
+    const { onOpenChange } = renderDialog(makeProject(), false)
+    fireEvent.click(projectKeyOption())
+    fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: "sk-or-user" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    expect(await screen.findByText(/set for the whole project/i)).toBeInTheDocument()
+    expect(patchSettings).not.toHaveBeenCalled()
+    expect(saveSettings).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it("lets someone who can't change it add their key when the project already uses that provider", async () => {
+    const { onOpenChange } = renderDialog(makeProject({
+      completionSettings: {
+        provider: "custom", endpoint: "https://openrouter.ai/api/v1", model: "", maxTokens: 16384, temperature: 0.3,
+      } as ProjectRecord["completionSettings"],
+    }), false)
+    fireEvent.click(projectKeyOption())
+    fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: "sk-mine" } })
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }))
+    await waitFor(() => expect(saveSettings).toHaveBeenCalled())
+    expect(patchSettings).not.toHaveBeenCalled()
+    expect(saveSettings).toHaveBeenCalledWith({ apiKey: "sk-mine" }, expect.objectContaining({ aiProviderChosen: true }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
@@ -152,16 +195,13 @@ describe("AiSetupDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
     expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "custom",
-        apiKey: "sk-or-project",
-      }),
+      { apiKey: "sk-or-project" },
       expect.objectContaining({ aiProviderChosen: true }),
     )
     expect(clearUserProviderOverride).not.toHaveBeenCalled()
   })
 
-  it("clears a leftover project key when Continue uses the personal override", async () => {
+  it("uses the personal override without changing the team's provider", async () => {
     overrideState.current = { endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-or-prefs" }
     renderDialog(makeProject({
       completionSettings: {
@@ -176,10 +216,8 @@ describe("AiSetupDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal override/i }))
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "frontier" }),
-      expect.objectContaining({ aiProviderChosen: true }),
-    )
+    expect(patchSettings).not.toHaveBeenCalled()
+    expect(saveSettings).toHaveBeenCalledWith({}, expect.objectContaining({ aiProviderChosen: true }))
     expect(clearUserProviderOverride).not.toHaveBeenCalled()
   })
 })

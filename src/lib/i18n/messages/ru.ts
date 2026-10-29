@@ -4795,7 +4795,6 @@ export const ru: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Вставьте свой ключ API",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Оставьте пустым, если авторизация не нужна",
   "projectSettings.advancedLlm.apiKeyHelp": "Отправляется как Authorization: Bearer <key>. Хранится локально в вашем браузере и никогда не передаётся во Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Остаётся на этом устройстве — коллегам не передаётся.",
   "projectSettings.advancedLlm.modelLabel": "Модель",
   "projectSettings.advancedLlm.modelManualLabel": "Модель (если её нет в списке)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Введите идентификатор модели",

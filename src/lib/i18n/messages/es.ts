@@ -5421,7 +5421,6 @@ export const es: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Pega tu clave de API",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Déjalo en blanco si no hay autenticación",
   "projectSettings.advancedLlm.apiKeyHelp": "Se envía como Authorization: Bearer <key>. Se guarda en tu navegador; nunca se sube a Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Permanece en este dispositivo — no se comparte con los colaboradores.",
   "projectSettings.advancedLlm.modelLabel": "Modelo",
   "projectSettings.advancedLlm.modelManualLabel": "Modelo (si no está en la lista)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Escribe un identificador de modelo",

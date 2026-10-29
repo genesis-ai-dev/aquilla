@@ -117,12 +117,9 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   }
 })
 
-let lastUpdateProjectArg: ProjectRecord | null = null
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => makeProject()),
-  updateProject: vi.fn(async (p: ProjectRecord) => {
-    lastUpdateProjectArg = p
-  }),
+  updateProject: vi.fn(async (_p: ProjectRecord) => {}),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -170,7 +167,6 @@ function renderSettings() {
 beforeEach(() => {
   vi.clearAllMocks()
   patchSharedMock.mockResolvedValue({ kind: "ok" })
-  lastUpdateProjectArg = null
 })
 
 describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
@@ -188,14 +184,16 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
     const saveBtn = screen.getByRole("button", { name: /save changes/i })
     fireEvent.click(saveBtn)
 
-    await waitFor(() => expect(lastUpdateProjectArg).not.toBeNull())
-    const saved = lastUpdateProjectArg!.completionSettings as CompletionSettings
+    // AQU-2259: these are the team's settings, saved to the shared settings.
+    await waitFor(() => expect(patchSharedMock).toHaveBeenCalled())
+    const saved = patchSharedMock.mock.calls[0][0].draftingSettings as CompletionSettings
     expect(saved.top_k).toBe(17)
     expect(saved.contextSize).toBe("large")
     expect(saved.useOnlyValidatedExamples).toBe(true)
     // Fields the user did NOT touch must survive the merge, not reset.
     expect(saved.fewShotExampleFormat).toBe("source-and-target")
-    expect(saved.systemPrompt).toBe("Existing instructions")
+    // The instructions are a separate shared setting, never part of this one.
+    expect(saved.systemPrompt).toBeUndefined()
   })
 
   it("shows a success message reflecting the actual fields saved, and the page stays open", async () => {

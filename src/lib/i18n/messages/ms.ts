@@ -4642,7 +4642,6 @@ export const ms: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Tampal kunci API anda",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Biar kosong jika tiada pengesahan",
   "projectSettings.advancedLlm.apiKeyHelp": "Dihantar sebagai Authorization: Bearer <key>. Disimpan secara tempatan dalam pelayar anda; tidak sekali-kali dimuat naik ke Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Kekal pada peranti ini — tidak dikongsi dengan kolaborator.",
   "projectSettings.advancedLlm.modelManualLabel": "Model (jika tiada dalam senarai)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Taip id model",
   "projectSettings.advancedLlm.modelManualHelp": "Klik Sambung untuk menemui model, atau taip satu secara manual (diperlukan untuk pembekal yang tidak mendedahkan {modelsPath}).",

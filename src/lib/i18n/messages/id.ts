@@ -4759,7 +4759,6 @@ export const id: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Tempel kunci API Anda",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Kosongkan bila tanpa autentikasi",
   "projectSettings.advancedLlm.apiKeyHelp": "Dikirim sebagai Authorization: Bearer <kunci>. Disimpan secara lokal di peramban Anda; tidak pernah diunggah ke Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Tetap di perangkat ini — tidak dibagikan kepada kolaborator.",
   "projectSettings.advancedLlm.modelManualLabel": "Model (bila tidak terdaftar)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Ketik sebuah id model",
   "projectSettings.advancedLlm.modelManualHelp": "Klik Sambungkan untuk menemukan model, atau ketik satu secara manual (wajib untuk penyedia yang tidak menyediakan {modelsPath}).",

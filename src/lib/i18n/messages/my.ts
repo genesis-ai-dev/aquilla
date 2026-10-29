@@ -4659,7 +4659,6 @@ export const my: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "သင့် API key ကို ကူးထည့်ပါ",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "အထောက်အထားမလိုပါက ဗလာချန်ထားပါ",
   "projectSettings.advancedLlm.apiKeyHelp": "Authorization: Bearer <key> အဖြစ် ပို့သည်။ သင့်ဘရောက်ဇာတွင် ဒေသတွင်းသိမ်းဆည်းသည်; Frontier သို့ ဘယ်တော့မှ တင်မည်မဟုတ်ပါ။",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "ဤစက်ပေါ်တွင်သာ ရှိနေမည် — ပူးပေါင်းဆောင်ရွက်သူများနှင့် မမျှဝေပါ။",
   "projectSettings.advancedLlm.modelLabel": "မော်ဒယ်",
   "projectSettings.advancedLlm.modelManualLabel": "မော်ဒယ် (စာရင်းမပါလျှင်)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "မော်ဒယ် id ကို ရိုက်ထည့်ပါ",

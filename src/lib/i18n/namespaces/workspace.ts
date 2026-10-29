@@ -244,6 +244,8 @@ export const workspace = defineNamespace({
     "workspace.aiDownloadChip.runsInBackground": "Runs in the background — keep working as normal.",
 
     // -- AiSetupDialog --
+    "workspace.aiSetup.teamProviderLocked":
+      "The AI provider and model are set for the whole project. Only {role} can change them. You can still pick your own provider in Preferences.",
     "workspace.aiSetup.title": "Set up AI",
     "workspace.aiSetup.description":
       "Choose once how this project drafts. You can change it later in settings.",
@@ -1359,6 +1361,14 @@ export const workspace = defineNamespace({
           "is stored on this project on this device — not a teammate-synced " +
           "setting and not the device-wide personal override.",
         screenshot: "confirm-dialog",
+      },
+      "workspace.aiSetup.teamProviderLocked": {
+        description:
+          "Error in the Set up AI dialog when someone below the settings floor picks a provider " +
+          "that would change the project's shared AI provider or model.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Maintainers'.",
+        },
       },
       "workspace.aiSetup.overrideDescription": {
         description:

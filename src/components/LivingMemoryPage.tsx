@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useMemo } from "react"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -252,7 +253,17 @@ export function LivingMemoryPage({
   // overlaySettings). Undefined while the record hydrates, and for a project
   // that never customized AI — the brief pane resolves both to the Frontier
   // platform default rather than reading them as "no provider" (AQU-1671).
-  const completionSettings = project?.completionSettings
+  // AQU-2259: a standalone visit's record carries no shared settings, so lay
+  // the team's drafting settings over it here (a no-op on the workspace's
+  // record, which already has them).
+  const completionSettings = useMemo(
+    () => (project ? overlaySettings(project, settings).completionSettings : undefined),
+    [project, settings],
+  )
+  const projectWithDrafting = useMemo(
+    () => (project && completionSettings !== project.completionSettings ? { ...project, completionSettings } : project),
+    [project, completionSettings],
+  )
 
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
     const next = addEntry(entries, kind, text, author)
@@ -475,7 +486,7 @@ export function LivingMemoryPage({
                 </h2>
                 <RulesSettingsSection
                   projectId={projectId}
-                  project={project}
+                  project={projectWithDrafting}
                   refreshProject={refreshProject}
                   patchSettings={patchSettings}
                   roleLevel={roleLevel}

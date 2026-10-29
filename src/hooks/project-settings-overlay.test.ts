@@ -181,3 +181,89 @@ describe("overlaySettings — AQU-1768 org media defaults", () => {
     expect(out.cellEditingFloor).toBeUndefined()
   })
 })
+
+// AQU-2259: the drafting settings (the "AI Instructions" card, the model
+// choice and the Health penalty) are the team's, so the shared value wins
+// over whatever this browser kept. The project's own AI key never travels
+// through the blob and must survive the overlay untouched.
+describe("overlaySettings — the team's drafting settings (AQU-2259)", () => {
+  const localCompletion = {
+    provider: "frontier" as const,
+    endpoint: "",
+    apiKey: "sk-this-browser-only",
+    model: "",
+    maxTokens: 16384,
+    temperature: 0.3,
+    systemPrompt: "Local copy of the instructions",
+    llmHealthPenalty: 0.1,
+    top_k: 10,
+    contextSize: "medium" as const,
+    main_chat_language: "",
+    fewShotExampleFormat: "source-and-target" as const,
+  }
+
+  it("puts the shared values on the record and keeps this browser's key", () => {
+    const out = overlaySettings(makeRecord({ completionSettings: localCompletion }), {
+      draftingSettings: {
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        model: "anthropic/claude-3.5-sonnet",
+        temperature: 0.7,
+        llmHealthPenalty: 0.25,
+        top_k: 17,
+        contextSize: "large",
+        fewShotExampleFormat: "target-only",
+        main_chat_language: "French",
+        completionBatchSize: 20,
+        validationBatchSize: 40,
+      },
+    })
+    expect(out.completionSettings).toMatchObject({
+      provider: "custom",
+      endpoint: "https://openrouter.ai/api/v1",
+      model: "anthropic/claude-3.5-sonnet",
+      temperature: 0.7,
+      llmHealthPenalty: 0.25,
+      top_k: 17,
+      contextSize: "large",
+      fewShotExampleFormat: "target-only",
+      main_chat_language: "French",
+      completionBatchSize: 20,
+      validationBatchSize: 40,
+      apiKey: "sk-this-browser-only",
+    })
+  })
+
+  it("reads a field the team left unset as its default, never this browser's copy", () => {
+    const out = overlaySettings(
+      makeRecord({ completionSettings: { ...localCompletion, top_k: 3, temperature: 0.9 } }),
+      { draftingSettings: { model: "team-model" } },
+    )
+    expect(out.completionSettings?.model).toBe("team-model")
+    expect(out.completionSettings?.top_k).toBe(10)
+    expect(out.completionSettings?.temperature).toBe(0.3)
+  })
+
+  it("keeps the shared written instructions on top", () => {
+    const out = overlaySettings(makeRecord({ completionSettings: localCompletion }), {
+      draftingSettings: { top_k: 12 },
+      systemPrompt: "Team instructions",
+    })
+    expect(out.completionSettings?.systemPrompt).toBe("Team instructions")
+    expect(out.completionSettings?.top_k).toBe(12)
+  })
+
+  it("leaves this browser's values alone while the team has none yet", () => {
+    const record = makeRecord({ completionSettings: { ...localCompletion, top_k: 3 } })
+    const out = overlaySettings(record, {})
+    expect(out.completionSettings?.top_k).toBe(3)
+  })
+
+  it("drops a malformed shared field instead of using it", () => {
+    const out = overlaySettings(makeRecord(), {
+      draftingSettings: { top_k: 9000, contextSize: "huge" } as never,
+    })
+    expect(out.completionSettings?.top_k).toBe(10)
+    expect(out.completionSettings?.contextSize).toBe("medium")
+  })
+})

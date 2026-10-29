@@ -5561,7 +5561,6 @@ export const ha: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Ku liƙa maɓallin API ɗinku",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Ku bar fanko idan babu tabbacin shiga",
   "projectSettings.advancedLlm.apiKeyHelp": "Ana aikawa a matsayin Authorization: Bearer <key>. Ana adana a burauzarku; ba a taba lodawa zuwa Frontier ba.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Yana zama a wannan na'ura — ba a raba shi da abokan aiki ba.",
   "projectSettings.advancedLlm.modelLabel": "Samfuri",
   "projectSettings.advancedLlm.modelManualLabel": "Samfuri (idan ba a jera ba)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Ku rubuta id na samfuri",

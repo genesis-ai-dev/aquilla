@@ -4677,7 +4677,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "貼上您的 API 金鑰",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "留白代表不需驗證",
   "projectSettings.advancedLlm.apiKeyHelp": "會以 Authorization: Bearer <key> 的形式送出。金鑰儲存在您的瀏覽器本機；絕不會上傳到 Frontier。",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "只會留在這台裝置上 — 不會與協作者共用。",
   "projectSettings.advancedLlm.modelLabel": "模型",
   "projectSettings.advancedLlm.modelManualLabel": "模型（若清單中沒有）",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "輸入模型 id",

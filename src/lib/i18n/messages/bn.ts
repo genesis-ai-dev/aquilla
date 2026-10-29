@@ -5569,7 +5569,6 @@ export const bn: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "আপনার API কী পেস্ট করুন",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "অথেন্টিকেশন না থাকলে খালি রাখুন",
   "projectSettings.advancedLlm.apiKeyHelp": "Authorization: Bearer <key> হিসেবে পাঠানো হয়। আপনার ব্রাউজারে রাখা হয়; Frontier-এ কখনো আপলোড হয় না।",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "এই ডিভাইসে থাকে — সহযোগীদের সাথে শেয়ার হয় না।",
   "projectSettings.advancedLlm.modelLabel": "মডেল",
   "projectSettings.advancedLlm.modelManualLabel": "মডেল (তালিকায় না থাকলে)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "একটি মডেল আইডি লিখুন",

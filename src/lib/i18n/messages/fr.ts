@@ -4729,7 +4729,6 @@ export const fr: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Collez votre clé API",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Laisser vide pour aucune authentification",
   "projectSettings.advancedLlm.apiKeyHelp": "Envoyée dans l'en-tête Authorization: Bearer <key>. Stockée localement dans votre navigateur ; jamais transmise à Frontier.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Reste sur cet appareil — non partagée avec les collaborateurs.",
   "projectSettings.advancedLlm.modelLabel": "Modèle",
   "projectSettings.advancedLlm.modelManualLabel": "Modèle (si non listé)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "Saisissez un identifiant de modèle",

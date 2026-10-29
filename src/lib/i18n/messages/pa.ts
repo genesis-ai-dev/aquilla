@@ -5554,7 +5554,6 @@ export const pa: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "ਆਪਣੀ API ਕੁੰਜੀ ਚਿਪਕਾਓ",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "ਬਿਨਾਂ ਪ੍ਰਮਾਣ ਲਈ ਖਾਲੀ ਛੱਡੋ",
   "projectSettings.advancedLlm.apiKeyHelp": "Authorization: Bearer <key> ਵਜੋਂ ਭੇਜੀ ਜਾਂਦੀ ਹੈ. ਤੁਹਾਡੇ ਬ੍ਰਾਊਜ਼ਰ ਵਿੱਚ ਸੰਭਾਲੀ ਜਾਂਦੀ ਹੈ; Frontier ਉੱਤੇ ਕਦੇ ਅੱਪਲੋਡ ਨਹੀਂ ਹੁੰਦੀ.",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "ਇਸ ਡਿਵਾਈਸ ਉੱਤੇ ਰਹਿੰਦੀ ਹੈ — ਸਹਿਯੋਗੀਆਂ ਨਾਲ ਸਾਂਝੀ ਨਹੀਂ.",
   "projectSettings.advancedLlm.modelLabel": "ਮਾਡਲ",
   "projectSettings.advancedLlm.modelManualLabel": "ਮਾਡਲ (ਜੇ ਸੂਚੀ ਵਿੱਚ ਨਾ ਹੋਵੇ)",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "ਇੱਕ ਮਾਡਲ id ਲਿਖੋ",

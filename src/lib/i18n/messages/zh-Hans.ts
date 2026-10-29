@@ -4676,7 +4676,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "粘贴您的 API 密钥",
   "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "留白代表不需验证",
   "projectSettings.advancedLlm.apiKeyHelp": "会以 Authorization: Bearer <key> 的形式送出。密钥保存在您的浏览器本机；绝不会上传到 Frontier。",
-  "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "只会留在这台设备上 — 不会与协作者共用。",
   "projectSettings.advancedLlm.modelLabel": "模型",
   "projectSettings.advancedLlm.modelManualLabel": "模型（若清单中没有）",
   "projectSettings.advancedLlm.modelManualPlaceholderGeneric": "输入模型 id",

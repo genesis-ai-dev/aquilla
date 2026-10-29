@@ -1648,13 +1648,37 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
     setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
-    // playback walks past it — drop it so the trigger quietly tracks the
-    // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
-    clearChapterNavigationSelection()
+    // playback walks past it — the trigger quietly tracks the sounding cell
+    // (Sam 2026-08-07). AQU-1758: by latching the SOUNDING line's chapter here,
+    // at every line, rather than dropping the latch and reading the top row:
+    // the running row rides 0.35 down, so when Play all crossed into the next
+    // chapter the old chapter's last rows were still above it, and the trigger
+    // kept the old chapter for a while. Now it switches the moment the new
+    // chapter's first line starts. A scroll by hand drops the latch, and the
+    // trigger names the chapter on screen again.
+    const key = milestoneKeyByCellId.get(cellId)
+    if (key) {
+      const subsectionKey = idmlMilestoneNavigation ? subsectionKeyByCellId.get(cellId) : undefined
+      setChapterNavigationSelection((current) =>
+        current?.fileId === audioFileId && current.label === key && current.subsectionKey === subsectionKey
+          ? current
+          : { fileId: audioFileId, label: key, ...(subsectionKey ? { subsectionKey } : {}) })
+    } else {
+      clearChapterNavigationSelection()
+    }
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [clearChapterNavigationSelection, programmaticListScroll, revealCellPage, setFollowHoverLock])
+  }, [
+    audioFileId,
+    clearChapterNavigationSelection,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    programmaticListScroll,
+    revealCellPage,
+    setFollowHoverLock,
+    subsectionKeyByCellId,
+  ])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than

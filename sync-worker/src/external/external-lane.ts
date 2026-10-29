@@ -6,19 +6,19 @@
 // that does not exist — "lane does not exist", with no name and no "archived"
 // — which is the AQU-1462 / external prepare response. Do not invent a status.
 
-import { type AskedLane, type ExternalLaneSpec, type ProjectLaneRecord } from '../../../db/shared/lanes'
-import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
-import { loadProjectSettings } from '../../../db/shared/projects'
-import type { AquillaDb } from '../../../db/shim/postgres'
 import {
-  archivedTagsFromSettings,
-  LANE_DOES_NOT_EXIST_REASON,
-} from '../../../src/lib/lanes/archived-lane'
+  listProjectLanes,
+  type AskedLane,
+  type ExternalLaneSpec,
+  type ProjectLaneRecord,
+} from '../../../db/shared/lanes'
+import { visibleTagsForMember } from '../../../db/shared/lane-visibility'
+import type { AquillaDb } from '../../../db/shim/postgres'
+import { LANE_DOES_NOT_EXIST_REASON } from '../../../src/lib/lanes/archived-lane'
 import {
   canonicalLanguageCodeOverride,
   laneDisplayName,
   laneLanguage,
-  type LaneLanguageSettings,
 } from '../../../src/lib/lanes/lane-display'
 
 /** The unauthenticated API map. Project lanes themselves are on the project read. */
@@ -49,7 +49,6 @@ export interface CallerLane {
 
 export interface LaneResolutionContext {
   rows: readonly ProjectLaneRecord[]
-  settings: Record<string, unknown>
   /** Null means the caller may see every lane. */
   visibleIds: ReadonlySet<string> | null
 }
@@ -76,31 +75,26 @@ export async function loadLaneResolutionContext(
   userId: number,
   role: number,
 ): Promise<LaneResolutionContext> {
-  const [settings, visibility] = await Promise.all([
-    loadProjectSettings(db, projectId),
+  const [rows, visibility] = await Promise.all([
+    listProjectLanes(db, projectId),
     visibleTagsForMember(db, flag, projectId, userId, role),
   ])
-  return {
-    rows: settings.lanes ?? [],
-    settings: settings.settings,
-    visibleIds: visibility.visible,
-  }
+  return { rows, visibleIds: visibility.visible }
 }
 
-/** Settings-aware load. Prefer this when the caller already has the blob. */
+/** Build the context from lane rows the caller already loaded. */
 export function laneContextFrom(
   rows: readonly ProjectLaneRecord[],
-  settings: Record<string, unknown>,
   visibleIds: ReadonlySet<string> | null,
 ): LaneResolutionContext {
-  return { rows, settings, visibleIds }
+  return { rows, visibleIds }
 }
 
-function toCallerLane(lane: ProjectLaneRecord, settings: LaneLanguageSettings | null | undefined): CallerLane {
+function toCallerLane(lane: ProjectLaneRecord): CallerLane {
   return {
     id: lane.id,
     name: laneDisplayName(lane),
-    language: laneLanguage(lane, { settings, role: lane.role, legacyTag: lane.legacyTag }),
+    language: laneLanguage(lane, { role: lane.role, legacyTag: lane.legacyTag }),
     role: lane.role,
     legacyTag: lane.legacyTag,
     archivedAt: lane.archivedAt,
@@ -135,38 +129,28 @@ export function laneContextWithPlanned(
     visibleIds?.add(lane.id)
   }
   if (extra.length === 0) return ctx
-  return { rows: [...ctx.rows, ...extra], settings: ctx.settings, visibleIds }
+  return { rows: [...ctx.rows, ...extra], visibleIds }
 }
 
 /** Target lanes this caller may write: visible, and not archived. */
 export function writableTargetLanes(ctx: LaneResolutionContext): ProjectLaneRecord[] {
-  const archived = archivedTagsFromSettings(ctx.settings)
   return ctx.rows.filter((lane) => {
     if (lane.role !== 'target') return false
     if (ctx.visibleIds !== null && !ctx.visibleIds.has(lane.id)) return false
-    return !rowIsArchived(lane, archived)
+    return !rowIsArchived(lane)
   })
 }
 
 /** Lanes this caller may see, in display order. A hidden lane is absent. */
 export function lanesVisibleToCaller(ctx: LaneResolutionContext): CallerLane[] {
-  const settings = ctx.settings as LaneLanguageSettings
   return ctx.rows
     .filter((lane) => lane.role === 'source' || ctx.visibleIds === null || ctx.visibleIds.has(lane.id))
-    .map((lane) => toCallerLane(lane, settings))
+    .map(toCallerLane)
 }
 
-function listed(tags: readonly string[], value: string): boolean {
-  if (!value) return false
-  const needle = value.toLowerCase()
-  return tags.some((tag) => tag !== '' && tag.toLowerCase() === needle)
-}
-
-function rowIsArchived(lane: ProjectLaneRecord, archivedTags: readonly string[]): boolean {
-  if (lane.archivedAt != null && lane.archivedAt !== '') return true
-  // The '' bridge is archived only by its row. archivedLanes cannot name it.
-  if ((lane.legacyTag ?? '') === '') return false
-  return listed(archivedTags, lane.legacyTag ?? '') || listed(archivedTags, lane.name ?? '')
+/** AQU-2223: the row's `archived_at` is the only record of an archived lane. */
+function rowIsArchived(lane: ProjectLaneRecord): boolean {
+  return lane.archivedAt != null && lane.archivedAt !== ''
 }
 
 export type ResolvedTargetLane =
@@ -200,10 +184,10 @@ export function resolveTargetLaneId(
     }
     return { ok: false, message: `${where} ${LANE_DOES_NOT_EXIST_REASON}` }
   }
-  if (rowIsArchived(row, archivedTagsFromSettings(ctx.settings))) {
+  if (rowIsArchived(row)) {
     return { ok: false, message: `${where} lane '${laneDisplayName(row)}' is archived` }
   }
-  return { ok: true, lane: toCallerLane(row, ctx.settings as LaneLanguageSettings) }
+  return { ok: true, lane: toCallerLane(row) }
 }
 
 /** Shape-check a CreateProject / ProjectSetup `lanes` array. Does not mint ids. */

@@ -1,7 +1,7 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 4
+export const OFFLINE_DATA_GENERATION = 5
 
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
@@ -417,6 +417,12 @@ const events = {
     name: "v1.SyncCursorsRemoved",
     schema: Schema.Struct({ projectId: Schema.String }),
   }),
+  // A project's whole local copy in one event. Removing it a row at a time
+  // was one commit per cell — minutes of frozen page on a 31k-cell project.
+  offlineCopyRemoved: Events.clientOnly({
+    name: "v1.OfflineCopyRemoved",
+    schema: Schema.Struct({ projectId: Schema.String }),
+  }),
 }
 
 export { events }
@@ -515,6 +521,15 @@ const materializers = State.SQLite.materializers(events, {
       .insert({ id: syncCursorId(projectId, fileId), projectId, fileId, serverSeq, projectEpoch })
       .onConflict("id", "update", { serverSeq, projectEpoch }),
   "v1.SyncCursorsRemoved": ({ projectId }) => tables.syncCursors.delete().where({ projectId }),
+  // Queued writes stay: removal refuses a project with any, and a stranded
+  // row is still the user's unsent work.
+  "v1.OfflineCopyRemoved": ({ projectId }) => [
+    tables.cells.delete().where({ projectId }),
+    tables.files.delete().where({ projectId }),
+    tables.projects.delete().where({ id: projectId }),
+    tables.syncCursors.delete().where({ projectId }),
+    tables.offlineProjects.delete().where({ projectId }),
+  ],
 })
 
 const state = State.SQLite.makeState({ tables, materializers })

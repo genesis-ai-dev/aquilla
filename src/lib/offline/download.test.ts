@@ -377,6 +377,59 @@ describe("removeOfflineProject", () => {
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 
+  it("removes the whole copy in one commit and leaves other projects alone", async () => {
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+    store.commit(
+      events.syncCursorSet({ projectId: "proj1", fileId: "file1", serverSeq: 9, projectEpoch: 1 }),
+      events.offlineProjectStatusSet({ projectId: "proj2", status: "ready", syncedAt: null, queueDepth: 0 }),
+      events.projectSynced({ id: "proj2", name: "Mark", orgId: "org1", settings: null, syncedAt: null }),
+      events.fileSynced({ id: "fileB", projectId: "proj2", name: "MRK", type: "usfm", sequenceIndex: 0 }),
+      events.cellsSynced({
+        projectId: "proj2",
+        fileId: "fileB",
+        rows: [
+          {
+            cellId: "m1",
+            side: "source",
+            value: "hello",
+            valueHtml: null,
+            eventId: "evtB",
+            sourceEventId: null,
+            validated: false,
+            aiDrafted: false,
+            sequenceIndex: 0,
+            canonicalRef: null,
+            targetLang: "",
+            laneId: null,
+          },
+        ],
+      }),
+      events.syncCursorSet({ projectId: "proj2", fileId: "fileB", serverSeq: 3, projectEpoch: 1 }),
+    )
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" })).length).toBeGreaterThan(0)
+
+    const commit = store.commit
+    let commits = 0
+    store.commit = ((...args: Parameters<typeof commit>) => {
+      commits += 1
+      return commit(...args)
+    }) as typeof commit
+    try {
+      expect(removeOfflineProject(store, "proj1")).toEqual({ ok: true })
+    } finally {
+      store.commit = commit
+    }
+
+    expect(commits).toBe(1)
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.syncCursors.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.cells.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.files.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.projects.select().where({ id: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.syncCursors.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj2" }))).toHaveLength(1)
+  })
+
   it("blocks removal when a pending write is queued, and reports the depth", async () => {
     await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     store.commit(

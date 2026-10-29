@@ -4,8 +4,9 @@
 // `SELECT settings FROM project_settings` + `JSON.parse` — a column the table's
 // own comment calls multi-MB, detoasted and shipped to the Worker on every
 // autosave flush just to ask "is this lane archived?". Migration 0171 projects
-// these eleven keys into STORED generated `wp_*` columns, so the write path
-// reads one narrow row instead.
+// these keys into STORED generated `wp_*` columns, so the write path reads one
+// narrow row instead. AQU-2223: archived lanes are read off `lanes.archived_at`
+// (events/archived-lane.ts), so `wp_archived_lanes` is no longer selected.
 //
 // This type is deliberately CLOSED: a key that is not listed here is not
 // projected, so reading one off this object would silently be `undefined`
@@ -20,8 +21,6 @@
 
 /** The keys the events write path reads out of `project_settings.settings`. */
 export interface WritePathSettings {
-  /** Legacy mirror of the archived-lane list: tags, never the `''` lane. */
-  archivedLanes?: unknown
   /** Unlocks the timeline only when exactly `false` (timing-authority.ts). */
   timingLocked?: unknown
   /** Refuses timeline restructuring only when exactly `false` (AQU-2214). */
@@ -42,7 +41,6 @@ export interface WritePathSettings {
  * and the object can never fall out of step.
  */
 export const WRITE_PATH_COLUMNS: Readonly<Record<string, keyof WritePathSettings>> = {
-  wp_archived_lanes: 'archivedLanes',
   wp_timing_locked: 'timingLocked',
   wp_allow_track_editing: 'allowTrackEditing',
   wp_validation_count: 'validationCount',

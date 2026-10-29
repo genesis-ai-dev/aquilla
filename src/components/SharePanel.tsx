@@ -278,7 +278,7 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
           resolveCloudProjectResult(projectId, jwt),
         ])
         if (!alive) return
-        const defaultLanguage = laneLanguageForTag("", settingsRes?.lanes, settingsRes?.settings) ?? ""
+        const defaultLanguage = laneLanguageForTag("", settingsRes?.lanes) ?? ""
         const defaultLabel = defaultLanguage || "Default"
         // AQU-1607: one option per lane ROW, valued by lane id, so scoping
         // someone to one of two lanes sharing a language picks that lane.

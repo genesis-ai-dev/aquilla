@@ -5,10 +5,11 @@
  * Maintainer, and it applies whether or not `LANE_READ_WALL` is on.
  *
  * AQU-1600: the former default lane (tag `''`) is an ordinary lane and can be
- * archived, so a write that names it is frozen like any other. Its archived
- * state lives ONLY on the lane row's `archivedAt` — the legacy
- * `settings.archivedLanes` mirror is a list of tags and cannot name a lane
- * whose tag is the empty string, so that mirror is not consulted for `''`.
+ * archived, so a write that names it is frozen like any other.
+ *
+ * AQU-2223: a lane's archived state lives only on its row's `archivedAt`. The
+ * retired project-level archived-lane list is not consulted; migration 0188
+ * copied it onto the rows.
  *
  * The wording does consult the read wall. A caller who is allowed to know the
  * lane exists (wall off, platform, Maintainer+, or a grant at Viewer or
@@ -89,7 +90,7 @@ export function writesLaneRow(kind: string): boolean {
 export function missingLaneReason(tag: string): string {
   return tag === ""
     ? "no lane named: this project has no default lane; name the target lane with laneId (or targetLang)"
-    : `unknown lane "${tag}"; register it in settings.targetLanes`
+    : `unknown lane "${tag}"; name an existing lane with laneId, or create the lane first`
 }
 
 /**
@@ -107,29 +108,14 @@ export function laneTagForArchiveCheck(kind: string, payload: unknown): string |
   return null
 }
 
-export function archivedTagsFromSettings(
-  settings: { archivedLanes?: unknown } | null | undefined,
-): string[] {
-  const raw = settings?.archivedLanes
-  if (!Array.isArray(raw)) return []
-  return raw.filter((tag): tag is string => typeof tag === "string" && tag !== "")
-}
-
-function listed(tags: readonly string[], value: string): boolean {
-  if (value === "") return false
-  const needle = value.toLowerCase()
-  return tags.some((tag) => tag.toLowerCase() === needle)
-}
-
 /**
  * Refusal for a caller who must not learn that the lane exists.
  * No lane name, no tag, and not the word "archived".
  */
 export const LANE_DOES_NOT_EXIST_REASON = "lane does not exist"
 
-function rowIsArchived(lane: ArchiveLaneRow, archivedTags: readonly string[]): boolean {
-  if (lane.archivedAt != null && lane.archivedAt !== "") return true
-  return listed(archivedTags, lane.legacyTag ?? "") || listed(archivedTags, lane.name ?? "")
+function rowIsArchived(lane: ArchiveLaneRow): boolean {
+  return lane.archivedAt != null && lane.archivedAt !== ""
 }
 
 /**
@@ -142,30 +128,20 @@ function rowIsArchived(lane: ArchiveLaneRow, archivedTags: readonly string[]): b
 export function archivedLaneReason(input: {
   tag: string
   lanes: readonly ArchiveLaneRow[]
-  archivedTags: readonly string[]
   visibleLaneIds?: ReadonlySet<string> | null
 }): string | null {
   const matches = lanesForRequestedTag(input.lanes, input.tag)
-  const archivedMatch = matches.find((lane) => lane.archivedAt != null && lane.archivedAt !== "")
-  // AQU-1600: for the former default lane (tag '') the row is the only truth.
-  // `archivedTags` holds tags, and matching one against the '' lane's NAME
-  // would archive it because some unrelated lane shares that name.
-  const inSettings =
-    input.tag !== "" &&
-    (listed(input.archivedTags, input.tag) ||
-      matches.some(
-        (lane) => listed(input.archivedTags, lane.legacyTag ?? "") || listed(input.archivedTags, lane.name ?? ""),
-      ))
-  if (!archivedMatch && !inSettings) return null
+  const archivedMatch = matches.find(rowIsArchived)
+  if (!archivedMatch) return null
 
   const visible = input.visibleLaneIds
   if (visible != null) {
-    const knowable = matches.find((lane) => visible.has(lane.id) && rowIsArchived(lane, input.archivedTags))
+    const knowable = matches.find((lane) => visible.has(lane.id) && rowIsArchived(lane))
     if (!knowable) return LANE_DOES_NOT_EXIST_REASON
     const display = (knowable.name ?? "").trim() || input.tag
     return `lane '${display}' is archived`
   }
 
-  const display = (archivedMatch?.name ?? matches[0]?.name ?? "").trim() || input.tag
+  const display = (archivedMatch.name ?? "").trim() || input.tag
   return `lane '${display}' is archived`
 }

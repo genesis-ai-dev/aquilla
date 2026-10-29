@@ -116,16 +116,13 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
  * switches → structured blobs).
  */
 export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec>> = {
-  // Identity / language
-  sourceLanguage: { kind: 'string' },
-  targetLanguage: { kind: 'string' },
-  targetLanes: { kind: 'string[]' },
-  archivedLanes: { kind: 'string[]' },
+  // Language. AQU-1615 / AQU-2223: the language pair and the lane registry are
+  // lane rows, not settings keys (db/shared/retired-lane-settings.ts).
   // AQU-1471: the project's DEFAULT text direction per side. "auto" (and an
   // absent key) means "take it from the language", which is what every project
   // did before these keys existed. They are a default, never a stamp: nothing
   // copies them onto the file rows, so a per-file override still wins and
-  // changing targetLanguage still moves every file that has no override.
+  // changing a lane's language still moves every file that has no override.
   sourceTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
   targetTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
 

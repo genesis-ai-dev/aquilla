@@ -21,19 +21,20 @@ and applies before the next step reads the state it produced.
    server-side and staging from its results, so the original round-trips on
    export. Duplicate file names are a staleness precondition — commit re-checks.
 
-2. Languages and lanes.
-   propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
-     ops:[{key:'sourceLanguage', value:'…'}, {key:'targetLanguage', value:'…'},
-          {key:'targetLanes', value:['es','pt']}]}]})
-   Gotchas: PatchSettings is also sole-command; read the LIVE settings version
-   first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
-   again); one op per key (a duplicate key is validation_failed); floor
-   MAINTAINER (600) for these keys. Register lanes BEFORE any lane-scoped
-   SetTranslation — prepare rejects an unregistered laneId.
-   Omitting laneId writes the former default lane (legacy_tag ''). A regional
-   lane beside it (fr-CA in a French project) is its own lane and must be
-   registered. When a draft or prompt needs a language, read lanes.language
-   for that lane — never the lane tag, and never these settings keys.
+2. Languages and lanes. A project's languages are its lanes — rows with an
+   id, a role and a language — not settings keys. Read them first (the
+   project's lanes: [{ id, name, language, role }]). A lane that is missing is
+   added by the person in Project settings → Languages, or staged with
+   ProjectSetup:
+   propose_command({commands:[{kind:'ProjectSetup', projectId,
+     lanes:[{role:'target', language:'…', name?, code?}]}]})
+   Gotchas: ProjectSetup is sole-command; floor MAINTAINER (600). Never
+   PatchSettings sourceLanguage, targetLanguage, targetLanes or archivedLanes —
+   those keys are rejected. Create lanes BEFORE any lane-scoped SetTranslation
+   — prepare rejects an unknown laneId. Address every lane by its id. A
+   regional lane (fr-CA in a French project) is its own lane. When a draft or
+   prompt needs a language, read lanes.language for that lane — never the
+   lane tag.
 
 3. Termbase seed. Read the concepts table first (docs('terminology')): a
    second term.create for an existing source term does not merge. Then:
@@ -48,9 +49,14 @@ and applies before the next step reads the state it produced.
    text and the person's decisions, never from general knowledge.
 
 4. Translation brief. Key 'translationBrief' (audience, purpose, register,
-   literalness, key-term strategy, constraints), staged the same way at
-   MAINTAINER. Propose a DRAFT brief from what the project already shows and
-   ask the person to correct it — do not invent standards. See docs('brief').
+   literalness, key-term strategy, constraints), staged with
+   propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
+     ops:[{key:'translationBrief', value:{…}}]}]})
+   Gotchas: PatchSettings is sole-command; read the LIVE settings version
+   first and pass it as ifMatchVersion (drift → plan_stale, re-read and stage
+   again); floor MAINTAINER (600). Propose a DRAFT brief from what the
+   project already shows and ask the person to correct it — do not invent
+   standards. See docs('brief').
 
 5. Route the work.
    propose_command({commands:[{kind:'EmitEvents', events:[{kind:
@@ -63,7 +69,7 @@ and applies before the next step reads the state it produced.
 
 Done when readiness has no blocking gaps — verify, do not assume:
 - a source file exists with cells: read({fileId}) returns rows
-- targetLanes / sourceLanguage / targetLanguage are set
+- the project has a source lane and at least one target lane, each with a language
 - the concepts table has live concepts (or the person explicitly deferred it)
 - translationBrief is non-null
 - at least one active assignment covers the work

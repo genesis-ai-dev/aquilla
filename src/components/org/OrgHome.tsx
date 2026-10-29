@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { ATTENTION_PROJECT_SORT } from "@/lib/org/project-list-sort"
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { AppShell } from "@/components/AppShell"
@@ -11,7 +12,7 @@ import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-
 import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, portfolioDeliversText, progressPct, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolioAggregates, translatedPct, validatedPct, audioPct, deadlineStatus, languagePairLabel, portfolioDeliversText, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { emptyPortfolioAggregate } from "@/lib/frontier/portfolio-metrics"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
@@ -151,9 +152,6 @@ export function activityStatus(p: PortfolioProject, now: number): ActivityStatus
   return portfolioActivityStatus(p, now)
 }
 
-type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
-
-const PROJECT_LENS_STORAGE_KEY = "org:all-projects:view"
 
 function ProjectTableName({ name }: { name: string }) {
   const nameRef = useRef<HTMLSpanElement>(null)
@@ -202,7 +200,6 @@ function ProjectTableName({ name }: { name: string }) {
     </span>
   )
 }
-const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-translated", "most-progress", "name", "pm"]
 
 export type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
@@ -221,14 +218,6 @@ type OrgPortfolioSummary = {
   overdueCount: number
 }
 
-export function readProjectLens(): ProjectLens {
-  try {
-    const stored = localStorage.getItem(PROJECT_LENS_STORAGE_KEY)
-    return PROJECT_LENS_VALUES.includes(stored as ProjectLens) ? stored as ProjectLens : "recent"
-  } catch {
-    return "recent"
-  }
-}
 
 function orgDisplayName(org: OrgSummary): string {
   return org.name ?? "Workspace"
@@ -298,34 +287,6 @@ function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon
   return deadlineStatusTooltip(status, project.deadlineAt)
 }
 
-export function sortProjectsByLens(projects: PortfolioProjectRow[], lens: ProjectLens, now: number): PortfolioProjectRow[] {
-  return [...projects].sort((a, b) => {
-    switch (lens) {
-      case "recent":
-        return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0) || a.name.localeCompare(b.name)
-      // Media redesign slice 1: progress by what each language delivers —
-      // the translated share for a Text project, as before.
-      case "least-translated":
-        return progressPct(a) - progressPct(b) || a.name.localeCompare(b.name)
-      case "most-progress":
-        return progressPct(b) - progressPct(a) || a.name.localeCompare(b.name)
-      case "name":
-        return a.name.localeCompare(b.name)
-      case "pm": {
-        // AQU-507: group by PM username; unassigned projects sort *last* (they
-        // are noise for someone scanning by who's responsible), then by name.
-        const an = a.pm?.username ?? null
-        const bn = b.pm?.username ?? null
-        if (an && bn) return an.localeCompare(bn) || a.name.localeCompare(b.name)
-        if (an) return -1
-        if (bn) return 1
-        return a.name.localeCompare(b.name)
-      }
-      case "attention":
-        return attentionRank(b, now) - attentionRank(a, now) || a.name.localeCompare(b.name)
-    }
-  })
-}
 
 // Keep the decision-making columns stable at normal project-panel widths.
 // Organization remains secondary information inside the identity cell, while
@@ -587,7 +548,6 @@ export function OrgHome() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [originFilter, setOriginFilter] = useState<"all" | "member" | "shared">("all")
   const [projectQuery, setProjectQuery] = useState("")
-  const projectLens = readProjectLens()
   const directoryOrgIds = useMemo(() => orgs.map((org) => org.id), [orgs])
   const orgById = useMemo(() => new Map(orgs.map((org) => [org.id, org])), [orgs])
   const pmByProjectId = useMemo(
@@ -961,7 +921,8 @@ export function OrgHome() {
                         showOrg
                         layout="embedded"
                         testId="project-table"
-                        initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                        rememberSort
+                        initialSort={statusFilter === "attention" ? ATTENTION_PROJECT_SORT : undefined}
                         searchValue={projectQuery}
                         onSearchChange={setProjectQuery}
                         searching={directory.searching}

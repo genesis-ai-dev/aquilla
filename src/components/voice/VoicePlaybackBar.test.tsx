@@ -63,6 +63,12 @@ vi.mock("@/hooks/useFileAudioAttachments", async (importActual) => {
   }
 })
 
+// Counts the bar's own programme layouts (AQU-1758), laying out as ever.
+vi.mock("@/lib/timeline/programme", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/programme")>()
+  return { ...actual, layOutProgramme: vi.fn(actual.layOutProgramme) }
+})
+
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
 import { startQueue, setQueueRate, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
 import { layOutProgramme } from "@/lib/timeline/programme"
@@ -398,6 +404,20 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     render(strip())
     expect(screen.getByTestId("transport-time")).toHaveTextContent("1:19 / 1:28")
     act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+  })
+
+  // The timeline and the play queue each lay the same lines out already; the
+  // strip's own layout is only for the length before play.
+  it("lays nothing out while it plays: the queue gives the length then", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 10, playing: true, duration: 87.94 }))
+    vi.mocked(layOutProgramme).mockClear()
+    const { rerender } = render(strip())
+    // A generate lands on a line mid-play.
+    rerender(<VoicePlaybackBar variant="strip" cells={[...BOOK]} projectId="p" session={null} settings={undefined} freeTiming />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:10 / 1:28")
+    expect(layOutProgramme).not.toHaveBeenCalled()
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
   })
 
   it("keeps a file that follows its source as it was before play", () => {

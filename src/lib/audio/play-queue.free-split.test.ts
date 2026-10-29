@@ -109,7 +109,8 @@ describe("Free timing — a split take", () => {
       ...line,
       attachments: {
         ...line.attachments,
-        [`${PIECE}.wav`]: { ...line.attachments![`${PIECE}.wav`], targetOffsetMs: 2000 },
+        // Moved 0.7 s along from the end of the first piece.
+        [`${PIECE}.wav`]: { ...line.attachments![`${PIECE}.wav`], targetOffsetMs: 700 },
       },
     } as unknown as CellData
     setQueueTimingMode("audioFirst")

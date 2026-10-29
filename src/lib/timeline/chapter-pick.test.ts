@@ -4,7 +4,7 @@
 // and picking the chapter that is playing changes nothing.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { applyChapterPick, planChapterPick } from "./chapter-pick"
+import { applyChapterPick, planChapterPick, rowEndsPlayback } from "./chapter-pick"
 import type { TimelineChapter } from "./sequence-timeline"
 import { getQueueState, setQueueTimingMode, startQueue, stopQueue, type PlayContext } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
@@ -123,5 +123,37 @@ describe.each([
     expect(take("r2v1")?.paused).toBe(false)
     // Nothing of Ruth 1 sounds any more.
     expect(FakeAudio.instances.filter((a) => a.src.includes("/r1v") && !a.paused)).toHaveLength(0)
+  })
+})
+
+// AQU-1758: scrolling the table onto another chapter is not a pick. Play all
+// paused at Ruth 1:2 and the table scrolled on to read Ruth 2 still resumes at
+// Ruth 1:2; only a pick, or a row of another chapter clicked, ends it.
+describe("a row of another chapter, while playback is paused (AQU-1758)", () => {
+  beforeEach(() => {
+    FakeAudio.instances = []
+    vi.stubGlobal("Audio", FakeAudio)
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    stopQueue()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it("ends a paused playback only for a row of another chapter", () => {
+    expect(rowEndsPlayback({ rowKey: "RUT 2", playingKey: "RUT 1", queueKind: "paused" })).toBe(true)
+    expect(rowEndsPlayback({ rowKey: "RUT 1", playingKey: "RUT 1", queueKind: "paused" })).toBe(false)
+    expect(rowEndsPlayback({ rowKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing" })).toBe(false)
+    expect(rowEndsPlayback({ rowKey: "RUT 2", playingKey: null, queueKind: "idle" })).toBe(false)
+  })
+
+  it("is the queue's real state that decides: paused at Ruth 1:2, a row of Ruth 2 ends it", async () => {
+    startQueue({ cells: RUTH.slice(0, 2), projectId: "p1", session }, 1)
+    await settle()
+    take("r1v2")?.pause()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "r1v2" })
+    expect(rowEndsPlayback({ rowKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind })).toBe(true)
   })
 })

@@ -16,7 +16,6 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
-import { TimingInfoButton } from "@/components/timeline/TimingModeControl"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
@@ -149,6 +148,7 @@ import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-se
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -789,6 +789,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
   const [filmAndSources, setFilmAndSources] = useState<boolean | null>(null)
   const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
+  // Sam, Oct 28: an (i) opens its explanation beneath the setting's title.
+  const [filmInfoOpen, toggleFilmInfo] = useInfoOpen()
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
   // shows while the project follows the organization, and where "Set for this
@@ -3189,14 +3191,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   disabled={!canEditShared}
                   onCheckedChange={(checked) => setFilmAndSources(checked)}
                 />
-                <label htmlFor="film-and-sources" className="min-w-0 flex-1 text-sm">
-                  {t("projectSettings.timeline.filmAndSourcesLabel")}
-                </label>
-                <TimingInfoButton
-                  label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
-                  text={t("projectSettings.timeline.filmAndSourcesInfo")}
-                  testId="settings-film-and-sources-info"
-                />
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="film-and-sources">{t("projectSettings.timeline.filmAndSourcesLabel")}</label>
+                    <InfoToggle
+                      open={filmInfoOpen}
+                      onToggle={toggleFilmInfo}
+                      label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                      controls="settings-film-and-sources-explanation"
+                      testId="settings-film-and-sources-info"
+                    />
+                  </span>
+                  <InfoReveal open={filmInfoOpen} id="settings-film-and-sources-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
+                  </InfoReveal>
+                </span>
               </div>
             </CardContent>
           </Card>

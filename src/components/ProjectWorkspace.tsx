@@ -220,7 +220,7 @@ import {
   timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
-import { applyChapterPick, planChapterPick } from "@/lib/timeline/chapter-pick"
+import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -13719,18 +13719,15 @@ export function ProjectWorkspace() {
     const ids = new Set(timelineCells.map((c) => c.id))
     return legacyCells.filter((c) => ids.has(c.id))
   }, [audioMergedCells, legacyCells, timelineCells])
-  // A book's chapter comes from the table's chapter picker.
+  // A book's chapter comes from the table: the chapter on screen, as it
+  // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
+  // a paused Play all resumes where it was, and the timeline stays on its
+  // chapter until it ends (lib/timeline/chapter-pick). A pick in the chapter
+  // picker and a row of another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
-  // Moving to another chapter while playback is PAUSED on a line of this one
-  // ends that playback, so the timeline can follow; a run that is playing
-  // keeps the timeline on its own chapter until it is paused or ends.
   const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
-  useEffect(() => {
-    if (!chosenScopeKey || !queueChapterKey || queueChapterKey === chosenScopeKey) return
-    if (getQueueState().kind === "paused") stopQueue()
-  }, [chosenScopeKey, queueChapterKey])
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
   // it and keeps playing, from its first line, in either timing. Picking one
   // while playback is paused ends that playback, as before. Either way the
@@ -13758,7 +13755,10 @@ export function ProjectWorkspace() {
     chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
-      if (chapter) setChosenScopeKey(chapter.key)
+      if (!chapter) return
+      setChosenScopeKey(chapter.key)
+      // Paused on another chapter: end it, so the timeline shows this row's.
+      if (rowEndsPlayback({ rowKey: chapter.key, playingKey: queueChapterKeyRef.current, queueKind: getQueueState().kind })) stopQueue()
     }
   })
   useEffect(() => onQueueRanOut((ctx) => {

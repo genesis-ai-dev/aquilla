@@ -9,8 +9,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { useMemo, useState } from "react"
-import { startDockLayout, writeStoredDock } from "./media-dock-layout"
+import { movePanel, startDockLayout, writeStoredDock } from "./media-dock-layout"
 import { useMediaDock } from "./useMediaDock"
+import { writeStoredVideoPaneWidth } from "./video-pane-layout"
 
 type Handle = {
   resize: ReturnType<typeof vi.fn>
@@ -69,6 +70,8 @@ const FULL_SCREEN = { code: "KeyF", key: "F", metaKey: true, shiftKey: true }
 const SHOW_TIMELINE = { code: "Digit1", key: "1", altKey: true }
 const ESC = { code: "Escape", key: "Escape" }
 
+const nextFrame = () => act(() => new Promise<void>((done) => requestAnimationFrame(() => done())))
+
 describe("useMediaDock", () => {
   beforeEach(() => {
     localStorage.clear()
@@ -109,5 +112,34 @@ describe("useMediaDock", () => {
       expect(result.current.dock.view.openRegions).toEqual(["tl", "ll", "lr"])
       expect(result.current.leftTab).toBe("files")
     })
+  })
+
+  // Review finding 3: the sizes went on in the switch's first commit, which
+  // still held the old file's arrangement.
+  it("opens the next file's film at its own width, in its own area, and leaves its text alone", async () => {
+    // f1: the film bottom right at 400 px. f2: as every file starts, the film
+    // bottom left, with no width of its own (its kind's 288).
+    writeStoredDock("f1", movePanel(movePanel(startDockLayout(), "film", "lr"), "text", "ll"))
+    writeStoredVideoPaneWidth("f1", 400)
+    const { result, rerender } = setup("f1")
+    await nextFrame()
+    expect(result.current.dock.view.areaOf("film")).toBe("lr")
+    expect(handles.lr.resize).toHaveBeenCalledWith(400)
+    for (const h of Object.values(handles)) h.resize.mockClear()
+    const writes = vi.spyOn(window.localStorage, "setItem")
+
+    try {
+      rerender({ fileId: "f2" })
+      await nextFrame()
+      expect(result.current.dock.view.areaOf("film")).toBe("ll")
+      expect(handles.ll.resize).toHaveBeenCalledWith(288)
+      expect(handles.lr.resize).not.toHaveBeenCalled()
+      // …and f1's arrangement was never written under f2, not even for a moment.
+      const underF2 = writes.mock.calls.filter(([key]) => key === "aquilla:mediaDock:f2").map(([, raw]) => JSON.parse(raw).areas)
+      expect(underF2.length).toBeGreaterThan(0)
+      for (const areas of underF2) expect(areas).toEqual({ ll: ["film"], lr: ["text"] })
+    } finally {
+      writes.mockRestore()
+    }
   })
 })

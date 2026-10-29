@@ -142,18 +142,21 @@ export function useMediaDock(input: UseMediaDockInput) {
   const presence = useMemo(() => ({ film: filmPresent }), [filmPresent])
 
   const [layout, setLayout] = useState<DockLayout>(() => readStoredDock(fileId) ?? startDockLayout())
-  // Per file, read on switch: the panels do not remount with the file.
-  const loadedFor = useRef(fileId)
-  useEffect(() => {
-    if (loadedFor.current === fileId) return
-    loadedFor.current = fileId
+  // Per file, read on switch: the panels do not remount with the file. Read
+  // during the render that brings the new file, so no commit ever pairs one
+  // file with the other's arrangement. Read in an effect, the switch's first
+  // commit still held the old file's layout: the sizes were put on the old
+  // file's areas (the film's width on what is now the text), and the old
+  // layout was written under the new file's key.
+  const [layoutFor, setLayoutFor] = useState(fileId)
+  if (layoutFor !== fileId) {
+    setLayoutFor(fileId)
     setLayout(readStoredDock(fileId) ?? startDockLayout())
-    lastOpenRef.current = {}
-  }, [fileId])
+  }
   // Written on change — only in the media lens, so a visit to the text lens
   // never writes what the reader arranged.
   useEffect(() => {
-    if (!timelineStacked || loadedFor.current !== fileId) return
+    if (!timelineStacked) return
     writeStoredDock(fileId, layout)
   }, [fileId, layout, timelineStacked])
 
@@ -306,6 +309,10 @@ export function useMediaDock(input: UseMediaDockInput) {
 
   const frozenRef = useRef<Partial<Record<DockRegion, { width: number; height: number }>>>({})
   const lastOpenRef = useRef<Partial<Record<DockRegion, number>>>({})
+  // A size noted on one file is never remembered for the next.
+  useEffect(() => {
+    lastOpenRef.current = {}
+  }, [fileId])
   const timelineContentRef = useRef<HTMLElement | null>(null)
   const freeze = useCallback((region: DockRegion) => {
     const el = region === "tl" ? timelineContentRef.current : boxesRef.current[region]
@@ -586,10 +593,17 @@ export function useMediaDock(input: UseMediaDockInput) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the latest sizes through the closures
   }, [safeResize, safeSize, timelineStacked, view])
 
-  /** On a file switch or a return from the text lens, the remembered sizes. */
+  /**
+   * On a file switch or a return from the text lens, the remembered sizes —
+   * on the next frame. Files arrange their areas differently (one has the film
+   * bottom right, the next bottom left), and the group takes the panels' new
+   * minimums only on the render after this commit; a width put on now is held
+   * to the old file's floors.
+   */
   useEffect(() => {
     if (!timelineStacked) return
-    applySizes(view)
+    const frame = requestAnimationFrame(() => applySizes(latest.current.view))
+    return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per file / lens, not per fold
   }, [fileId, timelineStacked, filmPresent])
 

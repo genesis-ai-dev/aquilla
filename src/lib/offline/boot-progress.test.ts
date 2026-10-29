@@ -1,26 +1,48 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { __resetOfflineBootProgressForTests, getOfflineBootProgress, reportOfflineBootStatus } from "./boot-progress"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import {
+  __resetOfflineBootProgressForTests,
+  getOfflineBootProgress,
+  installRebuildProgressForwarder,
+  listenForOfflineRebuildProgress,
+  reportOfflineRebuildProgress,
+} from "./boot-progress"
 
-afterEach(() => __resetOfflineBootProgressForTests())
+type Hook = (progress: { done: number; total: number }) => void
+const hookHolder = globalThis as { __livestoreRehydrateProgress?: Hook }
 
-describe("offline boot progress", () => {
+afterEach(() => {
+  __resetOfflineBootProgressForTests()
+  delete hookHolder.__livestoreRehydrateProgress
+})
+
+describe("offline rebuild progress", () => {
   it("starts idle", () => {
     expect(getOfflineBootProgress()).toEqual({ rebuilding: false, done: 0, total: 0, lastProgressAt: 0 })
   })
 
-  it("tracks an eventlog replay and clears it when boot finishes", () => {
-    reportOfflineBootStatus({ stage: "loading" }, () => 1)
-    expect(getOfflineBootProgress()).toMatchObject({ rebuilding: false, lastProgressAt: 1 })
-
-    reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 250, total: 1000 } }, () => 2)
+  it("is rebuilding until the replay reaches the last event", () => {
+    reportOfflineRebuildProgress({ done: 250, total: 1000 }, () => 2)
     expect(getOfflineBootProgress()).toEqual({ rebuilding: true, done: 250, total: 1000, lastProgressAt: 2 })
 
-    reportOfflineBootStatus({ stage: "done" }, () => 3)
+    reportOfflineRebuildProgress({ done: 1000, total: 1000 }, () => 3)
     expect(getOfflineBootProgress()).toMatchObject({ rebuilding: false, lastProgressAt: 3 })
   })
 
-  it("doesn't call an empty replay a rebuild", () => {
-    reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 0, total: 0 } }, () => 5)
-    expect(getOfflineBootProgress()).toMatchObject({ rebuilding: false, lastProgressAt: 5 })
+  it("forwards the leader's per-event hook to the page, throttled, always including the last event", async () => {
+    let now = 0
+    installRebuildProgressForwarder(() => now)
+    const stop = listenForOfflineRebuildProgress()
+    const hook = hookHolder.__livestoreRehydrateProgress
+    expect(hook).toBeTypeOf("function")
+
+    hook?.({ done: 1, total: 4 })
+    now = 100
+    hook?.({ done: 2, total: 4 }) // within the throttle window — dropped
+    await vi.waitFor(() => expect(getOfflineBootProgress()).toMatchObject({ rebuilding: true, done: 1 }))
+
+    now = 150
+    hook?.({ done: 4, total: 4 })
+    await vi.waitFor(() => expect(getOfflineBootProgress()).toMatchObject({ rebuilding: false, done: 4 }))
+    stop()
   })
 })

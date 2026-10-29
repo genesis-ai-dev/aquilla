@@ -48,3 +48,19 @@ index ef367175e1eef1cce225c307cf811744c8b3dd1c..78e4fcdff5ebb6176241b75b8b9a57fb
  const isSubsetOf = (a, b) => {
      for (const item of a) {
          if (b.has(item) === false) {
+diff --git a/dist/leader-thread/recreate-db.js b/dist/leader-thread/recreate-db.js
+index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..aedf2ca24e5115230dc267fb7892d23b567a7892 100644
+--- a/dist/leader-thread/recreate-db.js
++++ b/dist/leader-thread/recreate-db.js
+@@ -35,7 +35,10 @@ export const recreateDb = ({ dbState, dbEventlog, schema, bootStatusQueue, mater
+                 dbEventlog,
+                 schema,
+                 materializeEvent,
+-                onProgress: ({ done, total }) => Queue.offer(bootStatusQueue, { stage: 'rehydrating', progress: { done, total } }),
++                // [aquilla patch] The session only reads bootStatusQueue once the leader layer is built,
++                // which is after this replay, so the progress never reaches it live. A hook installed by
++                // the app's leader worker gets it as it happens.
++                onProgress: ({ done, total }) => Effect.sync(() => globalThis.__livestoreRehydrateProgress?.({ done, total })).pipe(Effect.andThen(Queue.offer(bootStatusQueue, { stage: 'rehydrating', progress: { done, total } }))),
+             });
+             yield* Effect.tryAll(() => hooks?.post?.(initResult.tmpDb)).pipe(UnknownError.mapToUnknownError);
+             break;

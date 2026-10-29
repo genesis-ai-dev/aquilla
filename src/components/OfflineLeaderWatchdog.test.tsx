@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
 import { OfflineLeaderWatchdog } from "./OfflineLeaderWatchdog"
 import { Toaster, toast } from "@/components/ui/toast"
 import { __resetLeaderStalledForTests, isLeaderStalled } from "@/lib/offline/leader-watchdog"
-import { __resetOfflineBootProgressForTests, reportOfflineBootStatus } from "@/lib/offline/boot-progress"
+import { __resetOfflineBootProgressForTests, reportOfflineRebuildProgress } from "@/lib/offline/boot-progress"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
@@ -124,7 +124,7 @@ describe("OfflineLeaderWatchdog", () => {
       booting()
       renderBooting()
       const rehydrate = (done: number) =>
-        reportOfflineBootStatus({ stage: "rehydrating", progress: { done, total: 200 } })
+        reportOfflineRebuildProgress({ done, total: 200 })
 
       rehydrate(50)
       expect(await screen.findByText(/Preparing your offline projects… 25%/)).toBeInTheDocument()
@@ -142,14 +142,14 @@ describe("OfflineLeaderWatchdog", () => {
       vi.spyOn(console, "error").mockImplementation(() => {})
       booting()
       renderBooting()
-      reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 10, total: 200 } })
+      reportOfflineRebuildProgress({ done: 10, total: 200 })
       await screen.findByText(/Preparing your offline projects… 5%/)
 
       expect(await screen.findByText(/taking a while to open/)).toBeInTheDocument()
       expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
 
       // And back to progress if it picks up again.
-      reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 20, total: 200 } })
+      reportOfflineRebuildProgress({ done: 20, total: 200 })
       expect(await screen.findByText(/Preparing your offline projects… 10%/)).toBeInTheDocument()
       await waitFor(() => expect(screen.queryByText(/taking a while to open/)).toBeNull())
     })

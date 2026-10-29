@@ -1,23 +1,35 @@
-// What the offline store's leader is doing while it boots, for the UI.
+// How far the offline store's leader is through rebuilding its state db.
 //
-// After an update that changes the offline tables, the leader rebuilds the
-// state db by replaying the whole eventlog before it hands out a store —
-// minutes on a 30k-cell project, during which offline reads and writes wait.
-// LiveStore reports that replay as `rehydrating` boot statuses, one per
-// event; getOfflineStore() feeds them in here so OfflineLeaderWatchdog can
-// show progress instead of a "restart the app?" prompt that would throw the
-// rebuild away.
+// After an update that changes the offline tables, the leader replays the
+// whole eventlog into a fresh state db before it hands out a store — minutes
+// on a 30k-cell project, during which offline reads and writes wait.
+// LiveStore reports that replay as `rehydrating` boot statuses, but its web
+// adapter only serves them to the page once the leader has finished booting
+// — i.e. after the replay — so they arrive in one burst at the end. Our
+// @livestore/common patch also calls `globalThis.__livestoreRehydrateProgress`
+// per replayed event; the leader worker (livestore.worker.ts) installs that
+// hook and forwards a throttled copy over a BroadcastChannel to the page,
+// where OfflineLeaderWatchdog shows it instead of a "restart the app?" prompt
+// that would throw the rebuild away.
 //
-// Read by polling (the watchdog already ticks), so there are no listeners to
-// notify thousands of times a second.
-import type { BootStatus } from "@livestore/livestore"
+// The page reads it by polling (the watchdog already ticks), so there are no
+// listeners to notify.
+
+const CHANNEL_NAME = "aquilla-offline-rebuild-progress"
+// The hook fires once per event, thousands of times a second.
+const FORWARD_EVERY_MS = 250
+
+export interface RebuildProgressMessage {
+  done: number
+  total: number
+}
 
 export interface OfflineBootProgress {
   /** The leader is replaying the eventlog into a fresh state db. */
   rebuilding: boolean
   done: number
   total: number
-  /** Date.now() of the last boot status of any kind; 0 before the first. */
+  /** Date.now() when the last progress arrived; 0 before any. */
   lastProgressAt: number
 }
 
@@ -25,17 +37,37 @@ const idle: OfflineBootProgress = { rebuilding: false, done: 0, total: 0, lastPr
 
 let progress: OfflineBootProgress = idle
 
-export function reportOfflineBootStatus(status: BootStatus, now: () => number = Date.now): void {
-  const at = now()
-  if (status.stage === "rehydrating" && status.progress.total > 0) {
-    progress = { rebuilding: true, done: status.progress.done, total: status.progress.total, lastProgressAt: at }
-    return
-  }
-  progress = { ...progress, rebuilding: status.stage === "done" ? false : progress.rebuilding, lastProgressAt: at }
+export function reportOfflineRebuildProgress({ done, total }: RebuildProgressMessage, now: () => number = Date.now): void {
+  progress = { rebuilding: total > 0 && done < total, done, total, lastProgressAt: now() }
 }
 
 export function getOfflineBootProgress(): OfflineBootProgress {
   return progress
+}
+
+/** Page side: start taking progress from the leader worker. Returns a stop function. */
+export function listenForOfflineRebuildProgress(): () => void {
+  if (typeof BroadcastChannel === "undefined") return () => {}
+  const channel = new BroadcastChannel(CHANNEL_NAME)
+  channel.onmessage = (event: MessageEvent<RebuildProgressMessage>) => reportOfflineRebuildProgress(event.data)
+  return () => channel.close()
+}
+
+type RehydrateHook = (progress: RebuildProgressMessage) => void
+
+/** Leader-worker side: install the hook the @livestore/common patch calls. */
+export function installRebuildProgressForwarder(now: () => number = Date.now): void {
+  if (typeof BroadcastChannel === "undefined") return
+  const channel = new BroadcastChannel(CHANNEL_NAME)
+  let lastSentAt = -Infinity
+  const hook: RehydrateHook = (message) => {
+    const at = now()
+    // Always send the last one, so the page sees the replay finish.
+    if (message.done < message.total && at - lastSentAt < FORWARD_EVERY_MS) return
+    lastSentAt = at
+    channel.postMessage(message)
+  }
+  ;(globalThis as { __livestoreRehydrateProgress?: RehydrateHook }).__livestoreRehydrateProgress = hook
 }
 
 /** Test-only reset. */

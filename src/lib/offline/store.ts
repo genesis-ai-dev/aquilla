@@ -10,7 +10,7 @@ import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
 import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
-import { reportOfflineBootStatus } from "./boot-progress"
+import { listenForOfflineRebuildProgress } from "./boot-progress"
 
 // Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
@@ -37,6 +37,8 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
   installBfcacheGuard()
+  // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
+  listenForOfflineRebuildProgress()
   return makePersistedAdapter({
     worker: (options: WorkerOptions) => {
       const worker = new LiveStoreWorker(options)
@@ -88,15 +90,7 @@ export function getOfflineStore(
   // Claim before boot: a newer build that crashes mid-boot may already have written.
   storePromise ??= claimOfflineGeneration(generationMarker)
     .then(() => createAdapter())
-    .then((adapter) => createStorePromise({
-        schema,
-        storeId: STORE_ID,
-        adapter,
-        batchUpdates,
-        // Rebuild progress for OfflineLeaderWatchdog (see boot-progress.ts).
-        onBootStatus: (status) => reportOfflineBootStatus(status),
-      }),
-    )
+    .then((adapter) => createStorePromise({ schema, storeId: STORE_ID, adapter, batchUpdates }))
     .then(async (store) => {
       // A stale client session must not take writes; hold the store back
       // while the page reloads (see head-check.ts).

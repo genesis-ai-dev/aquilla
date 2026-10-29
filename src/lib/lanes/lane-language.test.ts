@@ -308,7 +308,7 @@ describe("laneLanguageCodeForTag (AQU-1908)", () => {
 
   it("does not read project settings — a blank default lane stays blank", () => {
     expect(
-      laneLanguageCodeForTag("", [row({ id: "aaaa0001", legacyTag: "" })], { targetLanguage: "Spanish" }),
+      laneLanguageCodeForTag("", [row({ id: "aaaa0001", legacyTag: "" })]),
     ).toBeNull()
   })
 
@@ -332,7 +332,7 @@ describe("sourceLaneLanguage (AQU-1978)", () => {
   })
 
   it("is null when no source lane names a language — not the retired settings key", () => {
-    expect(sourceLaneLanguage([], { sourceLanguage: "English" })).toBeNull()
+    expect(sourceLaneLanguage([])).toBeNull()
     expect(sourceLaneLanguage(undefined)).toBeNull()
   })
 })

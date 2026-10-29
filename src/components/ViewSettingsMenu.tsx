@@ -520,8 +520,8 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             {/* AQU-2263: a file's size overrides the app font size from
                 Preferences, so say what that default is, and put both columns
                 back on it in one step. */}
-            <div className={cn("flex items-center justify-between gap-2 text-xs text-muted-foreground", !fileOpen && "opacity-50")}>
-              <span data-testid="font-size-default">
+            <div className={cn("flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground", !fileOpen && "opacity-50")}>
+              <span data-testid="font-size-default" className="whitespace-nowrap">
                 {t("editor.view.fontSizeDefault", { size: defaultFontSize })}
               </span>
               {(sourceFontSizeExplicit || targetFontSizeExplicit) && (onSourceFontSizeReset || onTargetFontSizeReset) ? (
@@ -529,7 +529,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
                   type="button"
                   variant="ghost"
                   size="xs"
-                  className="h-auto px-1.5 py-0.5 text-xs"
+                  className="-ms-1.5 h-auto px-1.5 py-0.5 text-xs"
                   disabled={!fileOpen}
                   onClick={() => {
                     if (sourceFontSizeExplicit) onSourceFontSizeReset?.()

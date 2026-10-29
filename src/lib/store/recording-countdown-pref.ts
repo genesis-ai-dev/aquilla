@@ -62,7 +62,8 @@ export function useRecordingCountdownSpeed(): CountdownSpeed {
 
 /**
  * "Countdown beep": the 3-2-1 tones. It was a plain `useState(true)` in the
- * recorder, so it came back on every time the recorder opened (AQU-2264).
+ * recorder, so it came back on with every reload and in every other project
+ * (AQU-2264).
  * Remembered now, on by default. Device key `aq.recording-countdown-beep.v1`
  * (`"off"` when turned off; absent means on).
  */

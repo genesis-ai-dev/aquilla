@@ -403,7 +403,8 @@ export function AudioRecordingModal({
   // can't be saved without a connection), instead of failing mid-flow with a
   // raw fetch error. One copy of the message, used by every gate.
   const offlineMessage = t("audio.recordingModal.offlineMessage")
-  // AQU-2264: remembered, and follows the person (it reset on every open).
+  // AQU-2264: remembered, and follows the person. It was held by this modal
+  // alone, so it came back on with every reload and in every other project.
   const beepEnabled = useRecordingCountdownBeep()
   const setBeepEnabled = setRecordingCountdownBeep
   // AQU-1209: the count itself is optional. OFF means idle → recording with no

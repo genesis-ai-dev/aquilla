@@ -385,7 +385,7 @@ describe("AudioRecordingModal — the countdown preference", () => {
   })
 
   // AQU-2264: the beep was the one recorder setting nothing remembered — it
-  // came back on with every reopen of the recorder and every reload.
+  // came back on with every reload, and in every other project.
   it("remembers the countdown beep after the recorder closes and the page reloads", () => {
     const { unmount } = render(modal(projectNoFilesKey))
     fireEvent.click(screen.getByTestId("rec-settings"))

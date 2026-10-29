@@ -150,12 +150,20 @@ export function VoicePlaybackBar({
   // book read "0:00 / 0:00". A file that follows its recordings shows how long
   // its lines come out laid end to end — the layout the timeline draws and the
   // Timing control states (`layOutProgramme`), which is also what the queue
-  // reports once it plays.
+  // reports once it plays. So only until then: while the queue runs, a take
+  // landing would otherwise lay a long book out here a third time over, beside
+  // the timeline and the queue's own.
+  //
+  // Not the timeline's total, though it is the same number: this bar also
+  // stands where no timeline is drawn, its lines carry its own read of the
+  // audio (what the queue plays from it), and handing the timeline's total
+  // down to it would be a workspace state change on every take.
+  const showsLaidOut = freeTiming && transport.source === "queue" && !transport.active
   const laidOutSec = useMemo(
-    () => (freeTiming && transport.source === "queue" ? layOutProgramme(cells).programme.totalSec : 0),
-    [freeTiming, transport.source, cells],
+    () => (showsLaidOut ? layOutProgramme(cells).programme.totalSec : 0),
+    [showsLaidOut, cells],
   )
-  const shownLengthSec = transport.source === "queue" && !transport.active && freeTiming ? laidOutSec : duration
+  const shownLengthSec = showsLaidOut ? laidOutSec : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving

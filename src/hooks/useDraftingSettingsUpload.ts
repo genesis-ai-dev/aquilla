@@ -10,13 +10,9 @@
 // wins; after that nobody's local copy is read (the overlay lays the shared
 // value over every record, src/hooks/project-settings-overlay.ts).
 //
-// THIS RULE IS NOT FINAL (Sam, Oct 29), so it lives here alone, behind one
-// call in useProjectSettings, and nothing else depends on it. To swap it:
-//   - "Start everyone on the defaults": delete that call, and make the
-//     overlay read the defaults (not the record's own values) when the blob
-//     has no `draftingSettings` — the one `if (drafting)` in the overlay.
-//   - "Ask once": keep the decision (`draftingSettingsToUpload`) and replace
-//     the automatic write below with a prompt whose Yes runs `uploadOnce`.
+// Sam chose this rule on Oct 29 (over starting everyone on the defaults, or
+// asking once). The decision itself is `draftingSettingsToUpload`
+// (src/lib/completion/drafting-settings.ts); this hook only runs it.
 
 import { useEffect } from "react"
 import { getProject } from "@/lib/store/project-index"

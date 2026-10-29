@@ -903,7 +903,7 @@ export function useProjectSettings(
   }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
 
   // AQU-2259: upload this browser's old drafting settings once, when the team
-  // has none yet. Isolated in its own hook because the rule is not final.
+  // has none yet (src/hooks/useDraftingSettingsUpload.ts).
   const onDraftingUploadResponse = useCallback((response: ProjectSettingsResponse, wrote: boolean) => {
     if (!aliveRef.current || !projectId) return
     writeServerConfirmed(response)

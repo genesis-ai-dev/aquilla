@@ -175,3 +175,13 @@ describe("Project settings → AI: which key is in use (AQU-2263)", () => {
     expect(await screen.findByTestId("gemini-key-in-use")).toHaveTextContent("Using this project's key (this device only).")
   })
 })
+
+// AQU-2263 (second pass): the project's assistant language is the team's
+// fallback for the assistant's answers, and is named for it.
+describe("Project settings → AI: the team's assistant language", () => {
+  it("is called 'The assistant answers the team in' and says when it applies", async () => {
+    renderAi()
+    expect(await screen.findByLabelText("The assistant answers the team in")).toBeInTheDocument()
+    expect(screen.getByText(/hasn't chosen their own in Preferences/)).toBeInTheDocument()
+  })
+})

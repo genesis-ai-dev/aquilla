@@ -157,6 +157,12 @@ export interface AgentRunRequest {
     otherInfo?: string
   }
   /**
+   * AQU-2263: the language the person uses Aquilla in (its English name). The
+   * assistant answers in the person's own language, else the project's
+   * language for the team, else this one.
+   */
+  appLanguage?: string
+  /**
    * Files the user attached in the composer, already uploaded as project
    * artifacts (POST /api/v2/projects/:id/agent-artifacts). The server tells the
    * model they're available and how to pull them into the sandbox with the

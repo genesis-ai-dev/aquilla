@@ -525,9 +525,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",
     "projectSettings.ai.contextWindowLarge": "Large — chapter",
     "projectSettings.ai.contextWindowDescription": "Controls how much surrounding passage context is included.",
-    "projectSettings.ai.assistantLanguageLabel": "Assistant language",
+    // AQU-2263: the team's fallback for the assistant's answers (it was saved
+    // but never read). Each person's own choice in Preferences wins over it.
+    "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
-    "projectSettings.ai.assistantLanguageDescription": "Language the AI assistant uses in chat responses. Independent of the UI locale.",
+    "projectSettings.ai.assistantLanguageDescription":
+      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person uses Aquilla in.",
     "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +

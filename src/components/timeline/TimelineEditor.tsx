@@ -1643,6 +1643,12 @@ export function TimelineEditor({
    *  back to the track column (AQU-1632). */
   const gutterRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
+  /** The header strip over the names, which `revealGutterRow` keeps a focused
+   *  row out from under (AQU-2236). */
+  const gutterHeaderRef = useRef<HTMLDivElement>(null)
+  /** Set by a keyboard move that went through, for the layout effect that
+   *  reveals the moved row once the new order lands (AQU-2236). */
+  const keyboardMovedRef = useRef(false)
   /** The horizontal offset this component has already reacted to. Stage 3 made
    *  the track column scroll in y as well, so a scroll event no longer implies
    *  a horizontal move — everything keyed on one has to check first. */
@@ -2974,6 +2980,52 @@ export function TimelineEditor({
     if (el && scrollTop !== 0) el.scrollTop += scrollTop
   }
 
+  /**
+   * AQU-2236: the header covers the column's top 28px, and the browser does
+   * not know that. A row up there counts as on screen, so focusing it — a
+   * Shift+Tab, the rename field, a menu handing focus back to its row —
+   * scrolls nothing, and the focus ring or the text being typed sits under
+   * the header. `scroll-padding-top` cannot help: it only changes where the
+   * browser aims, and this reveal would have to scroll the gutter UP, past the
+   * 0 that `handleGutterScroll` holds it at. So the track column, which owns
+   * the vertical offset, scrolls up by what the header hides of the row (or
+   * by all of it, for a row above the column's top).
+   *
+   * Only for a focus that SHOWS (`:focus-visible`). A row focused by a click
+   * draws no ring, so nothing is hidden, and sliding the row away mid-press
+   * can pull its speaker or ⋯ out from under the pointer, so the click misses.
+   *
+   * `belowToo` also brings the row up from under the column's bottom edge. A
+   * focus event must not ask for that: the browser already reveals downward,
+   * and AQU-1632 hands that scroll to the track column, so doing it here as
+   * well would scroll twice. A keyboard move needs it, because the moved row
+   * keeps its focus and gets no focus event at all.
+   */
+  function revealGutterRow(target: EventTarget | null, belowToo = false) {
+    const gutter = gutterRef.current
+    const header = gutterHeaderRef.current
+    const inner = gutterInnerRef.current
+    const el = scrollRef.current
+    if (!gutter || !header || !inner || !el || !(target instanceof Element)) return
+    if (!target.matches(":focus-visible")) return
+    // The ROW, not the control in it: a focused ⋯ alone would leave the row's
+    // own top edge under the header. The rows are `inner`'s children; a
+    // menu's portaled items, whose focus bubbles here through React, are not.
+    let row: Element | null = target
+    while (row && row.parentElement !== inner) row = row.parentElement
+    if (!row) return
+    const rect = row.getBoundingClientRect()
+    const hidden = header.getBoundingClientRect().bottom - rect.top
+    const below = rect.bottom - gutter.getBoundingClientRect().bottom
+    if (hidden > 0) el.scrollTop -= hidden
+    else if (belowToo && below > 0) el.scrollTop += below
+    else return
+    // Move the names NOW rather than on the scroll event, so a second look in
+    // the same frame (the browser's own reveal, or this one again from the
+    // focus React restores after a move) measures where the row really is.
+    handleTrackScroll()
+  }
+
   function applyZoom(next: number) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
     // AQU-646: keep an anchor stable across the zoom — the playhead when
@@ -3057,14 +3109,15 @@ export function TimelineEditor({
   /** A move expressed in SCOPE indices — see the trackDrag state for why the
    *  distinction is load-bearing. `scope.tracks` is ascending by `order` by
    *  construction (that is what scoping buys), which is the precondition
-   *  orderForDrop's midpoint arithmetic depends on. */
-  function commitScopedMove(scope: ScopeSiblings, toIndex: number) {
-    if (!onReorderTrack) return
+   *  orderForDrop's midpoint arithmetic depends on. Returns whether it wrote. */
+  function commitScopedMove(scope: ScopeSiblings, toIndex: number): boolean {
+    if (!onReorderTrack) return false
     const drop = orderForDrop(scope.tracks, scope.fromIndex, toIndex)
     // null covers both "did not move" and an index off either end (which is how
     // Alt+ArrowUp on the top row resolves), so neither needs its own guard.
-    if (!drop) return
+    if (!drop) return false
     onReorderTrack(drop.trackId, drop.order)
+    return true
   }
 
   /**
@@ -3219,8 +3272,24 @@ export function TimelineEditor({
     // next sibling, not out of the folder.
     const scope = scopeSiblings(trackRows, fromIndex)
     if (!scope) return
-    commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))
+    if (commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))) {
+      keyboardMovedRef.current = true
+    }
   }
+
+  // AQU-2236: the row a keyboard move sends somewhere keeps its focus (React
+  // moves the node, or its neighbour, without a focus event), so nothing else
+  // would bring it out from under the header — or up from below the fold —
+  // where it lands. Keyed on the ORDER, so it runs in the commit that carries
+  // the move, not in some render before it. Only after a keyboard move: a
+  // collaborator's reorder must not scroll anyone's view to their focus.
+  const rowOrderKey = trackRows.map((r) => r.track.id).join("\n")
+  useLayoutEffect(() => {
+    if (!keyboardMovedRef.current) return
+    keyboardMovedRef.current = false
+    revealGutterRow(document.activeElement, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads refs and the DOM only; the order is the trigger
+  }, [rowOrderKey])
 
   /**
    * The insertion boundary the drop-indicator line is drawn at: 0..tracks.length,
@@ -4697,6 +4766,9 @@ export function TimelineEditor({
             // are meant to cover the editor.
             className="relative isolate overflow-hidden bg-muted/20"
             onScroll={handleGutterScroll}
+            // React's onFocus bubbles: any row, or any control in one, that
+            // takes focus under the header comes back out from under it.
+            onFocus={(e) => revealGutterRow(e.target)}
           >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
                 BORDER. It was `border-r` on this container — but a border
@@ -4736,7 +4808,7 @@ export function TimelineEditor({
                 and the edge it shares with the lanes is then its left one.
                 `border-e` and `end-0` follow that edge; `border-r` and
                 `right-0` would draw the divider on the column's outer edge. */}
-            <div className="relative z-40 h-7 border-b border-e border-border bg-background">
+            <div ref={gutterHeaderRef} className="relative z-40 h-7 border-b border-e border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE TOGGLE LIVES HERE, AND ITS POSITIONING IS ABSOLUTE FOR A
                   REASON THAT IS NOT COSMETIC. This spacer is the ruler's

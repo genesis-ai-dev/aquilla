@@ -4971,6 +4971,11 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
   /** The div `handleTrackScroll` transforms; `role="list"` while rows can move. */
   const inner = () => gutter().querySelector('[role="list"]') as HTMLElement
   const rows = () => Array.from(gutter().querySelectorAll<HTMLElement>("[data-tl-track-row]"))
+  const stubRect = (el: Element, top: number, height: number) =>
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      top, bottom: top + height, left: 0, right: 240, width: 240, height, x: 0, y: top,
+      toJSON: () => ({}),
+    } as DOMRect)
 
   // Without `isolate` the column's numbers ranked in the workspace's own
   // stacking context, where 40 is the menus' tier (AppShell's z-scale): the
@@ -5017,6 +5022,110 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 50 })
     expect(raised()).toBe(false)
     expect(inner().classList).toContain("z-30")
+  })
+
+  // The browser counts the strip under the header as on screen, so focusing a
+  // row there scrolls nothing — and it could not scroll the gutter up anyway,
+  // which is held at 0. The track column, which owns the offset, has to.
+  it("scrolls a row that takes focus under the header back out from under it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 10, 40) // 18px of it under the header
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(42)
+    // The names follow at once, so a second look in the same frame (the
+    // browser's own, or the next reveal) sees where the row really is.
+    expect(inner().style.transform).toBe("translateY(-42px)")
+  })
+
+  it("reveals the whole row when a control inside it takes focus", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, -4, 40)
+    const menu = within(row).getByTestId("tl-track-menu-source-audio")
+    // The ⋯ itself would be clear of the header; the row's top edge is not.
+    stubRect(menu, 8, 20)
+
+    act(() => menu.focus())
+    expect(scroll.scrollTop).toBe(28)
+  })
+
+  it("leaves a focused row alone when the header covers none of it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 28, 40)
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+  })
+
+  // A keyboard move keeps the row's focus (React moves the DOM node, or its
+  // neighbour), so no focus event comes to reveal it where it lands.
+  it("brings a row moved up with Alt+ArrowUp back out from under the header", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 30, 40)
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+
+    fireEvent.keyDown(row, { key: "ArrowUp", altKey: true })
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    expect(trackId).toBe("source-audio")
+    // The workspace lands the move; the row is one place up, partly under the header.
+    stubRect(row, -10, 40)
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[0]).toBe(row)
+    expect(document.activeElement).toBe(row)
+    expect(scroll.scrollTop).toBe(22)
+  })
+
+  it("brings a row moved down with Alt+ArrowDown back up from below the fold", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    stubRect(gutter(), 0, 120)
+    const row = rows()[1]
+    stubRect(row, 60, 40)
+    act(() => row.focus())
+
+    fireEvent.keyDown(row, { key: "ArrowDown", altKey: true })
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    stubRect(row, 100, 40) // 20px of it past the column's bottom edge
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[2]).toBe(row)
+    expect(scroll.scrollTop).toBe(80)
   })
 })
 

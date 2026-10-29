@@ -27,7 +27,7 @@
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob: https:",
-        "font-src": "'self' data: https://fonts.gstatic.com",
+        "font-src": "'self' data:",
         "media-src": "'self' data: blob: https:",
         "connect-src": "'self' https: wss: http://localhost:49152",
         "worker-src": "'self' blob:",

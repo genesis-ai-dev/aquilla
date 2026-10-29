@@ -2874,3 +2874,79 @@ boot failure.** After `npm ci --legacy-peer-deps` in all three packages (72 / 65
 all three `package-lock.json` files md5-verified untouched afterwards) the stack booted on the
 next attempt. Treat the three installs as part of the container recipe unconditionally, not as
 a step that only a worker-touching diff needs.
+
+## 2026-10-28 — complexity run: `useCompletion.ts`'s 73 hand-rolled lane-map writes
+
+**Done this run** (theme 2, complexity reduction inside one file; 1 file, no test file
+touched): `src/hooks/useCompletion.ts`. The hook keeps four lane-keyed maps in state
+(`completing`, `previews`, `errors`, `examples`, all keyed `lk(cellId)` since AQU-1025) and
+every write to them was spelled out inline. Three module-level helpers —
+`putLaneEntry`, `dropLaneEntry`, `dropLaneEntryIfPresent` — now carry the copy-on-write,
+replacing **73 sites**: 36 `new Map(p).set(lk(x), v)`, 34
+`{ const m = new Map(p); m.delete(lk(x)); return m }`, and 3 copies of the six-line
+identity-preserving guarded delete (`if (!p.has(k)) return p`).
+
+- **The smell is unique to this file, repo-wide.** `grep -rl "const m = new Map(p); m.delete("`
+  and `grep -rl "new Map(p).set("` over non-test `src` each return exactly one path:
+  `src/hooks/useCompletion.ts` (34 and 36 hits). So the helpers stay module-private — there is
+  no second consumer to export them for, and no follow-up file.
+- **The helpers are module-level on purpose, not closures in the hook body.** A
+  `useCallback`'d helper inside the hook would have to join the dependency array of every
+  `useCallback` that calls it (`completeSingle`, `alignStyles`, `completeBatch`,
+  `completeParagraph`, `clearCellError`) — and the 2026-10-09 entry is this ledger's record
+  of how expensive a `react-hooks` dependency change can be with the React Compiler on. A
+  module-level function is not a reactive value, so **no dependency array in the diff
+  changed**: the sites still reference `lk` and the `setX` setters exactly as before.
+- **Three guarded blocks stayed guarded, two lookalikes were left alone.** The
+  `if (!p.has(k)) return p` shape returns the *same* map when the key is absent, so a no-op
+  clear does not re-render; `dropLaneEntryIfPresent` keeps that, and is deliberately a third
+  helper rather than a flag on `dropLaneEntry`. Two near-identical blocks were **not**
+  folded in: the batch error-clear at `completeBatch` (guards on
+  `chunk.some((c) => p.has(lk(c.id)))` and deletes a whole chunk) and `clearCellError`'s
+  second half (guards on `p.get(k) !== "error"`, not on presence). Neither is the same
+  predicate.
+- **The one real semantic shift, and why it is not observable**: the helpers take an
+  already-computed `key`, so `lk(cellId)` — and at two sites `t(...)` — is now evaluated
+  eagerly at the call site instead of inside the state updater React runs later. `lk` is
+  `useCallback((id) => completionLaneKey(id, lane), [lane])`, pure over its argument and the
+  captured `lane`, and the closure instance referenced is the same one in both versions.
+  `t` is `src/lib/i18n/standalone.ts`'s module-level function: a `readStoredLocale()` +
+  catalog lookup with no side effects, and no locale change can interleave inside one
+  synchronous statement sequence. The move also stops React's StrictMode double-invoke from
+  calling those pure functions twice per write, which is strictly less work, not different
+  work.
+
+### New candidates spotted this run (surveyed, deliberately not done)
+
+- **`src/lib/frontier/admin.ts` — ~35 thin fetch wrappers around one unwritten
+  `adminFetch`.** 21 byte-identical
+  `if (!res.ok) throw new UserError(res.status, await readError(res))` guards and 10
+  identical `headers: { ...authHeaders(jwt), "Content-Type": "application/json" }` spreads
+  across a 26 KB client for auth-worker's `admin/*` routes. *Friction*: every new admin
+  endpoint copies four lines of boilerplate, and the one wrapper that differs
+  (`getAdminStatus`, which returns `null` on 403 and throws with an empty message) is easy
+  to miss in the noise. *Why deferred*: collapsing it rewrites what is thrown at 21 sites,
+  and this routine treats changing what's thrown/returned/logged as behavior; a helper that
+  throws identically is provable but wants a reviewer who knows the elevation flow
+  (`notifyElevationGranted`). Also near the line budget on its own. *Proof it would need*:
+  `admin.test.ts` plus the six `src/components/admin/*.test.tsx` files that `vi.mock` this
+  module, and a per-wrapper check that the 403/empty-message special case survives.
+
+- **`src/components/ImportDialog.tsx:1188-1203` — a 16-branch `screen === "..."` ternary
+  ladder for the dialog title.** Each branch is one `t("importExport.…")` call, so unlike
+  the `ExportDialog` ladder logged above it really is the lookup-table smell: a
+  `Partial<Record<Screen, MessageKey>>` plus the two branches that aren't plain lookups
+  (`partner`, which reads `activePartner?.importScreen?.titleKey`, and `extension`, which
+  returns a non-`t` label) would take it to ~4 lines and a table, with the key literals
+  still greppable for the i18n orphan sweeps. *Why deferred*: this run's budget went to
+  `useCompletion.ts`, and one theme per run. *Proof it would need*: the standard gate plus
+  the 15 `ImportDialog.*.test.tsx` files, several of which assert on the dialog title.
+
+- **`src/components/ProjectWorkspace.tsx` — 42 copies of
+  `await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })`** and 21 of
+  `...(activeLane ? { targetLang: activeLane } : {})`, in an 18,715-line file. *Why
+  deferred*: a local closure would collapse the call sites but reduces no lines, and the
+  dependency-array question is exactly the one this run avoided by going module-level —
+  here the helper must close over `getTokenForProjectFile`, so it cannot. Worth doing only
+  alongside a real seam in that file. *Proof it would need*: the full gate plus a reading of
+  every enclosing `useCallback`'s deps.

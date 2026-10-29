@@ -94,13 +94,21 @@ export async function login(
  * (clearSession) must proceed even if this network call fails.
  */
 export async function logout(jwt: string): Promise<void> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(() => { controller.abort(); resolve(); }, 5_000);
+  });
   try {
-    await fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
+    await Promise.race([deadline, fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
       method: "POST",
       headers: { Authorization: `Bearer ${jwt}` },
-    });
+      signal: controller.signal,
+    })]);
   } catch {
     // Best-effort — offline or backend hiccup shouldn't block local logout.
+  } finally {
+    clearTimeout(timer);
   }
 }
 

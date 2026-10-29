@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
-import type { AgentRunUi } from "@/lib/agent/run-state"
+import { createRun, reduceRunFrame, type AgentRunUi } from "@/lib/agent/run-state"
 import { AgentRunView } from "./AgentRunView"
 
 function makeRun(overrides: Partial<AgentRunUi> = {}): AgentRunUi {
@@ -180,6 +180,19 @@ describe("AgentRunView", () => {
     )
     expect(screen.getByText("Out of credits.")).toBeInTheDocument()
     unmount()
+
+    // The route sends error then done(capped). Guidance must stay inline,
+    // rather than becoming a generic failure or disappearing at completion.
+    const limitMessage = "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent."
+    const limitedRun = reduceRunFrame(
+      reduceRunFrame(createRun("Keep researching"), {
+        type: "error", message: limitMessage,
+      }),
+      { type: "done", runId: "limited", status: "capped" },
+    )
+    const limited = render(<AgentRunView run={limitedRun} />)
+    expect(screen.getByRole("alert")).toHaveTextContent(limitMessage)
+    limited.unmount()
 
     const second = render(<AgentRunView run={makeRun({ status: "capped" })} />)
     expect(screen.getByText(/hit its step\/token cap/)).toBeInTheDocument()

@@ -26,6 +26,12 @@ export interface CellAreaStateInput {
   cellsError: boolean
   /** A timeline picture is usable even before the user adds caption segments. */
   hasLinkedPicture?: boolean
+  /** AQU-1901: the open target lane cannot be named yet (the project's lane
+   *  rows have not loaded and no lane id is remembered for it). The cell list
+   *  is then paired against a fallback tag — `''` for a first-time reader —
+   *  which on a project with no `''` lane holds nothing, so every translated
+   *  row would read "empty". */
+  lanesLoading?: boolean
 }
 
 export type CellAreaState =
@@ -34,6 +40,9 @@ export type CellAreaState =
    *  cells may arrive any moment — render a skeleton rather than an empty
    *  state. */
   | { kind: "syncing-empty" }
+  /** AQU-1901: cells may be loaded, but which lane's targets to show is not
+   *  known yet — render a placeholder, never rows paired with a guessed lane. */
+  | { kind: "lanes-loading" }
   /** The file may contain cells, but its projection could not be loaded. */
   | { kind: "load-error" }
   /** Sync is settled, cells fetch is done, genuinely no cells. */
@@ -42,6 +51,7 @@ export type CellAreaState =
 
 export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
   if (!input.activeFileId) return { kind: "no-file" }
+  if (input.lanesLoading) return { kind: "lanes-loading" }
   if (input.cellCount === 0) {
     if (input.cellsLoading) {
       return { kind: "syncing-empty" }

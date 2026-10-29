@@ -216,11 +216,12 @@ The homepage links to both case studies (good). Neither case study links to the 
 `/beta`. Add cross-links — a short "more stories" block at the foot of each case study. Cheap,
 and it's the standard fix for pages that never get crawled deeply.
 
-### 1.7 `/privacy-policy` is still client-rendered
+### 1.7 `/privacy-policy` is still client-rendered — DONE (AQU-2243)
 
-It's a SPA route (`src/pages/PrivacyPolicy.tsx`), so it ships as an empty shell. It's a real page
-people look for. Either promote it to a prerendered marketing entry, or accept it and move on —
-but decide deliberately rather than leaving it as an accident.
+Decided: there is one policy, and it is the prerendered marketing page at `/privacy`. The SPA
+route and its second, stale copy of the text (`src/pages/PrivacyPolicy.tsx`) are gone, and the
+app Worker 301s `/privacy-policy` → `/privacy` so the bookmarked address keeps working and
+crawlers consolidate on the live page.
 
 ---
 

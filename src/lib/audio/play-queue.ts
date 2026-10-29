@@ -19,6 +19,7 @@ import { joinedClip, seekableClip, tailCutNow } from "./tail-cut"
 import { takePlayWindow } from "./kept-window"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
+import { getSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
@@ -904,7 +905,7 @@ function progTargetEntry(): OverlayEntry | null {
 function progEffectiveClock(slot: ProgrammeSlot): "source" | "target" | null {
   // AQU-2204: during a take's pause the take still to come clocks its verse,
   // so a source that ends inside the pause goes quiet instead of advancing.
-  if (progLead && progLead.cellId === slot.cellId) return "target"
+  if (progLead && progLead.cellId === slot.cellId && progLead.then === "take") return "target"
   if (slot.clock === "target" && !progTargetEntry()) return slot.sourceWindow ? "source" : null
   return slot.clock
 }
@@ -948,11 +949,29 @@ function progRebuild(): void {
   setProgress({ duration: programme.totalSec })
 }
 
-/** The next verse with anything to play, from `from` onward. -1 when done. */
+/** A verse with something to hear: an original or a take the programme can play. */
+function progSlotHasSound(slot: ProgrammeSlot): boolean {
+  return Boolean(slot.sourceWindow || slot.targetWindow)
+}
+
+/**
+ * AQU-2251 (Sam, Oct 28): is a verse played through even though it has
+ * nothing to hear? Only when the person turned "Skip lines with nothing to
+ * play" off — then a line nobody has recorded yet (a book's stand-in) takes
+ * its time on the timeline in silence, the playhead runs across it, and the
+ * next line follows. On, the default, it is stepped over as it always was.
+ */
+function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
+  return !progSlotHasSound(slot) && !getSkipSilentLinesPref()
+}
+
+/** The next verse playback goes to, from `from` onward: one with anything to
+ *  play, or — the setting off — any verse at all. -1 when done. Next/previous
+ *  line, seeks past the end and the hand-on at a verse's end all ask this. */
 function progNextPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.max(0, from); i < slots.length; i++) {
-    if (slots[i].sourceWindow || slots[i].targetWindow) return i
+    if (progSlotHasSound(slots[i]) || progPlaysThroughSilence(slots[i])) return i
   }
   return -1
 }
@@ -960,7 +979,17 @@ function progNextPlayable(from: number): number {
 function progPrevPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.min(from, slots.length - 1); i >= 0; i--) {
-    if (slots[i].sourceWindow || slots[i].targetWindow) return i
+    if (progSlotHasSound(slots[i]) || progPlaysThroughSilence(slots[i])) return i
+  }
+  return -1
+}
+
+/** The next verse with something to HEAR, whatever the setting — what the
+ *  prefetch stocks, so the take after a silent verse is warm when it's due. */
+function progNextWithSound(from: number): number {
+  const slots = programme?.slots ?? []
+  for (let i = Math.max(0, from); i < slots.length; i++) {
+    if (progSlotHasSound(slots[i])) return i
   }
   return -1
 }
@@ -1052,10 +1081,25 @@ let progGateSeq = 0
  * the take isn't due: the verse sounds only its source (or holds the clock in
  * silence), a ticker keeps the clock moving, and at the pause's end the take
  * joins through an ordinary gate.
+ *
+ * AQU-2251: the same hold plays a verse with NOTHING to hear through, when
+ * "Skip lines with nothing to play" is off — the clock is held in silence to
+ * the verse's end (`then: "next"`) and the next verse follows. One clock for
+ * both, so a silent verse and a take's pause can never move at different
+ * speeds.
  */
 interface ProgLead {
   cellId: string
   explicit: boolean
+  /** What the hold ends in: the take coming in after its pause, or the next
+   *  verse after a verse with nothing to hear. */
+  then: "take" | "next"
+  /** Where the hold started (programme seconds) and when, so the clock can be
+   *  read exactly between the ticker's beats — a pause lands where it is. */
+  atSec: number
+  startedAt: number
+  rate: number
+  endSec: number
   timer: ReturnType<typeof setTimeout> | null
   ticker: ReturnType<typeof setInterval> | null
 }
@@ -1067,25 +1111,39 @@ function progClearLead(): void {
   progLead = null
 }
 
-/** Wait out the pause from `atSec`, then bring the take in at its start. */
-function progArmLead(slot: ProgrammeSlot, atSec: number, explicit: boolean): void {
+/** The held clock's position right now. */
+function progLeadNowSec(lead: ProgLead): number {
+  return Math.min(lead.atSec + ((performance.now() - lead.startedAt) / 1000) * lead.rate, lead.endSec)
+}
+
+/** Hold the clock in silence from `atSec` — to the end of the take's pause,
+ *  then bring the take in at its start ("take"); or to the end of the verse,
+ *  then go on to the next one ("next", AQU-2251). */
+function progArmLead(slot: ProgrammeSlot, atSec: number, explicit: boolean, then: "take" | "next" = "take"): void {
   progClearLead()
-  const leadEndSec = slot.startSec + (slot.targetLeadSec ?? 0)
+  const endSec = then === "take" ? slot.startSec + (slot.targetLeadSec ?? 0) : slot.startSec + slot.slotLenSec
   const rate = progress.rate || 1
-  const startedAt = performance.now()
-  const lead: ProgLead = { cellId: slot.cellId, explicit, timer: null, ticker: null }
+  const lead: ProgLead = {
+    cellId: slot.cellId, explicit, then, atSec, startedAt: performance.now(), rate, endSec, timer: null, ticker: null,
+  }
   lead.ticker = setInterval(() => {
     if (progLead !== lead) return
-    const t = atSec + ((performance.now() - startedAt) / 1000) * rate
-    setProgress({ currentTime: Math.min(t, leadEndSec) })
+    setProgress({ currentTime: progLeadNowSec(lead) })
   }, 100)
-  lead.timer = setTimeout(() => progLeadEnd(lead), Math.max(0, ((leadEndSec - atSec) / rate) * 1000))
+  lead.timer = setTimeout(() => progLeadEnd(lead), Math.max(0, ((endSec - atSec) / rate) * 1000))
   progLead = lead
 }
 
 function progLeadEnd(lead: ProgLead): void {
   if (progLead !== lead) return
   progClearLead()
+  if (lead.then === "next") {
+    // AQU-2251: the silent verse is over — on to the next, as if it had ended.
+    if (progCurrentSlot()?.cellId !== lead.cellId) return
+    setProgress({ currentTime: lead.endSec })
+    progAdvance()
+    return
+  }
   const slot = progCurrentSlot()
   const cell = slot ? activeContext?.cells.find((c) => c.id === slot.cellId) : undefined
   if (!slot || !cell || slot.cellId !== lead.cellId) return
@@ -1681,6 +1739,16 @@ async function progPlaySlot(
     progQuiet(currentAudio)
     setState({ kind: "playing", ...progStateCell() })
     progArmLead(slot, at, explicit)
+    return
+  }
+  if (progPlaysThroughSilence(slot)) {
+    // AQU-2251: a verse with nothing to hear, and the person wants it played
+    // through: it is the verse playing, the clock runs across it in silence,
+    // and the next verse follows at its end. Its take-to-come is stocked now.
+    progQuiet(currentAudio)
+    setState({ kind: "playing", ...progStateCell() })
+    progArmLead(slot, at, explicit, "next")
+    progPrefetchNext()
     return
   }
   if (!dubDue && !sourceDue) {
@@ -2944,7 +3012,8 @@ function progPrefetchNext(): void {
   const ctx = activeContext
   const prog = programme
   if (!ctx || !prog) return
-  const next = progNextPlayable(progIndex + 1)
+  // AQU-2251: past any silent verses played through — what is next to HEAR.
+  const next = progNextWithSound(progIndex + 1)
   const slot = next >= 0 ? prog.slots[next] : null
   const cell = slot ? ctx.cells.find((c) => c.id === slot.cellId) : null
   const target = cell && slot?.targetWindow ? progTargetFor(cell) : null
@@ -3712,7 +3781,9 @@ export function pauseQueue(): void {
       return
     }
     // AQU-2204: pausing inside a take's pause stops waiting it out; resume
-    // re-enters from where the clock stopped.
+    // re-enters from where the clock stopped — exactly there, not at the
+    // ticker's last beat (AQU-2251: a silent verse pauses the same way).
+    if (progLead) setProgress({ currentTime: progLeadNowSec(progLead) })
     progClearLead()
     // The source may already be quiet (its part of the verse is over) while
     // the dub carries on — pause BOTH, then say so once.
@@ -3762,6 +3833,12 @@ export async function resumeQueue(): Promise<void> {
     // AQU-2204: paused inside a take's pause — re-enter, so the rest of the
     // pause is waited out before the take.
     if (slot.targetWindow && (slot.targetLeadSec ?? 0) > progress.currentTime - slot.startSec + 0.001) {
+      void progPlaySlot(progIndex, progress.currentTime, true, progCuedExplicit)
+      return
+    }
+    // AQU-2251: paused on a verse with nothing to hear that is played through —
+    // re-enter, so the rest of it is held in silence before the next verse.
+    if (progPlaysThroughSilence(slot)) {
       void progPlaySlot(progIndex, progress.currentTime, true, progCuedExplicit)
       return
     }

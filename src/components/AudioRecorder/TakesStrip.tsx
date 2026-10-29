@@ -772,7 +772,16 @@ export function TakesStrip({
                   trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
                 />
               )}
-              <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
+              {/* Slice 3A (Oct 29): a cut take's text clips at its own edge, so
+                  nothing in it is ever drawn over the buttons or the pieces
+                  count after it, and keeps room for the length, so the count
+                  gives way before the length is cut. */}
+              <span
+                className={cn(
+                  "flex min-w-0 flex-1 items-center gap-1 tabular-nums",
+                  isSplit && "min-w-12 overflow-hidden",
+                )}
+              >
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
                 {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
                 {renamingId === rowKey ? (
@@ -795,16 +804,26 @@ export function TakesStrip({
                   />
                 ) : (
                   <>
-                    {/* Slice 3A evidence (Oct 25): a cut take's row also says how many
-                        pieces are approved, and at the recorder's width the name
-                        was squeezed to "T.". It keeps room for "Take 12"; the
-                        quieter "· cut into 3" and the count give way first. */}
-                    <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
-                      {isSplit ? splitLabel(pieces) : shownLabel(att)}
-                    </span>
-                    {isSplit && (
-                      <span data-testid={`take-split-${att.audioId}`} className="min-w-0 truncate text-muted-foreground/70">
-                        · {t("editor.recordingTab.splitInto", { count: pieces.length })}
+                    {isSplit ? (
+                      // Slice 3A (Sam, Oct 29): at the recorder's width a cut
+                      // take's squeezed "· split in 3" and the Remove noise
+                      // button were drawn over its length — the name kept a
+                      // minimum width, so the length spilled out of this text.
+                      // The name and its "· split in 3" are one line now, cut
+                      // from its end: the quieter "split in" goes first, then
+                      // the name. The length and the pieces count stay whole.
+                      <span data-testid={`take-name-${rowKey}`} className="min-w-0 truncate">
+                        <span data-testid={`take-label-${rowKey}`} className="font-medium">
+                          {splitLabel(pieces)}
+                        </span>
+                        <span data-testid={`take-split-${att.audioId}`} className="ms-1 text-muted-foreground/70">
+                          · {t("editor.recordingTab.splitInto", { count: pieces.length })}
+                        </span>
+                      </span>
+                    ) : (
+                      // Slice 3A evidence (Oct 25): the name keeps room for "Take 12".
+                      <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
+                        {shownLabel(att)}
                       </span>
                     )}
                     {isSplit ? (
@@ -861,7 +880,12 @@ export function TakesStrip({
                     {provenance && (
                       <span
                         data-testid={`take-recorded-${att.audioId}`}
-                        className="inline-flex min-w-0 max-w-full shrink items-center text-[10px] text-muted-foreground/60"
+                        className={cn(
+                          "inline-flex min-w-0 max-w-full shrink items-center text-[10px] text-muted-foreground/60",
+                          // Slice 3A (Oct 29): on a cut take's row the date
+                          // gives way before the name does.
+                          isSplit && "shrink-[999]",
+                        )}
                       >
                         <DateTooltip
                           value={provenance.recordedAt}

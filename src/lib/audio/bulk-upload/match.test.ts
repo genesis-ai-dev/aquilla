@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest"
 import { BookNameIndex, bookKey } from "./book-names"
 import { readName } from "./read-name"
 import {
+  CHAPTER_MIN_MEDIAN_MS,
+  VERSE_MAX_MEDIAN_MS,
+  needsLength,
   matchRecordings,
   planJobs,
   readRecordings,
@@ -533,6 +536,76 @@ describe("a number alone in a Bible book, decided by the count", () => {
     const files = numbered(50, "Genesis")
     const { assignments } = run(files, [big], { kind: "project" })
     expect(by(assignments, files, "0007.mp3")).toMatchObject({ read: "Genesis 7", fromFolder: "Genesis" })
+  })
+})
+
+// Sam, Oct 29 (second answer): "I don't see how on Earth an entire chapter
+// could be misinterpreted as a verse." When the count can't tell, the
+// recordings' length decides, by the folder's median: a minute or more is
+// chapters, half a minute or less is verses, and only in between does it stay
+// "can't tell".
+describe("when the count can't tell, the recordings' length decides", () => {
+  // The whole of Ruth: 4 chapters, 85 verses. Three lone numbers fit neither.
+  const ruth = book("rut", "RUT", "Ruth", [22, 23, 18, 22])
+  const scope: MatchScope = { kind: "file", fileId: "rut" }
+  const three = ["01.mp3", "02.mp3", "03.mp3"].map((n) => audio(`Ruth/${n}`))
+  const runWith = (files: BulkInputFile[], ms: number[]) => {
+    const projectFiles = [{ fileId: "rut", name: "Ruth", bookCode: "RUT" }]
+    const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
+    const targets = new Map([["rut", ruth]])
+    const first = matchRecordings(read, targets)
+    const lengths = new Map(ms.map((v, i) => [i, v]))
+    return { first, read, assignments: matchRecordings(read, targets, { lengths }) }
+  }
+
+  it("asks for the lengths of the files the count can't place, and of no others", () => {
+    const counters = Array.from({ length: 23 }, (_, i) => audio(`Phone/IMG_${4501 + i}.m4a`))
+    const { first } = runWith([...three, ...counters, audio("Ruth/Ruth 2-1.mp3")], [])
+    expect(needsLength(first)).toEqual([0, 1, 2])
+  })
+
+  it("3 of Ruth's 4 chapters, a few minutes each, are chapters 1 to 3", () => {
+    const { assignments } = runWith(three, [180_000, 150_000, 200_000])
+    expect(assignments.map((a) => a.read)).toEqual(["Ruth 1", "Ruth 2", "Ruth 3"])
+    expect(assignments.map((a) => a.cellIds?.length)).toEqual([22, 23, 18])
+    expect(assignments[0].byLength).toEqual({ as: "chapter", ms: 180_000 })
+  })
+
+  it("short recordings are verses, counted from the top", () => {
+    const { assignments } = runWith(three, [8_000, 12_000, 9_000])
+    expect(assignments.map((a) => a.cellIds)).toEqual([["rut:1:1"], ["rut:1:2"], ["rut:1:3"]])
+    expect(assignments[2].byLength).toEqual({ as: "verse", ms: 9_000 })
+  })
+
+  it("in between, it still can't tell, and says how long they are", () => {
+    const { assignments } = runWith(three, [45_000, 45_000, 45_000])
+    expect(assignments[0].reason).toEqual({ code: "chapterOrVerse", count: 3, book: "Ruth", chapters: 4, verses: 85, lengthMs: 45_000 })
+  })
+
+  it("the edges: a minute is chapters, half a minute is verses, anything between can't tell", () => {
+    expect(CHAPTER_MIN_MEDIAN_MS).toBe(60_000)
+    expect(VERSE_MAX_MEDIAN_MS).toBe(30_000)
+    expect(runWith(three, [60_000, 60_000, 60_000]).assignments[0].read).toBe("Ruth 1")
+    expect(runWith(three, [30_000, 30_000, 30_000]).assignments[0].read).toBe("Ruth 1:1")
+    expect(runWith(three, [59_999, 59_999, 59_999]).assignments[0].reason?.code).toBe("chapterOrVerse")
+    expect(runWith(three, [30_001, 30_001, 30_001]).assignments[0].reason?.code).toBe("chapterOrVerse")
+  })
+
+  it("the median holds against one odd file: a chapter as short as Psalm 117, a verse as long as Esther 8:9", () => {
+    expect(runWith(three, [14_000, 150_000, 200_000]).assignments.map((a) => a.read)).toEqual(["Ruth 1", "Ruth 2", "Ruth 3"])
+    expect(runWith(three, [40_000, 9_000, 10_000]).assignments.map((a) => a.read)).toEqual(["Ruth 1:1", "Ruth 1:2", "Ruth 1:3"])
+  })
+
+  it("lengths it couldn't read change nothing", () => {
+    const { assignments } = runWith(three, [])
+    expect(assignments[0].reason).toEqual({ code: "chapterOrVerse", count: 3, book: "Ruth", chapters: 4, verses: 85 })
+  })
+
+  it("the count still decides first: Ruth's 4 files are chapters, however short", () => {
+    const four = ["01.mp3", "02.mp3", "03.mp3", "04.mp3"].map((n) => audio(`Ruth/${n}`))
+    const { assignments } = runWith(four, [5_000, 5_000, 5_000, 5_000])
+    expect(assignments.map((a) => a.read)).toEqual(["Ruth 1", "Ruth 2", "Ruth 3", "Ruth 4"])
+    expect(assignments[0].byLength).toBeUndefined()
   })
 })
 

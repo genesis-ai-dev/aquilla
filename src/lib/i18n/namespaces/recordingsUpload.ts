@@ -22,6 +22,7 @@ const PLACEHOLDERS: Record<string, string> = {
   total: "A total number of files or parts.",
   chapters: "How many chapters a Bible book has in this project, already formatted for the locale.",
   verses: "How many verses a Bible book has in this project, already formatted for the locale.",
+  length: "How long a recording runs, already formatted for the locale, such as '3.1 minutes' or '12 seconds'.",
   done: "How many recordings uploaded.",
   failed: "How many recordings failed.",
   notStarted: "How many recordings were never uploaded because the person stopped the upload.",
@@ -90,7 +91,7 @@ const KEYS = {
     "recordingsUpload.rules.byName":
       "By name: a name with a book, chapter and verse goes to that verse, such as “Genesis 1-1”, “Gen 1.1”, “1Sam_3_4”, “GEN_001_001” or the project's own name for the book. When the name has no book, the folder's name is used.",
     "recordingsUpload.rules.byNumber":
-      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. A number alone, such as “012”, is a chapter when a folder holds about as many of them as the book has chapters, and a verse when it holds about as many as the book has verses. Otherwise those files are listed, not guessed. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
+      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. A number alone, such as “012”, is a chapter when a folder holds about as many of them as the book has chapters, and a verse when it holds about as many as the book has verses. When neither fits, their length decides: recordings of about a minute or more are chapters, and about half a minute or less are verses. Otherwise those files are listed, not guessed. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
     "recordingsUpload.rules.range":
       "“Genesis 1:1-3” or “1-1-3” is one recording for verses 1 to 3, and each of them counts as recorded. A name with a chapter and no verse is one recording for the whole chapter. A subtitle or film file, whose lines have times, needs one recording per line, so a range isn't uploaded there.",
     "recordingsUpload.rules.parts":
@@ -106,6 +107,10 @@ const KEYS = {
       other: "Reading the names of {count} files…",
     }),
     "recordingsUpload.loading.lines": "Loading the lines of {name}…",
+    "recordingsUpload.loading.lengths": plural({
+      one: "Reading how long {count} recording is…",
+      other: "Reading how long {count} recordings are…",
+    }),
     "recordingsUpload.loading.failed": "Couldn't load the lines of {name}. Check your connection and try again.",
     // Preview
     "recordingsUpload.preview.summary": "{recordings} will go onto {lines}.",
@@ -130,6 +135,16 @@ const KEYS = {
     "recordingsUpload.preview.part": "part {n} of {total}",
     "recordingsUpload.preview.lonePart": "named as a part, but it's the only one",
     "recordingsUpload.preview.take": "take {n}",
+    "recordingsUpload.preview.chapterByLength": "a chapter, by its length",
+    "recordingsUpload.preview.verseByLength": "a verse, by its length",
+    "recordingsUpload.preview.lengthChapters": plural({
+      one: "{count} file in {folder} is named with a number alone. It runs {length}, so it's read as a chapter, not a verse.",
+      other: "{count} files in {folder} are named with a number alone. They run about {length} each, so they're read as chapters, not verses.",
+    }),
+    "recordingsUpload.preview.lengthVerses": plural({
+      one: "{count} file in {folder} is named with a number alone. It runs {length}, so it's read as a verse, not a chapter.",
+      other: "{count} files in {folder} are named with a number alone. They run about {length} each, so they're read as verses, not chapters.",
+    }),
     "recordingsUpload.preview.takeOf": "take {n} of {total}",
     "recordingsUpload.preview.plays": "the one that plays",
     "recordingsUpload.preview.takesNewest": "Each file is uploaded as its own take, and the one modified most recently plays.",
@@ -177,6 +192,10 @@ const KEYS = {
       one: "Can't tell whether these numbers are chapters or verses. {count} file here is named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
       other: "Can't tell whether these numbers are chapters or verses. {count} files here are named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
     }),
+    "recordingsUpload.reason.chapterOrVerseLength": plural({
+      one: "Can't tell whether this number is a chapter or a verse. {count} file here is named with a number alone, {book} has {chapters} chapters and {verses} verses, and it runs {length}, which could be either.",
+      other: "Can't tell whether these numbers are chapters or verses. {count} files here are named with a number alone, {book} has {chapters} chapters and {verses} verses, and they run about {length} each, which could be either.",
+    }),
     "recordingsUpload.reason.skipped": "You chose not to upload it.",
     // Progress banner
     "recordingsUpload.banner.uploading": "Uploading recordings",
@@ -223,6 +242,11 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.takes.onLine": { description: "One item of a list naming a line that gets several takes from this upload, such as '2 takes on Genesis 1:1'. The count is always 2 or more." },
   "recordingsUpload.takes.moreLines": { description: "The last item of the list of lines with several takes, when more lines have them than are named: '…, and 2 more lines'." },
   "recordingsUpload.takes.summary": { description: "A sentence made of the list of lines that get several takes, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4.' Keep the sentence's own punctuation." },
+  "recordingsUpload.reason.chapterOrVerseLength": { description: "Why a recording named with a number alone is not uploaded into a Bible book: neither the number of such files nor their length tells whether the numbers are chapters or verses. Their typical length is between half a minute and a minute. Full sentences." },
+  "recordingsUpload.preview.chapterByLength": { description: "Small grey text in a preview row: a file named with a number alone was read as a whole chapter because the recordings are long.", maxLength: 32 },
+  "recordingsUpload.preview.verseByLength": { description: "Small grey text in a preview row: a file named with a number alone was read as one verse because the recordings are short.", maxLength: 32 },
+  "recordingsUpload.preview.lengthChapters": { description: "A note above the preview list: files named with a number alone could be chapters or verses, and were read as chapters because the recordings are long (a minute or more)." },
+  "recordingsUpload.preview.lengthVerses": { description: "A note above the preview list: files named with a number alone could be chapters or verses, and were read as verses because the recordings are short (half a minute or less)." },
   "recordingsUpload.join.button": { description: "Button on a recording that was uploaded or cut into pieces: makes one new recording of all the pieces, in order.", maxLength: 32 },
 }
 

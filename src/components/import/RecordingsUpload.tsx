@@ -36,6 +36,7 @@ import {
   canChooseLine,
   lonePart,
   matchRecordings,
+  needsLength,
   planJobs,
   readRecordings,
   takesByNumber,
@@ -52,6 +53,7 @@ import { chosenFromDrop, chosenFromInput, type ChosenFile } from "@/lib/audio/bu
 import { learnHeaderNames, loadTargetFile, projectFileInfos, type ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
 import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib/audio/bulk-upload/engine"
 import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-summary"
+import { readLengths } from "@/lib/audio/bulk-upload/read-length"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
 
@@ -179,8 +181,9 @@ export interface RecordingsReviewProps {
 type Phase =
   | { kind: "reading" }
   | { kind: "loading"; name: string }
+  | { kind: "lengths"; count: number }
   | { kind: "failed"; name: string }
-  | { kind: "ready"; read: ReadRecording[]; targets: Map<string, TargetFile> }
+  | { kind: "ready"; read: ReadRecording[]; targets: Map<string, TargetFile>; lengths: ReadonlyMap<number, number> }
 
 const LOAD_CONCURRENCY = 3
 
@@ -198,7 +201,14 @@ function lineLabel(file: TargetFile, line: TargetLine, position: number): string
   return `${file.name} · ${position + 1}`
 }
 
-function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n: number) => string): string {
+/** "3.1 minutes", "12 seconds": how long a recording runs, in the reader's language. */
+function lengthText(ms: number, locale: string): string {
+  return ms >= 60_000
+    ? new Intl.NumberFormat(locale, { style: "unit", unit: "minute", unitDisplay: "long", maximumFractionDigits: 1 }).format(Math.round(ms / 6_000) / 10)
+    : new Intl.NumberFormat(locale, { style: "unit", unit: "second", unitDisplay: "long", maximumFractionDigits: 0 }).format(Math.round(ms / 1000))
+}
+
+function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n: number) => string, len: (ms: number) => string): string {
   switch (reason.code) {
     case "notAudio": return t("recordingsUpload.reason.notAudio")
     case "systemFile": return t("recordingsUpload.reason.systemFile")
@@ -218,7 +228,9 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n
     case "duplicate": return t("recordingsUpload.reason.duplicate", { other: reason.other, target: reason.target })
     case "rangeOnTimedFile": return t("recordingsUpload.reason.rangeOnTimedFile")
     case "chapterOrVerse":
-      return t("recordingsUpload.reason.chapterOrVerse", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses) })
+      return reason.lengthMs != null
+        ? t("recordingsUpload.reason.chapterOrVerseLength", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses), length: len(reason.lengthMs) })
+        : t("recordingsUpload.reason.chapterOrVerse", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses) })
     case "skipped": return t("recordingsUpload.reason.skipped")
   }
 }
@@ -269,6 +281,7 @@ export function RecordingsReview({
           })
           read = readRecordings(inputs, opts)
         }
+        const files = chosen.map((c) => c.file)
         const targets = new Map<string, TargetFile>()
         const wanted = targetsWanted(read).map((id) => infos.find((f) => f.fileId === id)!).filter(Boolean)
         for (const f of wanted) {
@@ -282,17 +295,26 @@ export function RecordingsReview({
             throw Object.assign(e instanceof Error ? e : new Error(String(e)), { fileName: f.name })
           }
         }
-        if (live) setPhase({ kind: "ready", read, targets })
+        // Sam, Oct 29: numbers alone that the count can't place go by the
+        // recordings' length, read from each file's header or metadata.
+        const want = needsLength(matchRecordings(read, targets))
+        let lengths: ReadonlyMap<number, number> = new Map()
+        if (want.length > 0) {
+          if (!live) return
+          setPhase({ kind: "lengths", count: want.length })
+          lengths = await readLengths(files, want)
+        }
+        if (live) setPhase({ kind: "ready", read, targets, lengths })
       } catch (e) {
         if (live) setPhase({ kind: "failed", name: (e as { fileName?: string }).fileName ?? file?.name ?? "" })
       }
     })()
     return () => { live = false }
-  }, [inputs, file, projectFiles, projectId, getToken, lane, attempt])
+  }, [inputs, chosen, file, projectFiles, projectId, getToken, lane, attempt])
 
   const ready = phase.kind === "ready" ? phase : null
   const assignments = useMemo(
-    () => (ready ? matchRecordings(ready.read, ready.targets, { overrides, orderShift, orderStart }) : []),
+    () => (ready ? matchRecordings(ready.read, ready.targets, { overrides, orderShift, orderStart, lengths: ready.lengths }) : []),
     [ready, overrides, orderShift, orderStart],
   )
   const jobs = useMemo(() => (ready ? planJobs(assignments, ready.read) : []), [ready, assignments])
@@ -312,7 +334,9 @@ export function RecordingsReview({
           <p className="text-sm font-medium" role="status">
             {phase.kind === "reading"
               ? t("recordingsUpload.loading.reading", { count: formatNumber(chosen.length, locale) })
-              : t("recordingsUpload.loading.lines", { name: phase.name })}
+              : phase.kind === "lengths"
+                ? t("recordingsUpload.loading.lengths", { count: formatNumber(phase.count, locale) })
+                : t("recordingsUpload.loading.lines", { name: phase.name })}
           </p>
         )}
       </div>
@@ -396,6 +420,7 @@ function ReviewBody({
   const t = useT()
   const { locale } = useI18n()
   const fmt = (n: number) => formatNumber(n, locale)
+  const len = (ms: number) => lengthText(ms, locale)
   const { targets } = ready
   const matched = useMemo(() => assignments.filter((a) => a.cellIds && a.fileId), [assignments])
   const unmatched = useMemo(() => assignments.filter((a) => !a.cellIds || !a.fileId), [assignments])
@@ -442,6 +467,20 @@ function ReviewBody({
     }
     return { of, lines, byNumber, byDate }
   }, [jobs, assignments])
+
+  // Numbers alone placed by the recordings' length (Sam, Oct 29), per folder.
+  const byLength = useMemo(() => {
+    const m = new Map<string, { as: "chapter" | "verse"; count: number; ms: number; folder: string }>()
+    for (const a of assignments) {
+      if (!a.byLength) continue
+      const folder = chosen[a.index]?.path.split("/").slice(0, -1).join("/") ?? ""
+      const key = `${folder}\u0000${a.byLength.as}`
+      const entry = m.get(key) ?? { as: a.byLength.as, count: 0, ms: a.byLength.ms, folder }
+      entry.count++
+      m.set(key, entry)
+    }
+    return [...m.values()]
+  }, [assignments, chosen])
 
   // Order runs, each with where it starts now.
   const runs = useMemo(() => {
@@ -504,6 +543,15 @@ function ReviewBody({
           <RecordingsRulesInfo />
         </p>
         <p className="text-xs text-muted-foreground">{t("recordingsUpload.preview.instructions")}</p>
+        {byLength.map((note) => (
+          <p key={`${note.folder}-${note.as}`} className="text-xs text-muted-foreground" data-testid="recordings-length-note">
+            {t(note.as === "chapter" ? "recordingsUpload.preview.lengthChapters" : "recordingsUpload.preview.lengthVerses", {
+              count: fmt(note.count),
+              folder: note.folder ? `“${note.folder}”` : t("recordingsUpload.preview.topFolder"),
+              length: len(note.ms),
+            })}
+          </p>
+        ))}
         {takes.lines.length > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="recordings-takes-note">
             {takesSentence(t, locale, takes.lines)}
@@ -567,7 +615,7 @@ function ReviewBody({
                 <li key={a.index} className="flex items-start gap-2 text-xs" data-testid="recordings-unmatched-row" data-name={chosen[a.index]?.file.name}>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium text-foreground/90">{chosen[a.index]?.path}</span>
-                    <span className="block text-muted-foreground" data-testid="recordings-reason">{a.reason ? reasonText(t, a.reason, fmt) : ""}</span>
+                    <span className="block text-muted-foreground" data-testid="recordings-reason">{a.reason ? reasonText(t, a.reason, fmt, len) : ""}</span>
                   </span>
                   {canChooseLine(a) && pickerLines.length > 0 && (
                     editing === a.index ? (
@@ -607,6 +655,7 @@ function ReviewBody({
                   const recorded = a.cellIds!.some((id) => lineById.get(`${a.fileId}\u0000${id}`)?.line.hasRecording)
                   const notes: string[] = [a.chosen ? t("recordingsUpload.preview.chosen") : t(METHOD_KEY[a.method ?? "name"])]
                   if (a.fromFolder) notes.push(t("recordingsUpload.preview.fromFolder", { folder: a.fromFolder }))
+                  if (a.byLength) notes.push(t(a.byLength.as === "chapter" ? "recordingsUpload.preview.chapterByLength" : "recordingsUpload.preview.verseByLength"))
                   if (a.cellIds!.length > 1) notes.push(t("recordingsUpload.preview.range", { count: fmt(a.cellIds!.length) }))
                   if (parts) notes.push(t("recordingsUpload.preview.part", { n: parts.n, total: parts.total }))
                   else if (lonePart(a, assignments)) notes.push(t("recordingsUpload.preview.lonePart"))

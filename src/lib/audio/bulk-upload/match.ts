@@ -105,7 +105,7 @@ export type UnmatchedReason =
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
   | { code: "rangeOnTimedFile" }
-  | { code: "chapterOrVerse"; count: number; book: string; chapters: number; verses: number }
+  | { code: "chapterOrVerse"; count: number; book: string; chapters: number; verses: number; lengthMs?: number }
   | { code: "skipped" }
 
 export interface PartInfo {
@@ -134,6 +134,9 @@ export interface Assignment {
   fromFolder?: string
   /** The person chose this line in the preview. */
   chosen?: boolean
+  /** A number alone the count couldn't place, placed by the recordings'
+   *  length instead: as a chapter or a verse, and the folder's median (ms). */
+  byLength?: { as: "chapter" | "verse"; ms: number }
 }
 
 // ── Reading every name ───────────────────────────────────────────────────────
@@ -388,13 +391,47 @@ function pruneConstants(group: ReadRecording[], bible: boolean): Map<number, Nam
  */
 export const LONE_NUMBER_TOLERANCE = 0.1
 
+/**
+ * Sam, Oct 29: when the count can't tell, the recordings' length decides, by
+ * the folder's median. A median of a minute or more is chapters; half a minute
+ * or less is verses; only in between does it stay "can't tell".
+ *
+ * The numbers behind it. Audio Bibles are read at about 150 to 170 words a
+ * minute: the King James Version, 783,000 words, runs about 75 hours. An
+ * average verse is 25 words (31,102 verses), about 10 seconds; the longest,
+ * Esther 8:9, is 90 words, about 35 seconds. An average chapter is 660 words
+ * (1,189 chapters), about 4 minutes. Many languages take more words or
+ * syllables than English, up to about twice as long. So a folder of verses has
+ * a median near 10 to 20 seconds, well under half a minute. A folder of
+ * chapters has a median of several minutes: even the Psalms, the book of
+ * shortest chapters, has a median psalm of about 16 verses, over two minutes.
+ *
+ * The median, not each file, because single files mislead. Psalm 117 is one
+ * chapter of 33 words, about 12 to 25 seconds, shorter than many verses, and
+ * Esther 8:9 is a verse longer than half a minute. One of either in a folder
+ * leaves its median where the rest put it. A folder made only of the
+ * shortest psalms (117, 131, 133, 134) would read as verses; the preview shows
+ * it, and the person can change it.
+ */
+export const CHAPTER_MIN_MEDIAN_MS = 60_000
+export const VERSE_MAX_MEDIAN_MS = 30_000
+
+function median(values: readonly number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+}
+
 /** Within the tolerance of `target`, either side. */
 function closeTo(count: number, target: number): boolean {
   return target > 0 && Math.abs(count - target) <= Math.floor(target * LONE_NUMBER_TOLERANCE)
 }
 
 /** How a folder's lone numbers read in one Bible book. */
-type LoneReading = { as: "chapter" } | { as: "verse" } | { as: "unknown"; reason: UnmatchedReason }
+type LoneReading =
+  | { as: "chapter"; byLengthMs?: number }
+  | { as: "verse"; byLengthMs?: number }
+  | { as: "unknown"; reason: UnmatchedReason }
 
 /** The number, when a name in a Bible book holds one number and nothing says what it is. */
 function loneNumber(r: ReadRecording, nums: readonly NameNumber[]): NameNumber | null {
@@ -402,15 +439,38 @@ function loneNumber(r: ReadRecording, nums: readonly NameNumber[]): NameNumber |
   return nums.length === 1 && !nums[0].marker ? nums[0] : null
 }
 
-function readLoneNumbers(fi: FileIndex, numbers: readonly NameNumber[], singleChapter: boolean): LoneReading {
+function readLoneNumbers(
+  fi: FileIndex,
+  lone: ReadonlyMap<number, NameNumber>,
+  singleChapter: boolean,
+  lengths: ReadonlyMap<number, number> | undefined,
+): LoneReading {
   if (singleChapter) return { as: "verse" }
-  const count = new Set(numbers.map((n) => n.value)).size
+  const count = new Set([...lone.values()].map((n) => n.value)).size
   const chapters = fi.chapters.size
   const verses = fi.content.length
   const asChapters = closeTo(count, chapters)
   const asVerses = closeTo(count, verses)
   if (asChapters !== asVerses) return asChapters ? { as: "chapter" } : { as: "verse" }
-  return { as: "unknown", reason: { code: "chapterOrVerse", count, book: bookLabel(fi), chapters, verses } }
+  // The count can't tell: the recordings' length decides, when it was read.
+  const known = [...lone.keys()].flatMap((i) => {
+    const ms = lengths?.get(i)
+    return ms != null && ms > 0 ? [ms] : []
+  })
+  const reason: UnmatchedReason = { code: "chapterOrVerse", count, book: bookLabel(fi), chapters, verses }
+  if (known.length === 0) return { as: "unknown", reason }
+  const ms = median(known)
+  if (ms >= CHAPTER_MIN_MEDIAN_MS) return { as: "chapter", byLengthMs: ms }
+  if (ms <= VERSE_MAX_MEDIAN_MS) return { as: "verse", byLengthMs: ms }
+  return { as: "unknown", reason: { ...reason, lengthMs: ms } }
+}
+
+/**
+ * The files whose numbers neither count could place, and whose length hasn't
+ * been read: the preview reads these files' lengths and matches again.
+ */
+export function needsLength(assignments: readonly Assignment[]): number[] {
+  return assignments.flatMap((a) => (a.reason?.code === "chapterOrVerse" && a.reason.lengthMs == null ? [a.index] : []))
 }
 
 function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading): Interpreted {
@@ -643,6 +703,9 @@ export interface MatchOptions {
   orderStart?: ReadonlyMap<string, string>
   /** Lines the person chose by hand, or "skip" to leave a file out. */
   overrides?: ReadonlyMap<number, { fileId: string; cellId: string } | "skip">
+  /** Each recording's length in ms, by input index: read for the files the
+   *  count couldn't place (`needsLength`), which then go by their length. */
+  lengths?: ReadonlyMap<number, number>
 }
 
 /** The target, as one identity string, for duplicate detection. */
@@ -706,7 +769,10 @@ export function matchRecordings(
         if (n) lone.set(r.index, n)
       }
     }
-    const loneReading = lone.size > 0 ? readLoneNumbers(fi, [...lone.values()], singleChapter) : undefined
+    const loneReading = lone.size > 0 ? readLoneNumbers(fi, lone, singleChapter, opts.lengths) : undefined
+    const byLength = loneReading && loneReading.as !== "unknown" && loneReading.byLengthMs != null
+      ? { as: loneReading.as, ms: loneReading.byLengthMs }
+      : undefined
     const results = group.map((r) => {
       // In one Bible book, a name of another book is the wrong file.
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {
@@ -770,6 +836,7 @@ export function matchRecordings(
         read: res.read,
         ...(part ? { part } : {}),
         ...(interp?.take != null ? { take: interp.take } : {}),
+        ...(byLength && lone.has(r.index) ? { byLength } : {}),
         ...(!r.reading.book && r.folderBook ? { fromFolder: r.folderBook.segment } : r.folderChapter && !r.reading.numbers.some((n) => n.marker === "chapter") ? { fromFolder: r.folderChapter.segment } : {}),
       })
     }

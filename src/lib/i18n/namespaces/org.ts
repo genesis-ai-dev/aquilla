@@ -1113,7 +1113,6 @@ export const org = defineNamespace({
     // -- MembersMatrixCellEditor: inline per-cell role editor in the members × projects matrix --
     "org.membersMatrixCellEditor.alsoHasAccessAriaLabel": "Also has access via other paths",
     "org.membersMatrixCellEditor.alsoHasAccessVia": "Also has access via:",
-    "org.membersMatrixCellEditor.currentBadge": "current",
     // "Saving…" → common.saving (identical text)
     "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
     "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
@@ -1127,7 +1126,6 @@ export const org = defineNamespace({
     "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
       "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
-    "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
     "org.membersMatrixCellEditor.editRoleAriaLabel": "Edit {username}'s role on this project",

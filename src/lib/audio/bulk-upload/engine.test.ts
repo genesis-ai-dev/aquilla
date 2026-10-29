@@ -113,6 +113,30 @@ describe("bulk upload engine", () => {
     expect(uploads.map((u) => u.size)).toEqual([111, 222])
   })
 
+  // Sam, Oct 29 (question 5): two files for one line both upload, as takes.
+  it("a line given several takes is named in the summary: '2 takes on Genesis 1:1'", async () => {
+    await startBulkUpload(request(
+      [{ kind: "single", fileId: "f1", cellId: "c1", files: [0, 1] }, { kind: "single", fileId: "f1", cellId: "c2", files: [2] }],
+      [file("Genesis 1-1 copy.wav"), file("Genesis 1-1.wav"), file("Genesis 1-2.wav")],
+      { targetLabel: (job) => (job.kind === "single" && job.cellId === "c1" ? "Genesis 1:1" : "Genesis 1:2") },
+    ))
+    expect(attaches.map((a) => a.cellId)).toEqual(expect.arrayContaining(["c1", "c1", "c2"]))
+    expect(getBulkUploadState()).toMatchObject({ total: 3, done: 3, takes: [{ target: "Genesis 1:1", count: 2 }] })
+  })
+
+  it("when a line's second take fails, Try again uploads only that take, not the first again", async () => {
+    uploadFailures = [undefined as unknown as Error, new Error("audio upload failed (403): quota")]
+    const req = request([{ kind: "single", fileId: "f1", cellId: "c1", files: [0, 1] }], [file("older.wav", 111), file("newer.wav", 222)])
+    await startBulkUpload(req)
+    expect(getBulkUploadState()).toMatchObject({ total: 2, done: 1, takes: [] })
+    expect(getBulkUploadState()?.failed.map((f) => f.name)).toEqual(["newer.wav"])
+    await retryFailedBulkUploads()
+    // Two takes on the line, the newer last, so it plays: nothing uploaded twice.
+    expect(uploads.map((u) => u.size)).toEqual([111, 222])
+    expect(attaches).toHaveLength(2)
+    expect(getBulkUploadState()).toMatchObject({ total: 1, done: 1, failed: [] })
+  })
+
   it("retries a dropped connection, and lists a file that still fails with its reason", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     uploadFailures = [new TypeError("Failed to fetch")]

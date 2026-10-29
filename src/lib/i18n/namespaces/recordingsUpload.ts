@@ -28,6 +28,7 @@ const PLACEHOLDERS: Record<string, string> = {
   message: "A technical error message, in English.",
   recordings: "A phrase with a count, such as '12 recordings'.",
   lines: "A phrase with a count, such as '12 lines'.",
+  list: "A list of lines and how many takes each gets, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4'.",
 }
 
 /** Where a key sits, by its prefix, for keys without a hand-written note. */
@@ -42,6 +43,7 @@ const SURFACE_NOTES: ReadonlyArray<readonly [string, string]> = [
   ["recordingsUpload.banner.", "The progress banner shown while recordings upload, and its summary afterwards."],
   ["recordingsUpload.failures.", "The list of recordings that couldn't upload: its title, or why one failed. A full sentence."],
   ["recordingsUpload.join.", "The 'Join into one recording' action on a recording made of pieces."],
+  ["recordingsUpload.takes.", "Names the lines that get more than one take from this upload, in the preview and in the summary after it."],
 ]
 
 /** Placeholders a message uses, across its plural forms. */
@@ -96,7 +98,7 @@ const KEYS = {
     "recordingsUpload.rules.order":
       "By order: when no file in a folder has a verse or line number in its name (phone recordings such as “IMG_4521”, or no numbers at all), the files go onto the lines in folder order, sorted so that 2 comes before 10. A folder named for a chapter starts at that chapter.",
     "recordingsUpload.rules.existing":
-      "A line that already has a recording keeps it in its take list, and the new recording becomes the one that plays.",
+      "A line that already has a recording keeps it in its take list, and the new recording becomes the one that plays. Several files for one line that aren't its parts all upload as takes, and the one modified most recently plays. Files numbered “take 1”, “take 2” go in that order, and the highest plays.",
     "recordingsUpload.rules.unmatched": "A file that can't be placed is listed with the reason, and it is not uploaded.",
     // Loading
     "recordingsUpload.loading.reading": plural({
@@ -128,6 +130,10 @@ const KEYS = {
     "recordingsUpload.preview.part": "part {n} of {total}",
     "recordingsUpload.preview.lonePart": "named as a part, but it's the only one",
     "recordingsUpload.preview.take": "take {n}",
+    "recordingsUpload.preview.takeOf": "take {n} of {total}",
+    "recordingsUpload.preview.plays": "the one that plays",
+    "recordingsUpload.preview.takesNewest": "Each file is uploaded as its own take, and the one modified most recently plays.",
+    "recordingsUpload.preview.takesHighest": "Numbered takes upload in order, and the highest number plays.",
     "recordingsUpload.preview.hasRecording": "already recorded",
     "recordingsUpload.preview.change": "Change",
     "recordingsUpload.preview.changeLabel": "Change the line for {name}",
@@ -145,6 +151,10 @@ const KEYS = {
     "recordingsUpload.preview.orderStartAt": "Start at…",
     "recordingsUpload.preview.topFolder": "the chosen files",
     "recordingsUpload.preview.confirm": plural({ one: "Upload {count} recording", other: "Upload {count} recordings" }),
+    // Lines given several takes
+    "recordingsUpload.takes.onLine": plural({ one: "{count} take on {target}", other: "{count} takes on {target}" }),
+    "recordingsUpload.takes.moreLines": plural({ one: "{count} more line", other: "{count} more lines" }),
+    "recordingsUpload.takes.summary": "{list}.",
     // Why a file is not uploaded
     "recordingsUpload.reason.notAudio": "This isn't an audio file.",
     "recordingsUpload.reason.systemFile": "This is a hidden system file, not a recording.",
@@ -208,6 +218,11 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.banner.stop": { description: "Tooltip and accessible name of the X button on the upload progress banner; stops the upload." },
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
   "recordingsUpload.reason.chapterOrVerse": { description: "Why a recording named with a number alone (such as '012') is not uploaded into a Bible book: the number could be a chapter or a verse, and how many such files there are is close to neither the book's number of chapters nor its number of verses (or close to both). Shown beside each of those files. Full sentences." },
+  "recordingsUpload.preview.takeOf": { description: "Small grey text in a preview row: this file is one of several recordings for the same line, each uploaded as its own take; n is its place in the upload order.", maxLength: 24 },
+  "recordingsUpload.preview.plays": { description: "Small grey text in a preview row, after 'take 2 of 2': of the takes this upload gives the line, this file's is the one that will play.", maxLength: 28 },
+  "recordingsUpload.takes.onLine": { description: "One item of a list naming a line that gets several takes from this upload, such as '2 takes on Genesis 1:1'. The count is always 2 or more." },
+  "recordingsUpload.takes.moreLines": { description: "The last item of the list of lines with several takes, when more lines have them than are named: '…, and 2 more lines'." },
+  "recordingsUpload.takes.summary": { description: "A sentence made of the list of lines that get several takes, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4.' Keep the sentence's own punctuation." },
   "recordingsUpload.join.button": { description: "Button on a recording that was uploaded or cut into pieces: makes one new recording of all the pieces, in order.", maxLength: 32 },
 }
 

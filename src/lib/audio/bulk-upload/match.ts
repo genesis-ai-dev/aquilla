@@ -14,7 +14,9 @@
 //   3. "Genesis 1:1-3" or "1-1-3" is one recording for verses 1 to 3; a name
 //      with a chapter and no verse is one recording for the whole chapter.
 //   4. A verse in several files ("1-1a", "1-1 part 2", "1-1_2", "beginning",
-//      "end") lands as the pieces of one recording, in that order.
+//      "end") lands as the pieces of one recording, in that order. Several
+//      files for one line that are not its parts all land as takes; the most
+//      recently modified plays (numbered takes: the highest).
 //   5. When no file in a folder has a usable number, the files go to the
 //      lines in folder order — the names sorted so 2 comes before 10.
 //   6. Anything else is listed with the reason, and is not uploaded.
@@ -41,6 +43,9 @@ export interface BulkInputFile {
   path: string
   size: number
   type: string
+  /** File.lastModified (ms). Of several files for one line, the most recent
+   *  is the take that plays (Sam, Oct 29). */
+  lastModified?: number
 }
 
 export interface TargetLine {
@@ -804,9 +809,13 @@ function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): strin
 }
 
 /**
- * Two files on one line: pieces of one verse and numbered takes may share it;
- * otherwise the first in folder order keeps the line and the other is listed
- * with the name of the file that has it. A chosen line outranks a rule's.
+ * Two files on one line. Pieces of one verse share it. So do any files that
+ * are not parts (Sam, Oct 29): each uploads as a take of the line, whether the
+ * names say "take 2", say the same verse twice ("Genesis 1-1", "Genesis 1-1
+ * copy") or the person chose the line for one of them. What can't share a line
+ * — a range over it, a part beside a whole recording, two of the same part — is
+ * kept by the first in folder order, and the other is listed with the name of
+ * the file that has it. A chosen line outranks a rule's.
  */
 function settleConflicts(read: readonly ReadRecording[], assignments: Assignment[]): Assignment[] {
   const nameOf = (i: number) => read[i]?.file.name ?? ""
@@ -823,7 +832,7 @@ function settleConflicts(read: readonly ReadRecording[], assignments: Assignment
       if (!held) continue
       const sameLine = held.cellIds!.length === 1 && a.cellIds!.length === 1
       const pieces = sameLine && held.part != null && a.part != null && held.part.rank !== a.part.rank
-      const takes = sameLine && held.take != null && a.take != null && held.take !== a.take && !held.part && !a.part
+      const takes = sameLine && !held.part && !a.part
       if (!pieces && !takes) { clash = held; break }
     }
     if (clash) {
@@ -850,10 +859,23 @@ export type UploadJob =
   | { kind: "pieces"; fileId: string; cellId: string; files: number[] }
 
 /**
+ * True when every file for one line is a numbered take with its own number:
+ * they upload in that order, so the highest plays. Otherwise the most recently
+ * modified file plays (Sam, Oct 29).
+ */
+export function takesByNumber(list: readonly Assignment[]): boolean {
+  const numbers = list.map((a) => a.take)
+  return numbers.every((n) => n != null) && new Set(numbers).size === numbers.length
+}
+
+/**
  * Group the matched files into upload jobs:
  *   - one file on one line → a single take;
- *   - numbered takes of one line → one job, uploaded in take order so the
- *     highest plays;
+ *   - several files for one line → one job of takes, uploaded one after
+ *     another so the last plays: by take number when each has one, otherwise
+ *     oldest first by File.lastModified, a tie going by folder order (Sam,
+ *     Oct 29: the more recently modified plays; on a tie, the later in folder
+ *     order);
  *   - one file over several lines → one shared recording on each of them;
  *   - the parts of one verse → one job, joined into pieces of one take.
  * A verse named as a part with no other part is simply its recording.
@@ -882,7 +904,10 @@ export function planJobs(assignments: readonly Assignment[], read: readonly Read
       jobs.push({ kind: "pieces", fileId: fileId!, cellId, files: ordered.map((a) => a.index) })
       continue
     }
-    const ordered = [...list].sort((a, b) => (a.take ?? 0) - (b.take ?? 0) || compareFolderOrder(pathOf(a.index), pathOf(b.index)))
+    const modified = (i: number) => read[i]?.file.lastModified ?? 0
+    const ordered = takesByNumber(list)
+      ? [...list].sort((a, b) => a.take! - b.take! || compareFolderOrder(pathOf(a.index), pathOf(b.index)))
+      : [...list].sort((a, b) => modified(a.index) - modified(b.index) || compareFolderOrder(pathOf(a.index), pathOf(b.index)))
     jobs.push({ kind: "single", fileId: fileId!, cellId, files: ordered.map((a) => a.index) })
   }
   return jobs

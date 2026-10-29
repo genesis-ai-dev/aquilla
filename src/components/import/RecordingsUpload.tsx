@@ -38,6 +38,7 @@ import {
   matchRecordings,
   planJobs,
   readRecordings,
+  takesByNumber,
   targetsWanted,
   type Assignment,
   type MatchScope,
@@ -50,6 +51,7 @@ import {
 import { chosenFromDrop, chosenFromInput, type ChosenFile } from "@/lib/audio/bulk-upload/collect-files"
 import { learnHeaderNames, loadTargetFile, projectFileInfos, type ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
 import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib/audio/bulk-upload/engine"
+import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-summary"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
 
@@ -242,7 +244,7 @@ export function RecordingsReview({
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputs = useMemo(
-    () => chosen.map(({ file: f, path }) => ({ name: f.name, path, size: f.size, type: f.type })),
+    () => chosen.map(({ file: f, path }) => ({ name: f.name, path, size: f.size, type: f.type, lastModified: f.lastModified })),
     [chosen],
   )
 
@@ -422,6 +424,25 @@ function ReviewBody({
     return m
   }, [jobs])
 
+  // Lines given more than one take (Sam, Oct 29): every file uploads, in the
+  // job's order, and the last plays. "take 2 of 2" on each row; the lines in
+  // the summary ("2 takes on Genesis 1:1").
+  const takes = useMemo(() => {
+    const byIndex = new Map(assignments.map((a) => [a.index, a]))
+    const of = new Map<number, { n: number; total: number }>()
+    const lines: LineTakes[] = []
+    let byNumber = false
+    let byDate = false
+    for (const job of jobs) {
+      if (job.kind !== "single" || job.files.length < 2) continue
+      job.files.forEach((index, i) => of.set(index, { n: i + 1, total: job.files.length }))
+      lines.push({ target: byIndex.get(job.files[0])?.read ?? "", count: job.files.length })
+      if (takesByNumber(job.files.map((i) => byIndex.get(i)!))) byNumber = true
+      else byDate = true
+    }
+    return { of, lines, byNumber, byDate }
+  }, [jobs, assignments])
+
   // Order runs, each with where it starts now.
   const runs = useMemo(() => {
     const m = new Map<string, { count: number; first: Assignment | null; folder: string; fileId: string }>()
@@ -483,6 +504,13 @@ function ReviewBody({
           <RecordingsRulesInfo />
         </p>
         <p className="text-xs text-muted-foreground">{t("recordingsUpload.preview.instructions")}</p>
+        {takes.lines.length > 0 && (
+          <p className="text-xs text-muted-foreground" data-testid="recordings-takes-note">
+            {takesSentence(t, locale, takes.lines)}
+            {takes.byDate && <> {t("recordingsUpload.preview.takesNewest")}</>}
+            {takes.byNumber && <> {t("recordingsUpload.preview.takesHighest")}</>}
+          </p>
+        )}
         {recordedCount > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="recordings-recorded-note">
             {t("recordingsUpload.preview.recordedCount", { count: fmt(recordedCount) })}
@@ -582,7 +610,11 @@ function ReviewBody({
                   if (a.cellIds!.length > 1) notes.push(t("recordingsUpload.preview.range", { count: fmt(a.cellIds!.length) }))
                   if (parts) notes.push(t("recordingsUpload.preview.part", { n: parts.n, total: parts.total }))
                   else if (lonePart(a, assignments)) notes.push(t("recordingsUpload.preview.lonePart"))
-                  if (a.take != null) notes.push(t("recordingsUpload.preview.take", { n: a.take }))
+                  const takeOf = takes.of.get(a.index)
+                  if (takeOf) {
+                    notes.push(t("recordingsUpload.preview.takeOf", { n: takeOf.n, total: takeOf.total }))
+                    if (takeOf.n === takeOf.total) notes.push(t("recordingsUpload.preview.plays"))
+                  } else if (a.take != null) notes.push(t("recordingsUpload.preview.take", { n: a.take }))
                   const current = `${a.fileId}\u0000${a.cellIds![0]}`
                   return (
                     <li

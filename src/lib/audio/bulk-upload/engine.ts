@@ -71,6 +71,9 @@ export interface BulkUploadState {
   cancelled: boolean
   /** Paused until the browser is back online. */
   waitingForConnection: boolean
+  /** Lines that got more than one take, as the preview named them, for the
+   *  summary ("2 takes on Genesis 1:1"). */
+  takes: Array<{ target: string; count: number }>
   finished: boolean
   startedAt: number
   finishedAt: number | null
@@ -360,12 +363,31 @@ function filesIn(job: UploadJob): number {
   return job.files.length
 }
 
+/** A job that failed part-way: the files of it that did not land. */
+class PartlyDone extends Error {
+  readonly cause: unknown
+  readonly remaining: number[]
+  constructor(cause: unknown, remaining: number[]) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.cause = cause
+    this.remaining = remaining
+  }
+}
+
 async function runJob(ctx: RunContext, job: UploadJob): Promise<void> {
   const files = job.files.map((i) => ctx.req.files[i])
   switch (job.kind) {
     case "single":
-      // Numbered takes of one line, one after another, so the last plays.
-      for (const f of files) await uploadOne(ctx, job.fileId, job.cellId, f)
+      // Takes of one line, one after another, so the last plays. When one
+      // fails, the ones before it have landed: only the rest are tried again.
+      for (const [i, f] of files.entries()) {
+        try {
+          await uploadOne(ctx, job.fileId, job.cellId, f)
+        } catch (e) {
+          if (i === 0) throw e
+          throw new PartlyDone(e, job.files.slice(i))
+        }
+      }
       return
     case "range":
       return uploadRange(ctx, job.fileId, job.cellIds, files[0])
@@ -401,6 +423,7 @@ export async function startBulkUpload(req: BulkUploadRequest): Promise<void> {
     notStarted: 0,
     cancelled: false,
     waitingForConnection: false,
+    takes: [],
     finished: false,
     startedAt: Date.now(),
     finishedAt: null,
@@ -422,19 +445,28 @@ export async function startBulkUpload(req: BulkUploadRequest): Promise<void> {
       const job = queue[next++]
       try {
         await runJob(ctx, job)
-        patch({ done: (state?.done ?? 0) + filesIn(job) })
+        patch({
+          done: (state?.done ?? 0) + filesIn(job),
+          ...(job.kind === "single" && job.files.length > 1
+            ? { takes: [...(state?.takes ?? []), { target: req.targetLabel(job), count: job.files.length }] }
+            : {}),
+        })
       } catch (e) {
+        const remaining = e instanceof PartlyDone ? e.remaining : job.files
+        const landed = filesIn(job) - remaining.length
         if (cancelFlag) {
-          patch({ notStarted: (state?.notStarted ?? 0) + filesIn(job) })
+          patch({ done: (state?.done ?? 0) + landed, notStarted: (state?.notStarted ?? 0) + remaining.length })
           return
         }
-        const err = classify(e)
-        failedJobs.push(job)
-        const first = job.files[0]
+        const err = classify(e instanceof PartlyDone ? e.cause : e)
+        const rest: UploadJob = landed > 0 ? { ...job, files: remaining } as UploadJob : job
+        failedJobs.push(rest)
+        const first = rest.files[0]
+        if (landed > 0) patch({ done: (state?.done ?? 0) + landed })
         patch({
           failed: [
             ...(state?.failed ?? []),
-            { index: first, name: req.files[first]?.name ?? "", target: req.targetLabel(job), code: err.code, message: err.message },
+            { index: first, name: req.files[first]?.name ?? "", target: req.targetLabel(rest), code: err.code, message: err.message },
           ],
         })
       }

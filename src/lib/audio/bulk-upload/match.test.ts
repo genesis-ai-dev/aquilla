@@ -16,9 +16,9 @@ import {
 
 const MB = 1024 * 1024
 
-function audio(path: string, size = 1000): BulkInputFile {
+function audio(path: string, size = 1000, lastModified?: number): BulkInputFile {
   const name = path.split("/").pop()!
-  return { name, path, size, type: name.endsWith(".txt") ? "text/plain" : "audio/wav" }
+  return { name, path, size, type: name.endsWith(".txt") ? "text/plain" : "audio/wav", ...(lastModified != null ? { lastModified } : {}) }
 }
 
 /** A Bible book with `chapters[c-1]` verses in chapter c, plus a title line. */
@@ -201,7 +201,7 @@ describe("matching inside one Bible book", () => {
       audio("notes.txt"),
       audio("._Genesis 1-1.mp3"),
       audio("Genesis 1-1.mp3"),
-      audio("Genesis 1-1 copy.mp3"),
+      audio("Genesis 1-1a.mp3"),
       audio("intro.mp3"),
       { ...audio("Genesis 1-2.mp3"), size: 0 },
     ]
@@ -211,7 +211,8 @@ describe("matching inside one Bible book", () => {
     expect(by(assignments, files, "Exodus 1-1.mp3").reason).toEqual({ code: "otherBook", book: "Exodus", fileName: "Genesis" })
     expect(by(assignments, files, "notes.txt").reason).toEqual({ code: "notAudio" })
     expect(by(assignments, files, "._Genesis 1-1.mp3").reason).toEqual({ code: "systemFile" })
-    expect(by(assignments, files, "Genesis 1-1 copy.mp3").reason).toEqual({ code: "duplicate", target: "Genesis 1:1", other: "Genesis 1-1.mp3" })
+    // A part can't share its verse with a whole recording of it.
+    expect(by(assignments, files, "Genesis 1-1a.mp3").reason).toEqual({ code: "duplicate", target: "Genesis 1:1", other: "Genesis 1-1.mp3" })
     expect(by(assignments, files, "intro.mp3").reason).toEqual({ code: "noNumber" })
     expect(by(assignments, files, "Genesis 1-2.mp3").reason).toEqual({ code: "empty" })
     // Never silently dropped: one answer per file.
@@ -262,8 +263,8 @@ describe("matching inside one Bible book", () => {
     expect(moved.map((a) => a.cellIds?.[0])).toEqual(["gen:3:6", "gen:3:7"])
   })
 
-  it("a chosen line wins and takes the line from the rule's file", () => {
-    const files = [audio("Genesis 1-1.mp3"), audio("Genesis 1-2.mp3")]
+  it("a chosen line wins over a part's claim on it", () => {
+    const files = [audio("Genesis 1-1a.mp3"), audio("Genesis 1-2.mp3")]
     const projectFiles = [{ fileId: "gen", name: "Genesis", bookCode: "GEN" }]
     const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
     const out = matchRecordings(read, new Map([["gen", gen]]), { overrides: new Map([[1, { fileId: "gen", cellId: "gen:1:1" }]]) })
@@ -363,6 +364,61 @@ describe("matching inside a document, plain text or subtitles", () => {
       ["a.mp3", "notes#1", "order"],
       ["c.mp3", "notes#3", "order"],
     ])
+  })
+})
+
+// Sam, Oct 29 (question 5): two files for one line that are not its parts and
+// not numbered takes both upload, as takes. The more recently modified file
+// (File.lastModified) is the one that plays; on a tie, the later in folder
+// order. The engine uploads a job's files in order and the last one plays.
+describe("two files for one line upload as takes", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25, 24])
+  const scope: MatchScope = { kind: "file", fileId: "gen" }
+
+  it("both upload as takes of the line, and the more recently modified plays", () => {
+    const files = [audio("Genesis 1-1.mp3", 1000, 2_000), audio("Genesis 1-1 copy.mp3", 1000, 1_000)]
+    const { assignments, jobs } = run(files, [gen], scope)
+    expect(assignments.map((a) => [a.cellIds, a.reason])).toEqual([[["gen:1:1"], undefined], [["gen:1:1"], undefined]])
+    // Oldest first: the last uploaded is the one that plays.
+    expect(jobs).toEqual([{ kind: "single", fileId: "gen", cellId: "gen:1:1", files: [1, 0] }])
+  })
+
+  it("on a tie, the later one in folder order plays", () => {
+    const tied = [audio("Genesis 1-1 copy.mp3", 1000, 5_000), audio("Genesis 1-1.mp3", 1000, 5_000)]
+    expect(run(tied, [gen], scope).jobs).toEqual([{ kind: "single", fileId: "gen", cellId: "gen:1:1", files: [1, 0] }])
+    // No dates at all (files picked from somewhere that keeps none): folder order.
+    const undated = [audio("b/Genesis 1-1.mp3"), audio("a/Genesis 1-1.mp3")]
+    expect(run(undated, [gen], scope).jobs.map((j) => j.files)).toEqual([[1, 0]])
+  })
+
+  it("three files for one line: oldest first, newest last", () => {
+    const files = [audio("Genesis 1-2.mp3", 1000, 30), audio("Genesis 1-2 copy.mp3", 1000, 10), audio("Gen 1.2.mp3", 1000, 20)]
+    expect(run(files, [gen], scope).jobs).toEqual([{ kind: "single", fileId: "gen", cellId: "gen:1:2", files: [1, 2, 0] }])
+  })
+
+  it("a numbered take and a file without a number: the newest plays", () => {
+    const files = [audio("Genesis 1-3 take 2.mp3", 1000, 100), audio("Genesis 1-3.mp3", 1000, 200)]
+    expect(run(files, [gen], scope).jobs.map((j) => j.files)).toEqual([[0, 1]])
+  })
+
+  it("numbered takes on their own still go by their numbers, whatever their dates", () => {
+    const files = [audio("Genesis 1-4 take 2.mp3", 1000, 100), audio("Genesis 1-4 take 1.mp3", 1000, 900)]
+    expect(run(files, [gen], scope).jobs.map((j) => j.files)).toEqual([[1, 0]])
+  })
+
+  it("a line chosen by hand that another file has: both are takes", () => {
+    const files = [audio("Genesis 1-1.mp3", 1000, 1), audio("random.mp3", 1000, 2), audio("Genesis 1-2.mp3", 1000, 3)]
+    const projectFiles = [{ fileId: "gen", name: "Genesis", bookCode: "GEN" }]
+    const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 10 * MB })
+    const out = matchRecordings(read, new Map([["gen", gen]]), { overrides: new Map([[1, { fileId: "gen", cellId: "gen:1:1" }]]) })
+    expect(out.map((a) => a.cellIds)).toEqual([["gen:1:1"], ["gen:1:1"], ["gen:1:2"]])
+    expect(planJobs(out, read).find((j) => j.kind === "single" && j.cellId === "gen:1:1")?.files).toEqual([0, 1])
+  })
+
+  it("parts and ranges still can't share a line with another file", () => {
+    const files = [audio("Genesis 2-1-3.mp3"), audio("Genesis 2-2.mp3")]
+    const { assignments } = run(files, [gen], scope)
+    expect(by(assignments, files, "Genesis 2-2.mp3").reason).toEqual({ code: "duplicate", target: "Genesis 2:1–3", other: "Genesis 2-1-3.mp3" })
   })
 })
 

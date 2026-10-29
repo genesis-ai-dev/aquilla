@@ -19,6 +19,7 @@ import {
   useBulkUploadState,
   type BulkFailureCode,
 } from "@/lib/audio/bulk-upload/engine"
+import { takesSentence } from "@/lib/audio/bulk-upload/takes-summary"
 
 const FAILURE_KEY: Record<BulkFailureCode, MessageKey> = {
   offline: "recordingsUpload.failures.offline",
@@ -37,7 +38,7 @@ export function RecordingsUploadBanner() {
   const [showFailures, setShowFailures] = useState(false)
   if (!state) return null
   const fmt = (n: number) => formatNumber(n, locale)
-  const { total, done, failed, notStarted, cancelled, waitingForConnection, finished } = state
+  const { total, done, failed, notStarted, cancelled, waitingForConnection, finished, takes } = state
 
   const dismiss = (
     <AppTooltip content={t("common.dismiss")}>
@@ -61,6 +62,7 @@ export function RecordingsUploadBanner() {
             {cancelled
               ? t("recordingsUpload.banner.stoppedSummary", { done: fmt(done), total: fmt(total), notStarted: fmt(notStarted) })
               : t("recordingsUpload.banner.done", { count: fmt(done) })}
+            {takes.length > 0 && <> {takesSentence(t, locale, takes)}</>}
             {failed.length > 0 && (
               <> {t("recordingsUpload.banner.failedSummary", { failed: fmt(failed.length), total: fmt(total) })}</>
             )}

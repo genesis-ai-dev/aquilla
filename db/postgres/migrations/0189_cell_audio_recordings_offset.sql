@@ -26,7 +26,7 @@
 -- No backfill, and nothing else reads it. Idempotent; a database loaded from
 -- schema.sql already has the column.
 --
--- Numbered 0189 because 0188 is taken on the undo-per-project branch
--- (0188_edit_histories.sql); renumber on merge if that lands first.
+-- Numbered 0189: dev's 0188 is archived_lanes_onto_rows, 0190 is AQU-2263's
+-- and 0191 the undo-per-project branch's. Files apply in name order.
 
 ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS recordings_offset_ms BIGINT;

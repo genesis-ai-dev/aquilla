@@ -598,6 +598,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
 
     // ── Voice card ──
+    // Oct 29 second pass: the voice card's provider row, hard-coded English before.
+    "projectSettings.voice.geminiTtsLabel": "Gemini TTS",
     "projectSettings.voice.geminiKeyLabel": "Gemini API key",
     "projectSettings.voice.geminiKeyPlaceholder": "AIza...",
     "projectSettings.voice.geminiKeyHelp":
@@ -631,6 +633,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
     "projectSettings.gitSync.autoSyncLabel": "Auto-sync every",
     "projectSettings.gitSync.minutesSuffix": "minutes (only when there are changes)",
+    // Oct 29 second pass: the switch's label, hard-coded English before.
+    "projectSettings.gitSync.autoSyncSwitch": "Auto-sync",
     "projectSettings.gitSync.intervalNote": "Interval is floored at 1 minute. Sync will only push when there are local changes.",
 
     // ── Terminology card ──

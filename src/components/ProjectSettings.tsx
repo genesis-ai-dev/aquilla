@@ -2965,7 +2965,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
               <SettingsRow
-                label="Gemini TTS"
+                label={t("projectSettings.voice.geminiTtsLabel")}
                 description={
                   <>
                     {t("projectSettings.voice.geminiKeyHelp")}
@@ -3227,7 +3227,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 )}
               />
               <SettingsRow
-                label={<label htmlFor="auto-sync">Auto-sync</label>}
+                label={<label htmlFor="auto-sync">{t("projectSettings.gitSync.autoSyncSwitch")}</label>}
                 description={t("projectSettings.gitSync.intervalNote")}
                 control={
                   <div className="flex items-center gap-2">
@@ -3235,7 +3235,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       id="auto-sync"
                       checked={autoSyncEnabled}
                       onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
-                      aria-label="Auto-sync"
+                      aria-label={t("projectSettings.gitSync.autoSyncSwitch")}
                     />
                     <Input
                       type="number"

@@ -344,11 +344,10 @@ export async function buildPromptPreview(
   // string was already taken. Settings are not consulted.
   const sourceLane = (lanes ?? []).find((lane) => lane.role === "source")
   const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
-    settings,
     role: "source",
     legacyTag: sourceLane?.legacyTag ?? null,
   })
-  const targetLanguage = laneLanguageForTag(targetLang, lanes, settings) ?? ""
+  const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;

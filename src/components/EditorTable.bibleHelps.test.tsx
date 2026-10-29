@@ -365,7 +365,7 @@ describe("key terms in the Context tab", () => {
     expect(samaria.textContent).toBe("Samaria")
     expect(visible(samaria.getAttribute("aria-label"))).toBe("Key term: Samaria")
 
-    act(() => samaria.focus())
+    fireEvent.click(samaria)
     const details = await screen.findByTestId("term-details")
     expect(within(details).getByRole("heading").textContent).toBe("Samaria")
     expect(details.textContent).toContain("From unfoldingWord Translation Words")
@@ -445,7 +445,7 @@ describe("Who's Who popover, pack 1.1", () => {
   it("describes Jacob, and takes his son Joseph's name to Joseph's first mention; Levi, never mentioned, is text", async () => {
     renderTable(makeProject())
     await waitFor(() => mentionOf(cellIdFor("4:6"), ISRAEL))
-    act(() => mentionOf(cellIdFor("4:6"), ISRAEL).focus())
+    fireEvent.click(mentionOf(cellIdFor("4:6"), ISRAEL))
     const details = await screen.findByTestId("mention-details")
     const description = within(details).getByTestId("entity-description")
     expect(description.textContent).toBe(jhn4People11().entities[ISRAEL].descriptions?.eng)
@@ -474,7 +474,7 @@ describe("pack slice 3, accepted before it ships", () => {
     await waitFor(() => mentionOf(cellIdFor("4:10"), "deity:Lord"))
     const word = mentionOf(cellIdFor("4:10"), "deity:Lord")
     expect(visible(word.getAttribute("aria-label"))).toBe("θεοῦ: Named, God")
-    act(() => word.focus())
+    fireEvent.click(word)
     const details = await screen.findByTestId("mention-details")
     expect(visible(within(details).getByRole("heading").textContent)).toBe("God")
 
@@ -503,16 +503,16 @@ describe("pack slice 3, accepted before it ships", () => {
       if (!chip) throw new Error("no chip yet")
       return chip
     })
-    act(() => chip10.focus())
+    fireEvent.click(chip10)
     const details = await screen.findByTestId("voice-details")
     expect(within(details).getByTestId("speech-disputed").textContent).toBe("Boundary disputed")
     expect(details.textContent).toContain("Where this answer ends is disputed (synthetic).")
-    act(() => chip10.blur())
+    fireEvent.click(chip10)
     await waitFor(() => expect(screen.queryByTestId("voice-details")).toBeNull())
 
     const chip9 = row(cellIdFor("4:9")).querySelector<HTMLElement>('[data-testid="voice-chip"]')
     if (!chip9) throw new Error("no JHN 4:9 chip")
-    act(() => chip9.focus())
+    fireEvent.click(chip9)
     expect(within(await screen.findByTestId("voice-details")).queryByTestId("speech-disputed")).toBeNull()
   })
 })

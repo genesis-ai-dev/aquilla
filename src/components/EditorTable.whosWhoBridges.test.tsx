@@ -255,7 +255,7 @@ describe("an English source, through the stored alignment", () => {
     expect(approximate.length).toBeGreaterThan(0)
     expect(approximate.length).toBeLessThan(words.length)
     expect(approximate[0].getAttribute("aria-label")).toMatch(/probably/)
-    act(() => approximate[0].focus())
+    fireEvent.click(approximate[0])
     expect((await screen.findByTestId("mention-placement", {}, LOAD)).textContent).toMatch(/^Approximate/)
   })
 

@@ -18,6 +18,8 @@ export const FILM_FRAME_W = 128
 export const FILM_FRAME_H = 80
 /** Never decode more than this for a 128 px picture: the smallest rendition. */
 const GRABBER_MAX_HEIGHT = 240
+/** Three frames at 25 fps: see `videoFrameCapture`. */
+const FRAME_NUDGE_SEC = 0.12
 /** How long one seek may take before that frame is given up on. */
 const SEEK_PATIENCE_MS = 8000
 
@@ -39,6 +41,19 @@ function waitFor(video: HTMLVideoElement, event: string, ms: number): Promise<bo
 }
 
 /**
+ * Where to seek for a tile's moment: a hair past it, and never into the film's
+ * last moments. Tile moments sit on a whole-second grid, and so do a stream's
+ * segment boundaries, but a segment's first picture lands a frame or two after
+ * its boundary — so a seek exactly onto one fetched the segment before it as
+ * well (measured on The Chosen 101: 37 segments for 29 frames at the farthest
+ * zoom; three frames later, 29).
+ */
+export function captureSeekSec(sec: number, duration: number): number {
+  const wanted = sec + FRAME_NUDGE_SEC
+  return Number.isFinite(duration) && duration > 0 ? Math.min(wanted, Math.max(0, duration - 0.1)) : wanted
+}
+
+/**
  * Seek the hidden film to `sec` and draw what it shows there, cropped to fill
  * the picture the way a tile's `object-fit: cover` would.
  */
@@ -50,8 +65,7 @@ export function videoFrameCapture(video: HTMLVideoElement): CaptureFrame {
   return async (sec) => {
     if (!ctx) throw new FrameUnavailableError("no canvas")
     if (video.error) throw new FrameUnavailableError("the film did not load")
-    const duration = video.duration
-    const at = Number.isFinite(duration) && duration > 0 ? Math.min(sec, Math.max(0, duration - 0.1)) : sec
+    const at = captureSeekSec(sec, video.duration)
     if (Math.abs(video.currentTime - at) > 0.01) {
       const landed = waitFor(video, "seeked", SEEK_PATIENCE_MS)
       video.currentTime = at
@@ -108,7 +122,7 @@ export function useFilmFrames({
   const src = useMediaPictureUrl({ src: storedSrc, projectId, fileId, session, retryKey: 0 }) ?? ""
   const stream = useHlsVideo(videoRef, active ? src : null, {
     maxHeight: GRABBER_MAX_HEIGHT,
-    bufferSec: 1,
+    bufferSec: 0.25,
     enabled: active,
   })
   // Not disposed on unmount: its frames live in the per-film cache, and the

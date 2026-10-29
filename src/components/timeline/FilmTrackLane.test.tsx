@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import { FilmTrackLane } from "./FilmTrackLane"
+import { captureSeekSec } from "./useFilmFrames"
 
 // AQU-2253 (board 56): the film as one strip on its own clock.
 describe("FilmTrackLane", () => {
@@ -73,5 +74,16 @@ describe("FilmTrackLane", () => {
     strip.getBoundingClientRect = () => ({ left: 100, top: 0, width: 1027, height: 46, right: 1127, bottom: 46, x: 100, y: 0, toJSON: () => ({}) })
     fireEvent.click(strip, { clientX: 100 + 12 * 38 })
     expect(onSeekSec).toHaveBeenCalledWith(12)
+  })
+})
+
+describe("captureSeekSec", () => {
+  it("seeks a few frames past a tile's moment, off the stream's segment boundaries", () => {
+    // 1780 s is exactly where one of The Chosen 101's 4-second segments starts.
+    expect(captureSeekSec(1780, 3288)).toBeCloseTo(1780.12)
+  })
+
+  it("never into the film's last moments", () => {
+    expect(captureSeekSec(27.05, 27.08)).toBeCloseTo(26.98)
   })
 })

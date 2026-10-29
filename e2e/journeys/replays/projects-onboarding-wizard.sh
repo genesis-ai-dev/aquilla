@@ -11,7 +11,7 @@ ab wait --load networkidle >/dev/null
 ab find role button click --name "Get Started" >/dev/null || fail "Get Started button"
 ab wait --text "Help us improve" >/dev/null || fail "privacy step"
 ab find role button click --name "Continue" >/dev/null || fail "privacy Continue button"
-ab wait --text "Create your Frontier account" >/dev/null || fail "account step"
+ab wait --text "Create your Aquilla account" >/dev/null || fail "account step"
 
 ab find label "Username" fill "$USER" >/dev/null || fail "username field"
 ab find label "Email" fill "$USER@example.test" >/dev/null || fail "email field"

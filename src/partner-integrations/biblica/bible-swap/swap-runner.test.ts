@@ -80,6 +80,29 @@ describe("applyBibleSwapToIdml", () => {
     expect(report.modifiedStories).toBe(1)
   })
 
+  it("releases a no-break study-note run that is wider than a column", async () => {
+    const sentence =
+      ". Davi era senhor e rei. Mas o senhor e rei aqui não era Davi. Nenhum rei de Israel serviu como sacerdote."
+    const note =
+      `<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/intro%3aipi">` +
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/k_xt" NoBreak="true"><Content>Melquisedeque</Content></CharacterStyleRange>` +
+      `<CharacterStyleRange AppliedCharacterStyle="${NO_STYLE}" NoBreak="true"><Content>${sentence}</Content></CharacterStyleRange>` +
+      `</ParagraphStyleRange>`
+    const studyIdml = await idmlWith({
+      "Stories/Story_u1.xml": story("JOS", note + verse("1", "1", "English Joshua one one.")),
+    })
+    const bibleIdml = await idmlWith({
+      "Stories/Story_b1.xml": story("JOS", verse("1", "1", "Translated Joshua one one.")),
+    })
+
+    const { idml } = await applyBibleSwapToIdml(studyIdml, bibleIdml)
+    const swapped = (await storiesOf(idml))["Stories/Story_u1.xml"]
+
+    expect(swapped).toContain(`NoBreak="true"><Content>Melquisedeque</Content>`)
+    expect(swapped).toContain(`<Content>${sentence}</Content>`)
+    expect(swapped).not.toContain(`NoBreak="true"><Content>${sentence}</Content>`)
+  })
+
   it("preserves non-story entries so the package stays a valid IDML", async () => {
     const studyIdml = await idmlWith({ "Stories/Story_u1.xml": STUDY_STORY })
     const bibleIdml = await idmlWith({ "Stories/Story_b1.xml": BIBLE_STORY })

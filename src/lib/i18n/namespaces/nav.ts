@@ -28,10 +28,10 @@ export const nav = defineNamespace({
     "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
 
     // -- AccountSwitcher: account menu + auth dialogs --
-    "nav.account.addTitle": "Add Frontier account",
-    "nav.account.loginTitle": "Log in to Frontier",
-    "nav.account.signupTitle": "Create a Frontier account",
-    "nav.account.newToFrontier": "New to Frontier?",
+    "nav.account.addTitle": "Add Aquilla account",
+    "nav.account.loginTitle": "Log in to Aquilla",
+    "nav.account.signupTitle": "Create a Aquilla account",
+    "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
@@ -602,7 +602,7 @@ export const nav = defineNamespace({
       "nav.account.newToFrontier": {
         description:
           "Prompt text preceding the 'Create an account' link at the bottom of the " +
-          "login form. 'Frontier' is the identity provider's product name — keep it " +
+          "login form. 'Aquilla' is the identity provider's product name — keep it " +
           "untranslated.",
       },
       "nav.account.menuLabel": {

@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
+import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-controls"
 import { UserChip } from "@/components/UserChip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -335,11 +336,6 @@ function StatTile({ label, pct, tone, muted = false, tooltip }: {
 
 const LANE_TAB_ALL = "__all__"
 const LANE_TAB_DEFAULT = "__default__"
-/**
- * AQU-656: rows the imported-originals card shows before "Show more" /
- * "Show all" kick in. Also the batch size each "Show more" reveals.
- */
-const ORIGINALS_PAGE_SIZE = 5
 
 function laneTagToTab(tag: string | null): string {
   if (tag === null) return LANE_TAB_ALL
@@ -577,12 +573,10 @@ export function ProjectOverview() {
     () => files.filter((f) => f.hasOriginalSource),
     [files],
   )
-  // The originals list starts capped at ORIGINALS_PAGE_SIZE rows; "Show more"
-  // grows it one page at a time, "Show all" expands it outright, and "Show
-  // fewer" collapses it back to the first page.
-  const [originalsShown, setOriginalsShown] = useState(ORIGINALS_PAGE_SIZE)
-  const visibleOriginals = originalFiles.slice(0, originalsShown)
-  const hiddenOriginalsCount = originalFiles.length - visibleOriginals.length
+  // AQU-656: the originals list starts capped at the shared page size and
+  // grows through the shared Show more / Show all / Show fewer control
+  // (AQU-2293 — the Team workload card uses the same one).
+  const { visible: visibleOriginals, controls: originalsPaging } = useShowMore(originalFiles)
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
@@ -2858,51 +2852,11 @@ export function ProjectOverview() {
                       </li>
                     ))}
                   </ul>
-                  {originalFiles.length > ORIGINALS_PAGE_SIZE && (
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                      {/* "Show more" only earns its place while a full batch is
-                          still hidden — once fewer than a page remains it would
-                          do exactly what "Show all" does. */}
-                      {hiddenOriginalsCount > ORIGINALS_PAGE_SIZE && (
-                        <button
-                          type="button"
-                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                          aria-controls="imported-originals-list"
-                          data-testid="imported-originals-show-more"
-                          onClick={() => setOriginalsShown((n) => n + ORIGINALS_PAGE_SIZE)}
-                        >
-                          {t("org.projectOverview.importedOriginalsShowMore", {
-                            count: ORIGINALS_PAGE_SIZE,
-                          })}
-                        </button>
-                      )}
-                      {hiddenOriginalsCount > 0 ? (
-                        <button
-                          type="button"
-                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                          aria-controls="imported-originals-list"
-                          aria-expanded={false}
-                          data-testid="imported-originals-show-all"
-                          onClick={() => setOriginalsShown(originalFiles.length)}
-                        >
-                          {t("org.projectOverview.importedOriginalsShowAll", {
-                            count: originalFiles.length,
-                          })}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                          aria-controls="imported-originals-list"
-                          aria-expanded={true}
-                          data-testid="imported-originals-show-fewer"
-                          onClick={() => setOriginalsShown(ORIGINALS_PAGE_SIZE)}
-                        >
-                          {t("org.projectOverview.showFewer")}
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <ShowMoreControls
+                    state={originalsPaging}
+                    controlsId="imported-originals-list"
+                    testIdPrefix="imported-originals"
+                  />
                 </div>
               )}
 

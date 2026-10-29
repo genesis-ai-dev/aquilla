@@ -49,7 +49,7 @@ import { tabConnId } from "@/lib/sync/ws-reconciler"
  * since (`by` names them, gap 25). `notAllowed`: the person may no longer make
  * that change (gap 29).
  */
-export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed"
+export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged"
 
 /** What an undo or redo did. `skipped` is not an error: it is the guard working. */
 export type StepOutcome =

@@ -3237,7 +3237,12 @@ export function ProjectWorkspace() {
   // and Redo call. Resolves false when nothing was removed (refused, not yet
   // saved, nothing there), else the row whose anchor the removal re-pointed.
   const removeLineCore = useCallback(
-    async (cellId: string): Promise<false | { successor: { cellId: string; anchorAfter: string | null } | null }> => {
+    async (
+      cellId: string,
+      /** Slice 13: the undo of "make rows from a recording" names each line's
+       *  creating event, so the server can let its author take it back. */
+      undoOfEventId?: string,
+    ): Promise<false | { successor: { cellId: string; anchorAfter: string | null } | null }> => {
       if (!project?.id || !activeFileId) return false
       const cell = getActiveCell(cellId)
       // AQU-1068: the qualifying test moved OUT of here and into the shared
@@ -3311,7 +3316,7 @@ export function ProjectWorkspace() {
                 cellId,
                 parentId: plan.eventId,
                 author: currentUsername,
-                payload: {},
+                payload: undoOfEventId ? { undoOfEventId } : {},
               },
             ]),
         ])
@@ -4166,7 +4171,9 @@ export function ProjectWorkspace() {
                 ? "editor.history.skippedUnavailable"
                 : o.reason === "notAllowed"
                   ? "editor.history.skippedNotAllowed"
-                  : "editor.history.skippedChanged",
+                  : o.reason === "linesChanged"
+                    ? "editor.history.skippedLinesChanged"
+                    : "editor.history.skippedChanged",
             { step: name },
           ),
         })
@@ -14607,13 +14614,16 @@ export function ProjectWorkspace() {
     return registerStepKinds(
       recordingLinesStepHandlers({
         lineUntouched,
-        removeLine: async (cellId) => (await removeLineCore(cellId)) !== false,
+        removeLine: async (cellId, createdEventId) => (await removeLineCore(cellId, createdEventId ?? undefined)) !== false,
         // The server's rule for removing a line (authorize.ts): a Maintainer
-        // may remove any; below that, only a line added by hand.
-        mayRemoveLine: (cellId) => {
+        // may remove any; below that, a line added by hand, or (Sam, Oct 28)
+        // a line this person just made from a recording, named by its
+        // creating event, that nobody else has touched since.
+        mayRemoveLine: (cellId, createdEventId) => {
           if (syncRoleLevel >= ROLE.MAINTAINER) return true
           const cell = getActiveCells().find((c) => c.id === cellId)
-          return cell ? isUserAddedLine(cell) : false
+          if (!cell) return false
+          return isUserAddedLine(cell) || (createdEventId != null && syncRoleLevel >= ROLE.COMMENTER)
         },
         restoreLine: (cellId) => applyRestoreRow(cellId),
         fileState: (fileId) => fileStateRef.current(fileId),

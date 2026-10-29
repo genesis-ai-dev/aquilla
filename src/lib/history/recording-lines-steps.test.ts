@@ -55,6 +55,9 @@ describe("lines.fromRecording", () => {
     expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "done" })
     expect(lines.size).toBe(0)
     expect(vi.mocked(ctx.removeLine).mock.calls.map((c) => c[0])).toEqual(["l3", "l2", "l1"])
+    // Each removal names the line's creating event, so the server can let its
+    // author take it back below Maintainer (Sam, Oct 28).
+    expect(vi.mocked(ctx.removeLine).mock.calls.map((c) => c[1])).toEqual(["e3", "e2", "e1"])
     expect(await handlers["lines.fromRecording"].redo(made)).toEqual({ kind: "done" })
     expect([...lines.keys()].sort()).toEqual(["l1", "l2", "l3"])
   })
@@ -75,11 +78,23 @@ describe("lines.fromRecording", () => {
     expect(lines.size).toBe(0)
   })
 
+  // Sam, Oct 28: a Project lead may undo making lines from a recording — her
+  // own, still untouched. The guard is asked with each line's creating event.
+  it("asks whether each line may go with its creating event, and a lead's own lines go", async () => {
+    const lines = fresh()
+    const { ctx, handlers } = ctxFor(lines)
+    const asked: Array<[string, string | null]> = []
+    ctx.mayRemoveLine = (cellId, eventId) => { asked.push([cellId, eventId]); return eventId != null }
+    expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "done" })
+    expect(asked).toEqual([["l1", "e1"], ["l2", "e2"], ["l3", "e3"]])
+    expect(lines.size).toBe(0)
+  })
+
   it("once anyone has recorded on one line, the whole step is skipped and every line stays", async () => {
     const lines = fresh()
     lines.set("l2", { untouched: false, head: "e2" }) // Asha recorded a take on line 2
     const { ctx, handlers } = ctxFor(lines)
-    expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(await handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "skipped", reason: "linesChanged" })
     expect(ctx.removeLine).not.toHaveBeenCalled()
     expect(lines.size).toBe(3)
   })
@@ -87,7 +102,7 @@ describe("lines.fromRecording", () => {
   it("a line edited or moved since (its head moved on) counts as touched", async () => {
     const lines = fresh()
     lines.set("l1", { untouched: true, head: "edited" })
-    expect(await ctxFor(lines).handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(await ctxFor(lines).handlers["lines.fromRecording"].undo(made)).toEqual({ kind: "skipped", reason: "linesChanged" })
   })
 })
 
@@ -111,7 +126,7 @@ describe("file.importRecording", () => {
     worked.set("l1", { untouched: false, head: "e1" })
     expect(await ctxFor(worked, files).handlers["file.importRecording"].undo({ fileId: "f1" })).toEqual({
       kind: "skipped",
-      reason: "changed",
+      reason: "linesChanged",
     })
   })
 })

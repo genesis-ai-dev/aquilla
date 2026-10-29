@@ -21,7 +21,9 @@ import type { StepHandler, StepOutcome } from "./history"
 
 const DONE: StepOutcome = { kind: "done" }
 const GONE: StepOutcome = { kind: "skipped", reason: "gone" }
-const CHANGED: StepOutcome = { kind: "skipped", reason: "changed" }
+/** Sam, Oct 28: its own words — "These lines have changed since you made
+ *  them, so Undo left them as they are." */
+const CHANGED: StepOutcome = { kind: "skipped", reason: "linesChanged" }
 
 export interface RecordingLinesData {
   /** In file order; `eventId` is the line's creating event, its source head
@@ -34,17 +36,19 @@ export interface ImportedRecordingData { fileId: string }
 export interface RecordingLinesContext {
   /** Whether a line is still as it was made (null when it is not there). */
   lineUntouched(cellId: string, createdEventId: string | null): boolean | null
-  /** Remove a line, as "Remove row" does. False when refused. */
-  removeLine(cellId: string): Promise<boolean>
+  /** Remove a line, as "Remove row" does, naming its creating event so the
+   *  server knows the undo is its author's own. False when refused. */
+  removeLine(cellId: string, createdEventId: string | null): Promise<boolean>
   /**
-   * Whether this person may remove the line at all: the server lets someone
-   * below Maintainer remove only a line added by hand (sync-worker
-   * authorize.ts, "removing an imported cell requires maintainer"), and lines
-   * made from a recording are imported lines. Asked before any removal, so an
-   * undo that would be refused is skipped instead of queuing writes the
-   * server turns down (slice 13 evidence, Oct 27). Absent: everyone may.
+   * Whether this person may remove the line at all. Below Maintainer the
+   * server lets someone remove a line added by hand, or (Sam, Oct 28) a line
+   * they made from a recording, named by its creating event, while nobody
+   * else has written to it (sync-worker recording-line-authority.ts). Asked
+   * before any removal, so an undo that would be refused is skipped instead
+   * of queuing writes the server turns down (slice 13 evidence, Oct 27).
+   * Absent: everyone may.
    */
-  mayRemoveLine?(cellId: string): boolean
+  mayRemoveLine?(cellId: string, createdEventId: string | null): boolean
   /** Bring a removed line back. False when refused. */
   restoreLine(cellId: string): Promise<boolean>
   /** Where a file is: live, in Recently deleted, or gone for good. */
@@ -63,12 +67,12 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
         const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
         if (states.every((s) => s === null)) return GONE
         if (states.some((s) => s !== true)) return CHANGED
-        if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId))) {
+        if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId, l.eventId))) {
           return { kind: "skipped", reason: "notAllowed" }
         }
         // Last first: each removal then has no line after it to re-point.
         let removed = 0
-        for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId)) removed += 1
+        for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId, l.eventId)) removed += 1
         if (removed === 0) return { kind: "failed", error: new Error("the lines could not be removed") }
         return removed < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - removed } } : DONE
       },

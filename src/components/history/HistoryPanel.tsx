@@ -70,7 +70,9 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
             ? t("editor.history.reasonApproved", { name: entry.by ?? "" })
             : entry.reason === "notAllowed"
               ? t("editor.history.reasonNotAllowed")
-              : t("editor.history.reasonFailed")
+              : entry.reason === "linesChanged"
+                ? t("editor.history.reasonLinesChanged")
+                : t("editor.history.reasonFailed")
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>

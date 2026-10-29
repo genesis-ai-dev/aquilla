@@ -1,5 +1,5 @@
 // Decision 11: a person's undo history for a project, kept on the server so it
-// follows them between devices (routes/edit-history.ts, migration 0188). The
+// follows them between devices (routes/edit-history.ts, migration 0191). The
 // revision is the guarantee two devices writing at once cannot lose each
 // other's steps, and the session is the guarantee nobody reads another's.
 

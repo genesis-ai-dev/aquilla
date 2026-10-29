@@ -1,5 +1,5 @@
 // A person's undo history for a project, kept on the server so it follows
-// them between computers and browsers (decision 11, migration 0188). Mounted
+// them between computers and browsers (decision 11, migration 0191). Mounted
 // at /api/v2/projects in src/index.ts.
 //
 //   GET /:projectId/edit-history?since=<revision>

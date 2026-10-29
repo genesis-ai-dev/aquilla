@@ -352,7 +352,7 @@ app.route("/api/v2/projects", aiInterventionRoutes)
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)
 // Decision 11: each person's undo history for a project, so it follows them
-// between devices (routes/edit-history.ts, migration 0188).
+// between devices (routes/edit-history.ts, migration 0191).
 app.route("/api/v2/projects", editHistoryRoutes)
 // Contextual translation run engine (pipeline design §8, slice D1): durable
 // Postgres-backed runs + steering + staged-draft review (routes/contextual.ts).

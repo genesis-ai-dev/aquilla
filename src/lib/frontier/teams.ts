@@ -104,8 +104,21 @@ export async function addTeamMember(jwt: string, orgId: number, groupId: number,
  * role, so the batch body is a plain username array. Non-atomic — returns the
  * per-person `results` in request order.
  */
-export async function addTeamMembers(jwt: string, orgId: number, groupId: number, usernames: string[]): Promise<MemberGrantResult[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify({ usernames }) })
+/**
+ * AQU-2238: `external` opts into adding people who are NOT on the org roster —
+ * the "invite someone outside the organization" path. Each entry may then be a
+ * username or an email address. Left off, the server keeps failing closed with
+ * `not_org_member`, which is what the org-member picker wants.
+ */
+export async function addTeamMembers(
+  jwt: string,
+  orgId: number,
+  groupId: number,
+  usernames: string[],
+  opts: { external?: boolean } = {},
+): Promise<MemberGrantResult[]> {
+  const body = opts.external ? { usernames, external: true } : { usernames }
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}/members`, { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(body) })
   await throwIfElevationRequired(res, "team")
   if (!res.ok) throw new UserError(res.status, "", "team")
   return ((await res.json()) as { results: MemberGrantResult[] }).results

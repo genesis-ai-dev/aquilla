@@ -1233,14 +1233,41 @@ export async function deleteGroup(env: Env, orgId: number, groupId: number): Pro
   ])
 }
 
-/** Add an org member to a group. Returns "not-org-member" if the target isn't in the org. */
-export async function addGroupMember(env: Env, orgId: number, groupId: number, targetUserId: number, addedBy: number): Promise<"ok" | "not-org-member"> {
+/**
+ * Add someone to a group. Returns "not-org-member" when the target has no
+ * org_members row and `allowExternal` was not asked for.
+ *
+ * AQU-2238: `allowExternal` adds someone who has no org_members row — a guest
+ * staffed onto one team and nothing else.
+ *
+ * Without it, staffing a team with an outside person meant adding them to the
+ * org roster, adding them to the team, then removing the org row again to claw
+ * the org-wide visibility back. That dance needs an org OWNER, writes a roster
+ * row nobody wanted, and is invisibly lossy if the last step is forgotten.
+ *
+ * The guest's reach is exactly the team's `group_project_grants` (resolved by
+ * resolveProjectRole's group path) plus the guest-org visibility
+ * `listProjectGrantOrgIds` already grants to a team-granted user — never the
+ * org-wide path, which fires only at ORG_WIDE_ACCESS_FLOOR on a real
+ * org_members row they do not have. It confers no more than
+ * `POST /projects/:id/members` (project_lead+, any platform user by username)
+ * already did at the project scope; this closes the gap where team membership
+ * was the one access path that demanded prior org membership.
+ */
+export async function addGroupMember(
+  env: Env,
+  orgId: number,
+  groupId: number,
+  targetUserId: number,
+  addedBy: number,
+  opts: { allowExternal?: boolean } = {},
+): Promise<"ok" | "ok-external" | "not-org-member"> {
   const orgRole = await getOrgMemberRole(env, orgId, targetUserId)
-  if (orgRole == null) return "not-org-member"
+  if (orgRole == null && !opts.allowExternal) return "not-org-member"
   await env.AQUILLA_PG.prepare(
     "INSERT INTO group_members (group_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT(group_id, user_id) DO NOTHING",
   ).bind(groupId, targetUserId, addedBy).run()
-  return "ok"
+  return orgRole == null ? "ok-external" : "ok"
 }
 
 export async function removeGroupMember(env: Env, groupId: number, userId: number): Promise<void> {

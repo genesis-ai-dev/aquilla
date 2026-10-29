@@ -388,6 +388,12 @@ describe("TeamDetail admin management", () => {
     await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("joel")).toBeInTheDocument())
     expect(screen.getByText(/outside org/i)).toBeInTheDocument()
+    // AQU-2260: what "Outside org" means opens on a click of the label, never
+    // on hover.
+    await expectClickNote(
+      screen.getByRole("button", { name: /outside org/i }),
+      /not on this organization's member list/i,
+    )
   })
 
   it("removes a member", async () => {

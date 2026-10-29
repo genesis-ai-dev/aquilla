@@ -568,13 +568,15 @@ export function TeamDetail() {
           const m = row.original
           // AQU-2238: no org_members row is the normal state for a guest added
           // straight to this team, so name it instead of reporting "Unknown".
+          // Its note opens on a click of the label (AQU-2260: never a hover).
           if (m.roleLevel == null) {
             return (
-              <AppTooltip content={t("org.teamDetail.outsideOrgRoleTooltip")} className="max-w-xs">
-                <span tabIndex={0} className="inline-flex cursor-help text-sm text-muted-foreground">
-                  {t("org.teamDetail.outsideOrgRole")}
-                </span>
-              </AppTooltip>
+              <NoteOnClick
+                note={t("org.teamDetail.outsideOrgRoleTooltip")}
+                className="text-sm text-muted-foreground"
+              >
+                {t("org.teamDetail.outsideOrgRole")}
+              </NoteOnClick>
             )
           }
 

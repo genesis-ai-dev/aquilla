@@ -1539,6 +1539,62 @@ describe("TimelineEditor — audio-first mode", () => {
     })
   })
 
+  // AQU-2267 (Sam, Oct 29: "B makes the most sense"): a move moves a take by
+  // the same distance in both timings. The LOTE sermon's line 2 take sits
+  // 1.0 s before its line following the source; following the recordings it
+  // starts on its line. Dragged 0.2 s right there, it must be stored at −0.8 s
+  // following the source and +0.2 s following the recordings — before, the
+  // one place it had became "line start + 0.2" in both.
+  describe("a move carries across both timings (AQU-2267)", () => {
+    const sermonTake = (id: string) => `audio-${id}-1700000000-take.webm`
+    const sermonLine = (id: string, startTime: number, endTime: number, take: Record<string, number>) =>
+      cell({
+        id, medium: "media", startTime, endTime, original: id, selectedAudioId: sermonTake(id),
+        attachments: {
+          [sermonTake(id)]: { type: "audio", url: "frontier-audio://take", slot: "recording", ...take },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+    const sermon = () => [
+      sermonLine("l1", 0, 3.2, { durationMs: 2_600 }),
+      sermonLine("l2", 3.4, 7, { durationMs: 4_600, targetOffsetMs: -1_000 }),
+      sermonLine("l3", 7.3, 8.4, { durationMs: 1_700, targetOffsetMs: 203 }),
+    ]
+    const renderSermon = (mode: "dubbing" | "audioFirst", onRetimeTarget: () => void) =>
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="lote" coreMediaUrl={null} editable cells={sermon()} timingMode={mode}
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+    const dragBy = (chip: Element, sec: number) => {
+      // Measured off line 1's take (2.6 s, drawn whole): line 2's leads into
+      // it following the source, so it is drawn short at rest.
+      const perSec = px(screen.getByTestId("tl-target-l1"), "width") / 2.6
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 + perSec * sec })
+      fireEvent.pointerUp(window, { clientX: 400 + perSec * sec })
+    }
+
+    it("0.2 s right following the recordings: −0.8 s following the source, +0.2 s following the recordings", () => {
+      const onRetimeTarget = vi.fn()
+      renderSermon("audioFirst", onRetimeTarget)
+      dragBy(screen.getByTestId("tl-target-l2"), 0.2)
+      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+      const [cellId, , audioId, place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
+      expect([cellId, audioId]).toEqual(["l2", sermonTake("l2")])
+      expect(place).toEqual({ targetOffsetMs: -800, recordingsOffsetMs: 200 })
+    })
+
+    it("0.5 s left following the source: −1.5 s there, and following the recordings no further than its line's start", () => {
+      const onRetimeTarget = vi.fn()
+      renderSermon("dubbing", onRetimeTarget)
+      dragBy(screen.getByTestId("tl-target-l2"), -0.5)
+      const [, , , place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
+      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
+    })
+  })
+
   it("picking a choice closes the menu (AQU-2204)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))

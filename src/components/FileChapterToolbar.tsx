@@ -52,9 +52,8 @@ export interface FileChapterToolbarProps {
   audioLane?: boolean
   /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
   historyControl?: ReactNode
-  /** The media view's top bar (canvas board 55): only the open view keeps its
-   *  label, and `beforeMenu` (the Panels button) sits before the ⋯. */
-  lensLabels?: "all" | "active"
+  /** The media view's top bar (canvas board 55): the Panels button, before
+   *  the ⋯. */
   beforeMenu?: ReactNode
 }
 
@@ -78,7 +77,6 @@ export function FileChapterToolbar({
   onTranslateAsReadChange,
   audioLane = false,
   historyControl,
-  lensLabels = "all",
   beforeMenu,
 }: FileChapterToolbarProps) {
   const t = useT()
@@ -184,7 +182,6 @@ export function FileChapterToolbar({
           onChange={onLensChange}
           onAgentSelect={onAgentSelect}
           agentActive={agentActive}
-          labels={lensLabels}
         />
         {beforeMenu}
         <OverflowMenu

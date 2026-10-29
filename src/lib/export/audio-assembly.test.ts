@@ -454,3 +454,71 @@ describe("assembleAudioEntries — retained PCM is bounded by one clip", () => {
     expect(result.peakPcmBytes).toBeLessThanOrEqual(200 * 4 + 200 * 2)
   })
 })
+
+// AQU-1758 (Sam, Oct 29): on a book, a pause someone dragged open — before a
+// verse's take, or between two pieces of a cut take — plays as silence in the
+// app, so every mode that joins a book's takes end to end puts it in as
+// silence, and every piece of a cut take is in it.
+describe("assembleAudioEntries — a book's dragged-open pauses", () => {
+  const MS = TARGET_RATE / 1000
+  // A take is the line's own when its id is seeded with the line's.
+  const A1 = "audio-c1-1700000000-take", P1 = "audio-c2-1700000000-take", P2 = "audio-c2-1700000001-take"
+  // c1 (Mary): a 100 ms take, 50 ms into its line → 50 + 100 ms.
+  // c2 (John): a cut take of one 100 ms recording — 0–40 ms, then 60–100 ms
+  // placed at 100 ms → 40 + 60 (silence) + 40 ms.
+  const book = () => [
+    cell({
+      id: "c1",
+      selectedAudioId: A1,
+      attachments: { [A1]: { url: `frontier-audio://${A1}.webm`, type: "audio/webm", durationMs: 100, targetOffsetMs: 50 } },
+    }),
+    cell({
+      id: "c2",
+      selectedAudioId: P1,
+      attachments: {
+        [P1]: { url: `frontier-audio://${P1}.webm`, type: "audio/webm", durationMs: 100, trimEndMs: 40 },
+        [P2]: { url: `frontier-audio://${P1}.webm`, type: "audio/webm", durationMs: 100, trimStartMs: 60, pieceOf: P1, targetOffsetMs: 100 },
+      } as unknown as CellData["attachments"],
+    }),
+  ]
+  const clips = () => makeFetch({ [`${A1}.webm`]: clipBytes(50, 100 * MS), [`${P1}.webm`]: clipBytes(40, 100 * MS) })
+  const C1 = (50 + 100) * MS
+  const C2 = (40 + 60 + 40) * MS
+
+  it("file-clip: the pause and the gap between pieces are silence; every piece is there", async () => {
+    const { fetchBytes, calls } = clips()
+    const result = await assembleAudioEntries(baseArgs({ mode: "file-clip", cells: book(), fetchBytes }))
+    const s = await wavSamples(result.entries[0].data)
+    expect(s.length).toBe(C1 + C2)
+    expect(s.slice(0, 50 * MS).every((v) => v === 0)).toBe(true)
+    expect(s[50 * MS]).not.toBe(0)
+    expect(s[C1]).not.toBe(0) // piece 1
+    expect(s.slice(C1 + 40 * MS, C1 + 100 * MS).every((v) => v === 0)).toBe(true)
+    expect(s[C1 + 100 * MS]).not.toBe(0) // piece 2
+    // The two pieces are one recording, fetched once.
+    expect(calls.filter((c) => c === `${P1}.webm`)).toHaveLength(1)
+  })
+
+  it("voice-clips: each voice's line keeps its pause and its pieces", async () => {
+    const { fetchBytes } = clips()
+    const result = await assembleAudioEntries(baseArgs({ mode: "voice-clips", cells: book(), fetchBytes }))
+    expect(result.entries.map((e) => e.name)).toEqual(["Mary.wav", "John.wav"])
+    expect(wavSampleCount(result.entries[0].data)).toBe(C1)
+    expect(wavSampleCount(result.entries[1].data)).toBe(C2)
+  })
+
+  it("voice-timeline: each line takes its whole length, pause and gaps included", async () => {
+    const { fetchBytes } = clips()
+    const result = await assembleAudioEntries(baseArgs({ mode: "voice-timeline", cells: book(), fetchBytes }))
+    const mary = await wavSamples(result.entries[0].data)
+    const john = await wavSamples(result.entries[1].data)
+    expect(mary.length).toBe(C1 + C2)
+    expect(john.length).toBe(C1 + C2)
+    expect(mary[10]).toBe(0)
+    expect(mary[50 * MS]).not.toBe(0)
+    expect(john[C1]).not.toBe(0)
+    expect(john[C1 + 50 * MS]).toBe(0)
+    expect(john[C1 + 100 * MS]).not.toBe(0)
+  })
+})
+

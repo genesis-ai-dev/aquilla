@@ -220,6 +220,7 @@ import {
   timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
+import { applyChapterPick, planChapterPick } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -496,7 +497,7 @@ import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
-import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
+import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -13730,14 +13731,25 @@ export function ProjectWorkspace() {
     if (!chosenScopeKey || !queueChapterKey || queueChapterKey === chosenScopeKey) return
     if (getQueueState().kind === "paused") stopQueue()
   }, [chosenScopeKey, queueChapterKey])
-  // Picking a chapter mid-playback is navigation away from what is playing:
-  // it stops, and the timeline shows the chapter picked.
+  // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
+  // it and keeps playing, from its first line, in either timing. Picking one
+  // while playback is paused ends that playback, as before. Either way the
+  // timeline shows the chapter picked (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
-  const handleChapterPicked = useCallback((key: string) => {
-    const playing = queueChapterKeyRef.current
-    if (playing && playing !== key) stopQueue()
+  const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
+  chapterPickRunRef.current = { projectId: project?.id, session: frontierSession }
+  const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
+    const run = chapterRunRef.current
+    const plan = planChapterPick({
+      chapters: run?.chapters ?? [],
+      lines: run?.cells ?? [],
+      pickedKey: key,
+      playingKey: queueChapterKeyRef.current,
+      queueKind: getQueueState().kind,
+    })
+    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
@@ -16955,7 +16967,7 @@ export function ProjectWorkspace() {
               // then History. Right: the status ring, the views, Panels, ⋯.
               // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                afterTools={<HistoryPanel onResult={reportHistory} size="bar" />}
+                afterTools={<HistoryPanel onResult={reportHistory} />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -16973,7 +16985,6 @@ export function ProjectWorkspace() {
                       ? cloneElement(fileChapterToolbar, {
                           // History sits on the left of this bar.
                           historyControl: undefined,
-                          lensLabels: "active",
                           beforeMenu: (
                             <MediaPanelsMenu
                               dock={dock}
@@ -17336,7 +17347,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -17550,7 +17562,7 @@ export function ProjectWorkspace() {
             </div>
             {timelineStacked && activeFile && project ? (
               // Sam, Oct 27: the playback controls back at the bottom, in a
-              // very narrow footprint — a 28 px strip across the view, outside
+              // very narrow footprint — a 32 px strip across the view, outside
               // the panels, so no fold or full screen ever hides it.
               <VoicePlaybackBar
                 variant="strip"

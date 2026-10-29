@@ -164,28 +164,6 @@ function MoreTrigger({ tip, testId }: { tip: string; testId: string }) {
   )
 }
 
-/** The full-screen and fold items both menus share. */
-function LayoutItems({ controls, foldLabel, region }: { controls: RegionLayoutControls; foldLabel: string; region: DockRegion }) {
-  const t = useT()
-  const keys = dockKeys()
-  return (
-    <>
-      <DropdownMenuItem onClick={controls.onToggleFull} data-testid={`dock-menu-full-${region}`}>
-        {controls.isFull ? <Shrink /> : <Expand />}
-        {controls.isFull ? t("editor.dock.restore") : t("editor.dock.fullScreen")}
-        <DropdownMenuShortcut>{controls.isFull ? keys.restore : keys.full}</DropdownMenuShortcut>
-      </DropdownMenuItem>
-      {controls.canFold && (
-        <DropdownMenuItem onClick={controls.onFold} data-testid={`dock-menu-fold-${region}`}>
-          <Minus />
-          {foldLabel}
-          <DropdownMenuShortcut>{keys.fold}</DropdownMenuShortcut>
-        </DropdownMenuItem>
-      )}
-    </>
-  )
-}
-
 /** The layout icon's geometry, in a 24 × 24 box like a lucide icon's. */
 export interface LayoutGlyphShape {
   /** The destination, drawn solid: [x, y, w, h]. */
@@ -247,8 +225,10 @@ export function MediaLayoutGlyph({ view, target }: { view: DockView; target: Doc
 }
 
 /**
- * An area's ⋯: where the panel is, Move to the other area, Full screen, Fold,
- * and the note that a tab can also be dragged or double-clicked.
+ * An area's ⋯: where the panel is, Move to the other area, and the note that
+ * a tab can also be dragged or double-clicked. Full screen and Fold are the
+ * buttons beside it, so the menu leaves them out, as the timeline's does
+ * (Sam, Oct 27; the Film and Text panels followed Oct 29).
  */
 export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
   const t = useT()
@@ -256,7 +236,6 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
   const panel = dock.view.activeOf(area)
   if (!panel) return null
   const other: DockArea = area === "ll" ? "lr" : "ll"
-  const controls = regionControls(dock, area)
   return (
     <DropdownMenu>
       <MoreTrigger tip={t("editor.dock.moreTip")} testId={`dock-more-${area}`} />
@@ -269,7 +248,6 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
             <MediaLayoutGlyph view={dock.view} target={other} />
             {t(other === "ll" ? "editor.dock.moveToBottomLeft" : "editor.dock.moveToBottomRight")}
           </DropdownMenuItem>
-          <LayoutItems controls={controls} foldLabel={t("editor.dock.foldArea")} region={area} />
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <p className="px-1.5 py-1 text-xs leading-snug text-muted-foreground">{t("editor.dock.dragNote")}</p>

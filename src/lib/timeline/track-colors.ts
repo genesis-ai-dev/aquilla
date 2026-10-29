@@ -152,6 +152,18 @@ const ALPHA_BY_KIND: Record<string, Partial<TrackAlpha>> = {
   "source-audio": { hover: 0.12, hoverFill: 0.36, generated: 0.24 },
 }
 
+/**
+ * The film row's hue (AQU-2253, board 56's `FILM_HUE`): a dark neutral for its
+ * accent bar and dot. The film row is not a track a user can colour, move or
+ * rename — it is pinned at the top whenever a film is linked — so it is not a
+ * kind in the track contract either; it simply has its own hue.
+ */
+export const FILM_TRACK_HUE = "#43464e"
+
+export function filmTrackHueVars(): Record<string, string> {
+  return hueVarsFromHex(FILM_TRACK_HUE, ALPHA)
+}
+
 /** The custom properties for a row, resolved from its kind and its colour. */
 export function trackHueVarsFor(
   kind: string,

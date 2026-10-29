@@ -5246,7 +5246,9 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
   }
 
   it("on a short Free timing lane, is one readable line at the view's left edge, at every zoom, and the ruler keeps its labels", () => {
-    setVideoDurationSec(LINKED, 635)
+    // No film length known: since AQU-2253 a film's strip carries the timeline
+    // to the film's end in Follows recordings too, and this walk is about a
+    // timeline shorter than the view.
     localStorage.removeItem("aquilla:timelineZoom:lv-ft-zoom")
     const attach = vi.fn()
     withScrollColumn(900, () => withQueuedFrames((flush) => {
@@ -5681,5 +5683,80 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
     await expectTooltip(await screen.findByTestId("tl-stand-in-info"), /at a stand-in length worked out from its text/)
+  })
+})
+
+// AQU-2253 (board 56): the film is a row pinned at the very top of the tracks,
+// in both timings, whenever a film is linked — one strip from 0:00 to its end
+// on its own clock.
+describe("TimelineEditor — the film track", () => {
+  const FILM = "http://127.0.0.1:5540/showcase-film.webm"
+  const film = { name: "showcase-film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  // Episode 1.vtt's first two cues; the first has a 3.1 s take.
+  const takeId = "audio-e1-1700000000-take.webm"
+  const cues = [
+    cell({
+      id: "e1", medium: "text", startTime: 0.5, endTime: 4, original: "Simon, where are you going?",
+      selectedAudioId: takeId,
+      attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_100 } },
+    } as unknown as Partial<CellData>),
+    cell({ id: "e2", medium: "text", startTime: 4.6, endTime: 8.8, original: "To the shore." }),
+  ]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep1" coreMediaUrl={FILM} film={film} editable cells={cues} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false })}
+        onRetimeSubtitle={() => {}}
+        {...over}
+      />,
+    )
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling!
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(FILM, 27.08)
+  })
+
+  it.each(["dubbing", "audioFirst"] as const)("is the first row in %s, headed Film and the film's name", (mode) => {
+    draw(mode)
+    const names = Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+    expect(names[0]).toBe("Film")
+    expect(screen.getByTestId("tl-film-track-label")).toHaveTextContent("showcase-film.webm")
+    // …and its lane is the first under the ruler, holding one strip from 0:00.
+    const lanes = screen.getByTestId("tl-scroll").firstElementChild!
+    const firstLane = Array.from(lanes.children).find((el) => el.getAttribute("data-testid") !== "tl-ruler")
+    expect(firstLane).toBe(screen.getByTestId("tl-film-lane"))
+    expect(screen.getByTestId("tl-film-strip").style.left).toBe("0px")
+  })
+
+  it("following the recordings it does not adjust to the lines: the same strip in both timings", () => {
+    const { unmount } = draw("dubbing")
+    const width = screen.getByTestId("tl-film-strip").style.width
+    unmount()
+    draw("audioFirst")
+    expect(screen.getByTestId("tl-film-strip").style.width).toBe(width)
+  })
+
+  it("the timeline reaches the film's end even when the lines end sooner", () => {
+    draw("audioFirst")
+    const content = screen.getByTestId("tl-scroll").firstElementChild as HTMLElement
+    const strip = screen.getByTestId("tl-film-strip")
+    expect(parseFloat(content.style.width)).toBeGreaterThanOrEqual(parseFloat(strip.style.width))
+  })
+
+  it("is never a track you can drag, rename or open a menu on", () => {
+    draw("dubbing", { onReorderTrack: vi.fn(), onRenameTrack: vi.fn() })
+    const label = screen.getByTestId("tl-film-track-label")
+    expect(label).not.toHaveAttribute("data-tl-track-row")
+    expect(label).not.toHaveAttribute("role", "listitem")
+    expect(within(label).queryByRole("button")).toBeNull()
+  })
+
+  it("no film, no film row", () => {
+    draw("dubbing", { coreMediaUrl: null, film: undefined })
+    expect(screen.queryByTestId("tl-film-track-label")).toBeNull()
+    expect(screen.queryByTestId("tl-film-lane")).toBeNull()
   })
 })

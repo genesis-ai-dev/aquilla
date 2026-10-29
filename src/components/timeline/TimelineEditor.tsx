@@ -66,6 +66,7 @@ import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { FilmTrackLane } from "./FilmTrackLane"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
 import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
@@ -133,7 +134,7 @@ import {
   type TrackRow,
 } from "@/lib/timeline/track-groups"
 import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHiddenTracks, toggleCollapsed } from "@/lib/timeline/track-collapse"
-import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
+import { filmTrackHueVars, TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
@@ -2810,7 +2811,11 @@ export function TimelineEditor({
     return out
   }
 
-  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
+  // AQU-2253: the film track runs from 0:00 to the film's end on its own clock,
+  // in both timings, so the timeline reaches at least that far: following the
+  // recordings the lines can end well before the film does.
+  const filmTrackSec = coreMediaUrl && videoDurationSec && videoDurationSec > 0 ? videoDurationSec : 0
+  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmTrackSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
@@ -4883,6 +4888,22 @@ export function TimelineEditor({
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
+              {/* AQU-2253 (board 56): the film, pinned above every track
+                  whenever one is linked. Not a track in the contract — it
+                  cannot be moved, renamed, coloured or muted (its sound is the
+                  Source audio row's) — so it carries no reorder handle and no
+                  menu, and the drag code, which counts `[data-tl-track-row]`,
+                  never sees it. Its header is just "Film" and the film's name. */}
+              {coreMediaUrl && (
+                <LaneLabel
+                  data-testid="tl-film-track-label"
+                  name={t("editor.timeline.filmTrack")}
+                  sub={film?.name ?? ""}
+                  dot={TRACK_DOT_CLASS}
+                  hueVars={filmTrackHueVars()}
+                  collapsed={gutterCollapsed}
+                />
+              )}
               {/* The gutter is the track list, exactly as the lanes beside it are —
                   one row here per row there, in the same order, off the same
                   array. `name` comes from the track and not from the kind, which
@@ -5166,6 +5187,16 @@ export function TimelineEditor({
                 onScrubMove={moveScrub}
                 onScrubEnd={endScrub}
               />
+              {coreMediaUrl && (
+                <FilmTrackLane
+                  filmSec={filmTrackSec || null}
+                  pxPerSec={pxPerSec}
+                  viewStartSec={viewStartSec}
+                  viewEndSec={viewEndSec}
+                  name={film?.name ?? t("editor.timeline.filmTrack")}
+                  onSeekSec={seekTo}
+                />
+              )}
               {trackRows.map((row) => {
                 const lane = laneForTrack(row)
                 // A row with NO MENU CAPABILITY at all — a viewer — is the row

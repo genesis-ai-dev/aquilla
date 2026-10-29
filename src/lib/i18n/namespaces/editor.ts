@@ -1113,6 +1113,8 @@ export const editor = defineNamespace({
     "editor.history.reasonGone": "What it changed no longer exists.",
     "editor.history.reasonUnavailable": "This step can't be undone any more.",
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
+    "editor.timeline.filmTrack": "Film",
+    "editor.timeline.filmStripAria": "The film, {name}",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -6831,6 +6833,18 @@ export const editor = defineNamespace({
       "editor.history.reasonGone": { description: "Why an undo did not happen: the line, take or track it changed has been deleted since." },
       "editor.history.reasonUnavailable": { description: "Why an undo did not happen: this kind of step can no longer be undone." },
       "editor.history.reasonFailed": { description: "Why an undo did not happen: it could not be saved (for example, a network error)." },
+      "editor.timeline.filmTrack": {
+        description:
+          "The name of the row pinned at the top of the media view's timeline whenever a film " +
+          "(a linked video) is open: a strip of the film's frames on its own clock. Under it, " +
+          "in smaller text, the film's file name.",
+      },
+      "editor.timeline.filmStripAria": {
+        description:
+          "Screen-reader name of the film strip on the timeline's Film row. Clicking the strip " +
+          "moves the playhead, and the film, to that moment.",
+        placeholders: { name: "The film's name, e.g. 'showcase-film.webm'." },
+      },
       "editor.timeline.bluetoothPill": {
         description:
           "Small amber pill beside the timeline's heading, shown only while the " +

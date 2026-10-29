@@ -7928,6 +7928,7 @@ function EditorRow({
       hasContent={hasContent}
       validationStatus={cell.validationStatus}
       activeValidators={cell.activeValidators}
+      validatorDecidedTs={cell.validatorDecidedTs}
       validationHistory={cell.validationHistory}
       currentUsername={username}
       validationRequirement={readValidationCount(project)}

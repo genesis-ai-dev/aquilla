@@ -307,8 +307,9 @@ describe("buildProgramme — a split take", () => {
   // pieces is deliberate silence inside the line — drawn, joined and played.
   it("keeps a gap dragged open between two pieces as silence inside the line", () => {
     const cell = split(4000)
-    // The second piece placed 2 s into the line: 0.7 s after the first ends.
-    ;(cell.attachments![PIECE] as { targetOffsetMs?: number }).targetOffsetMs = 2000
+    // The second piece moved 0.7 s along (its clip's start 0.7 s after the
+    // line's): 2 s into the line, 0.7 s after the first ends.
+    ;(cell.attachments![PIECE] as { targetOffsetMs?: number }).targetOffsetMs = 700
     const [slot] = buildProgramme([cell]).slots
     expect(slot.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [2, expect.closeTo(0.7, 5)]])
     expect(slot.targetLenSec).toBeCloseTo(3.2)

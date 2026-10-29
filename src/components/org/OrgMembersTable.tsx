@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
+import { ChevronDown, ChevronRight, ShieldUser, UserMinus, UserPlus } from "lucide-react"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
+import { RoleDialog } from "@/components/access/RoleDialog"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
@@ -16,30 +16,17 @@ import {
   DataTableRowActionsButton,
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { TableEmptyState } from "@/components/ui/page"
-import { Spinner } from "@/components/ui/spinner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
 import { NoteOnClick } from "@/components/ui/info-note"
 import { RoleLabel } from "@/components/RoleLabel"
-import { RoleSelect } from "@/components/RoleSelect"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { MemberGrantResult } from "@/lib/frontier/members"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import {
   ALL_ROLE_LEVELS,
   humanRoleName,
-  ORG_ROLE_CHANGE_OPTIONS,
-  ORG_ROLE_OPTIONS,
   ROLE,
   roleDisplayText,
   roleHelpText,
@@ -47,8 +34,6 @@ import {
 } from "@/lib/frontier/roles"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-type AddDialogTab = "members" | "invite"
 
 // Shown on the disabled row-menu Remove item when the caller is not an org owner.
 const REMOVE_REQUIRES_OWNER_TOOLTIP =
@@ -58,12 +43,8 @@ const REMOVE_REQUIRES_OWNER_TOOLTIP =
 // partner that Frontier pre-loaded a workspace for can be given full admin
 // without rebuilding the workspace. It is additive (the promoting owner keeps
 // their own ownership, so the loaded workspace is never orphaned) and this
-// dialog cannot undo it: the row menu hides Change role and Remove for members
-// who are already owners.
-const PROMOTE_TO_OWNER_WARNING =
-  "Owners get full control of this workspace, including billing, members and deletion. " +
-  "You keep your own ownership, so the workspace is never left unowned. " +
-  "This cannot be undone here — an owner's role and membership are locked in this table once granted."
+// table cannot undo it: the row menu hides Change role and Remove for members
+// who are already owners. RoleDialog warns before saving it (AQU-2289).
 
 function roleLabel(roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
@@ -125,11 +106,7 @@ export function OrgMembersTable({
   const isOwner = (callerOrgRoleLevel ?? 0) >= ROLE.OWNER
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set())
   const [adding, setAdding] = useState(false)
-  const [addTab, setAddTab] = useState<AddDialogTab>("members")
   const [roleChangeTarget, setRoleChangeTarget] = useState<OrgMember | null>(null)
-  const [roleChangeLevel, setRoleChangeLevel] = useState("")
-  const [roleChangeBusy, setRoleChangeBusy] = useState(false)
-  const [roleError, setRoleError] = useState<string | null>(null)
 
   const toggleExpand = useCallback((userId: number) => {
     setExpanded((prev) => {
@@ -142,39 +119,6 @@ export function OrgMembersTable({
 
   function closeAdd() {
     setAdding(false)
-    setAddTab("members")
-  }
-
-  function openRoleChange(member: OrgMember) {
-    setRoleError(null)
-    setRoleChangeTarget(member)
-    setRoleChangeLevel(String(member.role.level))
-  }
-
-  function closeRoleChange() {
-    setRoleChangeTarget(null)
-    setRoleChangeLevel("")
-    setRoleChangeBusy(false)
-    setRoleError(null)
-  }
-
-  async function confirmRoleChange() {
-    if (!roleChangeTarget || !roleChangeLevel) return
-    setRoleChangeBusy(true)
-    setRoleError(null)
-    try {
-      await add(roleChangeTarget.username, Number(roleChangeLevel))
-      closeRoleChange()
-    } catch (e) {
-      const uf = toUserFacingError(e, "org")
-      setRoleError(
-        uf.category === "forbidden"
-          ? "Only org owners can change member roles."
-          : uf.message,
-      )
-    } finally {
-      setRoleChangeBusy(false)
-    }
   }
 
   const columns = useMemo<ColumnDef<OrgMember>[]>(
@@ -278,106 +222,65 @@ export function OrgMembersTable({
   return (
     <>
       {isOwner && (
-        <Dialog
+        <RoleDialog
           open={roleChangeTarget !== null}
-          onOpenChange={(open) => { if (!open) closeRoleChange() }}
-        >
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>
-                {t("org.membersPage.changeRoleAria")}{roleChangeTarget ? ` for ${roleChangeTarget.username}` : ""}
-              </DialogTitle>
-              <DialogDescription>
-                {t("org.membersPage.orgTable.changeRoleDescription")}
-              </DialogDescription>
-            </DialogHeader>
-            <RoleSelect
-              options={ORG_ROLE_CHANGE_OPTIONS}
-              value={roleChangeLevel ? Number(roleChangeLevel) : null}
-              onValueChange={(level) => setRoleChangeLevel(String(level))}
-              className="w-full!"
-              aria-label={
-                roleChangeTarget
-                  ? `Role for ${roleChangeTarget.username}`
-                  : "New role"
-              }
-            />
-            {Number(roleChangeLevel) === ROLE.OWNER && (
-              <p className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-muted-foreground">
-                <AlertTriangle className="mt-px size-4 shrink-0 text-amber-600" />
-                <span>{PROMOTE_TO_OWNER_WARNING}</span>
-              </p>
-            )}
-            {roleError && (
-              <p role="alert" className="text-xs text-destructive">{roleError}</p>
-            )}
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeRoleChange} disabled={roleChangeBusy}>
-                {t("common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void confirmRoleChange()}
-                disabled={!roleChangeLevel || roleChangeBusy}
-              >
-                {roleChangeBusy && <Spinner data-icon="inline-start" />}
-                {roleChangeBusy ? "Saving…" : "Save"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          onOpenChange={(open) => { if (!open) setRoleChangeTarget(null) }}
+          mode="change"
+          level="org"
+          callerLevel={callerOrgRoleLevel}
+          name={roleChangeTarget?.username ?? ""}
+          currentLevel={roleChangeTarget?.role.level ?? null}
+          summary={t("org.roleDialog.orgChangeSummary")}
+          details={t("org.roleDialog.orgRoleDetails")}
+          onSave={async (level) => {
+            if (roleChangeTarget) await add(roleChangeTarget.username, level)
+          }}
+          errorMessage={(e) => {
+            const uf = toUserFacingError(e, "org")
+            return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+          }}
+        />
       )}
 
       {isOwner && (
-        <Dialog open={adding} onOpenChange={(open) => { if (!open) closeAdd() }}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{t("org.membersPage.orgTable.addMemberTitle")}</DialogTitle>
-              <DialogDescription className="space-y-2">
-                <span className="block">{t("org.membersPage.orgTable.addMemberDescription")}</span>
-                <span className="block">{t("org.membersPage.orgTable.projectAccessNote")}</span>
-              </DialogDescription>
-            </DialogHeader>
-            <Tabs
-              value={addTab}
-              onValueChange={(v) => setAddTab((v as AddDialogTab) ?? "members")}
-              className="gap-3"
-            >
-              <TabsList size="lg" className="w-full" aria-label={t("org.membersPage.orgTable.addMethodAriaLabel")}>
-                <TabsTrigger value="members">{t("org.membersPage.orgTable.addMembersTab")}</TabsTrigger>
-                <TabsTrigger value="invite">{t("org.membersPage.orgTable.inviteByEmailTab")}</TabsTrigger>
-              </TabsList>
-              <TabsContent value="members">
-                <MemberMultiAddRow
-                  roleOptions={ORG_ROLE_OPTIONS}
-                  defaultRole={ROLE.CONTRIBUTOR}
-                  grantScope={{ kind: "organization" }}
-                  scopedUserSearch={false}
-                  excludedUserIds={members.map((m) => m.userId)}
-                  onAdd={async (usernames, role) => {
-                    const results = await addMany(usernames.map((username) => ({ username, role })))
-                    const outcomes = results.map((r) => ({
-                      username: r.username,
-                      ok: r.ok,
-                      error: r.error?.message,
-                    }))
-                    if (outcomes.length > 0 && outcomes.every((o) => o.ok)) closeAdd()
-                    return outcomes
-                  }}
-                  onBatchErrorMessage={(e) => {
-                    const uf = toUserFacingError(e, "org")
-                    return uf.category === "forbidden"
-                      ? "Only org owners can add members."
-                      : uf.message
-                  }}
-                />
-              </TabsContent>
-              <TabsContent value="invite">
-                <OrgInviteByEmail orgId={orgId} />
-              </TabsContent>
-            </Tabs>
-          </DialogContent>
-        </Dialog>
+        <RoleDialog
+          open={adding}
+          onOpenChange={(open) => { if (!open) closeAdd() }}
+          mode="add"
+          level="org"
+          callerLevel={callerOrgRoleLevel}
+          title={t("org.membersPage.orgTable.addMemberTitle")}
+          summary={t("org.roleDialog.orgAddSummary")}
+          details={t("org.roleDialog.orgRoleDetails")}
+          people={{
+            kind: "row",
+            row: {
+              defaultRole: ROLE.CONTRIBUTOR,
+              grantScope: { kind: "organization" },
+              scopedUserSearch: false,
+              excludedUserIds: members.map((m) => m.userId),
+              onAdd: async (usernames, role) => {
+                const results = await addMany(usernames.map((username) => ({ username, role })))
+                const outcomes = results.map((r) => ({
+                  username: r.username,
+                  ok: r.ok,
+                  error: r.error?.message,
+                }))
+                if (outcomes.length > 0 && outcomes.every((o) => o.ok)) closeAdd()
+                return outcomes
+              },
+              onBatchErrorMessage: (e) => {
+                const uf = toUserFacingError(e, "org")
+                return uf.category === "forbidden" ? t("org.roleDialog.orgAddForbidden") : uf.message
+              },
+            },
+          }}
+          otherTabs={[{
+            value: "invite",
+            label: t("org.membersPage.orgTable.inviteByEmailTab"),
+            content: <OrgInviteByEmail orgId={orgId} />,
+          }]}
+        />
       )}
 
       <DataTable
@@ -429,7 +332,7 @@ export function OrgMembersTable({
               <>
                 {isOwner && !isOrgOwner && (
                   <>
-                    <MenuItem onClick={() => openRoleChange(m)}>
+                    <MenuItem onClick={() => setRoleChangeTarget(m)}>
                       <ShieldUser className="size-4" />
                       {t("org.membersPage.changeRoleAria")}
                     </MenuItem>

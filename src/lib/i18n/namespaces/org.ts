@@ -889,13 +889,7 @@ export const org = defineNamespace({
     "org.rowActionsAriaLabel": "Actions for {name}",
 
     // -- OrgMembersTable: org roster table and member-management dialogs --
-    "org.membersPage.orgTable.changeRoleDescription":
-      "Maintainer and Owner can see every project in the organization. Contributor and below cannot see projects until added to a project or team.",
     "org.membersPage.orgTable.addMemberTitle": "Add a member",
-    "org.membersPage.orgTable.addMemberDescription":
-      "Add someone to this organization, or invite them by email if they don't have an account yet.",
-    "org.membersPage.orgTable.projectAccessNote":
-      "Contributor, Project lead, and Viewer join the organization but cannot see or open projects until they are added to a specific project or team. Only Maintainer and Owner can see every project.",
     "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
     "org.membersPage.orgTable.addMembersTab": "Add members",
     "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
@@ -1827,6 +1821,10 @@ export const org = defineNamespace({
         description:
           "AQU-2289: screen-reader name of the (i) button on the role dialog's Owner warning. It opens what being an Owner means, in place.",
       },
+      "org.roleDialog.orgRoleDetails": {
+        description:
+          "AQU-2289 (was AQU-1107's add-member note): opened from the (i) in the role dialog for an organization role. States that organization membership below Maintainer opens no project. Role names are the picker's role vocabulary, not placeholders.",
+      },
       "org.roleDialog.ownerWarning": {
         description:
           "AQU-2289: one-line warning in the role dialog when an organization owner picks Owner for someone. The rest is behind an (i).",
@@ -2689,18 +2687,6 @@ export const org = defineNamespace({
       "org.membersPage.orgTable.addMethodAriaLabel": {
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
-      },
-      "org.membersPage.orgTable.addMemberDescription": {
-        description:
-          "Dialog subtitle on the org Members 'Add a member' dialog. Explains that the action adds someone to the organization (or invites by email), not that it grants project access.",
-      },
-      "org.membersPage.orgTable.projectAccessNote": {
-        description:
-          "Helper paragraph under the add-member dialog subtitle (AQU-1107). States the rule that Contributor/Project lead/Viewer org membership does not open projects, and that only Maintainer and Owner see every project. Role names stay in this sentence as English role vocabulary matching the picker — they are not placeholders.",
-      },
-      "org.membersPage.orgTable.changeRoleDescription": {
-        description:
-          "Dialog subtitle when an org owner changes a member's organization-level role. Same access rule as org.membersPage.orgTable.projectAccessNote: Maintainer/Owner see every project; Contributor and below do not until added to a project or team.",
       },
       "org.membersPage.orgTable.copyEmailAriaLabel": {
         description:

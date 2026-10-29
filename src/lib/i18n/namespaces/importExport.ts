@@ -402,7 +402,8 @@ export const importExport = defineNamespace({
     "importExport.landing.dcs.description":
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
     "importExport.landing.youtube.title": "YouTube video",
-    "importExport.landing.youtube.description": "Link a video, bring captions, or generate them from your original media.",
+    "importExport.landing.youtube.description":
+      "Link a film, bring captions, or generate them from your original media.",
     "importExport.youtube.description": "Link a YouTube picture now, or add a text source for timed segments.",
     "importExport.youtube.source": "Caption source",
     "importExport.youtube.aboutCaptions": "About YouTube captions",

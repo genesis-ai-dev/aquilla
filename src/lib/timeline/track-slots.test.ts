@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  programmeTrackSlots,
   DEFAULT_TARGET_TRACK_ID,
   GENERATED_VOICE_SLOT,
   RECORDING_SLOT,
@@ -109,5 +110,26 @@ describe("a track whose id spells a legacy slot name", () => {
     expect(slotForTrack(TRK)).toBe(TRK)
     expect(trackIdForSlot(TRK)).toBe(TRK)
     expect(slotsForTrack(TRK)).toEqual([TRK])
+  })
+})
+
+// AQU-2252 (Sam, Oct 29): the one answer the timeline, the transport and the
+// play strip lay a file out from — which added tracks are laid in, and which
+// of them are layers.
+describe("programmeTrackSlots", () => {
+  const tracks = [
+    { id: "target-audio", kind: "target-audio" },
+    { id: "boaz", kind: "audio" },
+    { id: "music", kind: "audio", setsLineLengths: false as const },
+    { id: "grp", kind: "folder" },
+    { id: "source-subtitles", kind: "source-subtitles" },
+  ]
+
+  it("lays in every added audio track, and says which are layers", () => {
+    expect(programmeTrackSlots(tracks)).toEqual({ layerSlots: ["boaz", "music"], layerTrackSlots: ["music"] })
+  })
+
+  it("lays in nothing extra on a file with only the main track", () => {
+    expect(programmeTrackSlots([{ id: "target-audio", kind: "target-audio" }])).toEqual({ layerSlots: [], layerTrackSlots: [] })
   })
 })

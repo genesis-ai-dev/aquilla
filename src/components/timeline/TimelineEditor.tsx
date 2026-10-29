@@ -149,7 +149,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
@@ -2091,14 +2091,18 @@ export function TimelineEditor({
   // effect shows before anyone picks. Following the source: the source's own
   // end (or the film's, when it runs longer). Following the recordings: the
   // programme, laid out exactly as that choice lays it.
+  // AQU-2252 (Sam, Oct 29): the file's added tracks, and which of them are
+  // layers — the same answer the transport lays the file out from, so the
+  // drawing, the Timing menu and the playback agree about every line.
+  const programmeTracks = useMemo(() => programmeTrackSlots(tracks), [tracks])
   const timingLengths = useMemo(() => {
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
     // AQU-1758: the same layout the transport plays and the bottom strip shows.
-    const recorded = layOutProgramme(cells).programme
+    const recorded = layOutProgramme(cells, programmeTracks).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
-  }, [cells, subtitleFileWithFootage, videoDurationSec])
+  }, [cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2112,10 +2116,12 @@ export function TimelineEditor({
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
         // AQU-2204: following the recordings, every unrecorded line takes a
-        // stand-in length from its words, timed file or not.
-        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle) },
+        // stand-in length from its words, timed file or not. AQU-2252: the
+        // takes on the file's added tracks set their lines' lengths too, but
+        // for the tracks made layers.
+        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle), ...programmeTracks },
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, programmeTracks],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
@@ -4151,7 +4157,8 @@ export function TimelineEditor({
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
-            snapEnabled={snapOn && !audioFirst}
+            // AQU-2252: a layer's takes snap as they do following the source.
+            snapEnabled={snapOn && (!audioFirst || track.setsLineLengths === false)}
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}

@@ -213,7 +213,7 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
@@ -348,7 +348,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -14669,6 +14669,14 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueTargetSlots(targetSlots)
   }, [targetSlots])
+  // AQU-2252 (Sam, Oct 29): …and which of the added tracks are layers, so the
+  // transport lays every line out at the length the timeline draws. The same
+  // answer the timeline and the play strip are handed.
+  const programmeTracks = useMemo(() => programmeTrackSlots(serverTimelineTracks), [serverTimelineTracks])
+  const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
+  useEffect(() => {
+    setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
+  }, [layerTrackSlotsKey])
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
   // on-device byte cache with the open file's dub clips (nearest the selection
@@ -17465,6 +17473,7 @@ export function ProjectWorkspace() {
                 virtualSoundingCellId={virtualSoundingCellId}
                 freeTiming={timingMode === "audioFirst"}
                 lane={activeLane}
+                programmeTracks={programmeTracks}
               />
             ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
@@ -17784,6 +17793,7 @@ export function ProjectWorkspace() {
                   virtualSoundingCellId={virtualSoundingCellId}
                   freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
+                  programmeTracks={programmeTracks}
                   below={
                     <>
                       {syncStatus}

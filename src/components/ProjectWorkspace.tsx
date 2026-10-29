@@ -239,6 +239,7 @@ import {
   virtualClockPlay,
   virtualClockSeekFromTimeline,
 } from "@/lib/timeline/virtual-clock"
+import { useSkipSilentLinesOnVirtualClock } from "@/lib/timeline/silent-lines"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
@@ -13547,6 +13548,9 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
   }, [virtualIsTransport, virtualPlaying])
+  // AQU-2251: with "Skip lines with nothing to play" on, the clock jumps from
+  // the end of one line with a take to the start of the next one.
+  useSkipSilentLinesOnVirtualClock(dubDriverCells, virtualIsTransport)
   /** Which line the playhead is on, for the bar's caption and the table follow. */
   const virtualSoundingCellId = useMemo(
     () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),

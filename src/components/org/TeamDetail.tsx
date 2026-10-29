@@ -25,6 +25,9 @@ import { InheritedRoleControl } from "@/components/access/InheritedRoleControl"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { GrantOrigin, ScopePath } from "@/lib/access/types"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
+import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
@@ -50,6 +53,7 @@ import {
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
+import type { MemberGrantResult } from "@/lib/frontier/members"
 import {
   fetchAccessibleProjectsResult,
   projectsResultError,
@@ -116,7 +120,7 @@ function CopyEmailButton({ email }: { email: string }) {
 }
 
 export function TeamDetail() {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
   const { activeOrgId, activeOrg } = useActiveOrg()
@@ -168,6 +172,11 @@ export function TeamDetail() {
   const [stagedUsernames, setStagedUsernames] = useState<string[]>([])
   const [addBusy, setAddBusy] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  // AQU-2238: the outside-the-org path. The picker can only ever offer people
+  // already on the org roster, so staffing a team with someone external used to
+  // mean org add → team add → org remove. This free-text username/email goes
+  // straight to the team as a guest, leaving the org roster untouched.
+  const [externalIdentifier, setExternalIdentifier] = useState("")
 
   // Change-role dialog (owners only) — opened from the row actions menu.
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
@@ -284,20 +293,48 @@ export function TeamDetail() {
     [orgProjects, team?.projects],
   )
 
+  // AQU-2238 / AQU-1030: a guest's reach is exactly this team's attached
+  // projects — nothing org-wide, and no org-roster entry. An unattached team
+  // grants nothing yet, and saying so beats an invite that looks like it worked
+  // and shows the person an empty workspace.
+  const externalGrantSentence = useMemo(() => {
+    const names = (team?.projects ?? []).map((project) => project.name)
+    return names.length === 0
+      ? t("org.teamDetail.outsideOrgScopeNoProjects")
+      : t("org.teamDetail.outsideOrgScopeWithProjects", {
+          projects: new Intl.ListFormat(locale, { type: "conjunction", style: "long" }).format(names),
+        })
+  }, [team?.projects, t, locale])
+
   function closeAddMember() {
     setAddingMember(false)
     setStagedUsernames([])
+    setExternalIdentifier("")
     setAddError(null)
   }
 
   async function handleAddMembers() {
-    if (!jwt || activeOrgId == null || groupIdNum == null || stagedUsernames.length === 0) return
+    if (!jwt || activeOrgId == null || groupIdNum == null) return
+    const external = externalIdentifier.trim()
+    if (stagedUsernames.length === 0 && !external) return
     setAddBusy(true)
     setAddError(null)
     try {
-      // ONE batch request — the endpoint is non-atomic and returns per-person
-      // results in request order, so one rejected person never sinks the rest.
-      const results = await addTeamMembers(jwt, activeOrgId, groupIdNum, stagedUsernames)
+      // ONE batch request per path — the endpoint is non-atomic and returns
+      // per-person results in request order, so one rejected person never
+      // sinks the rest. The outside-the-org invite is its own request because
+      // `external` waives the org-roster requirement for the WHOLE request
+      // (AQU-2238), and the picker path must keep failing closed: someone who
+      // silently lost their org membership should still be rejected there.
+      const results: MemberGrantResult[] = []
+      if (stagedUsernames.length > 0) {
+        results.push(...(await addTeamMembers(jwt, activeOrgId, groupIdNum, stagedUsernames)))
+      }
+      if (external) {
+        results.push(
+          ...(await addTeamMembers(jwt, activeOrgId, groupIdNum, [external], { external: true })),
+        )
+      }
       await refetch()
       const failures = results.filter((r) => !r.ok)
       if (failures.length === 0) {
@@ -305,11 +342,15 @@ export function TeamDetail() {
         return
       }
       // Keep only the people who failed staged for a retry; drop the successes.
-      // Name each failure with its reason — no silent all-or-nothing.
-      setStagedUsernames(failures.map((f) => f.username))
+      // Name each failure with its reason — no silent all-or-nothing. The
+      // external identifier is kept in its own field, never folded into the
+      // org-member picker (it is not an org member — that is the point).
+      const failed = new Set(failures.map((f) => f.username))
+      setStagedUsernames(stagedUsernames.filter((username) => failed.has(username)))
+      setExternalIdentifier(external && failed.has(external) ? external : "")
       setAddError(
         failures
-          .map((f) => `${f.username} (${f.error?.message ?? "couldn't be added"})`)
+          .map((f) => `${f.username} (${f.error?.message ?? t("org.teamDetail.couldntBeAddedFallback")})`)
           .join(", "),
       )
     } catch (err) {
@@ -525,8 +566,18 @@ export function TeamDetail() {
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
+          // AQU-2238: no org_members row is the normal state for a guest added
+          // straight to this team, so name it instead of reporting "Unknown".
+          // Its note opens on a click of the label (AQU-2260: never a hover).
           if (m.roleLevel == null) {
-            return <span className="text-sm text-muted-foreground">{t("autopilot.evidence.status.unknown")}</span>
+            return (
+              <NoteOnClick
+                note={t("org.teamDetail.outsideOrgRoleTooltip")}
+                className="text-sm text-muted-foreground"
+              >
+                {t("org.teamDetail.outsideOrgRole")}
+              </NoteOnClick>
+            )
           }
 
           const label = <RoleLabel name={m.roleLevel} />
@@ -557,7 +608,10 @@ export function TeamDetail() {
           const canEditRow = canEditTeamRoles && (current ?? 0) <= teamRoleCap
           // AQU-1352 §3.7 rule 1: a NULL team role inherits the org role; a set
           // one is a direct grant at this team. The effective role is the higher.
-          const orgRef = activeOrgId != null && activeOrg?.name
+          // AQU-2238: a guest has no org role to inherit, so never offer the
+          // org as the source of their team role — the team's project grants
+          // are the whole of their access.
+          const orgRef = activeOrgId != null && activeOrg?.name && m.roleLevel != null
             ? { type: "org" as const, id: String(activeOrgId), name: activeOrg.name }
             : null
           const origin: GrantOrigin = current == null
@@ -1080,6 +1134,30 @@ export function TeamDetail() {
                               {t("org.teamDetail.allMembersAddedNotice")}
                             </p>
                           )}
+                          {/* AQU-2238: the picker lists org members only, so an
+                              outside person is unreachable through it. This is
+                              the direct invite-to-team path — a team-scoped
+                              guest grant, no org-roster entry. AQU-1030: the
+                              scope sentence names exactly what they will and
+                              won't see. */}
+                          <FieldSeparator />
+                          <Field>
+                            <FieldLabel htmlFor="team-add-external">
+                              {t("org.teamDetail.outsideOrgLabel")}
+                            </FieldLabel>
+                            <Input
+                              id="team-add-external"
+                              autoComplete="off"
+                              value={externalIdentifier}
+                              placeholder={t("org.teamDetail.outsideOrgPlaceholder")}
+                              className="h-9"
+                              onChange={(e) => {
+                                setAddError(null)
+                                setExternalIdentifier(e.target.value)
+                              }}
+                            />
+                          </Field>
+                          <GrantScopeNotice sentence={externalGrantSentence} />
                           {addError && (
                             <p role="alert" className="text-xs text-destructive">
                               {t("org.teamDetail.addErrorPrefix", { error: addError })}
@@ -1093,7 +1171,10 @@ export function TeamDetail() {
                           <Button
                             type="button"
                             onClick={handleAddMembers}
-                            disabled={stagedUsernames.length === 0 || addBusy}
+                            disabled={
+                              (stagedUsernames.length === 0 && externalIdentifier.trim().length === 0) ||
+                              addBusy
+                            }
                           >
                             {addBusy && <Spinner data-icon="inline-start" />}
                             {addBusy ? "Adding…" : "Add"}

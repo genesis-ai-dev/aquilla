@@ -2,7 +2,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest"
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { createRef } from "react"
 import userEvent from "@testing-library/user-event"
-import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectDisabledNote, expectClickNote } from "@/test-utils/tooltip"
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer"
 import {
   composerDraftStore, createComposerDraftStore, resetComposerDraftsForTesting, type ComposerDraftScope,
@@ -216,6 +216,12 @@ describe("ChatComposer hovers", () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByRole("tooltip")).toBeNull()
     await expectDisabledNote(screen.getByRole("button", { name: "Check terms" }), "Open a file first")
+  })
+
+  // Oct 29, third pass: what Queue does is a click (i) beside it.
+  it("Queue has an (i) beside it saying the message sends when the run finishes", async () => {
+    renderWithTooltips(<ChatComposer isStreaming isConfigured queueWhileStreaming onSend={vi.fn()} onStop={vi.fn()} />)
+    await expectClickNote(screen.getByRole("button", { name: "About Queue message" }), "Sends when the current run finishes.")
   })
 
   it("Queue's label names the button and nothing more", async () => {

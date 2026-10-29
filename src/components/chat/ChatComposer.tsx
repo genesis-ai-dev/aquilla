@@ -30,6 +30,7 @@ import {
   InputGroup, InputGroupAddon, InputGroupButton,
 } from "@/components/ui/input-group"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { ContextChipNode } from "@/lib/richtext/context-chip-node"
 import { serializeDocJSON, type ContextChip } from "@/lib/agent/context-chip"
@@ -265,14 +266,26 @@ const ScopedChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fun
             {isStreaming ? (
               <span className="ms-auto flex items-center gap-1">
                 {queueWhileStreaming && (
-                  <AppTooltip content={t("workspace.chatComposer.queueMessage")}>
-                    <InputGroupButton
-                      type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                      disabled={isEmpty || draft.isSending || !isConfigured} aria-label={t("workspace.chatComposer.queueMessage")}
+                  <>
+                    {/* AQU-2260 (Oct 29, third pass): what Queue does, on a
+                        click of the (i) beside it; the hover only names it. */}
+                    <InfoNote
+                      label={t("common.aboutAria", { name: t("workspace.chatComposer.queueMessage") })}
+                      testId="chat-queue-info"
+                      side="top"
+                      align="end"
                     >
-                      <ArrowUp />
-                    </InputGroupButton>
-                  </AppTooltip>
+                      {t("workspace.chatComposer.queueInfo")}
+                    </InfoNote>
+                    <AppTooltip content={t("workspace.chatComposer.queueMessage")}>
+                      <InputGroupButton
+                        type="button" variant="default" size="icon-sm" onClick={handleSendClick}
+                        disabled={isEmpty || draft.isSending || !isConfigured} aria-label={t("workspace.chatComposer.queueMessage")}
+                      >
+                        <ArrowUp />
+                      </InputGroupButton>
+                    </AppTooltip>
+                  </>
                 )}
                 <AppTooltip content={t("common.stop")}>
                   <InputGroupButton

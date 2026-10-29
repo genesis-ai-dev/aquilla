@@ -414,6 +414,7 @@ export const workspace = defineNamespace({
 
     // -- chat/ChatComposer (Send reuses autopilot.steering.send, Stop reuses common.stop) --
     "workspace.chatComposer.queueMessage": "Queue message",
+    "workspace.chatComposer.queueInfo": "Sends when the current run finishes.",
 
     // -- chat/ChatMarkdown --
     "workspace.chatMarkdown.copyCode": "Copy code",
@@ -1810,6 +1811,11 @@ export const workspace = defineNamespace({
         description: "Button that re-selects the original recording take instead of the denoised one.",
       },
 
+      "workspace.chatComposer.queueInfo": {
+        description:
+          "Opens from a small (i) beside the chat's Queue button while the agent is still " +
+          "answering: a message queued now is sent as soon as the current run finishes.",
+      },
       "workspace.chatComposer.queueMessage": {
         description:
           "Accessible name for the queue button in the chat composer, shown " +

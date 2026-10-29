@@ -13,6 +13,9 @@ patchedDependencies:
   '@livestore/common@0.4.0':
     hash: c0b9a89139fe08fb1670c3203fd62c5c0098fedf0c66db9bcba03d0c9a495483
     path: patches/@livestore__common@0.4.0.patch
+  '@livestore/sqlite-wasm@0.4.0':
+    hash: e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208
+    path: patches/@livestore__sqlite-wasm@0.4.0.patch
 
 importers:
 
@@ -8064,7 +8067,7 @@ snapshots:
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
       '@livestore/common': 0.4.0(patch_hash=c0b9a89139fe08fb1670c3203fd62c5c0098fedf0c66db9bcba03d0c9a495483)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/devtools-web-common': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
-      '@livestore/sqlite-wasm': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/sqlite-wasm': 0.4.0(patch_hash=e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/webmesh': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
@@ -8283,7 +8286,7 @@ snapshots:
       effect: 3.21.2
       react: 19.3.1
 
-  '@livestore/sqlite-wasm@0.4.0(3b79ce90d8e0e5337a9b451a318ee921)':
+  '@livestore/sqlite-wasm@0.4.0(patch_hash=e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208)(3b79ce90d8e0e5337a9b451a318ee921)':
     dependencies:
       '@cloudflare/workers-types': 4.20251118.0
       '@effect/ai': 0.35.0(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)

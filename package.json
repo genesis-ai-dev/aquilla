@@ -299,7 +299,8 @@
       "sharp": ">=0.35.0"
     },
     "patchedDependencies": {
-      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch"
+      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch",
+      "@livestore/sqlite-wasm@0.4.0": "patches/@livestore__sqlite-wasm@0.4.0.patch"
     }
   }
 }

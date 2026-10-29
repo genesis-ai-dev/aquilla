@@ -41,6 +41,23 @@ describe("TimelineRuler", () => {
     expect(ruler.className).toContain("overflow-x-clip")
   })
 
+  // Review, Oct 29: the track is at least one tick step long, so a clip
+  // shorter than a step let a click land past its end.
+  it("stops a click and a drag at the end of a clip shorter than one tick step", () => {
+    const onScrub = vi.fn()
+    const onScrubEnd = vi.fn()
+    // 20 px/s → a 5 s step; the clip is 2 s.
+    render(<TimelineRuler durationSec={2} pxPerSec={20} onScrub={onScrub} onScrubMove={() => {}} onScrubEnd={onScrubEnd} />)
+    const ruler = screen.getByTestId("tl-ruler")
+    expect(ruler.style.width).toBe("100px") // one step is still drawn
+    fireEvent.click(ruler, { clientX: 80 }) // 4 s
+    expect(onScrub).toHaveBeenCalledWith(2)
+    fireEvent.pointerDown(ruler, { clientX: 10, button: 0, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 90, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 90, pointerId: 1 }) // 4.5 s
+    expect(onScrubEnd).toHaveBeenCalledWith(2)
+  })
+
   it("is the file's own width when the file is the longer", () => {
     render(<TimelineRuler durationSec={60} pxPerSec={38} fillPx={1140} onScrub={() => {}} />)
     expect(screen.getByTestId("tl-ruler").style.width).toBe("2280px")

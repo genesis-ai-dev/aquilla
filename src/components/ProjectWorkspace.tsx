@@ -17120,14 +17120,9 @@ export function ProjectWorkspace() {
                       name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
                       hiddenByTiming: !showVideoPane,
                       showing: dock.view.isShowing("film"),
-                      onHide: () => {
-                        const area = dock.view.areaOf("film")
-                        if (!area) return
-                        // A tab beside the text: show the text instead. Alone
-                        // in its area: fold the area.
-                        if (dock.view.list(area).length > 1) dock.show("text")
-                        else dock.fold(area)
-                      },
+                      // A tab beside the text: the text shows instead. Alone
+                      // in its area: the area folds.
+                      onHide: () => dock.hide("film"),
                       onShow: () => dock.show("film"),
                     } : undefined}
                     onAddLine={handleAddLine}

@@ -43,6 +43,7 @@ import { clearVideoControllerIf, setVideoController, type VideoController } from
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { youTubeVideoId } from "@/lib/video/youtube"
 import { YouTubePicture } from "./YouTubePicture"
+import { DOCK_HOST_MOVING } from "./media-dock-layout"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -604,6 +605,39 @@ export function MediaVideoPane({
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
   }, [slaved])
+
+  /**
+   * A YOUTUBE PICTURE DOES NOT SURVIVE A MOVE. The dock moves the film between
+   * areas by moving the element it is drawn into (useMediaDock), and a browser
+   * reloads an iframe that is moved in the page. A <video> moves untouched and
+   * plays on; a YouTube picture is an iframe, so it came back at 0:00, stopped,
+   * with its player cut off from the transport's play, pause and seek (review,
+   * Oct 29). The dock says when it is about to move the film, and a YouTube
+   * picture is then rebuilt where it lands, as the stall ladder's last rung
+   * does: a fresh element and player, put back where it was, and started again
+   * if the transport still wants it. The time is read now, while the player is
+   * still the live one.
+   */
+  useEffect(() => {
+    const host = fieldRef.current?.closest("[data-media-panel]")
+    if (!youTube || !host) return
+    const onMoving = () => {
+      const video = videoRef.current
+      if (!video) return
+      // A rebuild already on its way keeps the place it is going back to.
+      if (resumeAtRef.current == null) resumeAtRef.current = video.currentTime
+      stallRef.current = forgetStallSample(stallRef.current)
+      // A wait for the old element to be ready would never end.
+      cancelPendingPlay()
+      // Not playing until the new player is, or the playhead runs on over a
+      // picture that is still loading.
+      if (!slaved) onVideoPlayingRef.current?.(false)
+      setLoadAttempt((n) => n + 1)
+    }
+    host.addEventListener(DOCK_HOST_MOVING, onMoving)
+    return () => host.removeEventListener(DOCK_HOST_MOVING, onMoving)
+    // `failed`: the field is only there while the error card is not.
+  }, [youTube, failed, slaved, cancelPendingPlay])
 
   /**
    * Switching sound mid-play hands the transport from one player to the other

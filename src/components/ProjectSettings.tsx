@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { SearchSelect } from "@/components/ui/search-select"
 import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
 import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
 import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
@@ -2900,16 +2901,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     <SettingsRow
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select value={model} onValueChange={(value) => setModel(value ?? "")} disabled={!canEditShared}>
-                          <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        // AQU-2290: a provider can list hundreds of models, so the
+                        // list searches as you type, like every list that grows
+                        // with your data (AQU-2260).
+                        <SearchSelect
+                          id="mdl"
+                          aria-label={t("projectSettings.advancedLlm.modelLabel")}
+                          options={models.map((m) => ({ value: m, label: m }))}
+                          value={model}
+                          onValueChange={(value) => setModel(value)}
+                          disabled={!canEditShared}
+                          className="w-56 bg-background"
+                        />
                       }
                     />
                   )}

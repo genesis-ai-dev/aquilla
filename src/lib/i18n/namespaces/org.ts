@@ -604,11 +604,6 @@ export const org = defineNamespace({
     "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.importedOriginalsHeading": "Imported originals",
     "org.projectOverview.importedOriginalsListAria": "Imported original files",
-    "org.projectOverview.importedOriginalsShowMore": plural({
-      one: "Show {count} more",
-      other: "Show {count} more",
-    }),
-    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -627,7 +622,6 @@ export const org = defineNamespace({
       one: "+{count} more file — show all",
       other: "+{count} more files — show all",
     }),
-    "org.projectOverview.showFewer": "Show fewer",
     "org.projectOverview.deadlineHeading": "Deadline",
     "org.projectOverview.noDeadlineSet": "No deadline set",
     "org.projectOverview.change": "Change",
@@ -2461,16 +2455,6 @@ export const org = defineNamespace({
       "org.projectOverview.importedOriginalsListAria": {
         description:
           "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
-      },
-      "org.projectOverview.importedOriginalsShowMore": {
-        description:
-          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
-        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
-      },
-      "org.projectOverview.importedOriginalsShowAll": {
-        description:
-          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
-        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",

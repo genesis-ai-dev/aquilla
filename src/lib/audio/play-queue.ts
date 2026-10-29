@@ -1891,7 +1891,16 @@ function progSeekTo(sec: number, wantPlay: boolean, explicit = true): void {
 export function setQueueTimingMode(mode: AudioTimingMode): void {
   if (timingMode === mode) return
   timingMode = mode
+  // AQU-2253: a picture (or the built-in clock) already driving the dubs keeps
+  // its context. The workspace starts that driver in the same commit that
+  // reports the flip — a file with a film switching to Follows source — and
+  // dropping the context here left the film playing with every take silent.
+  const driven = externalDubs ? activeContext : null
   stopQueue()
+  if (driven && externalDubs) {
+    activeContext = driven
+    externalDubs.restock = true
+  }
 }
 
 export function getQueueTimingMode(): AudioTimingMode {

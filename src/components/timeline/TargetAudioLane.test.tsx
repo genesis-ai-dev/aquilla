@@ -4,7 +4,8 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 const pauseAllTransports = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
 const toastAdd = vi.hoisted(() => vi.fn())
@@ -47,6 +48,19 @@ function item(
 const pressPlay = async () => {
   fireEvent.click(screen.getByTestId("tl-target-c1-play"))
   await act(async () => { await Promise.resolve() })
+}
+
+
+/** AQU-2260 (Sam, Oct 29, third pass): a take's details are at the top of its
+ *  right-click menu, as plain lines. Hovering the chip shows nothing. */
+async function expectTakeDetails(key: string, text: RegExp) {
+  const chip = screen.getByTestId(`tl-target-${key}`)
+  await userEvent.setup().hover(chip)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  fireEvent.contextMenu(chip, { button: 2 })
+  const details = await screen.findByTestId(`tl-take-details-${key}`)
+  expect(details.textContent).toMatch(text)
+  return details
 }
 
 const base = {
@@ -188,7 +202,7 @@ describe("TargetAudioLane — overflow warnings", () => {
       "c2",
     ) // head at 16 → 2.0s under c1's tail
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /−2\.0s.*previous dub/)
+    await expectTakeDetails("c2", /−2\.0s.*previous dub/)
     // The red paints the whole warning line (the number span inherits it).
     expect(
       screen.getByTestId("tl-target-c2-tip-overlap-head").parentElement?.className,
@@ -204,7 +218,7 @@ describe("TargetAudioLane — overflow warnings", () => {
     ) // head at 16, under c1's GUESSED tail
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
     // The warning prose still fires — but no number derived from a guess.
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /Overlaps the previous dub/)
+    await expectTakeDetails("c2", /Overlaps the previous dub/)
     expect(screen.queryByTestId("tl-target-c2-tip-overlap-head")).toBeNull()
   })
 
@@ -212,7 +226,7 @@ describe("TargetAudioLane — overflow warnings", () => {
     const first = item({}, 12500) // [10, 22.5] over c2's chip at 20 → −2.5s
     const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
     renderWithTooltips(<TargetAudioLane {...base} items={[first, second]} />)
-    await expectTooltip(screen.getByTestId("tl-target-c1"), /−2\.5s.*next dub/)
+    await expectTakeDetails("c1", /−2\.5s.*next dub/)
     expect(
       screen.getByTestId("tl-target-c1-tip-overlap").parentElement?.className,
     ).toContain("text-red")
@@ -978,11 +992,11 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
 
   it("the drawn-short tooltip names the neighbour it is protecting", async () => {
     const { unmount } = renderWithTooltips(<TargetAudioLane {...base} items={backdragged()} />)
-    await expectTooltip(screen.getByTestId("tl-target-c2"), /previous dub stays reachable/)
+    await expectTakeDetails("c2", /previous dub stays reachable/)
     unmount()
 
     renderWithTooltips(<TargetAudioLane {...base} items={longLongShort()} />)
-    await expectTooltip(screen.getByTestId("tl-target-c1"), /next dub stays reachable/)
+    await expectTakeDetails("c1", /next dub stays reachable/)
   })
 
   it("a chip with no chip after it is never truncated", () => {
@@ -1045,7 +1059,7 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip).toHaveAttribute("data-missing", "true")
     expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
-    await expectTooltip(chip, /This clip's audio is missing\./)
+    await expectTakeDetails("c1", /This clip's audio is missing\./)
   })
 
   it("the verse being waited on shows the loading spinner", () => {

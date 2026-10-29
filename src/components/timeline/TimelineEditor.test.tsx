@@ -1331,7 +1331,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip = screen.getByTestId("tl-target-v1")
     expect(chip).toHaveAttribute("data-overflow", "none")
     expect(chip).toHaveAttribute("data-ratio", (11 / 6).toFixed(2))
-    await expectTooltip(chip, /11\.0s — 1\.8× the original/)
+    // AQU-2260: the take's details are at the top of its right-click menu.
+    fireEvent.contextMenu(chip, { button: 2 })
+    expect((await screen.findByTestId("tl-take-details-v1")).textContent).toMatch(/11\.0s — 1\.8× the original/)
     // The same take in dubbing mode is still flagged for running past its verse.
     renderAt("dubbing")
     expect(screen.getAllByTestId("tl-target-v1")[1]).toHaveAttribute("data-overflow", "overlap")

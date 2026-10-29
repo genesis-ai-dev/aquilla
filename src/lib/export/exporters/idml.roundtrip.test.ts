@@ -72,6 +72,34 @@ describe("strict web IDML export adapter", () => {
     )
   })
 
+  it("downloads a file whose over-long NoBreak run can wrap, after structural validation", async () => {
+    const sentence =
+      ". Davi era senhor e rei. Mas o senhor e rei aqui não era Davi."
+    const raw = await buildFixture(
+      `<ParagraphStyleRange Self="pnote" AppliedParagraphStyle="ParagraphStyle/intro%3aipi">` +
+        `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/k_xt" NoBreak="true"><Content>Melchizedek</Content></CharacterStyleRange>` +
+        `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain" NoBreak="true"><Content>.</Content></CharacterStyleRange>` +
+        `</ParagraphStyleRange>` +
+        `<ParagraphStyleRange Self="plock" AppliedParagraphStyle="ParagraphStyle/Body">` +
+        `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain" NoBreak="true"><Content>os d</Content></CharacterStyleRange>` +
+        `</ParagraphStyleRange>`,
+    )
+    const parsed = await parseIdml(raw)
+    const note = unitById(parsed.units, "pnote")
+    const cells = parsed.units.map((unit) => cellFor(unit))
+    replaceCell(cells, note, ["Melquisedeque", sentence])
+
+    const result = await exportIdml(raw.slice(0), cells, directExecutor)
+    const outputZip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const outputStory = await outputZip.file(STORY)!.async("string")
+
+    expect(result.diagnostics).toEqual([])
+    expect(outputStory).toContain(`NoBreak="true"><Content>Melquisedeque</Content>`)
+    expect(outputStory).toContain(`NoBreak="true"><Content>os d</Content>`)
+    expect(outputStory).toContain(`<Content>${sentence}</Content>`)
+    expect(outputStory).not.toContain(`NoBreak="true"><Content>${sentence}</Content>`)
+  })
+
   it("returns the exact original bytes when every protected target is empty", async () => {
     const raw = await buildFixture()
     const parsed = await parseIdml(raw)
@@ -177,10 +205,11 @@ function replaceCell(
   cell.translatedHtml = targetHtml(unit, values)
 }
 
-async function buildFixture(): Promise<ArrayBuffer> {
+async function buildFixture(extraParagraphs = ""): Promise<ArrayBuffer> {
   const story = [
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`,
     `<idPkg:Story ${IDPKG}><Story Self="u100">`,
+    extraParagraphs,
     '<ParagraphStyleRange Self="heading" AppliedParagraphStyle="ParagraphStyle/Heading">',
     '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Chapter One</Content></CharacterStyleRange>',
     "</ParagraphStyleRange>",

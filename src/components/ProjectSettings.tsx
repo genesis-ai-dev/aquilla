@@ -148,6 +148,7 @@ import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { ElevenLabsConnectCard } from "@/components/voice/elevenlabs/ElevenLabsConnectCard"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -1584,7 +1585,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
@@ -2942,6 +2943,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
                   help={t("projectSettings.voice.geminiKeyHelp")}
                 />
+              </SettingsRow>
+              {/* AQU-2299: the user's own ElevenLabs key, per user + device
+                  (never project settings) — the same card New voice shows. */}
+              <SettingsRow
+                label="ElevenLabs"
+                description={t("projectSettings.voice.elevenLabsHelp")}
+                block
+              >
+                <ElevenLabsConnectCard projectId={id} session={session} />
               </SettingsRow>
               <SettingsRow
                 label={t("projectSettings.voice.studioLabel")}

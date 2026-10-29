@@ -47,6 +47,12 @@ INWORLD_API_KEY=""
 # INWORLD_TTS_MODEL="inworld-tts-2-flash"
 # INWORLD_DEFAULT_VOICE="Dennis"
 
+# ElevenLabs (AQU-2299) is bring-your-own-key: each user's key travels from the
+# browser in X-ElevenLabs-Key and is never stored here. Only the upstream origin
+# is configurable. `pnpm dev` points it at scripts/mock-elevenlabs.ts (key
+# "test-elevenlabs-key") unless you set it here.
+# ELEVENLABS_BASE_URL="https://api.elevenlabs.io"
+
 # Voice conversion ("Change voice" into a library character voice or a trained
 # custom voice) — the only speech-to-speech path: the infra/modal/voice_forge.py
 # deploy's /convert URL and its shared secret.

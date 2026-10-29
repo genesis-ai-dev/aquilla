@@ -19,7 +19,7 @@
 
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
-import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
+import { resolveTtsProvider, isServerTtsProvider, normalizeVoiceForProvider, effectiveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
@@ -28,9 +28,7 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
-import { synthesizeCellTts } from "@/lib/sync/tts"
-import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
-import { inworldLanguageForRequest } from "./inworld-languages"
+import { synthesizeServerTts } from "./server-tts"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
 import type { CellData } from "@/hooks/useCells"
@@ -118,30 +116,29 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let audioId: string
     let ext: string
     let url: string
-    // The server-side (Inworld) branch returns WAV; the client-synth
+    // The server-side branch sets the stored clip's type; the client-synth
     // branch overrides when it compresses.
     let combinedMime = "audio/wav"
 
     if (isServerTtsProvider(provider)) {
-      // Server-side: one Inworld call for the whole joined clip; the worker
-      // stores it and returns its id.
+      // Server-side (Inworld, or ElevenLabs with the user's key): one call for
+      // the whole joined clip; the worker stores it and returns its id.
       onProgress?.("Synthesizing combined clip…")
-      const language = inworldLanguageForRequest(voice, targetLanguage)
-      const result = await synthesizeCellTts(
-        {
-          projectId: project.id,
-          fileId,
-          cellId: chosen[0].id,
-          text: joined,
-          ...(language ? { language } : {}),
-          ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
-          ...inworldSynthFieldsFromVoice(voice),
-        },
+      const engine = effectiveTtsProvider(provider)
+      const server = await synthesizeServerTts({
+        provider: engine,
+        voice: engine === "elevenlabs" ? normalizeVoiceForProvider(voice, engine) : voice,
+        projectId: project.id,
+        fileId,
+        cellId: chosen[0].id,
+        text: joined,
+        targetLanguage,
         getSyncToken,
-      )
-      audioId = result.audioId
-      ext = "wav"
-      url = result.url
+      })
+      audioId = server.result.audioId
+      ext = server.ext
+      combinedMime = server.mimeType
+      url = server.result.url
     } else {
       onProgress?.("Synthesizing combined clip…")
       const ttsBlob = await synthesizeForCell(joined, {

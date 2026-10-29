@@ -1,6 +1,7 @@
 // AQU-1109 "Change voice": re-voice a cell's EXISTING take into a library
 // voice's timbre (voice forge RVC — a character voice or a trained custom
-// voice). Never synthesizes from text — the words, timing and performance of
+// voice), or into an ElevenLabs voice (speech-to-speech with the user's own
+// key, AQU-2299). Never synthesizes from text — the words, timing and performance of
 // the take are kept; only who it sounds like changes.
 //
 // Mirrors denoise-take: the result is a NEW take in the SAME slot as the take
@@ -27,7 +28,9 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey } from "./tts"
 import { fetchCellAudio, audioIdSeededWith } from "./upload"
-import { convertToLibraryVoice } from "./voice-clone"
+import { convertToLibraryVoice, type ConvertToLibraryVoiceResult } from "./voice-clone"
+import { convertElevenLabsSpeech } from "@/lib/sync/elevenlabs"
+import { elevenLabsConversionKey, elevenLabsSettingsOf, isElevenLabsVoice, ELEVENLABS_STS_MODEL } from "./elevenlabs/settings"
 
 const VOICE_CHANGED_PREFIX = "vc-"
 
@@ -46,13 +49,16 @@ export function voiceReferenceFingerprint(key: string): string {
 }
 
 /**
- * What a voice's conversions are pinned to: a library voice's model id
- * (namespaced). Null when the voice can't convert — only character voices and
- * trained voices have a model. Mirrors `libraryVoiceKey` in
- * sync-worker/src/voice-convert.ts.
+ * What a voice's conversions are pinned to: a library voice's model id, or an
+ * ElevenLabs voice id (both namespaced). Null when the voice can't convert —
+ * only character voices, trained voices and ElevenLabs voices can. Mirrors
+ * `libraryVoiceKey` in sync-worker/src/voice-convert.ts and
+ * `elevenLabsVoiceKey` in sync-worker/src/elevenlabs.ts.
  */
 export function voiceConversionKey(voice: Voice): string | null {
-  return voice.libraryVoiceId ? `library:${voice.libraryVoiceId}` : null
+  if (voice.libraryVoiceId) return `library:${voice.libraryVoiceId}`
+  if (isElevenLabsVoice(voice) && voice.elevenLabs) return elevenLabsConversionKey(voice.elevenLabs.voiceId)
+  return null
 }
 
 /** True when an audioId names a Change voice conversion. */
@@ -176,24 +182,41 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
   if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
   const take = changeVoiceSourceTake(cell)
   if (!take) throw new Error("This line has no take to change.")
-  if (!voice.libraryVoiceId) {
-    throw new Error(`${voice.name} has no trained voice model yet — Change voice works with character voices and trained voices.`)
+  const elevenLabs = isElevenLabsVoice(voice) ? voice.elevenLabs : undefined
+  if (!voice.libraryVoiceId && !elevenLabs) {
+    throw new Error(`${voice.name} has no trained voice model yet — Change voice works with character voices, trained voices and ElevenLabs voices.`)
   }
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
   const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
-  const conv = await convertToLibraryVoice({
-    projectId,
-    fileId: cell.fileId,
-    cellId: cell.id,
-    libraryVoiceId: voice.libraryVoiceId,
-    sourceAudioId,
-    getSyncToken,
-  })
+  let conv: ConvertToLibraryVoiceResult
+  if (voice.libraryVoiceId || !elevenLabs) {
+    conv = await convertToLibraryVoice({
+      projectId,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      libraryVoiceId: voice.libraryVoiceId ?? "",
+      sourceAudioId,
+      getSyncToken,
+    })
+  } else {
+    // ElevenLabs speech-to-speech: the worker stores the mp3 under the same
+    // vc-<fingerprint>-audio-<cellId>-… naming, keyed on the ElevenLabs voice.
+    conv = await convertElevenLabsSpeech({
+      projectId,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      voiceId: elevenLabs.voiceId,
+      sourceAudioId,
+      modelId: ELEVENLABS_STS_MODEL,
+      voiceSettings: elevenLabsSettingsOf(voice),
+    }, getSyncToken)
+  }
+  const mimeType = conv.ext === "mp3" ? "audio/mpeg" : "audio/wav"
 
   const bytes = await fetchCellAudio({ projectId, fileId: cell.fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
-  const blob = new Blob([bytes as BlobPart], { type: "audio/wav" })
+  const blob = new Blob([bytes as BlobPart], { type: mimeType })
   void audioCachePutBlob(conv.audioId, conv.ext, blob)
   const durationMs = await probeDurationMsSafe(blob)
   const objectName = `${conv.audioId}.${conv.ext}`
@@ -205,7 +228,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     audioId: objectName,
     url: conv.url,
     slot: take.slot,
-    mimeType: "audio/wav",
+    mimeType,
     voiceId: voice.id,
     referenceAudioId: sourceAudioId,
     ...(durationMs != null ? { durationMs } : {}),
@@ -217,7 +240,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     audioId: objectName,
     url: conv.url,
     slot: take.slot,
-    mimeType: "audio/wav",
+    mimeType,
     voiceId: voice.id,
     referenceAudioId: sourceAudioId,
     durationMs: durationMs ?? null,

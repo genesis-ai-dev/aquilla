@@ -650,7 +650,13 @@ function SynthStatusBadge({
     // Voice setup (engine, Gemini key, library) now lives in the Voice Studio,
     // so recovery actions route there rather than opening an inline modal.
     const actions: Array<{ label: string; primary?: boolean; onClick: () => void }> = []
-    if (error.category === "missing-gemini-key") {
+    if (
+      error.category === "missing-gemini-key" ||
+      // ElevenLabs is BYOK: connecting (or reconnecting) the key is the fix,
+      // and it lives in the Voice Studio's New voice / voice editor.
+      error.category === "elevenlabs-key-missing" ||
+      error.category === "elevenlabs-invalid-key"
+    ) {
       actions.push({
         label: t("editor.tts.openAudioSetup"),
         primary: true,
@@ -666,7 +672,11 @@ function SynthStatusBadge({
       error.category === "voice-convert-not-configured" ||
       error.category === "voice-convert-failed" ||
       error.category === "gemini-failed" ||
-      error.category === "missing-openrouter-key"
+      error.category === "missing-openrouter-key" ||
+      error.category === "elevenlabs-quota" ||
+      error.category === "elevenlabs-clone-not-allowed" ||
+      error.category === "elevenlabs-rate-limited" ||
+      error.category === "elevenlabs-failed"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {

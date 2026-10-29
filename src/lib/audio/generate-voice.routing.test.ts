@@ -63,6 +63,49 @@ describe("generateAndAttachCellVoice routing", () => {
     expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
   })
 
+  it("an ElevenLabs voice synthesizes through the BYOK route and attaches the stored mp3", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn()
+    const synthElevenLabs = vi.fn(async () => ({
+      audioId: "audio-tts-7", durationSeconds: 2,
+      objectName: "audio-tts-7.mp3", url: "frontier-audio://audio-tts-7.mp3",
+    }))
+    const fetchAudio = vi.fn(async () => new ArrayBuffer(4))
+    const emitAttach = vi.fn(async () => {})
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("@/lib/sync/elevenlabs", () => ({ synthesizeElevenLabsTts: synthElevenLabs }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({ buildAudioId: () => "id", uploadCellAudio: vi.fn(), fetchCellAudio: fetchAudio }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({
+        id: "v-el", name: "Rachel", provider: "elevenlabs", voiceName: "Dennis",
+        elevenLabs: { voiceId: "el123", modelId: "eleven_flash_v2_5", settings: { stability: 0.2, similarityBoost: 0.75, style: 0, speed: 1.1, speakerBoost: false } },
+      }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    const result = await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hola",
+      session: { jwt: "j", username: "u" } as any, username: "u",
+      geminiContext: { targetLanguage: "es-419" },
+    })
+    expect(synthCellTts).not.toHaveBeenCalled()
+    expect(synthElevenLabs).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p", fileId: "f", cellId: "c", text: "hola", voiceId: "el123",
+      modelId: "eleven_flash_v2_5", languageCode: "es",
+      voiceSettings: { stability: 0.2, similarityBoost: 0.75, style: 0, speed: 1.1, speakerBoost: false },
+    }), expect.any(Function))
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-tts-7.mp3", url: "frontier-audio://audio-tts-7.mp3", mimeType: "audio/mpeg",
+      durationMs: 2000, ttsProvider: "elevenlabs", voiceId: "v-el",
+    }))
+    expect(fetchAudio).toHaveBeenCalledWith(expect.objectContaining({ audioId: "audio-tts-7", ext: "mp3" }))
+    expect(result.blob.type).toBe("audio/mpeg")
+  })
+
   it("a character (library) voice reads with the stock voice, then re-voices that clip", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({

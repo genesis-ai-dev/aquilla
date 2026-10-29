@@ -112,6 +112,11 @@ const DEFAULT_VITE_PORT = 5173
 // identity worker has no real OPENROUTER_API_KEY, so the agent/chat paths
 // work end-to-end locally with a deterministic model.
 const MOCK_LLM_PORT = Number(process.env.DEV_STACK_MOCK_LLM_PORT) || 9456
+// ElevenLabs mock (scripts/mock-elevenlabs.ts, AQU-2299) — booted when
+// sync-worker/.dev.vars sets no ELEVENLABS_BASE_URL. ElevenLabs is BYOK, so the
+// mock is what makes the engine usable locally: connect with
+// "test-elevenlabs-key" (see the mock's header for the other test keys).
+const MOCK_ELEVENLABS_PORT = Number(process.env.DEV_STACK_MOCK_ELEVENLABS_PORT) || 9457
 
 // D1→Neon migration (AQU-146): auth-worker + sync-worker bind HYPERDRIVE and
 // swap AQUILLA_PG for a Postgres shim (see auth-worker/src/index.ts). Under
@@ -211,6 +216,14 @@ function identityHasRealOpenRouterKey(): boolean {
   const m = readFileSync(p, "utf8").match(/^OPENROUTER_API_KEY\s*=\s*"?([^"\n]*)"?\s*$/m)
   const key = m?.[1]?.trim() ?? ""
   return key !== "" && key !== "mock"
+}
+
+/** True when sync-worker/.dev.vars points ElevenLabs at a real (or custom) origin. */
+function syncHasElevenLabsBaseUrl(): boolean {
+  const p = path.join(SYNC_DIR, ".dev.vars")
+  if (!existsSync(p)) return false
+  const m = readFileSync(p, "utf8").match(/^ELEVENLABS_BASE_URL\s*=\s*"?([^"\n]*)"?\s*$/m)
+  return (m?.[1]?.trim() ?? "") !== ""
 }
 
 /** Explicit remote/custom sandbox endpoint, if configured for local dev. */
@@ -627,6 +640,19 @@ async function main(): Promise<void> {
     cleanup.push(() => killChildTree(mockLlm))
   }
 
+  const useMockElevenLabs = !WITHOUT_SYNC && !syncHasElevenLabsBaseUrl()
+  if (useMockElevenLabs) {
+    await freePort(MOCK_ELEVENLABS_PORT)
+    console.log(`[dev-stack] starting mock ElevenLabs on :${MOCK_ELEVENLABS_PORT}… (no ELEVENLABS_BASE_URL in sync-worker/.dev.vars)`)
+    const mockElevenLabs = spawn(
+      "npx",
+      ["tsx", "scripts/mock-elevenlabs.ts", String(MOCK_ELEVENLABS_PORT)],
+      { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
+    )
+    attachOutput(mockElevenLabs, "mock-elevenlabs", openLogFile(path.join(LOG_DIR, "mock-elevenlabs.log")), VERBOSE)
+    cleanup.push(() => killChildTree(mockElevenLabs))
+  }
+
   // Boot the agent sandbox worker (best-effort). Its container image builds on
   // first `wrangler dev` and can be slow; if it never comes up we warn and
   // continue rather than tearing the whole stack down. Booted BEFORE identity
@@ -748,6 +774,8 @@ async function main(): Promise<void> {
       extraArgs: [
         "--persist-to", PERSIST_DIR,
         ...(SYNC_PUBLIC_URL ? ["--var", `DIARIZATION_PUBLIC_BASE:${SYNC_PUBLIC_URL}`] : []),
+        // --var (not process env): only `--var` lands in the Worker's env.
+        ...(useMockElevenLabs ? ["--var", `ELEVENLABS_BASE_URL:http://127.0.0.1:${MOCK_ELEVENLABS_PORT}`] : []),
       ],
       logFile: openLogFile(path.join(LOG_DIR, "sync.log")),
       streamToParent: VERBOSE,
@@ -853,6 +881,11 @@ async function main(): Promise<void> {
       : WITHOUT_MOCK_LLM
         ? `         llm      -> skipped (--no-mock-llm; hosted chat 500s without OPENROUTER_API_KEY)`
         : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+    useMockElevenLabs
+      ? `         11labs   -> http://127.0.0.1:${MOCK_ELEVENLABS_PORT}/  (mock — connect with key "test-elevenlabs-key")`
+      : sync
+        ? `         11labs   -> ELEVENLABS_BASE_URL from sync-worker/.dev.vars (bring your own key)`
+        : `         11labs   -> skipped (--no-sync)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

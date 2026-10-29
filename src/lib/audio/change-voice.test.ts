@@ -7,7 +7,9 @@ import type { Voice } from "@/lib/parsers/types"
 const convertToLibraryVoice = vi.fn()
 const emitCellAudioAttach = vi.fn()
 const injectOptimisticAudioAttachment = vi.fn()
+const convertElevenLabsSpeech = vi.fn()
 vi.mock("./voice-clone", () => ({ convertToLibraryVoice: (...a: unknown[]) => convertToLibraryVoice(...a) }))
+vi.mock("@/lib/sync/elevenlabs", () => ({ convertElevenLabsSpeech: (...a: unknown[]) => convertElevenLabsSpeech(...a) }))
 vi.mock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: (...a: unknown[]) => emitCellAudioAttach(...a) }))
 vi.mock("./audio-attachments-bus", () => ({
   injectOptimisticAudioAttachment: (...a: unknown[]) => injectOptimisticAudioAttachment(...a),
@@ -243,8 +245,43 @@ describe("changeVoiceForCell", () => {
 
   it("refuses a voice with no trained model before calling the worker", async () => {
     await expect(changeVoiceForCell({ projectId: "p1", cell: cell(), voice: stock, session, author: "dev" }))
-      .rejects.toThrow("Stock has no trained voice model yet — Change voice works with character voices and trained voices.")
+      .rejects.toThrow("Stock has no trained voice model yet — Change voice works with character voices, trained voices and ElevenLabs voices.")
     expect(convertToLibraryVoice).not.toHaveBeenCalled()
+  })
+})
+
+describe("ElevenLabs voices (AQU-2299)", () => {
+  const rachel: Voice = {
+    id: "v-rachel", name: "Rachel", provider: "elevenlabs",
+    elevenLabs: { voiceId: "el123", settings: { stability: 0.3, similarityBoost: 0.75, style: 0, speed: 1, speakerBoost: true } },
+  } as Voice
+
+  it("converts through ElevenLabs speech-to-speech and attaches the mp3 in the take's slot", async () => {
+    // The id the worker mints for `elevenlabs:el123` (sync-worker elevenlabs.ts).
+    const fp = voiceReferenceFingerprint("elevenlabs:el123")
+    convertElevenLabsSpeech.mockResolvedValue({
+      audioId: `vc-${fp}-audio-GEN_1_1-9-r`, ext: "mp3", url: `frontier-audio://vc-${fp}-audio-GEN_1_1-9-r.mp3`, bytes: 3,
+    })
+    expect(voiceConversionKey(rachel)).toBe("elevenlabs:el123")
+    expect(changeVoiceBlocker(cell(), rachel)).toBeNull()
+
+    await changeVoiceForCell({ projectId: "p1", cell: cell(), voice: rachel, session, author: "dev" })
+
+    expect(convertToLibraryVoice).not.toHaveBeenCalled()
+    expect(convertElevenLabsSpeech).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1", fileId: "f1", cellId: "GEN 1:1", voiceId: "el123",
+      sourceAudioId: "audio-GEN_1_1-1-abc.webm", modelId: "eleven_multilingual_sts_v2",
+      voiceSettings: expect.objectContaining({ stability: 0.3 }),
+    }), expect.any(Function))
+    const attached = emitCellAudioAttach.mock.calls[0][0] as { audioId: string; mimeType: string; slot: string }
+    expect(attached).toMatchObject({ audioId: `vc-${fp}-audio-GEN_1_1-9-r.mp3`, mimeType: "audio/mpeg", slot: "recording" })
+
+    // That take now reads as up to date for the same voice.
+    const after = cell({
+      selectedAudioId: attached.audioId,
+      attachments: { [attached.audioId]: att({ slot: "recording", voiceId: "v-rachel" }) },
+    })
+    expect(changeVoiceBlocker(after, rachel)).toBe("up-to-date")
   })
 })
 

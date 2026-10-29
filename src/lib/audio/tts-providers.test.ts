@@ -71,13 +71,26 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(leftover, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
   })
 
+  it("keeps an ElevenLabs voice's account voice and drops it when switching engines (AQU-2299)", () => {
+    const el: Voice = {
+      id: "v", name: "Rachel", provider: "elevenlabs", voiceName: "Dennis", language: "es", audioQuality: "highest",
+      elevenLabs: { voiceId: "el123" },
+    }
+    const kept = normalizeVoiceForProvider(el, "elevenlabs")
+    expect(kept).toMatchObject({ provider: "elevenlabs", language: "es", elevenLabs: { voiceId: "el123", modelId: "eleven_multilingual_v2" } })
+    expect(kept.voiceName).toBeUndefined()
+    expect(kept.audioQuality).toBeUndefined()
+    expect(isServerTtsProvider("elevenlabs")).toBe(true)
+    expect(normalizeVoiceForProvider(el, "inworld").elevenLabs).toBeUndefined()
+  })
+
   it("defaults to inworld", () => {
     expect(DEFAULT_TTS_PROVIDER).toBe("inworld")
   })
 
-  it("lists the three remaining engines with cloud engines first", () => {
+  it("lists the engines with cloud engines first", () => {
     expect(TTS_PROVIDER_INFOS.map((p) => p.id)).toEqual([
-      "inworld", "gemini", "mms",
+      "inworld", "gemini", "elevenlabs", "mms",
     ])
   })
 

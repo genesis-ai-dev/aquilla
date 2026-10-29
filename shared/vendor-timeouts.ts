@@ -37,6 +37,18 @@ export const VENDOR_TIMEOUT_MS = {
   /** Inworld TTS synthesis (AQU-1156). Above a real TTS-2 run on the longest
    *  text we accept, below the SPA's own `TTS_REQUEST_TIMEOUT_MS`. */
   inworldTts: 60_000,
+  /** ElevenLabs synthesis and speech-to-speech (AQU-2299, BYOK): one
+   *  non-streaming `POST /v1/text-to-speech/{voice_id}` or
+   *  `POST /v1/voice-changer/{voice_id}` that answers with the whole mp3.
+   *  Same ceiling as Inworld TTS — below the SPA's `TTS_REQUEST_TIMEOUT_MS`. */
+  elevenLabsAudio: 60_000,
+  /** ElevenLabs Instant Voice Clone (`POST /v1/voices/add`): uploads every
+   *  sample in one multipart body, optionally with background-noise removal,
+   *  so it is the slowest ElevenLabs call we make. */
+  elevenLabsClone: 120_000,
+  /** ElevenLabs metadata reads (`/v1/user/subscription`, `/v2/voices`,
+   *  `/v1/models`). Small JSON; a translator is waiting on the picker. */
+  elevenLabsMetadata: 15_000,
   /** Monday GraphQL API. One request carries up to ~10 aliased mutations; the
    *  client may also sleep on a 429 *between* attempts, which this does not
    *  cover (each attempt gets its own deadline). */

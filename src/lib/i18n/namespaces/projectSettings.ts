@@ -625,6 +625,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Frontier.",
+    "projectSettings.voice.elevenLabsHelp":
+      "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
     "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
     "projectSettings.voice.openStudioButton": "Open Voice Studio",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",

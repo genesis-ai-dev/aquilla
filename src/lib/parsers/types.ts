@@ -297,7 +297,36 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
  * rewrites them to `"inworld"` (language tags included); runtime still remaps
  * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
  */
-export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms" | "elevenlabs"
+
+/**
+ * ElevenLabs voice tuning (AQU-2299), camelCase mirror of the API's
+ * `voice_settings`. Defaults live in src/lib/audio/elevenlabs/settings.ts.
+ */
+export interface ElevenLabsVoiceSettings {
+  /** 0–1. Lower is more expressive, higher more consistent. */
+  stability: number
+  /** 0–1. How closely to stick to the original voice. */
+  similarityBoost: number
+  /** 0–1. Style exaggeration; 0 is the voice's own delivery. */
+  style: number
+  /** 0.7–1.2. Talking speed. */
+  speed: number
+  speakerBoost: boolean
+}
+
+/** The ElevenLabs side of a `provider: "elevenlabs"` voice (AQU-2299). */
+export interface ElevenLabsVoiceRef {
+  /** The account's ElevenLabs voice id. */
+  voiceId: string
+  /** Display copy of the ElevenLabs voice name (the cast name may differ). */
+  voiceName?: string
+  /** premade | cloned | generated | professional. */
+  category?: string
+  /** TTS model; absent → eleven_multilingual_v2. */
+  modelId?: string
+  settings?: ElevenLabsVoiceSettings
+}
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -397,6 +426,23 @@ export interface Voice {
    * the consent confirmation; the authoritative audit record lives server-side
    * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
    */
+  /**
+   * ElevenLabs (AQU-2299, bring-your-own-key): the account voice this cast
+   * voice speaks with. Generate synthesizes through sync-worker
+   * /api/v1/elevenlabs/tts and Change voice re-voices takes through
+   * /api/v1/elevenlabs/sts, both with the user's own device-local key.
+   */
+  elevenLabs?: ElevenLabsVoiceRef
+  /**
+   * Set when `elevenLabs.voiceId` is an Instant Voice Clone of a real speaker
+   * made from this project. Same consent statement as `customVoice`; the audit
+   * record lives server-side (sync-worker elevenlabs.ts).
+   */
+  elevenLabsClone?: {
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+  }
   customVoice?: {
     speakerName: string
     /** ISO time the maintainer confirmed the consent statement. */

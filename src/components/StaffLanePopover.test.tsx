@@ -233,7 +233,7 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
@@ -247,7 +247,7 @@ describe("StaffLanePopover", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
-        /maria will join as a reviewer on mark, spanish lane only/i,
+        /maria will join as a reviewer on mark, spanish language lane only/i,
       ),
     )
   })
@@ -261,7 +261,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
@@ -287,7 +287,7 @@ describe("StaffLanePopover", () => {
     renderPopover(1, "ln-es")
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     const [, , , scopes] = mockPutMemberScopes.mock.calls[0]
@@ -310,7 +310,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).not.toHaveBeenCalled()
@@ -330,7 +330,7 @@ describe("StaffLanePopover", () => {
     expect(popover).not.toHaveTextContent(/broader access|see all languages/i)
     expect(screen.queryByRole("button", { name: /as lead/i })).not.toBeInTheDocument()
     // The lane-scoped add is the only submit left, and it still works.
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
     await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
     expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "maria", 300, {
       scopeLanes: ["es"],
@@ -360,7 +360,7 @@ describe("StaffLanePopover", () => {
     renderPopover()
     openPopover()
     pickMaria()
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() =>
       expect(screen.getByTestId("grant-scope-result")).toHaveTextContent(
@@ -388,7 +388,7 @@ describe("StaffLanePopover", () => {
     expect(screen.getByTestId("staff-lane-sees-every-lane")).toHaveTextContent(
       /maria is a maintainer or above on this project, so they already see every language/i,
     )
-    const add = screen.getByRole("button", { name: /spanish lane only/i })
+    const add = screen.getByRole("button", { name: /spanish language lane only/i })
     expect(add).toBeDisabled()
     fireEvent.click(add)
     expect(mockAddProjectMember).not.toHaveBeenCalled()
@@ -409,11 +409,11 @@ describe("StaffLanePopover", () => {
     openPopover()
     pickMaria()
 
-    const preview = /maria stays a project lead on mark, spanish lane only/i
+    const preview = /maria stays a project lead on mark, spanish language lane only/i
     expect(screen.getByTestId("staff-lane-popover")).toHaveTextContent(preview)
     expect(screen.getByTestId("staff-lane-popover")).not.toHaveTextContent(/will join as a reviewer/i)
 
-    fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+    fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
     await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
     // Never a downgrade: no membership write for someone already above the pick.
@@ -452,7 +452,7 @@ describe("StaffLanePopover", () => {
 
     const popover = screen.getByTestId("staff-lane-popover")
     expect(popover).toHaveTextContent(
-      /add an org member or someone already invited to this project, scoped to this lane/i,
+      /add an org member or someone already invited to this project, scoped to this language lane/i,
     )
     expect(popover).toHaveTextContent(
       /searches org members and people already invited to this project\. adding someone who is neither\?/i,
@@ -519,7 +519,7 @@ describe("StaffLanePopover", () => {
       )
       expect(screen.getByTestId("staff-lane-roster-note")).not.toHaveTextContent(/instead/i)
       fireEvent.click(screen.getByText("kean"))
-      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+      fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
       await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
       expect(mockAddProjectMember).toHaveBeenCalledWith("jwt-pm", "proj-1", "kean", 300, {
@@ -1003,7 +1003,7 @@ describe("StaffLanePopover", () => {
       await waitFor(() => expect(screen.getByTestId("staff-lane-staffed-row-10")).toBeInTheDocument())
 
       fireEvent.click(screen.getByText("mark"))
-      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+      fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
 
       await waitFor(() => expect(mockPutMemberScopes).toHaveBeenCalledTimes(1))
       expect(mockPutMemberScopes).toHaveBeenCalledWith("jwt-pm", "proj-1", 11, [
@@ -1032,9 +1032,9 @@ describe("StaffLanePopover", () => {
       // Picking a name advances to the role step instead of navigating away.
       pickMaria()
       expect(onRowClick).not.toHaveBeenCalled()
-      expect(screen.getByRole("button", { name: /spanish lane only/i })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: /spanish language lane only/i })).toBeInTheDocument()
 
-      fireEvent.click(screen.getByRole("button", { name: /spanish lane only/i }))
+      fireEvent.click(screen.getByRole("button", { name: /spanish language lane only/i }))
       await waitFor(() => expect(mockAddProjectMember).toHaveBeenCalledTimes(1))
       expect(onRowClick).not.toHaveBeenCalled()
     })

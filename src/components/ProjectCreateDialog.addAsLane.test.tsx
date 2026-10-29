@@ -165,7 +165,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(panel).toBeTruthy()
     expect(screen.getByTestId("add-as-lane-btn")).toBeTruthy()
     // Sam, Oct 29: a lane is always a "Language lane", never a "target lane".
-    expect(screen.getByText(/Add it as a Language lane on/)).toBeTruthy()
+    expect(screen.getByText(/Add it as a language lane on/)).toBeTruthy()
     expect(within(panel).queryByText(/target lane/i)).toBeNull()
     // "English Source" appears both in the panel copy and the button label;
     // scope to the panel and accept either/both.
@@ -332,7 +332,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(screen.getByText(/already a lane on English Source/i)).toBeTruthy()
+      expect(screen.getByText(/already a language lane on English Source/i)).toBeTruthy()
     })
     expect(mockCreateProjectLane).not.toHaveBeenCalled()
   })

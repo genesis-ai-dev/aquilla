@@ -52,8 +52,8 @@ export const autopilot = defineNamespace({
     "autopilot.time.checkedNever": "Not checked yet",
     "autopilot.time.checkedAt": "Checked {time}",
     "autopilot.lane.projectDefault": "Project default",
-    "autopilot.lane.label": "Target lane",
-    "autopilot.lane.selectAria": "Target language Autopilot will draft",
+    "autopilot.lane.label": "Language lane",
+    "autopilot.lane.selectAria": "Language lane Autopilot will draft",
     "autopilot.phase.reading": "Reading context…",
     "autopilot.phase.drafting": "Drafting…",
     "autopilot.phase.checking": "Checking…",
@@ -331,7 +331,7 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.run.stopped": "This run was stopped.",
     "autopilot.inspector.run.failed": "This run stopped before it could finish.",
     "autopilot.inspector.run.passagesComplete": "Passages complete",
-    "autopilot.inspector.run.lane": "Language: {language}",
+    "autopilot.inspector.run.lane": "Language lane: {language}",
     "autopilot.inspector.run.updatedAt": "Updated {time}",
     "autopilot.inspector.run.calls": plural({
       one: "{count} call",
@@ -358,7 +358,8 @@ export const autopilot = defineNamespace({
 
     // — Inspector: errors, recovery, and live announcements —————————
     "autopilot.inspector.error.unsupportedLane":
-      "This run targeted a language lane Autopilot couldn’t draft at the time. Retry it on that lane.",
+      "This run targeted a language lane Autopilot couldn’t draft at the time. Retry it on that " +
+      "language lane.",
     "autopilot.inspector.error.requestAborted":
       "The model request ended before it completed. Retry when you’re ready.",
     "autopilot.inspector.error.transport":

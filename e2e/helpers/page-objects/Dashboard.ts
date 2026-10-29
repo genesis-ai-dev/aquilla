@@ -55,8 +55,8 @@ export class Dashboard {
     // while /i tolerates label casing ("Project name" vs "Project Name").
     await dialog.getByLabel(/^Project name$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
-    // Create-dialog target field is always "Target Language(s)".
-    await dialog.getByLabel(/^Target Language\(s\)$/i).fill(target)
+    // Create-dialog target field is always "Language lanes".
+    await dialog.getByLabel(/^Language lanes$/i).fill(target)
     const createResponse = this.page.waitForResponse((response) => {
       const request = response.request()
       if (request.method() !== "POST" || !response.ok()) return false

@@ -148,13 +148,13 @@ function addExtraLanguage(tag: string) {
   fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
 
-// AQU-2263: New Project adds a language with the same "Add language" piece as
+// AQU-2263: New Project adds a language with the same "Add language lane" piece as
 // Project settings → Languages, in the same words.
 describe("ProjectCreateDialog — the shared Add language piece", () => {
   it("is the same Add language button Project settings uses", () => {
     openDialogWithBasics()
     const add = addLaneButton()
-    expect(add).toHaveTextContent("Add language")
+    expect(add).toHaveTextContent("Add language lane")
     expect(add).toHaveAttribute("data-add-language")
   })
 })
@@ -188,9 +188,9 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
   })
 
-  it("labels the field 'Target Language(s)' on the default self-contained shape", () => {
+  it("labels the field 'Language lanes' on the default self-contained shape", () => {
     openDialogWithBasics()
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
     expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
   })
@@ -199,7 +199,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     openDialogWithBasics()
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
@@ -212,7 +212,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     addExtraLanguage("es")
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its targets\./),
     ).toBeTruthy()
@@ -222,7 +222,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
@@ -472,7 +472,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // A linked target is the Biblica case — one upstream source, several
     // languages — so it needs lanes at creation just as much as a
     // self-contained project does.
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })

@@ -248,21 +248,20 @@ export const settings = defineNamespace({
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
     "settings.assignmentAuthority.floorDescription":
-      "Minimum project role required to assign, reassign, or unassign file, " +
-      "chapter, target-lane, and AI review tasks. Defaults to Project lead.",
+      "Minimum project role required to assign, reassign, or unassign file, chapter, language lane, " +
+      "and AI review tasks. Defaults to Project lead.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.description":
       "When on, a member (contributor and above) can claim a book/chapter/take " +
       "for themselves from the assign-work picker — they still can't assign " +
       "work to anyone else. Leads and maintainers can always assign, to " +
       "anyone, regardless of this setting.",
-    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.label": "Allow language lane coordinators to assign work",
     "settings.laneAssignmentAuthority.description":
-      "When on, a member (contributor and above) who has been restricted to " +
-      "specific target languages can assign work to other people — but only " +
-      "within those languages. Give a mentor or coordinator the languages they " +
-      "look after under Members, and they can hand out chapters there without " +
-      "any other admin rights. Members with no language restriction are " +
+      "When on, a member (contributor and above) who has been restricted to specific language lanes " +
+      "can assign work to other people — but only within those language lanes. Give a mentor or " +
+      "coordinator the language lanes they look after under Members, and they can hand out chapters " +
+      "there without any other admin rights. Members with no language lane restriction are " +
       "unaffected by this setting.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
@@ -378,9 +377,9 @@ export const settings = defineNamespace({
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
     "settings.languageEdit.label": "Who can change project languages",
     "settings.languageEdit.description":
-      "Minimum role required to change a project's source and target language " +
-      "and to add or archive extra target languages. This setting covers " +
-      "languages only — every other project setting still requires Maintainer.",
+      "Minimum role required to change a project's source and target language and to add or archive " +
+      "extra language lanes. This setting covers languages only — every other project setting still " +
+      "requires Maintainer.",
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":

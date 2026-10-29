@@ -116,7 +116,7 @@ describe("TargetValidationControl", () => {
     )
     fireEvent.click(screen.getByRole("button"))
     expect(await screen.findByText("Text validated by")).toBeInTheDocument()
-    expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or lanes")
+    expect(screen.getByTestId("validation-blocked-note")).toHaveTextContent("Outside your assigned files or language lanes")
   })
 
   // AQU-1571: the project's own text rules, mirrored so a vote the server is

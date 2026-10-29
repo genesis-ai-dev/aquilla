@@ -53,7 +53,7 @@ export function BillingUsagePanel({
         data.plan === "field"
           ? "Field Plan allowance for this 4-week period"
           : data.plan === "enterprise"
-            ? "Enterprise allowance across target lanes"
+            ? "Enterprise allowance across language lanes"
             : "Explore allowance for this 4-week period"
       }
       action={

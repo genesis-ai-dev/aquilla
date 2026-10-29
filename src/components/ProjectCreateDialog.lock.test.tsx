@@ -208,7 +208,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     expect(screen.getByTestId("create-project-fields")).toBeDisabled()
     expect(screen.getByLabelText(/^Project name$/i)).toBeDisabled()
     expect(screen.getByLabelText(/^Source language$/i)).toBeDisabled()
-    expect(screen.getByLabelText(/^Target language/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Language lanes/i)).toBeDisabled()
     expectRadioDisabled(screen.getByTestId("create-shape-linked-target"))
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeDisabled()
     // AQU-1352: where the project lives is part of the request in flight too.

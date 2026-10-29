@@ -15293,7 +15293,7 @@ export function ProjectWorkspace() {
     setSelection: (ids) => setSelection(ids, ids[0] ?? null),
     setLane: setActiveLane,
     openSettings: (section) =>
-      navigate(`/project/${projectId}/settings?q=${encodeURIComponent(section === "lanes" ? "target lanes" : section === "terminology" ? "terminology" : "target language")}`, {
+      navigate(`/project/${projectId}/settings?q=${encodeURIComponent(section === "lanes" ? "language lanes" : section === "terminology" ? "terminology" : "target language")}`, {
         state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
       }),
     setLens: (next) => {

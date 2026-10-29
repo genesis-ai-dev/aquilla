@@ -42,7 +42,7 @@ export const org = defineNamespace({
     "org.access.scope.org": "org",
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
-    "org.access.scope.lane": "lane",
+    "org.access.scope.lane": "language lane",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
@@ -58,7 +58,8 @@ export const org = defineNamespace({
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
-      "Each person's organization role, the teams they belong to, and the role they actually have on each project — the same answer the access checks use — plus their lane grants.",
+      "Each person's organization role, the teams they belong to, and the role they actually have on " +
+      "each project — the same answer the access checks use — plus their language lane grants.",
     "org.accessAudit.print": "Print",
     "org.accessAudit.loadError": "Couldn't load the access audit for this organization.",
     "org.accessAudit.roleRequired":
@@ -66,13 +67,13 @@ export const org = defineNamespace({
     "org.accessAudit.empty": "No people to list in this access audit.",
     "org.accessAudit.noTeams": "No teams",
     "org.accessAudit.noProjects": "No project access",
-    "org.accessAudit.noLanes": "No lane grants",
+    "org.accessAudit.noLanes": "No language lane grants",
     "org.accessAudit.notOrgMember": "Not an organization member",
     "org.accessAudit.csvOrgRole": "Organization role",
     "org.accessAudit.csvEffectiveRole": "Effective role",
     "org.accessAudit.csvSource": "Comes from",
-    "org.accessAudit.csvLane": "Lane",
-    "org.accessAudit.csvLaneRole": "Lane role",
+    "org.accessAudit.csvLane": "Language lane",
+    "org.accessAudit.csvLaneRole": "Language lane role",
     "org.accessAudit.generatedAt": "Generated {when}",
     "org.accessAudit.teamMembership": "{name} ({role})",
     "org.accessAudit.projectAccess": "{role} ({source})",
@@ -88,11 +89,12 @@ export const org = defineNamespace({
     "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
     "org.egress.loading": "Loading organization files",
     "org.egress.loadFailed": "Couldn’t load files",
-    "org.egress.portfolioUnavailable": "Portfolio stats are unavailable — lane, audio, and last-edit columns may be incomplete.",
+    "org.egress.portfolioUnavailable":
+      "Portfolio stats are unavailable — language lane, audio, and last-edit columns may be incomplete.",
     "org.egress.policyRestricted": "Export restricted by org policy",
     "org.egress.selectAll": "Select all files",
     "org.egress.selectFile": "Select {file}",
-    "org.egress.column.lanes": "Lanes",
+    "org.egress.column.lanes": "Language lanes",
     "org.egress.column.lastEdit": "Last edit",
     "org.egress.filterPlaceholder": "Filter files…",
     "org.egress.selectedCount": "{selected} of {total} selected",
@@ -105,8 +107,8 @@ export const org = defineNamespace({
     "org.egress.options.text.none.label": "Text off",
     "org.egress.options.text.none.description": "No text entries in the export.",
     "org.egress.options.conversionFormat": "Conversion format",
-    "org.egress.options.targetLanes": "Target lanes",
-    "org.egress.options.lane": "Lane {lane}",
+    "org.egress.options.targetLanes": "Language lanes",
+    "org.egress.options.lane": "Language lane {lane}",
     "org.egress.options.includeSources": "Include original source documents",
     "org.egress.options.includeSourcesDescription": "The raw files you uploaded, as stored.",
     "org.egress.options.audioMode": "Audio export mode",
@@ -124,7 +126,8 @@ export const org = defineNamespace({
     "org.egress.options.audioWavDescription":
       "For broadcast delivery. Off copies each clip as it was saved, which may be compressed or at a lower sample rate.",
     "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
-    "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
+    "org.egress.options.empty":
+      "These options would export nothing — pick a language lane, an audio mode, or source documents.",
     "org.egress.options.estimate": "{fileCount} · {cellCount}",
     "org.egress.options.estimateAudio": " · ~{minutes} min recorded audio",
     "org.egress.results.preparing": "Preparing",
@@ -185,8 +188,8 @@ export const org = defineNamespace({
 
     "org.orgHome.organizations": "Organizations",
     // AQU-1071 / AQU-1598: the enterprise billing band — active target lanes.
-    "org.orgHome.activeLanguages": "Active lanes",
-    "org.orgHome.activeLanguagesHint": "Target lanes",
+    "org.orgHome.activeLanguages": "Active language lanes",
+    "org.orgHome.activeLanguagesHint": "Language lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -538,10 +541,12 @@ export const org = defineNamespace({
       "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
-    "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    "org.projectOverview.crossLaneTooltip":
+      "Across all language lanes — not broken down per language lane.",
     // AQU-1954: a language tab whose language is off and has no recordings.
     "org.projectOverview.laneNoAudioTooltip":
-      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
+      "This language lane doesn't deliver audio. Choose Audio, or Text and audio, under Delivers in " +
+      "Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
@@ -818,7 +823,8 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.projectAccessTitle": "Project access",
     "org.membersPage.orgPage.projectAccessDescription": "Expand a member to see their per-project roles.",
     "org.membersPage.orgPage.matrixHint":
-      "Every member × every project you can see, at a glance. Click a cell to change a role; hover a row to load its lane scopes.",
+      "Every member × every project you can see, at a glance. Click a cell to change a role; hover a " +
+      "row to load its language lane scopes.",
     "org.membersPage.orgPage.pendingInvitesDescription":
       "Share-link invitations that haven't been redeemed yet. Revoke to cancel.",
     "org.membersPage.orgPage.invitedByLabel": "by {username}",
@@ -893,7 +899,7 @@ export const org = defineNamespace({
     "org.overviewLaneTable.noActivityYet": "No activity yet",
     "org.overviewLaneTable.openAction": "Open",
     "org.overviewLaneTable.staffAction": "Staff…",
-    "org.overviewLaneTable.addLanguageAction": "Add language",
+    "org.overviewLaneTable.addLanguageAction": "Add language lane",
     "org.overviewLaneTable.archivedGroup": "Archived ({count})",
     "org.overviewLaneTable.archivedBadge": "Archived",
 
@@ -936,7 +942,8 @@ export const org = defineNamespace({
     // AQU-1994: the lane field offers only lanes someone on the project is on.
     // When that is none, there is nothing truthful to offer.
     "org.assignWork.noStaffedLanes":
-      "No one on this project is on any of its languages yet, so there is no language to assign work in. Staff someone on a language first.",
+      "No one on this project is on any of its language lanes yet, so there is no language lane to " +
+      "assign work in. Staff someone on a language lane first.",
     // AQU-1308: the assignee picker must never render an empty "Select
     // member…" when the roster fetch failed — say which failure it was.
     "org.assignWork.rosterHiddenError":
@@ -1053,25 +1060,28 @@ export const org = defineNamespace({
     "org.memberAccessDrillDown.pathOrgLevel": "org-level · {role}",
 
     // -- MemberLaneScopeEditor: freeform lane/file scope editor popover (matrix) --
-    "org.memberLaneScopeEditor.editScopesAriaLabel": "Edit {username}'s lane scopes on this project",
+    "org.memberLaneScopeEditor.editScopesAriaLabel":
+      "Edit {username}'s language lane scopes on this project",
     "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
     "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
-    "org.memberLaneScopeEditor.languagesLegend": "Languages they can work in",
+    "org.memberLaneScopeEditor.languagesLegend": "Language lanes they can work in",
     "org.memberLaneScopeEditor.mainLanguageFallback": "Main language",
-    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language in this project)",
-    "org.memberLaneScopeEditor.laneCodePlaceholder": "Lane code (e.g. es)",
-    "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
+    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language lane in this project)",
+    "org.memberLaneScopeEditor.laneCodePlaceholder": "Language lane code (e.g. es)",
+    "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New language lane code",
     // "Add" → common.add (identical text)
     "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
     // AQU-1783: the read wall decides from lane GRANTS, not from these scopes,
     // so the inspector reports the grants rather than claiming "full access".
-    "org.memberLaneScopeEditor.grantsLegend": "Lanes they can read",
+    "org.memberLaneScopeEditor.grantsLegend": "Language lanes they can read",
     "org.memberLaneScopeEditor.laneNoAccess": "no access",
     "org.memberLaneScopeEditor.grantGapWarning":
-      "This member is unscoped, but has no grant for every lane. The lanes marked \u201cno access\u201d read as empty for them.",
-    "org.memberLaneScopeEditor.grantAllButton": "Grant all current lanes",
+      "This member is unscoped, but has no grant for every language lane. The language lanes marked " +
+      "“no access” read as empty for them.",
+    "org.memberLaneScopeEditor.grantAllButton": "Grant all current language lanes",
     "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
-    "org.memberLaneScopeEditor.visibleByRole": "Every lane is visible to this member through their role.",
+    "org.memberLaneScopeEditor.visibleByRole":
+      "Every language lane is visible to this member through their role.",
 
     // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
     "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",
@@ -1118,8 +1128,8 @@ export const org = defineNamespace({
     // AQU-2054: a project lead can be limited to lanes, and can grant only
     // the lanes they hold. Someone who already has every lane stays read-only
     // for that caller, because changing them would remove other languages.
-    "org.membersPanel.lanesLegend": "Lanes",
-    "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
+    "org.membersPanel.lanesLegend": "Language lanes",
+    "org.membersPanel.laneCheckboxAriaLabel": "Language lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
     // File checkbox aria-label → comments.scope.file (identical "File {file}" text)
 
@@ -1166,7 +1176,8 @@ export const org = defineNamespace({
     // AQU-2048: {member} names both groups the search actually covers. Someone
     // in neither is still a project invite (searchScopeNote + inviteToProjectLink).
     "org.staffLanePopover.orgMemberPhrase": "org member or someone already invited",
-    "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
+    "org.staffLanePopover.addOrgMemberDescription":
+      "Add an {member} to this project, scoped to this language lane.",
     "org.staffLanePopover.searchPlaceholder": "Search org members and project invitees",
     // AQU-731: the four ways the org roster comes back unusable, each named
     // rather than collapsed into "no one in your organization yet".
@@ -1177,14 +1188,16 @@ export const org = defineNamespace({
     "org.staffLanePopover.rosterHidden":
       "Your organization hides its member list. Invite the person to the project instead.",
     "org.staffLanePopover.rosterNoAccess":
-      "You can staff this lane, but you can’t see this organization’s member list. Invite the person to the project instead.",
+      "You can staff this language lane, but you can’t see this organization’s member list. Invite " +
+      "the person to the project instead.",
     // Same two blocks, but only when people already on the project are listed
     // under the note. "Invite instead" would be false there — those people
     // are the list. Anyone in neither group still uses the footer invite.
     "org.staffLanePopover.rosterHiddenWithInvitees":
       "Your organization hides its member list. People already on this project are listed below.",
     "org.staffLanePopover.rosterNoAccessWithInvitees":
-      "You can staff this lane, but you can’t see this organization’s member list. People already on this project are listed below.",
+      "You can staff this language lane, but you can’t see this organization’s member list. People " +
+      "already on this project are listed below.",
     "org.staffLanePopover.rosterLoadFailed": "Couldn’t load your organization’s members.",
     "org.staffLanePopover.rosterEmpty": "No one in your organization yet.",
     "org.staffLanePopover.rosterNoMatch": "No org members or project invitees match.",
@@ -1196,31 +1209,39 @@ export const org = defineNamespace({
     // AQU-1998: the popover's unstaff half — who is on this lane now, and the
     // guard that refuses the last one. "Remove" itself reuses
     // org.membersPage.remove (identical text).
-    "org.staffLanePopover.staffedHeading": "On this lane",
-    "org.staffLanePopover.staffedEmpty": "No one is staffed on this lane yet.",
+    "org.staffLanePopover.staffedHeading": "On this language lane",
+    "org.staffLanePopover.staffedEmpty": "No one is staffed on this language lane yet.",
     "org.staffLanePopover.removeFromLaneAriaLabel": "Remove {name} from {lane}",
     "org.staffLanePopover.lastLaneNote":
-      "This is {name}’s only language. Taking it away here would leave them with no language limit at all — which the project reads as every language, not none — so it would widen their access instead of narrowing it. To take {name} off the project, go to:",
+      "This is {name}’s only language lane. Taking it away here would leave them with no language " +
+      "lane limit at all — which the project reads as every language lane, not none — so it would " +
+      "widen their access instead of narrowing it. To take {name} off the project, go to:",
     "org.staffLanePopover.teamMembersLink": "Project settings → Members",
     "org.staffLanePopover.lastLaneRefused":
-      "This is now their only language. Removing it would leave them with no language limit at all — which means every language, not none — so nothing was saved.",
+      "This is now their only language lane. Removing it would leave them with no language lane " +
+      "limit at all — which means every language lane, not none — so nothing was saved.",
     // AQU-1999: the decided answer for the two cases AQU-1998 left open — the
     // last lane stays blocked (the note above), and open assignments in the
     // lane are closed with the removal, after a confirmation that says how
     // many. A lane the person holds no open assignment in is removed in one
     // press, with no extra step.
     "org.staffLanePopover.removeClosesAssignments": plural({
-      one: "{name} has {count} open assignment in {lane}. Removing them from this language closes it. Work they have already finished stays as it is.",
-      other: "{name} has {count} open assignments in {lane}. Removing them from this language closes them. Work they have already finished stays as it is.",
+      one:
+        "{name} has {count} open assignment in {lane}. Removing them from this language lane closes " +
+        "it. Work they have already finished stays as it is.",
+      other:
+        "{name} has {count} open assignments in {lane}. Removing them from this language lane closes " +
+        "them. Work they have already finished stays as it is.",
     }),
     "org.staffLanePopover.removeClosesAssignmentsConfirm": "Remove and close",
     "org.staffLanePopover.assignmentCheckFailed":
-      "Couldn’t check what {name} has open in this language, so nothing was removed. Try again.",
+      "Couldn’t check what {name} has open in this language lane, so nothing was removed. Try again.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
     // AQU-2027: picking someone who is maintainer or above. The server refuses
     // to lane-limit them, because they see every language already.
     "org.staffLanePopover.alreadySeesEveryLanguage":
-      "{name} is a Maintainer or above on this project, so they already see every language. No lane limit is needed.",
+      "{name} is a Maintainer or above on this project, so they already see every language lane. No " +
+      "language lane limit is needed.",
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
@@ -1231,14 +1252,14 @@ export const org = defineNamespace({
     "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
     "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
     "org.grantScope.scope.organization": "of the whole organization — every project",
-    "org.grantScope.scope.projectAllLanes": "on {project} — every lane",
+    "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
     "org.grantScope.scope.project": "on {project}",
-    "org.grantScope.scope.laneOnly": "on {project}, {lane} lane only",
-    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} lanes only",
+    "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
+    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
-    "org.grantScope.echo.allLanes": "every lane",
-    "org.grantScope.echo.laneOnly": "{lane} lane only",
-    "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
+    "org.grantScope.echo.allLanes": "every language lane",
+    "org.grantScope.echo.laneOnly": "{lane} language lane only",
+    "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
     "org.grantScope.button": "{action} — {scope}",
     "org.grantScope.thisProject": "this project",
 
@@ -1424,13 +1445,13 @@ export const org = defineNamespace({
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
-    "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+    "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language lane",
     // ── AQU-1092…1098: the plan board ──────────────────────────────────
     // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
     // one project, a dub episode in another, a document in a third — so
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
-    "org.projectOverview.plan.laneMenuAria": "Language shown: {language}. Choose another.",
+    "org.projectOverview.plan.laneMenuAria": "Language lane shown: {language}. Choose another.",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
     "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),

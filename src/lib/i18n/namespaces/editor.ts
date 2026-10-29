@@ -181,7 +181,7 @@ export const editor = defineNamespace({
       "The file is still safe. Check your connection and try loading it again.",
     "editor.file.retryLoad": "Retry loading file",
     "editor.file.loadingFromCloud": "Loading file from the cloud",
-    "editor.file.loadingLanguages": "Loading this project's languages",
+    "editor.file.loadingLanguages": "Loading this project's language lanes",
     "editor.file.noneSelectedTitle": "No file selected",
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
@@ -720,7 +720,7 @@ export const editor = defineNamespace({
       other: "{count} will be skipped — {reasons}",
     }),
     "editor.selection.validateOutOfScope":
-      "Some selected cells are outside your assigned files or lanes",
+      "Some selected cells are outside your assigned files or language lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
     "editor.selection.validateOwnEdits":
       "You made the latest change to these cells, so someone else must validate them",
@@ -843,8 +843,8 @@ export const editor = defineNamespace({
       other: "{count} have your latest change, so someone else must validate them",
     }),
     "editor.batchValidate.skip.outOfScope": plural({
-      one: "{count} is outside your assigned files or lanes",
-      other: "{count} are outside your assigned files or lanes",
+      one: "{count} is outside your assigned files or language lanes",
+      other: "{count} are outside your assigned files or language lanes",
     }),
     "editor.batchValidate.skip.notCommitted": plural({
       one: "{count} has no saved translation yet",
@@ -1402,8 +1402,8 @@ export const editor = defineNamespace({
     "editor.removeCell.leadNothing":
       "This removes the cell. There is nothing else attached to it.",
     "editor.removeCell.translations": plural({
-      one: "its translation in {count} language",
-      other: "its translations in {count} languages",
+      one: "its translation in {count} language lane",
+      other: "its translations in {count} language lanes",
     }),
     "editor.removeCell.takes": plural({
       one: "{count} recording",
@@ -1450,15 +1450,21 @@ export const editor = defineNamespace({
     "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
     "editor.splitQuotes.title": "Split this line at its quotation marks?",
     "editor.splitQuotes.description": plural({
-      one: "It becomes {count} line, so each speaker can have their own voice. Every language shares the new lines.",
-      other: "It becomes {count} lines, so each speaker can have their own voice. Every language shares the new lines.",
+      one:
+        "It becomes {count} line, so each speaker can have their own voice. Every language lane " +
+        "shares the new lines.",
+      other:
+        "It becomes {count} lines, so each speaker can have their own voice. Every language lane " +
+        "shares the new lines.",
     }),
     "editor.splitQuotes.narration": "Narration",
     "editor.splitQuotes.quotation": "Quotation",
     "editor.splitQuotes.translationsNote":
       "Every translation of this line is marked for review, so it has to be done again. A translation that splits the same way is divided between the new lines. Any other stays whole on the first line.",
     "editor.splitQuotes.multiLaneWarning":
-      "Splitting changes the source all lanes share. Each lane's translation of this line is marked so it has to be done again, and each lane keeps the voice it already gave this line on the new narration lines.",
+      "Splitting changes the source all language lanes share. Each language lane's translation of " +
+      "this line is marked so it has to be done again, and each language lane keeps the voice it " +
+      "already gave this line on the new narration lines.",
     "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
     "editor.splitQuotes.confirm": plural({
       one: "Split into {count} line",
@@ -1895,7 +1901,7 @@ export const editor = defineNamespace({
 
     // — Validation button, validator popover and its history ——————————
     "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
-    "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
+    "editor.validation.outOfScopeTooltip": "Outside your assigned files or language lanes",
     "editor.validation.unavailableTooltip": "Text validation unavailable",
     "editor.validation.ownEditTooltip":
       "You made the latest change to this text, so someone else must validate it",
@@ -1919,9 +1925,8 @@ export const editor = defineNamespace({
     // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
     "editor.laneArchived.title": "{lane} has been archived",
     "editor.laneArchived.body":
-      "A project manager archived {lane}, so it is now read-only. You can still " +
-      "read, search, export and comment on it, and your other languages are " +
-      "unaffected.",
+      "A project manager archived {lane}, so it is now read-only. You can still read, search, export " +
+      "and comment on it, and your other language lanes are unaffected.",
     "editor.laneArchived.acknowledge": "Got it",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
@@ -2009,14 +2014,14 @@ export const editor = defineNamespace({
     "editor.column.controls": "Controls",
     "editor.audioLens.trackColorAria": "Audio color: {color}",
     "editor.audioLens.trackColorLabel": "Audio color",
-    "editor.lane.activeAria": "Active translation lane",
+    "editor.lane.activeAria": "Active language lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
-    "editor.lane.addLaneItem": "Add lane…",
-    "editor.lane.searchPlaceholder": "Search lanes…",
-    "editor.lane.searchAriaLabel": "Search lanes",
-    "editor.lane.searchEmpty": "No lanes found.",
+    "editor.lane.addLaneItem": "Add language lane…",
+    "editor.lane.searchPlaceholder": "Search language lanes…",
+    "editor.lane.searchAriaLabel": "Search language lanes",
+    "editor.lane.searchEmpty": "No language lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -2073,9 +2078,10 @@ export const editor = defineNamespace({
     "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
-    "editor.source.multiLaneTitle": "Change the source every language shares?",
+    "editor.source.multiLaneTitle": "Change the source every language lane shares?",
     "editor.source.multiLaneBody":
-      "All lanes share this source. Changing it marks each lane's translation of this line for review. The words stay, and so does the approval.",
+      "All language lanes share this source. Changing it marks each language lane's translation of " +
+      "this line for review. The words stay, and so does the approval.",
     "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",

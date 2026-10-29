@@ -215,20 +215,22 @@ export const nav = defineNamespace({
     "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
     "nav.workspaceActions.splitQuotes.description": plural({
       one:
-        "{count} line in this file holds more than one speaker. Split at its quotation " +
-        "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} line in this file holds more than one speaker. Split at its quotation marks it " +
+        "becomes {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
       other:
-        "{count} lines in this file hold more than one speaker. Split at their quotation " +
-        "marks they become {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} lines in this file hold more than one speaker. Split at their quotation marks they " +
+        "become {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
     }),
     "nav.workspaceActions.splitQuotes.multiLaneWarning":
-      "Splitting changes the source all lanes share. Each lane's translations of these lines are marked so they have to be done again, and each lane keeps the voice it already gave a line on that line's new narration.",
+      "Splitting changes the source all language lanes share. Each language lane's translations of " +
+      "these lines are marked so they have to be done again, and each language lane keeps the voice " +
+      "it already gave a line on that line's new narration.",
     "nav.workspaceActions.splitQuotes.none":
       "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
     "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",

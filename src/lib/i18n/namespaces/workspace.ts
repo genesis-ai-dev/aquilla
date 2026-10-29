@@ -110,7 +110,7 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     // AQU-1902: edits wait for the project's languages so none lands on the wrong lane.
-    "workspace.loadingLanguagesBanner": "Loading languages… editing starts in a moment.",
+    "workspace.loadingLanguagesBanner": "Loading language lanes… editing starts in a moment.",
     "workspace.staleSibling.viewInHistory": "View in history",
     // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
     // set, which silently switches off every term check in the editor. Say so
@@ -149,7 +149,8 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "The first language is the project's primary target; each one you add below becomes its own lane.",
+      "The first language is the project's primary target; each one you add below becomes its own " +
+      "language lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",

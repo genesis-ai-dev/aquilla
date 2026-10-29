@@ -123,7 +123,7 @@ export const projectSettings = defineNamespace({
     // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
-    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
+    "projectSettings.create.targetLanguagesLabel": "Language lanes",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.bulkTargetLanguagesHint":
@@ -131,8 +131,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
       "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
-      one: "Adds {count} more lane.",
-      other: "Adds {count} more lanes.",
+      one: "Adds {count} more language lane.",
+      other: "Adds {count} more language lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
@@ -179,13 +179,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.linkConsumesSourceName": "Its Source",
     "projectSettings.create.linkConsumesSource": plural({
       one:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, a target lane on the upstream project " +
-        "is the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, a language lane on the upstream project is the recommended " +
+        "shape instead.",
       other:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, target lanes on the upstream project " +
-        "are the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, language lanes on the upstream project are the recommended " +
+        "shape instead.",
     }),
     "projectSettings.create.linkConsumesTargetName": "One of its Targets",
     "projectSettings.create.linkConsumesTarget":
@@ -199,7 +199,7 @@ export const projectSettings = defineNamespace({
     // the user may see, and pre-filled when that is a single lane.
     "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
     "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
-    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled language lane",
     "projectSettings.create.upstreamLaneLoading": "Loading translations…",
     "projectSettings.create.upstreamLaneNone":
       "This project has no translation you can use as a source. Choose its source " +
@@ -267,28 +267,28 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.laneRecommendationHeading": "Same source, new language?",
     // Sam, Oct 29: a lane is always a "Language lane" in the interface.
     "projectSettings.create.laneRecommendation":
-      "{heading} Add it as a Language lane on {projectName} instead — no separate " +
-      "project to keep in sync.",
+      "{heading} Add it as a language lane on {projectName} instead — no separate project to keep in " +
+      "sync.",
     // AQU-2259: the dialog showed these as hard-coded English. A lane is a
     // "Language lane" in the interface (Sam, Oct 29).
-    "projectSettings.create.laneRecommendationAdding": "Adding Language lane…",
-    "projectSettings.create.laneRecommendationAddButton": "Add as a Language lane on {projectName}",
+    "projectSettings.create.laneRecommendationAdding": "Adding language lane…",
+    "projectSettings.create.laneRecommendationAddButton": "Add as a language lane on {projectName}",
     "projectSettings.create.laneRecommendationSignInError":
-      "You need to be signed in to add a lane.",
+      "You need to be signed in to add a language lane.",
     "projectSettings.create.laneRecommendationEmptyTargetError":
       "Enter a target language above first.",
     "projectSettings.create.laneRecommendationAlreadyDefaultError":
       "\"{lane}\" is already {projectName}'s default target language.",
     "projectSettings.create.laneRecommendationAlreadyLaneError":
-      "\"{lane}\" is already a lane on {projectName}.",
+      "\"{lane}\" is already a language lane on {projectName}.",
     "projectSettings.create.laneRecommendationSuccess":
-      "Added \"{lane}\" as a lane on {projectName}. Open that project to start translating.",
+      "Added \"{lane}\" as a language lane on {projectName}. Open that project to start translating.",
     "projectSettings.create.laneRecommendationConflictError":
       "Someone else updated that project's settings just now. Try again.",
     "projectSettings.create.laneRecommendationForbiddenError":
-      "You need maintainer access on {projectName} to add a lane there.",
+      "You need maintainer access on {projectName} to add a language lane there.",
     "projectSettings.create.laneRecommendationGenericError":
-      "Couldn't add the lane. Please try again.",
+      "Couldn't add the language lane. Please try again.",
 
     // ── Share panel ──
     "projectSettings.share.tabInviteLink": "Invite link",
@@ -298,13 +298,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
-    "projectSettings.share.laneChoiceLegend": "Target lanes",
-    "projectSettings.share.laneChoiceAll": "Every current target lane",
-    "projectSettings.share.laneChoiceSome": "Only selected lanes",
-    "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
-    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
+    "projectSettings.share.laneChoiceLegend": "Language lanes",
+    "projectSettings.share.laneChoiceAll": "Every current language lane",
+    "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
     "projectSettings.share.laneChoiceAdminHint":
-      "To limit someone to some lanes, use that project's share panel.",
+      "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
     "projectSettings.share.recipientJoinsAsFallbackRole": "a member",
     "projectSettings.share.createAnotherLinkButton": "Create another link",
@@ -646,8 +646,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.openStudioButton": "Open Voice Studio",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
-      "When this is on, a project lead can create, edit, and assign voices on the lanes they can write. " +
-      "When it is off, only a maintainer can. Voices already created stay either way.",
+      "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
+      "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
@@ -1085,13 +1085,13 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    "projectSettings.languages.laneNamePlaceholder": "Name this language lane",
     // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
     // name, and an OPTIONAL code override. The name's placeholder is the
     // language itself, because that is what the lane shows when no name is set.
-    "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
+    "projectSettings.languages.laneLanguagePlaceholder": "The language it translates into",
     "projectSettings.languages.laneLanguageRequiredError":
-      "A lane needs a language. Type the language it translates into.",
+      "A language lane needs a language. Type the language it translates into.",
     "projectSettings.languages.laneCodeNote":
       "Leave blank to derive the code from the language. Set it only when the " +
       "derived code is wrong.",
@@ -1099,26 +1099,27 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.laneCodeMalformedError":
       "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
-      "Another lane already has this name. Change one of them.",
+      "Another language lane already has this name. Change one of them.",
     // AQU-1784: the label a lane that shares its name is shown under elsewhere.
     "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
-    "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
+    "projectSettings.languages.noAdditionalLanes": "No language lanes yet.",
     // AQU-1464: "is anyone still working in here?" — shown inside the archive
     // confirmation, above the Confirm button.
     "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
-    "projectSettings.languages.lastChange": "Last change in this lane: {date} by {editor}",
-    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
-    "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
+    "projectSettings.languages.lastChange": "Last change in this language lane: {date} by {editor}",
+    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this language lane: {date}",
+    "projectSettings.languages.lastChangeNone": "No changes in this language lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
     // AQU-1600: every target lane is archivable, including the former default
     // one — but a project must keep one active, so the last one's archive
     // control is disabled with this reason.
     "projectSettings.languages.lastActiveLaneTooltip":
-      "This is the project's only active lane. Add another target lane before archiving this one.",
+      "This is the project's only active language lane. Add another language lane before archiving " +
+      "this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
-    "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
+    "projectSettings.languages.archiveLaneAriaLabel": "Archive language lane {lane}",
     // Media redesign slice 1 — each language row's "Delivers" choice, which
     // replaced AQU-1954's "Records audio" switch. Also used by the create dialog.
     "projectSettings.languages.deliversLabel": "Delivers",
@@ -1128,20 +1129,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversTextAndAudio": "Text and audio",
     "projectSettings.languages.deliversChoose": "Choose",
     "projectSettings.languages.deliversHint":
-      "Delivers decides how a language's progress is counted. Text: a line is done " +
-      "when its text is validated. Audio: a line is done when its recording is " +
-      "approved, and no text is needed. Text and audio: a line is done only when " +
-      "both its text and its recording are approved.",
+      "Delivers decides how a language lane's progress is counted. Text: a line is done when its " +
+      "text is validated. Audio: a line is done when its recording is approved, and no text is " +
+      "needed. Text and audio: a line is done only when both its text and its recording are approved.",
     "projectSettings.languages.deliversNeedsChoice":
-      "This language had \"Records audio\" turned on. Choose whether it delivers Text, " +
-      "or Text and audio. Until you choose, its progress is counted as before.",
+      "This language lane had \"Records audio\" turned on. Choose whether it delivers Text, or Text " +
+      "and audio. Until you choose, its progress is counted as before.",
     "projectSettings.languages.restoringButton": "Restoring…",
     // "Restore" button → common.restore (identical text)
-    "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
+    "projectSettings.languages.restoreLaneAriaLabel": "Restore language lane {lane}",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
-    "projectSettings.languages.alreadyExistsError": "This lane already exists.",
+    "projectSettings.languages.alreadyExistsError": "This language lane already exists.",
     "projectSettings.languages.conflictError": "Someone else updated shared settings. Refresh to reapply your change.",
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
     "projectSettings.languages.permissionError": "You don't have permission to change shared settings.",
@@ -1149,12 +1149,12 @@ export const projectSettings = defineNamespace({
     // Media redesign (Sam, Oct 25): design B, the compact table — Name |
     // Language | Code | Delivers | ⋯. Explanations and long sub-text sit behind
     // small (i) icons, so each "…AriaLabel" here names one of those icons.
-    "projectSettings.languages.targetLanguagesHeading": "Target languages",
+    "projectSettings.languages.targetLanguagesHeading": "Language lanes",
     "projectSettings.languages.targetLanguagesHint":
-      "The languages this project translates into. Add one entry per dialect, or per " +
-      "team when two teams draft the same language.",
-    "projectSettings.languages.targetLanguagesHintAriaLabel": "About target languages",
-    "projectSettings.languages.noTargetLanguages": "No target languages yet.",
+      "The language lanes this project translates into. Add one per dialect, or one per team when " +
+      "two teams draft the same language.",
+    "projectSettings.languages.targetLanguagesHintAriaLabel": "About language lanes",
+    "projectSettings.languages.noTargetLanguages": "No language lanes yet.",
     "projectSettings.languages.codeColumn": "Code",
     "projectSettings.languages.noLanguageSet": "No language set",
     "projectSettings.languages.codeOptionalLabel": "Code (optional)",
@@ -1163,24 +1163,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversNeedsChoiceAriaLabel": "Why {lane} needs a choice",
     "projectSettings.languages.renameLaneAriaLabel": "Rename {lane}",
     "projectSettings.languages.rowMenuAriaLabel": "More for {lane}",
-    "projectSettings.languages.sameNameMarker": "Same name as another language",
+    "projectSettings.languages.sameNameMarker": "Same name as another language lane",
     "projectSettings.languages.duplicateBannerTwo":
-      "Two languages are both named \"{lane}\", so they are hard to tell apart in the " +
-      "language switcher and on the Overview.",
+      "Two language lanes are both named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
     "projectSettings.languages.duplicateBannerMany":
-      "Several languages are named \"{lane}\", so they are hard to tell apart in the " +
-      "language switcher and on the Overview.",
+      "Several language lanes are named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
     "projectSettings.languages.duplicateRenameAction": "Rename the second one",
     "projectSettings.languages.duplicateArchiveAction": "Archive it",
-    "projectSettings.languages.addLanguageHeading": "Add a language",
+    "projectSettings.languages.addLanguageHeading": "Add a language lane",
     "projectSettings.languages.addNameHint":
-      "Starts as the language's name. Give it a name of its own to tell two entries " +
-      "in one language apart.",
+      "Starts as the language's name. Give it a name of its own to tell two language lanes in one " +
+      "language apart.",
     "projectSettings.languages.addNameHintAriaLabel": "About the name",
-    "projectSettings.languages.newLanguageLabel": "the new language",
+    "projectSettings.languages.newLanguageLabel": "the new language lane",
     "projectSettings.languages.addDuplicateNotice":
-      "Another language is already named \"{lane}\". You can still add this one; the " +
-      "language switcher numbers them.",
+      "Another language lane is already named \"{lane}\". You can still add this one; the language " +
+      "switcher numbers them.",
     "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
     "projectSettings.languages.archiveHint":
       "It leaves the language switcher, but nothing is deleted: its work is kept and " +
@@ -1189,7 +1189,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivedHint":
       "Hidden from the language switcher. Their work is kept; restore one to make it " +
       "active again.",
-    "projectSettings.languages.archivedHintAriaLabel": "About archived languages",
+    "projectSettings.languages.archivedHintAriaLabel": "About archived language lanes",
     "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──

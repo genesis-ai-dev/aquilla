@@ -1610,7 +1610,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       id: "section-languages",
       label: t("projectSettings.section.languages"),
       keywords: [
-        "languages", "target lanes", "lane", "target language", "dialect",
+        "languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect",
         ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
       ],
     },

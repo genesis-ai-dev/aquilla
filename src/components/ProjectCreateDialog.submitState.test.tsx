@@ -82,7 +82,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     expect(source).toHaveAttribute("autocomplete", "off")
     expect(source).toHaveAttribute("name", "aquilla-project-source-language")
 
-    const target = screen.getByLabelText(/^Target language/i)
+    const target = screen.getByLabelText(/^Language lanes/i)
     expect(target).toHaveAttribute("autocomplete", "off")
     expect(target).toHaveAttribute("name", "aquilla-project-target-language")
 

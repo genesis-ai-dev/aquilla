@@ -671,7 +671,7 @@ describe("AssignWork — only the lanes the project's people are on (AQU-1994)",
     fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
 
     expect(await screen.findByTestId("assign-work-no-staffed-lanes")).toHaveTextContent(
-      /no one on this project is on any of its languages/i,
+      /no one on this project is on any of its language lanes/i,
     )
     expect(screen.queryByTestId("assign-work-lane")).not.toBeInTheDocument()
     const submit = screen.getByRole("button", { name: "Assign" })

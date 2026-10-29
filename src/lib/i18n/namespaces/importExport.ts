@@ -1197,8 +1197,9 @@ export const importExport = defineNamespace({
     }),
     "importExport.dcs.notYetSupportedBadge": "Not yet supported",
     "importExport.dcs.ownerFilterLabel": "Owner",
-    "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
-      "release and import upstream changes into the source lane.",
+    "importExport.dcs.panelDescription":
+      "This project mirrors a Door43 resource. Check for a newer published release and import " +
+      "upstream changes into the source.",
     "importExport.dcs.pinnedRefBadge": "pinned {ref}",
     "importExport.dcs.pinTooltip":
       "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. Source cells are managed " +
@@ -1281,9 +1282,11 @@ export const importExport = defineNamespace({
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
-    "importExport.fileTarget.laneLabel": "Fill which language",
-    "importExport.fileTarget.laneHint": "The translations go into this language. Choosing another one opens it in the editor.",
-    "importExport.fileTarget.laneLoading": "Opening this language… you can choose a file in a moment.",
+    "importExport.fileTarget.laneLabel": "Fill which language lane",
+    "importExport.fileTarget.laneHint":
+      "The translations go into this language lane. Choosing another one opens it in the editor.",
+    "importExport.fileTarget.laneLoading":
+      "Opening this language lane… you can choose a file in a moment.",
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
@@ -1525,7 +1528,7 @@ export const importExport = defineNamespace({
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
     "importExport.declaredLanguage.laneMismatch":
-      "This file says {declared} — you imported into the {lane} lane.",
+      "This file says {declared} — you imported into the {lane} language lane.",
     // AQU-1365: the Import dialog's "What are you importing?" choice and its
     // translation path.
     "importExport.intent.groupLabel": "What are you importing?",
@@ -1578,10 +1581,18 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
     "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
     "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
-    "importExport.translationCheck.otherLane": "It says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
-    "importExport.translationCheck.otherLaneBody": "{fileName} says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.translationCheck.otherLane":
+      "It says it's in {language}, which this project translates into in another language lane. To " +
+      "import it as that translation, switch to that language lane in the editor, then start again " +
+      "from Import.",
+    "importExport.translationCheck.otherLaneBody":
+      "{fileName} says it's in {language}, which this project translates into in another language " +
+      "lane. To import it as that translation, switch to that language lane in the editor, then " +
+      "start again from Import.",
     "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
-    "importExport.intent.translation.laneArchived": "{lane} has been archived and is read-only. Switch to another language to import a translation.",
+    "importExport.intent.translation.laneArchived":
+      "{lane} has been archived and is read-only. Switch to another language lane to import a " +
+      "translation.",
     "importExport.translationCheck.manyTitle": "Some of these look like translations",
     "importExport.translationCheck.manyBody": plural({
       one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",

@@ -2211,6 +2211,13 @@ export const editor = defineNamespace({
       one: "{approved} of {count} piece approved",
       other: "{approved} of {count} pieces approved",
     }),
+    // Slice 3A (Sam, Oct 29): the same count, shorter, for a row too narrow
+    // for the whole sentence — first without "pieces", then as a fraction.
+    "editor.recordingTab.piecesApprovedShort": plural({
+      one: "{approved} of {count} approved",
+      other: "{approved} of {count} approved",
+    }),
+    "editor.recordingTab.piecesApprovedTiny": "{approved}/{count}",
     "editor.recordingTab.matches": "Matches the text",
     "editor.recordingTab.differs": plural({
       one: "{count} word differs",
@@ -8549,6 +8556,30 @@ export const editor = defineNamespace({
           count: "How many pieces the take is in. Always 2 or more.",
         },
         maxLength: 32,
+      },
+      "editor.recordingTab.piecesApprovedShort": {
+        description:
+          "A shorter form of editor.recordingTab.piecesApproved, shown instead of it when the " +
+          "row is too narrow for the whole sentence (the recorder's list of takes is narrow): " +
+          "the word 'pieces' is left out, e.g. '2 of 3 approved'. The whole sentence is still " +
+          "the hover text and what a screen reader reads. Count-governed.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 20,
+      },
+      "editor.recordingTab.piecesApprovedTiny": {
+        description:
+          "The shortest form of editor.recordingTab.piecesApproved, for a row too narrow even " +
+          "for editor.recordingTab.piecesApprovedShort: how many pieces of a split take are " +
+          "approved, as a fraction, e.g. '2/3'. Keep it as short as the English; change the " +
+          "slash only if your language writes fractions differently.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 8,
       },
       "editor.recordingTab.matches": {
         description:

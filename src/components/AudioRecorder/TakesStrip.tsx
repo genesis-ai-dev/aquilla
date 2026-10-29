@@ -727,10 +727,16 @@ export function TakesStrip({
             attachments: Object.fromEntries(pieces.map((p) => [p.audioId, p])),
             selectedBySlot: { [att.slot]: att.audioId },
           })
+          // Slice 3A (Sam, Oct 29): a cut take's row that says how many of its
+          // pieces are approved says how many pieces it is in, so it carries
+          // no "· split in 3".
+          const showsPiecesCount = isSplit && validationTakes.length > 0
           return (
             <div
               key={rowKey}
               data-testid={`take-row-${rowKey}`}
+              // The pieces count measures the text in this row (PiecesApproved).
+              data-fit-row={isSplit ? "" : undefined}
               className={cn(
                 "group/take flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-xs transition-colors",
                 // The recorder's piece rows sit indented under their take.
@@ -774,12 +780,13 @@ export function TakesStrip({
               )}
               {/* Slice 3A (Oct 29): a cut take's text clips at its own edge, so
                   nothing in it is ever drawn over the buttons or the pieces
-                  count after it, and keeps room for the length, so the count
-                  gives way before the length is cut. */}
+                  count after it, and keeps room for a name like "Take 12" and
+                  its length, so the count is what gives way. */}
               <span
+                data-fit-text={isSplit ? "" : undefined}
                 className={cn(
                   "flex min-w-0 flex-1 items-center gap-1 tabular-nums",
-                  isSplit && "min-w-12 overflow-hidden",
+                  isSplit && "min-w-[calc(11ch+0.25rem)] overflow-hidden",
                 )}
               >
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
@@ -804,26 +811,15 @@ export function TakesStrip({
                   />
                 ) : (
                   <>
-                    {isSplit ? (
-                      // Slice 3A (Sam, Oct 29): at the recorder's width a cut
-                      // take's squeezed "· split in 3" and the Remove noise
-                      // button were drawn over its length — the name kept a
-                      // minimum width, so the length spilled out of this text.
-                      // The name and its "· split in 3" are one line now, cut
-                      // from its end: the quieter "split in" goes first, then
-                      // the name. The length and the pieces count stay whole.
-                      <span data-testid={`take-name-${rowKey}`} className="min-w-0 truncate">
-                        <span data-testid={`take-label-${rowKey}`} className="font-medium">
-                          {splitLabel(pieces)}
-                        </span>
-                        <span data-testid={`take-split-${att.audioId}`} className="ms-1 text-muted-foreground/70">
-                          · {t("editor.recordingTab.splitInto", { count: pieces.length })}
-                        </span>
-                      </span>
-                    ) : (
-                      // Slice 3A evidence (Oct 25): the name keeps room for "Take 12".
-                      <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
-                        {shownLabel(att)}
+                    {/* Slice 3A evidence (Oct 25): the name keeps room for
+                        "Take 12" — on a cut take's row too (Sam, Oct 29): there
+                        the pieces count shortens before the name gives up any. */}
+                    <span data-testid={`take-label-${rowKey}`} className="min-w-[7ch] truncate font-medium">
+                      {isSplit ? splitLabel(pieces) : shownLabel(att)}
+                    </span>
+                    {isSplit && !showsPiecesCount && (
+                      <span data-testid={`take-split-${att.audioId}`} className="min-w-0 truncate text-muted-foreground/70">
+                        · {t("editor.recordingTab.splitInto", { count: pieces.length })}
                       </span>
                     )}
                     {isSplit ? (
@@ -877,28 +873,49 @@ export function TakesStrip({
                         calendar date and the person inline; the exact time
                         opens in DateTooltip, the same hover every other date
                         uses. */}
-                    {provenance && (
-                      <span
-                        data-testid={`take-recorded-${att.audioId}`}
-                        className={cn(
-                          "inline-flex min-w-0 max-w-full shrink items-center text-[10px] text-muted-foreground/60",
-                          // Slice 3A (Oct 29): on a cut take's row the date
-                          // gives way before the name does.
-                          isSplit && "shrink-[999]",
-                        )}
-                      >
-                        <DateTooltip
-                          value={provenance.recordedAt}
-                          label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
-                          className="min-w-0 truncate"
+                    {provenance && (() => {
+                      const recorded = (
+                        <span
+                          data-testid={`take-recorded-${att.audioId}`}
+                          className={cn(
+                            "inline-flex items-center text-[10px] text-muted-foreground/60",
+                            isSplit ? "shrink-0" : "min-w-0 max-w-full shrink",
+                          )}
                         >
-                          {t("audio.takesStrip.recordedByBadge", {
-                            date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
-                            author: provenance.recordedBy,
-                          })}
-                        </DateTooltip>
-                      </span>
-                    )}
+                          <DateTooltip
+                            value={provenance.recordedAt}
+                            label={t(isGenerated ? "audio.takesStrip.generatedLabel" : "audio.takesStrip.recordedLabel")}
+                            className="min-w-0 truncate"
+                          >
+                            {t("audio.takesStrip.recordedByBadge", {
+                              date: fmtShortCalendarDate(provenance.recordedAt, undefined, locale),
+                              author: provenance.recordedBy,
+                            })}
+                          </DateTooltip>
+                        </span>
+                      )
+                      if (!isSplit) return recorded
+                      // Slice 3A (Sam, Oct 29): on a cut take's row the date
+                      // gives way first, before the pieces count shortens — and
+                      // whole or not at all, never a stray "O…". A one-line box
+                      // that wraps: a date that does not fit beside the zero-
+                      // width first item drops to the hidden second line. That
+                      // item is a line tall, or the first line would have no
+                      // height and the second would show. The box only grows
+                      // into room nothing else wants (from nothing, up to the
+                      // date's own width): shrinking, it would take a sliver
+                      // from the name too, and a sliver is enough for "…".
+                      return (
+                        <span
+                          data-fit="give"
+                          data-testid={`take-recorded-fit-${att.audioId}`}
+                          className="flex h-4 min-w-0 max-w-max flex-1 basis-0 flex-wrap items-center overflow-hidden"
+                        >
+                          <span aria-hidden className="h-4 w-0" />
+                          {recorded}
+                        </span>
+                      )
+                    })()}
                     {/* AQU-464: this take speaks wording the line no longer
                         carries. Advisory, not an error — reviewing audio
                         against its own older text is the point.
@@ -1008,6 +1025,7 @@ export function TakesStrip({
                   pieces={validationTakes}
                   requirement={audioValidation.validationRequirement}
                   testId={`take-pieces-approved-${rowKey}`}
+                  fit
                 />
               ) : (
                 <AudioValidationControl

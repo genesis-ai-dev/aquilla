@@ -464,7 +464,9 @@ function CellTakeBlockView({
         ) : (
           <span data-testid="cell-take-label" className="font-medium">{label}</span>
         )}
-        {split && (
+        {/* Slice 3A (Sam, Oct 29): not beside the pieces count below, which
+            says how many pieces the take is in. */}
+        {split && pieceVotes.length === 0 && (
           <span data-testid="cell-take-split" className="text-muted-foreground">
             · {t("editor.recordingTab.splitInto", { count: split.length })}
           </span>

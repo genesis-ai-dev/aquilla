@@ -96,7 +96,8 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
       `take-row-${P1}`, `take-row-piece-${P1}`, `take-row-piece-${P2}`, `take-row-piece-${P3}`,
     ])
     expect(screen.getByTestId(`take-label-${P1}`)).toHaveTextContent(/^Take 2$/)
-    expect(screen.getByTestId(`take-split-${P1}`)).toHaveTextContent("split in 3")
+    // Slice 3A (Oct 29): its pieces count says how many pieces; no "split in 3".
+    expect(screen.queryByTestId(`take-split-${P1}`)).toBeNull()
     expect(within(pieceRow(P1)).getByTestId(`take-label-piece-${P1}`)).toHaveTextContent(/^Take 2 · 1$/)
     expect(within(pieceRow(P2)).getByTestId(`take-label-piece-${P2}`)).toHaveTextContent(/^Take 2 · 2$/)
     expect(within(pieceRow(P3)).getByTestId(`take-label-piece-${P3}`)).toHaveTextContent(/^Chorus$/)
@@ -116,60 +117,69 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
     expect(within(takeRow).getByTestId(`take-pieces-approved-${P1}`)).toHaveTextContent("1 of 3 pieces approved")
   })
 
-  // Slice 3A (Oct 29): in the recorder's list, at its real width (about 330
-  // to 410 px, the narrow end with the film beside it in a short window), the
-  // cut take's squeezed "· split in 3" and the Remove noise button were drawn
-  // over its length: the name kept a minimum width, so the length spilled out
-  // of the text beside the play button. Measured in Chromium and WebKit with
-  // the app's own CSS. happy-dom has no layout, so this pins the rules that
-  // make the overlap impossible:
-  //   · the name and its "· split in 3" are ONE line cut from its end, so the
-  //     quieter "split in" goes first and then the name — the name is what
-  //     truncates, never the length or the count;
-  //   · the length never shrinks, and sits after that line, outside it;
-  //   · the date gives way before the name does;
-  //   · the text clips at its own edge, so nothing in it can be drawn over the
-  //     buttons or the count, and it keeps room for the length, so the count
-  //     gives way before the length is cut.
-  it("sits the cut take's name, length and pieces count side by side, the name truncating first", () => {
+  // Slice 3A (Sam, Oct 29, second round). In the recorder's list, at its real
+  // width (about 310 to 410 px: narrowest with the film beside it in a short
+  // window), a cut take's row holds its name, its length, its date and how
+  // many of its pieces are approved. Measured in Chromium and WebKit with the
+  // app's own CSS. The rules, which happy-dom (no layout) can only pin:
+  //   · "· split in 3" is not on a row that says "N of 3 pieces approved":
+  //     the count says the same;
+  //   · the name keeps its room for "Take 12" (Oct 25), and the length never
+  //     shrinks;
+  //   · the count is what shortens first — it measures the room the text
+  //     beside it can spare (PiecesApproved.test.tsx) — and the date gives
+  //     way before it;
+  //   · the text clips at its own edge and keeps room for the name and the
+  //     length, so nothing in it is ever drawn over the buttons or the count.
+  it("puts no \"split in\" beside the pieces count, keeps the name and the length whole, and lets the count shorten first", () => {
     drift.map = new Map([[P1, { audioId: P1, recordedAt: Date.UTC(2026, 9, 24, 12), recordedBy: "ana", drifted: false, textAtRecording: null }]])
     draw(cutTake(), P1)
     const row = screen.getByTestId(`take-row-${P1}`)
-    const name = within(row).getByTestId(`take-name-${P1}`)
     const label = within(row).getByTestId(`take-label-${P1}`)
-    const split = within(row).getByTestId(`take-split-${P1}`)
     const length = within(row).getByTestId(`take-length-${P1}`)
     const recorded = within(row).getByTestId(`take-recorded-${P1}`)
     const count = within(row).getByTestId(`take-pieces-approved-${P1}`)
 
-    // One line, cut from its end: "Take 2 · split in 3".
-    expect(name.className).toMatch(/\btruncate\b/)
-    expect(name.className).toMatch(/\bmin-w-0\b/)
-    expect(name).toContainElement(label)
-    expect(name).toContainElement(split)
-    expect(label).toHaveTextContent(/^Take 2$/)
-    expect(label.className).not.toMatch(/\bmin-w-/)
-    expect(split).toHaveTextContent("split in 3")
+    expect(within(row).queryByTestId(`take-split-${P1}`)).toBeNull()
+    expect(row).not.toHaveTextContent(/split in/)
+    expect(count).toHaveTextContent("1 of 3 pieces approved")
 
-    // The length: whole, after the name, not inside it.
-    expect(name).not.toContainElement(length)
+    // The name: room for "Take 12" (Oct 25); the length: never shrinks.
+    expect(label).toHaveTextContent(/^Take 2$/)
+    expect(label.className).toMatch(/\bmin-w-\[7ch\]/)
     expect(length.className).toMatch(/\bshrink-0\b/)
-    expect(name.compareDocumentPosition(length) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(length).toHaveTextContent("3.0s")
 
-    // The date gives way before the name.
-    expect(recorded.className).toMatch(/\bshrink-\[999\]/)
+    // The count fits itself beside the text; the date gives way.
+    expect(count).toHaveAttribute("data-fit", "beside-text")
+    expect(row).toHaveAttribute("data-fit-row")
+    const text = label.parentElement!
+    expect(text).toHaveAttribute("data-fit-text")
+    // The date gives way first, whole or not at all: it sits alone in a
+    // one-line box that wraps, so a date with no room drops out of sight.
+    const dateBox = within(row).getByTestId(`take-recorded-fit-${P1}`)
+    expect(dateBox).toContainElement(recorded)
+    expect(dateBox).toHaveAttribute("data-fit", "give")
+    // It grows into spare room only (from nothing, up to the date's width),
+    // so it never takes a sliver from the name.
+    expect(dateBox.className).toMatch(/\bbasis-0\b/)
+    expect(dateBox.className).toMatch(/\bflex-1\b/)
+    expect(dateBox.className).toMatch(/\bmax-w-max\b/)
+    expect(dateBox.className).toMatch(/\bflex-wrap\b/)
+    expect(dateBox.className).toMatch(/\boverflow-hidden\b/)
+    expect(dateBox.className).toMatch(/\bh-4\b/)
+    expect(recorded.className).toMatch(/\bshrink-0\b/)
+    // Its first item: no width, but a line tall, so the second line is hidden.
+    const lead = dateBox.firstElementChild as HTMLElement
+    expect(lead).not.toBe(recorded)
+    expect(lead.className).toMatch(/\bw-0\b/)
+    expect(lead.className).toMatch(/\bh-4\b/)
 
-    // The text clips at its edge and keeps room for the length.
-    const text = name.parentElement!
+    // The text clips at its edge and keeps room for the name and the length.
     expect(text).toContainElement(length)
-    expect(text.className).toMatch(/\boverflow-hidden\b/)
-    expect(text.className).toMatch(/\bmin-w-12\b/)
-    expect(text.className).not.toMatch(/\bmin-w-0\b/)
     expect(text).not.toContainElement(count)
-
-    // The count: outside the text, its whole sentence on hover if it is ever cut.
-    expect(count).toHaveAttribute("title", "1 of 3 pieces approved")
+    expect(text.className).toMatch(/\boverflow-hidden\b/)
+    expect(text.className).toMatch(/\bmin-w-\[calc\(11ch\+0\.25rem\)\]/)
   })
 
   it("leaves a take that was never cut as it was: its name keeps room for \"Take 12\"", () => {

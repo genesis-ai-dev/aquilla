@@ -60,7 +60,10 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
   it("shows the take once, with its whole length, and its pieces under it — not as another take", () => {
     draw(splitTake)
     expect(screen.getByTestId("cell-take-label")).toHaveTextContent(/^Take 1$/)
-    expect(screen.getByTestId("cell-take-split")).toHaveTextContent("split in 2")
+    // Slice 3A (Oct 29): the take says how many of its pieces are approved,
+    // which says how many pieces there are, so no "· split in 2" beside it.
+    expect(screen.queryByTestId("cell-take-split")).toBeNull()
+    expect(screen.getByTestId("cell-take-pieces-approved")).toHaveTextContent("0 of 2 pieces approved")
     expect(screen.getByTestId("cell-take-length")).toHaveTextContent("4.0s")
     expect(screen.queryByTestId("tab-other-takes")).toBeNull()
     const pieces = screen.getByTestId("tab-take-pieces")
@@ -288,7 +291,8 @@ describe("RecordingTakes — a split take (AQU-1767)", () => {
     const row = within(others).getByTestId(`take-row-${T2}`)
     expect(within(others).queryByTestId(`take-row-${Q2}`)).toBeNull()
     expect(within(row).getByTestId(`take-label-${T2}`)).toHaveTextContent(/^Take 2$/)
-    expect(within(row).getByTestId(`take-split-${T2}`)).toHaveTextContent("split in 2")
+    expect(within(row).queryByTestId(`take-split-${T2}`)).toBeNull()
+    expect(within(row).getByTestId(`take-pieces-approved-${T2}`)).toHaveTextContent("0 of 2 pieces approved")
     expect(within(row).getByTestId(`take-length-${T2}`)).toHaveTextContent("3.5s")
     fireEvent.click(within(row).getByRole("button", { name: /delete/i }))
     await vi.waitFor(() => expect(queued.removes).toEqual([T2, Q2]))

@@ -292,11 +292,37 @@ orgs.delete("/:orgId", async (c) => {
   return c.json({ removed: true })
 })
 
-/** GET /api/v2/orgs/me — caller's owned organization (lazy-created). */
+/**
+ * GET /api/v2/orgs/me — the caller's personal workspace, or 404
+ * `{ error: "no_organization" }` when they own none.
+ *
+ * AQU-2259: a read never creates anything. This used to create
+ * "<username>'s workspace" for anyone without one, so an invited member got
+ * an empty organization just by opening Project settings. A personal
+ * workspace is made only when someone chooses one: POST /orgs/personal
+ * (onboarding's "Just me"), a personal project (POST /projects with no
+ * orgId), or Create organization (POST /orgs, a team).
+ */
 orgs.get("/me", async (c) => {
   const user = c.get("user")
-  const org = await getOrCreateUserOrg(c.env, user)
+  const org = await findPersonalOrg(c.env, user.id)
+  if (!org) return c.json({ error: "no_organization" }, 404)
   await bumpOrgActivity(c.env, user.id, org.id)
+  return c.json({
+    id: org.id,
+    name: org.name,
+    role: { level: 700, name: ROLE_NAMES[700] ?? "owner" },
+  })
+})
+
+/**
+ * POST /api/v2/orgs/personal — make the caller's personal workspace, the
+ * moment they choose to work on their own (onboarding's "Just me").
+ * Idempotent: an existing personal workspace is returned as it is.
+ */
+orgs.post("/personal", async (c) => {
+  const user = c.get("user")
+  const org = await getOrCreateUserOrg(c.env, user)
   return c.json({
     id: org.id,
     name: org.name,

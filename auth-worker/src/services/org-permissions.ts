@@ -89,7 +89,9 @@ export async function findPersonalOrg(
 }
 
 /**
- * Return the user's personal organization, lazy-creating one if absent.
+ * Return the user's personal organization, creating one if absent. Call it
+ * only where the person CHOSE a personal workspace (POST /orgs/personal, a
+ * personal project): a read never creates one (AQU-2259).
  * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
@@ -156,8 +158,8 @@ export type DeleteOrganizationResult =
  *   translation data. `projects.org_id` is never left pointing at a missing org.
  * - Members, teams, invites, org-scoped PATs, device grants, integrations,
  *   billing, and usage rows are removed in the same transaction.
- * - The personal workspace may be deleted. `GET /orgs/me` and an empty
- *   `listUserOrgs` lazily create a fresh one.
+ * - The personal workspace may be deleted. Nothing recreates it until the
+ *   person chooses one again (POST /orgs/personal, a personal project).
  *
  * Caller authorization stays in the route: membership role >= owner, with no
  * platform-admin elevation.
@@ -232,8 +234,9 @@ export interface UserOrgSummary {
 
 /**
  * Every org the user belongs to: owned orgs (role 700) unioned with
- * org_members rows (role per row). Owner wins on conflict. Lazy-creates the
- * personal org if the user has none yet, so the switcher always has >=1 entry.
+ * org_members rows (role per row). Owner wins on conflict. Empty for an
+ * account with no organization: this is a read, and since AQU-2259 a read
+ * never creates one.
  */
 export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
   const byId = new Map<number, UserOrgSummary>()
@@ -258,10 +261,8 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
     }
   }
 
-  if (byId.size === 0) {
-    const personal = await getOrCreateUserOrg(env, user)
-    byId.set(personal.id, { id: personal.id, name: personal.name, role: personal.role })
-  }
+  // AQU-2259: no auto-create. An account with no organization lists none;
+  // listing is a read, and a read never creates anything (see GET /orgs/me).
 
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
 }

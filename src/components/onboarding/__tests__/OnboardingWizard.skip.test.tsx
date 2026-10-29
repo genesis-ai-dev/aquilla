@@ -100,6 +100,11 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...args: unknown[]) => mockListMyOrgs(...args),
+  createPersonalOrg: vi.fn(async () => ({ id: 1, name: "w", role: { level: 700, name: "owner" } })),
+}))
+let mockProjects: { id: string }[] = []
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true, projects: mockProjects })),
 }))
 
 const navigate = vi.fn()
@@ -133,6 +138,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
   mockOrgs = []
+  mockProjects = []
   mockUsername = "alice"
   localStorage.clear()
 })
@@ -207,6 +213,20 @@ describe("OnboardingWizard — returning user skip", () => {
 
     expect(await screen.findByText("Name step")).toBeInTheDocument()
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  // AQU-2259: listing organizations no longer creates one, so a guest who
+  // belongs to no organization would otherwise look brand-new.
+  it("treats an account with projects but no organization as returning", async () => {
+    mockListMyOrgs.mockResolvedValue([])
+    mockProjects = [{ id: "p1" }]
+    renderWizard()
+    advanceToSignIn()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /login complete/i }))
+    })
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/"))
+    expect(screen.queryByText("Name step")).not.toBeInTheDocument()
   })
 
   it("advances to Name step when fresh user has no orgs and no flag", async () => {

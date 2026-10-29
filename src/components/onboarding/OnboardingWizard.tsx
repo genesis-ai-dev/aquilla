@@ -24,7 +24,8 @@ import {
   markAccountOnboardingComplete,
   markLocalOnboardingComplete,
 } from "@/lib/onboarding/completion"
-import { listMyOrgs } from "@/lib/frontier/orgs"
+import { createPersonalOrg, listMyOrgs } from "@/lib/frontier/orgs"
+import { fetchAccessibleProjectsResult } from "@/lib/sync/cloud-projects"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 // i18n-exempt: analytics discriminator, not UI copy. Sent verbatim as the
@@ -53,6 +54,10 @@ export function OnboardingWizard() {
   const { refresh: refreshOrgs } = useActiveOrg()
   const { session } = useFrontierSession()
   const [authenticatedUsername, setAuthenticatedUsername] = useState<string | null>(null)
+  // The token from this run's own sign-in or sign-up, which React's session
+  // state may not have committed yet.
+  const [authenticatedJwt, setAuthenticatedJwt] = useState<string | null>(null)
+  const jwt = authenticatedJwt ?? session?.jwt ?? null
   const [loginClassificationError, setLoginClassificationError] = useState<string | null>(null)
   const [loginClassificationBusy, setLoginClassificationBusy] = useState(false)
   const [step, setStep] = useState(1)
@@ -62,6 +67,7 @@ export function OnboardingWizard() {
   // personal users skip straight from Intent (5) to Project (7).
   const [intent, setIntent] = useState<"personal" | "team" | null>(null)
   const [teamOrgId, setTeamOrgId] = useState<number | null>(null)
+  const [personalOrgId, setPersonalOrgId] = useState<number | null>(null)
 
   // The privacy step (2) is skipped in both directions once the user has made
   // an analytics choice on a previous run.
@@ -100,7 +106,20 @@ export function OnboardingWizard() {
 
   // Intent fork — set the choice AND jump explicitly (avoids a stale-closure
   // race on `intent` if we relied on next()'s skip logic).
-  const choosePersonal = useCallback(() => { setIntent("personal"); setStep(7) }, [])
+  // AQU-2259: choosing "Just me" is the moment the personal workspace is made
+  // — no page read creates one any more. Best-effort: if this request fails,
+  // creating the project still makes it (POST /projects with no orgId).
+  const choosePersonal = useCallback(() => {
+    setIntent("personal")
+    setStep(7)
+    if (!jwt) return
+    void createPersonalOrg(jwt)
+      .then((org) => {
+        setPersonalOrgId(org.id)
+        void refreshOrgs()
+      })
+      .catch(() => { /* the project step creates it instead */ })
+  }, [jwt, refreshOrgs])
   const chooseTeam = useCallback(() => { setIntent("team"); setStep(6) }, [])
   const handleOrgCreated = useCallback((orgId: number) => {
     setTeamOrgId(orgId)
@@ -116,6 +135,7 @@ export function OnboardingWizard() {
    */
   const handleLoginComplete = useCallback(async (authenticated: FrontierSession) => {
     setAuthenticatedUsername(authenticated.username)
+    setAuthenticatedJwt(authenticated.jwt)
     setLoginClassificationError(null)
     setLoginClassificationBusy(true)
     // Use the session returned by this exact login. Waiting for OrgProvider's
@@ -132,10 +152,18 @@ export function OnboardingWizard() {
       return
     }
     const alreadyOnboarded = isAccountOnboardingComplete(authenticated.username)
-    if (alreadyOnboarded || freshOrgs.length > 0) {
+    // AQU-2259: listing organizations no longer creates one, so an account
+    // that belongs to none but already works on projects (a guest on a
+    // project) is a returning user too, not a brand-new one.
+    const hasProjects = !alreadyOnboarded && freshOrgs.length === 0
+      ? await fetchAccessibleProjectsResult(authenticated.jwt)
+        .then((result) => result.ok && result.projects.length > 0)
+        .catch(() => false)
+      : false
+    if (alreadyOnboarded || freshOrgs.length > 0 || hasProjects) {
       markAccountOnboardingComplete(authenticated.username)
       posthog.capture(ONBOARDING_RETURNING_USER_SKIP, {
-        reason: alreadyOnboarded ? "flag" : "has-orgs",
+        reason: alreadyOnboarded ? "flag" : freshOrgs.length > 0 ? "has-orgs" : "has-projects",
       })
       void refreshOrgs()
       navigate(billingNext ?? "/")
@@ -148,6 +176,7 @@ export function OnboardingWizard() {
 
   const handleSignupComplete = useCallback((authenticated: FrontierSession) => {
     setAuthenticatedUsername(authenticated.username)
+    setAuthenticatedJwt(authenticated.jwt)
     next()
   }, [next])
 
@@ -238,7 +267,7 @@ export function OnboardingWizard() {
         {step === 7 && (
           <ProjectStep
             displayName={displayName}
-            orgId={teamOrgId ?? undefined}
+            orgId={teamOrgId ?? personalOrgId ?? undefined}
             onCreated={handleProjectCreated}
             onBack={back}
             onSkip={handleSkipProject}

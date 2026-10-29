@@ -117,6 +117,7 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
     "editor.reimport.sourceReview": "The source text changed in a re-import. The translation was kept. Validating this cell clears the highlight.",
+    "editor.reimport.sourceReviewInfo": "Why this line is highlighted",
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
@@ -2974,8 +2975,13 @@ export const editor = defineNamespace({
       },
       "editor.reimport.sourceReview": {
         description:
-          "Tooltip on a cell outlined in yellow after a sidebar re-import changed its source " +
+          "Note that opens from the small (i) on a cell outlined in yellow after a sidebar re-import changed its source " +
           "text. Explains that the translation was kept and that validating the cell removes the outline.",
+      },
+      "editor.reimport.sourceReviewInfo": {
+        description:
+          "Screen-reader name of the small (i) button in the corner of a cell outlined in yellow after a re-import " +
+          "changed its source text. Clicking it opens the explanation.",
       },
       "editor.rail.moreActions": {
         description:
@@ -7557,7 +7563,7 @@ export const editor = defineNamespace({
       },
       "editor.row.lockedBy": {
         description:
-          "Tooltip on a target cell that another person currently holds the edit " +
+          "Note that opens when you click a target cell another person currently holds the edit " +
           "lease on, and the suffix appended to that cell's accessible name. It " +
           "answers \"why can't I type here?\" — the cell is read-only for now, not " +
           "broken, and frees up when that person moves on.",

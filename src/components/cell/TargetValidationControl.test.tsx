@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
 
 import { TargetValidationControl } from "./TargetValidationControl"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
@@ -194,6 +195,44 @@ describe("TargetValidationControl", () => {
   describe("the Text validated by list", () => {
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+    // AQU-2260 (Oct 29, third pass): the list never opens on hover. Where a
+    // press is the vote, an (i) beside the check opens it on click.
+    it("never opens on hover; where a press validates, an (i) beside the check opens it", async () => {
+      const onValidationChange = vi.fn()
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={onValidationChange}
+        />,
+      )
+      const check = screen.getAllByRole("button")[0]!
+      fireEvent.pointerEnter(check, { pointerType: "mouse" })
+      fireEvent.mouseEnter(check)
+      fireEvent.mouseMove(check, { movementX: 5, movementY: 5 })
+      await wait(600)
+      expect(screen.queryByText("Text validated by")).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "About Text validated by" }))
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+      expect(screen.getByText("bo")).toBeInTheDocument()
+      expect(onValidationChange).not.toHaveBeenCalled()
+    })
+
+    it("closes from a second click on its (i)", async () => {
+      render(
+        <TargetValidationControl
+          cellRef="Mark 1:1" hasContent validationStatus="others" activeValidators={["bo"]}
+          validationHistory={[]} currentUsername="alice" validationRequirement={2}
+          canValidate canValidateThisCell onValidationChange={vi.fn()}
+        />,
+      )
+      const info = screen.getByRole("button", { name: "About Text validated by" })
+      await userEvent.click(info)
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+      await userEvent.click(info)
+      await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
+    })
+
     // Walk 10-02: the check still announced "Click to remove your validation"
     // after a press stopped removing anything. It names what a press does now.
     it("names your own validation for what a press does: open the list, not remove the vote", () => {
@@ -223,7 +262,7 @@ describe("TargetValidationControl", () => {
       expect(screen.getByRole("button", { name: "Validated by you, row 4." })).toBeInTheDocument()
     })
 
-    it("stays open after a click on a hover-opened list, and after the pointer leaves", async () => {
+    it("stays open after a click opens it, and after the pointer leaves", async () => {
       render(
         <TargetValidationControl
           cellRef="Mark 1:1" hasContent validationStatus="full-self" activeValidators={["alice", "bo"]}
@@ -232,23 +271,20 @@ describe("TargetValidationControl", () => {
         />,
       )
       const button = screen.getByRole("button", { name: /Validated/ })
-      fireEvent.pointerEnter(button, { pointerType: "mouse" })
-      fireEvent.mouseEnter(button)
-      fireEvent.mouseMove(button, { movementX: 5, movementY: 5 })
-      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
-
-      // Past Base UI's 500 ms "patient click" window, where the click used to close it.
-      await wait(650)
+      // AQU-2260: a click opens it (hover opens nothing).
       fireEvent.pointerDown(button, { pointerType: "mouse" })
       fireEvent.click(button)
-      await wait(50)
+      expect(await screen.findByText("Text validated by")).toBeInTheDocument()
+      await wait(650)
       expect(screen.getByText("Text validated by")).toBeInTheDocument()
 
       fireEvent.mouseLeave(button, { relatedTarget: document.body })
       await wait(300)
       expect(screen.getByText("Text validated by")).toBeInTheDocument()
 
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+      // A click outside shuts it (Escape too, from inside the list).
+      fireEvent.pointerDown(document.body, { pointerType: "mouse" })
+      fireEvent.click(document.body)
       await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
       // Closed lists open again on the next click.
@@ -273,11 +309,11 @@ describe("TargetValidationControl", () => {
     })
 
     // PR 1 area 5 step 6 (Sam, 2026-10-03): open the list with a click, remove
-    // your vote, and hovering the check never opened the list again. The
+    // your vote, and the check never opened the list again (by hover, then). The
     // trash button closed the list behind Base UI's back, so Base UI still
     // remembered the CLICK that opened it, and it ignores hover while a list
     // it thinks a click opened is around. Closing through Base UI clears that.
-    it("opens on hover again after Remove your validation closed a click-opened list", async () => {
+    it("opens again from its (i) after Remove your validation closed a click-opened list", async () => {
       const onValidationChange = vi.fn()
       const props = {
         cellRef: "Mark 1:1", hasContent: true, validationHistory: [], currentUsername: "alice",
@@ -295,12 +331,12 @@ describe("TargetValidationControl", () => {
       rerender(<TargetValidationControl {...props} validationStatus="others" activeValidators={["bo"]} />)
       await vi.waitFor(() => expect(screen.queryByText("Text validated by")).not.toBeInTheDocument(), { timeout: STALL_WATCHDOG_MS })
 
+      // AQU-2260: a press on the check now votes again, so the list is on
+      // the (i) under it, on click — never on hover.
       const check = screen.getByRole("button", { name: /Validated by others/ })
       fireEvent.mouseLeave(check, { relatedTarget: document.body })
       await wait(150)
-      fireEvent.pointerEnter(check, { pointerType: "mouse" })
-      fireEvent.mouseEnter(check)
-      fireEvent.mouseMove(check, { movementX: 5, movementY: 5 })
+      fireEvent.click(screen.getByRole("button", { name: "About Text validated by" }))
       expect(await screen.findByText("Text validated by")).toBeInTheDocument()
       expect(screen.getByText("bo")).toBeInTheDocument()
     })

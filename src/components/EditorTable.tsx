@@ -185,7 +185,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { NoteOnClick } from "@/components/ui/info-note"
+import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -2912,7 +2912,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
-        title={needsSourceReview ? t("editor.reimport.sourceReview") : undefined}
         className={cn(
           "relative",
           needsSourceReview && "ring-2 ring-inset ring-yellow-400",
@@ -2927,6 +2926,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
+        {/* AQU-2260 third pass: why the row is ringed in yellow opens from an
+            (i) on click, in the ring's corner. It used to be the row's hover title. */}
+        {needsSourceReview && (
+          <InfoNote
+            label={t("editor.reimport.sourceReviewInfo")}
+            testId="source-review-info"
+            side="left"
+            className="absolute end-0.5 top-1 z-10 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300"
+            iconClassName="h-3 w-3"
+          >
+            {t("editor.reimport.sourceReview")}
+          </InfoNote>
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -8035,12 +8047,20 @@ function EditorRow({
 
   // AQU-1163: why this cell won't take your text. A peer holding the focus
   // lease makes the target read-only, and until now that was silent — clicking
-  // did nothing and nothing said why. Carried as the read surface's tooltip and
-  // appended to its accessible name, so both a mouse user and a screen-reader
-  // user get the reason from the cell itself.
+  // did nothing and nothing said why. Appended to the read surface's accessible
+  // name, and opened as a note when the cell is clicked (below), so both a
+  // screen-reader user and a mouse user get the reason from the cell itself.
   const targetLockedReason = lockHolderLabel
     ? t("editor.row.lockedBy", { name: lockHolderLabel })
     : null
+  // AQU-2260 third pass: the click that would open the editor on a cell
+  // someone else is editing now says why it did not, in a note anchored to the
+  // cell. It used to be a hover title. The note is keyed to the holder, so it
+  // closes by itself when they leave and does not reopen for the next one.
+  const lockSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const [lockNoteFor, setLockNoteFor] = useState<string | null>(null)
+  const lockNoteOpen = lockHolderLabel !== null && lockNoteFor === lockHolderLabel
+  const toggleLockNote = () => setLockNoteFor((current) => (current === lockHolderLabel ? null : lockHolderLabel))
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -8824,6 +8844,10 @@ function EditorRow({
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
+                if (lockHolderLabel) {
+                  toggleLockNote()
+                  return
+                }
                 requestTargetEdit(idmlConfiguration && !idmlPreview
                   ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                   : null)
@@ -8893,9 +8917,9 @@ function EditorRow({
                   />
                 ) : (
                   <EditorTargetReadSurface
+                    ref={lockSurfaceRef}
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={targetLockedReason ? `${editorAriaLabel} — ${targetLockedReason}` : editorAriaLabel}
-                    title={targetLockedReason ?? undefined}
                     data-target-read-view
                     data-segment-edge-mode={styleSegmentDrag ? "" : undefined}
                     data-target-locked-by={lockHolderLabel ?? undefined}
@@ -8935,6 +8959,10 @@ function EditorRow({
                       event.stopPropagation()
                       // Option/Alt+click seeks (onMouseDown); don't also enter edit.
                       if (isWordSeekClick(event)) return
+                      if (lockHolderLabel) {
+                        toggleLockNote()
+                        return
+                      }
                       requestTargetEdit(idmlConfiguration && !idmlPreview
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
@@ -8943,6 +8971,10 @@ function EditorRow({
                       if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
+                      if (lockHolderLabel) {
+                        toggleLockNote()
+                        return
+                      }
                       requestTargetEdit()
                     }}
                   >
@@ -8996,6 +9028,30 @@ function EditorRow({
                     />
                   </EditorTargetReadSurface>
                 )}
+              {targetLockedReason && (
+                <Popover
+                  open={lockNoteOpen}
+                  onOpenChange={(next, details) => {
+                    // A press on the cell itself is the toggle above; the
+                    // note's own outside-press close must not race it.
+                    const target = details?.event?.target
+                    if (!next && target instanceof Node && lockSurfaceRef.current?.contains(target)) return
+                    if (!next) setLockNoteFor(null)
+                  }}
+                >
+                  <PopoverContent
+                    anchor={lockSurfaceRef}
+                    side="top"
+                    align="start"
+                    sideOffset={6}
+                    initialFocus={false}
+                    data-testid="target-lock-note"
+                    className={NOTE_CONTENT_CLASS}
+                  >
+                    {targetLockedReason}
+                  </PopoverContent>
+                </Popover>
+              )}
               {/* FRO-204: Terminology highlight popover — controlled via termChipState.
                   Anchored to the highlighted term that was clicked.
                   We pass a dummy <span/> trigger so TermLookupPopover renders

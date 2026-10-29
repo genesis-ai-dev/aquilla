@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
-import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
+import { Check, CheckCheck, Info, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -103,6 +103,7 @@ export function AudioValidationControl({
   // list, and while it remembers one it ignores hover, so the check stopped
   // opening the list on hover after "Remove your validation".
   const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
+  const listInfoRef = useRef<HTMLButtonElement | null>(null)
   /**
    * audioId → the vote we asked for, plus what the server said at the moment
    * we asked.
@@ -408,7 +409,14 @@ export function AudioValidationControl({
   }
 
   const body = (
-    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void }) => {
+    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void; event?: Event }) => {
+      // A press on the (i) is its own toggle; the list's outside-press close
+      // must not race it, or a second click would shut and reopen it.
+      const target = details.event?.target
+      if (!next && target instanceof Node && listInfoRef.current?.contains(target)) {
+        details.cancel()
+        return
+      }
       if (!next) { setPopoverOpen(false); return }
       // A press on a line the viewer can still act on is the VOTE, not the
       // popover — the same bargain the text control strikes. Once there is
@@ -419,12 +427,10 @@ export function AudioValidationControl({
       }
       setPopoverOpen(true)
     }}>
-      <PopoverTrigger
-        openOnHover
-        delay={400}
-        closeDelay={100}
-        render={renderButton(clickable ? validateAll : undefined)}
-      />
+      {/* AQU-2260 (Oct 29, third pass): the list opens on a click, never on
+          hover — on the check itself where a press does not vote, and on
+          the (i) under it where it does. */}
+      <PopoverTrigger render={renderButton(clickable ? validateAll : undefined)} />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
         {/* "Audio validated by", the twin of the text list's "Text validated
             by" (Sam, 2026-09-23) — both name their half, since the two sit side
@@ -535,8 +541,24 @@ export function AudioValidationControl({
   // hover is kept only where a click validates ("Audio not validated — click
   // to validate"); why a click would NOT opens on that click, in a small note
   // anchored to the check, and shuts on a second one.
+  const listInfo = hasVoterInfo && clickable ? (
+    <button
+      ref={listInfoRef}
+      type="button"
+      data-testid="audio-validation-list-info"
+      aria-label={t("common.aboutAria", { name: t("editor.audioValidation.validatedBy") })}
+      aria-expanded={popoverOpen}
+      onClick={(e) => {
+        e.stopPropagation()
+        setPopoverOpen((o) => !o)
+      }}
+      className="inline-flex rounded-sm p-0.5 text-muted-foreground/70 hover:text-foreground"
+    >
+      <Info className="h-3 w-3" aria-hidden="true" />
+    </button>
+  ) : null
   const wrapped = hasVoterInfo
-    ? <Fragment key="list">{body}</Fragment>
+    ? <Fragment key="list">{body}{listInfo}</Fragment>
     : clickable
       ? (
           <AppTooltip key="tooltip" content={tooltip}>
@@ -559,7 +581,7 @@ export function AudioValidationControl({
         )
   if (variant === "inline") return wrapped
   return (
-    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">
+    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 flex-col items-center pt-1">
       {wrapped}
     </div>
   )

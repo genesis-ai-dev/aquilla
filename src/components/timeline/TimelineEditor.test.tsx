@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -1436,6 +1436,26 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
     // The take starts where the pause ends.
     expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
+  // what it is on a click of it.
+  it("the pause before a take says what it is on a click, not a hover", async () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
   })
 
   // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
@@ -5462,5 +5482,29 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
     expect(screen.getByTestId("tl-track-hide")).toHaveAttribute("data-disabled")
     fireEvent.pointerUp(window)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("TimelineEditor — the toolbar's hovers only name its icons", () => {
+  it("the quality toggle's hover names it, without the explanation", async () => {
+    renderWithTooltips(
+      <TimelineEditor fileId="q1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]} onRetimeSubtitle={() => {}} />,
+    )
+    await expectTooltip(screen.getByTestId("tl-quality-toggle"), "Play generated voices at original quality")
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/Toggle for|larger downloads/)
+  })
+
+  it("Measure now has no hover; what it does is behind its (i)", async () => {
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="m1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]}
+        onRetimeSubtitle={() => {}} legacyMeasure={{ count: 2, onMeasure: vi.fn() }}
+      />,
+    )
+    await userEvent.setup().hover(screen.getByTestId("tl-measure-run"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Measure now" }), "Nothing else about the takes changes")
   })
 })

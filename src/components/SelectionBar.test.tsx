@@ -5,8 +5,22 @@
  * CommentsDrawer AQU-427 role-gating test pattern.
  */
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips, expectTooltip, expectDisabledNote } from "@/test-utils/tooltip"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
+
+/** AQU-2260 (Sam, Oct 29): a text button carries its own words, so no hover. */
+async function expectNoHover(el: Element) {
+  await userEvent.setup().hover(el)
+  await act(() => new Promise((r) => setTimeout(r, 30)))
+  expect(screen.queryByRole("tooltip")).toBeNull()
+}
+
+/** The (i) beside a button, opened on a click; returns its note's text. */
+async function noteBeside(name: string, text: string | RegExp): Promise<string> {
+  await expectClickNote(screen.getByRole("button", { name: `About ${name}` }), text)
+  return [...document.querySelectorAll('[data-slot="popover-content"]')].map((n) => n.textContent ?? "").join(" ")
+}
 import { SelectionBar } from "./SelectionBar"
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -270,7 +284,8 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     renderBar(makeProject(ROLE.CONTRIBUTOR), [makeCell({ id: "cell-1", translated: "bonjour" })])
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    await expectTooltip(btn, "Validate 1 cell")
+    // AQU-2260: "Validate 1 cell" only restated the button; it has no hover.
+    await expectNoHover(btn)
     vi.restoreAllMocks()
   })
 
@@ -341,7 +356,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     const btn = validateButton()
     expect(btn).toBeEnabled()
     expect(btn).toHaveTextContent(/Validate text\s*5/)
-    await expectTooltip(btn, "Validate 5 cells")
+    await expectNoHover(btn)
     fireEvent.click(btn)
     expect(emitCellValidate).toHaveBeenCalledTimes(5)
     vi.restoreAllMocks()
@@ -487,7 +502,8 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
 
   // Sam, 2026-10-03: a badge of 3 on ten selected lines explained the other
   // seven only in the toast after the click.
-  it("says on hover which lines a partial run signs off and why it leaves the rest", async () => {
+  // AQU-2260: behind the (i) beside the button, on a click, never a hover.
+  it("says behind its (i) which lines a partial run signs off and why it leaves the rest", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(
       new Set(["ok-1", "ok-2", "mine", "empty"]),
     )
@@ -498,8 +514,9 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "empty", context: "B8", translated: "" }),
     ])
     const btn = screen.getByRole("button", { name: /^Validate text/i })
-    await expectTooltip(btn, "Validate 2 of 4 selected cells: B4 and B5")
-    await expectTooltip(btn, /2 will be skipped — .*still needs? a translation.*already validated/i)
+    await expectNoHover(btn)
+    const note = await noteBeside("Validate text", "Validate 2 of 4 selected cells: B4 and B5")
+    expect(note).toMatch(/2 will be skipped — .*still needs? a translation.*already validated/i)
     vi.restoreAllMocks()
   })
 
@@ -510,10 +527,7 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       ...ids.map((id, i) => makeCell({ id, context: `L${i + 1}`, translated: `t${i}` })),
       makeCell({ id: "mine", context: "D1", translated: "deja", activeValidators: ["alice"] }),
     ])
-    await expectTooltip(
-      screen.getByRole("button", { name: /^Validate text/i }),
-      "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more",
-    )
+    await noteBeside("Validate text", "Validate 10 of 11 selected cells: L1, L2, L3, L4, L5, L6, L7, and 3 more")
     vi.restoreAllMocks()
   })
 
@@ -524,10 +538,9 @@ describe("SelectionBar — bulk Validate reports what it skipped (AQU-1503)", ()
       makeCell({ id: "ok-2", context: "", group: "", translated: "salut" }),
       makeCell({ id: "mine", context: "B7", translated: "deja", activeValidators: ["alice"] }),
     ])
-    const btn = screen.getByRole("button", { name: /^Validate text/i })
     // …so they go by the table's # column instead: their place in the file.
-    await expectTooltip(btn, "Validate 2 of 3 selected cells: rows 1 and 2")
-    expect(screen.getByRole("tooltip").textContent).not.toContain("B4")
+    const note = await noteBeside("Validate text", "Validate 2 of 3 selected cells: rows 1 and 2")
+    expect(note).not.toContain("B4")
     vi.restoreAllMocks()
   })
 
@@ -982,7 +995,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     ])
     const btn = validateButton()
     expect(btn).toBeEnabled()
-    await expectTooltip(btn, "Validate 1 of 2 selected cells")
+    await noteBeside("Validate text", "Validate 1 of 2 selected cells")
     fireEvent.click(btn)
     expect(vi.mocked(emitCellValidate).mock.calls.map(([input]) => input.cellId)).toEqual(["their-draft"])
     vi.restoreAllMocks()
@@ -1157,6 +1170,53 @@ describe("selection bar — generate voice (AQU-1722)", () => {
 
     // "2 lines · about 3 words · about N cr" — the scope and cost up front.
     expect(await screen.findByText(/2 lines · about 3 words/i)).toBeTruthy()
+    vi.restoreAllMocks()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The bar's
+// text buttons have none; the two voice batches, which are easy to confuse,
+// say how they differ behind an (i) each.
+describe("SelectionBar — no hover on text buttons (AQU-2260)", () => {
+  const translated = [
+    makeCell({ id: "cell-1", translated: "bonjour" }),
+    makeCell({ id: "cell-2", translated: "le monde" }),
+  ]
+
+  it("Voice together and Generate voice say how they differ behind their (i)s", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), translated, [], "", { audioMode: true, onVoiceTogether: vi.fn() })
+    await expectNoHover(screen.getByRole("button", { name: /^Voice together/i }))
+    await expectNoHover(screen.getByRole("button", { name: /^Generate voice/i }))
+    await noteBeside("Voice together", "Voice 2 lines as one clip")
+    await noteBeside("Generate voice", "Generate a take for each of 2 selected lines, in one voice")
+    vi.restoreAllMocks()
+  })
+
+  it("Translate, Remove my validations and Harmonize have no hover", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(
+      makeProject(ROLE.PROJECT_LEAD),
+      [makeCell({ id: "cell-1", translated: "bonjour", activeValidators: ["alice"] }), makeCell({ id: "cell-2", translated: "" })],
+      [], "", { onHarmonize: vi.fn(), canHarmonize: true },
+    )
+    await expectNoHover(screen.getByRole("button", { name: /^Translate/i }))
+    await expectNoHover(screen.getByRole("button", { name: /^Remove my text validations/i }))
+    await expectNoHover(screen.getByTestId("selection-harmonize-btn"))
+    vi.restoreAllMocks()
+  })
+
+  it("Validate audio and its opposite have no hover", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap({ validatorCount: 1, validators: ["alice"] }) })
+    await expectNoHover(screen.getByRole("button", { name: /^remove my audio validations/i }))
+    vi.restoreAllMocks()
+  })
+
+  it("Validate audio has no hover when it is open", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
+    await expectNoHover(screen.getByRole("button", { name: /^validate audio/i }))
     vi.restoreAllMocks()
   })
 })

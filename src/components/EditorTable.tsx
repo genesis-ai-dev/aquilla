@@ -185,6 +185,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -615,8 +616,10 @@ function SynthStatusBadge({
       : pct != null
         ? t("editor.tts.loadingVoiceModelPct", { percent: pct })
         : t("editor.tts.loadingVoiceModel")
+    // What a wordless gutter mark means opens on a click of it, never a
+    // hover (AQU-2260).
     return (
-      <AppTooltip content={tooltip}>
+      <NoteOnClick note={tooltip} side="right">
         <span
           role="img"
           aria-label={tooltip}
@@ -625,12 +628,12 @@ function SynthStatusBadge({
         >
           <Spinner className="h-3 w-3" />
         </span>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
   if (status.kind === "synthesizing") {
     return (
-      <AppTooltip content={t("editor.tts.generatingAudio")}>
+      <NoteOnClick note={t("editor.tts.generatingAudio")} side="right">
         <span
           role="img"
           aria-label={t("editor.tts.generatingAudio")}
@@ -639,7 +642,7 @@ function SynthStatusBadge({
         >
           <Spinner className="h-3 w-3" />
         </span>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
   if (status.kind === "error") {
@@ -679,7 +682,7 @@ function SynthStatusBadge({
     // A4: dismissed — muted badge, no popover. Still communicates "not voiced".
     if (dismissed) {
       return (
-        <AppTooltip content={t("editor.tts.failedTooltip")}>
+        <NoteOnClick note={t("editor.tts.failedTooltip")} side="right">
           <span
             role="img"
             aria-label={t("editor.tts.notVoiced")}
@@ -688,7 +691,7 @@ function SynthStatusBadge({
           >
             <MicOff className="h-3 w-3" />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )
     }
 
@@ -7559,12 +7562,12 @@ function EditorRow({
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size. The tooltip is only there when the
-    // tint means something — a clean line stays a plain number.
-    <AppTooltip
-      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+    // happens to line up at one size. The note is only there when the tint
+    // means something — a clean line stays a plain number. It opens on a
+    // click of the number, never a hover (AQU-2260).
+    <NoteOnClick
+      note={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
       side="right"
-      className="max-w-xs"
     >
       <span
         className="flex items-center justify-center leading-none"
@@ -7579,7 +7582,7 @@ function EditorRow({
           tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
         />
       </span>
-    </AppTooltip>
+    </NoteOnClick>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -8314,10 +8317,7 @@ function EditorRow({
                   />
                 )}
                 {showFormattingLossWarning && (
-                  <AppTooltip
-                    content={t("editor.source.formattingLossTooltip")}
-                    className="max-w-xs"
-                  >
+                  <NoteOnClick note={t("editor.source.formattingLossTooltip")} side="right">
                     <span
                       role="img"
                       aria-label={t("editor.source.formattingLossTooltip")}
@@ -8329,7 +8329,7 @@ function EditorRow({
                     >
                       <Bold className="h-3 w-3" />
                     </span>
-                  </AppTooltip>
+                  </NoteOnClick>
                 )}
                 {((isSynthBusy && !audioLens) || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
@@ -8569,30 +8569,32 @@ function EditorRow({
                   on the SOURCE line because that is what repeats — the badge
                   answers "you will meet this string N times", which is what
                   makes auto-propagation predictable rather than surprising. */}
+              {/* What the mark means opens on a click of it (AQU-2260). */}
               {typeof repetitionCount === "number" && repetitionCount > 1 && (
-                <AppTooltip content={t("editor.repetition.tooltip", { count: repetitionCount })}>
+                <NoteOnClick note={t("editor.repetition.tooltip", { count: repetitionCount })} className="shrink-0">
                   <span
                     data-testid="source-repetition-count"
                     className="shrink-0 rounded-sm bg-muted px-1 font-medium tabular-nums"
                   >
                     {t("editor.repetition.badge", { count: repetitionCount })}
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               )}
               {/* AQU-1422: the eye-off badge. Only ever rendered on a row that
                   reached the table while parked, which only happens for a
                   source editor with "Show hidden cells" on — so it needs no
                   permission check of its own. */}
               {cellHidden && (
-                <AppTooltip content={t("editor.row.hiddenBadgeTooltip")}>
+                <NoteOnClick note={t("editor.row.hiddenBadgeTooltip")} className="shrink-0">
                   <span
+                    role="img"
                     data-testid="source-cell-hidden-badge"
                     aria-label={t("editor.row.hiddenBadgeAria")}
                     className="flex shrink-0 items-center"
                   >
                     <EyeOff className="h-3.5 w-3.5" />
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               )}
               <SourceTagChips metadata={cell.metadata} />
               <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />

@@ -14,6 +14,7 @@ import {
 } from "./AudioValidationControl"
 import { lineState, takeState } from "./audio-validation-state"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
 const take = (over: Partial<AudioValidationTake> & { audioId: string }): AudioValidationTake => ({
   label: null,
@@ -83,16 +84,19 @@ describe("takeState / lineState", () => {
 
 describe("the readout", () => {
   // Sam, 2026-09-23: a line with nothing recorded draws a FADED mic that
-  // does nothing, so the gutter column is full on every row. (Replaces the
-  // empty slot of 2026-09-21.) Not a button: no tab stop, no click.
-  it("draws a faded, unclickable mic on a line with no recording", () => {
-    draw([])
+  // casts no vote, so the gutter column is full on every row. (Replaces the
+  // empty slot of 2026-09-21.) AQU-2260 (Oct 29): why it is faded opens on a
+  // click, never a hover.
+  it("draws a faded mic on a line with no recording, which says why on a click", async () => {
+    const { onValidationChange } = draw([])
     expect(button()).toBeNull()
     const faded = screen.getByTestId("audio-validation-unavailable")
     expect(faded.tagName).toBe("SPAN")
     expect(faded).toHaveAccessibleName(/no audio to validate/i)
     expect(faded.className).toContain("opacity-40")
     expect(faded.querySelector("svg")).not.toBeNull()
+    await expectClickNote(faded, "No audio to validate")
+    expect(onValidationChange).not.toHaveBeenCalled()
   })
 
   it("draws nothing inline for a line with no recording", () => {
@@ -112,6 +116,11 @@ describe("the readout", () => {
     expect(placeholder.tagName).toBe("SPAN")
     expect(placeholder).toHaveAccessibleName(/checking for audio/i)
     expect(placeholder.querySelector("[data-slot=skeleton]")).not.toBeNull()
+  })
+
+  it("says what the placeholder waits for on a click, never a hover (AQU-2260)", async () => {
+    draw([], { checking: true })
+    await expectClickNote(screen.getByTestId("audio-validation-checking"), "Checking for audio")
   })
 
   it("holds the placeholder even over takes it already knows, so no count changes under it", () => {
@@ -371,10 +380,11 @@ describe("the hover matches the text control", () => {
   })
 
   // The why-not was unreachable before: the popover always won.
+  // AQU-2260 (Oct 29): on a click, in a note anchored to it — never a hover.
   it("an untouched line I recorded says why I cannot validate it", async () => {
-    draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
-    await userEvent.hover(button()!)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("You recorded this")
+    const { onValidationChange } = draw([take({ audioId: "a", canValidate: false, blockedReason: "You recorded this" })])
+    await expectDisabledNote(button()!, "You recorded this")
+    expect(onValidationChange).not.toHaveBeenCalled()
   })
 
   it("once somebody has voted, the hover is the Audio validated by list", async () => {
@@ -512,10 +522,10 @@ describe("read-only", () => {
     expect(onValidationChange).not.toHaveBeenCalled()
   })
 
-  it("says why there is nothing to click on a take nobody has validated", async () => {
+  it("says why there is nothing to vote on a take nobody has validated, on a click", async () => {
     draw([take({ audioId: "a" })], { readOnly: true })
-    await userEvent.hover(button()!)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    await expectDisabledNote(
+      button()!,
       "Nobody has validated this take. Only the take that plays for the line can be validated.",
     )
   })

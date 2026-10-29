@@ -4,6 +4,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
+import { NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
@@ -370,19 +371,20 @@ export function AudioValidationControl({
   // every line said "No audio to validate" for seconds, then changed its
   // mind). The app's skeleton pulse holds the slot: no click, no tab stop,
   // and a hover that says what it is waiting for.
+  // AQU-2260 (Sam, Oct 29): what it waits for opens on a click, never a hover.
   if (checking && variant === "gutter") {
     return (
       <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip key="checking" content={t("editor.audioValidation.checkingTooltip")}>
+        <NoteOnClick key="checking" note={t("editor.audioValidation.checkingTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="audio-validation-checking"
             aria-label={t("editor.audioValidation.ariaChecking", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center"
+            className="flex h-6 w-6 items-center justify-center"
           >
             <Skeleton className="size-3.5 rounded-full" />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </div>
     )
   }
@@ -391,16 +393,16 @@ export function AudioValidationControl({
     if (variant === "inline") return null
     return (
       <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
+        <NoteOnClick key="unavailable" note={t("editor.audioValidation.noAudioTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="audio-validation-unavailable"
             aria-label={t("editor.audioValidation.ariaNoAudio", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+            className="flex h-6 w-6 items-center justify-center text-muted-foreground/30 opacity-40"
           >
             <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </div>
     )
   }
@@ -528,13 +530,33 @@ export function AudioValidationControl({
   // the span that has just been thrown away. The real button then never opened
   // its tooltip on hover (found in the browser, 2026-09-23: the button had no
   // mouseenter listener at all). A key makes each shape mount its own.
+  //
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. So the
+  // hover is kept only where a click validates ("Audio not validated — click
+  // to validate"); why a click would NOT opens on that click, in a small note
+  // anchored to the check, and shuts on a second one.
   const wrapped = hasVoterInfo
     ? <Fragment key="list">{body}</Fragment>
-    : (
-        <AppTooltip key="tooltip" content={tooltip}>
-          {renderButton(clickable ? validateAll : undefined)}
-        </AppTooltip>
-      )
+    : clickable
+      ? (
+          <AppTooltip key="tooltip" content={tooltip}>
+            {renderButton(validateAll)}
+          </AppTooltip>
+        )
+      : (
+          <Popover key="reason">
+            <PopoverTrigger render={renderButton(undefined)} />
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={6}
+              data-slot="disabled-reason-note"
+              className={NOTE_CONTENT_CLASS}
+            >
+              {tooltip}
+            </PopoverContent>
+          </Popover>
+        )
   if (variant === "inline") return wrapped
   return (
     <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">

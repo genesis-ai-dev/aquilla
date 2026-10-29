@@ -639,7 +639,8 @@ function NewVoiceModalBody({
             )}
             <div className="flex flex-wrap items-center gap-2">
               {onMakeDefault && !isDefault && (
-                <AppTooltip content={t("audio.newVoice.makeNarratorHint")}>
+                // The hover only names it (AQU-2260).
+                <AppTooltip content={t("audio.newVoice.makeNarratorButton")}>
                   <Button
                     type="button"
                     variant="outline"
@@ -910,12 +911,13 @@ function EngineGrid({
   active: TtsProvider
   onPick: (id: TtsProvider) => void
 }) {
-  const t = useT()
   return (
     <div className="grid grid-cols-2 gap-1.5">
+      {/* Each card shows its name, what it is and its catch in words: no
+          hover (AQU-2260). */}
       {infos.map((info) => (
-        <AppTooltip key={info.id} content={t(info.hintKey)} className="max-w-xs">
           <button
+            key={info.id}
             type="button"
             onClick={() => onPick(info.id)}
             aria-pressed={active === info.id}
@@ -933,7 +935,6 @@ function EngineGrid({
               <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground/70">{info.caveat}</p>
             )}
           </button>
-        </AppTooltip>
       ))}
     </div>
   )

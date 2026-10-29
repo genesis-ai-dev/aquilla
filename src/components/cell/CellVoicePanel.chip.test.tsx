@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectTooltip, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
 
 vi.mock("@/hooks/useCellAudio", () => ({
@@ -113,6 +113,13 @@ beforeEach(() => {
 })
 
 const row = () => document.querySelector("[data-slot=voice-card-row]") as HTMLElement
+
+/** AQU-2260: a control that carries its own words has no hover at all. */
+async function expectNoHover(el: Element) {
+  await userEvent.setup().hover(el)
+  await act(() => new Promise((r) => setTimeout(r, 30)))
+  expect(screen.queryByRole("tooltip")).toBeNull()
+}
 
 // Sam, 2026-09-28: the take, then a row under it with the line's voice, Generate
 // again, volume and clone. Validation lives in its column, not on the card.
@@ -331,10 +338,11 @@ describe("CellVoicePanel — the recorder, from a line with audio", () => {
   it("keeps the mic but refuses it, with the reason, where this browser can't record", async () => {
     const { onRecord } = draw({ recordUnavailable: "this browser has no MediaRecorder" })
     const mic = screen.getByTestId("voice-card-record")
-    expect(mic).toHaveAttribute("aria-disabled", "true")
+    expect(mic).toBeDisabled()
     fireEvent.click(mic)
     expect(onRecord).not.toHaveBeenCalled()
-    await expectTooltip(mic, "this browser has no MediaRecorder")
+    // AQU-2260: why, on a click.
+    await expectDisabledNote(mic, "this browser has no MediaRecorder")
   })
 })
 
@@ -350,7 +358,8 @@ describe("CellVoicePanel — the take's voice", () => {
     expect(pill()).toHaveAttribute("data-wave-overlay")
     const time = screen.getByText("0:00 / 0:10")
     expect(time.parentElement!.contains(pill())).toBe(true)
-    await expectTooltip(pill()!, "This take was voiced by Mary. The line’s voice is now John.")
+    // AQU-2260: on a click, never a hover.
+    await expectClickNote(pill()!, "This take was voiced by Mary. The line’s voice is now John.")
   })
 
   it("is not there when the take is in the line's voice", () => {
@@ -371,7 +380,7 @@ describe("CellVoicePanel — the take's voice", () => {
   it("says so when the take's voice was removed from the project", async () => {
     draw({ cell: { ...generated, attachments: { a1: { url: "blob:x", type: "audio/wav", voiceId: "v-gone" } } } as unknown as CellData })
     expect(pill()).toHaveTextContent("Removed voice")
-    await expectTooltip(pill()!, "This take was voiced by a voice no longer in the project. The line’s voice is now Mary.")
+    await expectClickNote(pill()!, "This take was voiced by a voice no longer in the project. The line’s voice is now Mary.")
   })
 
   it("turns blue on a file coloured amber", () => {
@@ -403,13 +412,15 @@ describe("CellVoicePanel — a line with no audio yet", () => {
     expect(slot().contains(screen.getByTestId("voice-card-record"))).toBe(true)
   })
 
-  it("offers Generate in the default voice, saying why on hover, and Record", async () => {
+  // AQU-2260 (Oct 29): Generate and Record carry their own words, so no hover.
+  it("offers Generate in the default voice and Record, with no hover on either", async () => {
     const { onRecord } = draw({ cell: empty })
     expect(slot()).toHaveAttribute("data-state", "ready")
     expect(slot().className).toContain("border-dashed")
     const generate = screen.getByTestId("voice-card-generate")
     expect(generate).toHaveTextContent("Generate · Mary")
-    await expectTooltip(generate, /uses the default voice/)
+    await expectNoHover(generate)
+    await expectNoHover(screen.getByTestId("voice-card-record"))
     fireEvent.click(screen.getByTestId("voice-card-record"))
     expect(onRecord).toHaveBeenCalledTimes(1)
   })
@@ -429,7 +440,7 @@ describe("CellVoicePanel — a line with no audio yet", () => {
     draw({ cell: { ...empty, translated: "" } as unknown as CellData })
     expect(slot()).toHaveAttribute("data-state", "notext")
     expect(screen.getByTestId("voice-card-generate")).toBeDisabled()
-    await expectTooltip(screen.getByTestId("voice-card-generate").parentElement!, /translate the line first/)
+    await expectDisabledNote(screen.getByTestId("voice-card-generate"), /translate the line first/)
     expect(screen.getByTestId("voice-card-record")).toBeEnabled()
   })
 
@@ -441,13 +452,15 @@ describe("CellVoicePanel — a line with no audio yet", () => {
     expect(screen.getByTestId("voice-card-record")).toBeEnabled()
   })
 
-  it("after a failure, offers Try again with the reason on hover", async () => {
+  // AQU-2260: the reason is behind the (i) beside it, on a click.
+  it("after a failure, offers Try again with the reason behind its (i)", async () => {
     setTtsStatus(ttsStatusKey("cell-1"), { kind: "error", message: "no voice engine is set up" })
     draw({ cell: empty })
     expect(slot()).toHaveAttribute("data-state", "failed")
     const retry = screen.getByTestId("voice-card-retry")
     expect(retry).toHaveTextContent("Try again")
-    await expectTooltip(retry, "Couldn’t generate: no voice engine is set up")
+    await expectNoHover(retry)
+    await expectClickNote(screen.getByRole("button", { name: "About Try again" }), "Couldn’t generate: no voice engine is set up")
     await act(async () => { fireEvent.click(retry) })
     expect(generateCellVoice).toHaveBeenCalledTimes(1)
   })
@@ -464,10 +477,10 @@ describe("CellVoicePanel — a line with no audio yet", () => {
   it("keeps Record but refuses it, with the reason, where this browser can't record", async () => {
     const { onRecord } = draw({ cell: empty, recordUnavailable: "this browser has no MediaRecorder" })
     const record = screen.getByTestId("voice-card-record")
-    expect(record).toHaveAttribute("aria-disabled", "true")
+    expect(record).toBeDisabled()
     fireEvent.click(record)
     expect(onRecord).not.toHaveBeenCalled()
-    await expectTooltip(record, "this browser has no MediaRecorder")
+    await expectDisabledNote(record, "this browser has no MediaRecorder")
   })
 })
 

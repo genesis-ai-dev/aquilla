@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { TargetValidationControl } from "./TargetValidationControl"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
+import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
 function renderControl(activeValidators: string[], onValidationChange = vi.fn()) {
   return render(
@@ -64,7 +65,8 @@ describe("TargetValidationControl", () => {
 
   // Sam, 2026-09-23: a line with no text draws a FADED circle that does
   // nothing, instead of an empty slot, so the gutter is full on every row.
-  it("draws a faded, unclickable circle when there is no text", () => {
+  // AQU-2260 (Oct 29): why it is faded opens on a click, never a hover.
+  it("draws a faded circle when there is no text, which says why on a click and casts nothing", async () => {
     const onValidationChange = vi.fn()
     render(
       <TargetValidationControl
@@ -80,10 +82,10 @@ describe("TargetValidationControl", () => {
         onValidationChange={onValidationChange}
       />,
     )
-    expect(screen.queryByRole("button")).toBeNull()
+    expect(document.querySelector('[data-showcase="cell.validation"]')).toBeNull()
     const faded = screen.getByTestId("validation-unavailable")
     expect(faded).toHaveAccessibleName(/no text to validate/i)
-    fireEvent.click(faded)
+    await expectClickNote(faded, "No text to validate")
     expect(onValidationChange).not.toHaveBeenCalled()
   })
 
@@ -119,14 +121,6 @@ describe("TargetValidationControl", () => {
   // AQU-1571: the project's own text rules, mirrored so a vote the server is
   // about to refuse is never sent — and the reader is told why.
   describe("when the project's text rules refuse the vote", () => {
-    const hover = async () => {
-      const button = screen.getByRole("button")
-      fireEvent.mouseEnter(button)
-      fireEvent.pointerEnter(button)
-      fireEvent.focus(button)
-      return screen.findByRole("tooltip")
-    }
-
     it("says the reader made the latest change, and a click sends nothing", async () => {
       const onValidationChange = vi.fn()
       render(
@@ -138,10 +132,11 @@ describe("TargetValidationControl", () => {
         />,
       )
       expect(screen.getByRole("button")).toHaveAttribute("aria-disabled", "true")
-      expect(await hover()).toHaveTextContent(
+      // AQU-2260 (Oct 29): on a click, never a hover.
+      await expectDisabledNote(
+        screen.getByRole("button"),
         "You made the latest change to this text, so someone else must validate it",
       )
-      fireEvent.click(screen.getByRole("button"))
       expect(onValidationChange).not.toHaveBeenCalled()
     })
 
@@ -172,7 +167,7 @@ describe("TargetValidationControl", () => {
           canValidate canValidateThisCell={false} blockedReason="policy" onValidationChange={vi.fn()}
         />,
       )
-      expect(await hover()).toHaveTextContent("Text validation unavailable")
+      await expectDisabledNote(screen.getByRole("button"), "Text validation unavailable")
     })
 
     // The server never gates taking your own vote back.

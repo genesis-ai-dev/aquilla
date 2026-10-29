@@ -4224,15 +4224,10 @@ export function TimelineEditor({
         )}
         <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
-              playback; fast connections can opt into the original WAV. Mic
-              recordings have no lossless form — the tooltip says so. */}
-          <AppTooltip
-            content={
-              audioQuality === "original"
-                ? t("editor.timeline.qualityOriginalTooltip")
-                : t("editor.timeline.qualityCompressedTooltip")
-            }
-          >
+              playback; fast connections can opt into the original WAV.
+              AQU-2260: the hover only names it; it shows its state by its
+              tint (aria-pressed). */}
+          <AppTooltip content={t("editor.timeline.qualityToggleAria")}>
             <button
               type="button"
               aria-label={t("editor.timeline.qualityToggleAria")}
@@ -4611,13 +4606,15 @@ export function TimelineEditor({
           <span className="min-w-0 flex-1">
             {t("editor.timeline.measureNote", { count: legacyMeasure.count })}
           </span>
+          {/* Its words name it; why it is greyed out opens on a click on it,
+              and what it does is behind the (i) beside it (AQU-2260). */}
           <AppTooltip
             content={
               !online
                 ? t("editor.timeline.measureOfflineTooltip")
                 : batchProgress != null
                   ? t("editor.timeline.measureBusyTooltip")
-                  : t("editor.timeline.measureTooltip")
+                  : null
             }
           >
             <button
@@ -4630,6 +4627,9 @@ export function TimelineEditor({
               {t("editor.timeline.measureNow")}
             </button>
           </AppTooltip>
+          <InfoNote label={t("common.aboutAria", { name: t("editor.timeline.measureNow") })} align="end">
+            {t("editor.timeline.measureTooltip")}
+          </InfoNote>
           <button
             type="button"
             aria-label={t("editor.timeline.measureDismiss")}

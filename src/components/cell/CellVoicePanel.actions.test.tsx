@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -238,6 +238,11 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     renderPanel(converted, "v-anna")
     const dialog = await openChangeVoice(userEvent.setup())
     expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeDisabled()
+    // AQU-2260: why, on a click.
+    await expectDisabledNote(
+      within(dialog).getByRole("button", { name: "Change voice" }),
+      "This take is already in Anna's voice",
+    )
   })
 
   it("offers Change voice again when the clone's reference clip changes", async () => {
@@ -334,5 +339,46 @@ describe("CellVoicePanel in an Audio language", () => {
     renderPanel(recorded, "v-anna", vi.fn(), vi.fn(), false)
     expect(screen.queryByRole("button", { name: "Generate audio from text" })).toBeNull()
     expect(screen.getByTestId("voice-card-change-voice")).toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. In the
+// Change voice popover there is room, so what each part does opens in place,
+// under it, on a click of its (i).
+describe("CellVoicePanel — Change voice explains itself in place", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetChangeVoiceQualityCacheForTests()
+  })
+
+  function expectInPlace(button: HTMLElement, text: string | RegExp) {
+    const reveal = document.getElementById(button.getAttribute("aria-controls") ?? "")
+    expect(reveal).not.toBeNull()
+    expect(reveal).toHaveAttribute("data-open", "false")
+    fireEvent.click(button)
+    expect(reveal).toHaveAttribute("data-open", "true")
+    expect(reveal).toHaveTextContent(text)
+    fireEvent.click(button)
+    expect(reveal).toHaveAttribute("data-open", "false")
+  }
+
+  it("the Change voice button has no hover; what it keeps opens under it", async () => {
+    const user = userEvent.setup()
+    renderPanel(recorded, "v-anna")
+    const dialog = await openChangeVoice(user)
+    await user.hover(within(dialog).getByRole("button", { name: "Change voice" }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expectInPlace(within(dialog).getByRole("button", { name: "About Change voice" }), "Keep the words and timing, swap to Anna")
+  })
+
+  it("what Quality means opens under it, not on a hover", async () => {
+    const user = userEvent.setup()
+    renderPanel(recorded, "v-anna")
+    const dialog = await openChangeVoice(user)
+    await user.hover(within(dialog).getByRole("combobox", { name: "Quality" }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expectInPlace(within(dialog).getByRole("button", { name: "About Quality" }), "How closely the converted take matches the voice")
   })
 })

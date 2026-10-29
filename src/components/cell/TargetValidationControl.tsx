@@ -4,6 +4,7 @@ import type { EditValidationSummary, ValidationStatus } from "@/hooks/useCells"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -318,32 +319,45 @@ export function TargetValidationControl({
               </PopoverContent>
             )}
           </Popover>
-        ) : (
+        ) : canValidateThisCell && !isSelfValidated ? (
+          // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button,
+          // so it stays only where a click validates. Why a click would not
+          // opens on that click, in a note anchored to the check.
           <AppTooltip key="tooltip" content={tooltip}>
-            {renderButton(canValidateThisCell && !isSelfValidated
-              ? () => changeValidation(true)
-              : undefined)}
+            {renderButton(() => changeValidation(true))}
           </AppTooltip>
+        ) : (
+          <Popover key="reason">
+            <PopoverTrigger render={renderButton(undefined)} />
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={6}
+              data-slot="disabled-reason-note"
+              className={NOTE_CONTENT_CLASS}
+            >
+              {tooltip}
+            </PopoverContent>
+          </Popover>
         )
       ) : (
         // Nothing to validate: a line with no text. Drawn FADED rather than
         // left blank (Sam, 2026-09-23), so both gutter columns read full on
         // every row and "nothing here" looks different from "not validated
-        // yet". A span, not a disabled button — it is no tab stop, and unlike a
-        // disabled button it still takes the hover that explains itself.
+        // yet". Why it is faded opens on a click of it, never a hover
+        // (AQU-2260, Sam, Oct 29); a click casts nothing.
         // Keyed, like every branch here: React would otherwise reuse this
-        // tooltip for the real button when text arrives, and Base UI's hover
-        // listeners stay on the discarded span (see AudioValidationControl).
-        <AppTooltip key="unavailable" content={t("editor.validation.noContentTooltip")}>
+        // shape for the real button when text arrives.
+        <NoteOnClick key="unavailable" note={t("editor.validation.noContentTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="validation-unavailable"
             aria-label={t("editor.validation.ariaNoContent", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+            className="flex h-6 w-6 items-center justify-center text-muted-foreground/30 opacity-40"
           >
             <Circle className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )}
     </div>
   )

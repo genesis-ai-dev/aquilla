@@ -79,10 +79,14 @@ export function NoteOnClick({
   className,
   side = "bottom",
   align = "center",
+  tabStop = true,
 }: {
   note: ReactNode
   /** The mark itself (a badge, an icon, a short label). */
   children: ReactNode
+  /** False for a mark repeated on every row, which must not add a Tab stop
+   *  to each (a click still opens it). */
+  tabStop?: boolean
   /** Accessible name when the mark's own text does not say enough. */
   label?: string
   testId?: string
@@ -100,6 +104,7 @@ export function NoteOnClick({
             aria-label={label}
             data-testid={testId}
             data-slot="note-on-click"
+            tabIndex={tabStop ? undefined : -1}
             className={cn(
               "inline-flex min-w-0 cursor-pointer items-center rounded-sm text-start outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
               className,

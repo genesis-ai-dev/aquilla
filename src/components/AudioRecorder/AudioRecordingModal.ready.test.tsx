@@ -103,7 +103,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
@@ -199,7 +199,7 @@ describe("the selected take, before recording", () => {
     )
     const icon = screen.getByTestId("rec-no-window")
     expect(screen.getByTestId("rec-ready-take").contains(icon)).toBe(true)
-    await expectTooltip(icon, "This line has no timed window.")
+    await expectClickNote(icon, "This line has no timed window.")
     expect(screen.queryByText("This line has no timed window.", { selector: "p" })).toBeNull()
     expect(screen.getByTestId("rec-ready-waveform").style.height).toBe("40px")
   })

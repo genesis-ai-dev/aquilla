@@ -35,6 +35,8 @@ import {
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
@@ -1833,16 +1835,27 @@ export function TargetAudioLane({
           </div>
         )
       })}
+      {/* What the pause is opens on a click of it, never a hover (AQU-2260).
+          The press stops here, so it never seeks the lane under it. */}
       {leadGaps.map(({ cellId, leftPx, widthPx }) => (
-        <AppTooltip key={`lead-${cellId}`} content={t("editor.timeline.takeLeadPause")}>
-          <div
-            role="img"
-            aria-label={t("editor.timeline.takeLeadPause")}
-            data-testid={`tl-target-lead-${cellId}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
+        <Popover key={`lead-${cellId}`}>
+          <PopoverTrigger
+            nativeButton={false}
+            render={
+              <div
+                aria-label={t("editor.timeline.takeLeadPause")}
+                data-testid={`tl-target-lead-${cellId}`}
+                style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer border border-border/60 bg-muted/50`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              />
+            }
           />
-        </AppTooltip>
+          <PopoverContent sideOffset={6} className={NOTE_CONTENT_CLASS}>
+            {t("editor.timeline.takeLeadPause")}
+          </PopoverContent>
+        </Popover>
       ))}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div

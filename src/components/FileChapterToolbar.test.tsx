@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import userEvent from "@testing-library/user-event"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 
@@ -346,6 +348,26 @@ describe("FileChapterToolbar hidden-cell indicator (AQU-1422)", () => {
 
     await userEvent.click(btn)
     expect(onRevealedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+  // indicator carries its own words; what hiding does is behind the (i)
+  // beside it, on a click.
+  it("has no hover, and says what hiding does behind its (i)", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <FileChapterToolbar
+          {...base}
+          hiddenCells={{ count: 3, revealed: false, onRevealedChange: vi.fn() }}
+        />
+      </TooltipProvider>,
+    )
+    const btn = screen.getByTestId("hidden-cells-indicator")
+    expect(btn).not.toHaveAttribute("title")
+    await userEvent.setup().hover(btn)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About 3 hidden" }), "Nothing was deleted")
   })
 
   it("keeps the count singular-correct", () => {

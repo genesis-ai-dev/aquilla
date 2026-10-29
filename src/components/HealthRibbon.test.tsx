@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
 import { HealthRibbon } from "./HealthRibbon"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 describe("HealthRibbon", () => {
   it("keeps issue information accessible without drawing warning dashes or a split focus ring", () => {
@@ -54,10 +55,22 @@ describe("HealthRibbon", () => {
     expect(ribbon).toHaveAccessibleName(/Number integrity — Number from source missing in translation/)
     expect(ribbon).not.toHaveAccessibleName(/automatic issue/i)
 
-    fireEvent.focus(ribbon)
-    const tip = await screen.findByRole("tooltip")
-    expect(tip).toHaveTextContent("End punctuation — Terminal punctuation differs from source")
-    expect(tip).toHaveTextContent("Number integrity — Number from source missing in translation")
-    expect(tip).not.toHaveTextContent(/automatic issue/i)
+    // AQU-2260 (Sam, Oct 29): on a click, in a note anchored to it, never a
+    // hover.
+    await expectClickNote(ribbon, "End punctuation — Terminal punctuation differs from source")
+    const note = document.querySelector('[data-slot="popover-content"]')!
+    expect(note).toHaveTextContent("Number integrity — Number from source missing in translation")
+    expect(note).not.toHaveTextContent(/automatic issue/i)
+  })
+
+  it("says what its colour means on a click, and the click goes no further", async () => {
+    const onRow = vi.fn()
+    render(
+      <div onClick={onRow}>
+        <HealthRibbon point={{ id: "cell-1", stage: "automatic", rawScore: 20, smoothedScore: 25, evidenceWeight: 1 }} />
+      </div>,
+    )
+    await expectClickNote(screen.getByTestId("health-ribbon"), "Automatic estimate 20%")
+    expect(onRow).not.toHaveBeenCalled()
   })
 })

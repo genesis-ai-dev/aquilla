@@ -48,6 +48,8 @@ import { AudioLines, CircleAlert, Mic, Sparkles, Volume2, VolumeX, Wand2 } from 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
+import { InfoLabel } from "@/components/ui/info-label"
 import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import { WAVE_OVERLAY_CLASS } from "@/components/audio/chip-classes"
 import { TakeTimeReadout } from "@/components/audio/TakeTimeReadout"
@@ -158,6 +160,9 @@ export interface CellVoicePickerContext {
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
 
+/** The focus ring a greyed-out text button's click stand-in shows (AQU-2260). */
+const STAND_IN_FOCUS_CLASS = "rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+
 /** Volume, with its slider in a popover. */
 function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
   const t = useT()
@@ -209,6 +214,7 @@ function ChangeVoiceButton({
   qualityDisabled,
   quality,
   reason,
+  explain,
   onChange,
   onQuality,
 }: {
@@ -217,7 +223,10 @@ function ChangeVoiceButton({
   triggerDisabled: boolean
   qualityDisabled: boolean
   quality: (typeof CHANGE_VOICE_QUALITIES)[number]
-  reason: string
+  /** Why it cannot change this take, when it cannot. */
+  reason: string | null
+  /** What Change voice does, opened in place under it (AQU-2260). */
+  explain: string
   onChange: () => void
   onQuality: (quality: (typeof CHANGE_VOICE_QUALITIES)[number]) => void
 }) {
@@ -247,23 +256,40 @@ function ChangeVoiceButton({
           <AudioLines className="h-3.5 w-3.5" />
         </PopoverTrigger>
       </AppTooltip>
+      {/* AQU-2260 (Sam, Oct 29): nothing explains itself on hover. There is
+          room here, so what Change voice keeps and what Quality means open in
+          place, under each, on a click of its (i). Why Change voice is greyed
+          out opens on a click on it. */}
       <PopoverContent align="start" side="bottom" className="w-44">
-        <AppTooltip content={reason} disabledTriggerClassName="w-full">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            className="w-full"
-            onClick={() => {
-              setOpen(false)
-              onChange()
-            }}
-          >
-            <AudioLines />
-            {label}
-          </Button>
-        </AppTooltip>
+        <InfoLabel
+          info={explain}
+          label={t("common.aboutAria", { name: label })}
+          rowClassName="gap-1"
+        >
+          <AppTooltip content={disabled ? reason : null} disabledTriggerClassName="min-w-0 flex-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              className="w-full min-w-0 flex-1"
+              onClick={() => {
+                setOpen(false)
+                onChange()
+              }}
+            >
+              <AudioLines />
+              {label}
+            </Button>
+          </AppTooltip>
+        </InfoLabel>
+        <InfoLabel
+          info={t("editor.voice.changeVoiceQualityTooltip")}
+          label={t("common.aboutAria", { name: t("editor.voice.changeVoiceQuality") })}
+          rowClassName="gap-1"
+        >
+          <span className="text-xs text-muted-foreground">{t("editor.voice.changeVoiceQuality")}</span>
+        </InfoLabel>
         <Select
           value={quality}
           disabled={qualityDisabled}
@@ -273,16 +299,14 @@ function ChangeVoiceButton({
             }
           }}
         >
-          <AppTooltip content={t("editor.voice.changeVoiceQualityTooltip")} disabledTriggerClassName="w-full">
-            <SelectTrigger
-              size="sm"
-              disabled={qualityDisabled}
-              aria-label={t("editor.voice.changeVoiceQuality")}
-              className="w-full!"
-            >
-              {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
-            </SelectTrigger>
-          </AppTooltip>
+          <SelectTrigger
+            size="sm"
+            disabled={qualityDisabled}
+            aria-label={t("editor.voice.changeVoiceQuality")}
+            className="w-full!"
+          >
+            {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
+          </SelectTrigger>
           <SelectContent align="start">
             <SelectGroup>
               {CHANGE_VOICE_QUALITIES.map((q) => (
@@ -569,6 +593,24 @@ export function CellVoicePanel({
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
 
+  // Why Generate cannot run offline: on a click on it, never a hover (AQU-2260).
+  const offlineReason = offlineGate.kind === "blocked" && offlineGate.suggestLocal
+    ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
+    : t("audio.tts.offlineBlocked", { engine: engineName })
+  // Try again says what it does; why the last run failed is behind the (i)
+  // beside it, on a click (AQU-2260).
+  const retryButton = (reason: string) => (
+    <span className="inline-flex items-center gap-0.5">
+      <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
+        <CircleAlert className="text-destructive" />
+        {t("editor.voice.tryAgain")}
+      </Button>
+      <InfoNote label={t("common.aboutAria", { name: t("editor.voice.tryAgain") })}>
+        {t("editor.voice.failedTooltip", { reason })}
+      </InfoNote>
+    </span>
+  )
+
   const trackInput = {
     files: project.files,
     fileId: cell.fileId,
@@ -626,43 +668,26 @@ export function CellVoicePanel({
           <>
             <span role="status" className="text-center text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
             {failure ? (
-              <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure })}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
-                  <CircleAlert className="text-destructive" />
-                  {t("editor.voice.tryAgain")}
-                </Button>
-              </AppTooltip>
+              retryButton(failure)
             ) : !canGenerate ? (
-              <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
-                <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
-                    <Sparkles />
-                    {t("editor.voice.generateWith", { voice: active.name })}
-                  </Button>
-                </span>
-              </AppTooltip>
-            ) : offlineGate.kind !== "ok" ? (
-              <AppTooltip
-                content={
-                  offlineGate.kind === "blocked" && offlineGate.suggestLocal
-                    ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
-                    : t("audio.tts.offlineBlocked", { engine: engineName })
-                }
-              >
-                <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
-                    <Sparkles />
-                    {t("editor.voice.generateWith", { voice: active.name })}
-                  </Button>
-                </span>
-              </AppTooltip>
-            ) : (
-              <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
+              <AppTooltip content={t("editor.voice.nothingToReadTooltip")} disabledTriggerClassName={STAND_IN_FOCUS_CLASS}>
+                <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
                   <Sparkles />
                   {t("editor.voice.generateWith", { voice: active.name })}
                 </Button>
               </AppTooltip>
+            ) : offlineGate.kind !== "ok" ? (
+              <AppTooltip content={offlineReason} disabledTriggerClassName={STAND_IN_FOCUS_CLASS}>
+                <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+                  <Sparkles />
+                  {t("editor.voice.generateWith", { voice: active.name })}
+                </Button>
+              </AppTooltip>
+            ) : (
+              <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
+                <Sparkles />
+                {t("editor.voice.generateWith", { voice: active.name })}
+              </Button>
             )}
           </>
         )}
@@ -700,8 +725,11 @@ export function CellVoicePanel({
                 kept={kept}
                 testId="voice-card-time"
               />
+              {/* What it says opens on a click of it, never a hover
+                  (AQU-2260). The pill keeps its own pointer events, so it
+                  still steps aside for a moving trim line. */}
               {voiceDiffers && (
-                <AppTooltip content={takeVoiceTip}>
+                <NoteOnClick note={takeVoiceTip}>
                   <span
                     data-wave-overlay=""
                     data-testid="voice-card-take-voice"
@@ -718,7 +746,7 @@ export function CellVoicePanel({
                     <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
                     <span className="sr-only">{takeVoiceTip}</span>
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               )}
             </span>
           </TakeWaveform>
@@ -736,8 +764,9 @@ export function CellVoicePanel({
                     ? t("editor.voice.changeVoiceNeedsClone", { name: active.name })
                     : changeBlocker === "up-to-date"
                       ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
-                      : t("editor.voice.changeVoiceTooltip", { name: active.name })
+                      : null
                 }
+                explain={t("editor.voice.changeVoiceTooltip", { name: active.name })}
                 onChange={() => void changeVoice(active)}
                 onQuality={(next) => { if (takeId) setPicked({ audioId: takeId, quality: next }) }}
               />
@@ -757,6 +786,8 @@ export function CellVoicePanel({
                 </Button>
               </AppTooltip>
             )}
+            {/* Where this browser cannot record it is greyed out, and why
+                opens on a click on it (AQU-2260). */}
             {canEdit && onRecord && (
               <AppTooltip content={recordUnavailable ?? t("editor.audio.record")}>
                 <Button
@@ -765,9 +796,9 @@ export function CellVoicePanel({
                   size="icon-sm"
                   aria-label={t("editor.audio.record")}
                   data-testid="voice-card-record"
-                  aria-disabled={recordUnavailable ? true : undefined}
+                  disabled={Boolean(recordUnavailable)}
                   onClick={() => { if (!recordUnavailable) onRecord() }}
-                  className={cn("shrink-0 text-muted-foreground", recordUnavailable && "cursor-not-allowed opacity-50")}
+                  className="shrink-0 text-muted-foreground"
                 >
                   <Mic className="h-3.5 w-3.5" />
                 </Button>
@@ -823,16 +854,16 @@ export function CellVoicePanel({
       </div>
     )
   }
+  // Its words name it, so no hover; greyed out, why opens on a click (AQU-2260).
   const recordButton = onRecord ? (
-    <AppTooltip content={recordUnavailable ?? t("editor.audio.record")}>
+    <AppTooltip content={recordUnavailable}>
       <Button
         type="button"
         variant="outline"
         size="xs"
         data-testid="voice-card-record"
-        aria-disabled={recordUnavailable ? true : undefined}
+        disabled={Boolean(recordUnavailable)}
         onClick={() => { if (!recordUnavailable) onRecord() }}
-        className={cn(recordUnavailable && "cursor-not-allowed opacity-50")}
       >
         <Mic />
         {t("editor.voice.record")}
@@ -853,51 +884,35 @@ export function CellVoicePanel({
             {t("editor.voice.generatingAs", { voice: active.name })}
           </span>
         )}
-        {state === "failed" && (
-          <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure ?? "" })}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
-              <CircleAlert className="text-destructive" />
-              {t("editor.voice.tryAgain")}
-            </Button>
-          </AppTooltip>
-        )}
+        {state === "failed" && retryButton(failure ?? "")}
         {state === "notext" && (
-          // A disabled button fires no pointer events, so its tooltip hangs on
-          // a wrapper that does.
-          <AppTooltip content={t("editor.voice.nothingToReadTooltip")}>
-            <span tabIndex={0} className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
-                <Sparkles />
-                {t("editor.voice.generateWith", { voice: active.name })}
-              </Button>
-            </span>
+          // Greyed out; why opens on a click on it (AppTooltip's stand-in
+          // takes the click a disabled button cannot, AQU-2260).
+          <AppTooltip content={t("editor.voice.nothingToReadTooltip")} disabledTriggerClassName={STAND_IN_FOCUS_CLASS}>
+            <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
+              <Sparkles />
+              {t("editor.voice.generateWith", { voice: active.name })}
+            </Button>
           </AppTooltip>
         )}
         {state === "offline" && (
           // Every clip made here is saved to the server, so offline it can't
           // run at all — say so before the user clicks, not after a spinner.
-          <AppTooltip
-            content={
-              offlineGate.kind === "blocked" && offlineGate.suggestLocal
-                ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
-                : t("audio.tts.offlineBlocked", { engine: engineName })
-            }
-          >
-            <span tabIndex={0} data-testid="voice-card-offline" className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <span data-testid="voice-card-offline" className="inline-flex">
+            <AppTooltip content={offlineReason} disabledTriggerClassName={STAND_IN_FOCUS_CLASS}>
               <Button type="button" variant="outline" size="xs" disabled data-testid="voice-card-generate">
                 <Sparkles />
                 {t("editor.voice.generateWith", { voice: active.name })}
               </Button>
-            </span>
-          </AppTooltip>
+            </AppTooltip>
+          </span>
         )}
         {state === "ready" && (
-          <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
-              <Sparkles />
-              {t("editor.voice.generateWith", { voice: active.name })}
-            </Button>
-          </AppTooltip>
+          // Its words name the voice; no hover (AQU-2260).
+          <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
+            <Sparkles />
+            {t("editor.voice.generateWith", { voice: active.name })}
+          </Button>
         )}
         {recordButton}
       </div>

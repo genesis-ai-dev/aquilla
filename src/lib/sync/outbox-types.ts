@@ -481,7 +481,15 @@ export interface OutboxEventPayloads {
    */
   "cell.audio.place": {
     audioId: string
+    /** Its place following the source. */
     targetOffsetMs: number | null
+    /**
+     * AQU-2267: its place following the recordings. Every move states both
+     * (`emitCellAudioPlace` requires it); optional here because an event queued
+     * before AQU-2267 has none, and the server reads that as null — one place
+     * for both timings, as when it was queued.
+     */
+    recordingsOffsetMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

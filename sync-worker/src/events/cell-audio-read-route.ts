@@ -113,7 +113,7 @@ export async function handleCellAudioReadRequest(
   const res = await env.AQUILLA_PG.prepare(
     `SELECT a.cell_id, a.audio_id, a.slot, a.url, a.mime_type, a.voice_id,
             a.reference_audio_id, a.duration_ms, a.label, a.trim_start_ms,
-            a.trim_end_ms, a.target_offset_ms, a.timings_json, a.selected,
+            a.trim_end_ms, a.target_offset_ms, a.recordings_offset_ms, a.timings_json, a.selected,
             a.created_ts, a.validator_count, a.role, a.created_by, a.piece_of,
             a.asr_text, a.asr_model, a.transcript_ai,
             COALESCE(v.names, ARRAY[]::text[]) AS validators

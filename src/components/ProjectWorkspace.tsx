@@ -3859,6 +3859,8 @@ export function ProjectWorkspace() {
         cellId,
         audioId,
         targetOffsetMs,
+        // AQU-2267: one place for both timings, as every move has stored.
+        recordingsOffsetMs: null,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })

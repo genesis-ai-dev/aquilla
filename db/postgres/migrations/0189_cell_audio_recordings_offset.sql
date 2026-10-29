@@ -1,0 +1,32 @@
+-- 0189_cell_audio_recordings_offset.sql — AQU-2267: a take's place carries
+-- across both timings.
+--
+-- A take stored one place, `target_offset_ms` (where its clip's start sits, in
+-- ms from its line's start), and both timings read it: Follows source as the
+-- take's place on the film's clock, Follows recordings as the pause before it
+-- in its line. So a move in one timing replaced the place in the other. A LOTE
+-- sermon take 1.0 s before its line following the source, dragged 0.2 s while
+-- following the recordings, came back +0.2 s following the source.
+--
+-- Sam, Oct 29 ("B makes the most sense"): a move moves the take by the same
+-- distance in both timings, each held by its own timing's limits. That needs a
+-- second number per take:
+--
+--   target_offset_ms      its place following the source (unchanged);
+--   recordings_offset_ms  its place following the recordings, measured the
+--                         same way from its line's start in that layout.
+--
+-- Both are written by `cell.audio.place`, which now states both. NULL here
+-- means the take has no place of its own following the recordings, and that
+-- timing reads `target_offset_ms` exactly as it always has — which is every
+-- take before this migration, so nothing moves when it runs. A place event
+-- from an older client, which names only the first number, sets this back to
+-- NULL: both timings then read the one place that client gave.
+--
+-- No backfill, and nothing else reads it. Idempotent; a database loaded from
+-- schema.sql already has the column.
+--
+-- Numbered 0189 because 0188 is taken on the undo-per-project branch
+-- (0188_edit_histories.sql); renumber on merge if that lands first.
+
+ALTER TABLE cell_audio ADD COLUMN IF NOT EXISTS recordings_offset_ms BIGINT;

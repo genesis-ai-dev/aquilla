@@ -16,10 +16,11 @@ const PREPARING_TOAST_ID = "offline-preparing"
 // this only prompts a restart once boot has gone this long with no progress.
 const DEFAULT_BOOT_STALL_MS = 30_000
 // Once a rebuild is under way the leader can go minutes between events: on a
-// real 34k-cell store one 200 KB batch took 111 s, with the worker's event
-// loop blocked the whole time (2026-10-29), so a heartbeat can't tell a busy
-// leader from a dead one. Allow much longer before suggesting a restart.
-const DEFAULT_REBUILD_STALL_MS = 5 * 60_000
+// real 34k-cell store single 200 KB batches took 111 s and 318 s, with the
+// worker's event loop blocked throughout (2026-10-29), so neither a heartbeat
+// nor a timeout can tell a busy leader from a hung one. After this long the
+// toast says it's still working rather than suggesting a restart.
+const DEFAULT_SLOW_REBUILD_MS = 60_000
 const DEFAULT_BOOT_CHECK_EVERY_MS = 1_000
 const LOG_TAIL = 40
 
@@ -43,7 +44,7 @@ const restartApp = (): void => {
 
 type Props = {
   bootStallMs?: number
-  rebuildStallMs?: number
+  slowRebuildMs?: number
   bootCheckEveryMs?: number
   stallMs?: number
   checkEveryMs?: number
@@ -56,7 +57,7 @@ type Props = {
  * otherwise silent), or never boots the store at all — a dead leader never
  * hands one out, so there's nothing for the stall check to watch. While the
  * leader is rebuilding offline data after an update it shows that progress
- * instead, and only prompts if the rebuild stops moving. Prompts
+ * instead, and never prompts a restart mid-rebuild. Prompts
  * rather than auto-restarting, so an edit in progress isn't yanked away
  * mid-keystroke. A restart boots a fresh leader.
  *
@@ -64,7 +65,7 @@ type Props = {
  */
 export function OfflineLeaderWatchdog({
   bootStallMs = DEFAULT_BOOT_STALL_MS,
-  rebuildStallMs = DEFAULT_REBUILD_STALL_MS,
+  slowRebuildMs = DEFAULT_SLOW_REBUILD_MS,
   bootCheckEveryMs = DEFAULT_BOOT_CHECK_EVERY_MS,
   stallMs,
   checkEveryMs,
@@ -77,56 +78,56 @@ export function OfflineLeaderWatchdog({
     if (!loading) return
     const startedAt = Date.now()
     let shown: "preparing" | "slow" | null = null
+    let loggedSlowRebuild = false
     const check = () => {
       const progress = getOfflineBootProgress()
       const quietForMs = Date.now() - Math.max(startedAt, progress.lastProgressAt)
-      if (quietForMs >= (progress.rebuilding ? rebuildStallMs : bootStallMs)) {
-        if (shown === "slow") return
-        if (shown === "preparing") toast.close(PREPARING_TOAST_ID)
-        shown = "slow"
-        const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
-        console.error("[offline] LiveStore store still hasn't booted", {
-          waitedMs: Date.now() - startedAt,
-          quietForMs,
-          progress,
-          leaderLogs: leaderLogs?.slice(-LOG_TAIL),
-        })
-        toast.add({
-          id: SLOW_BOOT_TOAST_ID,
-          type: "warning",
-          timeout: 0,
-          title: t("workspace.offline.slowBootToast"),
-          actionProps: {
-            children: t("workspace.offline.leaderStalledRestart"),
-            onClick: restart,
-          },
-        })
-        return
-      }
-      if (!progress.rebuilding) {
-        if (shown === "preparing") {
-          toast.close(PREPARING_TOAST_ID)
-          shown = null
+      if (progress.rebuilding) {
+        // A rebuild gets progress, never a restart prompt: a restart only
+        // starts the replay over, and a leader that dies mid-rebuild fails
+        // the store's boot (an error, not a silent wait) anyway.
+        if (shown === "slow") toast.close(SLOW_BOOT_TOAST_ID)
+        const slow = quietForMs >= slowRebuildMs
+        if (slow && !loggedSlowRebuild) {
+          loggedSlowRebuild = true
+          console.warn("[offline] Offline data rebuild has gone quiet", { quietForMs, progress })
         }
+        const title = t("workspace.offline.preparingToast", {
+          percent: Math.floor((progress.done / progress.total) * 100),
+        })
+        const description = t(
+          slow ? "workspace.offline.preparingToastSlowDescription" : "workspace.offline.preparingToastDescription",
+        )
+        if (shown === "preparing") {
+          toast.update(PREPARING_TOAST_ID, { title, description })
+          return
+        }
+        shown = "preparing"
+        toast.add({ id: PREPARING_TOAST_ID, type: "loading", timeout: 0, title, description })
         return
       }
-      // A rebuild that's moving gets progress, not a restart prompt — a
-      // restart would only start the replay over from the first event.
-      if (shown === "slow") toast.close(SLOW_BOOT_TOAST_ID)
-      const title = t("workspace.offline.preparingToast", {
-        percent: Math.floor((progress.done / progress.total) * 100),
-      })
       if (shown === "preparing") {
-        toast.update(PREPARING_TOAST_ID, { title })
-        return
+        toast.close(PREPARING_TOAST_ID)
+        shown = null
       }
-      shown = "preparing"
+      if (shown === "slow" || quietForMs < bootStallMs) return
+      shown = "slow"
+      const leaderLogs = (window as Window & { __leaderLogs?: LeaderLogEntry[] }).__leaderLogs
+      console.error("[offline] LiveStore store still hasn't booted", {
+        waitedMs: Date.now() - startedAt,
+        quietForMs,
+        progress,
+        leaderLogs: leaderLogs?.slice(-LOG_TAIL),
+      })
       toast.add({
-        id: PREPARING_TOAST_ID,
-        type: "loading",
+        id: SLOW_BOOT_TOAST_ID,
+        type: "warning",
         timeout: 0,
-        title,
-        description: t("workspace.offline.preparingToastDescription"),
+        title: t("workspace.offline.slowBootToast"),
+        actionProps: {
+          children: t("workspace.offline.leaderStalledRestart"),
+          onClick: restart,
+        },
       })
     }
     const timer = setInterval(check, bootCheckEveryMs)
@@ -135,7 +136,7 @@ export function OfflineLeaderWatchdog({
       toast.close(SLOW_BOOT_TOAST_ID)
       toast.close(PREPARING_TOAST_ID)
     }
-  }, [loading, bootStallMs, rebuildStallMs, bootCheckEveryMs, restart, t])
+  }, [loading, bootStallMs, slowRebuildMs, bootCheckEveryMs, restart, t])
 
   useEffect(() => {
     if (!store) return

@@ -48,6 +48,7 @@ export const workspace = defineNamespace({
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
     "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
     "workspace.offline.preparingToastDescription": "This happens once after an update and can take a few minutes. Your offline projects will open when it's done.",
+    "workspace.offline.preparingToastSlowDescription": "This is taking longer than usual, but it's still working. Restarting the app would start it over.",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Desktop update prompt (DesktopUpdatePrompt.tsx).
@@ -626,6 +627,14 @@ export const workspace = defineNamespace({
           "(workspace.offline.preparingToast). Reassures the user it's a " +
           "one-time step after an update and that their downloaded projects " +
           "open once it finishes. Two short sentences with periods.",
+      },
+      "workspace.offline.preparingToastSlowDescription": {
+        description:
+          "Replaces the body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast) when the percentage hasn't moved " +
+          "for a minute. Reassures the user it isn't stuck and warns that " +
+          "restarting would only make it start again from the beginning. Two " +
+          "short sentences with periods.",
       },
       "workspace.offline.newerDataToast": {
         description:

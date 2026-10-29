@@ -1,6 +1,45 @@
 # Claude connector verification
 
-Issue: AQU-2127. Checked through 2026-10-24, Asia/Singapore.
+Issue: AQU-2127. Checked through 2026-10-29, America/Edmonton.
+
+## Current continuation status
+
+All six backend blocker PRs are merged. The production version document
+reports `6b81e47` on `release/2026/10/29-01`; that commit contains all six
+merges. The public sync health check reports Postgres and R2 healthy.
+The package PR #1603 and specification PR aquilla-specs#30 remain open.
+The following earlier results are historical evidence, not a current live
+provider pass. See the updated [tool matrix](CLAUDE-CONNECTOR-TOOL-MATRIX.md).
+
+The live catalog contains 42 tools, including `upload_artifact` and the
+later `list_style_rules`. Initial post-deployment project calls correctly
+reject an organization-mismatched grant. The user reconnects PluginReviewer
+to continue isolated fixture testing. No project content changes in that
+rejected attempt. The rebuilt package passes `--profile directory` and all
+10 package tests. Explicit MIT metadata preserves the repository's license
+when distributing the plugin folder separately.
+
+After reconnection, the grant covers only organization `46486`. Hosted
+`list_style_rules`, `transcription_status`, and `prepare_draft_cells` pass.
+Draft confirmation and readback preserve AI provenance and leave human
+validation false. The source upload, preview, import, confirmation and
+readback also pass. The tool matrix records IDs and receipts. Successful
+coverage reaches all 42 tools. Media confirmation applies two events with no
+stale cells. Whisper transcribes the stored take as "Hello." with word timings
+and 0.001263 credits charged. The Omnilingual comparison returns a provider
+failure despite ready status. This is a remaining provider limitation, not
+a passing Omnilingual test. No transcript is saved.
+
+The authenticated directory portal reads all 42 tools with titles and
+annotations. Its draft has the server, listing, Productivity category,
+existing public logo, three use cases, publisher, CIMD authentication and
+reviewer steps filled. The documentation URL returns HTTP 200; the live
+privacy policy is readable through the web browser. Private reviewer
+credentials and publisher policy acknowledgments remain required. The draft
+is saved in its browser tab; no review submission or publication is claimed.
+Self-tested is checked after all 42 tools succeed through the custom connector.
+The seven publisher policy acknowledgments remain unchecked.
+
 
 ## Completed checks
 

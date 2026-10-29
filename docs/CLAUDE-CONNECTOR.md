@@ -41,8 +41,9 @@ claude --plugin-dir ./plugins/aquilla
 In Claude Code, use `/mcp` to authenticate the Aquilla server.
 Claude Code authentication is not yet verified. Its ephemeral loopback
 callback requires port-agnostic matching. AQU-2154 implements and tests
-that matching locally. Deploy it and test a native OAuth session before
-claiming Claude Code OAuth support. Hosted Claude uses a fixed HTTPS callback.
+that matching, now included in the deployed production commit. A native
+OAuth session still needs authenticated verification before we claim
+Claude Code OAuth support. Hosted Claude uses a fixed HTTPS callback.
 Invoke `/aquilla:translation-status-report`, `/aquilla:attention-queue`,
 or `/aquilla:terminology-drift`.
 Adding a remote connector alone does not install these skills.
@@ -116,6 +117,14 @@ checking the portal's all-tools-tested acknowledgment. Test destructive tools
 only against disposable review data. The journeys above do not substitute
 for the complete tool inventory.
 
+For binary fixtures, compare the returned upload byte count and SHA-256
+with the original bytes before importing or linking. Model-generated base64
+can change during copying even when the source attachment is correct.
+The artifact uploader accepts WAV, MPEG, MP4/M4A and Ogg audio; a WebM upload
+returns an explicit unsupported-content-type error. A supported stored take
+can be transcribed by its file, cell and lane identifiers without sending
+its binary data through the model again.
+
 ## Verification and submission status
 
 Track the actual results in `CLAUDE-CONNECTOR-VERIFICATION.md` and the
@@ -136,5 +145,5 @@ Submission remains pending until:
 - [Connector submission](https://claude.com/docs/connectors/building/submission)
 - [Plugin manifest reference](https://code.claude.com/docs/en/plugins-reference)
 
-Requirements checked on 2026-10-23. The tools-only connector does not render
+Requirements rechecked on 2026-10-29. The tools-only connector does not render
 an MCP App, so the MCP App screenshot requirement does not apply.

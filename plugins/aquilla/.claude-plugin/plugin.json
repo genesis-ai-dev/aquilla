@@ -1,6 +1,7 @@
 {
   "name": "aquilla",
   "version": "0.2.0",
+  "license": "MIT",
   "description": "Manage Bible and mission translation projects, review terminology and quality, and save authorized translation updates.",
   "author": {
     "name": "Frontier R&D Ltd.",

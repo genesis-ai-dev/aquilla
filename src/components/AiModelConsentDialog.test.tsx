@@ -3,6 +3,8 @@
  * path that prefetched, so a dialog-close race left "Just Whisper" as a
  * silent no-op until the user enabled everything (and often reloaded).
  */
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"

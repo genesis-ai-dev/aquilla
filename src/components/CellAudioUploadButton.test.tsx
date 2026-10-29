@@ -4,6 +4,8 @@
 // injectOptimisticAudioAttachment — so `hasAudio` flips before the server
 // round-trip, matching the mic recorder's behavior.
 
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { CellAudioUploadButton } from "./CellAudioUploadButton"

@@ -10,6 +10,8 @@
  * The term is real pack data: tw:forsaken, on עָזְבֵךְ in RUT 1:16.
  */
 
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { TermChip } from "./TermChip"

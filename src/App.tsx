@@ -100,9 +100,6 @@ const BillingSelection = lazy(() =>
 const ResetPassword = lazy(() =>
   import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
 )
-const PrivacyPolicy = lazy(() =>
-  import("@/pages/PrivacyPolicy").then((m) => ({ default: m.PrivacyPolicy })),
-)
 const Preferences = lazy(() =>
   import("@/pages/Preferences").then((m) => ({ default: m.Preferences })),
 )
@@ -469,7 +466,6 @@ function AppRoutes() {
         <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — public, no auth required */}
         <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         {/* Dev-only auto-login/logout — see components/DevLoginRoute.tsx */}
         <Route path="/__dev/login" element={<DevLoginRoute />} />
         <Route path="/__dev/logout" element={<DevLogoutRoute />} />

@@ -666,9 +666,13 @@ export class Workspace {
     // rather than reject, so neither can win merely by timing out first, and
     // the whole wait stays bounded by the one EDITOR_READY_TIMEOUT_MS budget —
     // this is a better diagnosis of the same stall, not a shorter deadline.
+    let rowFailure: unknown = null
     const ready = firstCell
       .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
-      .then(() => true, () => false)
+      .then(() => true, (error: unknown) => {
+        rowFailure = error
+        return false
+      })
     const crashed = this.crashScreen
       .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
       .then(() => true, () => false)
@@ -684,6 +688,11 @@ export class Workspace {
     // happen, so consult both before deciding which stall this is.
     if (await crashed) await this.failCrashedEditor()
     if (await ready) return
+    // Only the locator's own deadline means "still hydrating". Anything else
+    // (the page or context closed under the wait, a navigation) is the reason
+    // the row never showed up, and the wait did not run its full budget, so
+    // report that rather than a 30-second stall that never happened.
+    if (rowFailure instanceof Error && rowFailure.name !== "TimeoutError") throw rowFailure
     throw new Error(
       `Editor never mounted: ${expectedCellId ? `[data-cell-id="${expectedCellId}"]` : "[data-cell-id]"} `
         + `was not visible within ${EDITOR_READY_TIMEOUT_MS} ms and the editor did not crash — `

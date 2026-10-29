@@ -143,6 +143,42 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("console.log(1)")
   })
 
+  // AQU-2243: the in-app /privacy-policy route held a second, stale copy of the
+  // policy and the live one is /privacy (the marketing Worker's route). With the
+  // route gone, the SPA fallback would answer the old address with the shell and
+  // React Router would render "404: Not Found" — so the Worker redirects it.
+  it("GET /privacy-policy 301s to /privacy instead of reaching the SPA", async () => {
+    const res = await fetchWorker("/privacy-policy")
+    expect(res.status).toBe(301)
+    expect(res.headers.get("Location")).toBe("https://aquilla.app/privacy")
+  })
+
+  it("GET /privacy-policy/ (trailing slash) 301s the same way", async () => {
+    const res = await fetchWorker("/privacy-policy/")
+    expect(res.status).toBe(301)
+    expect(res.headers.get("Location")).toBe("https://aquilla.app/privacy")
+  })
+
+  it("the /privacy-policy redirect keeps the query string and the host it was asked on", async () => {
+    const { default: worker } = await import("./index")
+    const res = await worker.fetch(
+      new Request("https://dev.aquilla.app/privacy-policy?utm_source=onboarding"),
+      makeEnv(),
+    )
+    expect(res.status).toBe(301)
+    expect(res.headers.get("Location")).toBe("https://dev.aquilla.app/privacy?utm_source=onboarding")
+  })
+
+  // /privacy and /terms belong to the marketing Worker on the live domains; this
+  // Worker must not start answering or rewriting them.
+  it("GET /privacy and /terms still pass through untouched", async () => {
+    for (const path of ["/privacy", "/terms"]) {
+      const res = await fetchWorker(path)
+      expect(res.status, path).toBe(200)
+      expect(await res.text()).toBe(`served:${path}`)
+    }
+  })
+
   it("GET /__dev/login passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/__dev/login")
     expect(await res.text()).toBe("served:/__dev/login")

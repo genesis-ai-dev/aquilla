@@ -8592,6 +8592,15 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
+  // Same for the sidebar rollup refresh: its identity carries the active lane
+  // and the first file id (AQU-2118), both of which settle a few ms after the
+  // socket starts connecting on a fresh editor mount — and again on every lane
+  // switch. As an effect dependency that tore the socket down while it was
+  // still CONNECTING and opened a second one (dropping the focus lease and
+  // forcing a reconnect resync each time). The handlers read the latest
+  // callback through this ref instead.
+  const refreshAllFilesProgressRef = useRef(refreshAllFilesProgress)
+  refreshAllFilesProgressRef.current = refreshAllFilesProgress
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {
@@ -8693,7 +8702,7 @@ export function ProjectWorkspace() {
           revalidateAuditStats,
           invalidateProjectFileProgress: () => invalidateProjectFileProgress(pid),
           refreshComments,
-          refreshAllFilesProgress,
+          refreshAllFilesProgress: () => refreshAllFilesProgressRef.current(),
         })
       })
       reconciler = createWsReconciler(
@@ -8938,7 +8947,7 @@ export function ProjectWorkspace() {
               // The frame names no lane; the record on screen is the open
               // lane's (AQU-2118).
               invalidateFileProgress(pid, msg.file, activeLaneRef.current)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
@@ -8968,7 +8977,7 @@ export function ProjectWorkspace() {
               // A validation-threshold change alters every file's derived
               // validated count without mutating its progress histogram.
               invalidateProjectFileProgress(pid)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
@@ -9123,7 +9132,6 @@ export function ProjectWorkspace() {
     presenceStore,
     sendPresenceUpdate,
     refreshContextualDrafts,
-    refreshAllFilesProgress,
     revalidateAuditStats,
   ])
 

@@ -47,7 +47,6 @@ describe("hasChromeVersionTag", () => {
       "/onboarding",
       "/join/tok",
       "/project/p1/debug",
-      "/privacy-policy",
     ]) {
       expect(hasChromeVersionTag(path), path).toBe(false)
     }

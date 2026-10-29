@@ -8,7 +8,9 @@
 //      With no book in the name, the folder's name is read for one.
 //   2. Inside one file, numbers alone are enough: in a Bible book "1-1" or
 //      "001_001" is chapter 1 verse 1; in any other file "012", "line 12" or
-//      "part_003" is that line, counted from the top.
+//      "part_003" is that line, counted from the top. A number alone in a
+//      Bible book ("012") is a chapter or a verse by how many such files the
+//      folder holds (LONE_NUMBER_TOLERANCE).
 //   3. "Genesis 1:1-3" or "1-1-3" is one recording for verses 1 to 3; a name
 //      with a chapter and no verse is one recording for the whole chapter.
 //   4. A verse in several files ("1-1a", "1-1 part 2", "1-1_2", "beginning",
@@ -98,6 +100,7 @@ export type UnmatchedReason =
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
   | { code: "rangeOnTimedFile" }
+  | { code: "chapterOrVerse"; count: number; book: string; chapters: number; verses: number }
   | { code: "skipped" }
 
 export interface PartInfo {
@@ -356,7 +359,56 @@ function pruneConstants(group: ReadRecording[], bible: boolean): Map<number, Nam
   return out
 }
 
-function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean): Interpreted {
+/**
+ * Sam, Oct 29 (question 4): a number alone in a Bible book ("012.mp3", or
+ * "Genesis/012.mp3" with the book from the folder) is decided by the count.
+ * When the folder holds about as many such numbers as the book has chapters,
+ * they are chapters; about as many as it has verses, they are verses, counted
+ * from the top; when neither fits, or both do, the files are listed as
+ * "can't tell" rather than guessed.
+ *
+ * "About as many" is within a tenth of the book's count, rounded down, either
+ * side. Genesis (50 chapters, 1,533 verses): 45–55 files are chapters and
+ * 1,380–1,686 are verses. Ruth (4 chapters, 85 verses): exactly 4 are chapters
+ * and 77–93 are verses. A tenth leaves room in a big book for a few missing or
+ * extra files (an intro, a retake under its own number); in a small book it
+ * asks for every chapter, because there three files could as well be verses
+ * 1–3 as chapters 1–3. The counts are the project's own lines: the chapters it
+ * has, and its verse lines counted from the top.
+ *
+ * Distinct numbers are counted, not files, so a verse in two parts ("012a",
+ * "012b") counts once. A name that says "chapter 12", a folder named for a
+ * chapter ("Genesis 2/05.mp3"), or a book with one chapter decides it outright;
+ * a book named in the name with one number ("Genesis 3") is still a chapter.
+ */
+export const LONE_NUMBER_TOLERANCE = 0.1
+
+/** Within the tolerance of `target`, either side. */
+function closeTo(count: number, target: number): boolean {
+  return target > 0 && Math.abs(count - target) <= Math.floor(target * LONE_NUMBER_TOLERANCE)
+}
+
+/** How a folder's lone numbers read in one Bible book. */
+type LoneReading = { as: "chapter" } | { as: "verse" } | { as: "unknown"; reason: UnmatchedReason }
+
+/** The number, when a name in a Bible book holds one number and nothing says what it is. */
+function loneNumber(r: ReadRecording, nums: readonly NameNumber[]): NameNumber | null {
+  if (r.reading.book || r.bookFromNumber || r.folderChapter) return null
+  return nums.length === 1 && !nums[0].marker ? nums[0] : null
+}
+
+function readLoneNumbers(fi: FileIndex, numbers: readonly NameNumber[], singleChapter: boolean): LoneReading {
+  if (singleChapter) return { as: "verse" }
+  const count = new Set(numbers.map((n) => n.value)).size
+  const chapters = fi.chapters.size
+  const verses = fi.content.length
+  const asChapters = closeTo(count, chapters)
+  const asVerses = closeTo(count, verses)
+  if (asChapters !== asVerses) return asChapters ? { as: "chapter" } : { as: "verse" }
+  return { as: "unknown", reason: { code: "chapterOrVerse", count, book: bookLabel(fi), chapters, verses } }
+}
+
+function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading): Interpreted {
   const reading = r.reading
   const take = reading.numbers.find((n) => n.marker === "take")?.value
   const markedPart = reading.numbers.find((n) => n.marker === "part")
@@ -384,11 +436,15 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
     if (plain.length === 1) {
       // A book named in the name with one number is a chapter ("Genesis 3",
       // "Psalm 23"); a lone number with no book is a line, counted from the top.
-      return reading.book || r.bookFromNumber
-        ? singleChapter
+      if (reading.book || r.bookFromNumber) {
+        return singleChapter
           ? withPart({ kind: "verse", chapter: 1, verse: plain[0].value }, undefined, plain[0].letter)
           : withPart({ kind: "chapter", chapter: plain[0].value })
-        : withPart({ kind: "line", line: plain[0].value }, undefined, plain[0].letter)
+      }
+      // No book in the name: the folder's count decides (LONE_NUMBER_TOLERANCE).
+      if (lone?.as === "chapter") return withPart({ kind: "chapter", chapter: plain[0].value })
+      if (lone?.as === "unknown") return { wanted: { kind: "error", reason: lone.reason }, ...base }
+      return withPart({ kind: "line", line: plain[0].value }, undefined, plain[0].letter)
     }
     chapter = plain[0].value
     rest = plain.slice(1)
@@ -535,7 +591,8 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
     case "line": {
       const line = fi.content[wanted.line - 1]
       if (!line || wanted.line < 1) return { reason: { code: "noSuchLine", line: wanted.line, count: fi.content.length } }
-      return { cellIds: [line.cellId], read: `line ${wanted.line}`, ...(part ? { part } : {}) }
+      // A verse counted from the top reads as its verse ("Genesis 2:5").
+      return { cellIds: [line.cellId], read: lineReadLabel(fi, line, wanted.line - 1), ...(part ? { part } : {}) }
     }
     case "lineRange": {
       const [lo, hi] = wanted.line <= wanted.toLine ? [wanted.line, wanted.toLine] : [wanted.toLine, wanted.line]
@@ -636,12 +693,21 @@ export function matchRecordings(
       ? rawGroup
       : rawGroup.map((r) => (r.reading.book ? { ...r, reading: readName(r.file.name, NO_BOOKS) } : r))
     const nums = pruneConstants(group, fi.bible)
+    // A number alone in a Bible book: chapter or verse, by the folder's count.
+    const lone = new Map<number, NameNumber>()
+    if (fi.bible) {
+      for (const r of group) {
+        const n = loneNumber(r, nums.get(r.index)!)
+        if (n) lone.set(r.index, n)
+      }
+    }
+    const loneReading = lone.size > 0 ? readLoneNumbers(fi, [...lone.values()], singleChapter) : undefined
     const results = group.map((r) => {
       // In one Bible book, a name of another book is the wrong file.
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {
         return { r, res: { reason: { code: "otherBook", book: englishBookName(r.reading.book.code), fileName: bookLabel(fi) } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }
       }
-      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter) : interpretLines(r, nums.get(r.index)!)
+      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter, lone.has(r.index) ? loneReading : undefined) : interpretLines(r, nums.get(r.index)!)
       return { r, res: refuseRangeOnTimed(fi, resolve(fi, interp.wanted, interp.part)), interp }
     })
 
@@ -652,8 +718,17 @@ export function matchRecordings(
     const otherBookOnly = results.every((x) => !x.interp)
     // "IMG_4521" is a counter, not a line: a name with one number that finds
     // nothing reads the same whether that number became a line or a verse.
+    // A lone number in a Bible book is a counter when it is neither one of the
+    // book's chapters nor one of its verses, however the count read it.
+    const loneFinds = (index: number) => {
+      const n = lone.get(index)
+      if (!n) return false
+      return "cellIds" in resolve(fi, { kind: "chapter", chapter: n.value }, undefined) || "cellIds" in resolve(fi, { kind: "line", line: n.value }, undefined)
+    }
     const counterLike = (x: (typeof results)[number]) =>
-      !x.interp || x.interp.wanted.kind === "none" || ((x.interp.wanted.kind === "line" || x.interp.wanted.kind === "verse") && (nums.get(x.r.index)?.length ?? 0) <= 1)
+      !x.interp || x.interp.wanted.kind === "none" ||
+      ((x.interp.wanted.kind === "line" || x.interp.wanted.kind === "verse") && (nums.get(x.r.index)?.length ?? 0) <= 1) ||
+      (lone.has(x.r.index) && !loneFinds(x.r.index))
     if (!anyFound && !otherBookOnly && (anyNumbered ? results.every(counterLike) : true)) {
       for (const x of results) if (!x.interp && "reason" in x.res) out.set(x.r.index, { index: x.r.index, reason: x.res.reason })
       const ordered = results.filter((x) => x.interp).map((x) => x.r).sort((a, b) => compareFolderOrder(a.file.path, b.file.path))

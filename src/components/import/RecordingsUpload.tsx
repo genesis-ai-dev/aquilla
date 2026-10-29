@@ -196,7 +196,7 @@ function lineLabel(file: TargetFile, line: TargetLine, position: number): string
   return `${file.name} · ${position + 1}`
 }
 
-function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason): string {
+function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n: number) => string): string {
   switch (reason.code) {
     case "notAudio": return t("recordingsUpload.reason.notAudio")
     case "systemFile": return t("recordingsUpload.reason.systemFile")
@@ -215,6 +215,8 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason): string
     case "beforeFirstLine": return t("recordingsUpload.reason.beforeFirstLine")
     case "duplicate": return t("recordingsUpload.reason.duplicate", { other: reason.other, target: reason.target })
     case "rangeOnTimedFile": return t("recordingsUpload.reason.rangeOnTimedFile")
+    case "chapterOrVerse":
+      return t("recordingsUpload.reason.chapterOrVerse", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses) })
     case "skipped": return t("recordingsUpload.reason.skipped")
   }
 }
@@ -537,7 +539,7 @@ function ReviewBody({
                 <li key={a.index} className="flex items-start gap-2 text-xs" data-testid="recordings-unmatched-row" data-name={chosen[a.index]?.file.name}>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium text-foreground/90">{chosen[a.index]?.path}</span>
-                    <span className="block text-muted-foreground" data-testid="recordings-reason">{a.reason ? reasonText(t, a.reason) : ""}</span>
+                    <span className="block text-muted-foreground" data-testid="recordings-reason">{a.reason ? reasonText(t, a.reason, fmt) : ""}</span>
                   </span>
                   {canChooseLine(a) && pickerLines.length > 0 && (
                     editing === a.index ? (

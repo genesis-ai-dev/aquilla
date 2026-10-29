@@ -20,6 +20,8 @@ const PLACEHOLDERS: Record<string, string> = {
   first: "Where the order starts, such as 'Genesis 1:1' or 'line 1'.",
   n: "A part or take number.",
   total: "A total number of files or parts.",
+  chapters: "How many chapters a Bible book has in this project, already formatted for the locale.",
+  verses: "How many verses a Bible book has in this project, already formatted for the locale.",
   done: "How many recordings uploaded.",
   failed: "How many recordings failed.",
   notStarted: "How many recordings were never uploaded because the person stopped the upload.",
@@ -86,7 +88,7 @@ const KEYS = {
     "recordingsUpload.rules.byName":
       "By name: a name with a book, chapter and verse goes to that verse, such as “Genesis 1-1”, “Gen 1.1”, “1Sam_3_4”, “GEN_001_001” or the project's own name for the book. When the name has no book, the folder's name is used.",
     "recordingsUpload.rules.byNumber":
-      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
+      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. A number alone, such as “012”, is a chapter when a folder holds about as many of them as the book has chapters, and a verse when it holds about as many as the book has verses. Otherwise those files are listed, not guessed. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
     "recordingsUpload.rules.range":
       "“Genesis 1:1-3” or “1-1-3” is one recording for verses 1 to 3, and each of them counts as recorded. A name with a chapter and no verse is one recording for the whole chapter. A subtitle or film file, whose lines have times, needs one recording per line, so a range isn't uploaded there.",
     "recordingsUpload.rules.parts":
@@ -161,6 +163,10 @@ const KEYS = {
     "recordingsUpload.reason.beforeFirstLine": "Starting the order earlier left this file before the first line.",
     "recordingsUpload.reason.duplicate": "{other} already goes to {target}.",
     "recordingsUpload.reason.rangeOnTimedFile": "A timed file needs one recording per line.",
+    "recordingsUpload.reason.chapterOrVerse": plural({
+      one: "Can't tell whether these numbers are chapters or verses. {count} file here is named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
+      other: "Can't tell whether these numbers are chapters or verses. {count} files here are named with a number alone, and {book} has {chapters} chapters and {verses} verses.",
+    }),
     "recordingsUpload.reason.skipped": "You chose not to upload it.",
     // Progress banner
     "recordingsUpload.banner.uploading": "Uploading recordings",
@@ -201,6 +207,7 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.preview.topFolder": { description: "Stands in for a folder name in 'files in {folder}' when the person chose files rather than a folder." },
   "recordingsUpload.banner.stop": { description: "Tooltip and accessible name of the X button on the upload progress banner; stops the upload." },
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
+  "recordingsUpload.reason.chapterOrVerse": { description: "Why a recording named with a number alone (such as '012') is not uploaded into a Bible book: the number could be a chapter or a verse, and how many such files there are is close to neither the book's number of chapters nor its number of verses (or close to both). Shown beside each of those files. Full sentences." },
   "recordingsUpload.join.button": { description: "Button on a recording that was uploaded or cut into pieces: makes one new recording of all the pieces, in order.", maxLength: 32 },
 }
 

@@ -220,8 +220,16 @@ describe("matching inside one Bible book", () => {
 
   it("a folder with no naming scheme goes in folder order, 2 before 10", () => {
     const files = ["New Recording 10.m4a", "New Recording 2.m4a", "New Recording 1.m4a"].map((n) => audio(`Gen/${n}`))
-    // "New Recording N" are lines that exist — so they are read by number.
-    expect(run(files, [gen], scope).assignments.map((a) => a.method)).toEqual(["number", "number", "number"])
+    // "New Recording N" are numbers that find lines, so they are read by
+    // number, not by order. Three of them in a book of three chapters are
+    // chapters (the count rule, below): 1 and 2 are whole chapters, and there
+    // is no chapter 10.
+    const numbered = run(files, [gen], scope).assignments
+    expect(numbered.map((a) => [files[a.index].name, a.method ?? a.reason?.code, a.read])).toEqual([
+      ["New Recording 10.m4a", "noSuchChapter", undefined],
+      ["New Recording 2.m4a", "number", "Genesis 2"],
+      ["New Recording 1.m4a", "number", "Genesis 1"],
+    ])
     const counters = ["IMG_4510.m4a", "IMG_4502.m4a", "IMG_4501.m4a"].map((n) => audio(`Gen/${n}`))
     const { assignments } = run(counters, [gen], scope)
     expect(assignments.map((a) => [counters[a.index].name, a.method, a.cellIds?.[0]])).toEqual([
@@ -355,6 +363,120 @@ describe("matching inside a document, plain text or subtitles", () => {
       ["a.mp3", "notes#1", "order"],
       ["c.mp3", "notes#3", "order"],
     ])
+  })
+})
+
+// Sam, Oct 29 (question 4): a number alone in a Bible book ("012.mp3") is read
+// by how many such files sit in the folder. About as many as the book has
+// chapters: chapters. About as many as it has verses: verses, counted from the
+// top. Neither: listed, not guessed. "About" is within a tenth of the book's
+// count, either side (LONE_NUMBER_TOLERANCE).
+describe("a number alone in a Bible book, decided by the count", () => {
+  // 50 chapters of 20 verses: chapters fit 45–55 files, verses 900–1,100.
+  const big = book("gen", "GEN", "Genesis", Array.from({ length: 50 }, () => 20))
+  const scope: MatchScope = { kind: "file", fileId: "gen" }
+  const numbered = (count: number, folder = "rec", from = 1) =>
+    Array.from({ length: count }, (_, i) => audio(`${folder}/${String(from + i).padStart(4, "0")}.mp3`))
+  const kinds = (assignments: Assignment[]) => new Set(assignments.map((a) => a.reason?.code ?? (a.cellIds!.length > 1 ? "chapter" : "verse")))
+
+  it("about as many files as the book has chapters: each is a whole chapter", () => {
+    const files = numbered(50)
+    const { assignments, jobs } = run(files, [big], scope)
+    const twelve = by(assignments, files, "0012.mp3")
+    expect(twelve).toMatchObject({ method: "number", read: "Genesis 12" })
+    expect(twelve.cellIds).toHaveLength(20)
+    expect(twelve.cellIds![0]).toBe("gen:12:1")
+    expect(jobs.every((j) => j.kind === "range")).toBe(true)
+  })
+
+  it("about as many files as the book has verses: each is a verse, counted from the top", () => {
+    const files = numbered(1000)
+    const { assignments } = run(files, [big], scope)
+    expect(by(assignments, files, "0012.mp3")).toMatchObject({ method: "number", cellIds: ["gen:1:12"], read: "Genesis 1:12" })
+    expect(by(assignments, files, "0025.mp3")).toMatchObject({ cellIds: ["gen:2:5"], read: "Genesis 2:5" })
+    expect(kinds(assignments)).toEqual(new Set(["verse"]))
+  })
+
+  it("the edges: 45 to 55 files are chapters, 44 and 56 can't tell", () => {
+    expect(kinds(run(numbered(45), [big], scope).assignments)).toEqual(new Set(["chapter"]))
+    // 51 to 55 name chapters Genesis doesn't have; they are chapters all the same.
+    expect(kinds(run(numbered(55), [big], scope).assignments)).toEqual(new Set(["chapter", "noSuchChapter"]))
+    expect(kinds(run(numbered(44), [big], scope).assignments)).toEqual(new Set(["chapterOrVerse"]))
+    expect(kinds(run(numbered(56), [big], scope).assignments)).toEqual(new Set(["chapterOrVerse"]))
+  })
+
+  it("the edges: 900 to 1,100 files are verses, 899 and 1,101 can't tell", () => {
+    expect(kinds(run(numbered(900), [big], scope).assignments)).toEqual(new Set(["verse"]))
+    expect(kinds(run(numbered(1100), [big], scope).assignments)).toEqual(new Set(["verse", "noSuchLine"]))
+    expect(kinds(run(numbered(899), [big], scope).assignments)).toEqual(new Set(["chapterOrVerse"]))
+    expect(kinds(run(numbered(1101), [big], scope).assignments)).toEqual(new Set(["chapterOrVerse"]))
+  })
+
+  it("neither count fits: every one is listed with the counts, not guessed", () => {
+    const files = numbered(10)
+    const { assignments, jobs } = run(files, [big], scope)
+    expect(assignments.map((a) => a.reason)).toEqual(
+      files.map(() => ({ code: "chapterOrVerse", count: 10, book: "Genesis", chapters: 50, verses: 1000 })),
+    )
+    expect(assignments.some((a) => a.orderRun)).toBe(false)
+    expect(jobs).toEqual([])
+  })
+
+  it("counts numbers, not files: a verse in two parts counts once", () => {
+    // Ruth: 4 chapters, 85 verses. 85 verses in two parts each is 170 files.
+    const ruth = book("rut", "RUT", "Ruth", [22, 23, 18, 22])
+    const files = Array.from({ length: 85 }, (_, i) => ["a", "b"].map((p) => audio(`Ruth/${String(i + 1).padStart(2, "0")}${p}.mp3`))).flat()
+    const { assignments, jobs } = run(files, [ruth], { kind: "file", fileId: "rut" })
+    expect(by(assignments, files, "23b.mp3")).toMatchObject({ cellIds: ["rut:2:1"], part: { rank: 2 } })
+    expect(jobs).toHaveLength(85)
+    expect(jobs.every((j) => j.kind === "pieces")).toBe(true)
+  })
+
+  it("a small book asks for every chapter: Ruth's 4 files are chapters, 3 can't tell", () => {
+    const ruth = book("rut", "RUT", "Ruth", [22, 23, 18, 22])
+    const rutScope: MatchScope = { kind: "file", fileId: "rut" }
+    expect(kinds(run(numbered(4), [ruth], rutScope).assignments)).toEqual(new Set(["chapter"]))
+    expect(kinds(run(numbered(3), [ruth], rutScope).assignments)).toEqual(new Set(["chapterOrVerse"]))
+  })
+
+  it("a name that says chapter, or a folder named for a chapter, decides it outright", () => {
+    const files = [audio("rec/chapter 12.mp3"), audio("Genesis 2/05.mp3"), audio("Genesis 2/06.mp3")]
+    const { assignments } = run(files, [big], scope)
+    expect(by(assignments, files, "chapter 12.mp3")).toMatchObject({ read: "Genesis 12" })
+    expect(by(assignments, files, "05.mp3")).toMatchObject({ cellIds: ["gen:2:5"], fromFolder: "Genesis 2" })
+    expect(by(assignments, files, "06.mp3")).toMatchObject({ cellIds: ["gen:2:6"] })
+  })
+
+  it("a book with one chapter has only verses", () => {
+    const jude = book("jud", "JUD", "Jude", [25])
+    const { assignments } = run([audio("rec/05.mp3"), audio("rec/06.mp3")], [jude], { kind: "file", fileId: "jud" })
+    expect(assignments.map((a) => a.cellIds)).toEqual([["jud:1:5"], ["jud:1:6"]])
+  })
+
+  it("when both counts fit, it can't tell", () => {
+    // Three chapters of one verse each: three files fit both.
+    const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])
+    const { assignments } = run(numbered(3), [tiny], scope)
+    expect(kinds(assignments)).toEqual(new Set(["chapterOrVerse"]))
+  })
+
+  it("a book named in the name with one number is still a whole chapter (Genesis 3)", () => {
+    const { assignments } = run([audio("rec/Genesis 3.mp3")], [big], scope)
+    expect(assignments[0]).toMatchObject({ read: "Genesis 3" })
+  })
+
+  it("phone counters that are neither a chapter nor a verse still go in folder order", () => {
+    const files = Array.from({ length: 23 }, (_, i) => audio(`rec/IMG_${4501 + i}.m4a`))
+    const { assignments } = run(files, [big], scope)
+    expect(assignments.every((a) => a.method === "order")).toBe(true)
+    expect(by(assignments, files, "IMG_4501.m4a").cellIds).toEqual(["gen:1:1"])
+  })
+
+  it("the folder that holds the files is the level that is counted", () => {
+    // Project-wide: a folder named for the book, with 50 numbered files in it.
+    const files = numbered(50, "Genesis")
+    const { assignments } = run(files, [big], { kind: "project" })
+    expect(by(assignments, files, "0007.mp3")).toMatchObject({ read: "Genesis 7", fromFolder: "Genesis" })
   })
 })
 

@@ -287,7 +287,7 @@ export interface TimelineEditorProps {
   canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
-  /** False disables the control — `file.video.set` needs contributor access,
+  /** False disables the control — `file.video.set` needs project lead access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
   /** AQU-646 stage 2: open the audio-VTT import dialog. It lives up in the
@@ -2214,7 +2214,7 @@ export function TimelineEditor({
   // Each row states what the file HAS, and opens the dialog that owns that
   // source's verbs — so no row needs two actions. Permission is per row rather
   // than per button, which is strictly better than the buttons were: linking a
-  // film is contributor-level, while both cell-writing imports sit at the
+  // film is project-lead-level, while both cell-writing imports sit at the
   // source.cell.create floor.
   /**
    * The CHECK menu — reviewing, as against Sources' importing. (Sam,
@@ -4535,7 +4535,7 @@ export function TimelineEditor({
           )}
           {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
             <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
-              {t("editor.timeline.neverPaired")}
+              {t("editor.timeline.neverPaired", { repairAll: t("editor.timeline.cueLinkRepairAll") })}
             </span>
           )}
           <div className="inline-flex items-center rounded-md border border-border">

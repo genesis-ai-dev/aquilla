@@ -1236,8 +1236,10 @@ export const editor = defineNamespace({
     // The link-video dialog and the chip strip's field labels.
     "editor.timeline.linkVideoTitleChange": "Change the linked video",
     "editor.timeline.linkVideoTitleNew": "Link a video",
+    // AQU-2259: it used to say the video always plays muted. It is muted only
+    // while the file's uploaded recording is what plays (MediaVideoPane).
     "editor.timeline.linkVideoDescription":
-      "Paste the address of the video this file was dubbed from. It plays beside the text, muted and in step with the audio — the recording you hear is always the one on the timeline.",
+      "Paste the address of the video this file was dubbed from. It plays beside the text, in step with the timeline. When the file has an uploaded recording, you hear that recording and the video is muted; a YouTube video keeps its own sound until you pick the recording from its Sound menu.",
     "editor.timeline.linkVideoAddressLabel": "Video address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
@@ -1366,8 +1368,10 @@ export const editor = defineNamespace({
     "editor.timeline.rowsTallerTooltip": "Taller rows (⌘ + scroll)",
     "editor.timeline.timingsUnlocked": "Timings unlocked",
     "editor.timeline.pairingsFailed": "The pairings couldn't be loaded — what's shown may be incomplete.",
+    // AQU-2259: the audio VTT dialog has no such checkbox. The notice shows
+    // with the Pairings drawer open, whose button does the pairing.
     "editor.timeline.neverPaired":
-      'These cues have never been paired with the subtitles — re-import the audio VTT and tick "work out the subtitle pairings".',
+      'These cues have never been paired with the subtitles. Choose "{repairAll}" to work out the pairings.',
     "editor.timeline.badgePairing": "pairing…",
     // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
     // It differed only in case, and a case-only split is pure duplicate work:
@@ -3746,6 +3750,14 @@ export const editor = defineNamespace({
         description:
           "Error shown in that confirmation when the change could not be saved " +
           "(for example the track changed meanwhile). The dialog stays open.",
+      },
+      "editor.timeline.neverPaired": {
+        description:
+          "Notice in the timeline's pairing mode when a file's audio cues have never been paired " +
+          "with its subtitles. Shown while the Pairings drawer is open.",
+        placeholders: {
+          repairAll: "The label of the drawer's button, exactly as translated: editor.timeline.cueLinkRepairAll ('Re-pair everything').",
+        },
       },
       "editor.timeline.soundSourceTrigger": {
         description:

@@ -352,7 +352,7 @@ import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/s
 import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
-import { denialMessage } from "@/lib/permissions/denial"
+import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
@@ -4233,7 +4233,7 @@ export function ProjectWorkspace() {
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
   // the file row, so refresh the project (not just cells). `file.video.set`
-  // needs contributor access and the emit THROWS on refusal, so surface that
+  // needs project lead access and the emit THROWS on refusal, so surface that
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
@@ -4272,7 +4272,9 @@ export function ProjectWorkspace() {
             ? e instanceof Error
               ? e.message
               : "Could not save the video link."
-            : denialMessage(t, ROLE.CONTRIBUTOR, level) })
+            // AQU-2230: name the floor the policy actually enforces (project
+            // lead since 2026-08-18), not a role written out by hand.
+            : denialMessageForEvent(t, "file.video.set", level, ROLE.PROJECT_LEAD) })
       }
     },
     [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],

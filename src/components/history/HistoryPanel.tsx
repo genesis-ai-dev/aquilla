@@ -20,6 +20,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { redoLast, refreshHistory, undoLast, undoTo, type HistoryResult, type SkipLogEntry, type StepSummary } from "@/lib/history/history"
 import { useHistoryView } from "@/lib/history/useHistory"
+import { stepLabel } from "@/lib/history/step-label"
 import { cn } from "@/lib/utils"
 
 export interface HistoryPanelProps {
@@ -34,7 +35,7 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
   const fmt = useFormat()
   const view = useHistoryView()
   const [open, setOpen] = useState(false)
-  const name = (s: Pick<StepSummary, "labelKey" | "labelParams">) => t(s.labelKey as never, s.labelParams as never)
+  const name = (s: Pick<StepSummary, "labelKey" | "labelParams">) => stepLabel(t as never, s)
   // Where a step was made: its file and, when it belongs to one, its language.
   const place = (s: StepSummary): string | null => {
     const language = s.lane !== undefined ? (laneName?.(s.lane) ?? s.lane) : null
@@ -72,7 +73,9 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
               ? t("editor.history.reasonNotAllowed")
               : entry.reason === "linesChanged"
                 ? t("editor.history.reasonLinesChanged")
-                : t("editor.history.reasonFailed")
+                : entry.reason === "otherDevice"
+                  ? t("editor.history.reasonOtherDevice")
+                  : t("editor.history.reasonFailed")
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>

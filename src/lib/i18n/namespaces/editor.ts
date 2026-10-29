@@ -1093,12 +1093,14 @@ export const editor = defineNamespace({
     "editor.history.reasonApproved": "{name} approved it afterwards, so it was left as it is.",
     "editor.history.reasonNotAllowed": "You can no longer make this change, so it was left as it is.",
     "editor.history.reasonLinesChanged": "These lines have changed since you made them, so Undo left them as they are.",
+    "editor.history.reasonOtherDevice": "It changed a setting kept only on the device it was made on, so it can only be undone there.",
     "editor.history.blockedLanguage": "Open {language} to undo “{step}”",
     "editor.history.movedUndo": "“{step}” was already undone on another of your devices, so nothing changed here",
     "editor.history.movedRedo": "“{step}” was already redone on another of your devices, so nothing changed here",
     "editor.history.skippedApproved": "Skipped “{step}”: {name} approved it since",
     "editor.history.skippedNotAllowed": "Skipped “{step}”: you can no longer make that change",
     "editor.history.skippedLinesChanged": "Skipped “{step}”: these lines have changed since you made them, so Undo left them as they are",
+    "editor.history.skippedOtherDevice": "“{step}” was made on another device and can only be undone there",
     "editor.history.stepPlace": "{file} · {language}",
     "editor.history.stepRecordTake": "Record take",
     "editor.history.stepUploadTake": "Upload recording",
@@ -1117,6 +1119,7 @@ export const editor = defineNamespace({
       other: "Change {count} characters",
     }),
     "editor.history.stepEditSource": "Edit the source text",
+    "editor.history.stepChangeSetting": "Change: {setting}",
     "editor.timeline.videoHiddenNote":
       "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
       "recordings.",
@@ -6622,12 +6625,14 @@ export const editor = defineNamespace({
       "editor.history.reasonApproved": { description: "Why an undo did not happen: someone else approved the recording (or text) this step made, after it was made. Undoing would throw their approval away.", placeholders: { name: "The username of the person who approved it." } },
       "editor.history.reasonNotAllowed": { description: "Why an undo did not happen: the user may no longer make this change (for example, they lost access to that language)." },
       "editor.history.reasonLinesChanged": { description: "Why undoing 'make lines from a recording' did not happen: someone recorded, translated or edited one of those lines after they were made, so all of them were kept." },
+      "editor.history.reasonOtherDevice": { description: "Why an undo in the History panel did not happen: the step changed a project setting that is kept only on one device (such as Audio loading), and this is a different device." },
       "editor.history.blockedLanguage": { description: "Toast when Undo is waiting because the step was made in another language that could not be opened from here. The step is kept; it can be undone after opening that language.", placeholders: { language: "The language's name as the language switcher shows it.", step: "The step's name." } },
       "editor.history.movedUndo": { description: "Toast when Undo found that the same person had already undone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.movedRedo": { description: "Toast when Redo found that the same person had already redone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.skippedApproved": { description: "Toast when Undo was not applied because someone else approved what the step made (e.g. a new recording) since. Nothing was changed.", placeholders: { step: "The step's name.", name: "The username of the person who approved it." } },
       "editor.history.skippedNotAllowed": { description: "Toast when Undo was not applied because the user may no longer make that change. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.skippedLinesChanged": { description: "Toast when undoing 'make lines from a recording' was not applied: someone recorded, translated or edited one of those lines after they were made, so every line was kept.", placeholders: { step: "The step's name." } },
+      "editor.history.skippedOtherDevice": { description: "Toast when Undo or Redo was not applied because the step changed a project setting kept only on another device (such as Audio loading).", placeholders: { step: "The step's name." } },
       "editor.history.stepPlace": { description: "Second line of a step in the History panel: the file and the language the step was made in.", placeholders: { file: "The file's name.", language: "The language's name as the language switcher shows it." } },
       "editor.history.stepRecordTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a new take was recorded on a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepUploadTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio file was uploaded as a line's take. A short verb phrase.", maxLength: 40 },
@@ -6643,6 +6648,7 @@ export const editor = defineNamespace({
       "editor.history.stepRepairCues": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): every subtitle line was paired with its heard lines again from scratch ('Re-pair'). A short verb phrase.", maxLength: 40 },
       "editor.history.stepCharacters": { description: "Name of one history step: the character (speaker) of one or more lines was set, changed or cleared. {count} is how many lines.", placeholders: { count: "A number." } },
       "editor.history.stepEditSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the source text of a line was edited (one editing session). A short verb phrase.", maxLength: 40 },
+      "editor.history.stepChangeSetting": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): one project setting was changed. {setting} is the setting's own name as Project settings shows it, for example 'Who can export'.", placeholders: { setting: "The name of the setting that was changed." }, maxLength: 60 },
       "editor.timeline.videoHiddenNote": {
         description:
           "Note replacing the linked video player when the file is in free-timing " +

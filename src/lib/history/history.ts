@@ -47,9 +47,10 @@ import { tabConnId } from "@/lib/sync/ws-reconciler"
 /**
  * Why a step was left alone. `approved`: someone else approved what it made
  * since (`by` names them, gap 25). `notAllowed`: the person may no longer make
- * that change (gap 29).
+ * that change (gap 29). `otherDevice`: it changed a setting kept only on the
+ * device it was made on (AQU-2262), which this one does not share.
  */
-export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged"
+export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged" | "otherDevice"
 
 /** What an undo or redo did. `skipped` is not an error: it is the guard working. */
 export type StepOutcome =
@@ -131,7 +132,8 @@ const GROUP_KIND = "group"
 const LIMITS = { steps: HISTORY_LIMIT, log: LOG_LIMIT }
 
 const stacks = new Map<string, Stacks>()
-const handlers = new Map<string, StepHandler<never>>()
+/** Each kind's registrations, newest last: the newest one runs. */
+const handlers = new Map<string, StepHandler<never>[]>()
 const listeners = new Set<() => void>()
 let activeScope: string | null = null
 let activeUser: string | null = null
@@ -523,6 +525,32 @@ export function setHistoryScope(projectId: string | null, username: string | nul
 }
 
 /**
+ * Host a project's history while nothing else does, and give it back after.
+ * (AQU-2262)
+ *
+ * The workspace hosts the history (`setHistoryScope`, `setHistoryRemote`)
+ * while a project is open. Project settings record steps too, and they can be
+ * open on their own page with no workspace behind them; then they host it, so
+ * Undo, the History panel and the copy on the server work there as well. Over
+ * the workspace (the settings dialog) the history is already hosted for the
+ * same project and person, and this changes nothing.
+ *
+ * Returns the release. It ends only what it started: the scope if it is still
+ * the active one, and the server copy if it set it.
+ */
+export function holdHistoryScope(projectId: string, username: string, makeRemote?: () => HistoryRemote): () => void {
+  const key = scopeKey(projectId, username)
+  if (activeScope === key) return () => {}
+  setHistoryScope(projectId, username, laneByProject.get(projectId) ?? "")
+  const ownRemote = !remote && makeRemote ? makeRemote() : null
+  if (ownRemote) setHistoryRemote(ownRemote)
+  return () => {
+    if (ownRemote && remote === ownRemote) setHistoryRemote(null)
+    if (activeScope === key) setHistoryScope(null, null)
+  }
+}
+
+/**
  * How opening a step's language went: open and loaded; `denied`, the person
  * may no longer work in it (the step is dropped, gap 29); `blocked`, it could
  * not be opened from here or not in time (the step waits, like one made in
@@ -543,12 +571,27 @@ export function setLaneSwitcher(fn: ((lane: string) => Promise<LaneSwitch>) | nu
  * Register what undo and redo mean for some step kinds. Returns the
  * unregister function; the newest registration of a kind wins, so a component
  * that re-registers with fresh closures replaces its earlier one.
+ *
+ * AQU-2262: registrations stack. Project settings open as a dialog over the
+ * workspace register the settings kinds the workspace registers too; when the
+ * dialog closes, the workspace's registration runs again rather than the kind
+ * being left with none (an undo would then drop the step as unavailable).
  */
 export function registerStepKinds(map: Record<string, StepHandler<never>>): () => void {
   const mine = Object.entries(map)
-  for (const [kind, handler] of mine) handlers.set(kind, handler)
+  for (const [kind, handler] of mine) {
+    const list = handlers.get(kind) ?? []
+    list.push(handler)
+    handlers.set(kind, list)
+  }
   return () => {
-    for (const [kind, handler] of mine) if (handlers.get(kind) === handler) handlers.delete(kind)
+    for (const [kind, handler] of mine) {
+      const list = handlers.get(kind)
+      if (!list) continue
+      const at = list.lastIndexOf(handler)
+      if (at >= 0) list.splice(at, 1)
+      if (list.length === 0) handlers.delete(kind)
+    }
   }
 }
 
@@ -719,7 +762,8 @@ async function runRecord(record: StepRecord, which: "undo" | "redo"): Promise<St
   const pending = pendingWrites.get(record.id)
   if (pending && !(await pending)) return { kind: "skipped", reason: "gone" }
   if (record.kind === GROUP_KIND) return runGroup(record as StepRecord<{ steps: StepRecord[] }>, which)
-  const handler = handlers.get(record.kind) as StepHandler<unknown> | undefined
+  const registered = handlers.get(record.kind)
+  const handler = registered?.[registered.length - 1] as StepHandler<unknown> | undefined
   if (!handler) return { kind: "skipped", reason: "unavailable" }
   try {
     return await (which === "undo" ? handler.undo(record.data) : handler.redo(record.data))

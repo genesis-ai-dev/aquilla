@@ -15,6 +15,12 @@
  * SETTINGS. A save in Project settings is one step. Undo writes back the old
  * value of each setting it changed, but only for settings still holding the
  * value this save wrote; one somebody has changed since keeps theirs.
+ *
+ * AQU-2262: settings save as you change them, so a step is usually one
+ * setting. A change may name one FIELD of an object setting (the drafting
+ * settings are one object): only that field is compared and written back,
+ * merged into the object as it stands, so a field someone else changed keeps
+ * their value.
  */
 import type { StepHandler, StepOutcome } from "./history"
 
@@ -26,7 +32,17 @@ export interface TextValue { value: string; valueHtml?: string }
 export interface TextCommitData { cellId: string; lane: string; side: "target" | "source"; before: TextValue; after: TextValue }
 export interface TextVoteData { cellId: string; lane: string; voted: boolean; editEventId: string }
 export interface AudioVoteData { cellId: string; audioId: string; voted: boolean }
-export interface SettingsData { changes: Array<{ key: string; before: unknown; after: unknown }> }
+export interface SettingsChange {
+  key: string
+  /** One field of an object setting, when only that field changed. */
+  field?: string
+  before?: unknown
+  after?: unknown
+}
+export interface SettingsData { changes: SettingsChange[] }
+/** How a settings write is applied: keys in `mergeKeys` are merged into the
+ *  object they hold rather than replacing it. */
+export interface SettingsWriteOptions { mergeKeys?: string[] }
 
 export interface EditStepContext {
   /** The cell's current text on a side/lane, or null when the cell is gone. */
@@ -40,7 +56,7 @@ export interface EditStepContext {
   setAudioVote(cellId: string, audioId: string, voted: boolean): Promise<void>
   /** The current value of each project setting named. */
   readSettings(keys: readonly string[]): Record<string, unknown> | null
-  writeSettings(patch: Record<string, unknown>): Promise<void>
+  writeSettings(patch: Record<string, unknown>, opts?: SettingsWriteOptions): Promise<void>
 }
 
 /** Text equality the way a reader sees it: the plain value decides. */
@@ -70,21 +86,6 @@ export function editStepHandlers(ctx: EditStepContext): Record<string, StepHandl
     await ctx.setAudioVote(d.cellId, d.audioId, !from)
     return DONE
   }
-  const settingsFlip = async (d: SettingsData, which: "undo" | "redo"): Promise<StepOutcome> => {
-    const now = ctx.readSettings(d.changes.map((c) => c.key))
-    if (!now) return GONE
-    const patch: Record<string, unknown> = {}
-    for (const c of d.changes) {
-      const from = which === "undo" ? c.after : c.before
-      const to = which === "undo" ? c.before : c.after
-      if (sameValue(now[c.key], from)) patch[c.key] = to ?? null
-    }
-    if (Object.keys(patch).length === 0) return CHANGED
-    await ctx.writeSettings(patch)
-    return Object.keys(patch).length < d.changes.length
-      ? { kind: "done", partial: { skipped: d.changes.length - Object.keys(patch).length } }
-      : DONE
-  }
 
   return {
     "text.commit": {
@@ -99,6 +100,45 @@ export function editStepHandlers(ctx: EditStepContext): Record<string, StepHandl
       undo: (d: AudioVoteData) => audioVoteFlip(d, d.voted),
       redo: (d: AudioVoteData) => audioVoteFlip(d, !d.voted),
     } as StepHandler<never>,
+    ...settingsProjectHandler(ctx),
+  }
+}
+
+/** The "settings.project" kind on its own, for a page that writes settings
+ *  but no text (Project settings on its own page). */
+export function settingsProjectHandler(
+  ctx: Pick<EditStepContext, "readSettings" | "writeSettings">,
+): Record<string, StepHandler<never>> {
+  const settingsFlip = async (d: SettingsData, which: "undo" | "redo"): Promise<StepOutcome> => {
+    const now = ctx.readSettings([...new Set(d.changes.map((c) => c.key))])
+    if (!now) return GONE
+    const patch: Record<string, unknown> = {}
+    const mergeKeys = new Set<string>()
+    let applied = 0
+    for (const c of d.changes) {
+      const from = which === "undo" ? c.after : c.before
+      const to = which === "undo" ? c.before : c.after
+      if (c.field !== undefined) {
+        const holder = now[c.key]
+        const current = holder && typeof holder === "object" ? (holder as Record<string, unknown>)[c.field] : undefined
+        if (!sameValue(current, from)) continue
+        // Unset when it was unset: the merge drops an undefined field.
+        patch[c.key] = { ...((patch[c.key] as Record<string, unknown> | undefined) ?? {}), [c.field]: to }
+        mergeKeys.add(c.key)
+        applied += 1
+      } else if (sameValue(now[c.key], from)) {
+        patch[c.key] = to ?? null
+        applied += 1
+      }
+    }
+    if (applied === 0) return CHANGED
+    if (mergeKeys.size > 0) await ctx.writeSettings(patch, { mergeKeys: [...mergeKeys] })
+    else await ctx.writeSettings(patch)
+    return applied < d.changes.length
+      ? { kind: "done", partial: { skipped: d.changes.length - applied } }
+      : DONE
+  }
+  return {
     "settings.project": {
       undo: (d: SettingsData) => settingsFlip(d, "undo"),
       redo: (d: SettingsData) => settingsFlip(d, "redo"),

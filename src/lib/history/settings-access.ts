@@ -9,10 +9,11 @@
  * mounted. The writes go through the hook's own patch, so they get the same
  * version check, optimistic apply and broadcast as a save from the page.
  */
+import type { SettingsWriteOptions } from "./edit-steps"
 
 export interface SettingsAccessor {
   read(): Record<string, unknown>
-  write(patch: Record<string, unknown>): Promise<void>
+  write(patch: Record<string, unknown>, opts?: SettingsWriteOptions): Promise<void>
 }
 
 const accessors = new Map<string, Set<SettingsAccessor>>()
@@ -48,8 +49,12 @@ export function readProjectSettingsFor(projectId: string | null, keys: readonly 
 }
 
 /** Write a patch through a mounted settings hook. Throws when it did not save. */
-export async function writeProjectSettingsFor(projectId: string | null, patch: Record<string, unknown>): Promise<void> {
+export async function writeProjectSettingsFor(
+  projectId: string | null,
+  patch: Record<string, unknown>,
+  opts?: SettingsWriteOptions,
+): Promise<void> {
   const accessor = first(projectId)
   if (!accessor) throw new Error("project settings are not available")
-  await accessor.write(patch)
+  await accessor.write(patch, opts)
 }

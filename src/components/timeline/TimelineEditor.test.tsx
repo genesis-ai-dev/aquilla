@@ -5573,6 +5573,34 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(onLink).toHaveBeenCalled()
   })
 
+  // AQU-1758 (Sam, Oct 29): with "Show the film and sources tools" off, a file
+  // that already has a film keeps it within reach: Sources still shows on it,
+  // holding its film and nothing else.
+  it("with the film and sources setting off, a file with a film keeps Sources, with its film in it and nothing else", async () => {
+    const { film, onLink } = drawBar({ showSources: false })
+    const sources = await screen.findByTestId("tl-sources-menu")
+    fireEvent.click(sources)
+    const menu = await screen.findByRole("menu")
+    const text = menu.textContent ?? ""
+    expect(text).toContain("a.mp4")
+    expect(within(menu).getByTestId("top-film-change")).toBeInTheDocument()
+    expect(within(menu).getByTestId("top-film-hide")).toBeInTheDocument()
+    // The other sources, and their heading, stay behind the setting.
+    expect(text).not.toMatch(/Audio cues/)
+    expect(text).not.toMatch(/^Sources|Sources$/m)
+    fireEvent.click(within(menu).getByTestId("top-film-hide"))
+    expect(film.onHide).toHaveBeenCalled()
+    fireEvent.click(sources)
+    fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
+    expect(onLink).toHaveBeenCalled()
+  })
+
+  it("with the setting off, a file without a film has no Sources at all, as before", async () => {
+    drawBar({ showSources: false, coreMediaUrl: null, film: undefined })
+    await waitFor(() => expect(screen.getByTestId("tl-timing-mode")).toBeInTheDocument())
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
+  })
+
   it("puts the note about stand-in lines at the foot of the Timing menu", async () => {
     renderWithTooltips(
       <TimelineEditor

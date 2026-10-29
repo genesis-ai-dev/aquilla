@@ -2231,7 +2231,7 @@ export function TimelineEditor({
     if (linkingAvailable) {
       items.push({
         id: "check-links",
-        label: linkingMode ? "Stop linking" : "Check links",
+        label: linkingMode ? t("editor.timeline.menuStopLinking") : t("editor.timeline.menuCheckLinks"),
         icon: Link2,
         badge: cueLinksPending ? (
           <span className="text-[11px] text-muted-foreground">{t("editor.timeline.badgePairing")}</span>
@@ -2246,7 +2246,7 @@ export function TimelineEditor({
     if (onReviewCharacterDisagreements && canCheck) {
       items.push({
         id: "check-characters",
-        label: "Check characters",
+        label: t("editor.timeline.menuCheckCharacters"),
         icon: Users,
         badge:
           characterDisagreements > 0 ? (
@@ -2272,7 +2272,7 @@ export function TimelineEditor({
     if (onRequestLinkVideo) {
       items.push({
         id: "film",
-        label: "Film",
+        label: t("editor.timeline.menuFilm"),
         icon: Film,
         disabled: !canLinkVideo,
         badge: (
@@ -2286,7 +2286,7 @@ export function TimelineEditor({
     if (onRequestImportAudioVtt) {
       items.push({
         id: "audio-cues",
-        label: "Audio cues",
+        label: t("editor.timeline.menuAudioCues"),
         icon: AudioLines,
         disabled: !canImportAudioVtt,
         badge: (
@@ -2322,7 +2322,7 @@ export function TimelineEditor({
     if (onRequestExtractSubtitles) {
       items.push({
         id: "subtitles",
-        label: "Subtitles",
+        label: t("editor.timeline.laneSubtitle"),
         icon: Captions,
         disabled: !canExtractSubtitles || subtitleCueCount > 0,
         badge: (
@@ -2338,7 +2338,7 @@ export function TimelineEditor({
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
-        label: "Characters",
+        label: t("editor.timeline.charactersTitle"),
         icon: Users,
         disabled: !canImportCharacters,
         badge: charactersWriting ? (
@@ -2349,12 +2349,14 @@ export function TimelineEditor({
           <span className="text-[11px] text-muted-foreground">
             {characterCount === 0 && audioCharacterCount === 0
               ? t("editor.timeline.badgeNotImported")
-              : [
-                  characterCount > 0 ? `${characterCount} subtitle` : null,
-                  audioCharacterCount > 0 ? `${audioCharacterCount} heard` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" + ")}
+              : characterCount > 0 && audioCharacterCount > 0
+                ? t("editor.timeline.badgeCharactersBoth", {
+                    subtitle: t("editor.timeline.badgeCharactersSubtitle", { count: characterCount }),
+                    heard: t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount }),
+                  })
+                : characterCount > 0
+                  ? t("editor.timeline.badgeCharactersSubtitle", { count: characterCount })
+                  : t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount })}
           </span>
         ),
         onClick: onRequestImportCharacters,

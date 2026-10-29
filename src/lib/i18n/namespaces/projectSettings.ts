@@ -245,6 +245,9 @@ export const projectSettings = defineNamespace({
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
     "projectSettings.create.submitCreate": "Create Project",
+    "projectSettings.create.longRunningNote":
+      "This is taking longer than expected. You can close this dialog — the project " +
+      "may still finish and show up in your projects list.",
     "projectSettings.create.submitCreateAndLink": "Create & Link",
     "projectSettings.create.errorSignInRequired": "You need to be signed in to create a project.",
     "projectSettings.create.errorGeneric": "Failed to create project. Please try again.",
@@ -266,8 +269,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.laneRecommendation":
       "{heading} Add it as a target lane on {projectName} instead — no separate " +
       "project to keep in sync.",
-    "projectSettings.create.laneRecommendationAdding": "Adding lane…",
-    "projectSettings.create.laneRecommendationAddButton": "Add as lane on {projectName}",
+    // AQU-2259: the dialog showed these as hard-coded English. A lane is a
+    // "Language lane" in the interface (Sam, Oct 29).
+    "projectSettings.create.laneRecommendationAdding": "Adding Language lane…",
+    "projectSettings.create.laneRecommendationAddButton": "Add as a Language lane on {projectName}",
     "projectSettings.create.laneRecommendationSignInError":
       "You need to be signed in to add a lane.",
     "projectSettings.create.laneRecommendationEmptyTargetError":

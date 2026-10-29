@@ -147,10 +147,6 @@ const EXTRA_LANGUAGES_WARNING =
  */
 const LONG_RUNNING_WORK_MS = 120_000
 
-const LONG_RUNNING_WORK_MESSAGE =
-  "This is taking longer than expected. You can close this dialog — the project " +
-  "may still finish and show up in your projects list."
-
 /**
  * AQU-1519: what the dialog is busy doing. Anything non-null locks every
  * control in the body AND every way of closing, so a stray click mid-create
@@ -1226,7 +1222,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               className="shrink-0 text-xs text-amber-600"
               data-testid="create-taking-long"
             >
-              {LONG_RUNNING_WORK_MESSAGE}
+              {t("projectSettings.create.longRunningNote")}
             </p>
           )}
 
@@ -1261,8 +1257,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}
                   {isSubmitting
-                    ? (willLink ? "Creating & linking…" : "Creating…")
-                    : (willLink ? "Create & Link" : "Create Project")}
+                    ? (willLink ? t("projectSettings.create.submitCreatingAndLinking") : t("common.creating"))
+                    : (willLink ? t("projectSettings.create.submitCreateAndLink") : t("projectSettings.create.submitCreate"))}
                 </Button>
               )
             }}
@@ -1446,7 +1442,9 @@ function AddAsLaneRecommendation({
           onClick={() => void handleAddAsLane()}
         >
           {status === "loading" && <Spinner data-icon="inline-start" />}
-          {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
+          {status === "loading"
+            ? t("projectSettings.create.laneRecommendationAdding")
+            : t("projectSettings.create.laneRecommendationAddButton", { projectName: upstreamProject.name })}
         </Button>
       </div>
       {message && status === "error" && (

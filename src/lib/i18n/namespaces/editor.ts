@@ -1373,6 +1373,15 @@ export const editor = defineNamespace({
     "editor.timeline.neverPaired":
       'These cues have never been paired with the subtitles. Choose "{repairAll}" to work out the pairings.',
     "editor.timeline.badgePairing": "pairing…",
+    // AQU-2259: the Sources and Check menu rows, hard-coded English before.
+    "editor.timeline.menuCheckLinks": "Check links",
+    "editor.timeline.menuStopLinking": "Stop linking",
+    "editor.timeline.menuCheckCharacters": "Check characters",
+    "editor.timeline.menuFilm": "Film",
+    "editor.timeline.menuAudioCues": "Audio cues",
+    "editor.timeline.badgeCharactersSubtitle": "{count} subtitle",
+    "editor.timeline.badgeCharactersHeard": "{count} heard",
+    "editor.timeline.badgeCharactersBoth": "{subtitle} + {heard}",
     // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
     // It differed only in case, and a case-only split is pure duplicate work:
     // three of the four target locales have no letter case at all. The badge
@@ -3750,6 +3759,36 @@ export const editor = defineNamespace({
         description:
           "Error shown in that confirmation when the change could not be saved " +
           "(for example the track changed meanwhile). The dialog stays open.",
+      },
+      "editor.timeline.menuCheckLinks": {
+        description: "Check menu row (timeline toolbar) that turns on the mode for checking which audio cue pairs with which subtitle.",
+      },
+      "editor.timeline.menuStopLinking": {
+        description: "The same Check menu row while that pairing mode is on: turns it off.",
+      },
+      "editor.timeline.menuCheckCharacters": {
+        description: "Check menu row that opens the review of lines whose speaking character disagrees between sources.",
+      },
+      "editor.timeline.menuFilm": {
+        description: "Sources menu row for the film (video) linked to this file; its badge says Linked or Not linked.",
+      },
+      "editor.timeline.menuAudioCues": {
+        description: "Sources menu row for the file's audio cues (imported from an audio VTT); its badge says how many.",
+      },
+      "editor.timeline.badgeCharactersSubtitle": {
+        description: "Badge on the Characters row: how many characters came from the subtitles. Short; 'subtitle' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '12'." },
+      },
+      "editor.timeline.badgeCharactersHeard": {
+        description: "Badge on the Characters row: how many characters were heard in the audio. Short; 'heard' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '3'." },
+      },
+      "editor.timeline.badgeCharactersBoth": {
+        description: "Badge on the Characters row when both kinds exist: the two counts side by side.",
+        placeholders: {
+          subtitle: "editor.timeline.badgeCharactersSubtitle, already filled in, e.g. '12 subtitle'.",
+          heard: "editor.timeline.badgeCharactersHeard, already filled in, e.g. '3 heard'.",
+        },
       },
       "editor.timeline.neverPaired": {
         description:

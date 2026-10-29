@@ -21,7 +21,6 @@ import { SettingsRow } from "@/components/ui/page"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ReactNode } from "react"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -84,11 +83,10 @@ export function StructuralCellsProjectSection({
     setBusy(false)
   }
 
-  // AQU-1912 (Sam, 2026-10-19): ONE hover. A locked control carried two
-  // tooltips stacked on one trigger — the lock's and the organization's
-  // answer — and the inner one won, so a reader never learned why it was
-  // grey. Locked, the lock's explanation leads and the organization's answer
-  // sits under it; unlocked, the organization's answer stands alone.
+  // AQU-2260 (Sam, Oct 29): no hovers. The organization's answer is a short
+  // line under the menu, always; locked, why it is locked is one more line
+  // beneath it, unless the card's heading already says so. (AQU-1912 had
+  // folded two stacked tooltips into one; now there are none.)
   const locked = Boolean(disabled) && disabledTooltip != null
   const trigger = (
     <SelectTrigger
@@ -113,7 +111,7 @@ export function StructuralCellsProjectSection({
         <div className="flex flex-col items-end gap-1">
           <DisabledFieldTooltip
             disabled={locked}
-            tooltip={locked ? <>{disabledTooltip}<p className="text-muted-foreground">{currentDefault}</p></> : null}
+            tooltip={locked ? disabledTooltip : null}
           >
             <Select
               items={options}
@@ -121,24 +119,7 @@ export function StructuralCellsProjectSection({
               value={choice}
               onValueChange={(v) => void handleChange((v ?? choice) as Choice)}
             >
-              {/* A span owns the hover rather than the trigger itself. Making
-                  a control its own tooltip trigger races that control's
-                  pointer and focus handling — the same reason
-                  DisabledFieldTooltip beside this wraps in a span. */}
-              {locked ? trigger : (
-                <Tooltip>
-                  <TooltipTrigger
-                    delay={200}
-                    closeOnClick={false}
-                    render={<span className="block" />}
-                  >
-                    {trigger}
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" align="center">
-                    {currentDefault}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              {trigger}
               <SelectContent>
                 <SelectGroup>
                   {options.map((o) => (
@@ -149,7 +130,7 @@ export function StructuralCellsProjectSection({
             </Select>
           </DisabledFieldTooltip>
           {/* Announced with the control rather than painted on hover only. */}
-          <span id="count-structural-cells-default" className="sr-only">
+          <span id="count-structural-cells-default" className="text-xs text-muted-foreground">
             {currentDefault}
           </span>
           {error && <FieldError className="text-xs">{error}</FieldError>}

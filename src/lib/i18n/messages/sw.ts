@@ -5807,8 +5807,6 @@ export const sw: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "Kuhusu kuweka kwenye kumbukumbu",
   "projectSettings.languages.archivedHint": "Hazionekani kwenye kibadilishi cha lugha. Kazi zake zinawekwa; rejesha moja ili iwe amilifu tena.",
   "projectSettings.languages.archivedHintAriaLabel": "Kuhusu lugha zilizowekwa kwenye kumbukumbu",
-  "projectSettings.languages.viewOnly": "Kuangalia tu",
-  "projectSettings.languages.viewOnlyAriaLabel": "Kwa nini huwezi kubadilisha lugha",
   "projectSettings.languages.changeSourceAriaLabel": "Badilisha lugha ya chanzo",
   "projectSettings.info.titleLabel": "Kichwa cha mradi",
   "projectSettings.systemPrompt.label": "Agizo la mfumo",

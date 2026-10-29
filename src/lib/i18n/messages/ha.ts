@@ -5811,8 +5811,6 @@ export const ha: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "Game da adanawa",
   "projectSettings.languages.archivedHint": "An ɓoye daga canjin harshe. Ana kiyaye aikinsu; ku maido ɗaya don sake kunna shi.",
   "projectSettings.languages.archivedHintAriaLabel": "Game da harsunan da aka adana",
-  "projectSettings.languages.viewOnly": "Kallo kawai",
-  "projectSettings.languages.viewOnlyAriaLabel": "Dalilin da ba za ku iya canza harsuna ba",
   "projectSettings.languages.changeSourceAriaLabel": "Ku canza harshen asali",
   "projectSettings.info.titleLabel": "Taken aiki",
   "projectSettings.systemPrompt.label": "Umarnin tsari",

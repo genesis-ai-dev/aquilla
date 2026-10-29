@@ -242,7 +242,7 @@ export function ValidationSettingsSection({
   return (
     <>
       {notice}
-      <SettingsGroup label={t("projectSettings.validation.textGroup")}>
+      <SettingsGroup label={t("projectSettings.validation.textGroup")} locked={disabled ? disabledTooltip : null}>
         <SettingsRow
           // AQU-1771: while inheriting there is no number box, so the label names
           // the "Organization default" select instead.
@@ -339,7 +339,7 @@ export function ValidationSettingsSection({
           or trust a different set of people with each. Since 2026-10-03 each
           has its own card: one card mixing the two read as one muddled rule
           (Sam, PR 1 test pass). */}
-      <SettingsGroup label={t("projectSettings.validation.audioGroup")}>
+      <SettingsGroup label={t("projectSettings.validation.audioGroup")} locked={disabled ? disabledTooltip : null}>
         <SettingsRow
           label={<label htmlFor={validationCountAudio == null ? "validation-count-audio-source" : "validation-count-audio"}>{t("projectSettings.validation.requiredAudioLabel")}</label>}
           description={t("projectSettings.validation.requiredAudioAppliesNote")}

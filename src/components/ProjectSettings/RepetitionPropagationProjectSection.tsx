@@ -16,7 +16,6 @@ import { SettingsRow } from "@/components/ui/page"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ReactNode } from "react"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -98,7 +97,7 @@ export function RepetitionPropagationProjectSection({
         <div className="flex flex-col items-end gap-1">
           <DisabledFieldTooltip
             disabled={locked}
-            tooltip={locked ? <>{disabledTooltip}<p className="text-muted-foreground">{currentDefault}</p></> : null}
+            tooltip={locked ? disabledTooltip : null}
           >
             <Select
               items={options}
@@ -106,23 +105,7 @@ export function RepetitionPropagationProjectSection({
               value={choice}
               onValueChange={(v) => void handleChange((v ?? choice) as Choice)}
             >
-              {/* A span owns the hover rather than the trigger itself —
-                  making a control its own tooltip trigger races that
-                  control's pointer and focus handling. */}
-              {locked ? trigger : (
-                <Tooltip>
-                  <TooltipTrigger
-                    delay={200}
-                    closeOnClick={false}
-                    render={<span className="block" />}
-                  >
-                    {trigger}
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" align="center">
-                    {currentDefault}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              {trigger}
               <SelectContent>
                 <SelectGroup>
                   {options.map((o) => (
@@ -132,7 +115,7 @@ export function RepetitionPropagationProjectSection({
               </SelectContent>
             </Select>
           </DisabledFieldTooltip>
-          <span id="auto-propagate-repetitions-default" className="sr-only">
+          <span id="auto-propagate-repetitions-default" className="text-xs text-muted-foreground">
             {currentDefault}
           </span>
           {error && <FieldError className="text-xs">{error}</FieldError>}

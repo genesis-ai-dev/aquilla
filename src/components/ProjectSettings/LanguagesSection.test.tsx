@@ -245,14 +245,16 @@ describe("LanguagesSection", () => {
     expect(screen.queryByTestId("archived-lanes-toggle")).toBeNull()
   })
 
-  it("disables write controls (add, the row menu, restore) below the role floor, and says View only", () => {
+  it("disables write controls (add, the row menu, restore) below the role floor, and says why once at the top", () => {
     renderSection({
       canEdit: false,
       targetLanes: ["fr-CA", "fr-BE"],
       archivedLanes: ["fr-BE"],
       disabledTooltip: "Maintainer or higher can edit shared settings.",
     })
-    expect(screen.getByTestId("languages-view-only").textContent).toContain("View only")
+    // AQU-2260: one line under the card's title, not a View only (i).
+    expect(screen.getByTestId("languages-view-only").textContent).toContain("Maintainer or higher can edit shared settings.")
+    expect(screen.getAllByText("Maintainer or higher can edit shared settings.")).toHaveLength(1)
     expect((screen.getByTestId("add-lane-open") as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId("lane-menu-fr-CA") as HTMLButtonElement).disabled).toBe(true)
     // Looking is not a write: the archived group still opens.
@@ -260,28 +262,14 @@ describe("LanguagesSection", () => {
     expect((screen.getByTestId("restore-lane-fr-BE") as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("says nothing about View only to someone who can edit", () => {
+  it("says nothing about a lock to someone who can edit", () => {
     renderSection()
     expect(screen.queryByTestId("languages-view-only")).toBeNull()
   })
 
-  it("shows the disabled-reason hint on a locked write control", async () => {
-    renderWithTooltips(
-      <LanguagesSection
-        defaultTargetLanguage="French"
-        targetLanes={[]}
-        canEdit={false}
-        disabledTooltip="Maintainer or higher can edit shared settings."
-        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
-      />,
-    )
-    await expectTooltip(
-      screen.getByTestId("add-lane-open"),
-      /maintainer or higher can edit shared settings/i,
-    )
-  })
-
-  it("puts the reason behind the View only (i)", async () => {
+  // AQU-2260 (Sam, Oct 29): the reason is on the page, never a hover, and
+  // there is no (i) to find it behind.
+  it("says why the card is locked on the page, with no hover and no (i)", async () => {
     renderWithTooltips(
       <LanguagesSection
         defaultTargetLanguage="French"
@@ -291,10 +279,10 @@ describe("LanguagesSection", () => {
         patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
       />,
     )
-    await expectTooltip(
-      screen.getByRole("button", { name: "Why you can't change languages" }),
-      /you need project lead to change languages/i,
-    )
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("You need Project lead to change languages.")
+    expect(screen.queryByRole("button", { name: "Why you can't change languages" })).toBeNull()
+    await userEvent.setup().hover(screen.getByTestId("add-lane-open"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })
 
@@ -1059,7 +1047,8 @@ describe("LanguagesSection — the former default lane archives like any other (
     openRowMenu("lane-default")
     const item = screen.getByTestId("archive-lane-lane-default")
     expect(item).toHaveAttribute("aria-disabled", "true")
-    await expectTooltip(item, /only active lane/i)
+    // AQU-2260: the reason sits under the item in the menu, not on hover.
+    expect(item.parentElement).toHaveTextContent(/only active lane/i)
     expect(onSetLaneArchived).not.toHaveBeenCalled()
   })
 
@@ -1073,7 +1062,7 @@ describe("LanguagesSection — the former default lane archives like any other (
     renderLanes([DEFAULT_LANE, SPANISH], false)
     const menu = screen.getByTestId("lane-menu-lane-default")
     expect(menu.hasAttribute("disabled")).toBe(true)
-    await expectTooltip(menu, /project lead/i)
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent(/project lead/i)
   })
 })
 
@@ -1180,7 +1169,7 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
     const rename = screen.getByTestId("lane-duplicate-rename")
     expect(rename).toBeDisabled()
     expect(screen.getByTestId("lane-duplicate-archive")).toBeDisabled()
-    await expectTooltip(rename, /project lead/i)
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent(/project lead/i)
   })
 
   it("warns inline while a duplicate name is typed, before anything is saved", () => {

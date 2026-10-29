@@ -1172,8 +1172,6 @@ export const projectSettings = defineNamespace({
       "Hidden from the language switcher. Their work is kept; restore one to make it " +
       "active again.",
     "projectSettings.languages.archivedHintAriaLabel": "About archived languages",
-    "projectSettings.languages.viewOnly": "View only",
-    "projectSettings.languages.viewOnlyAriaLabel": "Why you can't change languages",
     "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
@@ -2200,11 +2198,6 @@ export const projectSettings = defineNamespace({
       "projectSettings.languages.archivedHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
-      },
-      "projectSettings.languages.viewOnlyAriaLabel": {
-        description:
-          "Accessible name of a small (i) icon on Project settings → Languages beside \"View only\", shown to people who may not change the project's languages; the tooltip says which role can. " +
           "Hovering or focusing it shows the explanation as a tooltip.",
       },
       "projectSettings.languages.changeSourceAriaLabel": {

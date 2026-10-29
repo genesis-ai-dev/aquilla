@@ -440,6 +440,8 @@ export function OrgMembersTable({
                 )}
                 <DisabledFieldTooltip
                   disabled={!canRemove}
+                  align="start"
+                  noteClassName="px-2 pb-1.5"
                   tooltip={!isOwner ? REMOVE_REQUIRES_OWNER_TOOLTIP : undefined}
                 >
                   <MenuItem

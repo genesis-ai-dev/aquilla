@@ -5798,8 +5798,6 @@ export const ur: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "آرکائیو کے بارے میں",
   "projectSettings.languages.archivedHint": "زبان سوئچر سے چھپی۔ ان کا کام رہتا ہے؛ دوبارہ فعال کرنے کے لیے ایک بحال کریں۔",
   "projectSettings.languages.archivedHintAriaLabel": "آرکائیو زبانوں کے بارے میں",
-  "projectSettings.languages.viewOnly": "صرف دیکھیں",
-  "projectSettings.languages.viewOnlyAriaLabel": "زبانیں کیوں نہیں بدل سکتے",
   "projectSettings.languages.changeSourceAriaLabel": "ماخذ زبان بدلیں",
   "projectSettings.info.titleLabel": "منصوبے کا عنوان",
   "projectSettings.systemPrompt.label": "سسٹم پرامپٹ",

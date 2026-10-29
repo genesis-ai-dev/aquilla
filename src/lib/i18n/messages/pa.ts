@@ -5804,8 +5804,6 @@ export const pa: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "ਪੁਰਾਲੇਖ ਬਾਰੇ",
   "projectSettings.languages.archivedHint": "ਭਾਸ਼ਾ ਬਦਲਣ ਵਾਲੇ ਤੋਂ ਲੁਕੀਆਂ. ਉਨ੍ਹਾਂ ਦਾ ਕੰਮ ਰਹਿੰਦਾ ਹੈ; ਮੁੜ ਸਰਗਰਮ ਕਰਨ ਲਈ ਇੱਕ ਬਹਾਲ ਕਰੋ.",
   "projectSettings.languages.archivedHintAriaLabel": "ਪੁਰਾਲੇਖ ਭਾਸ਼ਾਵਾਂ ਬਾਰੇ",
-  "projectSettings.languages.viewOnly": "ਸਿਰਫ਼ ਵੇਖੋ",
-  "projectSettings.languages.viewOnlyAriaLabel": "ਤੁਸੀਂ ਭਾਸ਼ਾਵਾਂ ਕਿਉਂ ਨਹੀਂ ਬਦਲ ਸਕਦੇ",
   "projectSettings.languages.changeSourceAriaLabel": "ਸਰੋਤ ਭਾਸ਼ਾ ਬਦਲੋ",
   "projectSettings.info.titleLabel": "ਪ੍ਰੋਜੈਕਟ ਸਿਰਲੇਖ",
   "projectSettings.systemPrompt.label": "ਸਿਸਟਮ ਪ੍ਰੋਂਪਟ",

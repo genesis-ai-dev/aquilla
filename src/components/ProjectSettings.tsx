@@ -657,14 +657,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
-  // the control itself (GitHub-style hint), not with a page-level banner.
+  // Server enforces MAINTAINER (600) for settings writes. AQU-2260: a card
+  // locked as a whole says so once under its heading; a single locked control
+  // says so beneath it — never on hover.
   const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
   const roleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: privilegedRole,
-      })}
+      role={privilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -688,9 +687,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
   const languageRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: languagePrivilegedRole,
-      })}
+      role={languagePrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -712,9 +709,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
   const structuralRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: structuralPrivilegedRole,
-      })}
+      role={structuralPrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -2144,6 +2139,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               sourceProjectId={project.sourceProjectId}
               settings={sharedSettingsBlob}
               canEdit={canEditShared}
+              locked={sharedDisabledTooltip}
               onPatch={patchShared}
             />
           </div>
@@ -2165,7 +2161,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <div id="section-project-info">
-            <SettingsGroup label={t("projectSettings.section.projectInfo")}>
+            <SettingsGroup label={t("projectSettings.section.projectInfo")} locked={!canRenameProject ? sharedDisabledTooltip : null}>
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
@@ -2283,7 +2279,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             {/* AQU-1068. One setting answers WHO; the file's own nature answers
                 WHERE — a text file takes a cell anywhere, a subtitle file only
                 in a gap — so nothing here mentions timings or media. */}
-            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
                 description={t("projectSettings.cellEditing.description")}
@@ -2365,7 +2361,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
-            <SettingsGroup label={t("projectSettings.section.import")}>
+            <SettingsGroup label={t("projectSettings.section.import")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}
                 description={t("projectSettings.import.excludeFrontMatterDescription")}
@@ -3045,7 +3041,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-            <SettingsGroup label={t("projectSettings.harmonization.title")}>
+            <SettingsGroup label={t("projectSettings.harmonization.title")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</label>}
                 description={t("projectSettings.harmonization.description")}
@@ -3226,7 +3222,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
-            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
+            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} locked={sharedDisabledTooltip} />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}

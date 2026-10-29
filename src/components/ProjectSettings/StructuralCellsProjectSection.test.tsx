@@ -1,51 +1,54 @@
-// AQU-1912 (Sam, 2026-10-19): a locked "Count headings" (and its sibling,
-// "copy translations to repeated rows") has ONE hover — why it is locked,
-// with the organization's answer under it — not two stacked tooltips.
+// AQU-2260 (Sam, Oct 29): no hovers on these rows. The organization's answer
+// is a short line under the menu, always there; locked, why sits beneath it as
+// one more line — and says nothing when the card above already said it.
+// (AQU-1912 had made it one hover instead of two stacked ones.)
 import { describe, expect, it, vi } from "vitest"
-import { screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { renderWithTooltips } from "@/test-utils/tooltip"
+import { SettingsGroup } from "@/components/ui/page"
 import { StructuralCellsProjectSection } from "./StructuralCellsProjectSection"
 import { RepetitionPropagationProjectSection } from "./RepetitionPropagationProjectSection"
 
-const onPatch = vi.fn(async () => ({ kind: "ok" }))
-const LOCK = "Only Project leads can modify"
-
-async function hoverTooltips(trigger: Element): Promise<string[]> {
-  await userEvent.setup().hover(trigger)
-  await waitFor(() => expect(screen.getAllByRole("tooltip").length).toBeGreaterThan(0))
-  return screen.getAllByRole("tooltip").map((el) => el.textContent ?? "")
-}
+const onPatch = vi.fn(async () => ({ kind: "ok" as const }))
+const LOCK = "Only Project leads can change this."
 
 describe("StructuralCellsProjectSection", () => {
-  it("locked: one hover saying why, with the organization's answer under it", async () => {
-    renderWithTooltips(
+  it("locked: why, and the organization's answer, both on the page, with no hover", async () => {
+    render(
       <StructuralCellsProjectSection value={undefined} orgDefault disabled disabledTooltip={LOCK} onPatch={onPatch} />,
     )
-    const tips = await hoverTooltips(document.getElementById("count-structural-cells")!.parentElement!)
-    expect(tips).toHaveLength(1)
-    expect(tips[0]).toContain(LOCK)
-    expect(tips[0]).toContain("The organization currently counts them")
+    expect(screen.getByText(LOCK)).toBeVisible()
+    expect(screen.getByText("The organization currently counts them")).not.toHaveClass("sr-only")
+    await userEvent.setup().hover(document.getElementById("count-structural-cells")!)
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 
-  it("unlocked: the hover is the organization's answer alone", async () => {
-    renderWithTooltips(
-      <StructuralCellsProjectSection value={undefined} orgDefault={false} onPatch={onPatch} />,
+  it("unlocked: the organization's answer under the menu, and no lock line", () => {
+    render(<StructuralCellsProjectSection value={undefined} orgDefault={false} onPatch={onPatch} />)
+    expect(screen.getByText("The organization currently leaves them out")).not.toHaveClass("sr-only")
+    expect(screen.queryByText(LOCK)).toBeNull()
+  })
+
+  it("says nothing of its own inside a card whose heading already gives the same reason", () => {
+    render(
+      <SettingsGroup label="Text" locked={LOCK}>
+        <StructuralCellsProjectSection value={undefined} orgDefault disabled disabledTooltip={LOCK} onPatch={onPatch} />
+      </SettingsGroup>,
     )
-    const tips = await hoverTooltips(document.getElementById("count-structural-cells")!.parentElement!)
-    expect(tips).toEqual([expect.stringContaining("The organization currently leaves them out")])
-    expect(tips[0]).not.toContain(LOCK)
+    expect(screen.getAllByText(LOCK)).toHaveLength(1)
+    expect(screen.getByTestId("settings-group-locked")).toHaveTextContent(LOCK)
   })
 })
 
 describe("RepetitionPropagationProjectSection", () => {
-  it("locked: one hover saying why, with the organization's answer under it", async () => {
-    renderWithTooltips(
+  it("locked: why, and the organization's answer, both on the page, with no hover", async () => {
+    render(
       <RepetitionPropagationProjectSection value={undefined} orgDefault={false} disabled disabledTooltip={LOCK} onPatch={onPatch} />,
     )
-    const tips = await hoverTooltips(document.getElementById("auto-propagate-repetitions")!.parentElement!)
-    expect(tips).toHaveLength(1)
-    expect(tips[0]).toContain(LOCK)
+    expect(screen.getByText(LOCK)).toBeVisible()
+    expect(screen.getByText("The organization currently leaves them alone")).not.toHaveClass("sr-only")
+    await userEvent.setup().hover(document.getElementById("auto-propagate-repetitions")!)
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

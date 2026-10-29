@@ -5819,8 +5819,6 @@ export const bn: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "আর্কাইভ সম্পর্কে",
   "projectSettings.languages.archivedHint": "ভাষা সুইচার থেকে লুকানো। তাদের কাজ থাকে; আবার সক্রিয় করতে একটি ফিরিয়ে আনুন।",
   "projectSettings.languages.archivedHintAriaLabel": "আর্কাইভ করা ভাষা সম্পর্কে",
-  "projectSettings.languages.viewOnly": "শুধু দেখা",
-  "projectSettings.languages.viewOnlyAriaLabel": "আপনি ভাষা বদলাতে পারেন না কেন",
   "projectSettings.languages.changeSourceAriaLabel": "উৎস ভাষা বদলান",
   "projectSettings.info.titleLabel": "প্রকল্পের শিরোনাম",
   "projectSettings.systemPrompt.label": "সিস্টেম প্রম্পট",

@@ -5813,8 +5813,6 @@ export const am: Catalog = {
   "projectSettings.languages.archiveHintAriaLabel": "ስለ ማስመዝገብ",
   "projectSettings.languages.archivedHint": "ከቋንቋ መቀያየሪያው ተደብቋል። ስራቸው ይያዛል፤ እንደገና ንቁ ለማድረግ አንዱን ይመልሱ።",
   "projectSettings.languages.archivedHintAriaLabel": "ስለ የተመዘገቡ ቋንቋዎች",
-  "projectSettings.languages.viewOnly": "እይታ ብቻ",
-  "projectSettings.languages.viewOnlyAriaLabel": "ቋንቋዎችን ለምን መቀየር እንደማይችሉ",
   "projectSettings.languages.changeSourceAriaLabel": "የምንጭ ቋንቋውን ይቀይሩ",
   "projectSettings.info.titleLabel": "የፕሮጀክት ርዕስ",
   "projectSettings.systemPrompt.label": "የስርዓት ጥያቄ",

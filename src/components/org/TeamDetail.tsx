@@ -1144,6 +1144,8 @@ export function TeamDetail() {
                           )}
                           <DisabledFieldTooltip
                             disabled={!isAdmin}
+                            align="start"
+                            noteClassName="px-2 pb-1.5"
                             tooltip={REMOVE_REQUIRES_MAINTAINER_TOOLTIP}
                           >
                             <MenuItem

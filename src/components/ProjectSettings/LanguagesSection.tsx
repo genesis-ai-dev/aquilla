@@ -36,7 +36,6 @@ import {
   ChevronRight,
   Globe,
   Info,
-  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -45,7 +44,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { FieldLabel } from "@/components/ui/field"
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
@@ -55,6 +54,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import type {
   ProjectWideSettings,
   ProjectLaneView,
@@ -562,6 +562,8 @@ export function LanguagesSection({
             <DisabledFieldTooltip
               disabled={rowMode && !canArchiveAnyLane}
               tooltip={archiveBlockedTooltip}
+              align="start"
+              noteClassName="px-2 pb-1.5"
             >
               <DropdownMenuItem
                 data-testid={`archive-lane-${key}`}
@@ -660,22 +662,17 @@ export function LanguagesSection({
           <Globe className="h-4 w-4 text-muted-foreground" />
           {t("projectSettings.section.languages")}
         </CardTitle>
-        {/* Below the language-edit floor (or offline) every control here is
-            disabled; this says so once, with the reason behind the (i). */}
-        {!canEdit && (
-          <CardAction
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            data-testid="languages-view-only"
-          >
-            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("projectSettings.languages.viewOnly")}
-            {disabledTooltip && (
-              <InfoHint label={t("projectSettings.languages.viewOnlyAriaLabel")}>{disabledTooltip}</InfoHint>
-            )}
-          </CardAction>
+        {/* AQU-2260: below the language-edit floor (or offline) every control
+            here is disabled; one line under the title says why, once, and the
+            controls stay quiet. */}
+        {!canEdit && disabledTooltip && (
+          <LockedNote placement="section" testId="languages-view-only">
+            {disabledTooltip}
+          </LockedNote>
         )}
       </CardHeader>
       <CardContent className="space-y-4">
+        <LockedSection reason={canEdit ? null : disabledTooltip}>
         {sourceRow && onRenameLane && (
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium">{t("projectSettings.info.sourceLanguageLabel")}</span>
@@ -1155,6 +1152,7 @@ export function LanguagesSection({
             </CollapsibleContent>
           </Collapsible>
         )}
+        </LockedSection>
       </CardContent>
     </Card>
   )

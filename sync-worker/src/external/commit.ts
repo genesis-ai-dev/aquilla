@@ -1749,7 +1749,6 @@ async function commitUpdateProjectSettings(
     updatedBy: cred.userId,
     // The four language keys are rejected at validation. Do not let a leftover
     // key on the stored blob mint a lane row (AQU-1615).
-    registerLanes: false,
   })
 
   if (result.status === 'conflict') {

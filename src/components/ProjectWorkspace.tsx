@@ -13249,7 +13249,7 @@ export function ProjectWorkspace() {
    */
   const sourceLanguageCode = useMemo(
     () => sourceLane
-      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      ? laneLanguageCode(sourceLane, { role: "source", legacyTag: sourceLane.legacyTag ?? null })
       : null,
     [sourceLane, project],
   )

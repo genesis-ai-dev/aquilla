@@ -6153,7 +6153,7 @@ function EditorRow({
   // label matches no catalog entry resolves to nothing and the attribute is
   // omitted, leaving the browser its own default.
   const targetLanguageCode = useMemo(
-    () => laneLanguageCodeForTag(activeLane, project.lanes, project) ?? undefined,
+    () => laneLanguageCodeForTag(activeLane, project.lanes) ?? undefined,
     [activeLane, project],
   )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")

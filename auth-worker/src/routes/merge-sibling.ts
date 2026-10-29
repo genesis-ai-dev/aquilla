@@ -22,15 +22,16 @@
 //      translations onto the host lane as front-door target.cell.commit events
 //      (deterministic ids → idempotent re-runs); cells with no matching host
 //      source cell_id come back as `skipped`.
-//   3. On a 2xx fold: register the lane on the host settings (targetLanes +
-//      version bump), archive the donor (existing archive semantics), and write
-//      a { mergedInto, mergedLane } pointer into the donor's settings blob.
+//   3. On a 2xx fold: make sure the host lane row exists, archive the donor
+//      (existing archive semantics), and write a { mergedInto, mergedLane }
+//      pointer into the donor's settings blob.
 //   4. Return the fold report + the actions taken.
 //
 // The lane is a real lane (AQU-1550): the fold creates its `lanes` record with
-// the first rows it writes, named after the tag, and step 3 registers the tag
-// through the same shared settings write the Languages screen uses. A
-// maintainer renames it afterwards like any other lane.
+// the first rows it writes, named after the tag. A fold that matched nothing
+// writes no rows, so step 3 creates the record itself. AQU-2223: the lane row
+// is the only registry — the host's `settings.targetLanes` is neither read nor
+// written. A maintainer renames the lane afterwards like any other lane.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -41,8 +42,8 @@ import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { listDownstreamProjects, loadProjectWithSource } from "../services/source-linking"
 import { triggerMergeSiblingFold } from "../services/merge-sibling"
-import { mergeSettingsArray } from "./project-settings"
-import { listProjectLanes } from "../../../db/shared/lanes"
+import { ensureTargetLaneStmt, listProjectLanes, retryingLaneIdCollision } from "../../../db/shared/lanes"
+import { grantNewLaneStmt } from "../../../db/shared/lane-grants"
 import { laneNameProblem } from "../../../src/lib/lanes/lane-name"
 import { laneDisplayName } from "../../../src/lib/lanes/lane-display"
 
@@ -88,9 +89,30 @@ async function loadProjectSettings(
   return { settings, version: Number(row.version), hasRow: true }
 }
 
-function readTargetLanes(settings: Record<string, unknown>): string[] {
-  const raw = settings.targetLanes
-  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []
+const MERGE_AUTHOR = "merge-sibling" // sync-worker/src/events/merge-sibling-route.ts
+
+/**
+ * Does the host already have a target lane with this tag that holds someone's
+ * work? A lane whose only rows came from an earlier run of this merge is not a
+ * clash — running the merge again must finish the job — and neither is an
+ * empty one.
+ */
+async function hostLaneInUse(
+  env: AuthHonoEnv["Bindings"],
+  hostId: string,
+  tag: string,
+): Promise<boolean> {
+  const row = await env.AQUILLA_PG.prepare(
+    `SELECT 1 AS present
+       FROM cells c
+       JOIN lanes l ON l.project_id = c.project_id AND l.id = c.lane_id
+      WHERE c.project_id = ? AND l.role = 'target' AND l.legacy_tag = ?
+        AND c.last_editor IS DISTINCT FROM ?
+      LIMIT 1`,
+  )
+    .bind(hostId, tag, MERGE_AUTHOR)
+    .first<{ present: number }>()
+  return row != null
 }
 
 /** Upsert a project's settings blob with a version bump, following the
@@ -204,9 +226,7 @@ mergeSibling.post(
 
     // Exact tag only. A second lane of the same language is legal; a display
     // name another lane already shows is refused just below.
-    const hostSettings = await loadProjectSettings(c.env, hostId)
-    const existingLanes = readTargetLanes(hostSettings.settings)
-    if (existingLanes.includes(lane)) {
+    if (await hostLaneInUse(c.env, hostId, lane)) {
       return c.json({ error: `lane "${lane}" already exists on the host project` }, 400)
     }
 
@@ -248,38 +268,23 @@ mergeSibling.post(
       return c.json({ error: fold.error }, fold.status === 500 ? 500 : 502)
     }
 
-    // Register the lane on the host + bump settings version — through the
-    // shared settings write, so the tag and the host's `lanes` records cannot
-    // disagree (AQU-1550): it creates the record if the fold had nothing to
-    // write, and re-reads the settings rather than overwrite a change made
-    // while the fold ran. If it fails the donor stays live; the fold is
-    // idempotent, so running the merge again finishes the job.
-    //
-    // AQU-1602 asked for this registry write to go. It stays for now because
-    // POST /:projectId/lanes — the canonical way a lane is created (AQU-1418) —
-    // still makes it, for the readers that have not moved to lane rows yet
-    // (the contextual project context, the external API's PatchSettings).
-    // Billing counts lanes rows (AQU-1595). Dropping the registry write here
-    // alone would make a merged lane the only lane missing from them.
-    // AQU-1595 removes the
-    // four settings keys everywhere, once those readers are on lane rows.
-    const registered = await mergeSettingsArray(
-      c.env.AQUILLA_PG,
-      hostId,
-      user.id,
-      "targetLanes",
-      lane,
-      true,
-    )
-    if (registered !== "ok") {
-      return c.json(
-        {
-          error:
-            "the fold succeeded but the lane could not be registered on the host; run the merge again",
-          merged: fold.result.merged,
-        },
-        registered === "conflict" ? 409 : 500,
+    // A fold that matched nothing wrote no rows, so it created no lane. Create
+    // it here — with the grant the fold would have written (AQU-1781) — so the
+    // merged lane exists either way. Both statements keep an existing record.
+    let hostLaneId = fold.result.hostLaneId ?? null
+    if (!hostLaneId) {
+      await retryingLaneIdCollision(() =>
+        c.env.AQUILLA_PG.batch([
+          ensureTargetLaneStmt(c.env.AQUILLA_PG, hostId, lane),
+          grantNewLaneStmt(c.env.AQUILLA_PG, hostId, { legacyTag: lane }, null),
+        ]),
       )
+      const created = await c.env.AQUILLA_PG.prepare(
+        `SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+      )
+        .bind(hostId, lane)
+        .first<{ id: string }>()
+      hostLaneId = created?.id ?? null
     }
 
     // Archive the donor (existing archive semantics: stamp archived_at/by).
@@ -319,7 +324,7 @@ mergeSibling.post(
       // the new host lane (and record which donor lane it came from) without
       // going back through the legacy tag.
       donorLaneId: fold.result.donorLaneId ?? null,
-      hostLaneId: fold.result.hostLaneId ?? null,
+      hostLaneId,
       merged: fold.result.merged,
       skipped: fold.result.skipped,
       actions: {

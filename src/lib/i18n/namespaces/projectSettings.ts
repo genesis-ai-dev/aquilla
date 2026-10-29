@@ -416,6 +416,27 @@ export const projectSettings = defineNamespace({
     // Bible resources → projectSettings.section.bibleResources
     "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
+    // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
+    "projectSettings.field.model": "model",
+    "projectSettings.field.maxTokens": "max tokens",
+    "projectSettings.field.contextWindow": "context window",
+    "projectSettings.field.referenceExampleFormat": "reference example format",
+    "projectSettings.field.completionBatchSize": "AI completions batch size",
+    "projectSettings.field.validationBatchSize": "batch validation size",
+    "projectSettings.field.projectName": "project title",
+    "projectSettings.field.audioValidationRoleFloor": "minimum role to validate recordings",
+    "projectSettings.field.namedAudioValidators": "named recording validators",
+    "projectSettings.field.selfValidationAudio": "validating your own recordings",
+    "projectSettings.field.cellEditingFloor": "who can add and remove cells",
+    "projectSettings.field.trackEditing": "timeline track editing",
+    "projectSettings.field.timingLock": "the timing lock",
+    "projectSettings.field.bibleResources": "Bible resources",
+    "projectSettings.field.bibleData": "Bible data",
+    "projectSettings.field.bibleEnrichments": "Bible data enrichments",
+    "projectSettings.field.importCellUnit": "import cell unit",
+    "projectSettings.field.smartQuotes": "smart quotes",
+    "projectSettings.field.draftContext": "draft context",
+    "projectSettings.field.termMatching": "term matching affixes",
 
     // ── Save-flow errors ──
     "projectSettings.save.nameRequired": "Enter a project name.",
@@ -430,24 +451,43 @@ export const projectSettings = defineNamespace({
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
+    "projectSettings.group.generalDescription": "Name, languages, content structure, Bible resources",
+    "projectSettings.group.generalDescriptionBibleData": "Name, languages, content structure, Bible data",
+    "projectSettings.group.membersLabel": "Members",
+    "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI & completion",
     "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
-    // audio-media group label → projectSettings.section.audioMedia (identical text)
+    "projectSettings.group.audioMediaLabel": "Audio media",
     "projectSettings.group.audioMediaDescription": "How audio is fetched from storage",
-    // metrics group label → projectSettings.section.aiMetrics (identical text)
+    "projectSettings.group.metricsLabel": "AI metrics",
     "projectSettings.group.metricsDescription": "Post-edit distance and AI usage",
     "projectSettings.group.integrationsLabel": "Integrations",
-    "projectSettings.group.integrationsDescription": "Monday.com board sync",
+    "projectSettings.group.integrationsDescription": "Monday.com and Airtable sync",
     // experimental group label → projectSettings.section.experimental (identical text)
     "projectSettings.group.experimentalDescription": "Autopilot, extensions, and other early features",
+    // The headings the index groups its rows under. "Integrations" →
+    // projectSettings.group.integrationsLabel (identical text).
+    "projectSettings.hub.project": "Project",
+    "projectSettings.hub.aiMedia": "AI & media",
+    "projectSettings.hub.quality": "Quality",
+    // The short current value at the end of an index row, or a nav row.
+    "projectSettings.hint.untitled": "Untitled",
+    "projectSettings.hint.rolesInvites": "Roles & invites",
+    "projectSettings.hint.linked": "Linked",
+    "projectSettings.hint.git": "Git",
+    "projectSettings.hint.custom": "Custom",
+    "projectSettings.hint.default": "Default",
+    "projectSettings.hint.postEdit": "Post-edit",
+    "projectSettings.hint.integrations": "Monday.com, Airtable",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
+    "projectSettings.section.linkSource": "Link source",
     "projectSettings.section.sourceLink": "Source link",
+    "projectSettings.section.inheritedSettings": "Inherited settings",
     "projectSettings.section.upstreamChanges": "Upstream changes",
     "projectSettings.section.dcsUpstream": "Door43 upstream",
     "projectSettings.section.projectInfo": "Project Info",
@@ -455,6 +495,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.bibleResources": "Bible resources",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
+    "projectSettings.section.members": "Team members",
     "projectSettings.section.aiInstructions": "AI Instructions",
     "projectSettings.section.draftContext": "Draft Context",
     "projectSettings.section.advancedLlm": "Advanced LLM",
@@ -468,6 +509,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.termbaseSharing": "Term Base Sharing",
     "projectSettings.section.aiMetrics": "AI Metrics",
     "projectSettings.section.monday": "Monday.com",
+    "projectSettings.section.airtable": "Airtable",
     "projectSettings.section.experimental": "Experimental",
 
     // ── Project Info card ──

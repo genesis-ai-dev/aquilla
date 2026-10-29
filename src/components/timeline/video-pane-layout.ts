@@ -47,12 +47,18 @@ export function shouldShowVideoPane({ timelineStacked, coreMediaUrl, timingMode 
  * PER FILE since the media redesign's layout (Sam, Oct 23: "each person's own
  * arrangement per file"), like the timeline's height beside it: a dubbing
  * episode wants a large picture and a subtitles file a large table, and one
- * shared width made each visit undo the other. A file with no width of its own
- * starts from `fallback` — the width its kind of file starts with (see
- * media-layout-start.ts) — rather than the old global key, so a new file opens
- * the way its kind should, not the way the last file was left.
+ * shared width made each visit undo the other.
+ *
+ * A file with no width of its own takes the width everyone's files SHARED
+ * before (the bare key above, read and never written again), so a width
+ * someone dragged to is not lost to the change; only with neither does it
+ * start from `fallback`, the width its kind of file starts with (see
+ * media-layout-start.ts). Reset layout leaves `RESET_WIDTH` under the file's
+ * own key, so a reset file starts from its kind and the old shared width
+ * never decides it again.
  */
 const videoPaneWidthKey = (fileId: string) => `${VIDEO_PANE_WIDTH_KEY}:${fileId}`
+const RESET_WIDTH = "reset"
 
 export function readStoredVideoPaneWidth(
   fileId?: string | null,
@@ -60,8 +66,9 @@ export function readStoredVideoPaneWidth(
 ): number {
   if (typeof window === "undefined" || !fileId) return fallback
   try {
-    const saved = window.localStorage.getItem(videoPaneWidthKey(fileId))
-    if (saved) {
+    const own = window.localStorage.getItem(videoPaneWidthKey(fileId))
+    const saved = own ?? window.localStorage.getItem(VIDEO_PANE_WIDTH_KEY)
+    if (saved && saved !== RESET_WIDTH) {
       const n = parseInt(saved, 10)
       if (Number.isFinite(n) && n >= VIDEO_PANE_MIN_WIDTH) return n
     }
@@ -80,11 +87,12 @@ export function writeStoredVideoPaneWidth(fileId: string | null | undefined, px:
   }
 }
 
-/** "Reset layout": the file goes back to its kind's starting width. */
+/** "Reset layout": the file goes back to its kind's starting width — not to
+ *  the old shared width, which is why this marks the key rather than removing it. */
 export function clearStoredVideoPaneWidth(fileId: string | null | undefined): void {
   if (typeof window === "undefined" || !fileId) return
   try {
-    window.localStorage.removeItem(videoPaneWidthKey(fileId))
+    window.localStorage.setItem(videoPaneWidthKey(fileId), RESET_WIDTH)
   } catch {
     /* ignore */
   }

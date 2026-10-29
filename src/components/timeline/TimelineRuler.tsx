@@ -52,6 +52,10 @@ function TimelineRulerImpl({
   // track rather than an infinitely wide one.
   const safeDuration = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0
   const spanSec = Math.max(safeDuration, step)
+  // Where a click or a scrub may land: the file's own end. The one-step track
+  // above is only drawn room, so a clip shorter than a step still stops at its
+  // end; while the duration is unknown that room is all there is to go on.
+  const endSec = safeDuration > 0 ? safeDuration : spanSec
   // What is drawn: the file, or the whole view when the file is shorter.
   const drawSec = Math.max(spanSec, pxToSec(fillPx, pxPerSec))
   const from = Number.isFinite(viewStartSec) ? Math.max(0, viewStartSec as number) : 0
@@ -68,7 +72,7 @@ function TimelineRulerImpl({
   // every existing caller and every existing test gets.
   const scrub = useScrubGesture({
     pxPerSec,
-    durationSec: spanSec,
+    durationSec: endSec,
     onScrubStart,
     onScrubMove: onScrubMove ?? (() => {}),
     onScrubEnd,
@@ -117,7 +121,7 @@ function TimelineRulerImpl({
         // would fight the landing seek the drag already issued.
         if (scrub.consumeDragClick()) return
         const rect = e.currentTarget.getBoundingClientRect()
-        onScrub(Math.min(spanSec, pxToSec(e.clientX - rect.left, pxPerSec)))
+        onScrub(Math.min(endSec, pxToSec(e.clientX - rect.left, pxPerSec)))
       }}
     >
       {ticks.map((t) => (

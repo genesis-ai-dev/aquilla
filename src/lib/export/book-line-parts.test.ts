@@ -39,10 +39,11 @@ describe("bookLineParts", () => {
 
   it("a cut take: the pause before it, each piece, and the silence dragged open between them", () => {
     // Piece 1 is the recording's 0–1.5 s, placed 0.3 s into the line, so it
-    // ends at 1.8 s. Piece 2 is its 2–4 s, placed at 2.3 s: 0.5 s of silence.
+    // ends at 1.8 s. Piece 2 is its 2–4 s, moved 0.5 s along from there (its
+    // place 0.8 s, from the take's 0.3 s): at 2.3 s, 0.5 s of silence.
     const cell = verse("v2", {
       [P1]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimEndMs: 1500, targetOffsetMs: 300 },
-      [P2]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimStartMs: 2000, pieceOf: P1, targetOffsetMs: 2300 },
+      [P2]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimStartMs: 2000, pieceOf: P1, targetOffsetMs: 800 },
     })
     expect(bookLineParts(cell, P1)).toEqual([
       { kind: "silence", ms: 300 },
@@ -53,9 +54,10 @@ describe("bookLineParts", () => {
   })
 
   it("a cut take whose pieces touch: the pieces back to back", () => {
+    // As the cut left it: the second piece keeps the take's place.
     const cell = verse("v2", {
       [P1]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimEndMs: 1500 },
-      [P2]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimStartMs: 2000, pieceOf: P1, targetOffsetMs: 1500 },
+      [P2]: { type: "audio", url: `frontier-audio://${P1}`, durationMs: 4000, trimStartMs: 2000, pieceOf: P1 },
     })
     expect(bookLineParts(cell, P1)).toEqual([
       { kind: "take", attachmentId: P1 },

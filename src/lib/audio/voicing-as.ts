@@ -9,38 +9,42 @@
 
 import { useSyncExternalStore } from "react"
 
-const voicing = new Map<string, string>()
+// Every voicing of a line still running, in the order they started. Two can
+// overlap — a Regenerate from the take menu, then "Change to …" on the same
+// line before it finishes — so the line names the latest, and each, when it
+// ends, takes away only its own entry: never the status of one still running.
+const voicing = new Map<string, { voiceName: string }[]>()
 const listeners = new Set<() => void>()
 
 function notify(): void {
   for (const listener of [...listeners]) listener()
 }
 
-/** Say the line `cellId` is being voiced as `voiceName`; null when done. */
-export function setVoicingAs(cellId: string, voiceName: string | null): void {
-  if (voiceName == null) {
-    if (!voicing.delete(cellId)) return
-  } else {
-    if (voicing.get(cellId) === voiceName) return
-    voicing.set(cellId, voiceName)
-  }
-  notify()
+export function getVoicingAs(cellId: string): string | null {
+  return voicing.get(cellId)?.at(-1)?.voiceName ?? null
 }
 
-export function getVoicingAs(cellId: string): string | null {
-  return voicing.get(cellId) ?? null
+/** Change the line's running voicings, and tell the readers when what it
+ *  names changed. */
+function update(cellId: string, next: { voiceName: string }[]): void {
+  const before = getVoicingAs(cellId)
+  if (next.length > 0) voicing.set(cellId, next)
+  else voicing.delete(cellId)
+  if (getVoicingAs(cellId) !== before) notify()
 }
 
 /**
- * Run `work` with the line shown as being voiced as `voiceName`, and clear it
- * however the work ends.
+ * Run `work` with the line shown as being voiced as `voiceName`, and take that
+ * away however the work ends — this voicing's own, so a voicing of the same
+ * line still running keeps saying so.
  */
 export async function whileVoicingAs<T>(cellId: string, voiceName: string, work: () => Promise<T>): Promise<T> {
-  setVoicingAs(cellId, voiceName)
+  const entry = { voiceName }
+  update(cellId, [...(voicing.get(cellId) ?? []), entry])
   try {
     return await work()
   } finally {
-    setVoicingAs(cellId, null)
+    update(cellId, (voicing.get(cellId) ?? []).filter((e) => e !== entry))
   }
 }
 
@@ -53,7 +57,7 @@ function subscribe(listener: () => void): () => void {
 export function useVoicingAs(cellId: string | null | undefined): string | null {
   return useSyncExternalStore(
     subscribe,
-    () => (cellId ? voicing.get(cellId) ?? null : null),
+    () => (cellId ? getVoicingAs(cellId) : null),
     () => null,
   )
 }

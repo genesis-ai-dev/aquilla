@@ -80,7 +80,9 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           : active !== id && active && t("editor.dock.stateBehind", { panel: names.panel(active) }),
         full === area && t("editor.dock.stateFull"),
       ])
-      toggle = showing ? () => dock.fold(area) : () => dock.show(id)
+      // Hiding one of two tabs shows the other rather than folding the area
+      // they share, which would hide both (as Sources › Hide film does).
+      toggle = showing ? () => dock.hide(id) : () => dock.show(id)
     }
     return (
       <AppTooltip key={id} content={where} side="left">

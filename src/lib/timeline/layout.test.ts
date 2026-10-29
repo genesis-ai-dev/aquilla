@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from "vitest"
 import { buildTimelineLayout } from "./layout"
+import { buildProgramme } from "./programme"
+import { targetChipGeom, targetOffsetMsFor } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -316,10 +318,11 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
       } as unknown as CellData
       const l = buildTimelineLayout("audioFirst", [cell], [cell])
       expect(l.canRetimeTarget(cell, cell.attachments![TAKE] as never)).toBe(true)
-      // The second piece dragged to 1.8 s: 1.8 s from the line's start.
-      expect(l.retimeAnchorSec(cell, cell.attachments![PIECE] as never, 1.8)).toBeCloseTo(1.8)
+      // The second piece, right after the first (1.3 s in), dragged to 1.8 s:
+      // it moved 0.5 s, so its clip's start is now 0.5 s after the line's.
+      expect(l.retimeAnchorSec(cell, cell.attachments![PIECE] as never, 1.8)).toBeCloseTo(0.5)
       // Drawn where it was placed.
-      const placed = { ...cell, attachments: { ...cell.attachments, [PIECE]: { ...cell.attachments![PIECE], targetOffsetMs: 1800 } } } as unknown as CellData
+      const placed = { ...cell, attachments: { ...cell.attachments, [PIECE]: { ...cell.attachments![PIECE], targetOffsetMs: 500 } } } as unknown as CellData
       const l2 = buildTimelineLayout("audioFirst", [placed], [placed])
       expect(l2.targetGeom(placed, placed.attachments![PIECE] as never)!.start).toBeCloseTo(1.8)
     })
@@ -341,5 +344,61 @@ describe("moving a take — retimeAnchorSec / canRetimeTarget (AQU-2215)", () =>
       // Dragged back before its slot: no pause.
       expect(l.retimeAnchorSec(cell, cell.attachments![takeId] as never, 1.5)).toBe(0)
     })
+  })
+})
+
+// AQU-1758: a piece of a split take has ONE place, which both timings read —
+// where its clip's start sits from its line's start. So a piece moved in one
+// timing has moved by the same distance in the other.
+describe("a piece of a split take, in both timings (AQU-1758)", () => {
+  const TAKE = "audio-a-1700000000-take.wav"
+  const PIECE = "audio-a-1700000500-piece.wav"
+  /** A 6 s take on a line at 2–8 s, cut at 3 s: the second piece keeps the
+   *  take's place (its clip's start on the line's) and starts 3 s into it. */
+  const cut = (pieceOffsetMs?: number) =>
+    ({
+      id: "a", fileId: "f1", original: "", translated: "", medium: "media", startTime: 2, endTime: 8,
+      selectedAudioId: TAKE,
+      attachments: {
+        [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 6000, trimEndMs: 3000 },
+        [PIECE]: {
+          type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 6000, trimStartMs: 3000,
+          ...(pieceOffsetMs != null ? { targetOffsetMs: pieceOffsetMs } : {}),
+        },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    }) as unknown as CellData
+  const piece = (cell: CellData) => cell.attachments![PIECE] as never
+  const recordings = (cell: CellData) => buildTimelineLayout("audioFirst", [cell], [cell])
+
+  it("never moved, it follows the first piece, 3 s into its line, in both", () => {
+    const cell = cut()
+    expect(recordings(cell).targetGeom(cell, piece(cell))!.start).toBeCloseTo(3, 5)
+    expect(targetChipGeom(cell, piece(cell))!.start - 2).toBeCloseTo(3, 5)
+  })
+
+  it("dragged to 4 s into its line following the recordings, it is 4 s in following the source too", () => {
+    const cell = cut()
+    const anchor = recordings(cell).retimeAnchorSec(cell, piece(cell), 4)!
+    const moved = cut(targetOffsetMsFor(cell, anchor))
+    expect(recordings(moved).targetGeom(moved, piece(moved))!.start).toBeCloseTo(4, 5)
+    // Not 4 + its 3 s head: 7 s, over the line's last second.
+    expect(targetChipGeom(moved, piece(moved))!.start - 2).toBeCloseTo(4, 5)
+  })
+
+  it("dragged 1 s later following the source, it leaves the same 1 s of silence following the recordings", () => {
+    const cell = cut()
+    const dubbing = buildTimelineLayout("dubbing", [cell], [cell])
+    const anchor = dubbing.retimeAnchorSec(cell, piece(cell), 2 + 4)!
+    const moved = cut(targetOffsetMsFor(cell, anchor))
+    const [slot] = buildProgramme([moved]).slots
+    expect(slot.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [4, expect.closeTo(1, 5)]])
+  })
+
+  it("dragged back over the first piece following the recordings, it stays against it and its place does not change", () => {
+    const cell = cut()
+    const anchor = recordings(cell).retimeAnchorSec(cell, piece(cell), 1.5)!
+    // The place it already has: the lane records no move.
+    expect(anchor).toBeCloseTo(targetChipGeom(cell, piece(cell))!.anchor, 5)
   })
 })

@@ -9,6 +9,11 @@
 // Paused on another chapter: that playback ends, as it always has, and the
 // timeline shows the chapter picked. Picking the chapter that is playing, or
 // picking with nothing playing on this file, only shows it.
+//
+// Scrolling the table onto another chapter is not a pick. It names the chapter
+// on screen and nothing more: a paused playback waits to be resumed where it
+// was, and the timeline stays on its chapter meanwhile. A row of another
+// chapter clicked is a pick of its own kind (`rowEndsPlayback`).
 
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -59,4 +64,23 @@ export function applyChapterPick(
   }
   stopQueue()
   return false
+}
+
+/**
+ * A row of another chapter clicked — it points the timeline at its line —
+ * while playback is paused on this file: that playback ends, as a pick ends
+ * it, so the timeline can show the row's chapter. A row of the chapter
+ * playing, or a click while playback plays, leaves playback alone.
+ */
+export function rowEndsPlayback({
+  rowKey,
+  playingKey,
+  queueKind,
+}: {
+  rowKey: string
+  /** The chapter playback is on in this file, or null. */
+  playingKey: string | null
+  queueKind: QueueState["kind"]
+}): boolean {
+  return playingKey != null && rowKey !== playingKey && queueKind === "paused"
 }

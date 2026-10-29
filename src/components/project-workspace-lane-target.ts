@@ -23,7 +23,6 @@
 // `project-workspace-lane-deeplink.ts`.
 
 import { laneLanguageForTag, type LaneLanguageRow } from "@/lib/lanes/lane-language"
-import type { LaneLanguageSettings } from "@/lib/lanes/lane-display"
 
 /**
  * The target language for the currently active lane.
@@ -42,10 +41,11 @@ export function resolveActiveTargetLanguage(
   activeLane: string,
   // Retained for signature stability; the file stamp is never consulted.
   _fileTargetLanguage: string | null | undefined,
-  settings: LaneLanguageSettings | null | undefined,
+  // Retained for signature stability; project settings are not read (AQU-2223).
+  _settings: unknown,
   lanes?: readonly LaneLanguageRow[] | null,
 ): string | undefined {
-  return laneLanguageForTag(activeLane, lanes, settings) || undefined
+  return laneLanguageForTag(activeLane, lanes) || undefined
 }
 
 /** One target lane as the Import dialog's "Is this a translation?" check sees
@@ -68,12 +68,13 @@ export interface LaneTargetLanguage {
 export function laneTargetLanguages(
   lanes: readonly string[],
   activeLane: string,
-  settings: LaneLanguageSettings | null | undefined,
+  // Retained for signature stability; project settings are not read (AQU-2223).
+  _settings: unknown,
   laneLabels: Readonly<Record<string, string>>,
   rows?: readonly LaneLanguageRow[] | null,
 ): LaneTargetLanguage[] {
   return lanes.flatMap((lane) => {
-    const language = laneLanguageForTag(lane, rows, settings)
+    const language = laneLanguageForTag(lane, rows)
     return language ? [{ language, label: laneLabels[lane] || null, active: lane === activeLane }] : []
   })
 }

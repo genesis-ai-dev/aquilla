@@ -13458,7 +13458,7 @@ export function ProjectWorkspace() {
    */
   const sourceLanguageCode = useMemo(
     () => sourceLane
-      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      ? laneLanguageCode(sourceLane, { role: "source", legacyTag: sourceLane.legacyTag ?? null })
       : null,
     [sourceLane, project],
   )
@@ -18323,6 +18323,26 @@ export function ProjectWorkspace() {
           }}
           onLastTakeRemoved={(cellId) => {
             for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
+          }}
+          // The pencil beside "Read aloud": close the recorder and put the
+          // caret in the line's target text. A cue's words live on the subtitle
+          // it performs — the same row the recorder keeps scrolled into view
+          // behind it. No pencil at all where the lane takes no writes.
+          onEditText={laneWriteFrozen ? undefined : (cellId) => {
+            const rowId = resolveRecordingRowCellId({
+              cellId,
+              isCueArrangement: Boolean(audioCueCells),
+              linkedTextIds: cueLinks.textForCue.get(cellId),
+            })
+            setRecordingCellId(null)
+            if (!rowId) return
+            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            // A frame later: during this click the recorder is still open, and
+            // its focus trap would take the caret straight back.
+            requestAnimationFrame(() => {
+              const editor = editorRef.current
+              if (editor && !editor.focusCellEditorId(rowId)) editor.scrollToCellId(rowId, { flash: true })
+            })
           }}
           onClose={() => setRecordingCellId(null)}
         />

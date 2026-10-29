@@ -11,9 +11,8 @@
 // batched download event carries up to 500 cells and takes seconds, so an
 // event count sat at 87% for minutes on a real store). The leader worker
 // (livestore.worker.ts) installs that hook and forwards a throttled copy over
-// a BroadcastChannel to the page,
-// where OfflineLeaderWatchdog shows it instead of a "restart the app?" prompt
-// that would throw the rebuild away.
+// a BroadcastChannel to the page, where OfflineLeaderWatchdog shows it
+// instead of a "restart the app?" prompt that would throw the rebuild away.
 //
 // The page reads it by polling (the watchdog already ticks), so there are no
 // listeners to notify.

@@ -56,7 +56,6 @@ describe("project settings: draftingSettings (AQU-2259)", () => {
       model: "anthropic/claude-3.5-sonnet",
       maxTokens: 16384,
       temperature: 0.4,
-      llmHealthPenalty: 0.2,
       top_k: 17,
       contextSize: "large",
       useOnlyValidatedExamples: true,
@@ -68,6 +67,15 @@ describe("project settings: draftingSettings (AQU-2259)", () => {
     const res = await save({ draftingSettings: drafting })
     expect(res.status).toBe(200)
     expect((await storedSettings()).draftingSettings).toEqual(drafting)
+  })
+
+  // Oct 29 second pass: the Health penalty is retired (nothing read it). A
+  // stored value from before still saves, so nobody's settings are refused.
+  it("still accepts the retired Health penalty an older build stored", async () => {
+    await seed({ sourceLanguage: "en", draftingSettings: { top_k: 9, llmHealthPenalty: 0.2 } })
+    const res = await save({ draftingSettings: { top_k: 11, llmHealthPenalty: 0.3 }, systemPrompt: "Plain." })
+    expect(res.status).toBe(200)
+    expect((await storedSettings()).systemPrompt).toBe("Plain.")
   })
 
   it("refuses an AI key, and stores nothing", async () => {

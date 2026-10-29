@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { draftingSettingsProblem, readDraftingSettings } from "../../../db/shared/drafting-settings"
 import {
   applyDraftingSettings,
   draftingDiffersFromDefaults,
@@ -9,7 +10,7 @@ import type { CompletionSettings } from "@/lib/parsers/types"
 
 const BASE: CompletionSettings = {
   provider: "frontier", endpoint: "", apiKey: "sk-device", model: "", maxTokens: 4096,
-  temperature: 0.3, systemPrompt: "Mine", llmHealthPenalty: 0.1, top_k: 10,
+  temperature: 0.3, systemPrompt: "Mine", top_k: 10,
   contextSize: "medium", main_chat_language: "", fewShotExampleFormat: "source-and-target",
 }
 
@@ -41,3 +42,21 @@ describe("drafting settings in the SPA (AQU-2259)", () => {
     expect(draftingSettingsToUpload({ canEdit: true, serverDrafting: null, local: BASE })).toBeNull()
   })
 })
+
+// Oct 29 second pass: the Health penalty had no reader, so it is no longer
+// written or read. An old stored value is still accepted, and ignored.
+describe("the retired Health penalty", () => {
+  it("is never written to the shared value", () => {
+    expect(draftingSettingsFrom({ ...BASE, llmHealthPenalty: 0.3 } as never)).not.toHaveProperty("llmHealthPenalty")
+  })
+
+  it("is ignored when an old shared value still has it", () => {
+    expect(readDraftingSettings({ top_k: 7, llmHealthPenalty: 0.3 })).toEqual({ top_k: 7 })
+    expect(draftingDiffersFromDefaults(draftingSettingsFrom({ ...BASE, llmHealthPenalty: 0.4 } as never))).toBe(false)
+  })
+
+  it("is still accepted by the server's check, so an old blob saves", () => {
+    expect(draftingSettingsProblem({ top_k: 7, llmHealthPenalty: 0.3 })).toBeNull()
+  })
+})
+

@@ -238,7 +238,6 @@ interface Baseline {
   model: string
   maxTokens: number
   temperature: number
-  llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
   useOnlyValidatedExamples: boolean
@@ -298,7 +297,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: true,
@@ -354,7 +352,6 @@ const BLOB_BACKED_KEYS = [
   "model",
   "maxTokens",
   "temperature",
-  "llmHealthPenalty",
   "top_k",
   "contextSize",
   "main_chat_language",
@@ -779,7 +776,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
@@ -862,7 +858,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
     setUseOnlyValidatedExamples(true)
@@ -954,7 +949,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       model: setModel,
       maxTokens: setMaxTokens,
       temperature: setTemperature,
-      llmHealthPenalty: setLlmHealthPenalty,
       top_k: setTopK,
       contextSize: setContextSize,
       main_chat_language: setMainChatLanguage,
@@ -1064,7 +1058,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
       useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
@@ -1099,7 +1092,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     )
   }, [
     baseline, name, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -1233,7 +1226,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       noteDrafting(model !== baseline.model, "model")
       noteDrafting(maxTokens !== baseline.maxTokens, "max tokens")
       noteDrafting(temperature !== baseline.temperature, "temperature")
-      noteDrafting(llmHealthPenalty !== baseline.llmHealthPenalty, "health penalty")
       noteDrafting(topK !== baseline.top_k, "examples retrieved")
       noteDrafting(contextSize !== baseline.contextSize, "context window")
       noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, "validated examples only")
@@ -1324,7 +1316,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           model,
           maxTokens,
           temperature,
-          llmHealthPenalty,
           top_k: topK,
           contextSize,
           useOnlyValidatedExamples,
@@ -1432,7 +1423,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         model,
         maxTokens,
         temperature,
-        llmHealthPenalty,
         top_k: topK,
         contextSize,
         useOnlyValidatedExamples,
@@ -1501,7 +1491,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     }
   }, [
     id, baseline, name, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -2947,22 +2937,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       step={0.05}
                       value={[temperature]}
                       onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
-                      disabled={!canEditShared}
-                    />
-                  </div>
-                }
-              />
-              <SettingsRow
-                label={t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}
-                description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
-                control={
-                  <div className="w-40">
-                    <Slider
-                      min={0}
-                      max={0.5}
-                      step={0.05}
-                      value={[llmHealthPenalty]}
-                      onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
                       disabled={!canEditShared}
                     />
                   </div>

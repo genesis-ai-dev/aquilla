@@ -1,6 +1,9 @@
 // AI drafting settings (AQU-2259): the team's choices for how AI drafts are
 // made, held in the shared project settings blob under `draftingSettings`.
 //
+// (The Health penalty for AI drafts was one of them until Oct 29; it had no
+// reader, so it is retired — see RETIRED_FIELD_SPECS.)
+//
 // Before AQU-2259 every one of these lived only in the browser that set it
 // (the device-local `completionSettings` on the IndexedDB project record), so
 // a lead tuned drafting for their own browser while the page said the change
@@ -33,8 +36,6 @@ export interface DraftingSettings {
   model?: string
   maxTokens?: number
   temperature?: number
-  /** The Health penalty for AI drafts, 0–1. */
-  llmHealthPenalty?: number
   top_k?: number
   contextSize?: DraftingContextSize
   useOnlyValidatedExamples?: boolean
@@ -62,7 +63,6 @@ const FIELD_SPECS: Readonly<Record<keyof DraftingSettings, FieldSpec>> = {
   model: { kind: 'string', maxLength: 256 },
   maxTokens: { kind: 'number', min: 1, max: 1_000_000, integer: true },
   temperature: { kind: 'number', min: 0, max: 2, integer: false },
-  llmHealthPenalty: { kind: 'number', min: 0, max: 1, integer: false },
   top_k: { kind: 'number', min: 1, max: 50, integer: true },
   contextSize: { kind: 'enum', values: ['small', 'medium', 'large'] },
   useOnlyValidatedExamples: { kind: 'boolean' },
@@ -74,12 +74,23 @@ const FIELD_SPECS: Readonly<Record<keyof DraftingSettings, FieldSpec>> = {
 
 export const DRAFTING_SETTINGS_FIELDS = Object.keys(FIELD_SPECS) as (keyof DraftingSettings)[]
 
+/**
+ * Fields an older build wrote that nothing reads any more. Still ACCEPTED, so
+ * a project whose stored value carries one saves as before, but never read
+ * (`readDraftingSettings` drops them) and never written. `llmHealthPenalty`
+ * (Oct 29): no Health calculation had read it since the old health engine
+ * went, so its slider was removed.
+ */
+const RETIRED_FIELD_SPECS: Readonly<Record<string, FieldSpec>> = {
+  llmHealthPenalty: { kind: 'number', min: 0, max: 1, integer: false },
+}
+
 /** Key-shaped fields that must never reach the shared blob. */
 const KEY_FIELDS = new Set(['apiKey', 'geminiApiKey', 'key', 'token'])
 
 export const DRAFTING_SETTINGS_TYPE_NAME =
   '{ provider?: "frontier" | "custom", endpoint?: string, model?: string, maxTokens?: integer, ' +
-  'temperature?: 0–2, llmHealthPenalty?: 0–1, top_k?: 1–50, contextSize?: "small" | "medium" | "large", ' +
+  'temperature?: 0–2, top_k?: 1–50, contextSize?: "small" | "medium" | "large", ' +
   'useOnlyValidatedExamples?: boolean, main_chat_language?: string, ' +
   'fewShotExampleFormat?: "source-and-target" | "target-only", completionBatchSize?: 1–50, ' +
   'validationBatchSize?: 0–500 } (no API keys)'
@@ -113,7 +124,7 @@ export function draftingSettingsProblem(value: unknown): string | null {
     if (KEY_FIELDS.has(name)) {
       return `draftingSettings must not hold "${name}": AI keys stay on the device, in Preferences or with the organization`
     }
-    const spec = (FIELD_SPECS as Record<string, FieldSpec | undefined>)[name]
+    const spec = (FIELD_SPECS as Record<string, FieldSpec | undefined>)[name] ?? RETIRED_FIELD_SPECS[name]
     if (!spec) return `draftingSettings has no field "${name}"`
     if (field === undefined) continue
     const problem = fieldProblem(name, spec, field)

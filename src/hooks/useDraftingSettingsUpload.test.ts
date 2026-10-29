@@ -28,7 +28,6 @@ const TUNED: CompletionSettings = {
   maxTokens: 16384,
   temperature: 0.3,
   systemPrompt: "",
-  llmHealthPenalty: 0.1,
   top_k: 17,
   contextSize: "large",
   main_chat_language: "",

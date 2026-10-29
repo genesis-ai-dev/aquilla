@@ -392,7 +392,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
-    "projectSettings.field.healthPenalty": "health penalty",
     "projectSettings.field.examplesRetrieved": "examples retrieved",
     // context window → projectSettings.ai.contextWindowLabel
     "projectSettings.field.validatedExamplesOnly": "validated examples only",
@@ -597,10 +596,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
-    "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
-    "projectSettings.advancedLlm.healthPenaltyDescription":
-      "LLM translations are penalized by this amount in health calculations. 0% = full " +
-      "trust, 50% = heavy penalty. Default: 10%.",
 
     // ── Voice card ──
     "projectSettings.voice.geminiKeyLabel": "Gemini API key",
@@ -2016,12 +2011,6 @@ export const projectSettings = defineNamespace({
         description: "Field label for the temperature slider, showing its current value live.",
         placeholders: {
           value: "The current temperature value, e.g. '0.3'.",
-        },
-      },
-      "projectSettings.advancedLlm.healthPenaltyLabel": {
-        description: "Field label for the LLM health-penalty slider, showing its current value live.",
-        placeholders: {
-          percent: "The current penalty as a whole-number percentage, e.g. '10'.",
         },
       },
       "projectSettings.cellEditing.optionNone": {

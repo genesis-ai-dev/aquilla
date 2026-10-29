@@ -28,7 +28,6 @@ const LOCAL_COMPLETION = {
   maxTokens: 16384,
   temperature: 0.3,
   systemPrompt: "Existing instructions",
-  llmHealthPenalty: 0.1,
   top_k: 15,
   contextSize: "medium",
   useOnlyValidatedExamples: true,
@@ -159,6 +158,14 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
     expect(local.apiKey).toBe("sk-new-local")
     const sent = patchSharedMock.mock.calls.map((c) => JSON.stringify(c[0])).join("\n")
     expect(sent).not.toContain("sk-new-local")
+  })
+
+  // Oct 29 second pass: nothing has read the Health penalty since the old
+  // health engine went, so the slider that set it is gone.
+  it("has no Health penalty slider", () => {
+    renderSettings()
+    expect(screen.getByLabelText(/examples retrieved/i)).toBeInTheDocument()
+    expect(screen.queryByText(/health penalty/i)).toBeNull()
   })
 
   it("locks the drafting settings for someone who can't change project settings", async () => {

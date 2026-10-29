@@ -121,6 +121,24 @@ describe("guardSql — rejects", () => {
     if (!r.ok) expect(r.error).toMatch(pattern)
   }
 
+  it("rejects `TABLE x` bare relation references (unscoped read of any table)", () => {
+    reject(
+      "SELECT * FROM cells WHERE project_id = :project UNION ALL TABLE password_reset_tokens",
+      /keyword "TABLE"/,
+    )
+    reject(
+      "SELECT 1 FROM cells WHERE project_id = :project AND EXISTS (TABLE sessions)",
+      /keyword "TABLE"/,
+    )
+  })
+
+  it("does not treat a bare `SELECT DISTINCT FROM x` as IS DISTINCT FROM", () => {
+    const r = guard(
+      "SELECT 1 FROM cells WHERE project_id = :project AND EXISTS (SELECT DISTINCT FROM sessions)",
+    )
+    expect(r.ok).toBe(false)
+  })
+
   it("rejects UPDATE / INSERT / DELETE / DROP as the statement", () => {
     reject("UPDATE cells SET value = 'x' WHERE project_id = :project", /only a single SELECT/)
     reject("INSERT INTO events VALUES (1)", /only a single SELECT/)

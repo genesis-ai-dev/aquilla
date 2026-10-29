@@ -1,8 +1,9 @@
-/** Omnilingual ASR (self-hosted on Modal) is billed by metered GPU time, not a
- * provider price list: rawCents = gpuSeconds × rate[gpu] × amortization. The
- * usual credit markup (billing-cost.ts costMultiplier) applies on top.
+/** Omnilingual ASR (our own service, on Modal or self-hosted) is billed by
+ * metered GPU time, not a provider price list: rawCents = gpuSeconds × rate[gpu]
+ * × amortization. The usual credit markup (billing-cost.ts costMultiplier)
+ * applies on top.
  *
- * Rates are Modal's per-second GPU prices in US cents. CHECK THEM AGAINST
+ * Modal rates are Modal's per-second GPU prices in US cents. CHECK THEM AGAINST
  * https://modal.com/pricing AT DEPLOY TIME — they are not fetched.
  */
 /** Keyed on the CUDA device name the service reports as `gpu`. */
@@ -11,6 +12,13 @@ export const OMNI_GPU_CENTS_PER_SEC: Readonly<Record<string, number>> = {
   // CTC's fallback when Modal has no L4 free (infra/modal/omni_asr.py).
   'NVIDIA A10G': 0.0306,
   'NVIDIA L40S': 0.0542,
+  // Self-hosted (infra/selfhost). No provider bills these per second, so they
+  // are priced at what the same hardware would rent for:
+  // RTX 4090 — RunPod Community Cloud, $0.34/h (checked 2026-10-27).
+  'NVIDIA GeForce RTX 4090': 0.0094,
+  // CPU-only server — a whole Hetzner AX42 (€79/month ≈ $92) per wall-clock
+  // second, since it serves one request at a time (checked 2026-10-27).
+  'self-hosted-cpu': 0.0035,
 }
 /** An unrecognised GPU name (Modal moved the class, or a new card) bills at
  * the dearest known rate: overcharging is fixable, a free GPU is not. */

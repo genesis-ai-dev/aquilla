@@ -41,6 +41,18 @@ interface UseCellsAuditStatsOptions {
   lane?: string
 }
 
+/** The projected row a committed cell's stats entry follows on `lane` (the
+ *  reading deriveCommittedCellStats documents); undefined when `rows` has no
+ *  row for the cell at all. */
+function committedStatsRow(cellId: string, rows: readonly CellRow[], lane: string): CellRow | undefined {
+  const targets = rows.filter((r) => r.cellId === cellId && r.side === "target")
+  return (
+    targets.find((r) => (r.targetLang ?? "") === lane) ??
+    targets[0] ??
+    rows.find((r) => r.cellId === cellId && r.side === "source")
+  )
+}
+
 /**
  * The audit-stats entry the server would return for a cell whose projected
  * rows are `rows` — the same reading `/cells/audit-stats` does: the target
@@ -55,11 +67,7 @@ export function deriveCommittedCellStats(
   lane: string,
   prev: CellAuditStats | undefined,
 ): CellAuditStats | null {
-  const targets = rows.filter((r) => r.cellId === cellId && r.side === "target")
-  const row =
-    targets.find((r) => (r.targetLang ?? "") === lane) ??
-    targets[0] ??
-    rows.find((r) => r.cellId === cellId && r.side === "source")
+  const row = committedStatsRow(cellId, rows, lane)
   if (!row) return null
   const headChanged = prev?.lastEditEventId !== row.eventId
   return {
@@ -219,8 +227,6 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const tokenRef = useRef(getTokenForFile)
   const enabledRef = useRef(enabled)
   const laneRef = useRef(lane)
-  const dataRef = useRef(data)
-  dataRef.current = data
   const generationRef = useRef(0)
 
   fileRef.current = fileId
@@ -306,14 +312,23 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
 
   const applyCommittedCellStats = useCallback((cellId: string, rows: readonly CellRow[]): boolean => {
     if (!enabledRef.current || !fileRef.current) return false
-    // Read the latest map synchronously (a setData updater runs lazily, so
-    // the caller could not learn whether anything merged).
-    const stats = deriveCommittedCellStats(cellId, rows, laneRef.current, dataRef.current.get(cellId))
-    if (!stats) return false
-    const next = new Map(dataRef.current)
-    next.set(cellId, stats)
-    dataRef.current = next
-    setData(next)
+    const lane = laneRef.current
+    // Whether anything merges depends on the rows alone, so the caller has
+    // its answer synchronously while the merge itself runs as an updater.
+    if (!committedStatsRow(cellId, rows, lane)) return false
+    // AQU-2280: merge into React's latest map, never into a snapshot of it.
+    // A ref mirroring `data` only catches up on the next render, and the
+    // outbox drains the edits queued before a reload at the same moment the
+    // file's full read returns. Copying the pre-read map here and setting it
+    // threw the read's answer away for every other cell, so a whole file's
+    // validation pills went blank until something else refetched.
+    setData((prev) => {
+      const stats = deriveCommittedCellStats(cellId, rows, lane, prev.get(cellId))
+      if (!stats) return prev
+      const next = new Map(prev)
+      next.set(cellId, stats)
+      return next
+    })
     return true
   }, [])
 

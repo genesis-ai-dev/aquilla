@@ -168,6 +168,10 @@ describe("POST /api/v2/invites/:token/accept — email binding + archived guard"
   })
 
   it("accepts an email-bound invite for the matching account (case-insensitive)", async () => {
+    // AQU-1579: a matching address redeems only after email_verified_at is set.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 2",
+    ).run()
     await seedInvite({ token: "tok-bound-bbb", projectId: "proj-1", email: "BOB@Example.com" })
     const res = await app.request(
       "/api/v2/invites/tok-bound-bbb/accept",

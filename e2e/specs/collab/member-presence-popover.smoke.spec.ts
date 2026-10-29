@@ -1,6 +1,7 @@
 import { test, expect } from "../../helpers/multi-user"
 import { ensureAuthState } from "../../helpers/auth"
 import { bootstrapSharedProject } from "../../helpers/frontier-api"
+import { waitForProjectSyncReady } from "../../helpers/project-sync"
 import { v4 as uuid } from "uuid"
 
 test("member presence popover is fully visible above workspace chrome", async ({ alice, bob }) => {
@@ -12,10 +13,15 @@ test("member presence popover is fully visible above workspace chrome", async ({
     collaboratorUsername: "bob",
   })
 
+  // Both editors are cold here. The presence button cannot exist until each
+  // project socket has delivered its first presence frame.
+  const aliceReady = waitForProjectSyncReady(alice, projectId, 30_000)
+  const bobReady = waitForProjectSyncReady(bob, projectId, 30_000)
   await Promise.all([
     alice.goto(`/project/${projectId}/editor`),
     bob.goto(`/project/${projectId}/editor`),
   ])
+  await Promise.all([aliceReady, bobReady])
 
   const presenceTrigger = alice.getByRole("button", { name: /bob/i }).first()
   await expect(presenceTrigger).toBeVisible()

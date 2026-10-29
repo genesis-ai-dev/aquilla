@@ -26,6 +26,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── auth-worker/        # identity + agent-API Worker — see Backend below
 ├── sync-worker/        # realtime/sync Worker — see Backend below
 ├── agent-worker/       # sandboxed agent code-execution Worker — see Backend below
+├── monitor-worker/     # uptime cron → Discord alerts with @mentions (monitor-worker/README.md)
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
@@ -86,6 +87,7 @@ pnpm test:e2e
 cd sync-worker && npm test
 cd auth-worker && npm test
 cd agent-worker && npm test    # worker/ also has its own vitest suite
+cd monitor-worker && npm test
 
 # Run one test file / pattern
 pnpm test src/lib/parsers/usfm.test.ts

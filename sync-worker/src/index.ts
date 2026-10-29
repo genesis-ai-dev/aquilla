@@ -124,6 +124,7 @@ import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
+import { handleHealthRequest } from "./health-route"
 import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 declare global {
@@ -406,6 +407,13 @@ const worker = {
     const background = trackBackgroundWork(ctx)
     const routeCtx = background.ctx
     try {
+    // Uptime probe for monitor-worker/. Runs after the shim so it exercises the
+    // real Postgres path, and ahead of every auth-gated route.
+    const healthResponse = await handleHealthRequest(request, {
+      db: env.AQUILLA_PG,
+      r2: env.SNAPSHOTS,
+    })
+    if (healthResponse) return healthResponse
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
     // AQU-346: eject a removed member's live WS sessions + denylist their

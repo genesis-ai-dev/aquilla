@@ -266,6 +266,7 @@ describe("worker deployment environment contract", () => {
     ["sync-worker/wrangler.toml", "aquilla-sync-worker-local", "aquilla-sync-worker", "bash ../scripts/verify-deploy-branch.sh release"],
     ["auth-worker/wrangler.toml", "aquilla-identity-local", "aquilla-identity", "bash ../scripts/verify-deploy-branch.sh release"],
     ["agent-worker/wrangler.toml", "aquilla-agent-sandbox-local", "aquilla-agent-sandbox", "bash ../scripts/verify-deploy-branch.sh release"],
+    ["monitor-worker/wrangler.toml", "aquilla-monitor-local", "aquilla-monitor", "bash ../scripts/verify-deploy-branch.sh release"],
     ["resource-worker/wrangler.toml", "aquilla-resources-local", "aquilla-resources", "bash ../scripts/verify-deploy-branch.sh release"],
   ])(
     "keeps the unnamed profile in %s away from production",
@@ -285,7 +286,7 @@ describe("worker deployment environment contract", () => {
   // Wrangler would inherit the top-level [observability] block, but each deployed
   // env declares its own so a top-level edit can't switch Workers Logs off.
   it.each(
-    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml"]
+    ["sync-worker/wrangler.toml", "auth-worker/wrangler.toml", "agent-worker/wrangler.toml", "monitor-worker/wrangler.toml"]
       .flatMap((file) => ["production", "development"].map((profile) => [file, profile])),
   )("keeps Workers Logs enabled in %s [env.%s]", (file, profile) => {
     const config = readRepoFile(...file.split("/"))

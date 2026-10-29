@@ -385,8 +385,10 @@
 
        SCOPED to `html[data-app-frame]`, which AppShell sets while mounted.
        The blanket version of this rule broke every page rendered OUTSIDE the
-       frame: /privacy-policy is a 3,400px document in the body, and two
-       thirds of it — its analytics opt-out included — became unreachable. */
+       frame: the in-app privacy policy (removed in AQU-2243) was a 3,400px
+       document in the body, and two thirds of it — its analytics opt-out
+       included — became unreachable. Login, the invite/verify routes, the
+       approval page and the 404 still render outside the frame. */
   }
   html {
     @apply font-sans;

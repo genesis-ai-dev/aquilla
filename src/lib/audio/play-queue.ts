@@ -929,7 +929,8 @@ function progRebuild(): void {
   // verses. AQU-2204: a file with no times at all lays its lines out in order,
   // an unrecorded one at a stand-in length that playback steps over.
   const { lines: dialogue, untimed } = programmeLines(ctx.cells)
-  const built = buildProgramme(dialogue, untimed ? { standInLenSec: standInEstimator(dialogue) } : undefined)
+  // AQU-2204: following the recordings, every unrecorded line takes its stand-in.
+  const built = buildProgramme(dialogue, { standInLenSec: standInEstimator(dialogue) })
   // A take whose length was never measured (a generated voice nobody has
   // played yet) has no window the programme can play. On a file with times
   // that is today's rule — the verse is silent — but a file with NO times only

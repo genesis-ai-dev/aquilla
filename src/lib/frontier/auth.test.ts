@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import {
   login,
+  logout,
   register,
   redeemAccessLink,
   requestPasswordReset,
@@ -370,5 +371,20 @@ describe("AUTH_BASE env override", () => {
     vi.resetModules();
     const mod = await import("./auth");
     expect(mod.AUTH_BASE).toBe("https://api.aquilla.app/identity");
+  });
+});
+
+// AQU-2239: local account removal must not depend on a responsive transport.
+describe("logout deadline", () => {
+  it("settles and aborts a hung revocation request", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+      const result = logout("jwt");
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(result).resolves.toBeUndefined();
+      expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); vi.restoreAllMocks(); }
   });
 });

@@ -21,6 +21,13 @@ import type { ImportResult } from "@/lib/import"
 import type { ReimportChangeCounts } from "@/lib/import/reimport-diff"
 import { ReimportAnalysis } from "@/components/import/ReimportAnalysis"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
+import {
+  FramesAsHundredthsNotice,
+  resolveFramesAsHundredths,
+  type FramesAsHundredthsPick,
+} from "@/components/import/FramesAsHundredthsNotice"
+import { filmFrameRateOf, useFilmFrameRates } from "@/hooks/useFilmFrameRate"
+import { convertFramesAsHundredths, type FrameRateLabel } from "@/lib/parsers/frame-timecode"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import {
   defaultEpubSkipMemberPaths,
@@ -46,6 +53,9 @@ export interface ImportUploadProgress {
 export interface PreviewConfirmOptions {
   skipMemberPaths?: ReadonlySet<string>
   reimportChoice?: "update" | "updated-copy" | "blank"
+  /** AQU-2197: subtitle files (by result name) whose cue times the person
+   *  chose to convert from frames-written-as-hundredths, and at which rate. */
+  frameRates?: ReadonlyMap<string, FrameRateLabel>
 }
 
 export interface PreviewPanelProps {
@@ -75,12 +85,15 @@ export interface PreviewPanelProps {
   reimport?: boolean
   /** Added and updated counts for a sidebar re-import, once the file's cells have loaded. */
   reimportChanges?: ReimportChangeCounts | null
+  /** AQU-2197: the linked film of the existing file each result updates (by
+   *  result name), whose frame rate settles a frames-as-hundredths fix. */
+  filmUrls?: ReadonlyMap<string, string>
 }
 
 /** Max cells to show in the snippet list per result. */
 const PREVIEW_LIMIT = 20
 
-export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error, reimport = false, reimportChanges = null }: PreviewPanelProps) {
+export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error, reimport = false, reimportChanges = null, filmUrls }: PreviewPanelProps) {
   const { locale } = useI18n()
   const t = useT()
   const [confirming, setConfirming] = useState(false)
@@ -92,13 +105,34 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
     () => defaultEpubSkipMemberPaths(epubMembers),
   )
 
+  // AQU-2197: one settled check per subtitle file whose times are frames
+  // written as hundredths: fixed at the film's rate (an update of a file with
+  // a linked film) or the frame numbers', until the person says otherwise.
+  // The preview's cue list shows the times the import will actually write.
+  const [framePicks, setFramePicks] = useState<ReadonlyMap<string, FramesAsHundredthsPick>>(() => new Map())
+  const filmRates = useFilmFrameRates(results.map((r) => (r.framesAsHundredths ? filmUrls?.get(r.name) : null)))
+  const frameStates = useMemo(
+    () => new Map(results.flatMap((r) => (r.framesAsHundredths
+      ? [[r.name, resolveFramesAsHundredths(r.framesAsHundredths, framePicks.get(r.name),
+          filmFrameRateOf(filmRates, filmUrls?.get(r.name)))] as const]
+      : []))),
+    [results, framePicks, filmRates, filmUrls],
+  )
+  const frameRates = useMemo(
+    () => new Map([...frameStates].flatMap(([name, state]) =>
+      state.choice === "keep" ? [] : [[name, state.choice] as const])),
+    [frameStates],
+  )
+
   const visibleResults = useMemo(
-    () => results.map((result) => (
-      result.epubMembers
-        ? { ...result, strings: filterEpubStrings(result.strings, skipMemberPaths) }
-        : result
-    )),
-    [results, skipMemberPaths],
+    () => results.map((result) => {
+      const rate = result.framesAsHundredths ? frameRates.get(result.name) : undefined
+      const strings = rate ? convertFramesAsHundredths(result.strings, rate) : result.strings
+      return result.epubMembers
+        ? { ...result, strings: filterEpubStrings(strings, skipMemberPaths) }
+        : strings === result.strings ? result : { ...result, strings }
+    }),
+    [results, skipMemberPaths, frameRates],
   )
   const totalCells = visibleResults.reduce((n, r) => n + r.strings.length, 0)
 
@@ -119,6 +153,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
       await onConfirm({
         ...(epubMembers.length > 0 ? { skipMemberPaths } : {}),
         ...(choice ? { reimportChoice: choice } : {}),
+        ...(frameRates.size > 0 ? { frameRates } : {}),
       })
     } finally {
       setConfirming(false)
@@ -230,6 +265,12 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               ) : null}
               {r.structureFindings?.length ? (
                 <UsfmStructureFindings findings={r.structureFindings} />
+              ) : null}
+              {r.framesAsHundredths ? (
+                <FramesAsHundredthsNotice
+                  state={frameStates.get(r.name)!}
+                  onChange={(pick) => setFramePicks((prev) => new Map(prev).set(r.name, pick))}
+                />
               ) : null}
               {r.importNotices?.length ? (
                 <div className="mb-3 flex flex-col gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="import-preview-notices">

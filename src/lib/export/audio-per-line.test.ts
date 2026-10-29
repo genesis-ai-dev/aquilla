@@ -1024,3 +1024,55 @@ describe("the WAV format", () => {
     expect(decodes).toBe(0)
   })
 })
+
+// An 800-line export took over twenty minutes because each take was fetched
+// only after the one before it had been written: every network round-trip
+// sat end to end. Fetches now run ahead; the zip must not notice.
+describe("fetching ahead", () => {
+  const lines = Array.from({ length: 12 }, (_, i) => withTake(`c${i}`, i + 1))
+
+  it("has several fetches in flight at once", async () => {
+    let inFlight = 0
+    let most = 0
+    await exportAudioPerLine({
+      cells: lines, settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => {
+        inFlight += 1
+        most = Math.max(most, inFlight)
+        await new Promise((r) => setTimeout(r, 5))
+        inFlight -= 1
+        return makeWav()
+      },
+    })
+    expect(most).toBeGreaterThan(1)
+  })
+
+  it("still writes files and manifest rows in line order when later fetches finish first", async () => {
+    const result = await exportAudioPerLine({
+      cells: lines, settings: SETTINGS, projectId: "p1", langCode: "es",
+      // Earlier lines answer slowest, so arrival order is the reverse of line order.
+      fetchBytes: async ({ audioId }) => {
+        const n = Number(audioId.match(/\d+/)![0])
+        await new Promise((r) => setTimeout(r, 30 - n * 2))
+        return makeWav()
+      },
+    })
+    const zip = await JSZip.loadAsync(result.blob)
+    const audio = Object.keys(zip.files).filter((n) => n !== "manifest.csv")
+    const expected = lines.map((_, i) => `es_L${String(i + 1).padStart(4, "0")}_NO_CHARACTER.wav`)
+    expect(audio).toEqual(expected)
+    const rows = (await zip.file("manifest.csv")!.async("string")).trim().split(/\r?\n/).slice(1)
+    expect(rows.map((r) => r.split(",")[0])).toEqual(expected)
+  })
+
+  it("stores audio uncompressed, since DEFLATE only slows a big export down", async () => {
+    const result = await exportAudioPerLine({
+      cells: lines.slice(0, 1), settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(result.blob)
+    const entry = zip.file("es_L0001_NO_CHARACTER.wav") as unknown as { _data: { compression: { magic: string } } }
+    // JSZip's STORE method is magic "\x00\x00".
+    expect(entry._data.compression.magic).toBe("\x00\x00")
+  })
+})

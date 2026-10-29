@@ -26,9 +26,9 @@ export interface MemberScopeValue {
 /**
  * AQU-553: project context needed to render per-member lane limits.
  * When passed to MembersPanel AND the caller can manage scopes (callerMaxRole
- * >= project lead), each member below project lead gets a lane/file scope
- * editor. A project lead's lanes are shown read-only (AQU-2054); maintainers
- * and above get no scope UI. Absent = no scope UI (e.g. the org roster).
+ * >= project lead), each member below maintainer gets a lane/file scope
+ * editor, project leads included. Maintainers and above get no scope UI.
+ * Absent = no scope UI (e.g. the org roster).
  */
 export interface MembersPanelScopeConfig {
   /** Selectable lanes. `value: ""` is the default lane. */
@@ -37,6 +37,12 @@ export interface MembersPanelScopeConfig {
   files: Array<{ id: string; name: string }>;
   /** Current scopes per member userId (absent / empty array = unscoped). */
   scopesByUser: Record<number, MemberScopeValue[]>;
+  /**
+   * Lanes this caller may grant. Null or omitted means every lane in `lanes`
+   * (a maintainer, or a project lead who holds every lane). A list means only
+   * those lanes; lanes outside it stay on the member and are not shown.
+   */
+  grantableLaneValues?: string[] | null;
   /** Persist a member's replace-set of scopes (issues the PUT). */
   onSave: (userId: number, scopes: MemberScopeValue[]) => Promise<void>;
 }
@@ -109,8 +115,9 @@ interface MembersPanelProps {
   scopedUserSearch?: boolean;
   /**
    * AQU-553 / AQU-2054: when provided (and callerMaxRole >= project lead),
-   * renders a lane/file scope editor for members below project lead, and a
-   * read-only lane list for project leads. Maintainers and above are omitted.
+   * renders a lane/file scope editor for members below maintainer, including
+   * project leads. A caller who holds only some lanes can grant only those.
+   * Maintainers and above are omitted.
    */
   scopeConfig?: MembersPanelScopeConfig;
   /**
@@ -151,10 +158,11 @@ export function MembersPanel({
 }: MembersPanelProps) {
   const { t } = useI18n();
   // AQU-553: scope UI is shown only when project context is supplied and the
-  // caller is a project lead or above. Per row, the editor is for members
-  // below project lead. A project lead is lane-limitable (AQU-1813) but this
-  // panel does not edit their lanes — it names them and points at Staff…
-  // (AQU-2054). Maintainers and above have no lane limit to show.
+  // caller is a project lead or above. Per row, everyone below maintainer
+  // gets the editor, project leads included (AQU-2054). A lane-limited caller
+  // can grant only the lanes they hold. Someone who already has every lane
+  // stays read-only for that caller, because narrowing them would take away
+  // lanes the caller does not hold. Maintainers and above have no scope row.
   const canManageScopes =
     scopeConfig != null && callerMaxRole >= ROLE.PROJECT_LEAD;
 
@@ -173,14 +181,22 @@ export function MembersPanel({
       <ul className="max-h-[50vh] divide-y overflow-x-hidden overflow-y-auto overscroll-contain rounded border">
         {members.map((m) => {
           const isSelf = callerUserId !== null && m.userId === callerUserId;
-          // Contributors and reviewers keep the editor. A project lead's
-          // lanes are read-only here. Maintainer and above: no scope row.
-          const showScopeEditor =
-            canManageScopes && scopeConfig != null && m.roleLevel < ROLE.PROJECT_LEAD;
-          const showLeadLanes =
+          const grantable = scopeConfig?.grantableLaneValues ?? null;
+          const targetHasLaneLimit = (scopeConfig?.scopesByUser[m.userId] ?? []).some(
+            (scope) => scope.kind === "lane",
+          );
+          // A restricted caller cannot narrow someone who already holds every
+          // lane: that set includes lanes the caller does not hold.
+          const showEveryLaneLocked =
             canManageScopes &&
             scopeConfig != null &&
-            m.roleLevel >= ROLE.PROJECT_LEAD &&
+            grantable != null &&
+            !targetHasLaneLimit &&
+            m.roleLevel < ROLE.MAINTAINER;
+          const showScopeEditor =
+            canManageScopes &&
+            scopeConfig != null &&
+            !showEveryLaneLocked &&
             m.roleLevel < ROLE.MAINTAINER;
           return (
             <li key={m.userId} className="flex min-w-0 flex-col gap-2 overflow-x-hidden px-3 py-2">
@@ -243,12 +259,8 @@ export function MembersPanel({
                   current={scopeConfig.scopesByUser[m.userId] ?? []}
                 />
               )}
-              {showLeadLanes && scopeConfig != null && (
-                <LeadLaneLimits
-                  userId={m.userId}
-                  config={scopeConfig}
-                  current={scopeConfig.scopesByUser[m.userId] ?? []}
-                />
+              {showEveryLaneLocked && scopeConfig != null && (
+                <LeadLaneLimits userId={m.userId} />
               )}
             </li>
           );
@@ -287,36 +299,19 @@ function scopeSummary(laneCount: number, fileCount: number): string {
 }
 
 /**
- * AQU-2054: a project lead's lanes, read-only. An empty lane list means every
- * lane. Changing those lanes happens in the language's Staff popover, not
- * in this editor — contributors and reviewers keep MemberScopesEditor.
+ * A lane-limited caller looking at someone who already holds every lane.
+ * Narrowing that person would remove lanes the caller does not hold, so
+ * this row stays read-only.
  */
-function LeadLaneLimits({
-  userId,
-  config,
-  current,
-}: {
-  userId: number;
-  config: MembersPanelScopeConfig;
-  current: MemberScopeValue[];
-}) {
+function LeadLaneLimits({ userId }: { userId: number }) {
   const { t } = useI18n();
-  const labels: string[] = [];
-  for (const scope of current) {
-    if (scope.kind !== "lane") continue;
-    const label =
-      config.lanes.find((lane) => lane.value === scope.value)?.label ??
-      (scope.value || "Default");
-    if (!labels.includes(label)) labels.push(label);
-  }
-  const lanesText = labels.length > 0 ? labels.join(", ") : t("org.membersPanel.leadEveryLane");
 
   return (
     <div
       data-testid={`member-lead-lanes-${userId}`}
       className="rounded border bg-muted/30 px-2 py-1.5 text-xs"
     >
-      <p className="font-medium text-foreground">{lanesText}</p>
+      <p className="font-medium text-foreground">{t("org.membersPanel.leadEveryLane")}</p>
       <p className="text-muted-foreground">{t("org.membersPanel.leadLaneChangeHint")}</p>
     </div>
   );
@@ -372,11 +367,29 @@ function MemberScopesEditor({
     return next;
   }
 
+  const grantable = config.grantableLaneValues ?? null;
+  const laneOptions =
+    grantable == null
+      ? config.lanes
+      : config.lanes.filter((lane) => grantable.includes(lane.value));
+
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
+    const laneList = [...lanes];
+    const granted =
+      grantable == null ? laneList : laneList.filter((value) => grantable.includes(value));
+    const preserved =
+      grantable == null ? [] : laneList.filter((value) => !grantable.includes(value));
+    // An empty lane list means every lane. A caller who does not hold every
+    // lane cannot produce that, including by unchecking the only lane they hold.
+    if (grantable != null && granted.length === 0 && preserved.length === 0) {
+      setSaveError(t("org.membersPanel.cannotGrantEveryLane"));
+      setSaving(false);
+      return;
+    }
     const scopes: MemberScopeValue[] = [
-      ...[...lanes].map((value): MemberScopeValue => ({ kind: "lane", value })),
+      ...laneList.map((value): MemberScopeValue => ({ kind: "lane", value })),
       ...[...files].map((value): MemberScopeValue => ({ kind: "file", value })),
     ];
     try {
@@ -421,15 +434,17 @@ function MemberScopesEditor({
       {expanded && (
         <div id={bodyId} className="border-t px-2 pb-2 pt-2">
           <p className="mb-1.5 font-normal text-muted-foreground">
-            {t("org.membersPanel.leaveEmptyForFullAccess")}
+            {grantable == null
+              ? t("org.membersPanel.leaveEmptyForFullAccess")
+              : t("org.membersPanel.grantOnlyYourLanes")}
           </p>
-          {config.lanes.length > 0 && (
+          {laneOptions.length > 0 && (
             <fieldset className="mb-2">
               <legend className="mb-1 text-[10px] text-muted-foreground">
                 {t("org.membersPanel.lanesLegend")}
               </legend>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
-                {config.lanes.map((lane) => (
+                {laneOptions.map((lane) => (
                   <label key={lane.value || "__default__"} className="flex items-center gap-1.5">
                     <Checkbox
                       checked={lanes.has(lane.value)}

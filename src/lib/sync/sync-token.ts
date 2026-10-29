@@ -70,6 +70,34 @@ export async function fetchSyncToken(
   bootstrap: ProjectBootstrap = {},
   apiUrl: string = AUTH_API_URL
 ): Promise<SyncTokenResponse> {
+  // AQU-2240: Firefox can leave a mint pending across offline/online. Bound
+  // the entire exchange, including the body, so the outbox lock can retry.
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort()
+      reject(new DOMException("Sync token request timed out", "TimeoutError"))
+    }, 15_000)
+  })
+  try {
+    return await Promise.race([
+      deadline,
+      fetchSyncTokenRequest(jwt, projectId, fileId, bootstrap, apiUrl, controller.signal),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchSyncTokenRequest(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  bootstrap: ProjectBootstrap,
+  apiUrl: string,
+  signal: AbortSignal,
+): Promise<SyncTokenResponse> {
   const body: Record<string, unknown> = { projectId, fileId }
   if (bootstrap.projectName) body.projectName = bootstrap.projectName
   if (typeof bootstrap.gitlabProjectId === "number") {
@@ -82,6 +110,7 @@ export async function fetchSyncToken(
       Authorization: `Bearer ${jwt}`,
     },
     body: JSON.stringify(body),
+    signal,
   })
   if (!res.ok) {
     const errBody = await res.text().catch(() => "")

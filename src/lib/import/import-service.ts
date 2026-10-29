@@ -7,6 +7,7 @@ import {
   type NormalizedImportFile,
 } from "./normalized-manifest"
 import type { AiImportClassification } from "./ai-recipe"
+import type { FramesAsHundredths } from "@/lib/parsers/frame-timecode"
 import type {
   RoundTripFidelity,
   SourceArtifactFormat,
@@ -46,6 +47,9 @@ export interface ParsedImportResult {
   sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: SourceArtifactFormat }
   /** EPUB spine members shown in the chapter picker. Absent for other formats. */
   epubMembers?: EpubSpineMember[]
+  /** AQU-2197: cue times that look like video frame numbers written as
+   *  hundredths; the preview offers to convert them. Subtitle files only. */
+  framesAsHundredths?: FramesAsHundredths
 }
 
 export interface PreparedImportFile {

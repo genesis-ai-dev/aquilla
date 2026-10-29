@@ -1738,7 +1738,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "experimental",
       label: "Experimental",
-      description: "Early features, this device only",
+      description: "Autopilot, extensions, and other early features",
       icon: FlaskConical,
       hub: "Integrations",
       sectionIds: ["section-experimental"],
@@ -1890,7 +1890,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com, Airtable",
-    experimental: "This device",
   }
 
   const headerActions = (

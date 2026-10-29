@@ -64,20 +64,22 @@ describe("dubbing layout — unchanged from before SUB-53", () => {
 
 describe("audio-first layout — verses laid out end to end", () => {
   // v1: original 6s, translation 11s → slot 11s at 0.
-  // v2: original 10s, translation 4s → slot 10s at 11.
+  // v2: original 10s, translation 4s → slot 4s at 11: following the
+  // recordings, only the take sets its length and the original is cut there
+  // (AQU-2204, Sam Oct 27).
   const cells = [verse("v1", 0, 6, { durationMs: 11_000 }), verse("v2", 6, 16, { durationMs: 4_000 })]
   const layout = buildTimelineLayout("audioFirst", cells, cells)
 
-  it("the original keeps its real length but moves to its verse's slot", () => {
+  it("the original moves to its verse's slot, cut where the verse ends", () => {
     expect(layout.spanFor(cells[0], "source")).toEqual({ start: 0, end: 6 })
     // v2's original no longer starts at file second 6 — it waits for v1's
-    // translation to finish. This is the whole point.
-    expect(layout.spanFor(cells[1], "source")).toEqual({ start: 11, end: 21 })
+    // translation to finish — and it stops where v2's take does.
+    expect(layout.spanFor(cells[1], "source")).toEqual({ start: 11, end: 15 })
   })
 
   it("the subtitle card covers the whole verse, so the text stays readable", () => {
     expect(layout.spanFor(cells[0], "subtitle")).toEqual({ start: 0, end: 11 })
-    expect(layout.spanFor(cells[1], "subtitle")).toEqual({ start: 11, end: 21 })
+    expect(layout.spanFor(cells[1], "subtitle")).toEqual({ start: 11, end: 15 })
   })
 
   it("a verse's two sides share a left edge", () => {
@@ -136,7 +138,7 @@ describe("audio-first layout — verses laid out end to end", () => {
   })
 
   it("the track is as long as the assembled passage", () => {
-    expect(layout.totalSec).toBe(21 + 2)
+    expect(layout.totalSec).toBe(15 + 2)
   })
 
   it("clicking a card seeks to the verse's start on the programme clock", () => {
@@ -149,7 +151,7 @@ describe("audio-first layout — verses laid out end to end", () => {
     // imported recording, so it follows wherever that moment now sits.
     const sub = { id: "s1", fileId: "f1", medium: "text", startTime: 6, endTime: 16 } as unknown as CellData
     const l = buildTimelineLayout("audioFirst", [...cells, sub], cells)
-    expect(l.spanFor(sub, "subtitle")).toEqual({ start: 11, end: 21 })
+    expect(l.spanFor(sub, "subtitle")).toEqual({ start: 11, end: 15 })
   })
 })
 

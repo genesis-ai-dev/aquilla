@@ -64,6 +64,30 @@ import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
+import {
+  FramesAsHundredthsNotice,
+  resolveFramesAsHundredths,
+  type FramesAsHundredthsChoice,
+  type FramesAsHundredthsPick,
+  type FramesAsHundredthsState,
+} from "@/components/import/FramesAsHundredthsNotice"
+import { filmFrameRateOf, useFilmFrameRates } from "@/hooks/useFilmFrameRate"
+import {
+  convertFramesAsHundredthsSeconds,
+  detectFramesAsHundredths,
+  type FramesAsHundredths,
+} from "@/lib/parsers/frame-timecode"
+
+/** AQU-2197: a subtitle file's rows re-timed at the chosen frame rate, or as
+ *  they were. Only the times move; the label keeps the file's own timecode,
+ *  as the frame-rate rescale already does. */
+function retimeRows(rows: TargetRow[], choice: FramesAsHundredthsChoice): TargetRow[] {
+  if (choice === "keep") return rows
+  const at = (ms: number) => Math.round(convertFramesAsHundredthsSeconds(ms / 1000, choice) * 1000)
+  return rows.map((row) =>
+    row.startMs === undefined || row.endMs === undefined ? row : { ...row, startMs: at(row.startMs), endMs: at(row.endMs) },
+  )
+}
 
 export interface FileTargetImportPanelProps {
   projectId: string
@@ -97,6 +121,9 @@ export interface FileTargetImportPanelProps {
    *  target rows exclude book-name/title/TOC + intro-block cells, staying
    *  aligned with source cells imported under the same setting. */
   excludeFrontMatter?: boolean
+  /** AQU-2197: the destination file's linked film, whose frame rate settles a
+   *  subtitle file's frames-as-hundredths fix. */
+  filmUrl?: string | null
   /** Told where a back arrow should lead from the current step, or `null` on
    *  the first step. The host draws the arrow in its dialog title, the way the
    *  source import dialog does, so a wrong file is one click from the file
@@ -544,6 +571,7 @@ export function FileTargetImportPanel({
   onError,
   applyOptimisticTargetEdits,
   excludeFrontMatter,
+  filmUrl,
   onBackChange,
   mode = "commit",
   jwt,
@@ -565,6 +593,18 @@ export function FileTargetImportPanel({
   // A subtitle file's parsed cues, kept so the review's shift tickbox can
   // re-run the match with the shift on or off.
   const [subtitleRows, setSubtitleRows] = useState<{ rows: TargetRow[]; skippedCues: number } | null>(null)
+  // AQU-2197: a subtitle file whose times are frame numbers written as
+  // hundredths — its rows as read, the person's pick, and what was applied.
+  // The destination's film is read up front, so its rate is usually known by
+  // the time a file is.
+  const [frameRows, setFrameRows] = useState<{
+    raw: TargetRow[]
+    skippedCues: number
+    pick: FramesAsHundredthsPick | null
+    state: FramesAsHundredthsState
+  } | null>(null)
+  const filmRates = useFilmFrameRates([filmUrl])
+  const filmRate = filmFrameRateOf(filmRates, filmUrl)
   const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set())
   const [applying, setApplying] = useState(false)
   // The shift tickbox's new value while the list re-matches under it; null
@@ -612,6 +652,7 @@ export function FileTargetImportPanel({
             setSelectedSheet(null)
             setSourceFile(null)
             setSubtitleRows(null)
+            setFrameRows(null)
             setExpandedRows(new Set())
             setOverrides(NO_OVERRIDES)
             setOnlyToCheck(false)
@@ -629,6 +670,7 @@ export function FileTargetImportPanel({
               setMatchResult(null)
               setSelectedCellIds(new Set())
               setSubtitleRows(null)
+              setFrameRows(null)
               setExpandedRows(new Set())
               setOverrides(NO_OVERRIDES)
               setError(null)
@@ -731,8 +773,49 @@ export function FileTargetImportPanel({
     return run === matchRun.current
   }, [])
 
+  /** Review a subtitle file's rows as timed by the frame check's settled
+   *  state (AQU-2197); without a finding, as they were read. */
+  const reviewTimedRows = useCallback((
+    raw: TargetRow[],
+    skippedCues: number,
+    frames: { finding: FramesAsHundredths; pick: FramesAsHundredthsPick | null } | null,
+  ) => {
+    const state = frames ? resolveFramesAsHundredths(frames.finding, frames.pick, filmRate) : null
+    setFrameRows(frames && state ? { raw, skippedCues, pick: frames.pick, state } : null)
+    const timed = state ? retimeRows(raw, state.choice) : raw
+    setSubtitleRows({ rows: timed, skippedCues })
+    showReview({ ...matchTargetRowsByOrder(timed, cells), skippedCues }, true)
+  }, [filmRate, cells, showReview])
+
+  /** Review a subtitle file's rows, after the frames-as-hundredths check
+   *  (AQU-2197): when its times look like frame numbers written as hundredths,
+   *  they are re-timed at the film's rate or the frame numbers' until the
+   *  person says otherwise. */
+  const reviewSubtitleRows = useCallback((rows: TargetRow[], skippedCues: number) => {
+    const finding = detectFramesAsHundredths(
+      rows.map((r) => ({
+        start: r.startMs === undefined ? undefined : r.startMs / 1000,
+        end: r.endMs === undefined ? undefined : r.endMs / 1000,
+      })),
+    )
+    reviewTimedRows(rows, skippedCues, finding ? { finding, pick: null } : null)
+  }, [reviewTimedRows])
+
+  const changeFrameRate = useCallback((pick: FramesAsHundredthsPick) => {
+    if (!frameRows) return
+    reviewTimedRows(frameRows.raw, frameRows.skippedCues, { finding: frameRows.state.finding, pick })
+  }, [frameRows, reviewTimedRows])
+
+  // The film's rate arrived after the file was read: settle on it, while the
+  // review is still the step on screen.
+  useEffect(() => {
+    if (step !== "review" || frameRows?.state.from !== "pending" || filmRate === "pending") return
+    reviewTimedRows(frameRows.raw, frameRows.skippedCues, { finding: frameRows.state.finding, pick: frameRows.pick })
+  }, [step, frameRows, filmRate, reviewTimedRows])
+
   const handleFile = useCallback(async (file: File) => {
     setError(null)
+    setFrameRows(null)
     setSourceFile(file)
     const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
     try {
@@ -760,8 +843,7 @@ export function FileTargetImportPanel({
           setStep("file")
           return
         }
-        setSubtitleRows({ rows, skippedCues })
-        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
+        reviewSubtitleRows(rows, skippedCues)
       } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
         // AQU-1144: SRT/SBV cues have no canonical refs either, so they take
         // the same ref-less path as VTT — timecode overlap when the file's
@@ -774,8 +856,7 @@ export function FileTargetImportPanel({
           setStep("file")
           return
         }
-        setSubtitleRows({ rows, skippedCues })
-        showReview({ ...matchTargetRowsByOrder(rows, cells), skippedCues }, true)
+        reviewSubtitleRows(rows, skippedCues)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
@@ -1299,6 +1380,11 @@ export function FileTargetImportPanel({
                 </>
               )}
             </p>
+          )}
+          {frameRows && (
+            <div className="mt-2">
+              <FramesAsHundredthsNotice state={frameRows.state} onChange={changeFrameRate} />
+            </div>
           )}
           {offsetLabel && subtitleRows && (
             <label className="mt-1.5 flex items-start gap-2 text-xs text-muted-foreground">

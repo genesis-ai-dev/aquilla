@@ -12,6 +12,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ImportAudioVttDialog } from "./ImportAudioVttDialog"
 import type { ReconcilableCue } from "@/lib/import/cue-reconcile"
+import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 /** Two cues, at 24fps-ish timings. */
 const VTT = (aStart: string, bStart: string) =>
@@ -297,8 +298,10 @@ describe("the timing note", () => {
     await waitFor(() =>
       expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toBeInTheDocument(),
     )
+    // AQU-2197: worded so it stays true when the frame check has fixed the
+    // times — no drift correction, rather than "as delivered".
     expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toHaveTextContent(
-      "as delivered",
+      "couldn't be checked against the subtitles, so no drift correction is made",
     )
   })
 
@@ -342,5 +345,49 @@ describe("the timing note", () => {
     fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
     expect(onConfirm.mock.calls[0][2]).not.toBeNull()
     expect(onConfirm.mock.calls[0][2].scale).toBeCloseTo(NTSC, 6)
+  })
+})
+
+// AQU-2197: the audio VTT pick is the path Come and See actually uses for
+// their AUDIO_ONLY file — it gets the same warning, choice and conversion as
+// every other VTT import.
+describe("times written as frame numbers in hundredths (AQU-2197)", () => {
+  it("warns and imports the times converted at the suggested 24 fps", async () => {
+    const { onConfirm } = await pick(framesAsHundredthsVtt(), { existingCues: undefined, onReconcile: undefined })
+    expect(screen.getByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+    const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+    expect(cue.end).toBeCloseTo(SAMPLE_CUE.endAt24, 6)
+  })
+
+  it("imports the times as they are when the person keeps them", async () => {
+    const { onConfirm } = await pick(framesAsHundredthsVtt(), { existingCues: undefined, onReconcile: undefined })
+    fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+    const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.start, 6)
+  })
+
+  it("says nothing about a properly timed file", async () => {
+    await pick(properlyTimedVtt(), { existingCues: undefined, onReconcile: undefined })
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+
+  it("converts at the text file's linked film's own rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const { onConfirm } = await pick(framesAsHundredthsVtt(), {
+        existingCues: undefined, onReconcile: undefined,
+        filmUrl: "https://cdn.example.test/videos/audio-vtt-film/master.m3u8",
+      })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+      const cue = onConfirm.mock.calls[0][0].cues.find((c: { original: string }) => c.original === SAMPLE_CUE.text)
+      expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt23976, 6)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

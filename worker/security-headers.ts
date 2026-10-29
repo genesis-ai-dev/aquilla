@@ -44,16 +44,21 @@ export const ENFORCED_CSP = [
 ].join("; ")
 
 /** The policy we intend to enforce. Mirrors the Tauri shell's CSP so the two
- *  shells converge, with the web-only additions (Google Fonts stylesheet,
- *  `'wasm-unsafe-eval'` for the onnxruntime-web / sherpa-onnx WASM runtimes,
- *  blob: workers for the audio pipeline). Report-only until the console is
- *  clean on the SPA. */
+ *  shells converge, with the web-only additions (`'wasm-unsafe-eval'` for the
+ *  onnxruntime-web / sherpa-onnx WASM runtimes, blob: workers for the audio
+ *  pipeline). Report-only until the console is clean on the SPA.
+ *
+ *  AQU-2244: no third-party font hosts here or in the Tauri shell — Geist is
+ *  served from our own origin via `@fontsource-variable/geist`, so allowing
+ *  Google's font CDNs would only let a future change leak every visitor's IP to
+ *  Google unnoticed. Keep style-src/font-src origin-only; self-host any font the
+ *  app adds. */
 export const REPORT_ONLY_CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval' https://www.youtube.com",
   "worker-src 'self' blob:",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   "img-src 'self' data: blob: https:",
   "media-src 'self' data: blob: https:",
   // Deliberately host-agnostic for now: the API base, sync host, PostHog host

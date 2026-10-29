@@ -32,6 +32,10 @@ export interface CloneVoiceModalHostProps {
   roleLevel?: number | null
   /** AQU-2041. Same switch as VoiceLibraryPanel. */
   leadsManageVoices?: boolean
+  /** Which tab opens: "clone" (from a take) or "character" (Add a voice…). */
+  initialMode?: "clone" | "character"
+  /** After a NEW voice is saved. */
+  onAdded?: (voice: Voice) => void
 }
 
 export function CloneVoiceModalHost({
@@ -48,6 +52,8 @@ export function CloneVoiceModalHost({
   cells,
   roleLevel,
   leadsManageVoices = false,
+  initialMode = "clone",
+  onAdded,
 }: CloneVoiceModalHostProps) {
   const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
 
@@ -62,6 +68,7 @@ export function CloneVoiceModalHost({
     if (!canEditVoices) return
     const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
     void tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+    onAdded?.(voice)
   }
 
   return (
@@ -80,8 +87,9 @@ export function CloneVoiceModalHost({
       session={session}
       cells={cells}
       onSave={saveVoice}
-      initialMode="clone"
-      seedCellId={seedCellId}
+      initialMode={initialMode}
+      seedCellId={initialMode === "clone" ? seedCellId : null}
+      existingVoices={tts.allVoices}
     />
   )
 }

@@ -161,10 +161,18 @@ export function useProjectTts(
   // AQU-1943: which save is the latest. A refusal arrives after its save, so a
   // rollback must not undo a LATER save that already succeeded.
   const writeSeqRef = useRef(0)
+  // AQU-2212: the last write, until the render that shows it. Two saves in one
+  // tick (add a voice, then cast it on the line it was added from) must each
+  // build on the one before, not on the same stale render.
+  const pendingRef = useRef<ProjectTtsSettings | undefined>(undefined)
+  useEffect(() => {
+    if (pendingRef.current === localTts) pendingRef.current = undefined
+  }, [localTts])
   useEffect(() => {
     if (loadedForRef.current === projectId) return
     loadedForRef.current = projectId
     migratedForRef.current = null
+    pendingRef.current = undefined
     setLocalTts(projectId ? loadProjectTts(projectId) : undefined)
   }, [projectId])
 
@@ -184,8 +192,9 @@ export function useProjectTts(
   const writeSettings = useCallback(
     async (next: ProjectTtsSettings) => {
       if (!projectId) return
-      const previous = localTts ?? serverSettings
+      const previous = pendingRef.current ?? localTts ?? serverSettings
       const seq = ++writeSeqRef.current
+      pendingRef.current = next
       setLocalTts(next)
       // Source of truth: durable, client-owned, survives reload + pulls.
       saveProjectTts(projectId, next)
@@ -207,6 +216,7 @@ export function useProjectTts(
           .then((outcome) => {
             if (!outcome?.rejected) return
             if (writeSeqRef.current !== seq) return
+            pendingRef.current = previous
             setLocalTts(previous)
             if (previous) saveProjectTts(projectId, previous)
             else clearProjectTts(projectId)
@@ -228,7 +238,7 @@ export function useProjectTts(
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!projectId) return
-      const previous = localTts ?? serverSettings
+      const previous = pendingRef.current ?? localTts ?? serverSettings
       let patch: Partial<ProjectTtsSettings> = overrides
       // AQU-2037: the one place a voice is given its lane. Every mint site —
       // New voice / Clone / voice design, an import with speaker labels,
@@ -294,21 +304,21 @@ export function useProjectTts(
 
   const assignCells = useCallback(
     (cellIds: Iterable<string>, voiceId: string | null) => {
-      void saveTts(setLaneCast(localTts ?? serverSettings, lane, cellIds, voiceId))
+      void saveTts(setLaneCast(pendingRef.current ?? localTts ?? serverSettings, lane, cellIds, voiceId))
     },
     [localTts, serverSettings, lane, saveTts],
   )
 
   const assignCharacter = useCallback(
     (castName: string, voiceId: string | null, lineIds: Iterable<string>) => {
-      void saveTts(setLaneCharacterCast(localTts ?? serverSettings, lane, activeLaneId, castName, voiceId, lineIds))
+      void saveTts(setLaneCharacterCast(pendingRef.current ?? localTts ?? serverSettings, lane, activeLaneId, castName, voiceId, lineIds))
     },
     [localTts, serverSettings, lane, activeLaneId, saveTts],
   )
 
   const assignPick = useCallback(
     (pick: CastPick) => {
-      void saveTts(castPickPatch(localTts ?? serverSettings, lane, activeLaneId, pick))
+      void saveTts(castPickPatch(pendingRef.current ?? localTts ?? serverSettings, lane, activeLaneId, pick))
     },
     [localTts, serverSettings, lane, activeLaneId, saveTts],
   )

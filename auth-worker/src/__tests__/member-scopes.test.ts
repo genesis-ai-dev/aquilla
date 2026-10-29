@@ -285,6 +285,36 @@ describe("member-scopes — maintainer and above stay unscoped", () => {
     const res = await putScopes(await jwtFor("lead"), 3, [])
     expect(res.status).toBe(403)
   })
+
+  it("a lane-limited lead grants only lanes they hold and keeps the rest", async () => {
+    const owner = await jwtFor("owner")
+    await putScopes(owner, 3, [{ kind: "lane", value: "es" }])
+    await putScopes(owner, 2, [{ kind: "lane", value: "fr" }])
+    const lead = await jwtFor("lead")
+
+    const added = await putScopes(lead, 2, [{ kind: "lane", value: "es" }])
+    expect(added.status).toBe(200)
+    const addedBody = (await added.json()) as { scopes: Array<{ kind: string; value: string }> }
+    expect(addedBody.scopes.filter((scope) => scope.kind === "lane").map((scope) => scope.value).sort()).toEqual([
+      "es",
+      "fr",
+    ])
+
+    const foreign = await putScopes(lead, 2, [{ kind: "lane", value: "de" }])
+    expect(foreign.status).toBe(403)
+    expect(await foreign.json()).toMatchObject({ error: "you can only grant lanes you hold" })
+
+    const narrow = await putScopes(lead, 4, [{ kind: "lane", value: "es" }])
+    expect(narrow.status).toBe(403)
+    expect(await narrow.json()).toMatchObject({
+      error: "you cannot change lanes for someone who already has every lane",
+    })
+
+    await putScopes(owner, 4, [{ kind: "lane", value: "es" }])
+    const wipe = await putScopes(lead, 4, [])
+    expect(wipe.status).toBe(403)
+    expect(await wipe.json()).toMatchObject({ error: "you cannot grant every lane" })
+  })
 })
 
 describe("AQU-553 sync-token — scopes claim included/omitted", () => {

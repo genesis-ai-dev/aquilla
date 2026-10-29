@@ -134,12 +134,27 @@ aiTranscriptCleanup.post("/", authMiddleware, zValidator("json", cleanupSchema),
       }
       return c.json({ error: "llm_upstream_error", message: detail.slice(0, 500) || `Upstream returned ${upstream.status}` }, 502)
     }
-    const data = await upstream.json() as { choices?: { message?: { content?: string } }[]; usage?: { cost?: number } }
+    const data = await upstream.json() as {
+      choices?: { finish_reason?: string; message?: { content?: string } }[]
+      usage?: { cost?: number; completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } }
+    }
     if (usage) c.header("X-Billing-Usage-Status", await settleChatUsage(c.env, usage, data))
     if (!usage) {
       const cost = typeof data.usage?.cost === "number" && data.usage.cost > 0 ? data.usage.cost * 100 : 1
       await recordCredit(db, orgId, user.id, "llm", cost, 1)
       await recordWords(db, orgId, user.id, "llm", countWords(input.heard))
+    }
+    // A reply cut off at max_tokens is never a result, even when what it did
+    // write parses: reading it as "unchanged" would say ASR was already right.
+    // Usually a model reasoning despite effort "none" (AQU-2226).
+    if (data.choices?.[0]?.finish_reason === "length") {
+      console.warn("[transcript-cleanup] reply cut off at max_tokens", {
+        model,
+        maxTokens: CLEANUP_MAX_TOKENS,
+        completionTokens: data.usage?.completion_tokens,
+        reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens,
+      })
+      return c.json({ model, result: { kind: "invalid" } })
     }
     const result = parseCleanupResult(data.choices?.[0]?.message?.content ?? "", input.heard)
     return c.json({ model, result })

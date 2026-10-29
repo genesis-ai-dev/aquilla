@@ -189,6 +189,26 @@ describe("CastGutterVoice", () => {
       expect(field).toHaveTextContent("NCNarrator (default)")
     })
 
+    it("names a person's recording, not the default voice, when nobody was cast (AQU-2212)", () => {
+      ui(
+        <CastGutterVoice variant="field" voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+      )
+      const field = screen.getByTestId("voice-field")
+      expect(field).toHaveTextContent("Your recording")
+      expect(field).not.toHaveTextContent("Narrator")
+    })
+
+    it("ends the list with Add a voice…", () => {
+      const onAddVoice = vi.fn()
+      ui(
+        <CastGutterVoice variant="field" voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} onAddVoice={onAddVoice} />,
+      )
+      fireEvent.click(screen.getByTestId("voice-field"))
+      fireEvent.click(screen.getByTestId("gutter-voice-add"))
+      expect(onAddVoice).toHaveBeenCalledTimes(1)
+      expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+    })
+
     it("read-only, names the voice with no picker", () => {
       ui(
         <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,

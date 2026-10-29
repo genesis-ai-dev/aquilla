@@ -1,7 +1,8 @@
 // CharacterVoicePicker — the "Characters" tab of NewVoiceModal: the pre-built
 // cast (src/lib/audio/character-voices.ts) as a compact grid. Each card's avatar
 // previews the voice; ＋ adds it to the project's cast in one tap (or, while
-// editing a character voice, the card re-points it). Chips filter by sex and age.
+// editing a character voice, the card re-points it). Each card says only who
+// the voice is (sex, age) and its range; chips filter by sex and age.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Check, Pause, Play, Plus } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -17,7 +18,9 @@ import {
   characterVoicePreviewUrl,
   filterCharacterVoices,
   type CharacterVoice,
+  type CharacterVoiceAge,
   type CharacterVoiceFilter,
+  type CharacterVoiceRange,
 } from "@/lib/audio/character-voices"
 
 export interface CharacterVoicePickerProps {
@@ -36,12 +39,26 @@ export interface CharacterVoicePickerProps {
 const FILTER_LABEL_KEYS = {
   female: "audio.characters.filterFemale",
   male: "audio.characters.filterMale",
-  child: "audio.characters.filterChild",
-  teen: "audio.characters.filterTeen",
-  "young-adult": "audio.characters.filterYoungAdult",
-  adult: "audio.characters.filterAdult",
-  elderly: "audio.characters.filterElderly",
+  young: "audio.characters.filterYoung",
+  "middle-aged": "audio.characters.filterMiddleAged",
+  old: "audio.characters.filterOld",
 } as const satisfies Record<CharacterVoiceFilter, string>
+
+const AGE_LABEL_KEYS = {
+  young: FILTER_LABEL_KEYS.young,
+  "middle-aged": FILTER_LABEL_KEYS["middle-aged"],
+  old: FILTER_LABEL_KEYS.old,
+} as const satisfies Record<CharacterVoiceAge, string>
+
+const RANGE_LABEL_KEYS = {
+  treble: "audio.characters.rangeTreble",
+  soprano: "audio.characters.rangeSoprano",
+  mezzo: "audio.characters.rangeMezzo",
+  alto: "audio.characters.rangeAlto",
+  tenor: "audio.characters.rangeTenor",
+  baritone: "audio.characters.rangeBaritone",
+  bass: "audio.characters.rangeBass",
+} as const satisfies Record<CharacterVoiceRange, string>
 
 /** A stable accent per character, from the cast palette. */
 function accentFor(id: string): string {
@@ -119,7 +136,7 @@ export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = 
       {shown.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">{t("audio.characters.noMatches")}</p>
       ) : (
-        <ul className="grid max-h-[23rem] grid-cols-1 gap-1.5 overflow-y-auto pe-1 sm:grid-cols-2">
+        <ul className="grid max-h-[22rem] grid-cols-1 gap-1.5 overflow-y-auto pe-1 sm:grid-cols-2">
           {shown.map((c) => {
             const selected = c.id === selectedId
             const inCast = !editing && (inCastIds?.has(c.id) ?? false)
@@ -130,7 +147,7 @@ export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = 
                 key={c.id}
                 ref={selected ? selectedRowRef : undefined}
                 className={cn(
-                  "group/card relative flex items-start gap-2.5 rounded-xl border bg-card p-2.5 transition-colors",
+                  "group/card relative flex items-center gap-2.5 rounded-xl border bg-card p-2.5 transition-colors",
                   "hover:border-foreground/20",
                   selected && "border-primary ring-1 ring-primary",
                 )}
@@ -172,9 +189,13 @@ export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = 
                 </button>
 
                 <div className="min-w-0 flex-1 pe-7">
-                  <p className="truncate text-sm font-medium leading-5">{c.name}</p>
-                  <p className="truncate text-[11px] text-muted-foreground">{c.tags.slice(0, 3).join(" · ")}</p>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground/80">{c.description}</p>
+                  <p className="flex items-baseline gap-1.5 truncate leading-5">
+                    <span className="text-sm font-medium">{c.name}</span>
+                    <span className="text-[11px] text-muted-foreground">{t(RANGE_LABEL_KEYS[c.range])}</span>
+                  </p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {t(FILTER_LABEL_KEYS[c.sex])} · {t(AGE_LABEL_KEYS[c.age])}
+                  </p>
                 </div>
 
                 <Button
@@ -182,7 +203,7 @@ export function CharacterVoicePicker({ selectedId, inCastIds, onPick, editing = 
                   size="icon"
                   variant="ghost"
                   className={cn(
-                    "absolute end-1.5 top-1.5 size-7 rounded-full",
+                    "absolute end-1.5 top-1/2 size-7 -translate-y-1/2 rounded-full",
                     !(selected || inCast) && "text-muted-foreground hover:bg-primary/15 hover:text-primary",
                   )}
                   disabled={selected || inCast}

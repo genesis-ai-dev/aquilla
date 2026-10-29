@@ -34,7 +34,9 @@ unless the walk is `PASS` or `none`.
 
 Branch protection requires the `ci.yml` jobs that always report a status
 (`lint`, `unit`, `schema-migrations`, `auth-worker-tests`, `sync-worker-tests`,
-`agent-worker-tests`) and the Cloudflare preview. Admins are exempt
+`agent-worker-tests`) and the Cloudflare preview. `unit` aggregates the three
+`unit (shard N/3)` matrix jobs that split the root Vitest suite (AQU-1991); its
+name is what protection pins. Admins are exempt
 (`enforce_admins` is false). The gate only works if that account does not merge
 around a red check.
 

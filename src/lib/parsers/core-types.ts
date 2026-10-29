@@ -7,6 +7,7 @@
 // re-exports these names, so existing SPA imports of "@/lib/parsers/types"
 // are unaffected. Do NOT add imports here that reach outside shared/.
 
+import type { FramesAsHundredths } from "./frame-timecode"
 import type { ImportMilestone, ImportSourceLocator, SourceArtifactFormat } from "../../../shared/import-contract"
 import type { UsfmStructureFinding } from "./usfm-structure-check"
 
@@ -135,6 +136,10 @@ export interface ParsedTextFileResult {
   structureFindings?: UsfmStructureFinding[]
   /** Subtitle (vtt/srt) cue counts (AQU-2119). Absent when both are zero. */
   cueRepair?: SubtitleCueRepair
+  /** AQU-2197: the file's cue times look like video frame numbers written as
+   *  hundredths of a second (`00:01:06:15` → `00:01:06.150`). Numbers only;
+   *  the preview words it and offers to convert. Absent when they don't. */
+  framesAsHundredths?: FramesAsHundredths
 }
 
 /**

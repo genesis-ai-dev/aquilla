@@ -82,7 +82,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.allSection": "All {section}",
 
     "projectSettings.checking.flagLabel": "Community checking (WIP)",
-    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days.",
+    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days. Only on this device.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
     "projectSettings.permission.roleOrHigher": "{role} or higher",
@@ -463,7 +463,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.integrationsLabel": "Integrations",
     "projectSettings.group.integrationsDescription": "Monday.com board sync",
     // experimental group label → projectSettings.section.experimental (identical text)
-    "projectSettings.group.experimentalDescription": "Early features, this device only",
+    "projectSettings.group.experimentalDescription": "Autopilot, extensions, and other early features",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
     "projectSettings.section.sourceLink": "Source link",

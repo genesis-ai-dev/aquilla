@@ -670,7 +670,9 @@ describe("AQU-1673: a translation staged as proposals for review", () => {
     await userEvent.click(proposalsBox())
     await dropFiles([usfm(JON_USFM, "JON-tatar.usfm")])
     expect(await screen.findByRole("heading", { name: "Import a translation into Jonah as proposals" })).toBeInTheDocument()
-    expect(screen.getByText(/staged as proposals for review/i)).toBeInTheDocument()
+    // The mode line sits below the review list and can paint after the
+    // heading under a loaded runner, so wait for it rather than read it.
+    expect(await screen.findByText(/staged as proposals for review/i)).toBeInTheDocument()
     const propose = await screen.findByRole("button", { name: /propose 2 cells/i })
     await act(async () => {
       fireEvent.click(propose)

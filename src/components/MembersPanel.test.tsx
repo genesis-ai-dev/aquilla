@@ -1,9 +1,10 @@
 // AQU-553 (Slice 5): the per-member lane/file scopes editor in MembersPanel.
 //
 // Pins: the editor renders only for lead+ callers (callerMaxRole >= 500) over
-// members below project lead. A project lead's lanes are shown read-only and
-// point at the language Staff menu (AQU-2054). Maintainers and above have no
-// scope row. Save issues the replace-set (onSave = the PUT).
+// members below maintainer, project leads included (AQU-2054). A caller who
+// holds only some lanes can grant only those, and cannot change someone who
+// already has every lane. Maintainers and above have no scope row. Save
+// issues the replace-set (onSave = the PUT).
 
 import { describe, it, expect, vi } from "vitest"
 import type { ReactElement } from "react"
@@ -210,40 +211,72 @@ describe("MembersPanel scopes editor", () => {
     expect(screen.queryByTestId("member-scopes-2")).not.toBeInTheDocument()
   })
 
-  it("shows an unscoped project lead as seeing every lane, without an editor", () => {
+  it("lets an unrestricted caller edit a project lead's lanes", () => {
     renderPanel(
       <MembersPanel
         {...baseProps()}
         members={[lead()]}
         callerMaxRole={500}
-        scopeConfig={scopeConfig(vi.fn())}
-      />,
-    )
-    expect(screen.queryByTestId("member-scopes-3")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /save scopes/i })).not.toBeInTheDocument()
-    const row = screen.getByTestId("member-lead-lanes-3")
-    expect(row).toHaveTextContent("Every lane")
-    expect(row).toHaveTextContent("To change these lanes, use Staff… on the language.")
-  })
-
-  it("shows a lane-limited project lead's lanes and points to Staff, without an editor", () => {
-    renderPanel(
-      <MembersPanel
-        {...baseProps()}
-        members={[lead()]}
-        callerMaxRole={600}
         scopeConfig={scopeConfig(vi.fn(), {
           3: [{ kind: "lane", value: "es" }],
         })}
       />,
     )
+    fireEvent.click(screen.getByTestId("member-scopes-toggle-3"))
+    expect(screen.getByLabelText("Lane Spanish")).toBeInTheDocument()
+    expect(screen.getByLabelText("Lane English")).toBeInTheDocument()
+    expect(screen.queryByTestId("member-lead-lanes-3")).not.toBeInTheDocument()
+  })
+
+  it("a lane-limited caller grants only their lanes and leaves the others in the save", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const config = scopeConfig(onSave, {
+      3: [
+        { kind: "lane", value: "es" },
+        { kind: "lane", value: "fr" },
+      ],
+    })
+    config.lanes = [
+      ...config.lanes,
+      { value: "fr", label: "French" },
+    ]
+    config.grantableLaneValues = ["es"]
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        members={[lead()]}
+        callerMaxRole={500}
+        scopeConfig={config}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("member-scopes-toggle-3"))
+    expect(screen.getByLabelText("Lane Spanish")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Lane French")).not.toBeInTheDocument()
+    expect(screen.getByText(/lanes you don't hold stay as they are/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /save scopes/i }))
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(3, [
+        { kind: "lane", value: "es" },
+        { kind: "lane", value: "fr" },
+      ])
+    })
+  })
+
+  it("does not let a lane-limited caller change someone who already has every lane", () => {
+    const config = scopeConfig(vi.fn())
+    config.grantableLaneValues = ["es"]
+    renderPanel(
+      <MembersPanel
+        {...baseProps()}
+        members={[lead()]}
+        callerMaxRole={500}
+        scopeConfig={config}
+      />,
+    )
     expect(screen.queryByTestId("member-scopes-3")).not.toBeInTheDocument()
-    expect(screen.queryByLabelText("Lane Spanish")).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /save scopes/i })).not.toBeInTheDocument()
     const row = screen.getByTestId("member-lead-lanes-3")
-    expect(row).toHaveTextContent("Spanish")
-    expect(row).not.toHaveTextContent("Every lane")
-    expect(row).toHaveTextContent("To change these lanes, use Staff… on the language.")
+    expect(row).toHaveTextContent("Every lane")
+    expect(row).toHaveTextContent("languages you don't hold")
   })
 
   it("shows no scope row for a maintainer", () => {

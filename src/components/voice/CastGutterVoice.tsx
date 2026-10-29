@@ -19,9 +19,13 @@
 // The Audio view opens the SAME picker from a field under each line's waveform
 // (`variant="field"`, Sam, 2026-09-28): a gutter of circles beside every row
 // unbalanced that page, and in narration nearly every circle is the Narrator.
+//
+// AQU-2212: in the field, a line nobody cast whose take is a person's recording
+// names that recording ("Your recording"), not "Narrator (default)". The list
+// ends with "Add a voice…", which opens New voice without leaving the line.
 
 import { useState } from "react"
-import { ChevronsUpDown } from "lucide-react"
+import { ChevronsUpDown, Mic, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -56,9 +60,14 @@ export interface CastGutterVoiceProps {
   /** "circle" (default): the 32px circle in the Media view's gutter. "field":
    *  a field naming the voice, under a line's waveform in the Audio view. */
   variant?: "circle" | "field"
+  /** Field only: what to call an uncast line's take when it is a person's
+   *  recording ("Your recording"). The default voice is named otherwise. */
+  takeLabel?: string
+  /** Offer "Add a voice…" at the end of the list. */
+  onAddVoice?(): void
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, variant = "circle" }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, variant = "circle", takeLabel, onAddVoice }: CastGutterVoiceProps) {
   const t = useT()
   const [open, setOpenState] = useState(false)
   const [speakerLines, setSpeakerLines] = useState<number | null>(null)
@@ -79,22 +88,37 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
     ? castName && castName !== voice.name
       ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
-    : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
+    : variant === "field" && takeLabel
+      ? t("audio.castGutter.recordingTooltip", { label: takeLabel })
+      : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
   const field = variant === "field"
+  const recording = field && !explicit && Boolean(takeLabel)
   const avatarPx = field ? 20 : 32
   const trigger = (
     <span className={cn("grid place-items-center rounded-md", field && "shrink-0")}>
       {/* Nothing is drawn for a line nobody cast — no face, no colour, no
           initial. The empty dashed ring IS the state; a faded orb read as a
           weak assignment rather than as none. */}
-      {explicit ? <VoiceAvatar voice={voice} size={avatarPx} /> : <NoCharacterAvatar size={avatarPx} />}
+      {explicit ? (
+        <VoiceAvatar voice={voice} size={avatarPx} />
+      ) : recording ? (
+        <span
+          aria-hidden
+          className="grid place-items-center rounded-full bg-muted text-muted-foreground"
+          style={{ width: avatarPx, height: avatarPx }}
+        >
+          <Mic className="size-3" />
+        </span>
+      ) : (
+        <NoCharacterAvatar size={avatarPx} />
+      )}
     </span>
   )
   // The field names the voice beside its mark; nobody cast reads as the
   // default voice, muted.
   const fieldLabel = (
     <span className={cn("min-w-0 truncate", !explicit && "text-muted-foreground")}>
-      {explicit ? voice.name : t("audio.castGutter.defaultVoiceLabel", { voiceName: voice.name })}
+      {explicit ? voice.name : recording ? takeLabel : t("audio.castGutter.defaultVoiceLabel", { voiceName: voice.name })}
     </span>
   )
   const tooltipSide = field ? "top" : "right"
@@ -177,7 +201,24 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
             setOpen(false)
           }}
           footer={
-            castName ? (
+            <>
+            {onAddVoice && (
+              <button
+                type="button"
+                data-testid="gutter-voice-add"
+                onClick={() => {
+                  setOpen(false)
+                  onAddVoice()
+                }}
+                className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm font-medium transition-colors hover:bg-accent/50"
+              >
+                <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground text-muted-foreground">
+                  <Plus className="size-3" />
+                </span>
+                {t("audio.castGutter.addVoice")}
+              </button>
+            )}
+            {castName ? (
               <fieldset className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5 text-xs text-muted-foreground">
                 <legend className="mb-0.5">{t("workspace.castGutterVoice.scopeLegend")}</legend>
                 {(
@@ -210,7 +251,8 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
               <p data-testid="gutter-voice-scope-none" className="mt-1.5 border-t border-border pt-1.5 text-xs text-muted-foreground">
                 {t("workspace.castGutterVoice.scopeNoCharacter")}
               </p>
-            )
+            )}
+            </>
           }
         />
       </PopoverContent>

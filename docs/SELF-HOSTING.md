@@ -704,6 +704,7 @@ which processing features you enable:
 | Hosted Inworld TTS and voice cloning | `INWORLD_API_KEY` on sync; optional `INWORLD_API_BASE`, `INWORLD_TTS_MODEL`, and `INWORLD_DEFAULT_VOICE` |
 | Speaker diarization | Modal service in `infra/modal/diarization.py`; `DIARIZATION_MODAL_URL`, `DIARIZATION_SHARED_SECRET`, and `DIARIZATION_PUBLIC_BASE` on sync |
 | Seed-VC voice conversion | Modal service in `infra/modal/seed_vc.py`; `SEED_VC_URL` and `SEED_VC_TOKEN` on sync |
+| Omnilingual ASR (languages Whisper lacks; zero-shot) | Self-hosted server in `infra/selfhost/`, Modal service in `infra/modal/omni_asr.py`, or both; `OMNI_ASR_PRIMARY_URL`, `OMNI_ASR_MODAL_URL` and the `OMNI_SHARED_SECRET` secret on identity |
 | Whisper transcription | Browser worker and downloaded model; no dedicated transcription server required for this path |
 | Browser MMS speech models | Hugging Face downloads or a public model mirror configured with `VITE_MMS_*` |
 | Gemini speech and other user-configured providers | Provider settings and keys configured through the corresponding app settings |
@@ -735,6 +736,18 @@ modal deploy infra/modal/seed_vc.py
 Preserve its persistent model-cache volume. A replacement GPU service must
 implement the same authenticated API and audio contract; the Modal wrappers
 are not ready-made Docker services for a private server.
+
+Omnilingual ASR is the one GPU service with a ready-made server for your own
+hardware. `infra/selfhost/omni_asr_server.py` serves the same authenticated API
+as the Modal app and keeps its models loaded, so it has no cold start. One
+24 GB GPU holds CTC 1B; a second holds the 7B zero-shot model. A CPU-only host
+can serve CTC alone (see `docs/benchmarks/omni-asr-cpu.md`). Set
+`OMNI_ASR_PRIMARY_URL` on identity to its public HTTPS URL. With
+`OMNI_ASR_MODAL_URL` also set, Modal takes over when your server is down or
+answers 5xx; without it, your server is the only backend. Install steps, the
+systemd unit and a Cloudflare Tunnel guide are in `infra/selfhost/README.md`.
+A device name the billing table does not know is billed at the highest rate:
+add your GPU's name to `db/shared/omni-asr-cost.ts`.
 
 For a browser model mirror, follow [MMS model hosting](MMS_R2_HOSTING.md).
 Use a separate public model bucket or HTTP service with suitable GET, HEAD,
@@ -941,7 +954,7 @@ contracts; no supported production command starts them all on Linux today.
 | Email binding | Transactional email adapter with delivery monitoring |
 | Scheduled Worker events | Scheduler plus compatible environment guards and background job handling |
 | Cloudflare Sandbox | Isolated execution service implementing the existing authenticated session, file, execution, and artifact APIs |
-| Modal wrappers | Authenticated GPU services with matching job, audio, and callback contracts |
+| Modal wrappers | Authenticated GPU services with matching job, audio, and callback contracts (Omnilingual ASR already has one: `infra/selfhost/`) |
 | Cloudflare request metadata | Trusted client-IP handling and equivalent rate-limit inputs |
 
 For a multi-server deployment, shared presence and locks need explicit

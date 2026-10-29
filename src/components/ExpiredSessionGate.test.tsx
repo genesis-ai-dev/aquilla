@@ -157,7 +157,6 @@ describe("isSessionGuardedPath", () => {
       "/login",
       "/reset-password",
       "/verify-email",
-      "/privacy-policy",
       "/onboarding",
       "/join/tok",
       "/join-org/tok",

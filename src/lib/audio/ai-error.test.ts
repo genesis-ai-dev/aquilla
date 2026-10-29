@@ -258,10 +258,23 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.body).toMatch(/seed-vc/i)
   })
 
-  it("names Seed-VC on a later conversion failure", () => {
-    const result = categorizeAiError("Voice cloning (Seed-VC) failed (500): gpu OOM")
-    expect(result.category).toBe("seed-vc-failed")
-    expect(result.title).toBe("Voice cloning failed")
+  it("reports a conversion failure without naming one engine (AQU-2212)", () => {
+    // Change voice runs on Seed-VC or the voice forge; the copy must fit both.
+    for (const raw of [
+      "Voice conversion failed (500): gpu OOM",
+      "Voice cloning (Seed-VC) failed (500): gpu OOM",
+    ]) {
+      const result = categorizeAiError(raw)
+      expect(result.category).toBe("seed-vc-failed")
+      expect(result.title).toBe("Voice conversion failed")
+      expect(result.body).not.toMatch(/seed-vc/i)
+    }
+  })
+
+  it("explains a convert timeout as a cold start, and says to retry", () => {
+    const result = categorizeAiError(errorFromVoiceConvert(504, "voice conversion upstream did not respond within 240s").message)
+    expect(result.title).toBe("The voice service was starting up")
+    expect(result.body).toMatch(/try again/i)
   })
 
   it("keeps a missing Gemini key as Gemini, and offers Inworld as the alternative", () => {

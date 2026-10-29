@@ -62,6 +62,7 @@ export const org = defineNamespace({
     "org.roleDialog.orgChangeForbidden": "Only organization owners can change member roles.",
     "org.roleDialog.orgAddForbidden": "Only organization owners can add members.",
     "org.roleDialog.setProjectRole": "Set a role for this project…",
+    "org.roleDialog.searchMembersLabel": "Search members",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",

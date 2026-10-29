@@ -88,14 +88,19 @@ export interface ChangeRoleDialogProps extends RoleDialogBase {
 
 export type MemberAddRowConfig = Omit<MemberMultiAddRowProps, "roleOptions">
 
-export interface AddPeopleDialogProps extends RoleDialogBase {
+export interface AddPeopleDialogProps extends Omit<RoleDialogBase, "level"> {
   mode: "add"
+  /**
+   * Which list of roles the people row offers. `team` has none to pick: a
+   * team's new members take its project grants, and their team role (the
+   * team's own three) is set afterwards in the Team role column.
+   */
+  level: RoleChoiceLevel | "team"
   title: string
   /**
    * Who to add. `row` is the shared search + role + Add row, with the role
-   * list taken from `roleChoices`. `custom` is for a scope with no role to
-   * pick: a team, whose members take the team's grants (their team role is
-   * set afterwards in the Team role column).
+   * list taken from `roleChoices`. `custom` is for a team, which has no role
+   * to pick here.
    */
   people:
     | { kind: "row"; row: MemberAddRowConfig }
@@ -137,7 +142,7 @@ function Header({ title, summary, details }: { title: string; summary?: string; 
       <DialogTitle>{title}</DialogTitle>
       {(summary || details) && (
         <DialogDescription className="flex items-start gap-1">
-          <span className="min-w-0 flex-1">{summary}</span>
+          <span className="min-w-0">{summary}</span>
           {details && (
             <InfoToggle
               open={infoOpen}
@@ -331,7 +336,10 @@ function AddBody({ level, callerLevel, summary, details, title, people, otherTab
   const { t } = useI18n()
   const [tab, setTab] = useState(PEOPLE_TAB)
   const peopleBody = people.kind === "row"
-    ? <MemberMultiAddRow {...people.row} roleOptions={roleChoices(level, { callerLevel, purpose: "add" })} />
+    ? <MemberMultiAddRow
+        {...people.row}
+        roleOptions={level === "team" ? [] : roleChoices(level, { callerLevel, purpose: "add" })}
+      />
     : people.body
   const peopleTab = (
     <div className="space-y-3">

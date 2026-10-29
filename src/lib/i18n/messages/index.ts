@@ -32,6 +32,11 @@ const LOADERS: Record<string, () => Promise<Catalog>> = {
   pt: () => import("./pt").then((m) => m.pt),
   sw: () => import("./sw").then((m) => m.sw),
   hi: () => import("./hi").then((m) => m.hi),
+  ha: () => import("./ha").then((m) => m.ha),
+  ur: () => import("./ur").then((m) => m.ur),
+  bn: () => import("./bn").then((m) => m.bn),
+  am: () => import("./am").then((m) => m.am),
+  pa: () => import("./pa").then((m) => m.pa),
 }
 
 /** Every locale that has a catalog, English first. */

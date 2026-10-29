@@ -2,6 +2,147 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## Combined branch, 2026-10-28
+>
+> `ha`, `ur`, `bn`, `am`, and `pa` were translated against an older `dev`.
+> Twelve keys that English no longer has were removed from each catalog and
+> from `source-hashes.json` when those catalogs were combined onto current
+> `dev`: `editor.timeline.bladeFreeTiming`, the five `audio.characters.filter*`
+> age filters, `org.overviewLaneTable.pctTextValidated`,
+> `org.overviewLaneTable.pctAudioValidated`, the three
+> `workspace.timingVideoWarning.*` strings, and `transcribe.status.failed`.
+> The import counts in the notes below are the original importer reports.
+
+> ## `ha` (standard written Hausa) — AQU-2199, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> (9,565 leaves) and merged with `scripts/i18n-catalog.ts import`. **No Hausa speaker
+> has read it.** Variety: standard written Hausa, the Kano-based standard of education
+> and BBC Hausa, in Latin Boko (including ɓ ɗ ƙ). Not Ajami, not a city dialect, not
+> Ghanaian Hausa, not Nigerian Pidgin. Buttons use the polite plural imperative (`ku`).
+> `ha-NG`, `ha-NE`, and `ha-Latn` fold onto `ha`. Ajami (`ha-Arab`) is not registered.
+>
+> Glossary: cell → ƙwaya / ƙwayoyi, lane → hanya / hanyoyi, changeset → rukunin
+> canje-canje, termbase → ma'ajiyar kalmomi, back-translation → fassarar komawa,
+> source → asali, target → manufa, draft → daftari / daftarori. Also locked in this
+> draft: Recently deleted → An goge kwanan nan, corpus → kundi, validate → tabbatar
+> (approve stays amince), Apply → Ku aiwatar, outbox → Akwatin fita, knowledge base →
+> Tushen ilimi. Timeline audio and caption tracks use waƙa / waƙoƙi; hanya stays the
+> language lane. Plurals: `one` is only for 1, and 0 uses `other`.
+>
+> Import report: 8,902/9,039 keys. The leaves the importer dropped were identical to
+> English on purpose (formats, product names, placeholder-only templates, and the
+> keep-English labels below). Mechanical check before import: every todo leaf present,
+> no extra leaf, and no added `{placeholder}`. Plural leaves may drop `{count}` and
+> must not add a placeholder the English seed does not have. `common.datePlaceholder`
+> stays `June 01, 2025`. `org.projectOverview.deadlineDatePlaceholder` stays
+> `July 03, 2026`. Whole values that are exactly Source text, Source audio, Target
+> text, Target audio, Speaker, Camera, Character Label, or Cast stay English, and
+> those tokens stay English inside a sentence that names the product label. Role names
+> inside `org.membersPage.orgTable.projectAccessNote` stay Contributor, Project lead,
+> Viewer, Maintainer, and Owner. Every `knowledgeBase.*` value differs from English.
+
+> ## `ur` (Modern Standard Urdu) — AQU-2200, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> and merged with `scripts/i18n-catalog.ts import`. **No Urdu speaker has read it.**
+> The variety is Modern Standard Urdu (معیاری اردو): formal آپ, Perso-Arabic script,
+> polite imperative buttons, RTL. It was not derived from the Hindi catalog.
+> Glossary: cell → خانہ, lane → لین, changeset → مجموعۂ تبدیلی, termbase →
+> اصطلاحی ذخیرہ, back-translation → معکوس ترجمہ, source → ماخذ, target → ہدف,
+> draft → مسودہ.
+>
+> Plurals: `Intl.PluralRules("ur")` has `one` and `other`. `one` is only for 1;
+> 0 uses `other`. Identical wording on both forms is grammatical when the noun
+> does not change.
+>
+> Import report: 8,895/9,039 keys. The leaves the importer dropped were identical
+> to English on purpose (formats, product names, placeholder-only templates, and
+> the keep-English labels). Mechanical check before import: every todo leaf
+> present, no extra leaf, and no added `{placeholder}`. Non-plural leaves kept
+> the exact placeholder set. Plural leaves could drop `{count}` and did not add
+> any placeholder the English seed lacked. `common.datePlaceholder` stays
+> `June 01, 2025`. `org.projectOverview.deadlineDatePlaceholder` stays
+> `July 03, 2026`. Source text, Source audio, Target text, Target audio, Speaker,
+> Camera, Character Label, and Cast stay English when they are the product label.
+> Inside `org.membersPage.orgTable.projectAccessNote`, Contributor, Project lead,
+> Viewer, Maintainer, and Owner stay English.
+
+> ## `bn` (Bangladeshi Bengali) — AQU-2201, 2026-10-26
+>
+> Machine-translated from the full `pnpm i18n:todo` packet (9,565 leaves) and merged
+> with `scripts/i18n-catalog.ts import`. **No Bengali speaker has read it.** This is an
+> unreviewed machine draft. The menu endonym stays বাংলা. The wording is Bangladeshi
+> standard colloquial Bengali (প্রমিত চলিত বাংলা): আপনি imperative, পানি not জল. Not
+> sadhu bhasha, and not a regional dialect. `bn-BD` and `bn-IN` fold onto `bn`.
+> Glossary: cell → সেল, lane → লেন, changeset → পরিবর্তনসেট, termbase →
+> পরিভাষাভাণ্ডার, back-translation → বিপরীত অনুবাদ, source → উৎস, target → লক্ষ্য,
+> draft → খসড়া.
+>
+> Bengali plurals are `one` and `other`. `one` covers 0 and 1. The two forms may share
+> wording when the noun does not change.
+>
+> Import report: 8,931/9,039 keys. The leaves the importer dropped were identical to
+> English on purpose (formats, product names, placeholder-only templates, and the
+> track labels that stay English). Mechanical check before import: 0 missing leaves
+> and no added `{placeholder}`s. Plural leaves may drop `{count}` and must not add a
+> placeholder the English seed does not have; this pass added none.
+> `common.datePlaceholder` stays `June 01, 2025` and
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026` because the
+> date parser only accepts those en-US shapes. Source text, Source audio, Target
+> text, Target audio, Speaker, Camera, Character Label, and Cast stay English when
+> they name the product label, including "Target audio" and "Source text" inside
+> longer sentences. Role names inside `org.membersPage.orgTable.projectAccessNote`
+> stay English: Contributor, Project lead, Viewer, Maintainer, and Owner.
+
+> ## `am` (standard written Amharic) — AQU-2203, 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo` packet
+> (9,565 leaves) and merged with `scripts/i18n-catalog.ts import`. **No Amharic speaker
+> has read it.** Variety: Addis Ababa written standard, Geʽez script, LTR, formal
+> imperative; not Tigrinya. `am-ET` folds onto `am`. Plural category `one` covers 0 and 1.
+>
+> Glossary: cell → ሕዋስ, lane → መስመር, changeset → የለውጥ ስብስብ, termbase → የቃላት መዝገብ,
+> back-translation → የተገላቢጦሽ ትርጉም, source → ምንጭ, target → ዒላማ, draft → ረቂቅ.
+>
+> Import report: 8,917/9,039 keys. Identical-to-English leaves were dropped on purpose
+> (formats, product names, and placeholder-only templates). Placeholder check before
+> import found no added placeholders. `common.datePlaceholder` stays `June 01, 2025`.
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026`. Track labels and
+> Speaker / Camera / Character Label / Cast stay English. Role names inside
+> `org.membersPage.orgTable.projectAccessNote` stay Contributor, Project lead, Viewer,
+> Maintainer, and Owner.
+
+> ## `pa` (Gurmukhi Punjabi, Majhi) — 2026-10-27
+>
+> Unreviewed machine draft. Machine-translated from the full `pnpm i18n:todo`
+> packet and merged with `scripts/i18n-catalog.ts import` (AQU-2202). **No
+> Punjabi speaker has read it.** Not derived from Hindi or Urdu. Not Shahmukhi.
+> The variety is Indian standard Punjabi, Gurmukhi, Majhi, LTR. Buttons use
+> ਤੁਸੀਂ and the polite imperative. Bare `pa` is Gurmukhi, so `pa-IN` folding
+> onto `pa` is right. `pa-Arab` and `pa-PK` currently fold onto this Gurmukhi
+> catalog by primary subtag, which is the wrong script for a Shahmukhi reader;
+> Shahmukhi needs its own future locale. `normalizeLocale` was not changed.
+> Plurals follow `Intl.PluralRules("pa")`: `one` and `other`, and `one` covers
+> 0 and 1. Identical wording on both forms is grammatical when the noun does
+> not change.
+>
+> Glossary: cell → ਸੈੱਲ, lane → ਲੇਨ, changeset → ਬਦਲਾਅ-ਸਮੂਹ, termbase →
+> ਸ਼ਬਦ-ਅਧਾਰ, back-translation → ਉਲਟਾ-ਅਨੁਵਾਦ, source → ਸਰੋਤ, target → ਟੀਚਾ,
+> draft → ਖਰੜਾ.
+>
+> Import report: 8,909/9,039 keys. Identical-to-English leaves were dropped on
+> purpose (formats, product names, placeholder-only templates, and locked
+> English labels). Mechanical check before import found no added placeholders:
+> non-plural leaves kept the exact placeholder set, and plural leaves could
+> drop `{count}` only. `common.datePlaceholder` stays `June 01, 2025`.
+> `org.projectOverview.deadlineDatePlaceholder` stays `July 03, 2026`.
+> Whole-string labels Source text, Source audio, Target text, Target audio,
+> Speaker, Camera, Character Label, and Cast stay English, including those
+> tokens inside longer sentences when they name the product label.
+> `org.membersPage.orgTable.projectAccessNote` keeps Contributor, Project lead,
+> Viewer, Maintainer, and Owner in English.
+
 > ## `sw` (Kiswahili sanifu) — AQU-2198, 2026-10-26
 >
 > Machine-translated from the full `pnpm i18n:todo` packet (9,565 leaves) and merged

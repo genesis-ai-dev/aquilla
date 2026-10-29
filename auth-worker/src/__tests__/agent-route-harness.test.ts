@@ -125,6 +125,42 @@ describe("agent route — harness tool registration & dispatch", () => {
     expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "ok" })
   })
 
+  it.each(["read_memory", "propose_memory"])(
+    "allows 200k tokens, then explains continuation before more %s work",
+    async (nextTool) => {
+      await seedWorld()
+      const jwt = await jwtFor("alice")
+      let calls = 0
+      const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        calls++
+        // Two rounds total exactly 200k. The third crosses the ceiling.
+        const tokens = calls <= 2 ? 100_000 : 1
+        const name = calls <= 2 ? "read_memory" : nextTool
+        return new Response(JSON.stringify({
+          choices: [{ message: toolCall(`t${calls}`, name, {}) }],
+          usage: { prompt_tokens: tokens, completion_tokens: 0, cost: 0.001 },
+        }), { headers: { "Content-Type": "application/json" } })
+      })
+
+      const res = await postRun(jwt, {
+        projectId: PROJECT,
+        messages: [{ role: "user", content: "Keep researching" }],
+      })
+      const frames = parseFrames(await res.text())
+
+      expect(upstream).toHaveBeenCalledTimes(3)
+      expect(frames).toContainEqual({
+        type: "error",
+        message: "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent.",
+      })
+      expect(frames.find((f) => f.type === "budget.exhausted")).toBeUndefined()
+      expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "capped" })
+      if (nextTool === "propose_memory") {
+        expect(frames.find((f) => f.type === "memory.proposed")).toBeUndefined()
+      }
+    },
+  )
+
   it("emits a budget meter and halts with budget.exhausted at the cost cap", async () => {
     await seedWorld()
     const jwt = await jwtFor("alice")

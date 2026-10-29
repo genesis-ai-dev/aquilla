@@ -14,8 +14,14 @@ export const HOSTED_TTS_FAILED_BODY =
 export const SEED_VC_NOT_CONFIGURED_BODY =
   "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
 
+// Engine-neutral: Change voice runs on Seed-VC for clone voices and on the
+// voice forge (RVC) for character and custom voices (AQU-2212).
 export const SEED_VC_FAILED_BODY =
-  "Voice cloning (Seed-VC) couldn't convert this line. This is not a Gemini key problem."
+  "Voice conversion couldn't re-voice this line. This is not a Gemini key problem."
+
+/** The worker gave up waiting: almost always a GPU container starting cold. */
+export const VOICE_CONVERT_SLOW_MESSAGE =
+  "The voice service took too long to answer — it was probably starting up. Try again; the next one is usually quick."
 
 /**
  * AQU-1156: a single TTS request must finish, or fail, inside a bounded window.
@@ -69,5 +75,6 @@ export function errorFromVoiceConvert(status: number, body: string): Error {
   if (status === 409 && /still training/i.test(detail)) {
     return new Error("This voice is still training. Training takes about 45 minutes; try again once it shows as ready.")
   }
-  return new Error(`Voice cloning (Seed-VC) failed (${status}): ${detail}`)
+  if (status === 504) return new Error(VOICE_CONVERT_SLOW_MESSAGE)
+  return new Error(`Voice conversion failed (${status}): ${detail}`)
 }

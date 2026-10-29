@@ -9238,9 +9238,9 @@ function EditorRow({
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
               overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
-              // AQU-200: AI-generate is the one action that stays a direct
-              // button. Validate is the other always-visible action, and it
-              // already lives in the row's left gutter — it is not moved.
+              // AQU-200: AI-generate stays a direct button, and AQU-2287 adds
+              // record beside it. Validate is the other always-visible action,
+              // and it already lives in the row's left gutter — it is not moved.
               // Paragraph-draft rides in `primary` beside the sparkle because
               // it IS the generate action at group scale; it is already behind
               // strict gates and only ever renders on a paragraph's first row,
@@ -9305,80 +9305,78 @@ function EditorRow({
                       />
                     )
                   })()}
+
+                  {/* AQU-2287: record is a direct button again, after the AI
+                      group. AQU-200 had moved it behind the `⋯` (reversing
+                      FRO-237's "just hit the record mic — quick action"), but
+                      translators record line after line, so the extra click
+                      landed on every take. In an audio-only lane it is the
+                      only direct button.
+                      WARN fix: the button must NOT be disabled when micDenied —
+                      disabled elements receive no mouse events, so the "click
+                      for help" affordance is unreachable. Instead keep it
+                      enabled and route clicks to the denied-help popover. */}
+                  {onOpenRecording && editable && (() => {
+                    const unsupportedReason = getUnsupportedReason()
+                    const isUnsupported = unsupportedReason !== null
+                    const micTooltip = micDenied
+                      ? t("editor.audio.micBlockedTooltip")
+                      : isUnsupported
+                        // Browser-capability diagnostic from outside any component:
+                        // stays English (AQU-510).
+                        ? `Recording unavailable — ${unsupportedReason}`
+                        : t("editor.audio.record")
+                    return (
+                      <div ref={micHelpAnchorRef} className="relative">
+                        <RailButton
+                          icon={<Mic className="h-3.5 w-3.5" />}
+                          tooltip={micTooltip}
+                          onClick={() => {
+                            if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
+                            if (!isUnsupported) onOpenRecording(cell.id)
+                          }}
+                          toneClass={
+                            micDenied
+                              ? "text-amber-500/70 hover:text-amber-500"
+                              : isUnsupported
+                                ? "cursor-not-allowed text-muted-foreground/30"
+                                : undefined
+                          }
+                          // NEVER disable when micDenied — that kills mouse events
+                          // and makes the help popover unreachable.
+                          disabled={isUnsupported && !micDenied}
+                        />
+                        {micDenied && showMicDeniedHelp && (
+                          <Popover open onOpenChange={(open) => { if (!open) setShowMicDeniedHelp(false) }}>
+                            <PopoverContent
+                              anchor={micHelpAnchorRef}
+                              side="bottom"
+                              align="end"
+                              className="w-52 gap-1 p-3 text-[11px] leading-snug"
+                            >
+                              <PopoverTitle className="text-[11px] font-semibold">
+                                {t("editor.audio.micBlockedTitle")}
+                              </PopoverTitle>
+                              <PopoverDescription className="text-[11px] leading-snug">
+                                {t("editor.audio.micBlockedHelp")}
+                              </PopoverDescription>
+                              <button
+                                type="button"
+                                onClick={() => setShowMicDeniedHelp(false)}
+                                className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
+                              >
+                                {t("common.dismiss")}
+                              </button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </>
               }
             >
-              {/* AQU-200 moves the mic back behind the `⋯`, reversing FRO-237's
-                  promotion of it to a direct rail button ("just hit the record
-                  mic — quick action"). That was the right call against a rail of
-                  six buttons and the wrong one for a rail of two: the ticket
-                  names record among the actions that collapse. If recording
-                  turns out to be frequent enough to deserve the third direct
-                  slot, promote it back by moving this block into `primary` —
-                  nothing else has to change.
-                  WARN fix: the button must NOT be disabled when micDenied —
-                  disabled elements receive no mouse events, so the "click for
-                  help" affordance is unreachable. Instead keep it enabled and
-                  route clicks to the denied-help popover. */}
-              {onOpenRecording && editable && (() => {
-                const unsupportedReason = getUnsupportedReason()
-                const isUnsupported = unsupportedReason !== null
-                const micTooltip = micDenied
-                  ? t("editor.audio.micBlockedTooltip")
-                  : isUnsupported
-                    // Browser-capability diagnostic from outside any component:
-                    // stays English (AQU-510).
-                    ? `Recording unavailable — ${unsupportedReason}`
-                    : t("editor.audio.record")
-                return (
-                  <div ref={micHelpAnchorRef} className="relative">
-                    <RailButton
-                      icon={<Mic className="h-3.5 w-3.5" />}
-                      tooltip={micTooltip}
-                      onClick={() => {
-                        if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
-                        if (!isUnsupported) onOpenRecording(cell.id)
-                      }}
-                      toneClass={
-                        micDenied
-                          ? "text-amber-500/70 hover:text-amber-500"
-                          : isUnsupported
-                            ? "cursor-not-allowed text-muted-foreground/30"
-                            : undefined
-                      }
-                      // NEVER disable when micDenied — that kills mouse events
-                      // and makes the help popover unreachable.
-                      disabled={isUnsupported && !micDenied}
-                    />
-                    {micDenied && showMicDeniedHelp && (
-                      <Popover open onOpenChange={(open) => { if (!open) setShowMicDeniedHelp(false) }}>
-                        <PopoverContent
-                          anchor={micHelpAnchorRef}
-                          side="bottom"
-                          align="end"
-                          className="w-52 gap-1 p-3 text-[11px] leading-snug"
-                        >
-                          <PopoverTitle className="text-[11px] font-semibold">
-                            {t("editor.audio.micBlockedTitle")}
-                          </PopoverTitle>
-                          <PopoverDescription className="text-[11px] leading-snug">
-                            {t("editor.audio.micBlockedHelp")}
-                          </PopoverDescription>
-                          <button
-                            type="button"
-                            onClick={() => setShowMicDeniedHelp(false)}
-                            className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
-                          >
-                            {t("common.dismiss")}
-                          </button>
-                        </PopoverContent>
-                      </Popover>
-                    )}
-                  </div>
-                )
-              })()}
-
-              {/* AQU-513: file-picker upload next to the mic — a plain
+              {/* AQU-513: file-picker upload, the mic's counterpart — a plain
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
                   gating as the mic (editable; visible with a take too). */}

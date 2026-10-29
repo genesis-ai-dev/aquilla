@@ -2735,9 +2735,9 @@ export function TimelineEditor({
    * that plays, so an empty Target audio lane, or a Source audio lane on a
    * file with no sound at all, offered a mute that did nothing you could hear.
    *
-   *  - Source audio: its recording's segments, or a linked video's own sound.
-   *    The film only sounds where the picture plays, and in Free timing it is
-   *    hidden and silent.
+   *  - Source audio: its recording's segments, or a linked video's own sound,
+   *    which plays straight through with the picture in both timings
+   *    (AQU-2253).
    *  - Target audio and added tracks: at least one take on the lane.
    *
    * The caller keeps the button on a lane that is muted right now, whatever
@@ -2746,7 +2746,7 @@ export function TimelineEditor({
   function laneHasSound(track: TimelineTrack): boolean {
     switch (track.kind) {
       case "source-audio":
-        return dialogue.length > 0 || (Boolean(coreMediaUrl) && !audioFirst)
+        return dialogue.length > 0 || Boolean(coreMediaUrl)
       case "target-audio":
         return targetItems.length > 0
       case "audio":
@@ -4034,16 +4034,16 @@ export function TimelineEditor({
             snapEnabled={snapOn}
             // Sam's D3: on an empty linked video the row is one dashed chip
             // the length of the film, and what it stands for is the video's
-            // own sound. In Free timing the video is hidden and silent, so
-            // the row says nothing at all rather than claim it. (Sam, Oct 5:
-            // the same holds once the captions are rows — a linked video with
-            // no audio cues keeps the one labelled band.)
+            // own sound. (Sam, Oct 5: the same holds once the captions are
+            // rows — a linked video with no audio cues keeps the one labelled
+            // band.) AQU-2253: in both timings — following the recordings the
+            // film and its sound play straight through on the film's clock,
+            // so the band runs from 0:00 to the film's end there too.
             gapLabel={
-              (linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)) && !audioFirst
+              linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)
                 ? t("editor.timeline.soundSourceVideo")
                 : undefined
             }
-            hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
             scrollLeftPx={scrollLeft}
           />
         )

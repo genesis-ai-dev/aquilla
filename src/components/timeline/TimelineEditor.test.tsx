@@ -2044,7 +2044,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
     })
 
-    it("gives the Source audio row no speaker in Free timing, where the video is hidden and silent", () => {
+    it("keeps the Source audio row's speaker following the recordings: the film still sounds there (AQU-2253)", () => {
       setVideoDurationSec(VIDEO, 120)
       render(
         <TimelineEditor
@@ -2052,7 +2052,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
           tracks={subtitleTracks(true)} audioCues={audioCues} onRetimeSubtitle={() => {}}
         />,
       )
-      expect(screen.queryByTestId("tl-speaker-source")).toBeNull()
+      expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
     })
 
     it("keeps the Source audio row's speaker for an imported recording", () => {
@@ -5339,14 +5339,21 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(lane.textContent).not.toContain("10:35.0")
   })
 
-  it("draws no placeholder in Free timing, where the video is hidden and silent", () => {
+  // AQU-2253 (Sam, Oct 29): the film's own sound plays straight through with
+  // its picture in both timings, so following the recordings the row still
+  // stands for it: one band from 0:00 to the film's end, on the film's clock,
+  // with the speaker that mutes it.
+  it("following the recordings, the band is still the video's own sound, to the film's end, with its mute", () => {
     setVideoDurationSec(LINKED, 635)
-    render(
+    renderWithTooltips(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
         timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
-    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-    expect(screen.queryByText("The video's own sound")).toBeNull()
+    const gap = screen.getByTestId("tl-source-gap")
+    expect(gap.getAttribute("data-region-start")).toBe("0")
+    expect(gap.getAttribute("data-region-end")).toBe("635")
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-label", expect.stringMatching(/film's own sound/))
   })
 
   // Sam, Oct 5: once a linked video's captions are its rows, its Source audio

@@ -210,9 +210,9 @@ export interface TrackDerivationContext {
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
   hasAudioCues: boolean
-  /** The file plays a linked video with its sound on (Original's timing), so
-   *  the Source-audio row has the video's own sound to stand for even with no
-   *  cues. Absent reads as false. */
+  /** The file plays a linked video with its sound on (in both timings since
+   *  AQU-2253), so the Source-audio row has the video's own sound to stand for
+   *  even with no cues. Absent reads as false. */
   hasLinkedVideoSound?: boolean
   /** AQU-1758: the file is in reading order — a Bible book, a document —
    *  rather than timed. Absent reads as false. */

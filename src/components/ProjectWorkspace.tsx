@@ -214,7 +214,7 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -13003,15 +13003,15 @@ export function ProjectWorkspace() {
       // appearing a moment after the timeline settles.
       hasAudioCues: audioCues !== null,
       // AQU-1566 (Sam, Oct 5): a subtitle file linked to a video keeps its
-      // Source audio row for the video's own sound. Not in Free timing, where
-      // the video is hidden and silent.
-      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
+      // Source audio row for the video's own sound. AQU-2253: in both timings
+      // — the film and its sound play straight through on its own clock.
+      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl),
       // AQU-1758: a book or document, and whether it has a source recording
       // of its own.
       sequenceOrdered: !activeFileTimeOrdered,
       hasSourceAudio: audioMergedCells.some((c) => sourceClipAudioForCell(c) != null),
     }),
-    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode, activeFileTimeOrdered],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, activeFileTimeOrdered],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no
@@ -13448,6 +13448,14 @@ export function ProjectWorkspace() {
   // Driving is gated on the picture owning the file: following the recordings
   // the queue's programme plays the takes and the picture follows it.
   const videoDrivesDubs = videoIsTransport
+  // AQU-2253: following the recordings the film's own sound plays straight
+  // through with its picture, so the programme plays its original muted (it
+  // still clocks the lines) rather than voicing the same speech twice.
+  const filmVoicesProgramme = showVideoPane && timingMode === "audioFirst"
+  useEffect(() => {
+    setProgrammeSourceVoicedByFilm(filmVoicesProgramme)
+    return () => setProgrammeSourceVoicedByFilm(false)
+  }, [filmVoicesProgramme])
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change

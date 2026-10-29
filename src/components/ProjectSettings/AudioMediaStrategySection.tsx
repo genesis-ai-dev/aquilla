@@ -24,9 +24,9 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
   return (
     <Card>
       <CardHeader>
-        {/* Sam, Oct 28: the card says only the four names. Its (i) opens what
-            the card is for beneath the title and what each choice does inside
-            each choice, and closes them again. */}
+        {/* Sam, Oct 28: the card's (i) opens what the card is for beneath the
+            title and more on each choice inside each choice, and closes them
+            again. Oct 29: each choice also says one short phrase, always. */}
         <CardTitle className="flex items-center gap-1">
           {t("projectSettings.audioMedia.title")}
           <InfoToggle
@@ -38,7 +38,7 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
           />
         </CardTitle>
         <InfoReveal open={infoOpen} id="settings-audio-media-explanation">
-          <span className="block text-sm text-muted-foreground">{t("projectSettings.audioMedia.description")}</span>
+          <span className="block text-sm text-muted-foreground">{t("projectSettings.audioMedia.info")}</span>
         </InfoReveal>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -60,8 +60,9 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                 aria-pressed={selected}
               >
                 <span className="font-medium">{t(label.nameKey)}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{t(label.summaryKey)}</span>
                 <InfoReveal open={infoOpen} id={`settings-audio-media-${id}-explanation`}>
-                  <span className="block text-xs text-muted-foreground">{t(label.descriptionKey)}</span>
+                  <span className="block text-xs text-muted-foreground">{t(label.infoKey)}</span>
                 </InfoReveal>
               </button>
             )

@@ -5234,7 +5234,6 @@ export const ha: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Harshe(n) manufa",
   "projectSettings.create.targetLanguagePlaceholder": "Faransanci, Swahili na yau da kullum, Han na gargajiya…",
   "projectSettings.create.additionalTargetPlaceholder": "Ku ƙara wani…",
-  "projectSettings.create.addTargetLanguageAction": "Ku ƙara wani harshe",
   "projectSettings.create.bulkTargetLanguagesHint": "Waɗannan dukan akwatuna {max} ne. Ku ƙara sauran harsuna a nan, an raba su da alkalami.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "Swahili, Yoruba, Hausa, Han na gargajiya…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"Yana ƙara hanya {count} ƙari.","other":"Yana ƙara hanyoyi {count} ƙari."},"countVar":"count"},

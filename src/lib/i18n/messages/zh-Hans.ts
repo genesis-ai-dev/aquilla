@@ -4370,7 +4370,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "目标语言（可多个）",
   "projectSettings.create.targetLanguagePlaceholder": "French、口语斯瓦希里语、Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "再添加一个…",
-  "projectSettings.create.addTargetLanguageAction": "添加另一种语言",
   "projectSettings.create.bulkTargetLanguagesHint": "{max} 个输入框已用完。其余语言请在此处添加，用逗号分隔。",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "斯瓦希里语, 约鲁巴语, 豪萨语, Traditional Han…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"other":"将再添加 {count} 条轨道。"},"countVar":"count"},

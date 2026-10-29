@@ -4422,7 +4422,6 @@ export const fr: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Langue(s) cible(s)",
   "projectSettings.create.targetLanguagePlaceholder": "Français, swahili courant, Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "Ajouter une autre…",
-  "projectSettings.create.addTargetLanguageAction": "Ajouter une autre langue",
   "projectSettings.create.bulkTargetLanguagesHint": "Voilà les {max} zones remplies. Ajoutez ici les langues restantes, séparées par des virgules.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "Swahili, yoruba, haoussa, Traditional Han…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"Ajoute {count} piste supplémentaire.","many":"Ajoute {count} pistes supplémentaires.","other":"Ajoute {count} pistes supplémentaires."},"countVar":"count"},

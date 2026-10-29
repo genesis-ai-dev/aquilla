@@ -4453,7 +4453,6 @@ export const id: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Bahasa Target",
   "projectSettings.create.targetLanguagePlaceholder": "Prancis, Swahili percakapan, Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "Tambah lagi…",
-  "projectSettings.create.addTargetLanguageAction": "Tambah bahasa lain",
   "projectSettings.create.bulkTargetLanguagesHint": "Itu semua {max} kotak. Tambahkan bahasa lainnya di sini, dipisahkan dengan koma.",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"other":"Menambahkan {count} lajur lagi."},"countVar":"count"},
   "projectSettings.create.languageHintAriaLabel": "Apa yang bisa saya isikan di sini?",

@@ -5226,7 +5226,6 @@ export const ur: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "ہدف زبان(یں)",
   "projectSettings.create.targetLanguagePlaceholder": "فرانسیسی، بول چال کی سواحلی، روایتی ہان…",
   "projectSettings.create.additionalTargetPlaceholder": "ایک اور شامل کریں…",
-  "projectSettings.create.addTargetLanguageAction": "ایک اور زبان شامل کریں",
   "projectSettings.create.bulkTargetLanguagesHint": "یہ تمام {max} ڈبے ہیں۔ باقی زبانیں یہاں شامل کریں، کوما سے الگ۔",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "سواحلی، یوروبا، ہاؤسا، روایتی ہان…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"مزید {count} لین شامل کرتا ہے۔","other":"مزید {count} لینیں شامل کرتا ہے۔"},"countVar":"count"},

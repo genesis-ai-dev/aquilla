@@ -4371,7 +4371,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "目標語言（可多個）",
   "projectSettings.create.targetLanguagePlaceholder": "French、口語斯瓦希里語、Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "新增其他…",
-  "projectSettings.create.addTargetLanguageAction": "新增其他語言",
   "projectSettings.create.bulkTargetLanguagesHint": "已達 {max} 個欄位上限。其餘語言請在此輸入，並以逗號分隔。",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "斯瓦希里語、約魯巴語、豪薩語、Traditional Han…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"other":"將再新增 {count} 個軌道。"},"countVar":"count"},

@@ -5236,7 +5236,6 @@ export const am: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "የዒላማ ቋንቋ(ዎች)",
   "projectSettings.create.targetLanguagePlaceholder": "ፈረንሳይኛ፣ የንግግር ስዋሂሊ፣ Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "ሌላ ይጨምሩ…",
-  "projectSettings.create.addTargetLanguageAction": "ሌላ ቋንቋ ይጨምሩ",
   "projectSettings.create.bulkTargetLanguagesHint": "ያ {max} ሳጥኖች ሁሉ ናቸው። የቀሩትን ቋንቋዎች እዚህ በኮማ ተለይተው ይጨምሩ።",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "ስዋሂሊ፣ ዮሩባ፣ ሃውሳ፣ Traditional Han…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"ተጨማሪ {count} መስመር ይጨምራል።","other":"ተጨማሪ {count} መስመሮች ይጨምራል።"},"countVar":"count"},

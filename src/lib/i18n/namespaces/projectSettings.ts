@@ -126,7 +126,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
-    "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
@@ -1719,11 +1718,6 @@ export const projectSettings = defineNamespace({
         description:
           "Placeholder in the second and subsequent target-language boxes of the " +
           "create dialog, where the first box carries the full example placeholder.",
-      },
-      "projectSettings.create.addTargetLanguageAction": {
-        description:
-          "Label of the button under the target-language boxes in the create dialog " +
-          "that appends one more empty box (one per additional target lane).",
       },
       "projectSettings.create.bulkTargetLanguagesHint": {
         description:

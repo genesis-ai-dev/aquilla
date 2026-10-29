@@ -4355,7 +4355,6 @@ export const th: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "ภาษาปลายทาง",
   "projectSettings.create.targetLanguagePlaceholder": "ฝรั่งเศส, สวาฮีลีแบบสนทนา, Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "เพิ่มอีก…",
-  "projectSettings.create.addTargetLanguageAction": "เพิ่มภาษาอื่น",
   "projectSettings.create.bulkTargetLanguagesHint": "ครบ {max} ช่องแล้ว เพิ่มภาษาที่เหลือที่นี่ โดยคั่นด้วยเครื่องหมายจุลภาค",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"other":"จะเพิ่มอีก {count} เลน"},"countVar":"count"},
   "projectSettings.create.languageHintAriaLabel": "ที่นี่สามารถป้อนอะไรได้บ้าง",

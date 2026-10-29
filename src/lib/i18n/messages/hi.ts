@@ -5122,7 +5122,6 @@ export const hi: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "लक्ष्य भाषा(एँ)",
   "projectSettings.create.targetLanguagePlaceholder": "फ़्रेंच, बोलचाल की स्वाहिली, पारंपरिक हान…",
   "projectSettings.create.additionalTargetPlaceholder": "एक और जोड़ें…",
-  "projectSettings.create.addTargetLanguageAction": "एक और भाषा जोड़ें",
   "projectSettings.create.bulkTargetLanguagesHint": "ये सभी {max} बॉक्स हैं। शेष भाषाएँ यहाँ जोड़ें, अल्पविराम से अलग।",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "स्वाहिली, योरूबा, हौसा, पारंपरिक हान…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"{count} और लेन जोड़ता है।","other":"{count} और लेन जोड़ता है।"},"countVar":"count"},

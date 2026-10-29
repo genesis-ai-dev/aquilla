@@ -4354,7 +4354,6 @@ export const my: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "ဘာသာပြန်ဘာသာစကား(များ)",
   "projectSettings.create.targetLanguagePlaceholder": "French၊ conversational Swahili၊ Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "နောက်တစ်ခု ထည့်ပါ…",
-  "projectSettings.create.addTargetLanguageAction": "ဘာသာစကား နောက်တစ်ခု ထည့်ရန်",
   "projectSettings.create.bulkTargetLanguagesHint": "ဘောက်စ် {max} ခုလုံး ပြည့်ပါပြီ။ ကျန်သော ဘာသာစကားများကို ကော်မာခြား၍ ဤနေရာတွင် ထည့်ပါ။",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"other":"လမ်းကြောင်း {count} ခု ထပ်တိုးမည်။"},"countVar":"count"},
   "projectSettings.create.languageHintAriaLabel": "ဤနေရာတွင် ဘာထည့်နိုင်သလဲ?",

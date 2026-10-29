@@ -4364,7 +4364,6 @@ export const ar: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "اللغة (اللغات) الهدف",
   "projectSettings.create.targetLanguagePlaceholder": "الفرنسية، السواحيلية العامية، Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "أضف لغة أخرى…",
-  "projectSettings.create.addTargetLanguageAction": "إضافة لغة أخرى",
   "projectSettings.create.bulkTargetLanguagesHint": "هذه كل المربعات ({max}). أضف اللغات المتبقية هنا، مفصولة بفواصل.",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"zero":"يضيف {count} مسار إضافي.","one":"يضيف مسارًا إضافيًا واحدًا ({count}).","two":"يضيف مسارين إضافيين ({count}).","few":"يضيف {count} مسارات إضافية.","many":"يضيف {count} مسارًا إضافيًا.","other":"يضيف {count} مسار إضافي."},"countVar":"count"},
   "projectSettings.create.languageHintAriaLabel": "ما الذي يمكنني إدخاله هنا؟",

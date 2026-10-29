@@ -5241,7 +5241,6 @@ export const bn: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "লক্ষ্য ভাষা",
   "projectSettings.create.targetLanguagePlaceholder": "ফরাসি, কথ্য সোয়াহিলি, ঐতিহ্যবাহী হান…",
   "projectSettings.create.additionalTargetPlaceholder": "আরেকটি যোগ করুন…",
-  "projectSettings.create.addTargetLanguageAction": "আরেকটি ভাষা যোগ করুন",
   "projectSettings.create.bulkTargetLanguagesHint": "{max}টি বাক্স পূর্ণ। বাকি ভাষা এখানে কমা দিয়ে আলাদা করে যোগ করুন।",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "সোয়াহিলি, ইয়োরুবা, হাউসা, ঐতিহ্যবাহী হান…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"আরও {count}টি লেন যোগ করে।","other":"আরও {count}টি লেন যোগ করে।"},"countVar":"count"},

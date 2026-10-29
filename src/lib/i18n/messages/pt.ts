@@ -5101,7 +5101,6 @@ export const pt: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Idioma(s) de destino",
   "projectSettings.create.targetLanguagePlaceholder": "Francês, suaíli conversacional, han tradicional…",
   "projectSettings.create.additionalTargetPlaceholder": "Adicionar outro…",
-  "projectSettings.create.addTargetLanguageAction": "Adicionar outro idioma",
   "projectSettings.create.bulkTargetLanguagesHint": "Esses são os {max} campos. Adicione aqui os idiomas restantes, separados por vírgulas.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "Suaíli, iorubá, hauçá, han tradicional…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"Adiciona {count} faixa a mais.","many":"Adiciona {count} faixas a mais.","other":"Adiciona {count} faixas a mais."},"countVar":"count"},

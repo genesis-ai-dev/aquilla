@@ -5227,7 +5227,6 @@ export const pa: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "ਟੀਚਾ ਭਾਸ਼ਾ(ਵਾਂ)",
   "projectSettings.create.targetLanguagePlaceholder": "ਫ਼ਰਾਂਸੀਸੀ, ਗੱਲਬਾਤ ਵਾਲੀ ਸਵਾਹਿਲੀ, ਰਵਾਇਤੀ ਹਾਨ…",
   "projectSettings.create.additionalTargetPlaceholder": "ਹੋਰ ਜੋੜੋ…",
-  "projectSettings.create.addTargetLanguageAction": "ਹੋਰ ਭਾਸ਼ਾ ਜੋੜੋ",
   "projectSettings.create.bulkTargetLanguagesHint": "ਇਹ ਸਾਰੇ {max} ਖਾਨੇ ਹਨ. ਬਾਕੀ ਭਾਸ਼ਾਵਾਂ ਇੱਥੇ ਜੋੜੋ, ਕੌਮਿਆਂ ਨਾਲ ਵੱਖ.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "ਸਵਾਹਿਲੀ, ਯੋਰੂਬਾ, ਹਾਉਸਾ, ਰਵਾਇਤੀ ਹਾਨ…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"ਹੋਰ {count} ਲੇਨ ਜੋੜਦਾ ਹੈ.","other":"ਹੋਰ {count} ਲੇਨਾਂ ਜੋੜਦਾ ਹੈ."},"countVar":"count"},

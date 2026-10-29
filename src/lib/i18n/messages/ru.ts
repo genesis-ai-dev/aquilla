@@ -4488,7 +4488,6 @@ export const ru: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Язык(и) перевода",
   "projectSettings.create.targetLanguagePlaceholder": "Французский, разговорный суахили, Traditional Han…",
   "projectSettings.create.additionalTargetPlaceholder": "Добавить ещё…",
-  "projectSettings.create.addTargetLanguageAction": "Добавить ещё язык",
   "projectSettings.create.bulkTargetLanguagesHint": "Это все {max} поля. Добавьте остальные языки здесь, через запятую.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "Суахили, йоруба, хауса, Traditional Han…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"Добавит ещё {count} дорожку.","few":"Добавит ещё {count} дорожки.","many":"Добавит ещё {count} дорожек.","other":"Добавит ещё {count} дорожки."},"countVar":"count"},

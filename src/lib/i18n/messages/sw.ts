@@ -5229,7 +5229,6 @@ export const sw: Catalog = {
   "projectSettings.create.targetLanguagesLabel": "Lugha lengo",
   "projectSettings.create.targetLanguagePlaceholder": "Kifaransa, Kiswahili cha mazungumzo, Han ya Jadi…",
   "projectSettings.create.additionalTargetPlaceholder": "Ongeza nyingine…",
-  "projectSettings.create.addTargetLanguageAction": "Ongeza lugha nyingine",
   "projectSettings.create.bulkTargetLanguagesHint": "Hivyo ndivyo visanduku vyote {max}. Ongeza lugha zozote zilizosalia hapa, zikitenganishwa kwa koma.",
   "projectSettings.create.bulkTargetLanguagesPlaceholder": "Kiswahili, Kiyoruba, Kihausa, Han ya Jadi…",
   "projectSettings.create.bulkTargetLanguagesCount": {"forms":{"one":"Inaongeza njia {count} zaidi.","other":"Inaongeza njia {count} zaidi."},"countVar":"count"},

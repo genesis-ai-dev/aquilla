@@ -701,3 +701,51 @@ describe("nextTakeLabel", () => {
     expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
   })
 })
+
+// AQU-981 (Sam, Oct 29): a take split into pieces is still ONE take. After a
+// join the line read "Take 1", "Take 2 · split in 2", "Take 4" — no Take 3 —
+// because every unnamed piece was counted, and named, as a take of its own.
+describe("one number per take, however many pieces it has", () => {
+  const att = (audioId: string, label: string | null, pieceOf?: string, trimStartMs: number | null = null) =>
+    ({ audioId, label, trimStartMs, ...(pieceOf ? { pieceOf } : {}) })
+
+  it("an unnamed take in two pieces beside Take 1: it will be Take 2, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null), att("c", null, "b", 400)])).toBe("Take 3")
+  })
+
+  it("a split take reads by its first piece's name, as the list shows it, whatever its other pieces were named", () => {
+    // Named one piece at a time by the old backfill: the list shows "Take 2 · split in 2".
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2"), att("c", "Take 3", "b", 400)])).toBe("Take 3")
+    // Named by a cut.
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2 · 1"), att("c", "Take 2 · 2", "b", 400)])).toBe("Take 3")
+  })
+
+  it("a named take and an unnamed whole take: the unnamed one is numbered after the named, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null)])).toBe("Take 3")
+  })
+
+  it("named takes alone: one past the highest, a deleted number never reused", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("c", "Take 3")])).toBe("Take 4")
+    expect(nextTakeLabel([att("a", "My best one")])).toBe("Take 1")
+  })
+
+  it("names an unnamed split take once, its pieces as the cut names them", async () => {
+    emitRename.mockClear()
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1"), take("b", 1000), piece]} selectedAudioId="a" />)
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2 · 1" }))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "c", label: "Take 2 · 2" }))
+  })
+
+  it("the list of one take's pieces names nothing: it can't see the line's other takes", async () => {
+    emitRename.mockClear()
+    // The pieces' waveforms load their audio; nothing here is about that.
+    const offline = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} variant="pieces" takes={[take("b", 1000), piece]} selectedAudioId="b" />)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(emitRename).not.toHaveBeenCalled()
+    offline.mockRestore()
+  })
+})

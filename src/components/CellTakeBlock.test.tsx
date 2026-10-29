@@ -623,15 +623,19 @@ describe("Join into one recording", () => {
 
   // Sam, Oct 29 (question 7): the joined take is named "Take N", numbered the
   // way the recorder numbers a new take (nextTakeLabel): one past the highest
-  // "Take N" on this track, counting unnamed takes, the source clip and other
-  // tracks' takes left out.
+  // take on this track, a take in pieces counting once, the source clip and
+  // other tracks' takes left out.
   it("names the joined take as the recorder would name the next take", async () => {
     joinCalls.length = 0
+    const attachments = owner.attachments as unknown as Record<string, Record<string, unknown>>
     const withOthers = {
       ...owner,
       attachments: {
-        ...(owner.attachments as Record<string, unknown>),
-        // A named take on this track, and the two unnamed pieces: Take 3 is next.
+        // The take in pieces, its pieces named one by one ("Take 2", "Take 3"),
+        // as the take list used to: the list shows it as "Take 2 · split in 2".
+        "audio-c1-1-a.wav": { ...attachments["audio-c1-1-a.wav"], label: "Take 2" },
+        "audio-c1-2-b.wav": { ...attachments["audio-c1-2-b.wav"], label: "Take 3" },
+        // A named take on this track beside it: Take 3 is next.
         "audio-c1-0-old.wav": { type: "audio", url: "frontier-audio://audio-c1-0-old.wav", slot: "recording", label: "Take 1" },
         // Not this track's, not a take, and gone: none of them counts.
         "audio-c1-5-other.wav": { type: "audio", url: "frontier-audio://audio-c1-5-other.wav", slot: "track-2", label: "Take 9" },

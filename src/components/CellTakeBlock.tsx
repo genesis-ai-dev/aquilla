@@ -313,13 +313,14 @@ function CellTakeBlockView({
     setJoinError(null)
     let failed: string | null = null
     // Sam, Oct 29: the joined take is "Take N", numbered as the recorder
-    // numbers a new take — over this track's takes, the source clip (seeded
-    // with the file's id) and removed takes left out.
+    // numbers a new take — over this track's takes, a take in pieces counting
+    // once, the source clip (seeded with the file's id) and removed takes left
+    // out.
     const slot = split[0].slot
     const ownSlots = new Set(slotsForTrack(trackIdForSlot(slot)))
     const trackTakes = Object.entries(owner.attachments ?? {})
       .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
-      .map(([, a]) => ({ label: a.label ?? null }))
+      .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
     try {
       await joinTakePieces({
         session,

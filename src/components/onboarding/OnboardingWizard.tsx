@@ -1,4 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
+import { CardContent } from "@/components/ui/card"
 import { billingSelectionPath, readBillingIntent } from "@/lib/billing/intent"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -181,73 +183,75 @@ export function OnboardingWizard() {
   }, [navigate, markCompletion, billingNext])
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label={t("onboarding.wizard.setupAriaLabel")}>
-      <div className="w-full max-w-md">
-        {billingNext && <p className="mb-4 text-sm text-muted-foreground">{t("onboarding.wizard.billingAfterSetup")}</p>}
-        {billingIntent.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
-        {/* Step indicator */}
-        <div
-          className="mb-8 flex justify-center gap-2"
-          role="progressbar"
-          aria-valuenow={step}
-          aria-valuemin={1}
-          aria-valuemax={TOTAL_STEPS}
-          aria-label={t("onboarding.wizard.stepProgress", { step, total: TOTAL_STEPS })}
-        >
-          {Array.from({ length: TOTAL_STEPS }, (_, i) => (
-            <div
-              key={i}
-              aria-hidden="true"
-              className={
-                "h-2 w-2 rounded-full transition-colors " +
-                (i + 1 <= step ? "bg-primary" : "bg-muted")
-              }
-            />
-          ))}
-        </div>
+    <AuthPage label={t("onboarding.wizard.setupAriaLabel")}>
+      <AuthPanel>
+        <CardContent>
+          {billingNext && <p className="mb-4 text-sm text-muted-foreground">{t("onboarding.wizard.billingAfterSetup")}</p>}
+          {billingIntent.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
+          {/* Step indicator */}
+          {step !== 3 && <div
+            className="mb-8 flex justify-center gap-2"
+            role="progressbar"
+            aria-valuenow={step}
+            aria-valuemin={1}
+            aria-valuemax={TOTAL_STEPS}
+            aria-label={t("onboarding.wizard.stepProgress", { step, total: TOTAL_STEPS })}
+          >
+            {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+              <div
+                key={i}
+                aria-hidden="true"
+                className={
+                  "h-2 w-2 rounded-full transition-colors " +
+                  (i + 1 <= step ? "bg-primary" : "bg-muted")
+                }
+              />
+            ))}
+          </div>}
 
-        {/* Steps */}
-        {step === 1 && <WelcomeStep onNext={next} />}
-        {step === 2 && <PrivacyStep onNext={next} onBack={back} />}
-        {step === 3 && (
-          <SignInStep
-            onNext={next}
-            onBack={back}
-            onLoginComplete={handleLoginComplete}
-            onSignupComplete={handleSignupComplete}
-            continuationBusy={loginClassificationBusy}
-            continuationError={loginClassificationError}
-          />
-        )}
-        {step === 4 && (
-          <NameStep
-            value={displayName}
-            onChange={setDisplayName}
-            onNext={next}
-            onBack={back}
-          />
-        )}
-        {step === 5 && (
-          <IntentStep
-            onChoosePersonal={choosePersonal}
-            onChooseTeam={chooseTeam}
-            onBack={back}
-          />
-        )}
-        {step === 6 && <OrgStep onCreated={handleOrgCreated} onBack={back} />}
-        {step === 7 && (
-          <ProjectStep
-            displayName={displayName}
-            orgId={teamOrgId ?? undefined}
-            onCreated={handleProjectCreated}
-            onBack={back}
-            onSkip={handleSkipProject}
-          />
-        )}
-        {step === 8 && createdProject && (
-          <ReadyStep project={createdProject} onFinish={handleFinish} />
-        )}
-      </div>
-    </main>
+          {/* Steps */}
+          {step === 1 && <WelcomeStep onNext={next} />}
+          {step === 2 && <PrivacyStep onNext={next} onBack={back} />}
+          {step === 3 && (
+            <SignInStep
+              onNext={next}
+              onBack={back}
+              onLoginComplete={handleLoginComplete}
+              onSignupComplete={handleSignupComplete}
+              continuationBusy={loginClassificationBusy}
+              continuationError={loginClassificationError}
+            />
+          )}
+          {step === 4 && (
+            <NameStep
+              value={displayName}
+              onChange={setDisplayName}
+              onNext={next}
+              onBack={back}
+            />
+          )}
+          {step === 5 && (
+            <IntentStep
+              onChoosePersonal={choosePersonal}
+              onChooseTeam={chooseTeam}
+              onBack={back}
+            />
+          )}
+          {step === 6 && <OrgStep onCreated={handleOrgCreated} onBack={back} />}
+          {step === 7 && (
+            <ProjectStep
+              displayName={displayName}
+              orgId={teamOrgId ?? undefined}
+              onCreated={handleProjectCreated}
+              onBack={back}
+              onSkip={handleSkipProject}
+            />
+          )}
+          {step === 8 && createdProject && (
+            <ReadyStep project={createdProject} onFinish={handleFinish} />
+          )}
+        </CardContent>
+      </AuthPanel>
+    </AuthPage>
   )
 }

@@ -2,6 +2,8 @@ import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { useNavigate, useSearchParams, Navigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Field,
   FieldError,
@@ -79,128 +81,133 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <div className="flex w-full max-w-sm flex-col gap-6">
-        <h1 className="text-center text-2xl font-semibold">
-          {mode === "login" ? t("auth.login.title") : t("auth.resetPassword.title")}
-        </h1>
+    <AuthPage>
+      <AuthPanel>
+        <CardHeader>
+          <CardTitle role="heading" aria-level={1}>
+            {mode === "login" ? t("auth.login.title") : t("auth.resetPassword.title")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
 
-        {mode === "forgot" ? (
-          <FrontierForgotPasswordForm onBack={() => setMode("login")} />
-        ) : (
-          <form
-            id="login-form"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void form.handleSubmit()
-            }}
-            className="flex flex-col gap-4"
-          >
-            <FieldGroup>
-              <form.Field
-                name="username"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="login-user">{t("auth.login.usernameLabel")}</FieldLabel>
-                      <Input
-                        id="login-user"
-                        name={field.name}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        aria-invalid={invalid}
-                        autoComplete="username"
-                        autoFocus
-                      />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
-              <form.Field
-                name="password"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <div className="flex items-center justify-between">
-                        <FieldLabel htmlFor="login-pass">{t("auth.login.passwordLabel")}</FieldLabel>
-                        <button
-                          type="button"
-                          onClick={() => setMode("forgot")}
-                          className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-                        >
-                          {t("auth.login.forgotPasswordLink")}
-                        </button>
-                      </div>
-                      <RevealableInput
-                        id="login-pass"
-                        name={field.name}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        aria-invalid={invalid}
-                        autoComplete="current-password"
-                      />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
-            </FieldGroup>
-            {submitError && <FieldError>{submitError}</FieldError>}
-            <form.Subscribe
-              selector={(state) => state.isSubmitting}
-              children={(isSubmitting) => (
-                <>
-                  <Button
-                    type="submit"
-                    form="login-form"
-                    className="w-full"
-                    loading={isSubmitting}
-                    aria-describedby={
-                      isSubmitting && isMigrating
-                        ? "login-account-setup-note"
-                        : undefined
-                    }
-                  >
-                    {isSubmitting
-                      ? isMigrating
-                        ? t("auth.login.submitMigrating")
-                        : t("auth.login.submitSigningIn")
-                      : t("auth.login.submitDefault")}
-                  </Button>
-                  {isSubmitting && isMigrating && (
-                    <p
-                      id="login-account-setup-note"
-                      role="status"
-                      aria-live="polite"
-                      className="text-center text-xs text-muted-foreground"
-                    >
-                      {t("auth.login.migratingNote")}
-                    </p>
-                  )}
-                </>
-              )}
-            />
-          </form>
-        )}
-
-        {/* i18n-exempt: mode is an internal state discriminator, not visible copy. */}
-        {mode === "login" && (
-          <p className="text-center text-sm text-muted-foreground">
-            {t("auth.login.newHerePrefix")}{" "}
-            <a
-              href={onboardingForBillingNext(next)}
-              className="font-medium text-foreground underline-offset-4 hover:underline"
+          {mode === "forgot" ? (
+            <FrontierForgotPasswordForm onBack={() => setMode("login")} />
+          ) : (
+            <form
+              id="login-form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void form.handleSubmit()
+              }}
+              className="flex flex-col gap-4"
             >
-              {t("auth.login.createAccountLink")}
-            </a>
-          </p>
-        )}
-      </div>
-    </div>
+              <FieldGroup className="gap-4">
+                <form.Field
+                  name="username"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <FieldLabel htmlFor="login-user">{t("auth.login.aquillaUsernameLabel")}</FieldLabel>
+                        <Input
+                          id="login-user"
+                          name={field.name}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          aria-invalid={invalid}
+                          autoComplete="username"
+                          autoFocus
+                        />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
+                <form.Field
+                  name="password"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <div className="flex items-center justify-between">
+                          <FieldLabel htmlFor="login-pass">{t("auth.login.passwordLabel")}</FieldLabel>
+                          <button
+                            type="button"
+                            onClick={() => setMode("forgot")}
+                            className="min-h-8 text-xs text-muted-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                          >
+                            {t("auth.login.forgotPasswordLink")}
+                          </button>
+                        </div>
+                        <RevealableInput
+                          id="login-pass"
+                          name={field.name}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          aria-invalid={invalid}
+                          autoComplete="current-password"
+                        />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
+              </FieldGroup>
+              {submitError && <FieldError>{submitError}</FieldError>}
+              <form.Subscribe
+                selector={(state) => state.isSubmitting}
+                children={(isSubmitting) => (
+                  <>
+                    <Button
+                      type="submit"
+                      size="lg"
+                      form="login-form"
+                      className="w-full"
+                      loading={isSubmitting}
+                      aria-describedby={
+                        isSubmitting && isMigrating
+                          ? "login-account-setup-note"
+                          : undefined
+                      }
+                    >
+                      {isSubmitting
+                        ? isMigrating
+                          ? t("auth.login.submitMigrating")
+                          : t("auth.login.submitSigningIn")
+                        : t("auth.login.submitDefault")}
+                    </Button>
+                    {isSubmitting && isMigrating && (
+                      <p
+                        id="login-account-setup-note"
+                        role="status"
+                        aria-live="polite"
+                        className="text-center text-xs text-muted-foreground"
+                      >
+                        {t("auth.login.migratingNote")}
+                      </p>
+                    )}
+                  </>
+                )}
+              />
+            </form>
+          )}
+
+          {/* i18n-exempt: mode is an internal state discriminator, not visible copy. */}
+          {mode === "login" && (
+            <p className="text-center text-sm text-muted-foreground">
+              {t("auth.login.newHerePrefix")}{" "}
+              <a
+                href={onboardingForBillingNext(next)}
+                className="font-medium text-foreground underline-offset-4 hover:underline"
+              >
+                {t("auth.login.createAccountLink")}
+              </a>
+            </p>
+          )}
+        </CardContent>
+      </AuthPanel>
+    </AuthPage>
   )
 }

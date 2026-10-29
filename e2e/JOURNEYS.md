@@ -244,6 +244,8 @@ UI chrome that used to be one smoke file per click is covered under
   RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Recovery's single validation message and return-to-sign-in navigation without
+  advancing onboarding are covered in RTL (`SignInStep.recovery.test.tsx`, AQU-2300).
   Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
   copy with word-for-word identical wording whichever datastore reserved the identity,
   and the Sign in action carries the typed identifier into the login field

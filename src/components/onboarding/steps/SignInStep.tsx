@@ -83,18 +83,18 @@ export function SignInStep({
   const isForgot = mode === "forgot"
 
   const headings: Record<Mode, string> = {
-    signup: t("onboarding.step.signIn.headingSignup"),
-    login: t("onboarding.step.signIn.headingLogin"),
+    signup: t("auth.signup.submitDefault"),
+    login: t("auth.login.title"),
     forgot: t("auth.resetPassword.title"),
   }
 
   return (
-    <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-semibold">{headings[mode]}</h2>
-        <p className="text-sm text-muted-foreground">
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-base font-medium leading-snug">{headings[mode]}</h1>
+        {isSignup && <p className="text-sm text-muted-foreground">
           {t("onboarding.step.signIn.unlockBlurb")}
-        </p>
+        </p>}
       </div>
 
       {mode === "signup" && (
@@ -125,12 +125,12 @@ export function SignInStep({
             onClick={() => setMode(isSignup ? "login" : "signup")}
             className="font-medium text-foreground underline-offset-4 hover:underline"
           >
-            {isSignup ? t("common.logIn") : t("onboarding.step.signIn.createOne")}
+            {isSignup ? t("auth.login.submitDefault") : t("auth.login.createAccountLink")}
           </button>
         </p>
       )}
 
-      <div className="text-center">
+      {!isForgot && <div className="text-center">
         <button
           type="button"
           onClick={onNext}
@@ -138,8 +138,8 @@ export function SignInStep({
         >
           {t("onboarding.common.skipForNow")}
         </button>
-      </div>
-      {import.meta.env.DEV && (
+      </div>}
+      {import.meta.env.DEV && !isForgot && (
         <Button
           variant="outline"
           onClick={async () => {
@@ -154,10 +154,10 @@ export function SignInStep({
           {t("onboarding.step.signIn.devLogin")}
         </Button>
       )}
-      <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
+      {!isForgot && <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
         <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
         {t("common.back")}
-      </Button>
+      </Button>}
     </div>
   )
 }

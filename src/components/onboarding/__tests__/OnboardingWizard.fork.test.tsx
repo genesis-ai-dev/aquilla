@@ -1,10 +1,11 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
 /**
  * Bifurcated onboarding: the Personal vs Team fork (IntentStep) routes the
  * wizard differently — Team users get the OrgStep, Personal users skip straight
  * to the ProjectStep.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { OnboardingWizard } from "../OnboardingWizard"
 

@@ -308,7 +308,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin }:
           )}
         </div>
       )}
-      <Button type="submit" form="signup-form" className="w-full">
+      <Button type="submit" size="lg" form="signup-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
         {form.state.isSubmitting ? t("auth.signup.submitCreating") : t("auth.signup.submitDefault")}
       </Button>

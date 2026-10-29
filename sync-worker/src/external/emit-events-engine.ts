@@ -254,7 +254,7 @@ export async function prepareEmitEvents(
       Number(cred.userId),
       callerRoleLevel,
     )
-    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
     const events = []
     for (const [i, e] of requested.events.entries()) {
       if (e.laneId === undefined) {

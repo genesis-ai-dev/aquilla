@@ -1391,11 +1391,11 @@ export async function resolveUpstreamLinkLane(
   let laneId = args.laneId ?? null
   const role = consumes === "target" ? "target" : "source"
   if (!laneId) {
-    // Fixtures and any project the lane backfill has not reached have no
-    // `lanes` rows. A new link still has to store an id, so mint the standard
-    // source lane and '' target lane first. A project that already has lanes
-    // is left alone — `ensureProjectLanes` would also insert the '' target
-    // lane, which is a different choice than the ones already there.
+    // A project with no `lanes` rows at all (a fixture; every real project
+    // has rows since the AQU-1616 backfill) still has a source lane to link
+    // to, so mint that one. No target lane is invented: AQU-2223 retired the
+    // settings blob it used to be guessed from. A project that already has
+    // lanes is left alone.
     const anyLane = await env.AQUILLA_PG.prepare(
       `SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1`,
     )

@@ -291,7 +291,7 @@ describe('AQU-1532 — SetTranslation laneId naming the primary language (lane-f
     const body = (await res.json()) as EventsBody
     expect(body.accepted).toEqual([])
     expect(body.rejected).toEqual([
-      { id: 'raw-unknown-lane-1', status: 422, reason: 'unknown lane "zz-unknown"; register it in settings.targetLanes' },
+      { id: 'raw-unknown-lane-1', status: 422, reason: 'unknown lane "zz-unknown"; name an existing lane with laneId, or create the lane first' },
     ])
     expect(await targetRows()).toEqual([])
   })

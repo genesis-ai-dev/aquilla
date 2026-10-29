@@ -339,7 +339,16 @@ describe("POST /contextual/runs", () => {
     expect(body.error.message).toMatch(/not registered/i)
     expect(syncFrames).toEqual([])
 
+    // AQU-2223: a lane row registers the lane; the settings registry does not.
     await setSettings({ targetLanes: ["fr", "es"] })
+    const stillUnregistered = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
+    expect(stillUnregistered.status).toBe(400)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('ctxr-fr', ?, 'target', 'French', 'fr', 2), ('ctxr-es', ?, 'target', 'Spanish', 'es', 3)`,
+    )
+      .bind(PROJECT, PROJECT)
+      .run()
 
     const started = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
     expect(started.status).toBe(201)

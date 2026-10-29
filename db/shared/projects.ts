@@ -331,13 +331,6 @@ export interface UpdateProjectSettingsInput {
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
   /**
-   * AQU-1615: the in-app settings write still registers lanes from the blob
-   * (AQU-1585). An external settings write passes false so a blob that still
-   * holds sourceLanguage / targetLanguage / targetLanes / archivedLanes cannot
-   * mint a lane. Default true.
-   */
-  registerLanes?: boolean
-  /**
    * AQU-1075: this write is the link copying a field into a downstream.
    * Skip the inherit prepare (it would detach the field being copied) and
    * skip a further cascade from this write — the caller walks the chain.
@@ -392,8 +385,6 @@ export interface PatchProjectSettingsInput {
   ifMatchVersion: number
   /** Writer's user id (numeric, or its string form). */
   updatedBy: number | string
-  /** See {@link UpdateProjectSettingsInput.registerLanes}. Default true. */
-  registerLanes?: boolean
 }
 
 /**
@@ -420,7 +411,6 @@ export async function patchProjectSettingsShared(
     settings: merged,
     ifMatchVersion: input.ifMatchVersion,
     updatedBy: input.updatedBy,
-    registerLanes: input.registerLanes,
   })
 }
 
@@ -475,25 +465,9 @@ export async function updateProjectSettingsShared(
   const oldThreshold = effectiveThreshold(current.settings.validationCount, orgDefaults.validationCount)
   const newThreshold = effectiveThreshold(normalizedSettings.validationCount, orgDefaults.validationCount)
   const thresholdChanged = oldThreshold !== newThreshold
-  // Lane ids are minted inside the attempt. The settings write is in the same
-  // transaction, so a uq_lanes_id collision rolls the version change back too.
-  // Passing the existing lane rows stops a stale targetLanes entry minting a
-  // second lane for one that already exists (AQU-1585). The in-app path still
-  // registers lanes from the blob. External settings writes pass
-  // registerLanes: false (AQU-1615) so they never mint a lane.
-  const registerLanes = input.registerLanes !== false
-  const batchWithLanes = (head: AquillaStatement[]) =>
-    retryingLaneIdCollision(() =>
-      db.batch([
-        ...head,
-        ...(registerLanes
-          ? ensureProjectLaneStmts(db, input.projectId, {
-              settings: normalizedSettings,
-              existingLanes: current.lanes ?? [],
-            })
-          : []),
-      ]),
-    )
+  // AQU-2223: a settings write never creates a lane. Lanes are made by the
+  // lane routes and by project create / import / migrate, from the languages
+  // those callers are given — not from keys left in the blob.
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a
   // racing writer can't sneak past us.
@@ -511,7 +485,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
-      await batchWithLanes(stmts)
+      await db.batch(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
       // return conflict only if another writer actually won. A projection /
@@ -549,7 +523,7 @@ export async function updateProjectSettingsShared(
     // returns `conflict` (0-row guard below); only real failures are `error`.
     let result: Awaited<ReturnType<typeof db.batch>>[number]
     try {
-      ;[result] = await batchWithLanes(stmts)
+      ;[result] = await db.batch(stmts)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       console.error("project_settings update failed:", err)

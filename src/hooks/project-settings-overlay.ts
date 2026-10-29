@@ -46,11 +46,16 @@ export function overlaySettings(
   // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
   // never renders (found by the add-target-language e2e journey).
   assign("targetLanes", settings.targetLanes)
-  // AQU-601: archived-lane markers overlay alongside the registry so the
-  // workspace switcher can hide archived lanes by default.
-  assign("archivedLanes", settings.archivedLanes)
   if (lanes) {
     draft().lanes = lanes
+    // AQU-601: archived-lane markers ride alongside the registry so the lane
+    // lists can hide archived lanes. AQU-2223: they come from the rows'
+    // `archivedAt` — the settings mirror is no longer written, so it misses
+    // every lane archived since. The tags are the rows' own; `''` (the former
+    // default lane) is never a registry entry, so it is left out.
+    draft().archivedLanes = lanes.flatMap((lane) =>
+      lane.role === "target" && lane.archivedAt && lane.legacyTag ? [lane.legacyTag] : [],
+    )
   }
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {

@@ -44,6 +44,7 @@ describe("onboarding playbooks", () => {
       "SetTranslation",
       "PlanImport",
       "PatchSettings",
+      "ProjectSetup",
       "EmitEvents",
       "LinkMedia",
       "CreateProject",
@@ -60,7 +61,7 @@ describe("onboarding playbooks", () => {
 
   it("bootstrap sequences import → settings → termbase → brief → routing", () => {
     const text = getCookbook("playbooks/project-bootstrap").text
-    const order = ["PlanImport", "targetLanes", "term.create", "translationBrief", "assignment.create"]
+    const order = ["PlanImport", "Languages and lanes", "term.create", "translationBrief", "assignment.create"]
     let cursor = -1
     for (const marker of order) {
       const at = text.indexOf(marker)

@@ -152,7 +152,7 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
         raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
       batchCap = completionBatchSizeFromSettings(parsed)
       const lanes = await loadLaneRows(db, body.projectId)
-      const languages = languagesForLanes(lanes, parsed, body.laneId ?? "")
+      const languages = languagesForLanes(lanes, body.laneId ?? "")
       sourceLanguage = languages.sourceLanguage
       targetLanguage = languages.targetLanguage
     }

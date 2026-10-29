@@ -45,50 +45,49 @@ describe("laneLanguage", () => {
     expect(
       laneLanguage(
         { role: "target", language: null, name: "a3f09c1e", langCode: "a3f09c1e" },
-        { role: "target", legacyTag: "a3f09c1e", settings: { targetLanguage: "Spanish" } },
+        { role: "target", legacyTag: "a3f09c1e" },
       ),
     ).toBe("")
   })
 
-  it("does not read settings when language is null (AQU-1595)", () => {
-    const settings = { sourceLanguage: "English", targetLanguage: "Spanish" }
+  it("answers a null language from the row alone (AQU-1595)", () => {
     expect(
       laneLanguage(
         { role: "target", language: null, name: null },
-        { settings, role: "target", legacyTag: "" },
+        { role: "target", legacyTag: "" },
       ),
     ).toBe("")
     expect(
       laneLanguage(
         { role: "target", language: "French", name: null },
-        { settings, role: "target", legacyTag: "" },
+        { role: "target", legacyTag: "" },
       ),
     ).toBe("French")
     expect(
       laneLanguage(
         { role: "target", language: null, name: "Bambara" },
-        { settings, role: "target", legacyTag: "" },
+        { role: "target", legacyTag: "" },
       ),
     ).toBe("Bambara")
   })
 
-  it("does not read settings.sourceLanguage for a source lane with a null language (AQU-1595)", () => {
+  it("answers a source lane with a null language from the row alone (AQU-1595)", () => {
     expect(
       laneLanguage(
         { role: "source", language: null, name: "Source" },
-        { settings: { sourceLanguage: "Gom" }, role: "source", legacyTag: null },
+        { role: "source", legacyTag: null },
       ),
     ).toBe("Source")
     expect(
       laneLanguage(
         { role: "source", language: "Koine Greek", name: null },
-        { settings: { sourceLanguage: "English" }, role: "source", legacyTag: null },
+        { role: "source", legacyTag: null },
       ),
     ).toBe("Koine Greek")
     expect(
       laneLanguage(
         { role: "source", language: null, name: null },
-        { settings: { sourceLanguage: "Gom" }, role: "source", legacyTag: null },
+        { role: "source", legacyTag: null },
       ),
     ).toBe("")
   })

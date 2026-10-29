@@ -429,7 +429,7 @@ export async function loadProjectContext(
     ...(await loadSubscribedConcepts(db, projectId, lanes)),
   ]
   const concepts = lane ? await conceptsForRequestedLane(db, projectId, loaded, lane) : loaded
-  const resolved = languagesForLanes(lanes, settings, "")
+  const resolved = languagesForLanes(lanes, "")
   const sourceLanguage = resolved.sourceLanguage ?? ""
   const targetLanguage = resolved.targetLanguage ?? ""
   const termMatching = parseTermMatching(settings.termMatching)
@@ -445,23 +445,17 @@ export async function loadProjectContext(
     authoredRules: parseAuthoredRules(settings.rules),
     projectFacts: readProjectFacts(settings.projectFacts),
     languageProfile: readLanguageProfile(settings.languageProfile),
-    ...((await hasExtraTargetLane(db, projectId, settings)) ? { multiLane: true } : {}),
+    ...((await hasExtraTargetLane(db, projectId)) ? { multiLane: true } : {}),
   }
 }
 
 /**
  * A second active target lane (AQU-1699). The `lanes` rows are the list
- * (AQU-1595); a project with none falls back to the settings registry, where a
- * registered lane beside the default one, not archived, counts. The registry
- * may list the primary language itself (AQU-1473), which is the default lane,
- * and that primary is the legacy `settings.targetLanguage` (0156 dropped the
- * column that projected it).
+ * (AQU-1595, AQU-2223). A project with no rows has no second lane: every
+ * project has rows since the AQU-1616 backfill, and one without them is a data
+ * bug, not a reason to read the retired settings registry.
  */
-async function hasExtraTargetLane(
-  db: SettingsDb,
-  projectId: string,
-  settings: Record<string, unknown>,
-): Promise<boolean> {
+async function hasExtraTargetLane(db: SettingsDb, projectId: string): Promise<boolean> {
   try {
     const row = await db
       .prepare(
@@ -470,17 +464,10 @@ async function hasExtraTargetLane(
       )
       .bind(projectId)
       .first<{ active: number | string }>()
-    const active = Number(row?.active ?? 0)
-    if (active > 0) return active > 1
+    return Number(row?.active ?? 0) > 1
   } catch {
-    // No lanes read: the settings registry below still answers.
+    return false
   }
-  const archived = new Set(stringList(settings.archivedLanes).map((lane) => lane.trim().toLowerCase()))
-  const primary = (asString(settings.targetLanguage) ?? "").trim().toLowerCase()
-  return stringList(settings.targetLanes).some((lane) => {
-    const tag = lane.trim().toLowerCase()
-    return tag !== primary && !archived.has(tag)
-  })
 }
 
 async function targetLaneId(
@@ -519,21 +506,12 @@ async function conceptsForRequestedLane(
   return conceptsForLane(concepts, activeId, emptyId)
 }
 
-function stringList(raw: unknown): string[] {
-  return Array.isArray(raw)
-    ? raw.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-    : []
-}
-
 /**
  * Is this lane one the project may draft into?
  *
  * AQU-1610: a lane id is checked against the `lanes` table — the lane's own
- * row, archived or not — which is the only identity that cannot name two
- * lanes at once. A legacy TAG still falls back to the settings rule
- * (`settings.targetLanes` minus `archivedLanes`, with `''` the project-default
- * lane) because older clients send tags and the project-level lists are
- * AQU-1595's to remove, not this ticket's.
+ * row — which is the only identity that cannot name two lanes at once. An
+ * archived lane is refused (AQU-1462).
  */
 export async function isRegisteredLaneId(
   db: SettingsDb,
@@ -555,26 +533,31 @@ export async function isRegisteredLaneId(
   }
 }
 
-/** Legacy-tag form of {@link isRegisteredLaneId}. Empty string is the
- *  project-default lane; named lanes must be in settings.targetLanes and not
- *  archived. The tag is matched exactly: "es" is not the lane registered as
- *  "Spanish". Removed with the project-level lane lists (AQU-1595). */
+/**
+ * Legacy-tag form of {@link isRegisteredLaneId}, for clients that still send
+ * `targetLang`. AQU-2223: answered from the `lanes` rows, like the id form —
+ * the tag must be a target lane's `legacy_tag`, matched exactly ("es" is not
+ * the lane tagged "Spanish"), and that lane must not be archived.
+ *
+ * `''` is the project-default lane. A project made since AQU-1594 has no row
+ * tagged `''`, and older clients still send `''` for the first lane there, so
+ * `''` is refused only when its row exists and is archived.
+ */
 export async function isRegisteredTargetLane(
   db: SettingsDb,
   projectId: string,
   lane: string,
 ): Promise<boolean> {
-  if (lane === "") return true
   try {
     const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-      .bind(projectId)
-      .first<{ settings: unknown }>()
-    if (!row) return false
-    const settings = parseSettings(row.settings)
-    const lanes = stringList(settings.targetLanes)
-    const archived = stringList(settings.archivedLanes)
-    return lanes.includes(lane) && !archived.includes(lane)
+      .prepare(
+        `SELECT archived_at FROM lanes
+          WHERE project_id = ? AND role = 'target' AND legacy_tag = ?`,
+      )
+      .bind(projectId, lane)
+      .first<{ archived_at: unknown }>()
+    if (!row) return lane === ""
+    return row.archived_at == null
   } catch {
     return false
   }

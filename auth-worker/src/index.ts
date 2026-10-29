@@ -204,6 +204,18 @@ app.use("*", async (c, next) => {
   }
 })
 
+// Baseline response hardening for an API that only ever returns JSON / SSE /
+// downloads: no MIME sniffing, no Referer (several flows carry a token in the
+// URL), and authenticated bodies are not heuristically cached by browsers or
+// intermediaries unless a route opts in with its own Cache-Control.
+app.use("*", async (c, next) => {
+  await next()
+  const h = c.res.headers
+  h.set("X-Content-Type-Options", "nosniff")
+  h.set("Referrer-Policy", "no-referrer")
+  if (c.req.method !== "OPTIONS" && !h.has("Cache-Control")) h.set("Cache-Control", "no-store")
+})
+
 // Observability: ship 4xx/5xx responses and unhandled throws to PostHog Logs
 // (fire-and-forget; no-op when POSTHOG_KEY is unset — see posthog-logs.ts).
 // Hono throws on `c.executionCtx` when there is none (vitest calls

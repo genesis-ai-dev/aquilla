@@ -387,6 +387,16 @@ export const org = defineNamespace({
     "org.teamDetail.addMemberButton": "Add member",
     "org.teamDetail.removeAriaLabel": "Remove {name}",
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
+    // AQU-2238: direct invite-to-team for someone who is not an org member.
+    "org.teamDetail.outsideOrgLabel": "Invite someone outside the organization",
+    "org.teamDetail.outsideOrgPlaceholder": "Username or email",
+    "org.teamDetail.outsideOrgScopeWithProjects":
+      "Someone outside the organization joins this team only, and reaches its projects: {projects}. They are not added to the organization's member list and see nothing else.",
+    "org.teamDetail.outsideOrgScopeNoProjects":
+      "Someone outside the organization joins this team only. No project is attached to this team yet, so they will see nothing until one is. They are not added to the organization's member list.",
+    "org.teamDetail.outsideOrgRole": "Outside org",
+    "org.teamDetail.outsideOrgRoleTooltip":
+      "Not on this organization's member list. They reach only the projects attached to the teams they are on.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
     "org.teamDetail.couldntBeAddedFallback": "couldn't be added",
     // "Adding…" → common.adding (identical text)
@@ -2147,6 +2157,11 @@ export const org = defineNamespace({
         description:
           "Accessible name for a 'remove' control on TeamDetail — used both for a staged-member chip's × button and for a team member row's Remove action. {name} is whichever person's username is being removed.",
         placeholders: { name: "Username of the person the control removes — not translated." },
+      },
+      "org.teamDetail.outsideOrgScopeWithProjects": {
+        description:
+          "AQU-2238: scope sentence under the 'invite someone outside the organization' field in the team add-member dialog, naming exactly what the guest will and won't reach (AQU-1030). {projects} is the team's attached projects. The no-project wording is a separate key.",
+        placeholders: { projects: "The team's attached project names, joined as a localized list — project names are not translated." },
       },
       "org.teamDetail.addErrorPrefix": {
         description:

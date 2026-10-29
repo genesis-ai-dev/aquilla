@@ -44,7 +44,7 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
 
       <p className="text-center text-xs text-muted-foreground">
         {t("onboarding.step.privacy.footer")}{" "}
-        <a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+        <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
           {t("onboarding.step.privacy.policyLink")}
         </a>.
       </p>

@@ -129,6 +129,28 @@ describe("TeamDetail project management", () => {
     await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400, undefined))
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): every project in the org is a choice
+  // here, so the list gets a search box.
+  it("the project to attach list has a search box that narrows it", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [
+        { id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+        { id: "pb", name: "Wolof", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      ],
+    })
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    fireEvent.click(screen.getByRole("combobox", { name: /project to attach/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "wol" } })
+    expect(await screen.findByRole("option", { name: "Wolof" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Bambara" })).toBeNull()
+  })
+
   it("checks every lane from All, and sends only the lanes left checked", async () => {
     targetLanes.mockReturnValue({
       lanes: [

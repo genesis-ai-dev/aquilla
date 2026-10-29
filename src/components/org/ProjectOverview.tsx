@@ -148,14 +148,7 @@ import {
   type StatKey,
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -2323,37 +2316,35 @@ export function ProjectOverview() {
                     <FieldGroup>
                       <Field>
                         <FieldLabel htmlFor="project-pm">{t("org.projectOverview.projectManagerHeading")}</FieldLabel>
-                        <Select
-                          value={pmSelection}
-                          onValueChange={(v) => setPmSelection(v ?? "")}
-                          items={[
-                            { value: "", label: t("org.projectOverview.unassigned") },
+{/* AQU-2260: one candidate per member, so a search box. */}
+                        <SearchSelect
+                          id="project-pm"
+                          aria-label={t("org.projectOverview.projectManagerHeading")}
+                          options={[
+                            { value: "", label: t("org.projectOverview.unassigned"), userId: undefined as number | undefined },
                             ...pmCandidates.map((m) => ({
                               value: String(m.userId),
                               label: m.username,
+                              userId: m.userId,
                             })),
                           ]}
-                        >
-                          <SelectTrigger id="project-pm" aria-label={t("org.projectOverview.projectManagerHeading")}>
-                            <SelectValue placeholder={t("org.projectOverview.selectMemberPlaceholder")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="">{t("org.projectOverview.unassigned")}</SelectItem>
-                              {pmCandidates.map((m) => (
-                                <SelectItem key={m.userId} value={String(m.userId)}>
-                                  <UsernameWithAvatar
-                                    userId={m.userId}
-                                    username={m.username}
-                                    size="xs"
-                                    menuSafe
-                                    nameClassName="text-sm font-normal"
-                                  />
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                          value={pmSelection}
+                          onValueChange={setPmSelection}
+                          placeholder={t("org.projectOverview.selectMemberPlaceholder")}
+                          renderOption={(o) =>
+                            o.userId == null ? (
+                              o.label
+                            ) : (
+                              <UsernameWithAvatar
+                                userId={o.userId}
+                                username={o.label}
+                                size="xs"
+                                menuSafe
+                                nameClassName="text-sm font-normal"
+                              />
+                            )
+                          }
+                        />
                       </Field>
                     </FieldGroup>
                     <DialogFooter>

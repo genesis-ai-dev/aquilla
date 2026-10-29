@@ -80,9 +80,10 @@ vi.mock("@/hooks/useProject", () => ({
 // real. The overview Members card (AQU-1171) mounts the same hook via
 // MembersSection once expanded; an empty roster is enough to prove the
 // surface is present without hitting identity.
+const pmMembers: { members: unknown[] } = { members: [] }
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
-    members: [],
+    members: pmMembers.members,
     isLoading: false,
     error: null,
     rosterHidden: false,
@@ -1315,6 +1316,29 @@ describe("ProjectOverview PM assignment", () => {
     await waitFor(() =>
       expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
     )
+  })
+
+  // AQU-2260 (Sam, Oct 29, option 2B): one candidate per member, so the
+  // project manager list gets a search box.
+  it("the project manager list has a search box that narrows it", async () => {
+    pmMembers.members = [
+      { userId: 7, username: "wendi", role: { level: 500, name: "project_lead", source: "override" }, secondarySources: [] },
+      { userId: 8, username: "tomas", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      pm: { id: 7, username: "wendi" },
+    })
+    renderOverview()
+    fireEvent.click(await screen.findByRole("button", { name: "Change project manager" }))
+    fireEvent.click(await screen.findByRole("combobox", { name: "Project manager" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "tom" } })
+    expect(await screen.findByRole("option", { name: /tomas/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /wendi/ })).toBeNull()
+    pmMembers.members = []
   })
 
   it("clears the deadline from the edit-dialog Clear control", async () => {

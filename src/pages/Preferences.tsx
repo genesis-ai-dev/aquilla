@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -176,7 +177,13 @@ function GeneralSection({
   const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
   const { enabled, setEnabled } = useAnalyticsConsent()
-  const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
+  const languageItems = locales.map((l) => ({
+    value: l.code,
+    label: l.nativeName,
+    keywords: `${l.englishName} ${l.code}`,
+    lang: l.code,
+    dir: l.dir,
+  }))
   const fontSizeItems = FONT_SIZE_SCALES.map((id) => ({ value: id, label: t(FONT_SIZE_LABEL_KEYS[id]) }))
 
   return (
@@ -247,37 +254,17 @@ function GeneralSection({
         label={t("language.switcher.settingsRow")}
         description={t("onboarding.preferences.language.rowDescription")}
         control={
-          <Select
-            items={languageItems}
+          // AQU-2260: a search box, since the list grows with the catalogs.
+          // Each language under its own name, in its own script and direction,
+          // and found by its English name or code too.
+          <SearchSelect
+            id="ui-language"
+            aria-label={t("language.switcher.settingsRow")}
+            className="w-44 bg-background"
+            options={languageItems}
             value={locale}
-            onValueChange={(value) => {
-              if (value != null) setLocale(value)
-            }}
-          >
-            <SelectTrigger
-              id="ui-language"
-              aria-label={t("language.switcher.settingsRow")}
-              className="w-44 bg-background"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {locales.map((l) => (
-                  <SelectItem
-                    key={l.code}
-                    value={l.code}
-                    // Endonym alone for sighted users; tag lang/dir so the
-                    // browser shapes the script correctly (incl. RTL Arabic).
-                    lang={l.code}
-                    dir={l.dir}
-                  >
-                    {l.nativeName}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            onValueChange={(value) => setLocale(value)}
+          />
         }
       />
       <SettingsRow

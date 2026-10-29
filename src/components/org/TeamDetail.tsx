@@ -55,14 +55,7 @@ import {
   projectsResultError,
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import {
@@ -933,22 +926,15 @@ export function TeamDetail() {
                           </DialogDescription>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-3">
-                          <Select
-                            items={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
+{/* AQU-2260: every project in the org, so a search box. */}
+                          <SearchSelect
+                            aria-label={t("org.teamDetail.projectToAttachAriaLabel")}
+                            className="w-full"
+                            options={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
                             value={selectedProjectId}
-                            onValueChange={(v) => setSelectedProjectId(v ?? "")}
-                          >
-                            <SelectTrigger aria-label={t("org.teamDetail.projectToAttachAriaLabel")} className="w-full">
-                              <SelectValue placeholder={t("org.teamDetail.selectProjectPlaceholder")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {attachableProjects.map((op) => (
-                                  <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                            onValueChange={setSelectedProjectId}
+                            placeholder={t("org.teamDetail.selectProjectPlaceholder")}
+                          />
                           <RoleSelect
                             options={ALL_ROLE_OPTIONS}
                             value={selectedRole}

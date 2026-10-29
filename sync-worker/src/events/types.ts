@@ -1174,6 +1174,9 @@ export interface EventPayloads {
       color?: string | null
       sourceTrackId?: string | null
       contentFileId?: string | null
+      /** AQU-2252: false makes an added track a layer (its takes set no line's
+       *  length while the file follows its recordings); null clears it. */
+      setsLineLengths?: boolean | null
     } | null
   }
 

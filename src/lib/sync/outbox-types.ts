@@ -813,6 +813,8 @@ export interface OutboxEventPayloads {
       groupId?: string | null
       color?: string | null
       sourceTrackId?: string | null
+      /** AQU-2252: false makes an added track a layer; null clears it. */
+      setsLineLengths?: boolean | null
     } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).

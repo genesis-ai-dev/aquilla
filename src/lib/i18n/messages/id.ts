@@ -5837,7 +5837,6 @@ export const id: Catalog = {
   "settings.monday.connectedAsRow": "Tersambung sebagai {username}",
   "settings.monday.connectedOnRow": "Tersambung {date}",
   "settings.monday.disconnectButton": "Putuskan sambungan",
-  "settings.monday.manageRestrictedNotice": "Hanya pengelola dan pemilik organisasi yang dapat mengelola koneksi ini.",
   "settings.monday.connectPrompt": "Sambungkan sebuah akun Monday.com agar proyek di organisasi ini dapat menautkan papan dan mengirim progres terjemahan secara otomatis.",
   "settings.monday.connectRestrictedNotice": "Mintalah pengelola atau pemilik organisasi untuk menyambungkan Monday.com.",
   "settings.monday.awaitingOAuthNotice": "Menunggu tab Monday.com… halaman ini diperbarui otomatis begitu penyambungannya selesai.",

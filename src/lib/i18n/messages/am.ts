@@ -7177,7 +7177,6 @@ export const am: Catalog = {
   "settings.monday.connectedAsOnRow": "እንደ {username} በ{date} ተገናኝቷል",
   "settings.monday.disconnectButton": "ግንኙነት ያቋርጡ",
   "settings.monday.openMondayButton": "Monday.com ይክፈቱ",
-  "settings.monday.manageRestrictedNotice": "የድርጅት ጠባቂዎች እና ባለቤቶች ብቻ ይህን ግንኙነት ማስተዳደር ይችላሉ።",
   "settings.monday.connectPrompt": "በዚህ ድርጅት ውስጥ ያሉ ፕሮጀክቶች ቦርዶችን እንዲያገናኙ እና የትርጉም እድገትን በራስ እንዲገፉ የMonday.com መለያ ያገናኙ።",
   "settings.monday.connectRestrictedNotice": "Monday.com እንዲያገናኝ የድርጅት ጠባቂ ወይም ባለቤት ይጠይቁ።",
   "settings.monday.awaitingOAuthNotice": "የMonday.com ትሩን በመጠበቅ ላይ… ግንኙነቱ ሲጠናቀቅ ይህ ገጽ በራስ ይዘምናል።",

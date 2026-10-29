@@ -7172,7 +7172,6 @@ export const pa: Catalog = {
   "settings.monday.connectedAsOnRow": "{date} ਨੂੰ {username} ਵਜੋਂ ਜੁੜਿਆ",
   "settings.monday.disconnectButton": "ਕਨੈਕਸ਼ਨ ਤੋੜੋ",
   "settings.monday.openMondayButton": "Monday.com ਖੋਲ੍ਹੋ",
-  "settings.monday.manageRestrictedNotice": "ਸਿਰਫ਼ ਸੰਸਥਾ ਸੰਭਾਲਕ ਅਤੇ ਮਾਲਕ ਇਹ ਕਨੈਕਸ਼ਨ ਸੰਭਾਲ ਸਕਦੇ ਹਨ.",
   "settings.monday.connectPrompt": "ਇਸ ਸੰਸਥਾ ਦੇ ਪ੍ਰੋਜੈਕਟਾਂ ਨੂੰ ਬੋਰਡ ਜੋੜਨ ਅਤੇ ਅਨੁਵਾਦ ਤਰੱਕੀ ਆਪਣੇ ਆਪ ਭੇਜਣ ਦੇਣ ਲਈ ਇੱਕ Monday.com ਖਾਤਾ ਜੋੜੋ.",
   "settings.monday.connectRestrictedNotice": "Monday.com ਜੋੜਨ ਲਈ ਸੰਸਥਾ ਸੰਭਾਲਕ ਜਾਂ ਮਾਲਕ ਨੂੰ ਕਹੋ.",
   "settings.monday.awaitingOAuthNotice": "Monday.com ਟੈਬ ਦੀ ਉਡੀਕ… ਕਨੈਕਸ਼ਨ ਪੂਰਾ ਹੁੰਦਿਆਂ ਇਹ ਪੰਨਾ ਆਪਣੇ ਆਪ ਅੱਪਡੇਟ ਹੁੰਦਾ ਹੈ.",

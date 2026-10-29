@@ -6913,7 +6913,6 @@ export const hi: Catalog = {
   "settings.monday.connectedAsOnRow": "{date} को {username} के रूप में जुड़ा",
   "settings.monday.disconnectButton": "डिस्कनेक्ट करें",
   "settings.monday.openMondayButton": "Monday.com खोलें",
-  "settings.monday.manageRestrictedNotice": "यह कनेक्शन केवल संगठन के अनुरक्षक और स्वामी प्रबंधित कर सकते हैं।",
   "settings.monday.connectPrompt": "इस संगठन की परियोजनाओं को बोर्ड जोड़ने और अनुवाद प्रगति अपने आप भेजने देने के लिए एक Monday.com खाता जोड़ें।",
   "settings.monday.connectRestrictedNotice": "Monday.com जोड़ने के लिए संगठन के अनुरक्षक या स्वामी से कहें।",
   "settings.monday.awaitingOAuthNotice": "Monday.com टैब की प्रतीक्षा… कनेक्शन पूरा होते ही यह पृष्ठ अपने आप अपडेट होता है।",

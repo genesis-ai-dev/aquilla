@@ -7178,7 +7178,6 @@ export const ha: Catalog = {
   "settings.monday.connectedAsOnRow": "An haɗa a matsayin {username} a {date}",
   "settings.monday.disconnectButton": "Ku cire haɗi",
   "settings.monday.openMondayButton": "Ku buɗe Monday.com",
-  "settings.monday.manageRestrictedNotice": "Masu kula da masu mallaka na ƙungiya kawai za su iya kula da wannan haɗi.",
   "settings.monday.connectPrompt": "Ku haɗa asusun Monday.com don ayyuka a wannan ƙungiya su haɗa alluna kuma su tura ci gaban fassara da kansu.",
   "settings.monday.connectRestrictedNotice": "Ku tambayi mai kula ko mai mallaka na ƙungiya ya haɗa Monday.com.",
   "settings.monday.awaitingOAuthNotice": "Ana jiran shafin Monday.com… wannan shafi yana sabuntawa da kansa da zarar haɗin ya gama.",

@@ -5744,7 +5744,6 @@ export const my: Catalog = {
   "settings.monday.connectedAsRow": "{username} အဖြစ် ချိတ်ဆက်ထားသည်",
   "settings.monday.connectedOnRow": "{date} တွင် ချိတ်ဆက်ထားသည်",
   "settings.monday.disconnectButton": "အဆက်အသွယ်ကိတ်ခွင့်",
-  "settings.monday.manageRestrictedNotice": "အဖွဲ့အကျ စောင့်ရှောက်သူများ နှင့် အုပ်စုဖြစ်သူများသည် ဤချိတ်ဆက်မှုကို စီမံခန့်ခွဲနိုင်သည်။",
   "settings.monday.connectPrompt": "ဤအဖွဲ့အကျတွင် ပရောဂျက်များ ဘုတ်စာတင်များကို ချိတ်ဆက်နိုင်ရန် နှင့် ဘာသာပြန် တိုးတက်မှုကို အလိုအလျောက် တင်သွင်းစေရန် Monday.com အကောင့်ချိတ်ဆက်ပါ။",
   "settings.monday.connectRestrictedNotice": "အဖွဲ့အကျ စောင့်ရှောက်သူ သို့မဟုတ် အုပ်စုဖြစ်သူထံ Monday.com ချိတ်ဆက်ရန် တောင်းဆိုပါ။",
   "settings.monday.awaitingOAuthNotice": "Monday.com tab အတွက် စောင့်ဆိုင်းနေသည်… ချိတ်ဆက်မှု အပြီးသတ်လုပ်ဆောင်ချိန်တွင် ဤစာမျက်နှာ အလိုအလျောက် အဆင့်မြှင့်တင်သည်။",

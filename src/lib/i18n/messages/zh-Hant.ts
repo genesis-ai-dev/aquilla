@@ -5762,7 +5762,6 @@ export const zh_Hant: Catalog = {
   "settings.monday.connectedAsRow": "已以 {username} 身分連接",
   "settings.monday.connectedOnRow": "連接於 {date}",
   "settings.monday.disconnectButton": "中斷連接",
-  "settings.monday.manageRestrictedNotice": "只有組織維護者與擁有者可以管理這個連線。",
   "settings.monday.connectPrompt": "連接一個 Monday.com 帳戶，讓這個組織中的專案可以連結看板並自動推送翻譯進度。",
   "settings.monday.connectRestrictedNotice": "請洽詢組織維護者或擁有者連接 Monday.com。",
   "settings.monday.awaitingOAuthNotice": "正在等待 Monday.com 分頁… 連線完成後，這個頁面會自動更新。",

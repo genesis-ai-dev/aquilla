@@ -7186,7 +7186,6 @@ export const bn: Catalog = {
   "settings.monday.connectedAsOnRow": "{date}-এ {username} হিসেবে সংযুক্ত",
   "settings.monday.disconnectButton": "সংযোগ কাটুন",
   "settings.monday.openMondayButton": "Monday.com খুলুন",
-  "settings.monday.manageRestrictedNotice": "শুধু প্রতিষ্ঠানের রক্ষণাবেক্ষক ও মালিক এই সংযোগ পরিচালনা করতে পারেন।",
   "settings.monday.connectPrompt": "এই প্রতিষ্ঠানের প্রকল্পকে বোর্ড লিংক করতে ও অনুবাদের অগ্রগতি নিজে পাঠাতে একটি Monday.com অ্যাকাউন্ট সংযোগ করুন।",
   "settings.monday.connectRestrictedNotice": "Monday.com সংযোগ করতে একজন প্রতিষ্ঠান রক্ষণাবেক্ষক বা মালিককে বলুন।",
   "settings.monday.awaitingOAuthNotice": "Monday.com ট্যাবের জন্য অপেক্ষা… সংযোগ শেষ হলে এই পৃষ্ঠা নিজে হালনাগাদ হয়।",

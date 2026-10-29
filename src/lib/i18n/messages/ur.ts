@@ -7163,7 +7163,6 @@ export const ur: Catalog = {
   "settings.monday.connectedAsOnRow": "{date} کو {username} کے طور پر جڑا",
   "settings.monday.disconnectButton": "منقطع کریں",
   "settings.monday.openMondayButton": "Monday.com کھولیں",
-  "settings.monday.manageRestrictedNotice": "یہ کنکشن صرف تنظیم کے نگہدار اور مالکان سنبھال سکتے ہیں۔",
   "settings.monday.connectPrompt": "Monday.com اکاؤنٹ جڑیں تاکہ اس تنظیم کے منصوبے بورڈ لنک کریں اور ترجمہ پیش رفت خود بھیجیں۔",
   "settings.monday.connectRestrictedNotice": "Monday.com جوڑنے کے لیے تنظیم کے نگہدار یا مالک سے کہیں۔",
   "settings.monday.awaitingOAuthNotice": "Monday.com ٹیب کا انتظار… کنکشن مکمل ہوتے ہی یہ صفحہ خود بدل جاتا ہے۔",

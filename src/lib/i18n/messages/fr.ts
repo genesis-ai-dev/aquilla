@@ -5795,7 +5795,6 @@ export const fr: Catalog = {
   "settings.monday.connectedAsRow": "Connecté en tant que {username}",
   "settings.monday.connectedOnRow": "Connecté le {date}",
   "settings.monday.disconnectButton": "Déconnecter",
-  "settings.monday.manageRestrictedNotice": "Seuls les mainteneurs et les propriétaires de l'organisation peuvent gérer cette connexion.",
   "settings.monday.connectPrompt": "Connectez un compte Monday.com pour permettre aux projets de cette organisation de lier des tableaux et de transmettre automatiquement la progression de la traduction.",
   "settings.monday.connectRestrictedNotice": "Demandez à un mainteneur ou à un propriétaire de l'organisation de connecter Monday.com.",
   "settings.monday.awaitingOAuthNotice": "En attente de l'onglet Monday.com… cette page se met à jour automatiquement une fois la connexion terminée.",

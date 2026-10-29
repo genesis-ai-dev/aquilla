@@ -422,7 +422,6 @@ export const settings = defineNamespace({
     "settings.monday.connectedAsOnRow": "Connected as {username} on {date}",
     "settings.monday.disconnectButton": "Disconnect",
     "settings.monday.openMondayButton": "Open Monday.com",
-    "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
       "boards and push translation progress automatically.",

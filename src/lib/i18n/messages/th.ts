@@ -5746,7 +5746,6 @@ export const th: Catalog = {
   "settings.monday.connectedAsRow": "เชื่อมต่อในนาม {username}",
   "settings.monday.connectedOnRow": "เชื่อมต่อ {date}",
   "settings.monday.disconnectButton": "ตัดการเชื่อมต่อ",
-  "settings.monday.manageRestrictedNotice": "เฉพาะผู้ดูแลรักษาองค์กรและเจ้าของเท่านั้นที่สามารถจัดการการเชื่อมต่อนี้ได้",
   "settings.monday.connectPrompt": "เชื่อมต่อบัญชี Monday.com เพื่อให้โครงการในองค์กรนี้สามารถลิงก์กระดานและส่งความก้าวหน้าในการแปลโดยอัตโนมัติ",
   "settings.monday.connectRestrictedNotice": "ขอให้ผู้ดูแลรักษาองค์กรหรือเจ้าของเชื่อมต่อ Monday.com",
   "settings.monday.awaitingOAuthNotice": "รอแท็บ Monday.com… หน้านี้อัปเดตโดยอัตโนมัติเมื่อการเชื่อมต่อเสร็จสิ้น",

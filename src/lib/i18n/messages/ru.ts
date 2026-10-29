@@ -5880,7 +5880,6 @@ export const ru: Catalog = {
   "settings.monday.connectedAsRow": "Подключено как {username}",
   "settings.monday.connectedOnRow": "Подключено {date}",
   "settings.monday.disconnectButton": "Отключить",
-  "settings.monday.manageRestrictedNotice": "Управлять этим подключением могут только кураторы и владельцы организации.",
   "settings.monday.connectPrompt": "Подключите аккаунт Monday.com, чтобы проекты этой организации могли связывать доски и автоматически отправлять прогресс перевода.",
   "settings.monday.connectRestrictedNotice": "Попросите куратора или владельца организации подключить Monday.com.",
   "settings.monday.awaitingOAuthNotice": "Ожидание вкладки Monday.com… эта страница обновится автоматически, когда подключение завершится.",

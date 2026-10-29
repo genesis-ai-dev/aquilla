@@ -5722,7 +5722,6 @@ export const ms: Catalog = {
   "settings.monday.connectedAsRow": "Terhubung sebagai {username}",
   "settings.monday.connectedOnRow": "Terhubung {date}",
   "settings.monday.disconnectButton": "Putuskan sambungan",
-  "settings.monday.manageRestrictedNotice": "Hanya pemelihara dan pemilik organisasi yang dapat mengelola koneksi ini.",
   "settings.monday.connectPrompt": "Hubungkan akun Monday.com untuk membiarkan projek dalam organisasi ini menghubungkan papan dan mendorong kemajuan terjemahan secara otomatis.",
   "settings.monday.connectRestrictedNotice": "Minta pemelihara atau pemilik organisasi untuk menghubungkan Monday.com.",
   "settings.monday.awaitingOAuthNotice": "Menunggu tab Monday.com… halaman ini diperbarui secara otomatis setelah koneksi selesai.",

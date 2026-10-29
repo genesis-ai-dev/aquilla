@@ -5753,7 +5753,6 @@ export const ar: Catalog = {
   "settings.monday.connectedAsRow": "متصل باسم {username}",
   "settings.monday.connectedOnRow": "متصل في {date}",
   "settings.monday.disconnectButton": "قطع الاتصال",
-  "settings.monday.manageRestrictedNotice": "فقط مسؤولو المنظمة والمالكون يمكنهم إدارة هذا الاتصال.",
   "settings.monday.connectPrompt": "اتصل بحساب Monday.com للسماح للمشاريع في هذه المنظمة بربط اللوحات ودفع تقدم الترجمة تلقائيًا.",
   "settings.monday.connectRestrictedNotice": "اطلب من مسؤول المنظمة أو المالك الاتصال بـ Monday.com.",
   "settings.monday.awaitingOAuthNotice": "انتظار علامة تبويب Monday.com… يتم تحديث هذه الصفحة تلقائيًا بمجرد اكتمال الاتصال.",

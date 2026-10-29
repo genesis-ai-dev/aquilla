@@ -7172,7 +7172,6 @@ export const sw: Catalog = {
   "settings.monday.connectedAsOnRow": "Imeunganishwa kama {username} tarehe {date}",
   "settings.monday.disconnectButton": "Tenganisha",
   "settings.monday.openMondayButton": "Fungua Monday.com",
-  "settings.monday.manageRestrictedNotice": "Ni Watunzaji na Wamiliki wa shirika pekee wanaweza kudhibiti muunganisho huu.",
   "settings.monday.connectPrompt": "Unganisha akaunti ya Monday.com ili miradi ya shirika hili iweze kuunganisha mabao na kusukuma maendeleo ya tafsiri kiotomatiki.",
   "settings.monday.connectRestrictedNotice": "Omba Mtunzaji au Mmiliki wa shirika aunganishe Monday.com.",
   "settings.monday.awaitingOAuthNotice": "Inasubiri kichupo cha Monday.com… ukurasa huu unasasishwa kiotomatiki muunganisho ukikamilika.",

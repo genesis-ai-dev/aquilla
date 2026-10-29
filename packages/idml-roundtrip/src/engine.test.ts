@@ -8,6 +8,7 @@ import {
   parseIdml,
   partitionIdmlUnitAtLineBreaks,
   projectIdmlUnitToLocator,
+  releaseOversizedNoBreakInPackage,
   sliceIdmlUnit,
   validateExport,
 } from "./engine.js"
@@ -1231,6 +1232,35 @@ describe("sliceIdmlUnit / mergeIdmlSliceTargetHtml", () => {
       ...unit.locator,
       slotIndexes: [7, 8],
     })).toBeUndefined()
+  })
+
+  it("keeps NoBreak through export so validation passes, then releases a run too long for one line", async () => {
+    const sentence =
+      ". Davi era senhor e rei. Mas o senhor e rei aqui não era Davi."
+    const story = `<?xml version="1.0" encoding="UTF-8"?><idPkg:Story xmlns:idPkg="urn:test"><Story Self="u1"><ParagraphStyleRange Self="pnote" AppliedParagraphStyle="ParagraphStyle/intro%3aipi"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/k_xt" NoBreak="true"><Content>Melchizedek</Content></CharacterStyleRange><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" NoBreak="true"><Content>.</Content></CharacterStyleRange></ParagraphStyleRange><ParagraphStyleRange Self="plock"><CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]" NoBreak="true"><Content>os d</Content></CharacterStyleRange></ParagraphStyleRange></Story></idPkg:Story>`
+    const bytes = await makeIdml({ "Stories/Story_u1.xml": story })
+    const parsed = await parseIdml(bytes)
+    const unit = unitById(parsed.units, "pnote")
+    const targetHtml = unit.sourceHtml.replace(
+      /(<span data-idml-slot="1"[^>]*>)\.(<\/span>)/,
+      `$1${sentence}$2`,
+    )
+
+    const exported = await exportIdml(bytes, [translationFor(unit, targetHtml)], { strict: true })
+    const exportedStory = await memberText(exported.bytes, "Stories/Story_u1.xml")
+    const diagnostics = await validateExport(exported.bytes, parsed.manifest)
+
+    expect(diagnostics).toEqual([])
+    expect(exportedStory).toContain(`NoBreak="true"><Content>${sentence}</Content>`)
+
+    const repairedStory = await memberText(
+      await releaseOversizedNoBreakInPackage(exported.bytes),
+      "Stories/Story_u1.xml",
+    )
+    expect(repairedStory).toContain(`NoBreak="true"><Content>Melchizedek</Content>`)
+    expect(repairedStory).toContain(`NoBreak="true"><Content>os d</Content>`)
+    expect(repairedStory).toContain(`<Content>${sentence}</Content>`)
+    expect(repairedStory).not.toContain(`NoBreak="true"><Content>${sentence}</Content>`)
   })
 })
 

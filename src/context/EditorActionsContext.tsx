@@ -16,6 +16,7 @@
 
 import { createContext, useContext, type ReactNode } from "react"
 import type { MemberScope } from "@/lib/sync/member-scopes"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
@@ -74,6 +75,14 @@ export interface EditorActionsContextValue {
   /** AQU-2212: the one-click "Change to …" / "Generate · …" for a line whose
    *  voice and take disagree (lib/audio/line-voice `lineVoicePending`). */
   onApplyLineVoice?: (cellId: string) => void
+  /**
+   * AQU-1758: the WHOLE project's voices, every lane's — for the
+   * clone-reference guard only (AQU-2037). Which voice a line speaks with is
+   * its lane's; a take some voice was cloned from is left alone whichever lane
+   * that voice is on. The workspace runs `onApplyLineVoice` by this rule, so
+   * the button offering it reads the same library.
+   */
+  allTtsSettings?: ProjectTtsSettings
   /** AQU-2212: "Add a voice…" from a line's voice dropdown — New voice on
    *  Characters, the voice it adds cast on that line. */
   onAddVoiceForLine?: (cellId: string) => void

@@ -71,6 +71,19 @@ describe("RecordingTakes — the line's voice and its take (AQU-2212)", () => {
     expect(screen.queryByTestId("voice-card-apply")).toBeNull()
   })
 
+  // AQU-2037: which voice a line speaks with is the LANE's, but a take some
+  // voice was cloned from is left alone whichever lane that voice is on — the
+  // rule the workspace runs the click by. A voice another lane cloned from
+  // this take is not in this lane's library.
+  it("never offers to re-voice a take another lane's voice was cloned from", () => {
+    const echo: Voice = { id: "v-echo", name: "Echo", color: "#444", provider: "inworld", voiceName: "echo", referenceAudioId: T1 } as Voice
+    const lane = cast("v-hearth")
+    const whole = { ...lane, voices: [...(lane.voices ?? []), echo] } as ProjectTtsSettings
+    draw(lane, { onApplyLineVoice: vi.fn(), allTtsSettings: whole })
+    // Not "Change to Hearth": what the click would do is read the text.
+    expect(screen.getByTestId("voice-card-apply")).toHaveTextContent("Generate · Hearth")
+  })
+
   it("says Voicing as … while the line is voiced, in the button's place", () => {
     draw(cast("v-hearth"), { onApplyLineVoice: vi.fn() })
     act(() => setVoicingAs("c1", "Hearth"))

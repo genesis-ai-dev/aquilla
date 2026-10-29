@@ -9898,6 +9898,7 @@ export function ProjectWorkspace() {
     onCloneTake: cloneTake, // AQU-1758 / AQU-2212: …in one step
     onLineVoicePicked: handleLineVoicePicked, // AQU-2212: a pick acts on the line
     onApplyLineVoice: handleApplyLineVoice, // AQU-2212: "Change to …" / "Generate · …"
+    allTtsSettings: tts.settings, // AQU-2037: …never over a take a voice was cloned from
     onAddVoiceForLine: addVoiceForLine, // AQU-2212: "Add a voice…"
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
@@ -9926,7 +9927,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, makeCharacter, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, makeCharacter, tts.settings, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.

@@ -2927,13 +2927,19 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         )}
       >
         {/* AQU-2260 third pass: why the row is ringed in yellow opens from an
-            (i) on click, in the ring's corner. It used to be the row's hover title. */}
+            (i) on click, in the ring's top-start corner. It used to be the
+            row's hover title. Not the end corner: the cell's action rail sits
+            over that one and swallowed the click. Below the time lens's "no
+            timing" mark when a row has both. */}
         {needsSourceReview && (
           <InfoNote
             label={t("editor.reimport.sourceReviewInfo")}
             testId="source-review-info"
-            side="left"
-            className="absolute end-0.5 top-1 z-10 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300"
+            side="right"
+            className={cn(
+              "absolute start-1 z-10 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300",
+              untimedInTimeLens ? "top-5" : "top-1",
+            )}
             iconClassName="h-3 w-3"
           >
             {t("editor.reimport.sourceReview")}

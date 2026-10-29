@@ -656,6 +656,12 @@ export interface TimelineEditorProps {
     onMoveToScope(trackId: string, groupId: string | null, order: number): void
     onCreateFolderFrom(trackIds: readonly string[]): string
     onDelete(trackIds: readonly string[]): void
+    /**
+     * AQU-2252 (Sam, Oct 29): "Sets line lengths" on added audio tracks —
+     * `false` makes them layers. Offered only while the file follows its
+     * recordings: following the source, nothing sets a line's length.
+     */
+    onSetLineLengths?(trackIds: readonly string[], sets: boolean): void
   }
 }
 
@@ -1400,6 +1406,9 @@ export function TimelineEditor({
    *  setting had no trigger, no `⋯`, nothing. */
   const canHideTracks = Boolean(fileId)
   const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+  /** AQU-2252: "Sets line lengths" — only while the file follows its
+   *  recordings, where a track's takes are what set a line's length. */
+  const lineLengthsAction = audioFirst ? trackEditing?.onSetLineLengths : undefined
 
   // ── AQU-1684: hiding tracks ───────────────────────────────────────────────
   /** The lane a primary-button press began in, until it is let go: a chip or
@@ -1564,6 +1573,7 @@ export function TimelineEditor({
         canEdit: Boolean(trackEditing),
         canPromote: Boolean(onPromoteTrackToRows),
         canHide: canHideTracks,
+        canSetLengths: Boolean(lineLengthsAction),
       }),
     )
   }
@@ -1656,6 +1666,7 @@ export function TimelineEditor({
             // it asks first (Sam, 2026-08-22). The menu opens the question; the
             // dialog is what calls through.
             onDelete: setDeletingTrackIds,
+            onSetLineLengths: lineLengthsAction,
           }
         : undefined,
     })
@@ -4917,7 +4928,14 @@ export function TimelineEditor({
                     // inside a folder is said by the indented rows when it is
                     // open and by the summary band when it is closed. The
                     // kind-table fallback flows through unrendered.
-                    sub={render.sub}
+                    // AQU-2252 (Sam, Oct 29): a track made a layer says so in
+                    // words, while the file follows its recordings — the only
+                    // timing where a track's takes set a line's length.
+                    sub={
+                      audioFirst && track.kind === "audio" && track.setsLineLengths === false
+                        ? t("editor.timeline.laneLayerSub")
+                        : render.sub
+                    }
                     dot={render.dot}
                     // Every row but a FOLDER, which is a heading rather than a
                     // track (Sam's own rule) and has a disclosure triangle

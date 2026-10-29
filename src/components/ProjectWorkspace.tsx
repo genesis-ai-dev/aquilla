@@ -14035,6 +14035,27 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * AQU-2252 (Sam, Oct 29): whether these added tracks' takes set their lines'
+   * lengths while the file follows its recordings. `false` is stored (the
+   * track becomes a layer); `true` clears the field back to the default.
+   * Track editing, one write for the whole selection, and one undo step.
+   */
+  const handleSetTrackLineLengths = useCallback(
+    (trackIds: readonly string[], sets: boolean) => {
+      const value = sets ? null : false
+      recordTrackChanges(
+        sets ? "editor.history.stepTrackSetsLengths" : "editor.history.stepTrackMadeLayer",
+        trackIds.map((trackId) => ({ trackId, after: { setsLineLengths: value } })),
+      )
+      void applyTrackPatches(
+        trackIds.map((trackId) => ({ trackId, patch: { setsLineLengths: value } })),
+        t("editor.timeline.trackSetsLineLengthsFailed"),
+      )
+    },
+    [applyTrackPatches, recordTrackChanges, t],
+  )
+
+  /**
    * BOTH FIELDS IN ONE PATCH, and this is the one place the one-field-per-verb
    * rule bends — because the two ARE one verb. A track changing scope needs a
    * rank among its new siblings, and its old number is a rank in a different
@@ -17159,6 +17180,7 @@ export function ProjectWorkspace() {
                             onMoveToScope: handleMoveTrackToScope,
                             onCreateFolderFrom: handleCreateFolderFrom,
                             onDelete: handleDeleteTrack,
+                            onSetLineLengths: handleSetTrackLineLengths,
                           }
                         : undefined
                     }

@@ -2827,6 +2827,88 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(editing.onDelete).toHaveBeenCalledWith(["trk-es"])
   })
 
+  // ── AQU-2252 (Sam, Oct 29): a track can be made a layer ─────────────────
+  describe("Sets line lengths (AQU-2252)", () => {
+    const voiced = (music: { setsLineLengths?: false } = {}) => deriveTracksForFile({
+      trackOverrides: {
+        boaz: { kind: "audio", name: "Boaz", order: 5 },
+        music: { kind: "audio", name: "Music", order: 6, ...music },
+      },
+    })
+    const rowOf = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")].find((r) => r.textContent?.includes(name))!
+
+    it("is a checkable item on an added track's menu, following the recordings, and switching it says which way", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Boaz"))
+      const item = screen.getByRole("menuitemcheckbox", { name: "Sets line lengths" })
+      expect(item.getAttribute("aria-checked")).toBe("true")
+      fireEvent.click(item)
+      expect(editing.onSetLineLengths).toHaveBeenCalledWith(["boaz"], false)
+    })
+
+    it("is unticked on a track made a layer, and ticking it makes the track set lengths again", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Music"))
+      const item = screen.getByRole("menuitemcheckbox", { name: "Sets line lengths" })
+      expect(item.getAttribute("aria-checked")).toBe("false")
+      fireEvent.click(item)
+      expect(editing.onSetLineLengths).toHaveBeenCalledWith(["music"], true)
+    })
+
+    it("a layer track's subtitle says so in words, following the recordings", () => {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })} onReorderTrack={vi.fn()}
+        />,
+      )
+      expect(rowOf("Music")).toHaveTextContent("layer · doesn't set line lengths")
+      expect(rowOf("Boaz")).toHaveTextContent("takes · generated")
+    })
+
+    it("following the source, neither the item nor the words are there: nothing sets a line's length", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="dubbing" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      expect(rowOf("Music")).toHaveTextContent("takes · generated")
+      fireEvent.contextMenu(rowOf("Music"))
+      expect(screen.getByText("Rename")).toBeTruthy()
+      expect(screen.queryByRole("menuitemcheckbox", { name: "Sets line lengths" })).toBeNull()
+    })
+
+    it("is not offered without track editing", () => {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced()} onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Boaz"))
+      expect(screen.getByText("Rename")).toBeTruthy()
+      expect(screen.queryByRole("menuitemcheckbox", { name: "Sets line lengths" })).toBeNull()
+    })
+  })
+
   // ── AQU-646 stage 6D ───────────────────────────────────────────────────────
   //
   // …AND THE NUMBER HAS TO BE TRUE, which is what nothing checked. The count

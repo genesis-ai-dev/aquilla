@@ -906,6 +906,10 @@ export const editor = defineNamespace({
     "editor.timeline.laneTargetAudioSub": "takes · generated",
     "editor.timeline.laneUntimed": "Untimed",
     "editor.timeline.laneUntimedSub": "no timecode yet",
+    // AQU-2252 (Sam, Oct 29): an added track made a layer — music, sound
+    // effects, ambience — whose takes set no line's length while the file
+    // follows its recordings. In words, on the sublabel line, never a badge.
+    "editor.timeline.laneLayerSub": "layer · doesn't set line lengths",
     // AQU-646: a track whose button silences something the standard per-track
     // sentences cannot name — on a subtitle file the source row's cues sit over
     // the FILM's soundtrack, and "source audio" there is true but useless. The
@@ -1077,6 +1081,14 @@ export const editor = defineNamespace({
     "editor.history.stepMoveTrack": plural({
       one: "Move {count} track",
       other: "Move {count} tracks",
+    }),
+    "editor.history.stepTrackMadeLayer": plural({
+      one: "Make {count} track a layer",
+      other: "Make {count} tracks layers",
+    }),
+    "editor.history.stepTrackSetsLengths": plural({
+      one: "Make {count} track set line lengths",
+      other: "Make {count} tracks set line lengths",
     }),
     "editor.history.stepDeleteTrack": "Delete track",
     "editor.history.stepSettings": plural({
@@ -1321,6 +1333,9 @@ export const editor = defineNamespace({
     "editor.timeline.trackMenuAria": "Track options for {name}",
     "editor.timeline.trackRename": "Rename",
     "editor.timeline.trackColor": "Color",
+    // AQU-2252: the checkable item on an added track's ⋯ menu.
+    "editor.timeline.trackSetsLineLengths": "Sets line lengths",
+    "editor.timeline.trackSetsLineLengthsFailed": "Couldn't change whether the track sets line lengths:",
     // AQU-646 stage 7: one hue per track, picked from six swatches, so the
     // whole vocabulary of axes, weights and previews is gone with the picker.
     // A colour name and a count is all this menu says now.
@@ -6807,6 +6822,8 @@ export const editor = defineNamespace({
       "editor.history.stepValidateAudioMany": { description: "Name of one history step: the user validated many recordings at once. {count} is the number of recordings.", placeholders: { count: "A number." } },
       "editor.history.stepUnvalidateAudioMany": { description: "Name of one history step: the user took back their own validation from many recordings at once. {count} is the number of recordings.", placeholders: { count: "A number." } },
       "editor.history.stepTrackColour": { description: "Name of one history step: the colour of one or more timeline tracks was changed. {count} is how many tracks.", placeholders: { count: "A number." } },
+      "editor.history.stepTrackMadeLayer": { description: "Name of one history step: one or more audio tracks on the timeline were made layers (music, sound effects, ambience), so their recordings no longer decide how long each line lasts. {count} is how many tracks.", placeholders: { count: "A number." } },
+      "editor.history.stepTrackSetsLengths": { description: "Name of one history step: one or more audio tracks on the timeline were set back to deciding how long each line lasts (the opposite of making them layers). {count} is how many tracks.", placeholders: { count: "A number." } },
       "editor.history.stepMoveTrack": { description: "Name of one history step: one or more timeline tracks were moved (reordered, or into/out of a folder). {count} is how many tracks.", placeholders: { count: "A number." } },
       "editor.history.stepSettings": { description: "Name of one history step: the user saved project settings. {count} is how many settings changed.", placeholders: { count: "A number." } },
       "editor.history.skippedUnavailable": { description: "Toast when Undo/Redo could not run because this kind of step can no longer be undone (for example, it was made by an older version of the app). Nothing was changed.", placeholders: { step: "The step's name." } },
@@ -6953,6 +6970,28 @@ export const editor = defineNamespace({
           "10px sub-label under the Untimed area, restating why those clips are " +
           "parked there: they carry no timecode.",
         maxLength: 20,
+      },
+      "editor.timeline.laneLayerSub": {
+        description:
+          "10px sub-label under an audio track's name on the timeline, shown when the " +
+          "track has been made a LAYER (music, sound effects, ambience): its recordings " +
+          "play over the lines but do not decide how long each line lasts. The middle " +
+          "dot separates 'layer' from the explanation. Plain words, lower case.",
+        maxLength: 36,
+      },
+      "editor.timeline.trackSetsLineLengths": {
+        description:
+          "A checkable item in an audio track's menu on the timeline. Ticked (the " +
+          "default), the track's recordings decide how long each line lasts — a line " +
+          "lasts as long as its longest recording. Unticked, the track is a layer " +
+          "(music, sound effects) whose recordings play over the lines without " +
+          "changing their lengths.",
+        maxLength: 28,
+      },
+      "editor.timeline.trackSetsLineLengthsFailed": {
+        description:
+          "Start of an error message when switching 'Sets line lengths' on a timeline " +
+          "track did not save; the reason the server gave follows it.",
       },
       "editor.voice.play": {
         description:

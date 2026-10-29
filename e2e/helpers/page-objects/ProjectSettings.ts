@@ -66,7 +66,7 @@ export class ProjectSettings {
     await expect(setting).toBeChecked()
   }
 
-  /** Add a target lane via the Languages section's "Add language" form. */
+  /** Add a target lane via the Languages section's "Add language lane" form. */
   async addTargetLanguage(tag: string): Promise<void> {
     const open = this.page.getByTestId("add-lane-open")
     if (await open.isVisible()) await open.click()

@@ -103,12 +103,12 @@ export class Workspace {
     await dialog.getByLabel("Use original audio or video", { exact: true }).check()
     await dialog.getByLabel("Your original audio or video").setInputFiles(filePath)
     await dialog.getByRole("button", { name: "Preview import" }).click()
-    await expect(this.page.getByRole("button", { name: "Import media and link video" }))
+    await expect(this.page.getByRole("button", { name: "Import media and link the film" }))
       .toBeVisible({ timeout: 30_000 })
   }
 
   async confirmYouTubeOriginalMedia(): Promise<void> {
-    await this.page.getByRole("button", { name: "Import media and link video" }).click()
+    await this.page.getByRole("button", { name: "Import media and link the film" }).click()
     await this.waitForImportSettled()
   }
 
@@ -364,7 +364,7 @@ export class Workspace {
     await this.openImportDialog()
     // Navigate to the Upload Files panel by clicking its card.
     await uploadCard.click()
-    // UploadPanel is now visible with a "Choose Files" button.
+    // UploadPanel is now visible with a "Choose files" button.
     // Prefer the import dialog's file picker — cell audio upload inputs also
     // match a bare `input[type=file]:not([webkitdirectory])` once the editor
     // has hydrated, which trips Playwright's strict mode.

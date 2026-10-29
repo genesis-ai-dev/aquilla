@@ -206,7 +206,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     // One disabled fieldset carries the lock, so jest-dom reports every form
     // control inside it as disabled — fields, radios and buttons alike.
     expect(screen.getByTestId("create-project-fields")).toBeDisabled()
-    expect(screen.getByLabelText(/^Project title$/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Project name$/i)).toBeDisabled()
     expect(screen.getByLabelText(/^Source language$/i)).toBeDisabled()
     expect(screen.getByLabelText(/^Target language/i)).toBeDisabled()
     expectRadioDisabled(screen.getByTestId("create-shape-linked-target"))
@@ -316,7 +316,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     fireEvent.submit(document.getElementById("project-create-form")!)
     expect(mockCreateCloudProject).not.toHaveBeenCalled()
 
-    expect(screen.getByLabelText(/^Project title$/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Project name$/i)).toBeDisabled()
     tryEveryWayOut()
     expect(dialogIsOpen()).toBe(true)
 
@@ -338,7 +338,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
     expect(closeButton()).toBeEnabled()
     // Nothing the user entered was thrown away by the failure.
-    expect(screen.getByLabelText(/^Project title$/i)).toHaveValue("Russian BSB")
+    expect(screen.getByLabelText(/^Project name$/i)).toHaveValue("Russian BSB")
     expect(screen.getByRole("radio", { name: /^Its Source/i })).toBeChecked()
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toHaveTextContent(
       /English Source/i,
@@ -381,7 +381,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     await destinationLoaded()
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
-    expect(screen.getByLabelText(/^Project title$/i)).toHaveValue("")
+    expect(screen.getByLabelText(/^Project name$/i)).toHaveValue("")
     expect(screen.queryByTestId("create-taking-long")).toBeNull()
 
     release()

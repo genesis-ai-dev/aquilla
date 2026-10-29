@@ -5120,7 +5120,7 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     // is behind the row's (i) — a click opens it in place (AQU-2260) — and is
     // its accessible description.
     expect(within(item).queryByText("track editing off")).toBeNull()
-    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
+    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project settings.")
     const info = within(item).getByRole("button", { name: "About Attach captions" })
     // The row is disabled, so its (i) has to take the pointer back itself.
     expect(info.parentElement!.className).toMatch(/pointer-events-auto/)
@@ -5128,7 +5128,7 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     expect(reason).toHaveAttribute("data-open", "false")
     fireEvent.click(info)
     expect(reason).toHaveAttribute("data-open", "true")
-    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project Settings.")
+    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project settings.")
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What

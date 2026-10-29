@@ -12,7 +12,7 @@ export const importExport = defineNamespace({
     "importExport.mediaPreview.embedded": "Embedded captions {number}",
     "importExport.mediaPreview.embeddedLanguage": "Embedded captions {number} ({language})",
     "importExport.captionTrack.attach": "Attach captions",
-    "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
+    "importExport.captionTrack.enableTracks": "Enable track editing in Project settings",
     "importExport.captionTrack.title": "Attach captions to {name}",
     "importExport.captionTrack.description": "Add captions as a new text track, or replace the content in an existing track.",
     "importExport.captionTrack.file": "Caption file",
@@ -105,7 +105,7 @@ export const importExport = defineNamespace({
     "importExport.direction.targetLabel": "Target language",
     "importExport.direction.targetPlaceholder": "e.g. Spanish, fra, swh",
     "importExport.direction.changeLaterHint": "You can change these later in {path}.",
-    "importExport.direction.settingsBreadcrumb": "Project Settings → Project Info",
+    "importExport.direction.settingsBreadcrumb": "Project settings → Project info",
     "importExport.direction.setting": "Setting…",
     "importExport.direction.setDirection": "Set direction",
 
@@ -445,7 +445,8 @@ export const importExport = defineNamespace({
     "importExport.landing.linkProject.description":
       "Read another Aquilla project's source files here. The link is live, so later upstream edits keep flowing through.",
     "importExport.landing.linkProject.alreadyLinkedTooltip":
-      "This project already reads its source from another project, and it can only follow one. Manage or detach that link in Project Settings → Source & sync.",
+      "This project already reads its source from another project, and it can only follow one. " +
+      "Manage or detach that link in Project settings → Source & sync.",
     "importExport.landing.linkProject.roleTooltip":
       "Project lead or above required to link a source project.",
 
@@ -1152,7 +1153,7 @@ export const importExport = defineNamespace({
     }),
     "importExport.dcs.applyResyncConfirmTitle": "Apply re-sync?",
     "importExport.dcs.applyResyncEllipsis": "Apply re-sync…",
-    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project Settings",
+    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project settings",
     "importExport.dcs.catalogIntro": "Browse released resources on {link}. Importing pins the project to the " +
       "chosen release; you can pull later changes from the project's settings. " +
       "Bible (USFM) resources import today; more resource types are rolling " +
@@ -1199,9 +1200,9 @@ export const importExport = defineNamespace({
     "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
       "release and import upstream changes into the source lane.",
     "importExport.dcs.pinnedRefBadge": "pinned {ref}",
-    "importExport.dcs.pinTooltip": "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. " +
-      "Source cells are managed by this link — update or detach in Project " +
-      "Settings.",
+    "importExport.dcs.pinTooltip":
+      "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. Source cells are managed " +
+      "by this link — update or detach in Project settings.",
     "importExport.dcs.repairStaleCursorError": "the upstream link changed while confirming (detached or re-imported in " +
       "another tab). Nothing was applied — run the scan again.",
     "importExport.dcs.resyncButton": "Re-sync content",

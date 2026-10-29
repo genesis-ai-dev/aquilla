@@ -142,7 +142,7 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
 
     // A control from a different section (General → Project Title) must NOT be in
     // the document: proving the user landed on the key, not the top of the page.
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
     // And General's group header must not appear either (no matches in that group).
     expect(screen.queryByText("General")).toBeNull()
   })

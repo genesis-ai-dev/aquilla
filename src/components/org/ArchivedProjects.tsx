@@ -201,13 +201,13 @@ export function ArchivedProjects() {
         accessorFn: (p) => missingLast(p.archivedAt ?? undefined),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title={t("org.orgSidebar.archived")} />
+          <DataTableColumnHeader column={column} title={t("org.archivedProjects.archivedOnColumn")} />
         ),
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.archivedAt}
-            label={t("org.orgSidebar.archived")}
+            label={t("org.archivedProjects.archivedOnColumn")}
             className="text-muted-foreground"
           />
         ),
@@ -308,7 +308,7 @@ export function ArchivedProjects() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Archived" />}
+      header={<OrgBreadcrumb section={t("org.orgSidebar.archived")} />}
       statusBar={null}
       main={
         <Page size="wide" data-testid="archived-projects-scroll">

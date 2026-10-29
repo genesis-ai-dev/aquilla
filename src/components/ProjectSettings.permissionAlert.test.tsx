@@ -213,7 +213,7 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
   it("viewer on a cloud project sees the hint on a locked field, without any save attempt", async () => {
     currentProject = makeProject({ syncRole: { level: 100, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
-    const title = screen.getByLabelText(/title/i)
+    const title = screen.getByLabelText(/project name/i)
     expect(title).toBeDisabled()
     const projectInfo = screen.getAllByTestId("settings-group-locked")[0]!
     expect(projectInfo).toHaveTextContent("Only Maintainers can change these settings.")
@@ -238,7 +238,7 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
     currentCanEditLanguages = true
     currentReasonCannotEditLanguages = null
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/title/i)).not.toBeDisabled()
+    expect(screen.getByLabelText(/project name/i)).not.toBeDisabled()
     expect(screen.queryByText(/Only Maintainers can change/)).toBeNull()
     expect(screen.queryByTestId("settings-group-locked")).toBeNull()
   })
@@ -307,7 +307,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     currentLanguageEditFloor = 500
     // canEdit (the hook-wide maintainer floor) stays false — see beforeEach.
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
-    const title = screen.getByLabelText(/title/i)
+    const title = screen.getByLabelText(/project name/i)
     expect(title).toBeDisabled()
     expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
     expect(screen.queryByTestId("languages-view-only")).toBeNull()

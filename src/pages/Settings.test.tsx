@@ -143,9 +143,9 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
-  it("lists Billing & usage on the settings index", async () => {
+  it("lists Billing on the settings index", async () => {
     renderSettings("/orgs/1/settings")
-    expect(await screen.findByRole("link", { name: /Billing & usage/i })).toBeDefined()
+    expect(await screen.findByRole("link", { name: /^Billing/i })).toBeDefined()
   })
 
   it("links to and renders the organization knowledge base", async () => {
@@ -238,7 +238,7 @@ describe("Security settings page", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
     expect(screen.getByText("Visibility")).toBeInTheDocument()
     expect(screen.getByText("Permissions")).toBeInTheDocument()
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
     expect(screen.getByLabelText(/who can export/i)).toBeDefined()
     expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
@@ -251,7 +251,7 @@ describe("Security settings page", () => {
     renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
-    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can export/i, /^contributor$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -262,7 +262,7 @@ describe("Security settings page", () => {
     renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can use data egress/i)).toBeDefined())
 
-    await pickSelectOption(/who can use data egress/i, /maintainer \(600\)/i)
+    await pickSelectOption(/who can use data egress/i, /^maintainer$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ egressMinRole: 600 }))
   })
@@ -272,7 +272,7 @@ describe("Security settings page", () => {
     renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
-    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can export/i, /^contributor$/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -281,9 +281,9 @@ describe("Security settings page", () => {
   it("silently patches the roster floor without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined())
 
-    await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can see the member list/i, /^contributor$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ rosterViewMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -295,7 +295,7 @@ describe("Security settings page", () => {
     renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
 
-    await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
+    await pickSelectOption(/who can view member progress/i, /^owner/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -304,7 +304,7 @@ describe("Security settings page", () => {
   it("redirects retired floor URLs onto /settings/security", async () => {
     renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
   })
 })
 
@@ -312,14 +312,14 @@ describe("Settings index", () => {
   it("omits the Members settings row when the caller is below the roster floor", async () => {
     rosterSettings.canViewRoster = false
     renderSettings("/orgs/1/settings")
-    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.getByRole("link", { name: /^security/i })).toBeInTheDocument()
   })
 
   it("links Security as a single row, not per-floor pages", async () => {
     renderSettings("/orgs/1/settings")
-    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.getByRole("link", { name: /^security/i })).toHaveAttribute("href", "/orgs/1/settings/security")
     expect(screen.queryByRole("link", { name: /roster & progress visibility/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /export permissions/i })).not.toBeInTheDocument()
@@ -339,7 +339,7 @@ describe("Org settings you can open but not change (AQU-2260)", () => {
     expect(await screen.findByTestId("org-settings-locked")).toHaveTextContent("Only Owners can change Security.")
     expect(screen.getAllByTestId("org-settings-locked")).toHaveLength(1)
     // Read-only, not hidden: the controls are still there to read.
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
   })
 
   it("a Contributor reads Identity and Knowledge with the Maintainer line at the top", async () => {

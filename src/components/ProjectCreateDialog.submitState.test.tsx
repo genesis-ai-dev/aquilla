@@ -73,7 +73,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New Project" }))
 
-    const name = screen.getByLabelText(/^Project title$/i)
+    const name = screen.getByLabelText(/^Project name$/i)
     expect(name).toHaveAttribute("autocomplete", "off")
     expect(name).toHaveAttribute("name", "aquilla-project-title")
     expect(name.getAttribute("name")).not.toBe("name")

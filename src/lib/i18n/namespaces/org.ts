@@ -83,7 +83,8 @@ export const org = defineNamespace({
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
     "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
     "org.egress.roleRequired":
-      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+      "Data egress is available to organization owners, and to other roles when an owner enables " +
+      "them in Organization settings.",
     "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
     "org.egress.loading": "Loading organization files",
     "org.egress.loadFailed": "Couldn’t load files",
@@ -255,7 +256,8 @@ export const org = defineNamespace({
     // AQU-1771: the org overview's Team workload / Team usage cards list
     // people by name, so they can never be more open than the member list.
     "org.orgHome.teamVisibilityRosterFloorHint":
-      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower " +
+      "the member list in Organization settings → Security first.",
 
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
     "org.orgHome.lens.attentionDescription":
@@ -299,7 +301,7 @@ export const org = defineNamespace({
     // org.membersPage.sourceProjectCreator's duplicate-exceptions.ts entry for the lowercase
     // badge-fragment sibling that stays distinct)
     "org.membersPage.remove": "Remove",
-    "org.membersPage.rosterHiddenTitle": "Roster hidden",
+    "org.membersPage.rosterHiddenTitle": "Member list hidden",
     "org.membersPage.allOrgMembersAdded": "All org members are already on this project.",
     "org.membersPage.addMembersAction": "add members to this project",
     "org.membersPage.accessRevokedTitle": "Access revoked",
@@ -605,13 +607,13 @@ export const org = defineNamespace({
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
-    "org.projectOverview.membersVisibilityDescription":
-      "Who can see the member roster on this project.",
+    "org.projectOverview.membersVisibilityDescription": "Who can see the member list on this project.",
     // AQU-1779: under the Team card's "Who can see this section" picker when
     // the lower options are disabled. The Team card lists people, so it can
     // never be more open than the member list.
     "org.projectOverview.teamVisibilityRosterFloorHint":
-      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on " +
+      "the Members card or in Organization settings → Security first.",
     // AQU-1771: amber line under the Team card's visibility badge right after a
     // Members change moved the Team card's level with it.
     "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
@@ -621,7 +623,8 @@ export const org = defineNamespace({
     // AQU-1771: under a project's Team / Members visibility picker when the
     // options below the organization's setting are greyed out.
     "org.projectOverview.visibilityOrgFloorHint":
-      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, " +
+      "an org owner lowers it in Organization settings → Security first.",
     // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
     "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
     "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
@@ -678,7 +681,9 @@ export const org = defineNamespace({
       "Full control: add/remove org members, archive/restore projects, and all maintainer actions.",
 
     // -- OrgSidebar: left nav for org-scoped routes --
-    "org.orgSidebar.archived": "Archived",
+    "org.orgSidebar.archived": "Archived projects",
+    // AQU-2261: the archived list's date column, apart from the page's name.
+    "org.archivedProjects.archivedOnColumn": "Archived",
     "org.orgSidebar.admin": "Admin",
 
     // -- hooks/useOrgSettings: patch()/requestPromotion() error fallback when
@@ -802,7 +807,7 @@ export const org = defineNamespace({
       "Add someone to specific projects without granting org-wide access.",
     "org.membersPage.orgPage.addToProjectsButton": "Add to projects",
     "org.membersPage.orgPage.tabsAriaLabel": "Members views",
-    "org.membersPage.orgPage.roster": "Roster",
+    "org.membersPage.orgPage.roster": "Member list",
     "org.membersPage.orgPage.matrixTab": "Matrix",
     "org.membersPage.orgPage.inviteSectionTitle": "Invite a teammate by email",
     "org.membersPage.orgPage.inviteSectionDescription":
@@ -1007,7 +1012,8 @@ export const org = defineNamespace({
       "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
     "org.accessModelLegend.creator.label": "Creator",
     "org.accessModelLegend.creator.description":
-      "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
+      "Owner role is permanent until project ownership is transferred. Manage it in Project settings " +
+      "→ Members.",
 
     // -- JoinOrgPage: org-invite landing page (/join-org/:token) --
     "org.joinOrgPage.organizationLine": "Organization: {name}",
@@ -1079,7 +1085,9 @@ export const org = defineNamespace({
     "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
     "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
     "org.membersMatrixCellEditor.creatorGrantDescription":
-      "This person created the project. Their Owner role is permanent until project ownership is transferred. The effective role here is Owner (max-wins). Manage in the project's Settings → Share.",
+      "This person created the project. Their Owner role is permanent until project ownership is " +
+      "transferred. The effective role here is Owner (max-wins). Manage it in Project settings → " +
+      "Members.",
     "org.membersMatrixCellEditor.viaGroupHeading": "Effective role: via group (max-wins)",
     "org.membersMatrixCellEditor.viaGroupDescription":
       "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
@@ -1164,7 +1172,8 @@ export const org = defineNamespace({
     // rather than collapsed into "no one in your organization yet".
     "org.staffLanePopover.rosterLoading": "Loading your organization…",
     "org.staffLanePopover.rosterNoOrg":
-      "No organization is selected, so there is no roster to search. Invite the person to the project instead.",
+      "No organization is selected, so there is no member list to search. Invite the person to the " +
+      "project instead.",
     "org.staffLanePopover.rosterHidden":
       "Your organization hides its member list. Invite the person to the project instead.",
     "org.staffLanePopover.rosterNoAccess":
@@ -1192,7 +1201,7 @@ export const org = defineNamespace({
     "org.staffLanePopover.removeFromLaneAriaLabel": "Remove {name} from {lane}",
     "org.staffLanePopover.lastLaneNote":
       "This is {name}’s only language. Taking it away here would leave them with no language limit at all — which the project reads as every language, not none — so it would widen their access instead of narrowing it. To take {name} off the project, go to:",
-    "org.staffLanePopover.teamMembersLink": "Project Settings → Team members",
+    "org.staffLanePopover.teamMembersLink": "Project settings → Members",
     "org.staffLanePopover.lastLaneRefused":
       "This is now their only language. Removing it would leave them with no language limit at all — which means every language, not none — so nothing was saved.",
     // AQU-1999: the decided answer for the two cases AQU-1998 left open — the
@@ -1436,9 +1445,11 @@ export const org = defineNamespace({
     // never resolve, so it has to say WHY there is nothing here.
     "org.projectOverview.archived.title": "This project is archived",
     "org.projectOverview.archived.bodyCanRestore":
-      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — choose Restore above to bring it back.",
+      "Its plan and team are hidden while it is archived. Nothing has been deleted — choose Restore " +
+      "above to bring it back.",
     "org.projectOverview.archived.bodyAskManager":
-      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — a maintainer can restore it.",
+      "Its plan and team are hidden while it is archived. Nothing has been deleted — a maintainer " +
+      "can restore it.",
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",

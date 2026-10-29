@@ -341,17 +341,16 @@ export const settings = defineNamespace({
     // ── RosterProgressSection (org settings → security) ──
     "settings.rosterProgress.groupLabel": "Visibility",
     "settings.rosterProgress.groupDescription":
-      "Who can see the member roster and per-member progress. Both default to Maintainer.",
-    "settings.rosterProgress.rosterLabel": "Who can view the roster",
+      "Who can see the member list and per-member progress. Both default to Maintainer.",
+    "settings.rosterProgress.rosterLabel": "Who can see the member list",
     "settings.rosterProgress.rosterDescription":
-      "Minimum role required to see the member list and member count, on both " +
-      "the org Members page and each project's Members tab. Below this role, " +
-      "the roster and count are hidden entirely — not shown empty, just absent.",
+      "Minimum role required to see the member list and member count, on both the org Members page " +
+      "and each project's Members tab. Below this role, the member list and count are hidden " +
+      "entirely — not shown empty, just absent.",
     "settings.rosterProgress.progressLabel": "Who can view member progress",
     "settings.rosterProgress.progressDescription":
-      "Minimum role required to see per-member progress/productivity. " +
-      "Independent of roster visibility — a role can see who's on the team " +
-      "without seeing their progress, or vice versa.",
+      "Minimum role required to see per-member progress/productivity. Independent of who can see the " +
+      "member list — a role can see who's on the team without seeing their progress, or vice versa.",
     // Open-dropdown option text for the roster/progress floor selects. FLOOR_LABEL
     // (src/pages/settings/constants.ts) supplies the short closed-trigger text; these
     // are the fuller sentences shown once the dropdown is open. The role name +

@@ -134,8 +134,7 @@ export const onboarding = defineNamespace({
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
-    "onboarding.step.privacy.footer":
-      "You can change this anytime in Settings. Read our",
+    "onboarding.step.privacy.footer": "You can change this anytime in Preferences. Read our",
     "onboarding.step.privacy.policyLink": "Privacy Policy",
 
     // — SignInStep —
@@ -253,7 +252,8 @@ export const onboarding = defineNamespace({
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
-      "AI fills in suggested translations as you go and keeps style consistent across the project. You can change this later in Project Settings.",
+      "AI fills in suggested translations as you go and keeps style consistent across the project. " +
+      "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
       "Sign in with a Frontier account to use the managed model.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
@@ -328,7 +328,8 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.actionLabel": "Inviting collaborators",
     "onboarding.checklist.invite.descriptionPrefix": "Add teammates as",
     "onboarding.checklist.invite.descriptionSuffix":
-      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project → Share.",
+      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project " +
+      "settings → Members.",
     "onboarding.checklist.invite.usernameLabel": "Invite by Aquilla username",
     "onboarding.checklist.invite.usernamePlaceholder": "e.g. mariad",
     "onboarding.checklist.invite.signInRequired": "Sign in to invite by username.",

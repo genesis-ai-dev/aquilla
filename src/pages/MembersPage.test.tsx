@@ -228,7 +228,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^member list$/i })).toBeInTheDocument(),
     )
     expect(screen.queryByText(/no projects yet/i)).not.toBeInTheDocument()
   })
@@ -247,7 +247,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^member list$/i })).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole("tab", { name: /matrix/i }))

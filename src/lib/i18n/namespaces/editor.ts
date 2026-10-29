@@ -1371,7 +1371,7 @@ export const editor = defineNamespace({
     "editor.timeline.badgeImportedCount": "{count} imported",
     // Sam, Oct 5: the Sources menu's track rows are just greyed out when track
     // editing is off; this is what hovering one says.
-    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project Settings.",
+    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project settings.",
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",

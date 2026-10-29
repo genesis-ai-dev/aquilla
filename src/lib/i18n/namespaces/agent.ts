@@ -363,7 +363,9 @@ export const agent = defineNamespace({
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
-    "agent.budget.weeklyExhausted": "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. Usage resets weekly; see Billing & usage.",
+    "agent.budget.weeklyExhausted":
+      "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
+      "Usage resets weekly; see Billing.",
     "agent.budget.pctUsed": "{pct}% of the run budget used",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the

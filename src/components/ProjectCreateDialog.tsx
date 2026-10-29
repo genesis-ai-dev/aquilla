@@ -194,7 +194,7 @@ type LinkConsumes = "source" | "target" | ""
 
 const projectSchema = z
   .object({
-    name: requiredString("Project title"),
+    name: requiredString("Project name"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
     // Self-contained shape only (spec §5 / AQU-1240): extras beyond the

@@ -10,8 +10,8 @@ Smoke twin: `e2e/specs/orgs/org-settings-billing.smoke.spec.ts`
 ## Steps
 
 1. Open `/orgs/9/settings`. A level-1 heading reads **Organization settings**.
-2. Click the **Billing & usage** link.
-3. The URL becomes `/orgs/9/settings/billing` and a level-1 heading reads **Billing & usage**.
+2. Click the **Billing** link.
+3. The URL becomes `/orgs/9/settings/billing` and a level-1 heading reads **Billing**.
 4. Look for a plan panel and a usage panel on the page, and the text **Field Plan** somewhere on it.
 
 ## Expected end state
@@ -21,7 +21,7 @@ Smoke twin: `e2e/specs/orgs/org-settings-billing.smoke.spec.ts`
 
 ## Counts as a failure
 
-- **Billing & usage** is missing from Organization settings, or clicking it does not navigate.
+- **Billing** is missing from Organization settings, or clicking it does not navigate.
 - The plan panel or usage panel is missing.
 - **Field Plan** never appears on the page.
 

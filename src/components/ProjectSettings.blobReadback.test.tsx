@@ -352,14 +352,14 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     const view = renderSettings("general")
 
     const renamed = "Blob Readback Test Project renamed"
-    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: renamed } })
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: renamed } })
     // The source line's Change opens its fields.
     fireEvent.click(screen.getByTestId("source-language-change"))
     fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
     expect(sourceLanguageField()).toHaveValue("English (US)")
 
     await user.click(screen.getByRole("button", { name: /save changes/i }))
-    expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(await screen.findByText(/Saved: project name\./i)).toBeInTheDocument()
     expect(screen.queryByText("Unsaved changes")).toBeNull()
     // Source language is a lane rename, not a settings-blob write.
     expect(patchSpy).not.toHaveBeenCalled()
@@ -372,7 +372,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
 
     expect(screen.queryByText("Unsaved changes")).toBeNull()
-    expect(screen.getByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(screen.getByText(/Saved: project name\./i)).toBeInTheDocument()
     expect(sourceLanguageField()).toHaveValue("English (US)")
     // The untouched field still adopts the server value, and that is not an edit.
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
@@ -383,7 +383,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     currentHasFetched = false
     const view = renderSettings("general")
 
-    fireEvent.change(screen.getByLabelText("Project title"), { target: { value: "Blob Readback Test Project renamed" } })
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Blob Readback Test Project renamed" } })
     // The source line's Change opens its fields.
     fireEvent.click(screen.getByTestId("source-language-change"))
     fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
@@ -406,7 +406,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     resolveRename({ id: PROJECT_ID, name: "Blob Readback Test Project renamed" })
     await clickDone
 
-    expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
+    expect(await screen.findByText(/Saved: project name\./i)).toBeInTheDocument()
     expect(patchSpy).not.toHaveBeenCalled()
     expect(screen.queryByText("Unsaved changes")).toBeNull()
     expect(sourceLanguageField()).toHaveValue("English (US)")

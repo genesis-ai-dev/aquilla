@@ -251,7 +251,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.errorSignInRequired": "You need to be signed in to create a project.",
     "projectSettings.create.errorGeneric": "Failed to create project. Please try again.",
     "projectSettings.create.extraLanguagesWarning":
-      "Project created; adding extra languages failed — add them in Settings → Languages.",
+      "Project created; adding extra languages failed — add them in Project settings → Languages.",
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
@@ -421,7 +421,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.referenceExampleFormat": "reference example format",
     "projectSettings.field.completionBatchSize": "AI completions batch size",
     "projectSettings.field.validationBatchSize": "batch validation size",
-    "projectSettings.field.projectName": "project title",
+    "projectSettings.field.projectName": "project name",
     "projectSettings.field.audioValidationRoleFloor": "minimum role to validate recordings",
     "projectSettings.field.namedAudioValidators": "named recording validators",
     "projectSettings.field.selfValidationAudio": "validating your own recordings",
@@ -506,7 +506,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.experimental": "Experimental",
 
     // ── Project Info card ──
-    "projectSettings.info.nameLabel": "Project Name",
+    "projectSettings.info.nameLabel": "Project name",
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
     "projectSettings.info.sourceLanguageLabel": "Source Language",
     "projectSettings.info.targetLanguageLabel": "Target Language",
@@ -1193,7 +1193,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
-    "projectSettings.info.titleLabel": "Project title",
+    "projectSettings.info.titleLabel": "Project name",
     "projectSettings.systemPrompt.label": "System prompt",
     "projectSettings.systemPrompt.navDescription":
       "The standing instructions behind every AI draft — how the AI should write, " +

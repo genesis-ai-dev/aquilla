@@ -22,7 +22,7 @@ import { ChevronLeft } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
-  name: requiredString("Project title"),
+  name: requiredString("Project name"),
   sourceLanguage: requiredString("Source language"),
   targetLanguage: requiredString("Target language"),
 })

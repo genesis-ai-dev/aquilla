@@ -735,7 +735,7 @@ describe("StaffLanePopover", () => {
     // The trap the members matrix still falls into: an empty lane list means
     // EVERY lane, so removing someone's only lane grants access instead of
     // revoking it. Nothing is saved, and the note names where to go instead.
-    it("refuses the person's last lane, pointing at Project Settings → Team members", async () => {
+    it("refuses the person's last lane, pointing at Project settings → Members", async () => {
       staffRoster()
       scopesByUser({ 10: [{ kind: "lane", value: "es" }], 11: [] })
 
@@ -745,7 +745,7 @@ describe("StaffLanePopover", () => {
       await waitFor(() => expect(screen.getByTestId("staff-lane-remove-10")).toBeDisabled())
       const note = screen.getByTestId("staff-lane-last-lane-note-10")
       expect(note).toHaveTextContent(/only language/i)
-      expect(within(note).getByRole("link", { name: /team members/i })).toHaveAttribute(
+      expect(within(note).getByRole("link", { name: /project settings → members/i })).toHaveAttribute(
         "href",
         "/project/proj-1/settings/members",
       )

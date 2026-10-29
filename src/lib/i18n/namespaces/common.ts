@@ -55,6 +55,7 @@ export const common = defineNamespace({
     "common.noMatches": "No matches",
     "common.searchPlaceholder": "Search…",
     "common.searchListAria": "Search the list",
+    "common.aboutAria": "About {name}",
     "common.readOnlyGit": "Read-only (imported from git)",
     "common.refresh": "Refresh",
     "common.searching": "Searching…",
@@ -475,6 +476,13 @@ export const common = defineNamespace({
           "narrows the list below. A short imperative; the trailing character is a single " +
           "ellipsis glyph (…).",
         maxLength: 24,
+      },
+      "common.aboutAria": {
+        description:
+          "Accessible name (never visible) of a small (i) button beside a menu item or a " +
+          "setting. A click opens a line explaining that item under it. Names the thing it " +
+          "explains.",
+        placeholders: { name: "The menu item's or setting's own label, already translated." },
       },
       "common.searchListAria": {
         description:

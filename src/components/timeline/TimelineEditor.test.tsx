@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
@@ -111,6 +112,20 @@ const cell = (o: Partial<CellData>): CellData =>
 function armLinking() {
   fireEvent.click(screen.getByTestId("tl-check-menu"))
   fireEvent.click(screen.getByText("Check links"))
+}
+
+
+// AQU-2260 (Sam, Oct 29): a toolbar (i) opens a small note on CLICK and shuts
+// it on a second click or a click outside. Hovering it shows nothing.
+async function expectInfoNote(button: HTMLElement, text: RegExp) {
+  await userEvent.setup().hover(button)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  fireEvent.click(button)
+  const note = await screen.findByTestId(`${button.dataset.testid}-note`)
+  expect(note).toHaveTextContent(text)
+  expect(button).toHaveAttribute("aria-expanded", "true")
+  fireEvent.click(button)
+  await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "false"))
 }
 
 describe("TimelineEditor", () => {
@@ -1346,7 +1361,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
+    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
   })
 
   it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
@@ -1575,7 +1590,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(control).toHaveAttribute("data-locked", "film")
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
+    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
   })
 
   // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
@@ -5020,12 +5035,18 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     const item = screen.getByRole("menuitem", { name: "Attach captions" })
     expect(item).toHaveAttribute("data-disabled")
     // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
-    // is the row's hover text and its accessible description.
+    // is behind the row's (i) — a click opens it in place (AQU-2260) — and is
+    // its accessible description.
     expect(within(item).queryByText("track editing off")).toBeNull()
     expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
-    // The row is disabled, so its content has to take the pointer itself for
-    // the hover text to open.
-    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
+    const info = within(item).getByRole("button", { name: "About Attach captions" })
+    // The row is disabled, so its (i) has to take the pointer back itself.
+    expect(info.parentElement!.className).toMatch(/pointer-events-auto/)
+    const reason = document.getElementById(info.getAttribute("aria-controls")!)!
+    expect(reason).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(reason).toHaveAttribute("data-open", "true")
+    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project Settings.")
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What

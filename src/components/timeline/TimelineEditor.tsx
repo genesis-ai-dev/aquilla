@@ -35,7 +35,6 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
-  Info,
   Link2,
   LocateFixed,
   Magnet,
@@ -72,7 +71,6 @@ import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
 import { RenameTakeDialog } from "./RenameTakeDialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -81,6 +79,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { InfoNote } from "@/components/ui/info-note"
 import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
@@ -4211,23 +4210,15 @@ export function TimelineEditor({
             className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
           >
             {t("editor.timeline.bluetoothPill")}
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    data-testid="tl-output-latency-info"
-                    aria-label={t("editor.timeline.bluetoothPillInfo")}
-                    className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
-                  />
-                }
-              >
-                <Info className="h-3 w-3" />
-              </PopoverTrigger>
-              <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
-                {t("editor.timeline.outputLatencyNote")}
-              </PopoverContent>
-            </Popover>
+            {/* AQU-2260: the same click-open note as every toolbar (i). */}
+            <InfoNote
+              label={t("editor.timeline.bluetoothPillInfo")}
+              testId="tl-output-latency-info"
+              className="rounded-full p-0 text-amber-700/80 hover:text-amber-800 aria-expanded:text-amber-800 dark:text-amber-300/80 dark:hover:text-amber-200"
+              iconClassName="h-3 w-3"
+            >
+              {t("editor.timeline.outputLatencyNote")}
+            </InfoNote>
           </span>
         )}
         <div className="ms-auto flex items-center gap-1.5">

@@ -1765,7 +1765,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.create.languageHintAriaLabel": {
-        description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
+        description: "Accessible name of the small (i) button beside a source/target language field. A click opens an explanation in place under the label.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
@@ -2173,32 +2173,32 @@ export const projectSettings = defineNamespace({
       "projectSettings.languages.targetLanguagesHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Target languages heading. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.codeHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside a language's Code field, explaining that the code comes from the language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.deliversHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Delivers column heading and the add form's Delivers field. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.addNameHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Name field of the Add a language form. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archiveHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages inside the confirmation shown before archiving a language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archivedHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.changeSourceAriaLabel": {
         description:

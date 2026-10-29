@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Switch } from "@/components/ui/switch"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
@@ -241,29 +242,60 @@ const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
  *  type size for it rather than the drawer vanishing — on a five-line verse
  *  the ready screen's take strip had squeezed the drawer to nothing. */
 const TAKES_DRAWER_FLOOR_PX = 56
+/** The countdown's name and its (i) (AQU-2260): what the four speeds do opens
+ *  under it on click, and starts shut each time the settings open. */
+function CountdownTitle({ on }: { on: boolean }) {
+  const t = useT()
+  const [open, toggle] = useInfoOpen()
+  const title = t("audio.recordingModal.countdownTitle")
+  return (
+    <>
+      <span className="flex items-center gap-2.5">
+        {on
+          ? <Timer className="h-4 w-4 shrink-0 text-muted-foreground" />
+          : <TimerOff className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 text-xs font-medium">{title}</span>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("common.aboutAria", { name: title })}
+          controls="rec-countdown-info"
+          testId="rec-countdown-info-toggle"
+        />
+      </span>
+      <InfoReveal open={open} id="rec-countdown-info" className="text-[11px] leading-snug text-muted-foreground">
+        {t("audio.recordingModal.countdownInfo")}
+      </InfoReveal>
+    </>
+  )
+}
+
 /**
- * One recorder setting: its icon, its name, and a real switch — the whole row
- * toggles it, and what it does is said on hover (Sam, 2026-09-28).
+ * One recorder setting: its icon, its name, an (i), and a real switch — the
+ * whole row toggles it (Sam, 2026-09-28). AQU-2260 (Sam, Oct 29): what the row
+ * does opens under it from the (i), on click; it used to be a hover tip, and
+ * hovers open nothing now.
  */
 function SettingSwitch({
-  testId, icon, title, tip, checked, disabled = false, onCheckedChange,
+  testId, icon, title, info, checked, disabled = false, onCheckedChange,
 }: {
   testId: string
   icon: React.ReactElement<{ className?: string }>
   title: string
-  tip: string
+  info: string
   checked: boolean
   disabled?: boolean
   onCheckedChange: (next: boolean) => void
 }) {
+  const t = useT()
+  const [open, toggle] = useInfoOpen()
+  const infoId = `${testId}-info`
   return (
-    // To the LEFT: the menu opens at the recorder's right edge, and below a
-    // row the tip would cover the next row's switch — the first row's tip
-    // opens on its own as the menu takes focus.
-    <AppTooltip content={tip} side="left">
+    <div className="w-full">
       {/* Not a <label>: the switch keeps a hidden checkbox, and a label passes
           a click on the switch to it as well — two toggles, no change. The
-          row toggles itself for a click anywhere but the switch. */}
+          row toggles itself for a click anywhere but the switch or the (i)
+          (the (i) stops its own click). */}
       <div
         onClick={(e) => {
           if (disabled || (e.target as HTMLElement).closest("[role=switch]")) return
@@ -271,11 +303,18 @@ function SettingSwitch({
         }}
         className={cn(
           "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted",
-          disabled && "cursor-default opacity-50 hover:bg-transparent",
+          disabled && "cursor-default hover:bg-transparent",
         )}
       >
-        {cloneElement(icon, { className: "h-4 w-4 shrink-0 text-muted-foreground" })}
-        <span className="min-w-0 flex-1 text-xs font-medium">{title}</span>
+        {cloneElement(icon, { className: cn("h-4 w-4 shrink-0 text-muted-foreground", disabled && "opacity-50") })}
+        <span className={cn("min-w-0 flex-1 text-xs font-medium", disabled && "opacity-50")}>{title}</span>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("common.aboutAria", { name: title })}
+          controls={infoId}
+          testId={`${testId}-info-toggle`}
+        />
         <Switch
           data-testid={testId}
           size="sm"
@@ -283,9 +322,13 @@ function SettingSwitch({
           disabled={disabled}
           onCheckedChange={(next) => onCheckedChange(next)}
           aria-label={title}
+          aria-describedby={infoId}
         />
       </div>
-    </AppTooltip>
+      <InfoReveal open={open} id={infoId} className="px-2 text-[11px] leading-snug text-muted-foreground">
+        <span className="block pb-1.5">{info}</span>
+      </InfoReveal>
+    </div>
   )
 }
 
@@ -2770,23 +2813,7 @@ export function AudioRecordingModal({
                       one four-way choice — Off, Fast, Normal, Slow — where the
                       on/off switch was. */}
                   <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1 rounded-md px-2 pb-1 pt-1.5">
-                    <AppTooltip
-                      side="left"
-                      content={countdownSpeed === "off"
-                        ? t("audio.recordingModal.countdownOffDescription")
-                        : countdownSpeed === "fast"
-                          ? t("audio.recordingModal.countdownFastDescription")
-                          : countdownSpeed === "slow"
-                            ? t("audio.recordingModal.countdownSlowDescription")
-                            : t("audio.recordingModal.countdownNormalDescription")}
-                    >
-                      <span className="flex items-center gap-2.5">
-                        {countdownEnabled
-                          ? <Timer className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          : <TimerOff className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                        <span className="text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
-                      </span>
-                    </AppTooltip>
+                    <CountdownTitle on={countdownEnabled} />
                     <SegmentTabs<CountdownSpeed>
                       value={countdownSpeed}
                       onValueChange={setRecordingCountdownSpeed}
@@ -2811,25 +2838,19 @@ export function AudioRecordingModal({
                     testId="rec-beep"
                     icon={beepEnabled ? <Volume2 /> : <VolumeX />}
                     title={t("audio.recordingModal.beepTitle")}
-                    tip={!countdownEnabled
-                      ? t("audio.recordingModal.beepNotApplicableDescription")
-                      : beepEnabled
-                        ? t("audio.recordingModal.beepOnDescription")
-                        : t("audio.recordingModal.beepOffDescription")}
+                    info={t("audio.recordingModal.beepInfo")}
                     checked={beepEnabled}
                     disabled={!countdownEnabled}
                     onCheckedChange={setBeepEnabled}
                   />
                   {/* Sam, 2026-09-28: every setting but the countdown's speed is
-                      a real switch, and what it does is said on hover rather
-                      than in a line of its own. */}
+                      a real switch. What it does is behind its (i), on click
+                      (AQU-2260), rather than in a line always on show. */}
                   <SettingSwitch
                     testId="rec-auto-advance"
                     icon={<ChevronsRight />}
                     title={t("audio.recordingModal.autoAdvanceTitle")}
-                    tip={autoAdvance
-                      ? t("audio.recordingModal.autoAdvanceOnDescription")
-                      : t("audio.recordingModal.autoAdvanceOffDescription")}
+                    info={t("audio.recordingModal.autoAdvanceInfo")}
                     checked={autoAdvance}
                     onCheckedChange={setRecordingAutoAdvance}
                   />
@@ -2837,9 +2858,7 @@ export function AudioRecordingModal({
                     testId="rec-takes-drawer-open"
                     icon={<PanelBottom />}
                     title={t("audio.recordingModal.takesDrawerTitle")}
-                    tip={takesDrawerOpen
-                      ? t("audio.recordingModal.takesDrawerOnDescription")
-                      : t("audio.recordingModal.takesDrawerOffDescription")}
+                    info={t("audio.recordingModal.takesDrawerInfo")}
                     checked={takesDrawerOpen}
                     onCheckedChange={(next) => { setTakesOpen(false); setRecordingTakesDrawerOpen(next) }}
                   />

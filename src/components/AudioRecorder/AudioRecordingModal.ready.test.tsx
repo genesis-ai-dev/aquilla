@@ -2,6 +2,7 @@
 // waveform, its length, a play button — and the target bar judges it, so the
 // operator can see and hear what they are about to record over.
 
+import userEvent from "@testing-library/user-event"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
@@ -495,6 +496,40 @@ describe("the takes drawer, resting closed", () => {
     fireEvent.click(sw)
     expect(screen.queryByTestId("rec-takes-drawer")).toBeNull()
     expect(screen.getByTestId("rec-takes-drawer-open")).toHaveAttribute("aria-checked", "false")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): each row of the recorder's ⚙ has an (i) that opens a
+// short line saying what the row does, in place, on click. Nothing on hover,
+// and the (i) never flips the row's switch.
+describe("AudioRecordingModal — what each recorder setting does", () => {
+  const draw = () => render(
+    <AudioRecordingModal
+      open project={project} cells={[cell]} activeCellId="c1" username="sam"
+      onActiveCellChange={() => {}} onTakeSaved={() => {}} onClose={() => {}}
+    />,
+  )
+
+  it("opens each row's description from its (i), and hovering a row shows nothing", async () => {
+    draw()
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    for (const [name, text] of [
+      ["About Countdown", /3, 2, 1 before recording starts/],
+      ["About Countdown beep", /short beep on each number/],
+      ["About Move on after saving a recording", /takes you to the next line/],
+      ["About Keep the takes drawer open", /takes are listed under the recorder/],
+    ] as const) {
+      const info = screen.getByRole("button", { name })
+      const line = document.getElementById(info.getAttribute("aria-controls")!)!
+      expect(line, name).toHaveAttribute("data-open", "false")
+      fireEvent.click(info)
+      expect(line, name).toHaveAttribute("data-open", "true")
+      expect(line, name).toHaveTextContent(text)
+    }
+    // The (i) only opens its line; the switch beside it is untouched.
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-checked", "true")
+    await userEvent.setup().hover(screen.getByText("Countdown beep"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })
 

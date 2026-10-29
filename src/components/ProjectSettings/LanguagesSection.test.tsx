@@ -17,7 +17,7 @@ import { LanguagesSection, type LaneDeliversOutcome } from "./LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import type { LaneLastChangeResult, ProjectLaneView } from "@/lib/sync/project-settings"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 function renderSection(overrides: Partial<Parameters<typeof LanguagesSection>[0]> = {}) {
   const patch = vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))
@@ -56,6 +56,22 @@ function openArchived() {
 beforeEach(() => {
   vi.clearAllMocks()
 })
+
+/** AQU-2260 (Sam, Oct 29): an (i) opens its text in place on CLICK and shuts it
+ *  on a second click. Hovering it shows nothing. */
+async function expectInPlaceInfo(button: HTMLElement, text: RegExp | string) {
+  await userEvent.setup().hover(button)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  const reveal = document.getElementById(button.getAttribute("aria-controls") ?? "")
+  expect(reveal).not.toBeNull()
+  expect(reveal).toHaveAttribute("data-open", "false")
+  fireEvent.click(button)
+  expect(button).toHaveAttribute("aria-expanded", "true")
+  expect(reveal).toHaveAttribute("data-open", "true")
+  expect(reveal).toHaveTextContent(text)
+  fireEvent.click(button)
+  expect(reveal).toHaveAttribute("data-open", "false")
+}
 
 describe("LanguagesSection", () => {
   it("lists the project's target language with the other target lanes", () => {
@@ -262,6 +278,12 @@ describe("LanguagesSection", () => {
     expect((screen.getByTestId("restore-lane-fr-BE") as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it("every other (i) in the card opens its text in place, on click (AQU-2260)", async () => {
+    renderSection({ targetLanes: ["fr-CA", "fr-BE"], archivedLanes: ["fr-BE"] })
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About target languages" }), /./)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About archived languages" }), /./)
+  })
+
   it("says nothing about a lock to someone who can edit", () => {
     renderSection()
     expect(screen.queryByTestId("languages-view-only")).toBeNull()
@@ -361,8 +383,8 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     askToArchive("lane-es")
     const confirm = await screen.findByTestId("archive-confirm-lane-es")
     expect(confirm.textContent).toContain('Archive "Spanish"?')
-    expect(confirm.textContent).not.toMatch(/restore it at any time/)
-    await expectTooltip(screen.getByRole("button", { name: "About archiving" }), /restore it at any time/)
+    // AQU-2260: shut until its (i) is clicked, then open in place.
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About archiving" }), /restore it at any time/)
   })
 
   it("puts the archive confirmation on its own line, under the lane's row", async () => {
@@ -788,8 +810,7 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     const code = screen.getByTestId("lane-code-lane-yo") as HTMLInputElement
     expect(code.value).toBe("")
     expect(code.placeholder).toBe("es")
-    expect(screen.queryByText(/derive the code from the language/)).toBeNull()
-    await expectTooltip(screen.getByRole("button", { name: "About the code" }), /derive the code from the language/)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About the code" }), /derive the code from the language/)
   })
 
   it("shows a code override in the code field", () => {
@@ -907,7 +928,7 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect((screen.getByTestId("add-lane-name-input") as HTMLInputElement).placeholder).toBe(
       "Swahili",
     )
-    await expectTooltip(screen.getByRole("button", { name: "About the name" }), /starts as the language's name/i)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About the name" }), /starts as the language's name/i)
   })
 
   it("offers the new lane's optional code in the form and submits it", async () => {
@@ -1122,7 +1143,7 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
     expect(screen.queryByTestId("lane-shown-as-lane-a")).toBeNull()
     const hint = screen.getByTestId("lane-shown-as-lane-b")
     expect(hint).toHaveAccessibleName('Shown as "Tshangla · 2"')
-    await expectTooltip(hint, 'Shown as "Tshangla · 2"')
+    await expectInPlaceInfo(hint, 'Shown as "Tshangla · 2"')
   })
 
   it("prefers a colliding lane's code override to its position", () => {
@@ -1292,9 +1313,9 @@ describe("LanguagesSection — Delivers per language", () => {
     expect(screen.getByRole("combobox", { name: "What Tok Pisin delivers" })).toHaveTextContent("Audio")
     expect(screen.queryByRole("switch")).toBeNull()
     expect(screen.queryByText(/Records audio/)).toBeNull()
-    // The explanation is not on the card itself, only behind the (i).
-    expect(screen.queryByText(/a line is done/)).toBeNull()
-    await expectTooltip(
+    // The explanation is not on the card itself, only behind the (i)
+    // (expectInPlaceInfo checks it starts shut).
+    await expectInPlaceInfo(
       screen.getByTestId("lane-delivers-hint"),
       /Text and audio: a line is done only when both/,
     )
@@ -1307,7 +1328,7 @@ describe("LanguagesSection — Delivers per language", () => {
     expect(swahili).toHaveAttribute("data-needs-choice", "true")
     const why = screen.getByTestId("lane-delivers-needs-choice-lane-sw")
     expect(why).toHaveAccessibleName("Why Swahili needs a choice")
-    await expectTooltip(why, /Choose whether it delivers Text, or Text and audio/)
+    await expectInPlaceInfo(why, /Choose whether it delivers Text, or Text and audio/)
     expect(screen.queryByTestId("lane-delivers-needs-choice-lane-de")).toBeNull()
     expect(screen.queryByTestId("lane-delivers-needs-choice-lane-tpi")).toBeNull()
   })

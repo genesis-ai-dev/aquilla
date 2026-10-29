@@ -352,8 +352,6 @@ export const audio = defineNamespace({
     "audio.recordingModal.trimReset": "Reset trim",
     "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
     "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
-    "audio.recordingModal.takesDrawerOnDescription": "The takes that fit show under the recorder; the arrow beside Takes brings up the rest.",
-    "audio.recordingModal.takesDrawerOffDescription": "Only the Takes bar shows; the arrow beside it brings up the list.",
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
@@ -373,23 +371,26 @@ export const audio = defineNamespace({
       "Recording format: compressed — click to record in WAV",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
     "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
-    "audio.recordingModal.autoAdvanceOnDescription":
-      "Saved recordings jump to the next line. Uploaded files stay here.",
-    "audio.recordingModal.autoAdvanceOffDescription":
-      "Saved recordings stay on this line, and so do uploaded files.",
     "audio.recordingModal.countdownTitle": "Countdown",
-    "audio.recordingModal.countdownFastDescription": "3-2-1, half a second each",
-    "audio.recordingModal.countdownNormalDescription": "3-2-1, one second each",
-    "audio.recordingModal.countdownSlowDescription": "3-2-1, a second and a half each",
+    "audio.recordingModal.countdownInfo":
+      "Counts down 3, 2, 1 before recording starts, so you can get ready. Fast, Normal and " +
+      "Slow give each number half a second, a second, or a second and a half. Off starts " +
+      "recording the moment you press Record.",
+    "audio.recordingModal.beepInfo":
+      "Plays a short beep on each number of the countdown, so you can keep your eyes on the " +
+      "text. It does nothing while the countdown is off.",
+    "audio.recordingModal.autoAdvanceInfo":
+      "When on, saving a recording takes you to the next line, and on the last line closes " +
+      "the recorder. A file you upload always stays on its line.",
+    "audio.recordingModal.takesDrawerInfo":
+      "When on, this line's takes are listed under the recorder, as many as fit, and the " +
+      "arrow beside Takes brings up the rest. When off, only the Takes bar shows, and its " +
+      "arrow brings up the list.",
     "audio.recordingModal.countdownSpeedOff": "Off",
     "audio.recordingModal.countdownSpeedFast": "Fast",
     "audio.recordingModal.countdownSpeedNormal": "Normal",
     "audio.recordingModal.countdownSpeedSlow": "Slow",
-    "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
-    "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
-    "audio.recordingModal.beepOffDescription": "Silent countdown",
-    "audio.recordingModal.beepNotApplicableDescription": "No countdown to beep",
     "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
 
     // RecordingVideoSurface — the film panel inside that dialog, and the
@@ -1674,16 +1675,6 @@ export const audio = defineNamespace({
           "just its header bar.",
         maxLength: 40,
       },
-      "audio.recordingModal.takesDrawerOnDescription": {
-        description:
-          "Hover text for that setting while it is on: some takes show under the " +
-          "recorder, and the small arrow beside 'Takes' shows the rest.",
-      },
-      "audio.recordingModal.takesDrawerOffDescription": {
-        description:
-          "Hover text for that setting while it is off: only the 'Takes' bar shows, " +
-          "and the small arrow beside it shows the list.",
-      },
       "audio.recordingModal.takesExpand": {
         description:
           "Accessible name of the small arrow beside 'Takes' at the bottom of the " +
@@ -2281,6 +2272,29 @@ export const audio = defineNamespace({
           "compressed format, stating the current setting and what pressing it " +
           "would do. The visible caption is the single word 'COMPRESSED'.",
       },
+      "audio.recordingModal.countdownInfo": {
+        description:
+          "Opens under the recorder settings' Countdown row when its (i) is clicked. Says what " +
+          "the count before recording is for and what its four speeds (Off, Fast, Normal, Slow) " +
+          "do. Plain, short sentences.",
+      },
+      "audio.recordingModal.beepInfo": {
+        description:
+          "Opens under the recorder settings' Countdown beep switch when its (i) is clicked: " +
+          "what the beep is, and that it needs the countdown on.",
+      },
+      "audio.recordingModal.autoAdvanceInfo": {
+        description:
+          "Opens under the recorder settings' 'Move on after saving a recording' switch when its " +
+          "(i) is clicked: what happens after a recording is saved with it on, and that an " +
+          "uploaded file never moves you on.",
+      },
+      "audio.recordingModal.takesDrawerInfo": {
+        description:
+          "Opens under the recorder settings' 'Keep the takes drawer open' switch when its (i) is " +
+          "clicked: where the line's takes are shown with it on, and with it off. 'Takes' is the " +
+          "name of the bar under the recorder; 'the arrow' is the small chevron on that bar.",
+      },
       "audio.recordingModal.settingsAriaLabel": {
         description:
           "Screen-reader name of the gear button at the end of the recorder's " +
@@ -2295,27 +2309,6 @@ export const audio = defineNamespace({
           "whether a 3-2-1 countdown runs before each take. The noun for the " +
           "count-in itself, not an instruction.",
         maxLength: 24,
-      },
-      "audio.recordingModal.countdownFastDescription": {
-        description:
-          "One-line description under that preference while the FAST count is " +
-          "chosen: pressing Record counts three, two, one at half a second per " +
-          "number, then starts capturing.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.countdownNormalDescription": {
-        description:
-          "One-line description under that preference while the NORMAL count is " +
-          "chosen (the default): pressing Record counts three, two, one at one " +
-          "second per number, then starts capturing.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.countdownSlowDescription": {
-        description:
-          "One-line description under that preference while the SLOW count is " +
-          "chosen: pressing Record counts three, two, one at a second and a half " +
-          "per number, then starts capturing.",
-        maxLength: 40,
       },
       "audio.recordingModal.countdownSpeedOff": {
         description:
@@ -2341,20 +2334,6 @@ export const audio = defineNamespace({
           "Fourth of the four countdown choices: count three, two, one at a second " +
           "and a half per number. One short word; the row is narrow.",
         maxLength: 8,
-      },
-      "audio.recordingModal.countdownOffDescription": {
-        description:
-          "One-line description under the same preference while the countdown is " +
-          "OFF: pressing Record begins capturing immediately, with no count-in.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.beepNotApplicableDescription": {
-        description:
-          "One-line description under the 'Countdown beep' preference while the " +
-          "countdown itself has been turned off, which is why the beep control is " +
-          "greyed out and cannot be pressed: there is no countdown left for it to " +
-          "sound during. States the reason, does not instruct.",
-        maxLength: 40,
       },
       "audio.recordingModal.filmAriaLabel": {
         description:

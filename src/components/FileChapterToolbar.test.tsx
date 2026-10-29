@@ -200,13 +200,17 @@ describe("FileChapterToolbar draft as you read", () => {
     const help = "While on, AI drafts empty cells as you scroll and refreshes existing AI drafts when better validated examples appear. Every draft needs human review. Cells a person translated are never touched."
     expect(toggle).toHaveAccessibleName("Draft as you read")
     expect(toggle).toHaveAccessibleDescription(help)
-    // Sighted users get the same text from the info icon at the end of the
-    // row: hover shows it, and clicking the icon must not flip the toggle.
-    const hint = toggle.querySelector("[data-slot=tooltip-trigger]") as HTMLElement
-    expect(hint).not.toBeNull()
+    // Sighted users get the same text from the (i) at the end of the row: a
+    // click opens it in place under the label (AQU-2260; it was a hover), and
+    // clicking the (i) must not flip the toggle.
+    const hint = screen.getByRole("button", { name: "About Draft as you read" })
     await userEvent.hover(hint)
-    expect(await screen.findByRole("tooltip", { name: help })).toBeVisible()
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const text = document.getElementById(hint.getAttribute("aria-controls")!)!
+    expect(text).toHaveAttribute("data-open", "false")
     await userEvent.click(hint)
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveTextContent(help)
     expect(onChange).not.toHaveBeenCalled()
   })
 

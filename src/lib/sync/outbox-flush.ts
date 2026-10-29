@@ -103,6 +103,7 @@ export interface RejectedEntry {
   status: number
   reason: string
   fileId: string | null
+  cellId: string | null
 }
 
 export interface FlushDeps {
@@ -153,8 +154,13 @@ export interface FlushDeps {
    *  work. The caller uses this to revert deliberately and say why.
    *  Deliberately NOT routed through the 403 quarantine path: that copy is
    *  about permissions, and a refused shape is a bug, not a permission
-   *  problem. */
-  onRejected?: (entries: RejectedEntry[]) => void
+   *  problem.
+   *
+   *  AQU-1901: return the ids this caller reports to the user itself; every
+   *  other entry goes on to the tab-wide `subscribeRejected` listeners, which
+   *  undo and announce a refused edit. A caller that returns nothing claims
+   *  nothing — the batch may hold other people's edits, not only its own. */
+  onRejected?: (entries: RejectedEntry[]) => readonly string[] | void
   /** Called before a permanent 403 is quarantined. Foreground committers use
    *  the exact event ids to clear optimistic state and avoid chaining future
    *  writes onto a head the server refused.
@@ -339,6 +345,25 @@ const staleSiblingsListeners = new Set<StaleSiblingsListener>()
 export function subscribeStaleSiblings(listener: StaleSiblingsListener): () => void {
   staleSiblingsListeners.add(listener)
   return () => { staleSiblingsListeners.delete(listener) }
+}
+
+type RejectedListener = (entries: RejectedEntry[]) => void
+const rejectedListeners = new Set<RejectedListener>()
+
+/**
+ * AQU-1901: tab-wide notification of the non-retryable 4xx rejections a flush
+ * dropped. `deps.onRejected` reaches only the caller that ran THIS flush, and
+ * most writes — every hand-typed edit and validation — are posted by the
+ * app-shell drain or by another caller's inline flush, neither of which knows
+ * whose edit it was. So a refused edit was removed from the outbox, the status
+ * chip went back to "Synced", and the editor kept showing text that was never
+ * saved. The workspace subscribes here to undo the optimistic state and say
+ * so. Hears every entry the flush's own `onRejected` did not claim; same
+ * `shouldSurface` gate.
+ */
+export function subscribeRejected(listener: RejectedListener): () => void {
+  rejectedListeners.add(listener)
+  return () => { rejectedListeners.delete(listener) }
 }
 
 // Per-tab serialization. Many inline `flushOutboxBatch` calls run outside the
@@ -770,9 +795,16 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
           status: r.status,
           reason: r.reason,
           fileId: record?.event.fileId ?? null,
+          cellId: record?.event.cellId ?? null,
         })
       }
-      if (shouldSurface()) deps.onRejected?.(rejectedEntries)
+      if (shouldSurface()) {
+        const claimed = new Set(deps.onRejected?.(rejectedEntries) ?? [])
+        const unclaimed = rejectedEntries.filter((entry) => !claimed.has(entry.id))
+        if (unclaimed.length > 0) {
+          for (const listener of rejectedListeners) listener(unclaimed)
+        }
+      }
     }
 
     const removableIds = [...acceptedIds, ...permanentlyRejectedIds]

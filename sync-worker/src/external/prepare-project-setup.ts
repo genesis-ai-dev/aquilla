@@ -28,12 +28,7 @@ import {
   gateOne,
   type MembershipCommand,
 } from './commands-membership'
-import {
-  previewSettingValue,
-  resolveLanguageEditMinRole,
-  LANGUAGE_SETTINGS_KEYS,
-  type PatchSettingsOp,
-} from './commands-patch-settings'
+import { previewSettingValue } from './commands-patch-settings'
 import {
   briefPatchOfSetup,
   jsonEqual,
@@ -61,8 +56,6 @@ import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-thres
 import { BRIEF_SETTINGS_KEY, isBriefFieldId, isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
 import { REQUIRED_ROLE } from '../events/role-policy'
 
-const LANGUAGE_KEY_SET = new Set(LANGUAGE_SETTINGS_KEYS)
-
 /** validation_failed / permission_denied with the offending field named — the
  *  spec's acceptance criterion for a rejected plan. */
 function fieldError(
@@ -79,12 +72,7 @@ function fieldError(
  * carries, so a composite plan is gated by its strictest constituent and can
  * never be a cheaper door to any of them.
  */
-export async function projectSetupFloor(
-  db: AquillaDb,
-  projectId: string,
-  cmd: ProjectSetupCommand,
-  ops: { plain: PatchSettingsOp[]; policy: PatchSettingsOp[] },
-): Promise<number> {
+export function projectSetupFloor(cmd: ProjectSetupCommand): number {
   // Every block's baseline is MAINTAINER (PatchSettings / SetBrief /
   // Membership all sit there); imports add PlanImport's file.create floor,
   // which is lower, so it only matters in a hypothetical imports-only plan.
@@ -92,11 +80,8 @@ export async function projectSetupFloor(
   if (cmd.imports?.length) {
     floor = Math.max(floor, REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
-  // No termbase floor: `terminology` is refused at prepare (AQU-1724).
-  const allOps = [...ops.plain, ...ops.policy]
-  if (allOps.some((op) => LANGUAGE_KEY_SET.has(op.key))) {
-    floor = Math.max(floor, await resolveLanguageEditMinRole(db, projectId))
-  }
+  // No termbase or language floor: `terminology` and the retired lane keys
+  // are refused at prepare (AQU-1724, AQU-1615).
   return floor
 }
 
@@ -185,7 +170,7 @@ export async function prepareProjectSetup(
   }
 
   // ── role floor (live) ────────────────────────────────────────────────────
-  const requiredRole = await projectSetupFloor(db, urlProjectId, cmd, ops)
+  const requiredRole = projectSetupFloor(cmd)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this project setup', {
@@ -300,7 +285,7 @@ export async function prepareProjectSetup(
     role.level,
   )
   const laneCtx = laneContextWithPlanned(
-    laneContextFrom(current.lanes ?? [], current.settings, visibleLaneIds),
+    laneContextFrom(current.lanes ?? [], visibleLaneIds),
     cmd.plannedLanes,
   )
   const planNames = new Set<string>()
@@ -463,8 +448,8 @@ export async function prepareProjectSetup(
 
 /** Language the plan's lanes (or the lanes already on the project) name for one side.
  *  Direction falls through this when the import does not name its own language.
- *  The four retired settings keys are not read here except inside laneLanguage's
- *  migration fallback, which is the only language resolver. */
+ *  The four retired settings keys are not read (AQU-2223); laneLanguage is the
+ *  only language resolver. */
 function languageForSetupSide(
   cmd: ProjectSetupCommand,
   current: Awaited<ReturnType<typeof loadProjectSettings>>,
@@ -475,7 +460,6 @@ function languageForSetupSide(
   const existing = (current.lanes ?? []).find((lane) => lane.role === side && !lane.archivedAt)
   if (!existing) return null
   const language = laneLanguage(existing, {
-    settings: current.settings,
     role: side,
     legacyTag: existing.legacyTag,
   })

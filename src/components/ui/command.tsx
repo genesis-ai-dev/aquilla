@@ -52,8 +52,11 @@ function CommandDialog({
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
       <DialogContent
+        // Inherit the base dialog placement (centered, capped at 85dvh) so the
+        // palette never grows past the viewport; an upper anchor plus a fixed
+        // 46rem cap pushed long lists off the bottom edge (AQU-2283).
         className={cn(
-          "top-[25%] max-h-[46rem] translate-y-0 overflow-hidden rounded-xl! p-0",
+          "overflow-hidden rounded-xl! p-0",
           className
         )}
         showCloseButton={showCloseButton}

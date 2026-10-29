@@ -35,7 +35,7 @@ import {
   type CommitTarget,
   type MembershipCommand,
 } from './commands-membership'
-import { briefPatchOfSetup, splitSettingsOps, type ProjectSetupCommand } from './commands-project-setup'
+import { briefPatchOfSetup, type ProjectSetupCommand } from './commands-project-setup'
 import { projectSetupFloor } from './prepare-project-setup'
 import type { PatchSettingsOp } from './commands-patch-settings'
 import { ensureProjectLanes, listProjectLanes } from '../../../db/shared/lanes'
@@ -124,8 +124,7 @@ export async function commitProjectSetup(
     return toErrorResponse(err)
   }
 
-  const ops = splitSettingsOps(cmd.settings)
-  const requiredRole = await projectSetupFloor(db, projectId, cmd, ops)
+  const requiredRole = projectSetupFloor(cmd)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this project setup', {
@@ -227,7 +226,6 @@ async function writeSettingsOps(
       ops: [...ops],
       ifMatchVersion: live.version,
       updatedBy,
-      registerLanes: false,
     })
     if (result.status === 'ok') return { ok: true, version: result.settings.version }
     if (result.status === 'error') return { ok: false, error: result.message }

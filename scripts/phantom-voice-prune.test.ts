@@ -259,7 +259,6 @@ describe("the versioned write", () => {
       ops: [{ key: "ttsSettings", value: plan.nextTts }],
       ifMatchVersion: plan.version,
       updatedBy: "0",
-      registerLanes: false,
     })
     expect(written.status).toBe("ok")
     expect(await version("bloated")).toBe(4)
@@ -288,7 +287,6 @@ describe("the versioned write", () => {
       ops: [{ key: "ttsSettings", value: plan.nextTts }],
       ifMatchVersion: plan.version,
       updatedBy: "0",
-      registerLanes: false,
     })
     expect(written.status).toBe("conflict")
     expect(await version("bloated")).toBe(4)

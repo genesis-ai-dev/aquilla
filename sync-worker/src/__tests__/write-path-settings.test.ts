@@ -30,7 +30,8 @@ const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
 const FILE = 'file-x'
 
-/** A blob with a write-path key of every shape, plus bulk the projection drops. */
+/** A blob with a write-path key of every shape, plus bulk the projection drops.
+ *  `archivedLanes` is a retired key (AQU-2223): still in old blobs, never read. */
 const SETTINGS = {
   archivedLanes: ['de'],
   timingLocked: false,
@@ -55,7 +56,7 @@ const readsBlob = (sql: string): boolean =>
   sql.includes('project_settings') && /\bsettings\b/.test(sql.replace(/project_settings/g, ''))
 
 const readsProjection = (sql: string): boolean =>
-  sql.includes('project_settings') && sql.includes('wp_archived_lanes')
+  sql.includes('project_settings') && sql.includes('wp_timing_locked')
 
 describe('POST /events — the write path reads the projection, not the blob', () => {
   async function postCommit(): Promise<{ statements: string[]; accepted: number }> {
@@ -101,10 +102,17 @@ describe('POST /events — the write path reads the projection, not the blob', (
     return { statements, accepted: body.accepted.length }
   }
 
-  it('answers the archived-lane check from the projected columns', async () => {
+  it('reads the projected columns at most once', async () => {
     const { statements, accepted } = await postCommit()
     expect(accepted).toBe(1)
-    expect(statements.filter(readsProjection).length).toBe(1)
+    expect(statements.filter(readsProjection).length).toBeLessThanOrEqual(1)
+  })
+
+  // AQU-2223: the archived-lane check reads `lanes.archived_at`, so the
+  // retired key's projection is not even selected.
+  it('does not select the retired archived-lane projection', async () => {
+    const { statements } = await postCommit()
+    expect(statements.filter((sql) => sql.includes('wp_archived_lanes'))).toEqual([])
   })
 
   it('sends no statement that loads the settings blob', async () => {
@@ -125,7 +133,7 @@ describe('writePathSettingsFromRow', () => {
     expect(writePathSettingsFromRow({ wp_timing_locked: false })).toEqual({ timingLocked: false })
     expect(writePathSettingsFromRow({ wp_timing_locked: 'false' })).toEqual({ timingLocked: 'false' })
     expect(writePathSettingsFromRow({ wp_validation_count: 2 })).toEqual({ validationCount: 2 })
-    expect(writePathSettingsFromRow({ wp_archived_lanes: ['de'] })).toEqual({ archivedLanes: ['de'] })
+    expect(writePathSettingsFromRow({ wp_archived_lanes: ['de'] })).toEqual({})
   })
 
   it('maps the snake_cased column back to its settings key', () => {
@@ -133,7 +141,6 @@ describe('writePathSettingsFromRow', () => {
       harmonize_min_role: 'maintainer',
     })
     expect(writePathSettingsFromRow(writePathRow(JSON.stringify(SETTINGS))!)).toEqual({
-      archivedLanes: ['de'],
       timingLocked: false,
       allowTrackEditing: true,
       validationCount: 2,
@@ -156,7 +163,7 @@ describe('a database without migration 0171', () => {
             return {
               async first() {
                 if (!sql.includes('project_settings')) return null
-                if (!sql.includes('wp_archived_lanes')) {
+                if (!sql.includes('wp_timing_locked')) {
                   blobReads++
                   if (opts.blobFails) throw new Error('connection lost')
                 }
@@ -177,7 +184,6 @@ describe('a database without migration 0171', () => {
     const { db } = blobOnlyDb(JSON.stringify(SETTINGS))
     const settings = await makeRequestCache(db).writePathSettings(PROJECT)
     expect(settings).toEqual({
-      archivedLanes: ['de'],
       timingLocked: false,
       allowTrackEditing: true,
       validationCount: 2,

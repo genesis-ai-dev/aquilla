@@ -61,7 +61,7 @@ function laneLanguagesOf(res: ProjectSettingsResponse): string[] {
   if (rows.length > 0) {
     return rows
       .map((lane) =>
-        laneLanguage(lane, { settings: res.settings, role: "target", legacyTag: lane.legacyTag }),
+        laneLanguage(lane, { role: "target", legacyTag: lane.legacyTag }),
       )
       .filter((language) => language.length > 0)
   }
@@ -94,7 +94,7 @@ export function AddLanguagePopover({ projectId, jwt, onAdded }: AddLanguagePopov
       return
     }
     setSnapshot({
-      defaultTargetLanguage: laneLanguageForTag("", res.lanes, res.settings) ?? "",
+      defaultTargetLanguage: laneLanguageForTag("", res.lanes) ?? "",
       laneLanguages: laneLanguagesOf(res),
     })
     setPhase("ready")

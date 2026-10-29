@@ -13,7 +13,8 @@
 // film, a server that refuses them, before they arrive) the tile is the
 // strip's own black under the same border: still plainly the film.
 
-import type { MouseEvent as ReactMouseEvent } from "react"
+import { useEffect, type MouseEvent as ReactMouseEvent } from "react"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { TL_CHIP_BOX_CLASS, TL_ROW_H_CLASS } from "@/lib/timeline/row-metrics"
 import { filmTrackHueVars } from "@/lib/timeline/track-colors"
@@ -26,8 +27,15 @@ import {
   visibleFilmTiles,
 } from "@/lib/timeline/film-strip"
 import { useRowMetrics } from "./useRowMetrics"
+import { useFilmFrames } from "./useFilmFrames"
 
 export interface FilmTrackLaneProps {
+  /** The film as linked (`coreMediaUrl`), and what resolving an uploaded one
+   *  needs. The frames come from it (see useFilmFrames). */
+  src: string
+  fileId: string
+  projectId?: string
+  session?: FrontierSession | null
   /** How long the film is. Null until the film reports it: the row is there,
    *  the strip is not yet. */
   filmSec: number | null
@@ -38,7 +46,8 @@ export interface FilmTrackLaneProps {
   name: string
   /** A click on the strip moves the playhead (and so the film) there. */
   onSeekSec?(sec: number): void
-  /** The picture for a tile's moment, or null while there is none. */
+  /** Test seam: the picture for a tile's moment. Given, the film itself is
+   *  never read. */
   frameFor?(sec: number): string | null
 }
 
@@ -46,6 +55,10 @@ export interface FilmTrackLaneProps {
 const STRIP_EDGE = "0 0 0 1px rgba(17,18,20,0.55)"
 
 export function FilmTrackLane({
+  src,
+  fileId,
+  projectId,
+  session,
   filmSec,
   pxPerSec,
   viewStartSec,
@@ -64,6 +77,16 @@ export function FilmTrackLane({
       ? visibleFilmTiles({ filmSec: filmSec!, pxPerSec, viewStartSec, viewEndSec, tilePx })
       : []
 
+  const frames = useFilmFrames({ src, fileId, projectId, session, enabled: !frameFor })
+  const pictureFor = frameFor ?? frames.frameFor
+  // Ask for the tiles in view, and only those. Keyed on their moments, so a
+  // render that changes nothing about them asks for nothing new.
+  const tileSecs = tiles.map((tile) => tile.sec).join(",")
+  const want = frames.want
+  useEffect(() => {
+    want(tileSecs ? tileSecs.split(",").map(Number) : [])
+  }, [want, tileSecs])
+
   const seekFromClick = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!onSeekSec || !(pxPerSec > 0)) return
     const box = e.currentTarget.getBoundingClientRect()
@@ -77,6 +100,7 @@ export function FilmTrackLane({
       className={`relative ${TL_ROW_H_CLASS} border-b border-border`}
       style={filmTrackHueVars()}
     >
+      {frames.grabber}
       {stripPx > 0 && (
         <div
           data-testid="tl-film-strip"
@@ -110,7 +134,7 @@ export function FilmTrackLane({
           {pictureH > 0 && (
             <div className="relative shrink-0 overflow-hidden" style={{ height: `${pictureH}px` }} aria-hidden>
               {tiles.map((tile) => {
-                const url = frameFor?.(tile.sec) ?? null
+                const url = pictureFor(tile.sec)
                 return url ? (
                   <img
                     key={tile.index}

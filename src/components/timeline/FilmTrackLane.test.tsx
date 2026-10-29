@@ -6,7 +6,10 @@ import { FilmTrackLane } from "./FilmTrackLane"
 describe("FilmTrackLane", () => {
   const draw = (over: Partial<React.ComponentProps<typeof FilmTrackLane>> = {}) =>
     render(
-      <FilmTrackLane filmSec={27.08} pxPerSec={38} viewStartSec={0} viewEndSec={30} name="showcase-film.webm" {...over} />,
+      <FilmTrackLane
+        src="http://127.0.0.1:5540/showcase-film.webm" fileId="ep1" filmSec={27.08} pxPerSec={38}
+        viewStartSec={0} viewEndSec={30} name="showcase-film.webm" frameFor={() => null} {...over}
+      />,
     )
 
   it("one strip from 0:00 to the film's end, at the timeline's zoom", () => {
@@ -46,6 +49,21 @@ describe("FilmTrackLane", () => {
     const tiles = screen.getAllByTestId(/tl-film-frame/)
     const ends = tiles.map((tile) => parseFloat(tile.style.left) + parseFloat(tile.style.width))
     expect(Math.max(...ends)).toBeCloseTo(27.08 * 38)
+  })
+
+  it("reads its frames from a hidden, muted copy of the film, never the Film panel's", () => {
+    draw({ frameFor: undefined })
+    const grabber = screen.getByTestId("tl-film-grabber") as HTMLVideoElement
+    expect(grabber.muted).toBe(true)
+    expect(grabber.getAttribute("src")).toBe("http://127.0.0.1:5540/showcase-film.webm")
+    expect(grabber).toHaveAttribute("aria-hidden")
+  })
+
+  it("a YouTube film has no frames to read: the plain strip, with its sprockets", () => {
+    draw({ frameFor: undefined, src: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
+    expect(screen.queryByTestId("tl-film-grabber")).toBeNull()
+    expect(screen.getByTestId("tl-film-sprockets")).toBeInTheDocument()
+    expect(screen.queryAllByTestId("tl-film-frame")).toHaveLength(0)
   })
 
   it("a click on the strip moves the playhead to that moment", () => {

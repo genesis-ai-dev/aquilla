@@ -5189,6 +5189,10 @@ export function TimelineEditor({
               />
               {coreMediaUrl && (
                 <FilmTrackLane
+                  src={coreMediaUrl}
+                  fileId={fileId}
+                  projectId={project?.id}
+                  session={session}
                   filmSec={filmTrackSec || null}
                   pxPerSec={pxPerSec}
                   viewStartSec={viewStartSec}

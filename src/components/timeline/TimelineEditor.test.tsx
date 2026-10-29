@@ -270,7 +270,10 @@ describe("TimelineEditor", () => {
       />,
     )
     expect(screen.queryByTestId("tl-video")).toBeNull()
-    expect(document.querySelector("video")).toBeNull()
+    // AQU-2253: the one <video> left is the film track's frame grabber — muted,
+    // hidden, only ever seeked, so it plays nothing and drives no clock.
+    const videos = Array.from(document.querySelectorAll("video"))
+    expect(videos.every((v) => v.getAttribute("data-testid") === "tl-film-grabber" && v.muted)).toBe(true)
   })
 
   it("offers the film row in Sources, with its state, and disables it below contributor", () => {

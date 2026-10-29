@@ -23,6 +23,11 @@ export const DOCK_AREAS: readonly DockArea[] = ["ll", "lr"]
 export const DOCK_REGIONS: readonly DockRegion[] = ["tl", "ll", "lr"]
 export const DOCK_PANELS: readonly DockPanel[] = ["film", "text"]
 
+/** Dispatched on a panel's host element just before the dock moves it to
+ *  another area, for anything inside that cannot survive a DOM move (an
+ *  iframe reloads: the YouTube picture). */
+export const DOCK_HOST_MOVING = "mediadock:hostmoving"
+
 /** What full screen folded, so restoring can unfold exactly that. "left:<tab>"
  *  is the left panel, with the tab it had open. */
 export type UndoEntry = DockRegion | `left:${string}`
@@ -34,10 +39,11 @@ export interface DockLayout {
   fullUndo: UndoEntry[]
 }
 
-// THE SIZES ARE NOT HERE. The timeline's height and the film's width keep the
-// per-file keys they already had (timeline-pane-layout.ts, video-pane-layout.ts),
-// so nobody's remembered sizes are lost to this, and each file starts from its
-// kind's sizes (media-layout-start.ts) until someone drags.
+// THE SIZES ARE NOT HERE. The timeline's height keeps the per-file key it
+// already had (timeline-pane-layout.ts), and the film's width, one shared key
+// before, is per file now and still reads the shared one for a file with none
+// (video-pane-layout.ts), so nobody's remembered sizes are lost to this. With
+// neither, a file starts from its kind's sizes (media-layout-start.ts).
 
 /** Every file starts here: the film bottom left, the text bottom right. */
 export function startDockLayout(): DockLayout {
@@ -123,9 +129,11 @@ export function foldRegion(layout: DockLayout, presence: DockPresence, region: D
   return next
 }
 
-/** Unfold a region by hand. Ends full screen: the note goes with it. */
+/** Unfold a region by hand. Ends full screen: the note goes with it. A region
+ *  already open unfolds nothing, so it ends nothing either: showing the
+ *  timeline while it is the full-screen region keeps the way back. */
 export function unfoldRegion(layout: DockLayout, region: DockRegion): DockLayout {
-  if (!layout.folded[region] && layout.fullUndo.length === 0) return layout
+  if (!layout.folded[region]) return layout
   const next = clone(layout)
   next.folded[region] = false
   next.fullUndo = []

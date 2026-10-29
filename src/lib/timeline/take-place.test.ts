@@ -170,12 +170,39 @@ describe("a move, in both timings (AQU-2267)", () => {
     const track = [{ cell: cells[0], audioId: takeId("l0") }, { cell, audioId: TAKE }, { cell, audioId: PIECE }]
     // Following the recordings the piece sits right after the first (1.5 s in);
     // dragged 0.4 s right, it leaves a 0.4 s silence before it. (A piece's
-    // place there is where its SOUND starts — AQU-1758 — so 1.9 s.)
+    // place there is where its clip starts, measured as following the source
+    // — AQU-1758 — so 0.4 s along from where the take, played straight
+    // through, puts it.)
     const moved = drag(recordings, source, track, { cell, audioId: PIECE }, 0.4)!
-    expect(moved.place.recordingsOffsetMs).toBe(1_900)
+    expect(moved.place.recordingsOffsetMs).toBe(400)
     // Following the source its clip's start was on the line, so its sound at
     // 2 + 2.5 = 4.5 s; now 0.4 s later.
     expect(moved.place.targetOffsetMs).toBe(400)
+  })
+
+  it("…and the same on a voice track, moved following the source", () => {
+    const TAKE = trackId("a")
+    const PIECE = "audio-a-1700000900-piece.wav"
+    const cell = {
+      ...line("a", 2, 6, { durationMs: 1_000 }),
+      selectedBySlot: { [TRACK]: TAKE },
+      attachments: {
+        [takeId("a")]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 1000 },
+        [TAKE]: { type: "audio", url: "frontier-audio://track", slot: TRACK, durationMs: 4000, trimEndMs: 1500 },
+        [PIECE]: { type: "audio", url: "frontier-audio://track", slot: TRACK, pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as CellData
+    const cells = [cell]
+    const { source, recordings } = layouts(cells, { layerSlots: [TRACK] })
+    const track = [{ cell, audioId: TAKE }, { cell, audioId: PIECE }]
+    // 0.3 s right following the source; following the recordings it leaves
+    // 0.3 s of silence after the first piece (1.5 s in): 1.8 s.
+    const moved = drag(source, recordings, track, { cell, audioId: PIECE }, 0.3)!
+    expect(moved.place).toEqual({ targetOffsetMs: 300, recordingsOffsetMs: 300 })
+    const after = { ...cell, attachments: { ...cell.attachments, [PIECE]: { ...cell.attachments![PIECE], ...moved.place } } } as unknown as CellData
+    const piece = layouts([after], { layerSlots: [TRACK] }).recordings.targetGeom(after, after.attachments![PIECE] as never, PIECE)!
+    expect(piece.start).toBeCloseTo(1.8, 5)
   })
 })
 

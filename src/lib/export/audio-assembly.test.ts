@@ -465,7 +465,7 @@ describe("assembleAudioEntries — a book's dragged-open pauses", () => {
   const A1 = "audio-c1-1700000000-take", P1 = "audio-c2-1700000000-take", P2 = "audio-c2-1700000001-take"
   // c1 (Mary): a 100 ms take, 50 ms into its line → 50 + 100 ms.
   // c2 (John): a cut take of one 100 ms recording — 0–40 ms, then 60–100 ms
-  // placed at 100 ms → 40 + 60 (silence) + 40 ms.
+  // moved 60 ms along from the first piece's end → 40 + 60 (silence) + 40 ms.
   const book = () => [
     cell({
       id: "c1",
@@ -477,7 +477,7 @@ describe("assembleAudioEntries — a book's dragged-open pauses", () => {
       selectedAudioId: P1,
       attachments: {
         [P1]: { url: `frontier-audio://${P1}.webm`, type: "audio/webm", durationMs: 100, trimEndMs: 40 },
-        [P2]: { url: `frontier-audio://${P1}.webm`, type: "audio/webm", durationMs: 100, trimStartMs: 60, pieceOf: P1, targetOffsetMs: 100 },
+        [P2]: { url: `frontier-audio://${P1}.webm`, type: "audio/webm", durationMs: 100, trimStartMs: 60, pieceOf: P1, targetOffsetMs: 60 },
       } as unknown as CellData["attachments"],
     }),
   ]

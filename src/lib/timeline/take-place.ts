@@ -13,6 +13,13 @@
 //                         times). What `buildProgramme` reads — the pause before
 //                         a voice take, where a layer's clip starts.
 //
+// A PIECE OF A SPLIT TAKE (AQU-1758) is measured the same way in both: where
+// its clip's start sits from its line's start, never where its sound starts.
+// Following the recordings it then sounds where it would if the take played
+// straight through, its pieces end to end, that place along — so a piece moved
+// some distance in one timing is that distance along in the other, by the same
+// arithmetic as a take.
+//
 // Before AQU-2267 there was only the first, and both timings read it. So a move
 // in one timing replaced the place in the other: a LOTE sermon take 1.0 s
 // before its line following the source, dragged 0.2 s following the recordings
@@ -34,8 +41,9 @@
 // number by the same distance, so the two stay in step for when it can.
 //
 // OLD DATA: a take with no place of its own following the recordings reads its
-// place following the source there, exactly as before. Its first move gives it
-// both. The one-number event an older client sends gives it one place again.
+// place following the source there, exactly as before — a piece too, whose
+// place means the same in both. Its first move gives it both. The one-number
+// event an older client sends gives it one place again.
 
 import type { CellData } from "@/hooks/useCells"
 import { buildTimelineLayout, type TimelineLayout } from "./layout"

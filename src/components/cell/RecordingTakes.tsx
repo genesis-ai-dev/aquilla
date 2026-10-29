@@ -318,7 +318,7 @@ function LineVoiceRow({ cell, settings, editable, voiceFromText }: {
   voiceFromText: boolean
 }) {
   const t = useT()
-  const { onApplyLineVoice } = useEditorActions()
+  const { onApplyLineVoice, allTtsSettings } = useEditorActions()
   const voicingAs = useVoicingAs(cell.id)
   const status = useTtsStatus(ttsStatusKey(cell.id))
   const online = useOnline()
@@ -334,7 +334,9 @@ function LineVoiceRow({ cell, settings, editable, voiceFromText }: {
   if (!onApplyLineVoice) return null
   const pending = lineVoicePending(settings, cell, {
     generateReady: voiceFromText && Boolean(cell.translated?.trim()) && cell.type !== "paratext" && online && reachable !== false,
-    takeIsReference: takeUsedByVoice(cell, settings),
+    // The whole library, as the click is run (AQU-2037): a voice on another
+    // lane cloned from this take would be changed just the same.
+    takeIsReference: takeUsedByVoice(cell, allTtsSettings ?? settings),
     canEdit: editable,
     busy: status.kind === "loading" || status.kind === "synthesizing",
   })

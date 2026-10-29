@@ -99,8 +99,10 @@ describe("each timing reads its own place (AQU-2267)", () => {
         [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500, targetOffsetMs: 0, recordingsOffsetMs: 0 },
         [PIECE]: {
           type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700,
-          // Dragged 2 s into the line following the recordings; never moved following the source.
-          targetOffsetMs: 0, recordingsOffsetMs: 2000,
+          // Dragged 2 s into the line following the recordings, 0.7 s after the
+          // first piece ends (AQU-1758: a piece's place is where its clip
+          // starts, so 0.7 s along); never moved following the source.
+          targetOffsetMs: 0, recordingsOffsetMs: 700,
         },
         [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
       },
@@ -156,6 +158,39 @@ describe("a take with one place reads as it always has (AQU-2267)", () => {
     const [slot] = buildProgramme([cell]).slots
     expect(slot.targetLeadSec).toBeCloseTo(0.4, 5)
     expect(targetChipGeom(cell, att(cell, takeId("l1")))!.anchor).toBeCloseTo(2.4, 5)
+  })
+
+  it("a piece of a split take with one place sits that far along in both timings", () => {
+    // AQU-1758: a piece's one place is where its clip starts, which is what
+    // following the source reads, so reading it following the recordings too
+    // is right for pieces: a piece moved 0.7 s along following the source
+    // before AQU-2267 is 0.7 s along following the recordings.
+    const TAKE = takeId("a")
+    const PIECE = "audio-a-1700000900-piece.wav"
+    const cut = (pieceOffsetMs?: number) =>
+      ({
+        ...line("a", 2, 6),
+        selectedAudioId: TAKE,
+        attachments: {
+          [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+          [PIECE]: {
+            type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700,
+            ...(pieceOffsetMs != null ? { targetOffsetMs: pieceOffsetMs } : {}),
+          },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      }) as unknown as CellData
+    const piece = (cell: CellData) => att(cell, PIECE)
+    // Never moved: end to end following the recordings (1.3 s in), where the
+    // recording has it following the source (2.5 s in).
+    const [still] = buildProgramme([cut()]).slots
+    expect(still.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [expect.closeTo(1.3, 5), undefined]])
+    expect(targetChipGeom(cut(), piece(cut()))!.start - 2).toBeCloseTo(2.5, 5)
+    // Moved 0.7 s along: 0.7 s later in both.
+    const moved = cut(700)
+    const [slot] = buildProgramme([moved]).slots
+    expect(slot.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [expect.closeTo(2, 5), expect.closeTo(0.7, 5)]])
+    expect(targetChipGeom(moved, piece(moved))!.start - 2).toBeCloseTo(3.2, 5)
   })
 
   it("a layer with one place sits there in both timings", () => {

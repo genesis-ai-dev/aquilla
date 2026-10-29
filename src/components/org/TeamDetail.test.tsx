@@ -6,6 +6,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
 import { UserError } from "@/lib/errors/user-error"
 import { fmtShortCalendarDate } from "@/lib/format-date"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 // AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
 // fetchOrgSettings swallows its own failures and returns null, so unmocked it
@@ -127,6 +128,28 @@ describe("TeamDetail project management", () => {
     await pickSelectOption(/granted role/i, /contributor/i)
     await act(async () => { screen.getByRole("button", { name: /^attach$/i }).click() })
     await waitFor(() => expect(attachProject).toHaveBeenCalledWith("jwt", 1, 10, "pa", 400, undefined))
+  })
+
+  // AQU-2260 (Sam, Oct 29, option 2B): every project in the org is a choice
+  // here, so the list gets a search box.
+  it("the project to attach list has a search box that narrows it", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [
+        { id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+        { id: "pb", name: "Wolof", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      ],
+    })
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    fireEvent.click(screen.getByRole("combobox", { name: /project to attach/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "wol" } })
+    expect(await screen.findByRole("option", { name: "Wolof" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Bambara" })).toBeNull()
   })
 
   it("checks every lane from All, and sends only the lanes left checked", async () => {
@@ -507,8 +530,12 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    // Read-only org-level role label with shadcn tooltip is present
-    expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
+    // Read-only org-level role label. AQU-2260: why it is read-only opens on
+    // click, in a note anchored to it, never on hover.
+    await expectClickNote(
+      screen.getByRole("button", { name: /org-level role: viewer/i }),
+      /can only be changed by an org owner/,
+    )
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
   })

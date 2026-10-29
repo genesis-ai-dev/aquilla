@@ -2,7 +2,6 @@ import { useState } from "react"
 import { MessageSquare, Bot, Plus, X, Zap, Microscope } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 export interface ModelListValue {
@@ -106,28 +105,24 @@ export function ModelListEditor({
                 onClick={() => onChange({ ...value, chatModel: id })}
                 icon={MessageSquare}
                 label="Chat"
-                title="Use as the default chat model"
               />
               <RoleToggle
                 active={agentModel === id}
                 onClick={() => onChange({ ...value, agentModel: id })}
                 icon={Bot}
                 label="Agent"
-                title="Use as the agent model"
               />
               <RoleToggle
                 active={fastModel === id}
                 onClick={() => onChange({ ...value, fastModel: fastModel === id ? "" : id })}
                 icon={Zap}
                 label="Fast"
-                title="Autopilot fast tier — scene summaries, the support check, and passage detection. Optional: click again to clear and fall back to the default."
               />
               <RoleToggle
                 active={deepModel === id}
                 onClick={() => onChange({ ...value, deepModel: deepModel === id ? "" : id })}
                 icon={Microscope}
                 label="Deep"
-                title="Autopilot deep tier — the adversarial verifier stances. Optional: click again to clear and fall back to the drafting model."
               />
               <Button
                 type="button"
@@ -163,36 +158,34 @@ export function ModelListEditor({
   )
 }
 
+/** A labelled role toggle. AQU-2260: it says nothing on hover; what each one
+ *  marks is printed under the list. */
 function RoleToggle({
   active,
   onClick,
   icon: Icon,
   label,
-  title,
 }: {
   active: boolean
   onClick: () => void
   icon: React.ComponentType<{ className?: string }>
   label: string
-  title: string
 }) {
   return (
-    <AppTooltip content={title}>
-      <button
-        type="button"
-        onClick={onClick}
-        aria-pressed={active}
-        aria-label={`${label}${active ? " (selected)" : ""}`}
-        className={cn(
-          "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
-          active
-            ? "border-transparent bg-primary text-primary-foreground"
-            : "border-input text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <Icon className="size-3" />
-        {label}
-      </button>
-    </AppTooltip>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={`${label}${active ? " (selected)" : ""}`}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors",
+        active
+          ? "border-transparent bg-primary text-primary-foreground"
+          : "border-input text-muted-foreground hover:text-foreground",
+      )}
+    >
+      <Icon className="size-3" />
+      {label}
+    </button>
   )
 }

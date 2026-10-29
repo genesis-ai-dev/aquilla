@@ -19,11 +19,6 @@
       "count": 2
     }
   },
-  "src/components/CellTranscribeBadge.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
   "src/components/ErrorBoundary.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
@@ -141,7 +136,7 @@
   },
   "src/components/audio/DenoiseButton.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 5
+      "count": 4
     }
   },
   "src/components/brief/BriefSection.tsx": {

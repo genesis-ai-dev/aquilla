@@ -98,6 +98,7 @@ export function OrgSettingsIdentity() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES.identity}
+      page="identity"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.identity}
     >
       <SettingsGroup>

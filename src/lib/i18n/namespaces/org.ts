@@ -549,8 +549,6 @@ export const org = defineNamespace({
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
     "org.projectOverview.downloadOriginals": "Download all originals",
-    "org.projectOverview.downloadOriginalsTooltip":
-      "Download every original imported source file as a zip",
     "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.importedOriginalsHeading": "Imported originals",
     "org.projectOverview.importedOriginalsListAria": "Imported original files",
@@ -1474,7 +1472,6 @@ export const org = defineNamespace({
     "org.projectOverview.plan.previousUnit": "Previous unit",
     "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
-    "org.projectOverview.plan.openInEditor": "Open in the editor",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
@@ -2332,10 +2329,6 @@ export const org = defineNamespace({
       "org.projectOverview.downloadOriginals": {
         description:
           "Button on the project-overview imported-originals card that downloads every stored original as a zip. Distinct from Download CSV, which is the plan progress table.",
-      },
-      "org.projectOverview.downloadOriginalsTooltip": {
-        description:
-          "Tooltip on Download all originals explaining that the zip contains the raw imported source files, not a translation-injected export.",
       },
       "org.projectOverview.importedOriginalsHeading": {
         description:
@@ -3426,10 +3419,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.nextUnit": {
         description: "Tooltip on the down arrow that steps to the next unit.",
         maxLength: 20,
-      },
-      "org.projectOverview.plan.openInEditor": {
-        description: "Tooltip on the detail panel's title and on a chapter card's title; each opens what it names in the editor.",
-        maxLength: 30,
       },
       "org.projectOverview.plan.targetDate": {
         description: "Label for the date a manager plans this unit to be finished by.",

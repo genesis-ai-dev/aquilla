@@ -32,7 +32,7 @@ import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -55,14 +55,7 @@ import {
   projectsResultError,
   type CloudProjectSummary,
 } from "@/lib/sync/cloud-projects"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import {
@@ -539,19 +532,17 @@ export function TeamDetail() {
           const label = <RoleLabel name={m.roleLevel} />
 
           // Owners change roles via the actions menu dialog — badge is display-only.
-          // Non-owners get a tooltip explaining the org-level lock.
+          // Non-owners get a note explaining the org-level lock, opened by a
+          // click on the role (AQU-2260: never a hover).
           if (isOwner) return label
 
           return (
-            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
-              <span
-                tabIndex={0}
-                className="inline-flex cursor-help"
-                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
-              >
-                {label}
-              </span>
-            </AppTooltip>
+            <NoteOnClick
+              note={lockedOrgRoleTooltip(m.roleLevel)}
+              label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
+            >
+              {label}
+            </NoteOnClick>
           )
         },
       },
@@ -933,22 +924,15 @@ export function TeamDetail() {
                           </DialogDescription>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-3">
-                          <Select
-                            items={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
+{/* AQU-2260: every project in the org, so a search box. */}
+                          <SearchSelect
+                            aria-label={t("org.teamDetail.projectToAttachAriaLabel")}
+                            className="w-full"
+                            options={attachableProjects.map((op) => ({ value: op.id, label: op.name }))}
                             value={selectedProjectId}
-                            onValueChange={(v) => setSelectedProjectId(v ?? "")}
-                          >
-                            <SelectTrigger aria-label={t("org.teamDetail.projectToAttachAriaLabel")} className="w-full">
-                              <SelectValue placeholder={t("org.teamDetail.selectProjectPlaceholder")} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {attachableProjects.map((op) => (
-                                  <SelectItem key={op.id} value={op.id}>{op.name}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                            onValueChange={setSelectedProjectId}
+                            placeholder={t("org.teamDetail.selectProjectPlaceholder")}
+                          />
                           <RoleSelect
                             options={ALL_ROLE_OPTIONS}
                             value={selectedRole}
@@ -1158,6 +1142,8 @@ export function TeamDetail() {
                           )}
                           <DisabledFieldTooltip
                             disabled={!isAdmin}
+                            align="start"
+                            noteClassName="px-2 pb-1.5"
                             tooltip={REMOVE_REQUIRES_MAINTAINER_TOOLTIP}
                           >
                             <MenuItem

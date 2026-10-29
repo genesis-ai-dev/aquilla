@@ -128,6 +128,20 @@ describe("AdminSettingsSection", () => {
     expect(patch.defaultLlmModel).toBe("openai/gpt-5")
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): the model list is every model the
+  // endpoint offers, so the challenger list gets a search box.
+  it("the Challenger model list has a search box that narrows it", async () => {
+    mockGet.mockResolvedValue(RESPONSE)
+    render(<AdminSettingsSection jwt="jwt" />)
+    await screen.findByText("anthropic/claude-sonnet-4.5")
+    fireEvent.click(screen.getByRole("switch", { name: /enable a\/b experiment/i }))
+    fireEvent.click(screen.getByRole("combobox", { name: "Challenger model" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "haiku" } })
+    expect(await screen.findByRole("option", { name: /claude-haiku-4-5/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /gpt/ })).not.toBeInTheDocument()
+  })
+
   it("configures the A/B experiment and includes it in the PATCH", async () => {
     mockGet.mockResolvedValue(RESPONSE)
     mockUpdate.mockResolvedValue({ settings: {}, version: 4 })

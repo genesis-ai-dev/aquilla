@@ -53,6 +53,8 @@ export const common = defineNamespace({
     "common.seek": "Seek",
     "common.volume": "Volume",
     "common.noMatches": "No matches",
+    "common.searchPlaceholder": "Search…",
+    "common.searchListAria": "Search the list",
     "common.aboutAria": "About {name}",
     "common.readOnlyGit": "Read-only (imported from git)",
     "common.refresh": "Refresh",
@@ -467,12 +469,25 @@ export const common = defineNamespace({
           "voice picker, a voice library. No trailing period in the English source.",
         screenshot: "audio-studio",
       },
+      "common.searchPlaceholder": {
+        description:
+          "Placeholder in the search box at the top of a dropdown list that grows with the " +
+          "user's data — the UI language, a Bible's books, projects, people, AI models. Typing " +
+          "narrows the list below. A short imperative; the trailing character is a single " +
+          "ellipsis glyph (…).",
+        maxLength: 24,
+      },
       "common.aboutAria": {
         description:
           "Accessible name (never visible) of a small (i) button beside a menu item or a " +
           "setting. A click opens a line explaining that item under it. Names the thing it " +
           "explains.",
         placeholders: { name: "The menu item's or setting's own label, already translated." },
+      },
+      "common.searchListAria": {
+        description:
+          "Accessible name (never visible) of that same search box at the top of a dropdown " +
+          "list. Says what typing in it does: it narrows the list it sits in. No ellipsis.",
       },
       "common.readOnlyGit": {
         description:

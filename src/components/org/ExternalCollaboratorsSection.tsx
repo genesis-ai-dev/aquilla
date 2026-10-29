@@ -3,7 +3,7 @@ import { ShieldOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Section } from "@/components/ui/page"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchOrgMembersMatrix, removeProjectMember } from "@/lib/frontier/members"
 import {
@@ -142,18 +142,18 @@ export function ExternalCollaboratorsSection({
                       <ShieldOff className="size-3" />
                     </Button>
                   ) : (
-                    <AppTooltip
-                      content={
+                    // AQU-2260: why it can't be revoked here opens on click.
+                    <NoteOnClick
+                      note={
                         g.source === "group"
                           ? t("org.externalCollaborators.viaTeamTooltip")
                           : t("projectSettings.share.lockedHintCreator")
                       }
-                      className="max-w-xs"
                     >
                       <span className="text-[10px] text-muted-foreground">
                         {t("org.externalCollaborators.viaSourceLabel", { source: g.source })}
                       </span>
-                    </AppTooltip>
+                    </NoteOnClick>
                   )}
                 </span>
               ))}

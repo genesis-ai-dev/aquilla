@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { EquivalentsPanel } from "./EquivalentsPanel"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
@@ -115,5 +117,22 @@ describe("EquivalentsPanel", () => {
     expect(add).toHaveClass("ms-auto", "h-6", "text-[10px]")
     fireEvent.click(add)
     expect(onPromote).toHaveBeenCalledWith("dios")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "Add"
+// carries its own word.
+describe("EquivalentsPanel — no hover on Add", () => {
+  it("shows nothing on hover over Add", async () => {
+    render(
+      <I18nProvider>
+        <TooltipProvider delay={0}>
+          <EquivalentsPanel sourceTerm="God" managed={[]} predicted={[PREDICTION]} canPromote onPromote={vi.fn()} />
+        </TooltipProvider>
+      </I18nProvider>,
+    )
+    await userEvent.setup().hover(screen.getByRole("button", { name: "Add" }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

@@ -48,6 +48,31 @@ index ef367175e1eef1cce225c307cf811744c8b3dd1c..78e4fcdff5ebb6176241b75b8b9a57fb
  const isSubsetOf = (a, b) => {
      for (const item of a) {
          if (b.has(item) === false) {
+diff --git a/dist/leader-thread/recreate-db.js b/dist/leader-thread/recreate-db.js
+index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..a6101b839c4c13b258b900ae7dbe1e5b5c88cb3f 100644
+--- a/dist/leader-thread/recreate-db.js
++++ b/dist/leader-thread/recreate-db.js
+@@ -30,13 +30,18 @@ export const recreateDb = ({ dbState, dbEventlog, schema, bootStatusQueue, mater
+             const hooks = migrationOptions.hooks;
+             const initResult = yield* initDb(hooks);
+             migrationsReport = initResult.migrationsReport;
+-            yield* rematerializeFromEventlog({
++            // [aquilla patch] Replay in one transaction. Without it every statement autocommits, and on
++            // OPFS with a rollback journal each commit writes, syncs and deletes a journal file: ~7 ms
++            // per cell upsert, 20+ minutes for a 34k-cell store. Nothing else writes to the state db
++            // during boot, and a replay that fails or is killed starts over either way (the db is
++            // destroyed on failure; a half-built file fails the head check on the next boot).
++            yield* Effect.acquireUseRelease(Effect.sync(() => dbState.execute('BEGIN TRANSACTION', undefined)), () => rematerializeFromEventlog({
+                 // db: initResult.tmpDb,
+                 dbEventlog,
+                 schema,
+                 materializeEvent,
+                 onProgress: ({ done, total }) => Queue.offer(bootStatusQueue, { stage: 'rehydrating', progress: { done, total } }),
+-            });
++            }), (_, exit) => Effect.sync(() => dbState.execute(exit._tag === 'Success' ? 'COMMIT' : 'ROLLBACK', undefined)));
+             yield* Effect.tryAll(() => hooks?.post?.(initResult.tmpDb)).pipe(UnknownError.mapToUnknownError);
+             break;
+         }
 diff --git a/dist/rematerialize-from-eventlog.js b/dist/rematerialize-from-eventlog.js
 index 797a369cb08763226831cb6b1cb021080508ebd3..36b40005cbc104214255fc8d0766424fc6cf77d1 100644
 --- a/dist/rematerialize-from-eventlog.js

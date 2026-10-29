@@ -942,7 +942,6 @@ export const ms: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Baris lebih tinggi (⌘ + tatal)",
   "editor.timeline.timingsUnlocked": "Masa tidak dikunci",
   "editor.timeline.pairingsFailed": "Pasangan tidak dapat dimuatkan — apa yang ditunjukkan mungkin tidak lengkap.",
-  "editor.timeline.neverPaired": "Isyarat ini belum pernah dipasangkan dengan sari kata — import semula VTT audio dan tandakan \"tentukan pasangan sari kata\".",
   "editor.timeline.badgePairing": "memasangkan…",
   "editor.timeline.badgeLinked": "terpaut",
   "editor.timeline.badgeNotLinked": "tidak terpaut",

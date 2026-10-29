@@ -1142,7 +1142,6 @@ export const hi: Catalog = {
   "editor.timeline.rowsTallerTooltip": "ऊँची पंक्तियाँ (⌘ + स्क्रॉल)",
   "editor.timeline.timingsUnlocked": "समय अनलॉक",
   "editor.timeline.pairingsFailed": "जोड़ियाँ लोड नहीं हो सकीं — जो दिख रहा है वह अधूरा हो सकता है।",
-  "editor.timeline.neverPaired": "ये संकेत कभी उपशीर्षकों से नहीं जोड़े गए — ऑडियो VTT फिर आयात करें और “उपशीर्षक जोड़ियाँ निकालें” टिक करें।",
   "editor.timeline.badgePairing": "जोड़ा जा रहा है…",
   "editor.timeline.badgeLinked": "जुड़ा",
   "editor.timeline.badgeNotLinked": "न जुड़ा",

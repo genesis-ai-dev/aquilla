@@ -948,7 +948,6 @@ export const zh_Hans: Catalog = {
   "editor.timeline.rowsTallerTooltip": "较高的列高（⌘ + 卷动）",
   "editor.timeline.timingsUnlocked": "时间安排已解锁",
   "editor.timeline.pairingsFailed": "无法加载配对关系 — 目前显示的内容可能并不完整。",
-  "editor.timeline.neverPaired": "这些提示行从未与字幕配对过 — 请重新导入音频 VTT，并勾选「推算字幕配对关系」。",
   "editor.timeline.badgePairing": "配对中…",
   "editor.timeline.badgeLinked": "已链接",
   "editor.timeline.badgeNotLinked": "未链接",

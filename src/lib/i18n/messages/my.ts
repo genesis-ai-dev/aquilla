@@ -948,7 +948,6 @@ export const my: Catalog = {
   "editor.timeline.rowsTallerTooltip": "အတန်းများ ပိုမြင့် (⌘ + လှိမ့်)",
   "editor.timeline.timingsUnlocked": "အချိန်များ သော့ဖွင့်ထားသည်",
   "editor.timeline.pairingsFailed": "တွဲချိတ်မှုများကို ဖွင့်၍မရပါ — ပြထားသည်များ မပြည့်စုံနိုင်သည်။",
-  "editor.timeline.neverPaired": "ဤချိန်မှတ်များကို စာတန်းထိုးများနှင့် တစ်ကြိမ်မျှ မတွဲရသေးပါ — အသံ VTT ကို ပြန်တင်သွင်းပြီး \"စာတန်းထိုးတွဲချိတ်များကို တွက်ထုတ်ရန်\" ကို အမှန်ခြစ်ပါ။",
   "editor.timeline.badgePairing": "တွဲချိတ်နေသည်…",
   "editor.timeline.badgeLinked": "ချိတ်ပြီး",
   "editor.timeline.badgeNotLinked": "မချိတ်ရသေး",

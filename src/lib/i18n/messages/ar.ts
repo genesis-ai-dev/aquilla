@@ -948,7 +948,6 @@ export const ar: Catalog = {
   "editor.timeline.rowsTallerTooltip": "صفوف أطول (⌘ + تمرير)",
   "editor.timeline.timingsUnlocked": "التوقيتات غير مقفلة",
   "editor.timeline.pairingsFailed": "تعذّر تحميل الإقرانات — قد يكون المعروض غير مكتمل.",
-  "editor.timeline.neverPaired": "لم تُقرَن هذه الإشارات بالترجمات النصية من قبل — أعد استيراد VTT الصوتي وحدّد «استخراج إقرانات الترجمة النصية».",
   "editor.timeline.badgePairing": "جارٍ الإقران…",
   "editor.timeline.badgeLinked": "مرتبط",
   "editor.timeline.badgeNotLinked": "غير مرتبط",

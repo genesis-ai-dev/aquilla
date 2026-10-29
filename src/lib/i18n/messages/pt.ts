@@ -1138,7 +1138,6 @@ export const pt: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Linhas mais altas (⌘ + rolagem)",
   "editor.timeline.timingsUnlocked": "Tempos desbloqueados",
   "editor.timeline.pairingsFailed": "Não foi possível carregar os emparelhamentos — o que aparece pode estar incompleto.",
-  "editor.timeline.neverPaired": "Estas entradas nunca foram emparelhadas com as legendas — reimporte o VTT de áudio e marque \"determinar os emparelhamentos das legendas\".",
   "editor.timeline.badgePairing": "emparelhando…",
   "editor.timeline.badgeLinked": "vinculado",
   "editor.timeline.badgeNotLinked": "não vinculado",

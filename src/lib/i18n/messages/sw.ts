@@ -1174,7 +1174,6 @@ export const sw: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Safu ndefu (⌘ + sogeza)",
   "editor.timeline.timingsUnlocked": "Muda umefunguliwa",
   "editor.timeline.pairingsFailed": "Uoanishaji haukuweza kupakiwa — kinachoonekana kinaweza kuwa hakijakamilika.",
-  "editor.timeline.neverPaired": "Alama hizi hazijawahi kuoanishwa na manukuu — ingiza tena VTT ya sauti na weka tiki \"tambua uoanishaji wa manukuu\".",
   "editor.timeline.badgePairing": "inaoanisha…",
   "editor.timeline.badgeLinked": "imeunganishwa",
   "editor.timeline.badgeNotLinked": "haijaunganishwa",

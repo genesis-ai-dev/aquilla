@@ -948,7 +948,6 @@ export const th: Catalog = {
   "editor.timeline.rowsTallerTooltip": "แถวสูงขึ้น (⌘ + เลื่อน)",
   "editor.timeline.timingsUnlocked": "ปลดล็อกจังหวะเวลาแล้ว",
   "editor.timeline.pairingsFailed": "โหลดการจับคู่ไม่สำเร็จ — สิ่งที่แสดงอาจไม่ครบ",
-  "editor.timeline.neverPaired": "คิวเหล่านี้ยังไม่เคยถูกจับคู่กับคำบรรยาย — นำเข้า audio VTT อีกครั้งแล้วติ๊ก \"หาการจับคู่คำบรรยายให้\"",
   "editor.timeline.badgePairing": "กำลังจับคู่…",
   "editor.timeline.badgeLinked": "เชื่อมแล้ว",
   "editor.timeline.badgeNotLinked": "ยังไม่เชื่อม",

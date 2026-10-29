@@ -957,7 +957,6 @@ export const id: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Baris lebih tinggi (⌘ + gulir)",
   "editor.timeline.timingsUnlocked": "Pewaktuan tidak terkunci",
   "editor.timeline.pairingsFailed": "Pemasangan tidak dapat dimuat — yang tampil mungkin tidak lengkap.",
-  "editor.timeline.neverPaired": "Isyarat ini belum pernah dipasangkan dengan takarir — impor ulang VTT audio dan centang \"hitung pemasangan takarir\".",
   "editor.timeline.badgePairing": "memasangkan…",
   "editor.timeline.badgeLinked": "tertaut",
   "editor.timeline.badgeNotLinked": "tidak tertaut",

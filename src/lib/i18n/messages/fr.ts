@@ -950,7 +950,6 @@ export const fr: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Rangées plus hautes (⌘ + défiler)",
   "editor.timeline.timingsUnlocked": "Minutages déverrouillés",
   "editor.timeline.pairingsFailed": "Les associations n'ont pas pu être chargées — ce qui est affiché peut être incomplet.",
-  "editor.timeline.neverPaired": "Ces répliques n'ont jamais été associées aux sous-titres — réimportez le VTT audio et cochez « déterminer les associations de sous-titres ».",
   "editor.timeline.badgePairing": "association…",
   "editor.timeline.badgeLinked": "liée",
   "editor.timeline.badgeNotLinked": "non liée",

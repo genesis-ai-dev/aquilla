@@ -1181,7 +1181,6 @@ export const am: Catalog = {
   "editor.timeline.rowsTallerTooltip": "ረጅም ረድፎች (⌘ + ማሸብለል)",
   "editor.timeline.timingsUnlocked": "ጊዜዎች ተከፍተዋል",
   "editor.timeline.pairingsFailed": "ጥንዶቹ ሊጫኑ አልቻሉም — የሚታየው ያልተሟላ ሊሆን ይችላል።",
-  "editor.timeline.neverPaired": "እነዚህ ምልክቶች ከንዑስ ጽሑፎቹ ጋር ፈጽሞ አልተጣመሩም — የድምጽ VTT እንደገና ያስመጡ እና «የንዑስ ጽሑፍ ጥንዶችን አውጣ» ምልክት ያድርጉ።",
   "editor.timeline.badgePairing": "በመጣመር ላይ…",
   "editor.timeline.badgeLinked": "ተያይዟል",
   "editor.timeline.badgeNotLinked": "አልተያያዘም",

@@ -1183,7 +1183,6 @@ export const bn: Catalog = {
   "editor.timeline.rowsTallerTooltip": "লম্বা সারি (⌘ + স্ক্রল)",
   "editor.timeline.timingsUnlocked": "সময় খোলা",
   "editor.timeline.pairingsFailed": "জোড়া লোড হয়নি — যা দেখাচ্ছে তা অসম্পূর্ণ হতে পারে।",
-  "editor.timeline.neverPaired": "এই কিউগুলো কখনো সাবটাইটেলের সাথে জোড়া হয়নি — অডিও VTT আবার আমদানি করুন এবং \"সাবটাইটেলের জোড়া বের করুন\" টিক দিন।",
   "editor.timeline.badgePairing": "জোড়া হচ্ছে…",
   "editor.timeline.badgeLinked": "যুক্ত",
   "editor.timeline.badgeNotLinked": "যুক্ত নয়",

@@ -1181,7 +1181,6 @@ export const pa: Catalog = {
   "editor.timeline.rowsTallerTooltip": "ਉੱਚੀਆਂ ਕਤਾਰਾਂ (⌘ + ਸਕ੍ਰੋਲ)",
   "editor.timeline.timingsUnlocked": "ਸਮੇਂ ਦੇ ਤਾਲੇ ਖੁੱਲ੍ਹੇ",
   "editor.timeline.pairingsFailed": "ਜੋੜੇ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕੇ — ਜੋ ਦਿਖ ਰਿਹਾ ਹੈ ਉਹ ਅਧੂਰਾ ਹੋ ਸਕਦਾ ਹੈ.",
-  "editor.timeline.neverPaired": "ਇਹ ਕਿਊ ਉਪਸਿਰਲੇਖਾਂ ਨਾਲ ਕਦੇ ਨਹੀਂ ਜੁੜੇ — ਆਡੀਓ VTT ਮੁੜ ਇੰਪੋਰਟ ਕਰੋ ਅਤੇ \"ਉਪਸਿਰਲੇਖ ਜੋੜੇ ਪਤਾ ਲਗਾਓ\" ਉੱਤੇ ਨਿਸ਼ਾਨ ਲਗਾਓ.",
   "editor.timeline.badgePairing": "ਜੋੜਿਆ ਜਾ ਰਿਹਾ ਹੈ…",
   "editor.timeline.badgeLinked": "ਜੁੜਿਆ",
   "editor.timeline.badgeNotLinked": "ਨਹੀਂ ਜੁੜਿਆ",

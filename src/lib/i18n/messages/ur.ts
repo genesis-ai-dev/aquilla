@@ -1181,7 +1181,6 @@ export const ur: Catalog = {
   "editor.timeline.rowsTallerTooltip": "لمبی قطاریں (⌘ + اسکرول)",
   "editor.timeline.timingsUnlocked": "اوقات کھلے ہیں",
   "editor.timeline.pairingsFailed": "جوڑے لوڈ نہیں ہو سکے — جو دکھ رہا ہے نامکمل ہو سکتا ہے۔",
-  "editor.timeline.neverPaired": "یہ کیوز کبھی سب ٹائٹل سے نہیں جوڑی گئیں — آڈیو VTT دوبارہ درآمد کریں اور \"سب ٹائٹل کے جوڑے معلوم کریں\" پر نشان لگائیں۔",
   "editor.timeline.badgePairing": "جوڑ رہا ہے…",
   "editor.timeline.badgeLinked": "جڑا",
   "editor.timeline.badgeNotLinked": "نہیں جڑا",

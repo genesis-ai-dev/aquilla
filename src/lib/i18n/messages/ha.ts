@@ -1181,7 +1181,6 @@ export const ha: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Jere dogo (⌘ + gungura)",
   "editor.timeline.timingsUnlocked": "An buɗe lokuta",
   "editor.timeline.pairingsFailed": "An kasa loda haɗawa — abin da ake gani na iya zama rashin cika.",
-  "editor.timeline.neverPaired": "Ba a taɓa haɗa waɗannan alamomi da rubutun allo ba — ku sake shigo da VTT ɗin sauti kuma ku zaɓi \"gano haɗin rubutun allo\".",
   "editor.timeline.badgePairing": "haɗawa…",
   "editor.timeline.badgeLinked": "an haɗa",
   "editor.timeline.badgeNotLinked": "ba a haɗa ba",

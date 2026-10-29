@@ -971,7 +971,6 @@ export const ru: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Выше строки (⌘ + прокрутка)",
   "editor.timeline.timingsUnlocked": "Тайминг разблокирован",
   "editor.timeline.pairingsFailed": "Не удалось загрузить пары — показанное может быть неполным.",
-  "editor.timeline.neverPaired": "Эти реплики никогда не связывались с субтитрами — импортируйте аудио-VTT заново и отметьте «определить пары субтитров».",
   "editor.timeline.badgePairing": "связывание…",
   "editor.timeline.badgeLinked": "связано",
   "editor.timeline.badgeNotLinked": "не связано",

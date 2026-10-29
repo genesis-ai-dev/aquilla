@@ -1136,7 +1136,6 @@ export const es: Catalog = {
   "editor.timeline.rowsTallerTooltip": "Filas más altas (⌘ + desplazamiento)",
   "editor.timeline.timingsUnlocked": "Tiempos desbloqueados",
   "editor.timeline.pairingsFailed": "No se pudieron cargar los emparejamientos — lo que se muestra puede estar incompleto.",
-  "editor.timeline.neverPaired": "Estas entradas nunca se emparejaron con los subtítulos — vuelve a importar el VTT de audio y marca \"determinar los emparejamientos de subtítulos\".",
   "editor.timeline.badgePairing": "emparejando…",
   "editor.timeline.badgeLinked": "vinculado",
   "editor.timeline.badgeNotLinked": "no vinculado",

@@ -948,7 +948,6 @@ export const zh_Hant: Catalog = {
   "editor.timeline.rowsTallerTooltip": "較高的列高（⌘ + 捲動）",
   "editor.timeline.timingsUnlocked": "時間安排已解鎖",
   "editor.timeline.pairingsFailed": "無法載入配對關係 — 目前顯示的內容可能並不完整。",
-  "editor.timeline.neverPaired": "這些提示行從未與字幕配對過 — 請重新匯入音訊 VTT，並勾選「推算字幕配對關係」。",
   "editor.timeline.badgePairing": "配對中…",
   "editor.timeline.badgeLinked": "已連結",
   "editor.timeline.badgeNotLinked": "未連結",

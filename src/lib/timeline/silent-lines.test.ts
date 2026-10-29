@@ -88,6 +88,31 @@ describe("silentSkipTarget", () => {
     expect(silentSkipTarget(hidden, 2, 6)).toBe(4)
   })
 
+  // AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always."
+  describe("with the setting off", () => {
+    // c1 [0,2] recorded; c2 [2,4] hidden; c3 [4,6] not recorded; c4 [7,9] recorded. End 9.
+    const offMap = clockSoundMap(
+      [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)],
+      SLOTS,
+    )
+
+    it("still jumps a hidden line, to the next line it plays", () => {
+      expect(silentSkipTarget(offMap, 2, 9, false)).toBe(4)
+      expect(silentSkipTarget(offMap, 3, 9, false)).toBe(4)
+    })
+
+    it("plays an unrecorded line through, and the file's own gap after it", () => {
+      expect(silentSkipTarget(offMap, 4, 9, false)).toBeNull()
+      expect(silentSkipTarget(offMap, 5.5, 9, false)).toBeNull()
+      expect(silentSkipTarget(offMap, 6.5, 9, false)).toBeNull()
+    })
+
+    it("runs out to the end over trailing hidden lines", () => {
+      const tail = clockSoundMap([cue("c1", 0, 2, 2_000), cue("c2", 3, 5, undefined, { hidden: true })], SLOTS)
+      expect(silentSkipTarget(tail, 2, 5, false)).toBe(5)
+    })
+  })
+
   it("does nothing when no line on the clock is silent", () => {
     expect(clockSoundMap([cue("c1", 0, 2, 2_000)], SLOTS).silent).toHaveLength(0)
     expect(silentSkipTarget(clockSoundMap([cue("c1", 0, 2, 2_000)], SLOTS), 2.5, 3)).toBeNull()
@@ -154,6 +179,29 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)
     advance(1)
     expect(getVirtualClockSec()).toBeCloseTo(3.05, 3)
+  })
+
+  // AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always."
+  it("off: the clock still jumps a hidden line, and runs across the unrecorded one after it", () => {
+    setSkipSilentLinesPref(false)
+    const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)]
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, true))
+    act(() => { virtualClockPlay() })
+    advance(2.05)
+    expect(getVirtualClockSec()).toBeCloseTo(4, 3)
+    expect(getVirtualClockPlaying()).toBe(true)
+    advance(1)
+    expect(getVirtualClockSec()).toBeCloseTo(5, 3)
+    advance(1.5)
+    expect(getVirtualClockSec()).toBeCloseTo(6.5, 3)
+  })
+
+  it("on: the clock jumps a hidden line as it does an unrecorded one", () => {
+    const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)]
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, true))
+    act(() => { virtualClockPlay() })
+    advance(2.05)
+    expect(getVirtualClockSec()).toBeCloseTo(7, 3)
   })
 
   it("does nothing while the built-in clock is not this file's transport", () => {

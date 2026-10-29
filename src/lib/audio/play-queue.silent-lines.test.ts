@@ -294,3 +294,83 @@ describe("following the recordings, with Skip lines with nothing to play OFF", (
     expect(dubEl("b3")!.paused).toBe(true)
   })
 })
+
+// AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always. No
+// matter what." Turning "Skip lines with nothing to play" off plays an
+// unrecorded line through in silence — but never a hidden one. A hidden line
+// keeps its place on the timeline; playback steps over it either way, whether
+// it never had a take or its take is one that never sounds.
+describe.each([
+  ["ON", true],
+  ["OFF", false],
+])("following the recordings, a hidden line is skipped with the setting %s", (_label, on) => {
+  const hidden = (cell: CellData): CellData => ({ ...cell, hidden: true }) as CellData
+  // b1 recorded 2 s → [0, 2); b2 hidden, a stand-in → [2, 3.5); b3 recorded 3 s → [3.5, 6.5).
+  const withHiddenStandIn = () => [bookLine("b1", 2_000), hidden(bookLine("b2")), bookLine("b3", 3_000)]
+  // b2 hidden with a 1 s take that never sounds → [2, 3); b3 → [3, 6).
+  const withHiddenTake = () => [bookLine("b1", 2_000), hidden(bookLine("b2", 1_000)), bookLine("b3", 3_000)]
+
+  beforeEach(() => {
+    setSkipSilentLinesPref(on)
+  })
+
+  it("Play all goes from the line before it straight to the line after it", async () => {
+    startQueue(ctxFor(withHiddenStandIn()), 0)
+    await wait()
+    dubEl("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBe(3.5)
+  })
+
+  it("a hidden line whose take never sounds is stepped over too", async () => {
+    startQueue(ctxFor(withHiddenTake()), 0)
+    await wait()
+    dubEl("b1")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBe(3)
+    expect(dubEl("b2")?.paused ?? true).toBe(true)
+  })
+
+  it("Play all from the top starts after a first line that is hidden", async () => {
+    startQueue(ctxFor([hidden(bookLine("b0")), bookLine("b1", 2_000)]), 0)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBe(1.5)
+  })
+
+  it("next and previous line step over it", async () => {
+    startQueue(ctxFor(withHiddenStandIn()), 0)
+    await wait()
+    skipForward()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    skipBack()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+  })
+
+  it("a seek onto it moves on to the next line", async () => {
+    startQueue(ctxFor(withHiddenStandIn()), 0)
+    await wait()
+    seekQueueToTime(2.5)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+
+  it("a last line that is hidden ends the run when the line before it ends", async () => {
+    const ranOut = vi.fn()
+    const off = onQueueRanOut(ranOut)
+    try {
+      startQueue(ctxFor([bookLine("b1", 2_000), hidden(bookLine("b2"))]), 0)
+      await wait()
+      dubEl("b1")!.tick(2)
+      await wait()
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toHaveBeenCalledTimes(1)
+    } finally {
+      off()
+    }
+  })
+})

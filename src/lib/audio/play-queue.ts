@@ -478,6 +478,10 @@ let queueTickAt: ((atSec: number) => void) | null = null
 // volume and the app-wide audio coordinator all keep working untouched.
 let timingMode: AudioTimingMode = "dubbing"
 let programme: Programme | null = null
+/** The verses of `programme` that are hidden lines. AQU-2251 (Sam, Oct 29):
+ *  "A hidden line should always be skipped" — never played through in
+ *  silence, whatever "Skip lines with nothing to play" says. */
+let progHiddenCellIds: ReadonlySet<string> = new Set()
 /** Index into `programme.slots` — the verse the transport is on. */
 let progIndex = -1
 /** Whether the current PAUSED cue was user-chosen (a click/seek). A paused cue
@@ -923,6 +927,7 @@ function progRebuild(): void {
   const ctx = activeContext
   if (!ctx || timingMode !== "audioFirst") {
     programme = null
+    progHiddenCellIds = new Set()
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
@@ -940,12 +945,14 @@ function progRebuild(): void {
   // plain line-by-line path it always had rather than going quiet.
   if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
     programme = null
+    progHiddenCellIds = new Set()
     return
   }
   // Hidden lines keep their place (the timeline draws them there, faded) but
   // their takes are taken out of what plays: a hidden verse sounds only its
   // original, and one with no original is skipped.
-  programme = withoutHiddenTakes(built, new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
+  progHiddenCellIds = new Set(dialogue.filter(isHiddenCell).map((c) => c.id))
+  programme = withoutHiddenTakes(built, progHiddenCellIds)
   setProgress({ duration: programme.totalSec })
 }
 
@@ -960,9 +967,13 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * play" off — then a line nobody has recorded yet (a book's stand-in) takes
  * its time on the timeline in silence, the playhead runs across it, and the
  * next line follows. On, the default, it is stepped over as it always was.
+ *
+ * Never a hidden line (Sam, Oct 29: "A hidden line should always be skipped.
+ * Always. No matter what."): with its take taken out it has nothing to hear,
+ * and it is stepped over whichever way the setting is.
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
-  return !progSlotHasSound(slot) && !getSkipSilentLinesPref()
+  return !progSlotHasSound(slot) && !progHiddenCellIds.has(slot.cellId) && !getSkipSilentLinesPref()
 }
 
 /** The next verse playback goes to, from `from` onward: one with anything to

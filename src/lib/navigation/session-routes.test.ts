@@ -23,7 +23,6 @@ describe("isSessionHydrationRequiredPath", () => {
       "/login",
       "/reset-password",
       "/verify-email",
-      "/privacy-policy",
       "/onboarding",
       "/join/token",
       "/join-org/token",

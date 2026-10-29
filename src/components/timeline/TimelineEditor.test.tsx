@@ -3562,6 +3562,7 @@ describe("who may use the Check tools", () => {
     )
     expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
   })
+
 })
 
 // AQU-1758 (Sam's decision 7): Sources sits behind the project's "film and
@@ -5187,10 +5188,13 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
           linkedVideoEmpty={{ captionTrackCount: 0 }} />,
       )
       const column = screen.getByTestId("tl-scroll")
-      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      const canvas = screen.getByTestId("tl-canvas")
+      const laneWidthPx = () => parseFloat(canvas.dataset.filePx ?? "")
       // The walk's file: an empty Free timing timeline is about two seconds,
-      // far shorter than the view, so the column cannot scroll at all.
+      // far shorter than the view, so the column cannot scroll at all — and
+      // its ground still runs to the view's edge (Sam, Oct 28).
       expect(laneWidthPx()).toBeLessThan(200)
+      expect(canvas.style.width).toBe("900px")
 
       const check = (zoomStep: number) => {
         const where = `after ${zoomStep} zoom-in(s)`
@@ -5216,6 +5220,7 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
         fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
         flush()
         expect(laneWidthPx()).toBeGreaterThan(before)
+        expect(canvas.style.width).toBe(`${Math.max(900, laneWidthPx())}px`)
         check(i)
       }
       fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))
@@ -5553,11 +5558,11 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
   })
 
-  it("draws Sources as its icon and a chevron, 'Film and sources' on hover, the film first in its menu", async () => {
+  it("draws Sources as its icon alone, 'Film and sources' on hover, the film first in its menu", async () => {
     const { film, onLink } = drawBar()
     const sources = await screen.findByTestId("tl-sources-menu")
     expect(sources.textContent).toBe("")
-    expect(sources.querySelectorAll("svg")).toHaveLength(2)
+    expect(sources.querySelectorAll("svg")).toHaveLength(1)
     await expectTooltip(sources, /^Film and sources$/)
     fireEvent.click(sources)
     const menu = await screen.findByRole("menu")

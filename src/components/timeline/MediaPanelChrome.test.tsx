@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { layoutGlyphShape, MediaAreaStrip, MediaLayoutGlyph, PanelControlButtons, TimelineMenu } from "./MediaPanelChrome"
 import { filmLabelFor } from "./MediaTopBar"
 import { dockView, foldRegion, movePanel, startDockLayout, type DockLayout } from "./media-dock-layout"
@@ -48,6 +48,27 @@ describe("an area's strip", () => {
     expect(dock.activate).toHaveBeenCalledWith("film")
     fireEvent.doubleClick(screen.getByTestId("dock-tab-text"))
     expect(dock.toggleFull).toHaveBeenCalledWith("ll")
+  })
+
+  // AQU-2196 (Oct 29): as the timeline's ⋯ did on Oct 27, the Film and Text
+  // panels' ⋯ leave Full screen and Fold to the buttons beside them.
+  it.each([
+    ["bottom left (the film)", "ll", null],
+    ["bottom right (the text)", "lr", null],
+    ["full screen, where the button reads Restore", "ll", "ll"],
+  ] as const)("its ⋯ has no Full screen and no Fold — %s", (_label, area, fullRegion) => {
+    const dock = fakeDock(startDockLayout(), fullRegion ? { fullRegion, canRestore: true } : {})
+    render(<MediaAreaStrip dock={dock} area={area} />)
+    fireEvent.click(screen.getByTestId(`dock-more-${area}`))
+    const menu = screen.getByRole("menu")
+    expect(within(menu).getByTestId(`dock-move-${area}`)).toBeInTheDocument()
+    expect(screen.queryByTestId(`dock-menu-full-${area}`)).toBeNull()
+    expect(screen.queryByTestId(`dock-menu-fold-${area}`)).toBeNull()
+    expect(within(menu).queryByText(/Full screen|Restore|Fold/)).toBeNull()
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(1)
+    // The buttons beside the ⋯ stay.
+    expect(screen.getByTestId(`dock-full-${area}`)).toBeInTheDocument()
+    if (!fullRegion) expect(screen.getByTestId(`dock-fold-${area}`)).toBeInTheDocument()
   })
 
   it("its ⋯ says where the panel is and moves it to the other area", () => {

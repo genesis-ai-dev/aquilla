@@ -6,6 +6,7 @@
 // ahead of this Worker's aquilla.app/* catch-all.
 //
 // Request flow:
+//   /privacy-policy      → 301 to /privacy (the one live policy, served by marketing)
 //   /join/*, /join-org/* → SPA shell with invite social meta injected
 //   /*                    → env.ASSETS.fetch(req) (SPA fallback, React Router handles it)
 //
@@ -77,6 +78,17 @@ export default {
 
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url)
+
+  // AQU-2243: /privacy-policy was an in-app SPA route holding a second, stale
+  // copy of the policy. It is gone, and the one live policy lives at /privacy
+  // (the marketing Worker's route). Nothing claims /privacy-policy ahead of
+  // this catch-all, so without this the SPA fallback answered it with the
+  // shell and React Router rendered "404: Not Found" — the address people have
+  // bookmarked and that older copy linked to. Permanent, so crawlers and
+  // browsers forget it.
+  if (url.pathname === "/privacy-policy" || url.pathname === "/privacy-policy/") {
+    return Response.redirect(`${url.origin}/privacy${url.search}`, 301)
+  }
 
   // Shared invite links (project AND org — AQU-471): serve the SPA shell but
   // rewrite its social meta so the link unfurls as an invitation. Only HTML

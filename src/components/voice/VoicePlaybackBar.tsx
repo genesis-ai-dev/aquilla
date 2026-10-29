@@ -68,7 +68,7 @@ interface Props {
    *  language reads as unvoiced here, which is what it is. */
   lane?: string
   /**
-   * Media redesign, layout: "strip" is the same transport as a thin 28 px
+   * Media redesign, layout: "strip" is the same transport as a thin 32 px
    * strip along the bottom of the media view (Sam, Oct 27: the controls back
    * at the bottom, in a very narrow footprint) — the time at the left,
    * previous · play · next in the centre, speed and volume at the right, and
@@ -289,7 +289,7 @@ export function VoicePlaybackBar({
     return (
       <div
         data-testid="media-play-strip"
-        className="@container relative flex h-7 shrink-0 items-center border-t border-border bg-muted/30 px-2"
+        className="@container relative flex h-8 shrink-0 items-center border-t border-border bg-muted/30 px-2"
       >
         <span className="hidden shrink-0 text-[11.5px] tabular-nums text-muted-foreground @md:inline" data-testid="transport-time">
           {fmtTime(currentTime)} / {fmtLength(shownLengthSec)}
@@ -460,7 +460,7 @@ function IconButton({
   title: string
   onClick: () => void
   disabled?: boolean
-  /** The media view's 28 px strip. */
+  /** The media view's 32 px strip (28 until Sam's "ever so slightly" taller, Oct 28). */
   small?: boolean
 }) {
   return (

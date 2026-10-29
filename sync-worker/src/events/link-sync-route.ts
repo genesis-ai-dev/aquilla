@@ -128,7 +128,10 @@ export async function handleLinkSyncRequest(
     // Windows that finished before the failure stay committed, cursor
     // included, so the caller's retry resumes rather than starts over.
     if (err instanceof LinkSyncInvocationError) {
-      return new Response(`link sync failed: ${err.message}`, { status: 502 })
+      // The DO's body can carry SQL / stack text; keep it in the logs, not the
+      // response (a project member can trigger this route).
+      console.error('[link-sync] ProjectSync invocation failed', err.message)
+      return new Response('link sync failed', { status: 502 })
     }
     throw err
   }

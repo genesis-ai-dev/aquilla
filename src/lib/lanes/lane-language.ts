@@ -19,7 +19,6 @@ import {
   laneDisplayName,
   laneLanguage,
   laneLanguageCode,
-  type LaneLanguageSettings,
 } from "./lane-display"
 import { isLaneId } from "./lane-id"
 import { laneLabelSuffixes } from "./lane-label-suffix"
@@ -56,12 +55,8 @@ function notALaneId(value: string | null | undefined, laneId: string): string | 
  * name → tag → code. Settings are not read. An 8-hex lane id is never that
  * answer.
  */
-export function laneRowLanguage(
-  lane: LaneLanguageRow,
-  settings?: LaneLanguageSettings | null,
-): string | null {
+export function laneRowLanguage(lane: LaneLanguageRow): string | null {
   const resolved = laneLanguage(lane, {
-    settings,
     role: lane.role,
     legacyTag: lane.legacyTag,
   })
@@ -118,16 +113,15 @@ function rowForTag(
 export function laneLanguageForTag(
   tag: string,
   lanes: readonly LaneLanguageRow[] | null | undefined,
-  settings?: LaneLanguageSettings | null,
 ): string | null {
   const row = rowForTag(tag, lanes)
-  if (row) return laneRowLanguage(row, settings)
+  if (row) return laneRowLanguage(row)
   // No row: the tag is all a caller has (a server that predates lane rows),
   // except an 8-hex id, which is never a language. `''` is the former default
   // lane's tag, not a language, and settings are not consulted.
   const resolved = laneLanguage(
     { role: "target", language: null },
-    { settings, role: "target", legacyTag: tag },
+    { role: "target", legacyTag: tag },
   )
   return resolved || null
 }
@@ -150,14 +144,13 @@ export function laneLanguageForTag(
 export function laneLanguageCodeForTag(
   tag: string,
   lanes: readonly LaneLanguageRow[] | null | undefined,
-  settings?: LaneLanguageSettings | null,
 ): string | null {
   const row = rowForTag(tag, lanes)
   if (row) {
-    return laneLanguageCode(row, { settings, role: row.role, legacyTag: row.legacyTag })
+    return laneLanguageCode(row, { role: row.role, legacyTag: row.legacyTag })
   }
   // No row: the tag is all a caller has, by the same rule as the language.
-  return codeForLanguageLabel(laneLanguageForTag(tag, lanes, settings))
+  return codeForLanguageLabel(laneLanguageForTag(tag, lanes))
 }
 
 /**
@@ -247,11 +240,9 @@ export function laneLabelSuffixesById(
  */
 export function sourceLaneLanguage(
   lanes: readonly LaneLanguageRow[] | null | undefined,
-  settings?: LaneLanguageSettings | null,
 ): string | null {
   const source = (lanes ?? []).find((lane) => lane.role === "source")
   const resolved = laneLanguage(source ?? { role: "source", language: null }, {
-    settings,
     role: "source",
     legacyTag: source?.legacyTag ?? null,
   })

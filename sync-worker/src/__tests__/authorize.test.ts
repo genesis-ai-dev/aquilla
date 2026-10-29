@@ -1013,7 +1013,7 @@ describe("authorize() archived lanes (AQU-1462)", () => {
     expect(source.ok).toBe(true)
   })
 
-  it("allows a restored lane and refuses a tag that is only listed in settings", async () => {
+  it("allows a restored lane and ignores a tag that is only listed in settings", async () => {
     const token = await makeToken({ role: 400 })
     const restored = await authorize(
       token,
@@ -1032,8 +1032,10 @@ describe("authorize() archived lanes (AQU-1462)", () => {
       SECRET,
       makeDb({ projectSettings: { archivedLanes: ["sw"] } }),
     )
+    // AQU-2223: the retired settings mirror archives nothing. With no lane row
+    // the write is refused as an unknown lane, not as an archived one.
     expect(settingsOnly.ok).toBe(false)
-    if (!settingsOnly.ok) expect(settingsOnly.reason).toBe("lane 'sw' is archived")
+    if (!settingsOnly.ok) expect(settingsOnly.reason).not.toMatch(/archived/)
   })
 
   it("refuses lane audio only when the event names the archived lane", async () => {

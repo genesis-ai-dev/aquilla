@@ -288,11 +288,10 @@ function CellTakeBlockView({
     const sourceLane = project.lanes?.find((lane) => lane.role === "source")
     const language = isSourceSegmentSelected(owner)
       ? laneLanguage(sourceLane ?? { role: "source" }, {
-          settings: project,
           role: "source",
           legacyTag: sourceLane?.legacyTag ?? null,
         })
-      : laneLanguageForTag(targetLang ?? "", project.lanes, project) ?? undefined
+      : laneLanguageForTag(targetLang ?? "", project.lanes) ?? undefined
     // THIS take, on its own slot: the transcriber reads the cell's selected
     // recording, which for a take on an added track is a different take —
     // that block used to transcribe the default track's recording instead.

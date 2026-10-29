@@ -416,6 +416,26 @@ export function getQueueTargetSlots(): readonly string[] {
   return targetSlots
 }
 
+/**
+ * AQU-2252 (Sam, Oct 29): the added tracks made LAYERS — their takes set no
+ * line's length while the file follows its recordings. Published beside the
+ * target slots, by the same workspace, from the same tracks the timeline
+ * draws, so the transport lays every line out at the length the timeline
+ * shows. A change re-flows a programme that is playing.
+ */
+let layerTrackSlots: readonly string[] = []
+
+export function setQueueLayerTrackSlots(slots: readonly string[]): void {
+  const same = slots.length === layerTrackSlots.length && slots.every((s, i) => s === layerTrackSlots[i])
+  layerTrackSlots = [...slots]
+  if (same) return
+  if (timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)
+}
+
+export function getQueueLayerTrackSlots(): readonly string[] {
+  return layerTrackSlots
+}
+
 /** Three slots per sounding track. With one track this is the 3 that shipped;
  *  with N it is what stops N tracks evicting each other on every line. */
 function overlayCapacity(): number {
@@ -945,9 +965,11 @@ function progRebuild(): void {
   // an unrecorded one at a stand-in length that playback steps over.
   // AQU-2204: following the recordings, every unrecorded line takes its
   // stand-in (layOutProgramme passes the estimator for every file).
-  // AQU-2252: the tracks on screen beyond the main one are its layers.
+  // AQU-2252: the tracks on screen beyond the main one are laid in with it;
+  // those made layers set no line's length (Sam, Oct 29).
   const { programme: built, lines: dialogue, untimed } = layOutProgramme(ctx.cells, {
     layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
+    layerTrackSlots,
   })
   // A take whose length was never measured (a generated voice nobody has
   // played yet) has no window the programme can play. On a file with times

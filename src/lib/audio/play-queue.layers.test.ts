@@ -1,7 +1,9 @@
 // AQU-2252 (Sam, Oct 28, option A): following the recordings, a take on an
 // added track is a LAYER, and it PLAYS — from its own start, for its own
 // length, mixed with its line, still ringing when the next line starts, and
-// silenced by its track's mute.
+// silenced by its track's mute. (Sam, Oct 29: that is now a track MADE a
+// layer — every track sets its lines' lengths by default — so these make
+// Track 1 one; play-queue.track-lengths.test.ts has the default.)
 //
 // Before this the programme transport cued only each line's main take and its
 // source: every added track was silent while the file followed its
@@ -14,6 +16,7 @@ import {
   pauseQueue,
   resumeQueue,
   setQueueAudibility,
+  setQueueLayerTrackSlots,
   setQueueTargetSlots,
   setQueueTimingMode,
   startQueue,
@@ -146,6 +149,7 @@ beforeEach(() => {
   FakeAudio.deferSrc = () => false
   vi.stubGlobal("Audio", FakeAudio)
   setQueueTargetSlots(["recording", TRACK])
+  setQueueLayerTrackSlots([TRACK])
   setQueueAudibility({ source: true, target: true })
   setQueueTimingMode("audioFirst")
 })
@@ -154,6 +158,7 @@ afterEach(() => {
   stopQueue()
   setQueueTimingMode("dubbing")
   setQueueTargetSlots(["recording"])
+  setQueueLayerTrackSlots([])
   vi.unstubAllGlobals()
 })
 

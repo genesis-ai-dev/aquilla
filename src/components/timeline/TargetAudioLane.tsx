@@ -1815,9 +1815,10 @@ export function TargetAudioLane({
       resizable:
         !geom.usingFallback &&
         (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
-      // AQU-2252: a layer's length is its own, so its line's ratio is not its.
+      // AQU-2252: a take on another track has its own length, so its line's
+      // ratio (the main take's) is not its.
       ratio:
-        slot && !layout?.isLayerTake(item.cell, item.audioId) && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+        slot && layout?.takeRole(item.cell, item.audioId) === "main" && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
           : null,
     })

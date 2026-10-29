@@ -1,6 +1,6 @@
-// AQU-2252 (Sam, Oct 28): following the recordings, a take on an added track
-// is a LAYER — drawn at its own length, trimmed and moved on its own. This is
-// the chip's half: what it draws, and what a drag or a trim commits.
+// AQU-2252: following the recordings, a take on an added track — drawn at its
+// own length, trimmed and moved on its own. This is the chip's half: what it
+// draws, and what a drag or a trim commits.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
@@ -60,29 +60,32 @@ function renderLayer(
   return screen.getByTestId("tl-target-l2")
 }
 
-describe("a layer chip, following the recordings (AQU-2252)", () => {
-  it("is drawn at its own length, where it was placed", () => {
-    // Sample zero 1 s into line 2 (which starts at 2 s), sounding 0.841 s later.
+// Sam, Oct 29: every track sets its lines' lengths by default, so a take on an
+// added track sits in its line the way the main take does — after the pause
+// someone left before it — and moves and trims the way the main take does.
+describe("a take on an added track, following the recordings (AQU-2252)", () => {
+  it("is drawn at its own length, after its own pause in its line", () => {
+    // Its clip's start placed 1 s into line 2 (which starts at 2 s).
     const chip = renderLayer({ targetOffsetMs: 1000 })
-    expect(parseFloat(chip.style.left)).toBeCloseTo(3.841 * PX, 1)
+    expect(parseFloat(chip.style.left)).toBeCloseTo(3 * PX, 1)
     expect(parseFloat(chip.style.width)).toBeCloseTo(2.055 * PX, 1)
   })
 
-  it("a drag stores the layer's own offset, for the layer", () => {
+  it("a drag stores the take's own pause, for the take", () => {
     const onRetimeTarget = vi.fn()
     const chip = renderLayer({ targetOffsetMs: 1000 }, { onRetimeTarget })
     fireEvent.pointerDown(chip, { clientX: 200, pointerId: 1 })
     fireEvent.pointerMove(window, { clientX: 226 })
-    fireEvent.pointerUp(window, { clientX: 226 }) // +0.65 s → sounds from 4.491 s
+    fireEvent.pointerUp(window, { clientX: 226 }) // +0.65 s → sounds from 3.65 s
     expect(onRetimeTarget).toHaveBeenCalledTimes(1)
     const [cellId, anchor, audioId] = onRetimeTarget.mock.calls[0]!
     expect(cellId).toBe("l2")
     expect(audioId).toBe(LAYER)
-    // 2.491 s into its line, less its 0.841 s head trim.
+    // 1.65 s into its line: the pause before it.
     expect(anchor).toBeCloseTo(1.65, 3)
   })
 
-  it("a head trim keeps the layer's own tail", () => {
+  it("a head trim keeps the take's own tail", () => {
     const onTrimTarget = vi.fn()
     renderLayer({ targetOffsetMs: 1000 }, { onTrimTarget })
     const handle = screen.getByTestId("tl-target-l2-handle-l")
@@ -102,16 +105,18 @@ describe("a layer chip, following the recordings (AQU-2252)", () => {
     expect(onTrimTarget).toHaveBeenCalledWith("l2", LAYER, { trimStartMs: 841, trimEndMs: undefined })
   })
 
-  it("its head trim stops at its line's start", () => {
+  it("its head trim comes all the way back off, as the main take's does", () => {
     const onTrimTarget = vi.fn()
-    // Sample zero half a second BEFORE line 2's start: un-trimming the head
-    // all the way would make it sound before its line.
-    renderLayer({ targetOffsetMs: -500 }, { onTrimTarget })
+    renderLayer({ targetOffsetMs: 1000 }, { onTrimTarget })
     const handle = screen.getByTestId("tl-target-l2-handle-l")
-    fireEvent.pointerDown(handle, { clientX: 94, pointerId: 1 })
+    fireEvent.pointerDown(handle, { clientX: 120, pointerId: 1 })
     fireEvent.pointerMove(window, { clientX: 0 })
     fireEvent.pointerUp(window, { clientX: 0 })
-    // Line 2 starts at 2 s; the sample zero is at 1.5 s, so 0.5 s stays trimmed.
-    expect(onTrimTarget).toHaveBeenCalledWith("l2", LAYER, { trimStartMs: 500, trimEndMs: 2896 })
+    expect(onTrimTarget).toHaveBeenCalledWith("l2", LAYER, { trimStartMs: undefined, trimEndMs: 2896 })
+  })
+
+  it("shows no running-long warning: its line grows to hold it", () => {
+    const chip = renderLayer({ targetOffsetMs: 1000 })
+    expect(chip.getAttribute("data-overflow")).toBe("none")
   })
 })

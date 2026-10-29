@@ -159,7 +159,8 @@ export interface AgentRunRequest {
   /**
    * AQU-2263: the language the person uses Aquilla in (its English name). The
    * assistant answers in the person's own language, else the project's
-   * language for the team, else this one.
+   * language for the team, else the language of their latest message, and in
+   * this one only when that can't be told.
    */
   appLanguage?: string
   /**

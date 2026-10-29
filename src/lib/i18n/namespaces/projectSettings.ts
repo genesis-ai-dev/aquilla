@@ -530,7 +530,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
     "projectSettings.ai.assistantLanguageDescription":
-      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person uses Aquilla in.",
+      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
     "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +

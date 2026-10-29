@@ -4,11 +4,13 @@
 //      "The assistant answers me in …"), sent as translatorProfile.responseLanguage;
 //   2. the project's "The assistant answers the team in …", stored in the shared
 //      drafting settings as `main_chat_language`;
-//   3. the language the person uses Aquilla in, which the client sends as
-//      `appLanguage`.
+//   3. as before, the language of the person's latest message (a rule in the
+//      prompt, prompt-augment.ts);
+//   4. only when that can't be told, the language they use Aquilla in, which
+//      the client sends as `appLanguage` (English for an older client).
 //
-// None of them (an older client sends no app language) returns undefined, and
-// the prompt keeps its rule of following the language of the latest message.
+// `reply` is steps 1–2: a language the prompt pins. `whenUnclear` is step 4,
+// used only inside step 3's rule.
 
 /** The longest language name any step may put in the prompt. */
 const MAX_LANGUAGE_LENGTH = 100
@@ -23,6 +25,9 @@ export function resolveAnswerLanguage(input: {
   personal?: unknown
   team?: unknown
   app?: unknown
-}): string | undefined {
-  return clean(input.personal) ?? clean(input.team) ?? clean(input.app)
+}): { reply?: string; whenUnclear?: string } {
+  return {
+    reply: clean(input.personal) ?? clean(input.team),
+    whenUnclear: clean(input.app),
+  }
 }

@@ -904,10 +904,10 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
         // AQU-2263: the person's own language, then the project's language for
-        // the team, then the app's. With none, the augmentation prompt below
-        // tells the agent to follow the user's latest message — never the
-        // project's translation target.
-        responseLanguage: answerLanguage,
+        // the team. With neither, the augmentation prompt below tells the agent
+        // to follow the user's latest message (the app's language only when
+        // that can't be told) — never the project's translation target.
+        responseLanguage: answerLanguage.reply,
         briefSummary,
       }),
     },
@@ -918,7 +918,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       role: "system" as const,
       content: buildAugmentSystemPrompt({
         memory,
-        responseLanguage: answerLanguage,
+        responseLanguage: answerLanguage.reply,
+        unclearLanguage: answerLanguage.whenUnclear,
       }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in

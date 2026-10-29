@@ -1,9 +1,10 @@
-// AQU-2263 (Oct 29, second pass): the language the assistant answers in. The
-// person's own choice (Preferences → Translator profile) wins, then the
-// project's "The assistant answers the team in …" (drafting settings'
-// main_chat_language, which nothing read before), then the language the person
-// uses Aquilla in. With none of them (an older client sends no app language)
-// the assistant follows the language of the latest message, as before.
+// AQU-2263 (Oct 29, second pass): the language the assistant answers in.
+//   1. the person's own choice (Preferences → Translator profile);
+//   2. the project's "The assistant answers the team in …" (drafting settings'
+//      main_chat_language, which nothing read before);
+//   3. as before, the language of the person's latest message;
+//   4. only when that can't be told, the language they use Aquilla in (the
+//      client's appLanguage; English for an older client that sends none).
 import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
@@ -64,16 +65,23 @@ describe("the language the assistant answers in", () => {
     expect(prompt).not.toContain("Portuguese")
   })
 
-  it("then the language the person uses Aquilla in", async () => {
+  it("with neither set, a Swahili message still gets a Swahili answer, as before", async () => {
     await seed("  ")
-    const prompt = await systemPromptFor({ appLanguage: "Portuguese" })
-    expect(prompt).toContain("Reply to the user in Portuguese.")
+    const prompt = await systemPromptFor({ appLanguage: "Portuguese", messages: [{ role: "user", content: "Habari, unaweza kunisaidia?" }] })
+    expect(prompt).toContain("Reply in the language of the user's latest message")
+    expect(prompt).not.toContain("Reply to the user in")
   })
 
-  it("with none of them, it follows the latest message as before", async () => {
+  it("only when the message can't tell, the language the person uses Aquilla in", async () => {
+    await seed()
+    const prompt = await systemPromptFor({ appLanguage: "Portuguese" })
+    expect(prompt).toContain("if it is ambiguous, use Portuguese.")
+  })
+
+  it("an older client that sends no app language falls back to English, as before", async () => {
     await seed()
     const prompt = await systemPromptFor({})
-    expect(prompt).toContain("language of the user's latest message")
+    expect(prompt).toContain("language of the user's latest message; if it is ambiguous, use English.")
     expect(prompt).not.toContain("Reply to the user in")
   })
 })

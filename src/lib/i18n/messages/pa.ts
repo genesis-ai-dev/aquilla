@@ -5453,7 +5453,6 @@ export const pa: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (ਮੂਲ)",
   "projectSettings.harmonization.description": "ਸਿਰਫ਼ ਘੱਟੋ-ਘੱਟ ਇਸ ਭੂਮਿਕਾ ਵਾਲੇ ਵਰਤੋਂਕਾਰ ਇਸ ਪ੍ਰੋਜੈਕਟ ਉੱਤੇ ਇਕਸਾਰਤਾ ਸਵੀਪ ਖੋਲ੍ਹ ਸਕਦੇ ਹਨ. ਹੱਦ ਪ੍ਰੋਜੈਕਟ ਲੀਡ ਤੋਂ ਹੇਠਾਂ ਨਹੀਂ ਜਾ ਸਕਦੀ (ਸਪੈਕ ਅਨੁਸਾਰ ਸਖ਼ਤ ਹੱਦ).",
   "projectSettings.gitSync.originLabel": "ਮੂਲ: {url} (ਬ੍ਰਾਂਚ: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "ਆਟੋ-ਸਿੰਕ ਹਰ",
   "projectSettings.gitSync.minutesSuffix": "ਮਿੰਟ (ਸਿਰਫ਼ ਜਦ ਬਦਲਾਅ ਹੋਣ)",
   "projectSettings.gitSync.intervalNote": "ਅੰਤਰਾਲ ਘੱਟੋ-ਘੱਟ 1 ਮਿੰਟ ਹੈ. ਸਿੰਕ ਸਿਰਫ਼ ਤਦ ਧੱਕੇਗਾ ਜਦ ਲੋਕਲ ਬਦਲਾਅ ਹੋਣ.",
   "projectSettings.terminology.title": "ਸ਼ਬਦਾਵਲੀ ਲਾਇਬ੍ਰੇਰੀ",

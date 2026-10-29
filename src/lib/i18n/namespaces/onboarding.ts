@@ -485,7 +485,7 @@ export const onboarding = defineNamespace({
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
-      "Personal preferences that apply to you across all projects on this device.",
+      "Personal preferences that apply to you across all projects.",
     "onboarding.preferences.dialogDescription": "Personal preferences that apply across projects.",
 
     // ═══════════════════════════════════════════════════════════════════════

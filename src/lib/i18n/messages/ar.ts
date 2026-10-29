@@ -4567,7 +4567,6 @@ export const ar: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (افتراضي)",
   "projectSettings.harmonization.description": "يمكن فقط للمستخدمين الذين يملكون هذا الدور على الأقل فتح مسح مواءمة على هذا المشروع. لا يمكن خفض الحد الأدنى عن قائد المشروع (حد أدنى ثابت وفق المواصفات).",
   "projectSettings.gitSync.originLabel": "الأصل: {url} (الفرع: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "مزامنة تلقائية كل",
   "projectSettings.gitSync.minutesSuffix": "دقائق (فقط عند وجود تغييرات)",
   "projectSettings.gitSync.intervalNote": "يُقيَّد الفاصل الزمني بحد أدنى قدره دقيقة واحدة. لن تدفع المزامنة إلا عند وجود تغييرات محلية.",
   "projectSettings.terminology.title": "مكتبة المصطلحات",

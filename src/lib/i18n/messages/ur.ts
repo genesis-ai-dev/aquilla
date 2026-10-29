@@ -5447,7 +5447,6 @@ export const ur: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (طے شدہ)",
   "projectSettings.harmonization.description": "صرف کم از کم اس کردار والے صارف اس منصوبے پر ہم آہنگی جھاڑو کھول سکتے ہیں۔ حد سربراہِ منصوبہ سے نیچے نہیں جا سکتی (تفصیل کے مطابق سخت حد)۔",
   "projectSettings.gitSync.originLabel": "اصل: {url} (شاخ: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "خودکار ہم وقت ہر",
   "projectSettings.gitSync.minutesSuffix": "منٹ (صرف جب تبدیلیاں ہوں)",
   "projectSettings.gitSync.intervalNote": "وقفہ کم از کم 1 منٹ ہے۔ ہم وقت صرف مقامی تبدیلیوں پر بھیجے گا۔",
   "projectSettings.terminology.title": "اصطلاح لائبریری",

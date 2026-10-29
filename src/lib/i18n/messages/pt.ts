@@ -5324,7 +5324,6 @@ export const pt: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (padrão)",
   "projectSettings.harmonization.description": "Somente usuários com pelo menos esta função podem abrir uma varredura de harmonização neste projeto. O mínimo não pode ficar abaixo de Líder de projeto (mínimo fixo conforme a especificação).",
   "projectSettings.gitSync.originLabel": "Origem: {url} (ramo: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Sincronização automática a cada",
   "projectSettings.gitSync.minutesSuffix": "minutos (somente quando houver alterações)",
   "projectSettings.gitSync.intervalNote": "O intervalo tem o mínimo de 1 minuto. A sincronização só envia quando há alterações locais.",
   "projectSettings.terminology.title": "Biblioteca terminológica",

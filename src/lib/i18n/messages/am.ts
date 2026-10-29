@@ -5462,7 +5462,6 @@ export const am: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (ነባሪ)",
   "projectSettings.harmonization.description": "ቢያንስ ይህ ሚና ያላቸው ተጠቃሚዎች ብቻ በዚህ ፕሮጀክት ላይ የማስማማት ጠረግ መክፈት ይችላሉ። ወለሉ ከየፕሮጀክት መሪ በታች ሊወርድ አይችልም (በመመሪያው ጠንካራ ወለል)።",
   "projectSettings.gitSync.originLabel": "መነሻ፦ {url} (ቅርንጫፍ፦ {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "ራስ-ማመሳሰል በየ",
   "projectSettings.gitSync.minutesSuffix": "ደቂቃዎች (ለውጦች ሲኖሩ ብቻ)",
   "projectSettings.gitSync.intervalNote": "ክፍተቱ በ1 ደቂቃ ይወርዳል። ማመሳሰል አካባቢያዊ ለውጦች ሲኖሩ ብቻ ይገፋል።",
   "projectSettings.terminology.title": "የቃላት ቤተ መጻሕፍት",

@@ -36,14 +36,15 @@ describe("InterlinearAlignmentPanel — explanations open on click (AQU-2260)", 
   it("the ✓ and ✕ hovers only name them", async () => {
     drawGod()
     const confirm = screen.getAllByRole("button", { name: /confirm alignment/i })[0]
-    await expectTooltip(confirm, "Confirm")
+    // AQU-2261: their own words, not the agent's "Reject" or a bare "Confirm".
+    await expectTooltip(confirm, "Confirm this alignment")
     expect(screen.getByRole("tooltip").textContent).not.toMatch(/teach the statistical glosser/)
   })
 
   it("the ✕ hover only names it", async () => {
     drawGod()
     const reject = screen.getAllByRole("button", { name: /reject alignment/i })[0]
-    await expectTooltip(reject, "Reject")
+    await expectTooltip(reject, "Reject this alignment")
     expect(screen.getByRole("tooltip").textContent).not.toMatch(/penalized/)
   })
 

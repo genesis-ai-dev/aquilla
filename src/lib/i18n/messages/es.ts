@@ -5318,7 +5318,6 @@ export const es: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (predeterminado)",
   "projectSettings.harmonization.description": "Solo los usuarios con al menos este rol pueden abrir un barrido de armonización en este proyecto. El mínimo no puede quedar por debajo de Líder de proyecto (mínimo fijo según la especificación).",
   "projectSettings.gitSync.originLabel": "Origen: {url} (rama: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Sincronización automática cada",
   "projectSettings.gitSync.minutesSuffix": "minutos (solo cuando hay cambios)",
   "projectSettings.gitSync.intervalNote": "El intervalo tiene un mínimo de 1 minuto. La sincronización solo enviará cuando haya cambios locales.",
   "projectSettings.terminology.title": "Biblioteca terminológica",

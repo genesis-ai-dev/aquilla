@@ -4557,7 +4557,6 @@ export const my: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (ပုံမှန်)",
   "projectSettings.harmonization.description": "ဤအခန်းကဏ္ဍအနည်းဆုံးရှိသော အသုံးပြုသူများသာ ဤပရောဂျက်တွင် ညီညွတ်အောင်ပြုလုပ်ခြင်း လှည့်ပတ်စစ်ဆေးမှုကို ဖွင့်နိုင်သည်။ အနိမ့်ဆုံးအဆင့်ကို ပရောဂျက်ခေါင်းဆောင် အောက်သို့ လျှော့ချ၍မရပါ (သတ်မှတ်ချက်အရ တင်းကျပ်သော အနိမ့်ဆုံးအဆင့်)။",
   "projectSettings.gitSync.originLabel": "မူလအရင်းအမြစ်: {url} (ဘရန့်ခ်: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "အလိုအလျောက်ထပ်တူပြုမှု ကြားကာလ",
   "projectSettings.gitSync.minutesSuffix": "မိနစ် (ပြောင်းလဲမှုရှိမှသာ)",
   "projectSettings.gitSync.intervalNote": "အနည်းဆုံးကြားကာလမှာ 1 မိနစ်ဖြစ်သည်။ ဒေသတွင်းပြောင်းလဲမှုရှိမှသာ ထပ်တူပြုမှုက တွန်းအားပေးမည်။",
   "projectSettings.terminology.title": "ဝေါဟာရ စာကြည့်တိုက်",

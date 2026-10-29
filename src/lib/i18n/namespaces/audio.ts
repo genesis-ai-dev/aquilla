@@ -361,6 +361,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":
       "Recording format: compressed — click to record in WAV",
+    // AQU-2261: the format (i)'s own name, not the export dialog's "Format".
+    "audio.recordingModal.formatInfoAria": "About the recording format",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
     "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
     "audio.recordingModal.countdownTitle": "Countdown",
@@ -2218,6 +2220,11 @@ export const audio = defineNamespace({
           hardStopMinutes:
             "How many minutes in total the recorder allows before stopping by itself.",
         },
+      },
+      "audio.recordingModal.formatInfoAria": {
+        description:
+          "Screen-reader name of the small (i) beside the recorder's WAV / compressed " +
+          "toggle. A click opens a note on what each format costs in file size and detail.",
       },
       "audio.recordingModal.formatWavAriaLabel": {
         description:

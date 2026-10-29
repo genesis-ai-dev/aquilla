@@ -61,6 +61,9 @@ describe("Preferences", () => {
   it("index shows General controls inline, then nav rows for nested sections", () => {
     renderAt("/preferences")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
+    // AQU-2261: Recording and Notifications follow you across devices now, so
+    // the page no longer says its preferences stay on this device.
+    expect(screen.getByText("Personal preferences that apply to you across all projects.")).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()

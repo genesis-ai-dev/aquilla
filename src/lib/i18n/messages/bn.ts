@@ -5468,7 +5468,6 @@ export const bn: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (ডিফল্ট)",
   "projectSettings.harmonization.description": "শুধু অন্তত এই ভূমিকার ব্যবহারকারীরা এই প্রকল্পে একটি সমন্বয় চালাতে পারেন। তল প্রকল্প প্রধানের নিচে নামানো যায় না (স্পেক অনুযায়ী কঠিন তল)।",
   "projectSettings.gitSync.originLabel": "অরিজিন: {url} (শাখা: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "অটো-সিঙ্ক প্রতি",
   "projectSettings.gitSync.minutesSuffix": "মিনিট (শুধু পরিবর্তন থাকলে)",
   "projectSettings.gitSync.intervalNote": "ব্যবধান কমপক্ষে 1 মিনিট। সিঙ্ক শুধু স্থানীয় পরিবর্তন থাকলে পাঠাবে।",
   "projectSettings.terminology.title": "পরিভাষা ভাণ্ডার",

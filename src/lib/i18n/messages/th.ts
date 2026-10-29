@@ -4559,7 +4559,6 @@ export const th: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (ค่าเริ่มต้น)",
   "projectSettings.harmonization.description": "เฉพาะผู้ใช้ที่มีบทบาทตั้งแต่ระดับนี้ขึ้นไปเท่านั้นที่สามารถเปิดรอบการปรับให้สอดคล้องกันในโปรเจกต์นี้ได้ ขั้นต่ำนี้ไม่สามารถลดต่ำกว่าหัวหน้าโปรเจกต์ได้ (เป็นขั้นต่ำตายตัวตามข้อกำหนด)",
   "projectSettings.gitSync.originLabel": "ต้นทาง: {url} (branch: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "ซิงค์อัตโนมัติทุก",
   "projectSettings.gitSync.minutesSuffix": "นาที (เฉพาะเมื่อมีการเปลี่ยนแปลง)",
   "projectSettings.gitSync.intervalNote": "ช่วงเวลาต่ำสุดคือ 1 นาที การซิงค์จะพุชเฉพาะเมื่อมีการเปลี่ยนแปลงในเครื่อง",
   "projectSettings.terminology.title": "คลังคำศัพท์",

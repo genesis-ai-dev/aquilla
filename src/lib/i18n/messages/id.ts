@@ -4656,7 +4656,6 @@ export const id: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (bawaan)",
   "projectSettings.harmonization.description": "Hanya pengguna dengan peran setidaknya ini yang dapat membuka penyisiran penyelarasan pada proyek ini. Batasnya tidak dapat diturunkan di bawah Ketua Proyek (batas keras sesuai spesifikasi).",
   "projectSettings.gitSync.originLabel": "Origin: {url} (cabang: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Sinkronkan otomatis setiap",
   "projectSettings.gitSync.minutesSuffix": "menit (hanya bila ada perubahan)",
   "projectSettings.gitSync.intervalNote": "Interval dibatasi minimal 1 menit. Sinkronisasi hanya akan mengirim bila ada perubahan lokal.",
   "projectSettings.terminology.title": "Pustaka Peristilahan",

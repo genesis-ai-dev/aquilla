@@ -2789,7 +2789,7 @@ export function AudioRecordingModal({
               </AppTooltip>
               {!takeInHand && (
                 <InfoNote
-                  label={t("common.aboutAria", { name: t("importExport.dialog.formatLegend") })}
+                  label={t("audio.recordingModal.formatInfoAria")}
                   testId="rec-format-info"
                   className="text-muted-foreground/70"
                   iconClassName="h-3 w-3"

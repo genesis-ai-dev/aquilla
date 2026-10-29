@@ -328,6 +328,9 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    // AQU-2261: the ✓ and ✕ hovers' own words, not common.confirm / agent.reject.
+    "workspace.alignment.confirmTooltip": "Confirm this alignment",
+    "workspace.alignment.rejectTooltip": "Reject this alignment",
     "workspace.alignment.contributorRequired":
       "Contributor+ required to confirm or reject alignments",
 
@@ -1542,6 +1545,18 @@ export const workspace = defineNamespace({
           srcToken: "The source-language word/token — not translated.",
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
+      },
+      "workspace.alignment.confirmTooltip": {
+        description:
+          "Hover name of the ✓ button on a word-alignment pair in the alignment panel. " +
+          "Confirming tells the glosser the pairing is right.",
+        maxLength: 32,
+      },
+      "workspace.alignment.rejectTooltip": {
+        description:
+          "Hover name of the ✕ button on a word-alignment pair in the alignment panel. " +
+          "Rejecting tells the glosser the pairing is wrong.",
+        maxLength: 32,
       },
       "workspace.alignment.rejectAriaLabel": {
         description:

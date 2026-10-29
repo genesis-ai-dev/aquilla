@@ -4574,7 +4574,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role}（默认）",
   "projectSettings.harmonization.description": "只有至少具备此角色的用户才能在这个项目上打开统一用语扫描。此门槛不得低于项目负责人（规格规定的硬性下限）。",
   "projectSettings.gitSync.originLabel": "来源位置：{url}（分支：{branch}）",
-  "projectSettings.gitSync.autoSyncLabel": "自动同步间隔",
   "projectSettings.gitSync.minutesSuffix": "分钟（仅在有变更时）",
   "projectSettings.gitSync.intervalNote": "间隔下限为 1 分钟。只有在本机有变更时才会推送同步。",
   "projectSettings.terminology.title": "术语库",

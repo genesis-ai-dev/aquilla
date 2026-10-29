@@ -4693,7 +4693,6 @@ export const ru: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (по умолчанию)",
   "projectSettings.harmonization.description": "Открыть согласование в этом проекте могут только пользователи с этой ролью или выше. Порог нельзя опустить ниже руководителя проекта (жёсткое ограничение по спецификации).",
   "projectSettings.gitSync.originLabel": "Источник: {url} (ветка: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Автосинхронизация каждые",
   "projectSettings.gitSync.minutesSuffix": "минут (только при наличии изменений)",
   "projectSettings.gitSync.intervalNote": "Минимальный интервал — 1 минута. Синхронизация отправляет данные только при наличии локальных изменений.",
   "projectSettings.terminology.title": "Библиотека терминологии",

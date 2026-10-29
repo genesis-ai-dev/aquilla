@@ -5456,7 +5456,6 @@ export const sw: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (chaguo-msingi)",
   "projectSettings.harmonization.description": "Watumiaji walio na angalau jukumu hili pekee ndio wanaweza kufungua upitishaji wa uoanishaji katika mradi huu. Kiwango hakiwezi kushushwa chini ya Kiongozi wa mradi (kiwango thabiti kwa mujibu wa ubainifu).",
   "projectSettings.gitSync.originLabel": "Asili: {url} (tawi: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Landanisha kiotomatiki kila",
   "projectSettings.gitSync.minutesSuffix": "dakika (tu wakati kuna mabadiliko)",
   "projectSettings.gitSync.intervalNote": "Muda wa chini ni dakika 1. Ulandanishaji utatuma tu wakati kuna mabadiliko ya ndani.",
   "projectSettings.terminology.title": "Maktaba ya istilahi",

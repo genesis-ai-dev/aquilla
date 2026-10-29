@@ -668,7 +668,6 @@ export const projectSettings = defineNamespace({
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
-    "projectSettings.gitSync.autoSyncLabel": "Auto-sync every",
     "projectSettings.gitSync.minutesSuffix": "minutes (only when there are changes)",
     // Oct 29 second pass: the switch's label, hard-coded English before.
     "projectSettings.gitSync.autoSyncSwitch": "Auto-sync",

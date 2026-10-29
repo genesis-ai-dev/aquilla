@@ -5460,7 +5460,6 @@ export const ha: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (na al'ada)",
   "projectSettings.harmonization.description": "Masu amfani masu aƙalla wannan rawa kawai za su iya buɗe binciken daidaitawa a wannan aiki. Ba za a iya saukar da ƙasa ƙasa da Shugaban aiki ba (ƙasa mai wuya bisa ƙa'ida).",
   "projectSettings.gitSync.originLabel": "Asali: {url} (reshe: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Daidaitawa da kansa kowane",
   "projectSettings.gitSync.minutesSuffix": "mintuna (kawai idan akwai canje-canje)",
   "projectSettings.gitSync.intervalNote": "Ana ɗaukar tazara a ƙasa a minti 1. Daidaitawa za ta tura kawai idan akwai canje-canjen gida.",
   "projectSettings.terminology.title": "Dakin karatu na kalmomi",

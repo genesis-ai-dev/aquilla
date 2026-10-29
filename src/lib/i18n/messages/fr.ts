@@ -4627,7 +4627,6 @@ export const fr: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (par défaut)",
   "projectSettings.harmonization.description": "Seuls les utilisateurs ayant au moins ce rôle peuvent ouvrir un balayage d'harmonisation sur ce projet. Le plancher ne peut pas être abaissé sous Responsable de projet (plancher fixe selon la spécification).",
   "projectSettings.gitSync.originLabel": "Origine : {url} (branche : {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Synchronisation automatique toutes les",
   "projectSettings.gitSync.minutesSuffix": "minutes (seulement en cas de modifications)",
   "projectSettings.gitSync.intervalNote": "L'intervalle est plafonné à 1 minute minimum. La synchronisation ne pousse que s'il y a des modifications locales.",
   "projectSettings.terminology.title": "Bibliothèque terminologique",

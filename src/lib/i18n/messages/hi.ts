@@ -5346,7 +5346,6 @@ export const hi: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (डिफ़ॉल्ट)",
   "projectSettings.harmonization.description": "केवल कम से कम इस भूमिका वाले उपयोगकर्ता इस परियोजना पर सामंजस्य स्वीप खोल सकते हैं। सीमा परियोजना प्रमुख से नीचे नहीं की जा सकती (विनिर्देश की कठोर सीमा)।",
   "projectSettings.gitSync.originLabel": "मूल: {url} (शाखा: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "स्वतः सिंक हर",
   "projectSettings.gitSync.minutesSuffix": "मिनट (केवल जब बदलाव हों)",
   "projectSettings.gitSync.intervalNote": "अंतराल 1 मिनट पर सीमित है। सिंक केवल स्थानीय बदलाव होने पर पुश करेगा।",
   "projectSettings.terminology.title": "शब्दावली लाइब्रेरी",

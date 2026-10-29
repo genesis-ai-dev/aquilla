@@ -4575,7 +4575,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role}（預設）",
   "projectSettings.harmonization.description": "只有至少具備此角色的使用者才能在這個專案上開啟統一用語掃描。此門檻不得低於專案負責人（規格規定的硬性下限）。",
   "projectSettings.gitSync.originLabel": "來源位置：{url}（分支：{branch}）",
-  "projectSettings.gitSync.autoSyncLabel": "自動同步間隔",
   "projectSettings.gitSync.minutesSuffix": "分鐘（僅在有變更時）",
   "projectSettings.gitSync.intervalNote": "間隔下限為 1 分鐘。只有在本機有變更時才會推送同步。",
   "projectSettings.terminology.title": "術語庫",

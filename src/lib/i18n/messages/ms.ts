@@ -4539,7 +4539,6 @@ export const ms: Catalog = {
   "projectSettings.harmonization.defaultRoleSuffix": "{role} (lalai)",
   "projectSettings.harmonization.description": "Hanya pengguna dengan sekurang-kurangnya peranan ini boleh membuka imbasan penyelarasan pada projek ini. Had ini tidak boleh direndahkan di bawah Ketua Projek (had tetap mengikut spesifikasi).",
   "projectSettings.gitSync.originLabel": "Asal: {url} (cabang: {branch})",
-  "projectSettings.gitSync.autoSyncLabel": "Segerak automatik setiap",
   "projectSettings.gitSync.minutesSuffix": "minit (hanya apabila terdapat perubahan)",
   "projectSettings.gitSync.intervalNote": "Selang masa dihadkan minimum 1 minit. Penyegerakan hanya menolak apabila terdapat perubahan tempatan.",
   "projectSettings.terminology.title": "Pustaka Istilah",

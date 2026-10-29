@@ -1,3 +1,5 @@
+// Every catalog, synchronously: this file asserts translated text (AQU-1991).
+import "@/test-utils/all-catalogs"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"

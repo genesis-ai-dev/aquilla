@@ -220,6 +220,7 @@ import {
   timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
+import { applyChapterPick, planChapterPick } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -368,7 +369,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, subscribeRejected, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
+import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
@@ -494,7 +497,7 @@ import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
-import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
+import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -2296,6 +2299,69 @@ export function ProjectWorkspace() {
     })
   }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
+  // AQU-1901: a refused edit is not a saved one. The server answers /events
+  // with a 200 and lists a refused write in `rejected[]` — a write with no lane
+  // on a project with only tagged lanes (the AQU-1900 422), or any other
+  // validation refusal — and the flusher drops it. Every hand-typed edit and
+  // validation goes out through a flush that cannot tell whose it was, so
+  // without this the line kept the typed text and the chip went back to
+  // "Synced". Undo it the way a dead-letter is undone (above), and say so.
+  // Flows that report their own refusals (AI drafts) claim them first.
+  //
+  // Unlike a dead-letter, a refusal leaves the server exactly as it was, so
+  // nothing that reads "what changed" will ever correct the line: the edit
+  // wrote the typed text into the store's own row, the drain's delta read
+  // finds no change, and the plain targeted revalidate is discarded when that
+  // drain bumps the store's generation mid-flight. So read the refused cells
+  // back here and install the server's rows directly — unless the reader has
+  // edited one again since (its freshness floor moved past the read).
+  const refusedEditProjectId = project?.id
+  useEffect(() => {
+    if (!refusedEditProjectId || !activeFileId) return
+    const projectId = refusedEditProjectId
+    const fileId = activeFileId
+    return subscribeRejected((entries) => {
+      const refused = laneWriteRejections(entries)
+      if (refused.length === 0) return
+      const restore = new Set<string>()
+      for (const entry of refused) {
+        if (entry.fileId !== fileId) continue
+        const key = laneCellKey(entry.cellId)
+        if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === entry.id) {
+          pendingTargetCommitHeadsRef.current.delete(key)
+        }
+        cellStore.clearOptimisticForCell(entry.cellId)
+        restore.add(entry.cellId)
+      }
+      if (restore.size > 0) {
+        const cellIds = [...restore]
+        void (async () => {
+          const startSeq = cellStore.getWriteSeq()
+          const mint = await getTokenForProjectFile(projectId, fileId)
+          if (!mint.token) return
+          const rows = await fetchCellsByIds(projectId, fileId, cellIds, mint.token)
+          for (const cellId of cellIds) {
+            const floor = cellStore.getFreshnessFloor(cellId)
+            if (floor !== undefined && floor > startSeq) continue
+            cellStore.replaceRowsForCell(cellId, rows.filter((row) => row.cellId === cellId))
+          }
+        })().catch((err) => {
+          console.warn("[refused-edit] could not read the refused cells back:", err)
+          for (const cellId of cellIds) revalidateCell(cellId)
+        })
+      }
+      const first = refused[0]
+      const label = first.fileId === fileId
+        ? (cellStore.getCellSummary(first.cellId)?.cellLabel || first.cellId)
+        : first.cellId
+      toast.add({
+        type: "error",
+        title: t("editor.write.refusedTitle", { count: refused.length }),
+        description: t("editor.write.refusedDetail", { cell: label, reason: first.reason }),
+      })
+    })
+  }, [refusedEditProjectId, activeFileId, cellStore, laneCellKey, revalidateCell, getTokenForProjectFile, t])
+
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
@@ -3046,17 +3112,22 @@ export function ProjectWorkspace() {
    * anchor chain honest; if that companion is the one refused, the row is
    * fine but the chain is not, and putting the row back is still the correct
    * repair.
+   *
+   * Returns the ids it reported, so the tab-wide rejection listener (AQU-1901)
+   * does not announce the same refusal a second time.
    */
   const rollbackRefusedCellChange = useCallback(
     (
-      entries: { kind: string }[],
+      entries: { id?: string; kind: string }[],
       cellId: string,
       restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
       message?: MessageKey,
-    ) => {
-      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+    ): string[] => {
+      const refused = entries.filter((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))
+      if (refused.length === 0) return []
       cellStore.rollbackOptimisticSourceChange(cellId, restore)
       if (message) toast.add({ type: "error", title: t(message) })
+      return refused.flatMap((e) => (e.id ? [e.id] : []))
     },
     [cellStore, toast, t],
   )
@@ -3310,7 +3381,7 @@ export function ProjectWorkspace() {
         // and present on the server, permanently. Put it back and say so.
         onRejected: (entries) => {
           refused = true
-          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
+          return rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
         },
         onForbidden: (entries) => {
           refused = true
@@ -6242,6 +6313,9 @@ export function ProjectWorkspace() {
     let sourceEventIdPin = commitCell.sourceEventId ?? null
     let eventId = ""
     let draftDeadLettered = false
+    // AQU-1901: refused outright (a lane or validation 4xx inside the 200, or
+    // a 403). Not retryable, and not saved: the row must not say "Saved".
+    let draftRefusal = null as string | null
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         eventId = await emitTargetCellCommit({
@@ -6277,20 +6351,18 @@ export function ProjectWorkspace() {
       }
       pendingCompletionEventIdRef.current.set(laneCellKey(cell.id), eventId)
       rememberPendingTargetCommit(cell.id, eventId, parentId)
-      draftDeadLettered = false
-      const flushedEventId = eventId
       // AQU-579: settle THIS event, not just "one batch". A single
       // flushOutboxBatch posts the oldest file group, so with any older row
       // queued the draft goes out later under the background flusher, where a
       // dead-letter only reaches the tab-wide stale listener — it clears the
       // shadow with no rebase, erasing the draft after "Saved".
-      await flushOutboxUntilSettled([flushedEventId], {
-        getTokenForFile: getTokenForProjectFile,
-        onStaleSiblings: (entries) => {
-          if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
-        },
-      })
+      const outcome = await settleOwnEvent(eventId, { getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
+      draftDeadLettered = outcome.kind === "dead-lettered"
+      if (outcome.kind === "refused") {
+        draftRefusal = outcome.reason
+        break
+      }
       if (!draftDeadLettered) break
 
       // The draft had no visible effect. Drop it from the pending-parent maps
@@ -6331,6 +6403,18 @@ export function ProjectWorkspace() {
         }
       }
       break
+    }
+    if (draftRefusal !== null) {
+      const key = laneCellKey(cell.id)
+      if (pendingCompletionEventIdRef.current.get(key) === eventId) pendingCompletionEventIdRef.current.delete(key)
+      if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === eventId) pendingTargetCommitHeadsRef.current.delete(key)
+      applyOptimisticTargetEdit(cell.id, {
+        value: commitCell.translated ?? "",
+        valueHtml: commitCell.translatedHtml ?? "",
+      })
+      revalidateCellStats(cell.id)
+      revalidateCell(cell.id)
+      throw new Error(draftRefusal)
     }
     if (draftDeadLettered) {
       // Rebase exhausted — a genuine concurrent conflict. Revert to the LIVE
@@ -6459,9 +6543,12 @@ export function ProjectWorkspace() {
 
     const staleIndexes = new Set<number>()
     const rejectedIndexes = new Map<number, Error>()
+    // Returns the ids it took, so the tab-wide listener (AQU-1901) leaves
+    // those to this flow's own report.
     const noteRejectedEntries = (
       entries: Array<{ id: string; status: number; reason: string }>,
-    ) => {
+    ): string[] => {
+      const claimed: string[] = []
       for (const entry of entries) {
         const preparedIndex = initialIndexByEventId.get(entry.id)
         if (preparedIndex === undefined) continue
@@ -6469,7 +6556,9 @@ export function ProjectWorkspace() {
           preparedIndex,
           new Error(entry.reason || `The server refused this draft (${entry.status})`),
         )
+        claimed.push(entry.id)
       }
+      return claimed
     }
     // AQU-579: settle this response's own events (see flushOutboxUntilSettled).
     await flushOutboxUntilSettled(eventIds, {
@@ -6587,7 +6676,8 @@ export function ProjectWorkspace() {
           const retryRejectedIndexes = new Map<number, Error>()
           const noteRetryRejected = (
             entries: Array<{ id: string; status: number; reason: string }>,
-          ) => {
+          ): string[] => {
+            const claimed: string[] = []
             for (const entry of entries) {
               const index = retryIndexByEventId.get(entry.id)
               if (index === undefined) continue
@@ -6595,7 +6685,9 @@ export function ProjectWorkspace() {
                 index,
                 new Error(entry.reason || `The server refused this draft (${entry.status})`),
               )
+              claimed.push(entry.id)
             }
+            return claimed
           }
           await flushOutboxUntilSettled(retryEventIds, {
             getTokenForFile: getTokenForProjectFile,
@@ -8455,6 +8547,15 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
+  // Same for the sidebar rollup refresh: its identity carries the active lane
+  // and the first file id (AQU-2118), both of which settle a few ms after the
+  // socket starts connecting on a fresh editor mount — and again on every lane
+  // switch. As an effect dependency that tore the socket down while it was
+  // still CONNECTING and opened a second one (dropping the focus lease and
+  // forcing a reconnect resync each time). The handlers read the latest
+  // callback through this ref instead.
+  const refreshAllFilesProgressRef = useRef(refreshAllFilesProgress)
+  refreshAllFilesProgressRef.current = refreshAllFilesProgress
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {
@@ -8556,7 +8657,7 @@ export function ProjectWorkspace() {
           revalidateAuditStats,
           invalidateProjectFileProgress: () => invalidateProjectFileProgress(pid),
           refreshComments,
-          refreshAllFilesProgress,
+          refreshAllFilesProgress: () => refreshAllFilesProgressRef.current(),
         })
       })
       reconciler = createWsReconciler(
@@ -8801,7 +8902,7 @@ export function ProjectWorkspace() {
               // The frame names no lane; the record on screen is the open
               // lane's (AQU-2118).
               invalidateFileProgress(pid, msg.file, activeLaneRef.current)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
@@ -8831,7 +8932,7 @@ export function ProjectWorkspace() {
               // A validation-threshold change alters every file's derived
               // validated count without mutating its progress histogram.
               invalidateProjectFileProgress(pid)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
@@ -8986,7 +9087,6 @@ export function ProjectWorkspace() {
     presenceStore,
     sendPresenceUpdate,
     refreshContextualDrafts,
-    refreshAllFilesProgress,
     revalidateAuditStats,
   ])
 
@@ -9840,9 +9940,12 @@ export function ProjectWorkspace() {
       cellsLoading,
       cellsError,
       hasLinkedPicture: activeFile?.orderedBy === "time" && Boolean(activeFile.coreMediaUrl),
+      // AQU-1901: no rows until the open lane can be named — paired with the
+      // '' fallback they read "empty" on a project with only tagged lanes.
+      lanesLoading: lanesPending,
     }),
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError,
-      activeFile?.orderedBy, activeFile?.coreMediaUrl]
+      activeFile?.orderedBy, activeFile?.coreMediaUrl, lanesPending]
   )
 
   const showFileStats = centerSurface === "editor"
@@ -13628,14 +13731,25 @@ export function ProjectWorkspace() {
     if (!chosenScopeKey || !queueChapterKey || queueChapterKey === chosenScopeKey) return
     if (getQueueState().kind === "paused") stopQueue()
   }, [chosenScopeKey, queueChapterKey])
-  // Picking a chapter mid-playback is navigation away from what is playing:
-  // it stops, and the timeline shows the chapter picked.
+  // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
+  // it and keeps playing, from its first line, in either timing. Picking one
+  // while playback is paused ends that playback, as before. Either way the
+  // timeline shows the chapter picked (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
-  const handleChapterPicked = useCallback((key: string) => {
-    const playing = queueChapterKeyRef.current
-    if (playing && playing !== key) stopQueue()
+  const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
+  chapterPickRunRef.current = { projectId: project?.id, session: frontierSession }
+  const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
+    const run = chapterRunRef.current
+    const plan = planChapterPick({
+      chapters: run?.chapters ?? [],
+      lines: run?.cells ?? [],
+      pickedKey: key,
+      playingKey: queueChapterKeyRef.current,
+      queueKind: getQueueState().kind,
+    })
+    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
@@ -16882,7 +16996,7 @@ export function ProjectWorkspace() {
               // then History. Right: the status ring, the views, Panels, ⋯.
               // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                afterTools={<HistoryPanel onResult={reportHistory} size="bar" />}
+                afterTools={<HistoryPanel onResult={reportHistory} />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -16900,7 +17014,6 @@ export function ProjectWorkspace() {
                       ? cloneElement(fileChapterToolbar, {
                           // History sits on the left of this bar.
                           historyControl: undefined,
-                          lensLabels: "active",
                           beforeMenu: (
                             <MediaPanelsMenu
                               dock={dock}
@@ -17264,7 +17377,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -17478,7 +17592,7 @@ export function ProjectWorkspace() {
             </div>
             {timelineStacked && activeFile && project ? (
               // Sam, Oct 27: the playback controls back at the bottom, in a
-              // very narrow footprint — a 28 px strip across the view, outside
+              // very narrow footprint — a 32 px strip across the view, outside
               // the panels, so no fold or full screen ever hides it.
               <VoicePlaybackBar
                 variant="strip"

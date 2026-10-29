@@ -193,7 +193,7 @@ export function useMediaDock(input: UseMediaDockInput) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
   }, [])
-  const safeResize = useCallback((region: DockRegion | "body", px: number) => {
+  const safeResize = useCallback((region: DockRegion | "body", px: number | string) => {
     const ref = region === "body" ? bodyRef : panelRefs[region]
     try {
       ref.current?.resize(px)
@@ -521,6 +521,58 @@ export function useMediaDock(input: UseMediaDockInput) {
         safeResize("body", DOCK_FOLDED_PX)
       }
     }
+    // …and the other way: a region the layout says is OPEN, left at zero by
+    // the group, is sized back out (Sam, Oct 28: Film and Text ticked, the
+    // row below the timeline drawn empty). Reproduced in WebKit: after a move
+    // and a fold, Text was ticked and its area 0 px wide. The layout is the
+    // truth, and the sizes follow it both ways. On the next frame: in this
+    // commit the group may still hold the area at its folded pin (max 0), and
+    // a resize now would be clamped straight back to zero.
+    const reopenShut = () => {
+      const shut = (r: DockRegion | "body") => {
+        const px = safeSize(r)
+        return px !== null && isFoldSized(px)
+      }
+      if (view.isOpen("tl") && view.bodyOpen && (shut("tl") || shut("body"))) {
+        repairsRef.current++
+        try {
+          if (panelRefs.tl.current?.isCollapsed()) panelRefs.tl.current?.expand()
+        } catch {
+          /* not laid out yet */
+        }
+        safeResize("tl", tlHeight())
+      } else if (!view.isOpen("tl") && view.bodyOpen && shut("body")) {
+        repairsRef.current++
+        safeResize("body", "100%")
+      }
+      const both = view.isOpen("ll") && view.isOpen("lr")
+      for (const r of ["ll", "lr"] as const) {
+        if (!view.isOpen(r) || !shut(r)) continue
+        repairsRef.current++
+        // A panel the group holds COLLAPSED stays collapsed when its
+        // neighbour is resized (full screen, then a move, left the text so):
+        // it has to be expanded first.
+        try {
+          if (panelRefs[r].current?.isCollapsed()) panelRefs[r].current?.expand()
+        } catch {
+          /* not laid out yet */
+        }
+        if (!both) {
+          safeResize(r, "100%")
+        } else if (filmArea) {
+          // The film at its remembered width, leaving the text its minimum.
+          const other = filmArea === "ll" ? "lr" : "ll"
+          const row = (safeSize("ll") ?? 0) + (safeSize("lr") ?? 0)
+          const room = row > 0 ? row - minWidthOf(other) : filmWidth()
+          safeResize(filmArea, Math.max(minWidthOf(filmArea), Math.min(filmWidth(), room)))
+        } else {
+          safeResize(r, "50%")
+        }
+      }
+    }
+    const frame = requestAnimationFrame(reopenShut)
+    return () => cancelAnimationFrame(frame)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the latest sizes through the closures
   }, [safeResize, safeSize, timelineStacked, view])
 
   /** On a file switch or a return from the text lens, the remembered sizes. */

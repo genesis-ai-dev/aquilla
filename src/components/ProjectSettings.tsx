@@ -133,6 +133,9 @@ import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/La
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -838,6 +841,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
   const [geminiApiKey, setGeminiApiKey] = useState("")
+  // AQU-2263: which key drafts and voices use right now — from what is SAVED
+  // (the baseline), the Preferences override and this browser's own keys.
+  const providerOverride = useUserProviderOverride()
+  const completionInUse = completionKeyInUse({
+    settings: baseline ? { provider: baseline.provider, endpoint: baseline.endpoint, apiKey: baseline.apiKey } : undefined,
+    override: providerOverride,
+    personalKey: completionUserKey,
+  })
+  const geminiInUse = geminiKeyInUse({
+    projectKey: baseline?.geminiApiKey,
+    personalKey: geminiUserKey,
+    orgHasKey: Boolean(orgSettingsForProject.orgProviderKeys?.["gemini-tts"]),
+  })
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -2732,7 +2748,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </span>
               }
             >
-              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
+              <SettingsRow
+                label={t("projectSettings.advancedLlm.providerLabel")}
+                description={<KeyInUseLine purpose="completion" kind={completionInUse} testId="completion-key-in-use" />}
+                block
+              >
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -2986,6 +3006,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   <>
                     {t("projectSettings.voice.geminiKeyHelp")}
                     <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                    <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="gemini-key-in-use" />
                   </>
                 }
                 block

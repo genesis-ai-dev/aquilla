@@ -20,7 +20,9 @@ import {
   customProviderNeedsKey,
   resolveProvider,
 } from "@/lib/completion/completion-service"
-import { getUserApiKey, resolveApiKey } from "@/lib/store/user-api-keys"
+import { getUserApiKey, resolveApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse } from "@/lib/settings/key-in-use"
 import {
   clearUserProviderOverride,
   useUserProviderOverride,
@@ -58,6 +60,9 @@ export function AiSetupDialog({
   const { id } = useParams<{ id: string }>()
   const { session } = useFrontierSession()
   const override = useUserProviderOverride()
+  // AQU-2263: which key drafts use right now, before anything is chosen here.
+  const personalKey = useUserApiKey("completion")
+  const keyInUse = completionKeyInUse({ settings: project.completionSettings, override, personalKey })
 
   const initialChoice = useMemo<SetupChoice>(() => {
     if (override) return "override"
@@ -189,6 +194,7 @@ export function AiSetupDialog({
           <DialogDescription>
             {t("workspace.aiSetup.description")}
           </DialogDescription>
+          <KeyInUseLine purpose="completion" kind={keyInUse} testId="ai-setup-key-in-use" />
         </DialogHeader>
 
         <div className="space-y-3">

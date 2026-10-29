@@ -6237,7 +6237,6 @@ export const zh_Hant: Catalog = {
   "workspace.aiSetup.overrideMissingError": "「偏好設定」中沒有儲存個人覆寫設定。",
   "workspace.aiSetup.overrideNeedsKey": "該覆寫設定仍需要 API 金鑰。請在「偏好設定」中新增，或選擇此專案的 API 金鑰。",
   "workspace.apiKeyField.saveAcrossProjects": "在我的所有專案中儲存（僅限這個瀏覽器）",
-  "workspace.apiKeyField.usingSavedKey": "正在使用您已儲存的金鑰。輸入內容即可只針對這個專案覆寫。",
   "workspace.apiKeyField.forgetSavedKey": "忘記已儲存的金鑰",
   "workspace.assignModal.canModalVerb": "可以",
   "workspace.durationBar.targetLabel": "目標 {time}",

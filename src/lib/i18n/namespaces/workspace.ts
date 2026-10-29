@@ -263,7 +263,6 @@ export const workspace = defineNamespace({
 
     // -- ApiKeyField --
     "workspace.apiKeyField.saveAcrossProjects": "Save across my projects (this browser)",
-    "workspace.apiKeyField.usingSavedKey": "Using your saved key. Type to override for this project only.",
     "workspace.apiKeyField.forgetSavedKey": "Forget saved key",
 
     // -- AssignModal --
@@ -1392,12 +1391,6 @@ export const workspace = defineNamespace({
           "Checkbox label on the reusable API-key input, offering to also " +
           "save the key to this browser's local storage so it's reused by " +
           "other projects, not just the current one.",
-      },
-      "workspace.apiKeyField.usingSavedKey": {
-        description:
-          "Confirmation note shown when the field is displaying a key that " +
-          "came from browser-local storage rather than this project's own " +
-          "settings, and that typing will override it for this project only.",
       },
       "workspace.apiKeyField.forgetSavedKey": {
         description:

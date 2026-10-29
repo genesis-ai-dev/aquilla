@@ -7717,7 +7717,6 @@ export const ha: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Babu maye gurbin kanka da aka ajiye a Zaɓuɓɓuka.",
   "workspace.aiSetup.overrideNeedsKey": "Wannan maye gurbi har yanzu yana buƙatar maɓallin API. Ku ƙara shi a Zaɓuɓɓuka, ko ku zaɓi maɓallin API na wannan aiki.",
   "workspace.apiKeyField.saveAcrossProjects": "Ku ajiye a duk ayyukana (wannan burauza)",
-  "workspace.apiKeyField.usingSavedKey": "Ana amfani da maɓallin da kuka ajiye. Ku rubuta don maye gurbi ga wannan aiki kawai.",
   "workspace.apiKeyField.forgetSavedKey": "Ku manta da maɓallin da aka ajiye",
   "workspace.assignModal.canModalVerb": "zai iya",
   "workspace.durationBar.targetLabel": "manufa {time}",

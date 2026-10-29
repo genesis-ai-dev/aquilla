@@ -6226,7 +6226,6 @@ export const ar: Catalog = {
   "workspace.aiSetup.overrideMissingError": "لا يوجد تجاوز شخصي محفوظ في التفضيلات.",
   "workspace.aiSetup.overrideNeedsKey": "ما زال هذا التجاوز يحتاج إلى مفتاح API. أضفه في التفضيلات، أو اختر مفتاح API لهذا المشروع.",
   "workspace.apiKeyField.saveAcrossProjects": "احفظ عبر مشاريعي (هذا المتصفح)",
-  "workspace.apiKeyField.usingSavedKey": "استخدام مفتاحك المحفوظ. اكتب لتجاوز هذا المشروع فقط.",
   "workspace.apiKeyField.forgetSavedKey": "نسي المفتاح المحفوظ",
   "workspace.assignModal.canModalVerb": "يمكن",
   "workspace.durationBar.targetLabel": "الهدف {time}",

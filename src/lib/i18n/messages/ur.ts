@@ -7703,7 +7703,6 @@ export const ur: Catalog = {
   "workspace.aiSetup.overrideMissingError": "ترجیحات میں کوئی ذاتی اوور رائیڈ محفوظ نہیں۔",
   "workspace.aiSetup.overrideNeedsKey": "اس اوور رائیڈ کو اب بھی API کلید چاہیے۔ ترجیحات میں شامل کریں، یا اس منصوبے کی API کلید چنیں۔",
   "workspace.apiKeyField.saveAcrossProjects": "میرے منصوبوں میں محفوظ کریں (یہ براؤزر)",
-  "workspace.apiKeyField.usingSavedKey": "آپ کی محفوظ کلید استعمال ہو رہی ہے۔ صرف اس منصوبے کے لیے بدلنے کو لکھیں۔",
   "workspace.apiKeyField.forgetSavedKey": "محفوظ کلید بھول جائیں",
   "workspace.assignModal.canModalVerb": "سکتا ہے",
   "workspace.durationBar.targetLabel": "ہدف {time}",

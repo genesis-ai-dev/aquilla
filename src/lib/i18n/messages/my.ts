@@ -6215,7 +6215,6 @@ export const my: Catalog = {
   "workspace.aiSetup.overrideMissingError": "ရွေးချယ်မှုများတွင် ကိုယ်ပိုင်အစားထိုးသတ်မှတ်ချက် မသိမ်းထားပါ။",
   "workspace.aiSetup.overrideNeedsKey": "ထိုအစားထိုးသတ်မှတ်ချက်အတွက် API ကီး လိုနေသေးသည်။ ရွေးချယ်မှုများတွင် ထည့်ပါ၊ သို့မဟုတ် ဤပရောဂျက်၏ API ကီးကို ရွေးပါ။",
   "workspace.apiKeyField.saveAcrossProjects": "ကျွန်ုပ်၏ ပရောဂျက်များတွင် သိမ်းဆည်းပါ (ဤ browser)",
-  "workspace.apiKeyField.usingSavedKey": "သင်၏ သိမ်းဆည်းထားသည့် သော့ အသုံးပြုနေသည်။ ဤ ပရောဂျက်တည်း အလွန်စေရန် အမည်စာ။",
   "workspace.apiKeyField.forgetSavedKey": "သိမ်းဆည်းထားသည့် သော့ မေ့လျှော့ပါ",
   "workspace.assignModal.canModalVerb": "ပိုင်ခွင့်ရှိ",
   "workspace.durationBar.targetLabel": "ရည်ရွယ်ချက် {time}",

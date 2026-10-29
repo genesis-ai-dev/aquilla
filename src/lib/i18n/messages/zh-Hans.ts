@@ -6235,7 +6235,6 @@ export const zh_Hans: Catalog = {
   "workspace.aiSetup.overrideMissingError": "偏好设置中没有保存个人覆盖设置。",
   "workspace.aiSetup.overrideNeedsKey": "该覆盖设置仍需要 API 密钥。请在偏好设置中添加，或选择此项目的 API 密钥。",
   "workspace.apiKeyField.saveAcrossProjects": "在我的所有项目中保存（仅限这个浏览器）",
-  "workspace.apiKeyField.usingSavedKey": "正在使用您已保存的密钥。输入内容即可只针对这个项目覆写。",
   "workspace.apiKeyField.forgetSavedKey": "忘记已保存的密钥",
   "workspace.assignModal.canModalVerb": "可以",
   "workspace.durationBar.targetLabel": "目标 {time}",

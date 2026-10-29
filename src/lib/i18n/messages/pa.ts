@@ -7712,7 +7712,6 @@ export const pa: Catalog = {
   "workspace.aiSetup.overrideMissingError": "ਤਰਜੀਹਾਂ ਵਿੱਚ ਕੋਈ ਨਿੱਜੀ ਓਵਰਰਾਈਡ ਸੰਭਾਲਿਆ ਨਹੀਂ.",
   "workspace.aiSetup.overrideNeedsKey": "ਉਸ ਓਵਰਰਾਈਡ ਨੂੰ ਹਾਲੇ ਇੱਕ API ਕੁੰਜੀ ਚਾਹੀਦੀ ਹੈ. ਇਸਨੂੰ ਤਰਜੀਹਾਂ ਵਿੱਚ ਜੋੜੋ, ਜਾਂ ਇਸ ਪ੍ਰੋਜੈਕਟ ਦੀ API ਕੁੰਜੀ ਚੁਣੋ.",
   "workspace.apiKeyField.saveAcrossProjects": "ਮੇਰੇ ਪ੍ਰੋਜੈਕਟਾਂ ਵਿੱਚ ਸੰਭਾਲੋ (ਇਹ ਬ੍ਰਾਊਜ਼ਰ)",
-  "workspace.apiKeyField.usingSavedKey": "ਤੁਹਾਡੀ ਸੰਭਾਲੀ ਕੁੰਜੀ ਵਰਤੀ ਜਾ ਰਹੀ ਹੈ. ਸਿਰਫ਼ ਇਸ ਪ੍ਰੋਜੈਕਟ ਲਈ ਓਵਰਰਾਈਡ ਕਰਨ ਵਾਸਤੇ ਲਿਖੋ.",
   "workspace.apiKeyField.forgetSavedKey": "ਸੰਭਾਲੀ ਕੁੰਜੀ ਭੁੱਲੋ",
   "workspace.assignModal.canModalVerb": "ਸਕਦਾ ਹੈ",
   "workspace.durationBar.targetLabel": "ਟੀਚਾ {time}",

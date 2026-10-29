@@ -118,3 +118,22 @@ describe("PersonalProviderSection — provider presets (AQU-796)", () => {
     expect(input.value).toBe(mid)
   })
 })
+
+// AQU-2263: the section says which key is in use, in the same words as every
+// other key field.
+describe("PersonalProviderSection — which key is in use", () => {
+  it("not set: projects use Frontier unless they have their own provider", () => {
+    render(<PersonalProviderSection />)
+    expect(screen.getByTestId("prefs-key-in-use")).toHaveTextContent(
+      "Not set. Projects use Frontier unless they have their own provider.",
+    )
+  })
+
+  it("set: in use in every project without its own provider", () => {
+    stored = { endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-mine" }
+    render(<PersonalProviderSection />)
+    expect(screen.getByTestId("prefs-key-in-use")).toHaveTextContent(
+      "In use in every project that doesn't have its own provider.",
+    )
+  })
+})

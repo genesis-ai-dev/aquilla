@@ -6264,7 +6264,6 @@ export const fr: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Aucun remplacement personnel n'est enregistré dans les préférences.",
   "workspace.aiSetup.overrideNeedsKey": "Ce remplacement nécessite encore une clé API. Ajoutez-la dans les préférences, ou choisissez la clé API de ce projet.",
   "workspace.apiKeyField.saveAcrossProjects": "Enregistrer pour tous mes projets (ce navigateur)",
-  "workspace.apiKeyField.usingSavedKey": "Utilisation de votre clé enregistrée. Tapez pour la remplacer pour ce projet uniquement.",
   "workspace.apiKeyField.forgetSavedKey": "Oublier la clé enregistrée",
   "workspace.assignModal.canModalVerb": "peut",
   "workspace.durationBar.targetLabel": "cible {time}",

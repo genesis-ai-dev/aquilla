@@ -7732,7 +7732,6 @@ export const bn: Catalog = {
   "workspace.aiSetup.overrideMissingError": "পছন্দে কোনো ব্যক্তিগত ওভাররাইড সংরক্ষিত নেই।",
   "workspace.aiSetup.overrideNeedsKey": "সেই ওভাররাইডের এখনো একটি API কী দরকার। পছন্দে যোগ করুন, অথবা এই প্রকল্পের API কী বেছে নিন।",
   "workspace.apiKeyField.saveAcrossProjects": "আমার প্রকল্প জুড়ে সংরক্ষণ করুন (এই ব্রাউজার)",
-  "workspace.apiKeyField.usingSavedKey": "আপনার সংরক্ষিত কী ব্যবহার হচ্ছে। শুধু এই প্রকল্পের জন্য ওভাররাইড করতে লিখুন।",
   "workspace.apiKeyField.forgetSavedKey": "সংরক্ষিত কী ভুলে যান",
   "workspace.assignModal.canModalVerb": "পারেন",
   "workspace.durationBar.targetLabel": "লক্ষ্য {time}",

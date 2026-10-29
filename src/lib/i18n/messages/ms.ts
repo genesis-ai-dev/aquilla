@@ -6193,7 +6193,6 @@ export const ms: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Tiada penggantian peribadi disimpan dalam Pilihan.",
   "workspace.aiSetup.overrideNeedsKey": "Penggantian itu masih memerlukan kunci API. Tambahkannya dalam Pilihan, atau pilih kunci API projek ini.",
   "workspace.apiKeyField.saveAcrossProjects": "Simpan di seluruh projek saya (browser ini)",
-  "workspace.apiKeyField.usingSavedKey": "Menggunakan kunci yang disimpan Anda. Ketik untuk mengganti hanya projek ini.",
   "workspace.apiKeyField.forgetSavedKey": "Lupakan kunci yang disimpan",
   "workspace.assignModal.canModalVerb": "dapat",
   "workspace.durationBar.targetLabel": "sasaran {time}",

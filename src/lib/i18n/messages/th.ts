@@ -6219,7 +6219,6 @@ export const th: Catalog = {
   "workspace.aiSetup.overrideMissingError": "ไม่มีการแทนที่ส่วนตัวที่บันทึกไว้ในค่ากำหนด",
   "workspace.aiSetup.overrideNeedsKey": "การแทนที่นั้นยังต้องมีคีย์ API เพิ่มในค่ากำหนด หรือเลือกคีย์ API ของโครงการนี้",
   "workspace.apiKeyField.saveAcrossProjects": "บันทึกในโครงการของฉัน (เบราว์เซอร์นี้)",
-  "workspace.apiKeyField.usingSavedKey": "ใช้คีย์ที่บันทึกไว้ของคุณ พิมพ์เพื่อแทนที่โครงการนี้เท่านั้น",
   "workspace.apiKeyField.forgetSavedKey": "ลืมคีย์ที่บันทึก",
   "workspace.assignModal.canModalVerb": "สามารถ",
   "workspace.durationBar.targetLabel": "เป้าหมาย {time}",

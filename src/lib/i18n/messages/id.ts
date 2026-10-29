@@ -6307,7 +6307,6 @@ export const id: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Tidak ada penimpaan pribadi yang tersimpan di Preferensi.",
   "workspace.aiSetup.overrideNeedsKey": "Penimpaan itu masih memerlukan kunci API. Tambahkan di Preferensi, atau pilih kunci API proyek ini.",
   "workspace.apiKeyField.saveAcrossProjects": "Simpan untuk semua proyek saya (peramban ini)",
-  "workspace.apiKeyField.usingSavedKey": "Memakai kunci tersimpan Anda. Ketik untuk menimpanya khusus proyek ini.",
   "workspace.apiKeyField.forgetSavedKey": "Lupakan kunci tersimpan",
   "workspace.assignModal.canModalVerb": "boleh",
   "workspace.durationBar.overBy": "+{seconds} dtk",

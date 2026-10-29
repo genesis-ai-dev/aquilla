@@ -6354,7 +6354,6 @@ export const ru: Catalog = {
   "workspace.aiSetup.overrideMissingError": "В параметрах не сохранено личное переопределение.",
   "workspace.aiSetup.overrideNeedsKey": "Для этого переопределения всё ещё нужен ключ API. Добавьте его в параметрах или выберите ключ API этого проекта.",
   "workspace.apiKeyField.saveAcrossProjects": "Сохранить для всех моих проектов (в этом браузере)",
-  "workspace.apiKeyField.usingSavedKey": "Используется ваш сохранённый ключ. Введите другой, чтобы переопределить его только для этого проекта.",
   "workspace.apiKeyField.forgetSavedKey": "Забыть сохранённый ключ",
   "workspace.assignModal.canModalVerb": "может",
   "workspace.durationBar.targetLabel": "цель {time}",

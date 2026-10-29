@@ -7411,7 +7411,6 @@ export const pt: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Não há uma substituição pessoal salva em Preferências.",
   "workspace.aiSetup.overrideNeedsKey": "Essa substituição ainda precisa de uma chave de API. Adicione-a em Preferências, ou escolha a chave de API deste projeto.",
   "workspace.apiKeyField.saveAcrossProjects": "Salvar em todos os meus projetos (este navegador)",
-  "workspace.apiKeyField.usingSavedKey": "Usando sua chave salva. Digite para substituí-la só neste projeto.",
   "workspace.apiKeyField.forgetSavedKey": "Esquecer a chave salva",
   "workspace.assignModal.canModalVerb": "pode",
   "workspace.durationBar.targetLabel": "meta {time}",

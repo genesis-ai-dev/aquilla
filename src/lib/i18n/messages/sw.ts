@@ -7719,7 +7719,6 @@ export const sw: Catalog = {
   "workspace.aiSetup.overrideMissingError": "Hakuna mbadala wa kibinafsi uliohifadhiwa katika Mapendeleo.",
   "workspace.aiSetup.overrideNeedsKey": "Mbadala huo bado unahitaji ufunguo wa API. Ongeza katika Mapendeleo, au chagua ufunguo wa API wa mradi huu.",
   "workspace.apiKeyField.saveAcrossProjects": "Hifadhi katika miradi yangu yote (kivinjari hiki)",
-  "workspace.apiKeyField.usingSavedKey": "Unatumia ufunguo wako uliohifadhiwa. Andika ili kubadilisha kwa mradi huu pekee.",
   "workspace.apiKeyField.forgetSavedKey": "Sahau ufunguo uliohifadhiwa",
   "workspace.assignModal.canModalVerb": "anaweza",
   "workspace.durationBar.targetLabel": "lengo {time}",

@@ -7717,7 +7717,6 @@ export const am: Catalog = {
   "workspace.aiSetup.overrideMissingError": "በምርጫዎች የተቀመጠ ግላዊ ሽፋን የለም።",
   "workspace.aiSetup.overrideNeedsKey": "ያ ሽፋን አሁንም API ቁልፍ ይፈልጋል። በምርጫዎች ይጨምሩት፣ ወይም የዚህን ፕሮጀክት API ቁልፍ ይምረጡ።",
   "workspace.apiKeyField.saveAcrossProjects": "በፕሮጀክቶቼ ሁሉ ያስቀምጡ (ይህ አሳሽ)",
-  "workspace.apiKeyField.usingSavedKey": "የተቀመጠውን ቁልፍዎን በመጠቀም ላይ። ለዚህ ፕሮጀክት ብቻ ለመሸፈን ይተይቡ።",
   "workspace.apiKeyField.forgetSavedKey": "የተቀመጠ ቁልፍ ይርሱ",
   "workspace.assignModal.canModalVerb": "ይችላል",
   "workspace.durationBar.targetLabel": "ዒላማ {time}",

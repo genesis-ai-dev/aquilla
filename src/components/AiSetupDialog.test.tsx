@@ -32,6 +32,7 @@ vi.mock("@/lib/store/user-provider-override", () => ({
 
 vi.mock("@/lib/store/user-api-keys", () => ({
   getUserApiKey: () => undefined,
+  useUserApiKey: () => undefined,
   setUserApiKey: vi.fn(),
   resolveApiKey: (_purpose: string, projectValue?: string) => projectValue,
 }))
@@ -90,6 +91,18 @@ beforeEach(() => {
 })
 
 describe("AiSetupDialog", () => {
+  // AQU-2263: which key drafts use right now, before anything is chosen.
+  it("says drafts use Frontier with no key, for a project that never chose", () => {
+    renderDialog()
+    expect(screen.getByTestId("ai-setup-key-in-use")).toHaveTextContent("Using Frontier. No key needed.")
+  })
+
+  it("says drafts use your own key from Preferences while you have an override", () => {
+    overrideState.current = { endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-mine" }
+    renderDialog()
+    expect(screen.getByTestId("ai-setup-key-in-use")).toHaveTextContent("Using your own key (Preferences).")
+  })
+
   it("offers Frontier, a project API key, and Continue", () => {
     renderDialog()
     expect(screen.getByRole("button", { name: /Frontier AI/i })).toBeInTheDocument()

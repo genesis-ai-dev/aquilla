@@ -7440,7 +7440,6 @@ export const hi: Catalog = {
   "workspace.aiSetup.overrideMissingError": "प्राथमिकताओं में कोई व्यक्तिगत ओवरराइड सहेजा नहीं है।",
   "workspace.aiSetup.overrideNeedsKey": "उस ओवरराइड को अभी भी API कुंजी चाहिए। प्राथमिकताओं में जोड़ें, या इस परियोजना की API कुंजी चुनें।",
   "workspace.apiKeyField.saveAcrossProjects": "मेरी परियोजनाओं में सहेजें (यह ब्राउज़र)",
-  "workspace.apiKeyField.usingSavedKey": "आपकी सहेजी कुंजी उपयोग हो रही है। केवल इस परियोजना के लिए बदलने हेतु टाइप करें।",
   "workspace.apiKeyField.forgetSavedKey": "सहेजी कुंजी भूल जाएँ",
   "workspace.assignModal.canModalVerb": "सकते हैं",
   "workspace.durationBar.targetLabel": "लक्ष्य {time}",

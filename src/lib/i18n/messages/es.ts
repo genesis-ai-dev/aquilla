@@ -7406,7 +7406,6 @@ export const es: Catalog = {
   "workspace.aiSetup.overrideMissingError": "No hay una anulación personal guardada en Preferencias.",
   "workspace.aiSetup.overrideNeedsKey": "Esa anulación todavía necesita una clave de API. Agrégala en Preferencias, o elige la clave de API de este proyecto.",
   "workspace.apiKeyField.saveAcrossProjects": "Guardar en todos mis proyectos (este navegador)",
-  "workspace.apiKeyField.usingSavedKey": "Usando tu clave guardada. Escribe para reemplazarla solo en este proyecto.",
   "workspace.apiKeyField.forgetSavedKey": "Olvidar la clave guardada",
   "workspace.assignModal.canModalVerb": "puede",
   "workspace.durationBar.targetLabel": "objetivo {time}",

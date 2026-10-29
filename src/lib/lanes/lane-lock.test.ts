@@ -125,7 +125,7 @@ describe("laneWriteLocked mirrors the server's archived-lane kind table", () => 
     // Run the real refusal path over the lane row the client's list is derived
     // from, so the two halves of AQU-1462/AQU-1463 agree about one lane.
     const lanes = [{ id: "lane-es", name: "Spanish", legacyTag: "es", archivedAt: "2026-09-29T00:00:00Z" }]
-    expect(archivedLaneReason({ tag: "es", lanes, archivedTags: [] })).toBe("lane 'Spanish' is archived")
+    expect(archivedLaneReason({ tag: "es", lanes })).toBe("lane 'Spanish' is archived")
     expect(laneWriteLocked("target.cell.commit", laneLockFor({
       activeLane: "es",
       archivedLanes: lanes.filter((l) => l.archivedAt).map((l) => l.legacyTag ?? ""),

@@ -925,11 +925,8 @@ export async function handleBulkImportRequest(
       .first<{ present: number }>()
     if (!anyLane) {
       await ensureProjectLanes(db, body.projectId, {
-        settings: body.file
-          ? {
-              sourceLanguage: body.file.sourceLanguage,
-              targetLanguage: body.file.targetLanguage,
-            }
+        languages: body.file
+          ? { source: body.file.sourceLanguage, target: body.file.targetLanguage }
           : undefined,
         dataTargetTags: dataTargetTagsFromEvents(targetEvents),
       })

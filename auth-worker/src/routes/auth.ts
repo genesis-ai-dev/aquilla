@@ -818,6 +818,111 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
   })
 })
 
+// AQU-2264: a person's preferences, merged rather than replaced.
+//
+// PATCH /auth/me above REPLACES the whole `users.preferences` blob, so every
+// caller had to read it, change one key and send it all back — and two
+// devices, or two features, doing that at once lose one of the writes. Here a
+// caller sends only the keys it is changing, and one UPDATE merges them into
+// the row as it stands at that moment, so writers that touch different keys
+// never undo each other. (PATCH /auth/me keeps replacing for older clients.)
+//
+//   set          — written over whatever is stored.
+//   setIfAbsent  — written only for keys the person has none of yet: the
+//                  first device's values become theirs, and later devices
+//                  take those instead of offering their own.
+//
+// GET /auth/me/preferences reads the row itself. GET /auth/me answers from the
+// isolate's session cache, which can be up to 30 s behind a write made through
+// another isolate — too stale for a second device opening the recorder.
+
+/** Most keys one request may write. */
+const PREFERENCES_PATCH_MAX_KEYS = 64
+/** Longest key name. */
+const PREFERENCES_KEY_MAX_LENGTH = 100
+/** Most bytes of JSON one request may write. */
+const PREFERENCES_PATCH_MAX_BYTES = 16 * 1024
+/** A record already this large takes no more writes. */
+const PREFERENCES_STORED_MAX_BYTES = 256 * 1024
+
+const preferenceEntriesSchema = z.record(
+  z.string().min(1).max(PREFERENCES_KEY_MAX_LENGTH),
+  z.unknown(),
+)
+const patchPreferencesSchema = z.object({
+  set: preferenceEntriesSchema.optional(),
+  setIfAbsent: preferenceEntriesSchema.optional(),
+}).strict()
+
+/** The stored text as an object; anything that is not a JSON object reads as {}. */
+function parseStoredPreferences(text: string | null | undefined): Record<string, unknown> {
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+auth.get("/me/preferences", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+    .bind(user.id)
+    .first<{ preferences: string }>()
+  if (!row) return c.json({ error: "user not found" }, 404)
+  return c.json({ preferences: parseStoredPreferences(row.preferences) })
+})
+
+auth.patch(
+  "/me/preferences",
+  authMiddleware,
+  zValidator("json", patchPreferencesSchema),
+  async (c) => {
+    const { set = {}, setIfAbsent = {} } = c.req.valid("json")
+    const keyCount = Object.keys(set).length + Object.keys(setIfAbsent).length
+    if (keyCount === 0) return c.json({ error: "nothing to save" }, 400)
+    if (keyCount > PREFERENCES_PATCH_MAX_KEYS) {
+      return c.json({ error: `at most ${PREFERENCES_PATCH_MAX_KEYS} preferences per request` }, 400)
+    }
+    const setJson = JSON.stringify(set)
+    const absentJson = JSON.stringify(setIfAbsent)
+    if (new TextEncoder().encode(setJson + absentJson).length > PREFERENCES_PATCH_MAX_BYTES) {
+      return c.json({ error: "preferences too large" }, 413)
+    }
+
+    const user = c.get("user")
+    // One statement, so the merge reads the row as it is when the write
+    // lands — a write from another device in between is kept, not undone.
+    // `absent || stored || set`: stored keys beat setIfAbsent, set beats both.
+    // The nested CASE (evaluation order is guaranteed only inside CASE) turns a
+    // record that is not a JSON object into {} rather than failing the write.
+    const row = await c.env.AQUILLA_PG.prepare(
+      `UPDATE users
+          SET preferences = (
+                ?::text::jsonb
+                || CASE
+                     WHEN NOT pg_input_is_valid(preferences, 'jsonb') THEN '{}'::jsonb
+                     WHEN jsonb_typeof(preferences::jsonb) <> 'object' THEN '{}'::jsonb
+                     ELSE preferences::jsonb
+                   END
+                || ?::text::jsonb
+              )::text,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND length(preferences) <= ?
+        RETURNING preferences`,
+    )
+      .bind(absentJson, setJson, user.id, PREFERENCES_STORED_MAX_BYTES)
+      .first<{ preferences: string }>()
+    if (!row) return c.json({ error: "preferences are full" }, 413)
+    // The session cache holds the row, preferences included.
+    evictUserSessions(user.id)
+    return c.json({ preferences: parseStoredPreferences(row.preferences) })
+  },
+)
+
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 
 // POST /api/v2/auth/verify-email — public; the token is the authorization.

@@ -4,7 +4,7 @@
 // route: a write names the revision it was built on, or it is refused with
 // the current copy. An Undo asks the server first only when another device
 // wrote recently (Sam, Oct 22).
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
   OTHER_DEVICE_WINDOW_MS,
   flushHistorySaveForTests,
@@ -18,6 +18,7 @@ import {
   setHistoryRemote,
   setHistoryScope,
   settleHistorySyncForTests,
+  subscribeHistory,
   undoLast,
   type StepHandler,
   type StepRecord,
@@ -231,6 +232,37 @@ describe("two devices at once (P13.7)", () => {
     expect(log).toEqual([]) // nothing written here
     expect(historyView().undoSteps).toEqual([])
     expect(historyView().redoSteps.map((s) => s.labelKey)).toEqual(["Rename take"])
+  })
+
+  // Sam, Oct 28 ("happy with all your decisions"): after "… was already
+  // undone on another of your devices", this device's History panel must
+  // update at once, so its next Undo acts on what the panel then shows — here,
+  // this device's own older step (the P13.7 walk: A undid the 1:9 rename, and
+  // B's next Undo took B's own 1:7 rename).
+  it("after a step another device took, the panel updates at once and the next Undo takes this device's own step", async () => {
+    recordStep(step("Rename 1:7"))
+    await settle()
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename 1:9", h.undo[0].at + 1)] }))
+    await refreshHistory()
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:7", "Rename 1:9"])
+    await writeOnComputerA((h) => ({
+      ...h,
+      undo: h.undo.filter((r) => r.labelKey !== "Rename 1:9"),
+      redo: [{ ...h.undo.find((r) => r.labelKey === "Rename 1:9")!, movedAt: Date.now() + 5 }],
+    }))
+
+    const panel = vi.fn()
+    const off = subscribeHistory(panel)
+    const result = await undoLast()
+    expect(result?.outcome).toEqual({ kind: "moved" })
+    expect(panel).toHaveBeenCalled()
+    off()
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:7"])
+    expect(historyView().redoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:9"])
+    expect(log).toEqual([])
+
+    expect((await undoLast())?.outcome.kind).toBe("done")
+    expect(log).toEqual(["undo Rename 1:7"])
   })
 
   it("it waits at most 1.5 s for the server's answer, then undoes", async () => {

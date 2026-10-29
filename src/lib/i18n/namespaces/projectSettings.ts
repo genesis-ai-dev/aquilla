@@ -406,14 +406,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
     // target language → projectSettings.info.targetLanguageLabel
-    // AI instructions → projectSettings.section.aiInstructions
     "projectSettings.field.validationCount": "validation count",
     "projectSettings.field.audioValidationCount": "audio validation count",
     "projectSettings.field.validationRoleFloor": "validation role floor",
     "projectSettings.field.namedValidators": "named validators",
     "projectSettings.field.selfValidation": "self-validation",
     "projectSettings.field.harmonizeMinRole": "harmonize min role",
-    // Bible resources → projectSettings.section.bibleResources
     "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
     // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
@@ -430,7 +428,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.cellEditingFloor": "who can add and remove cells",
     "projectSettings.field.trackEditing": "timeline track editing",
     "projectSettings.field.timingLock": "the timing lock",
-    "projectSettings.field.bibleResources": "Bible resources",
     "projectSettings.field.bibleData": "Bible data",
     "projectSettings.field.bibleEnrichments": "Bible data enrichments",
     "projectSettings.field.importCellUnit": "import cell unit",
@@ -451,12 +448,11 @@ export const projectSettings = defineNamespace({
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, content structure, Bible resources",
-    "projectSettings.group.generalDescriptionBibleData": "Name, languages, content structure, Bible data",
+    "projectSettings.group.generalDescription": "Name, languages, content structure, Bible data",
     "projectSettings.group.membersLabel": "Members",
     "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
-    "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
+    "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI",
     "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
@@ -485,14 +481,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.hint.integrations": "Monday.com, Airtable",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
-    "projectSettings.section.linkSource": "Link source",
     "projectSettings.section.sourceLink": "Source link",
-    "projectSettings.section.inheritedSettings": "Inherited settings",
     "projectSettings.section.upstreamChanges": "Upstream changes",
     "projectSettings.section.dcsUpstream": "Door43 upstream",
     "projectSettings.section.projectInfo": "Project Info",
     "projectSettings.section.languages": "Languages",
-    "projectSettings.section.bibleResources": "Bible resources",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
     "projectSettings.section.members": "Team members",
@@ -521,7 +514,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
-    "projectSettings.bible.enableLabel": "Enable Bible resources",
     "projectSettings.bible.description": "Scholarly reference data from bibletranslation.org in Search and the agent.",
     "projectSettings.bible.scriptureDefaultHint": "Available by default for scripture projects — turn off to disable.",
     "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
@@ -1578,7 +1570,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.inherit.title": "Settings from {upstream}",
     "projectSettings.inherit.description":
       "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
-    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
     "projectSettings.inherit.linkDescription":
       "Turn on what this project should receive. You can detach any of them later in its settings.",
     "projectSettings.inherit.field.translationBrief": "Translation brief",
@@ -3269,10 +3260,6 @@ export const projectSettings = defineNamespace({
         placeholders: {
           upstream: "The upstream project's name, as its maintainers named it — never translated.",
         },
-      },
-      "projectSettings.inherit.linkTitle": {
-        description:
-          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
       },
       "projectSettings.inherit.linkDescription": {
         description:

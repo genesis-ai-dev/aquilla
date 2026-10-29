@@ -43,7 +43,7 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
     // makes the control explainable to others.
     const searchToggle = screen.getByRole("button", { name: "Search" })
     const replaceToggle = screen.getByRole("button", { name: "Find & Replace" })
-    const bibleToggle = screen.getByRole("button", { name: "Bible resources" })
+    const bibleToggle = screen.getByRole("button", { name: "Bible data" })
 
     expect(searchToggle).toHaveTextContent("Search")
     expect(replaceToggle).toHaveTextContent("Replace")
@@ -100,7 +100,7 @@ describe("SearchDockPanel — hover only names icon buttons", () => {
     render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ bibleResourcesEnabled: true })} /></TooltipProvider>)
     await expectNoHover(screen.getByRole("button", { name: "Search" }))
     await expectNoHover(screen.getByRole("button", { name: "Find & Replace" }))
-    await expectNoHover(screen.getByRole("button", { name: "Bible resources" }))
+    await expectNoHover(screen.getByRole("button", { name: "Bible data" }))
   })
 
   it("Expand all has no hover", async () => {

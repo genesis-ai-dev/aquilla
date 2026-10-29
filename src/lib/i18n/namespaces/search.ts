@@ -26,7 +26,7 @@ export const search = defineNamespace({
     "search.mode.replace": "Replace",
     "search.mode.replaceTooltip": "Find & Replace",
     "search.mode.bible": "Bible",
-    "search.mode.bibleTooltip": "Bible resources",
+    "search.mode.bibleTooltip": "Bible data",
     "search.mode.passages": "Passages",
 
     // Scope toggle (dock panel + full panel)
@@ -59,8 +59,8 @@ export const search = defineNamespace({
     "search.bible.openExternal": "Open on bibletranslation.org",
     "search.bible.truncated": "Truncated — open the full page on bibletranslation.org.",
     "search.bible.notesFor": "Notes for {ref}",
-    "search.bible.searchPlaceholder": "Search Bible resources…",
-    "search.bible.searchAriaLabel": "Search Bible resources",
+    "search.bible.searchPlaceholder": "Search Bible data…",
+    "search.bible.searchAriaLabel": "Search Bible data",
     "search.bible.noResults": "No resources found",
     "search.bible.idleHint":
       "Search bibletranslation.org for people, places, terms, and translation notes.",

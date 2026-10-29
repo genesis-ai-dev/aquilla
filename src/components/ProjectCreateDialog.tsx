@@ -1149,7 +1149,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
                         {showCorpusChoice && (chosenConsumes === "source" || chosenConsumes === "target") ? (
                           <InheritedSettingsChoice
-                            title={t("projectSettings.inherit.linkTitle")}
+                            title={t("projectSettings.inherit.title", {
+                              upstream: upstreamOptions.find((p) => p.id === chosenUpstreamId)?.name ?? "",
+                            })}
                             description={t("projectSettings.inherit.linkDescription")}
                             receive={inheritReceive}
                             detached={inheritDetached}

@@ -28,7 +28,7 @@ import { defineNamespace, plural } from "./types"
 export const bibleData = defineNamespace({
   keys: {
     // ── Experimental switch (Project settings → Experimental, AQU-1685) ──
-    "bibleData.experiment.label": "Bible data enrichments",
+    "bibleData.experiment.label": "Bible data",
     "bibleData.experiment.description":
       "Shows Bible data while a Bible book is open: who speaks to whom, who is who, original-language context, translation helps and Bible data checks. Only on this device.",
 

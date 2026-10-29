@@ -1363,7 +1363,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push(t("projectSettings.field.trackEditing")) }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push(t("projectSettings.field.timingLock")) }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push(t("projectSettings.field.harmonizeMinRole")) }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(t(isBibleDataExperimentOn(project) ? "projectSettings.field.bibleData" : "projectSettings.field.bibleResources")) }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(t("projectSettings.field.bibleData")) }
       if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push(t("projectSettings.field.bibleEnrichments")) }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push(t("projectSettings.field.usfmFrontMatter")) }
       if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push(t("projectSettings.field.importCellUnit")) }
@@ -1598,9 +1598,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const ALL_SECTIONS: SettingsSection[] = [
     // AQU-1525: the counterpart of section-source-link — exactly one of the two
     // is ever visible, keyed off whether this project already has an upstream.
-    { id: "section-link-source", label: t("projectSettings.section.linkSource"), keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
+    { id: "section-link-source", label: t("projectSettings.section.sourceLink"), keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
     { id: "section-source-link", label: t("projectSettings.section.sourceLink"), keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
-    { id: "section-inherited-settings", label: t("projectSettings.section.inheritedSettings"), keywords: ["inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: t("projectSettings.inherit.title", { upstream: inheritedUpstreamName ?? project?.sourceProjectId ?? "" }), keywords: ["settings from", "inherited settings", "inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
     { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
@@ -1630,7 +1630,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
           ],
         }
-      : { id: "section-bible-resources", label: t("projectSettings.section.bibleResources"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+      : { id: "section-bible-resources", label: t("bibleData.card.title"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     // AQU-2259: only the "this setting moved" note is left here, until it expires.
     { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"], visible: settingMovedNotesShowing() },
@@ -1723,9 +1723,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: t("common.general"),
-      description: t(bibleDataExperiment
-        ? "projectSettings.group.generalDescriptionBibleData"
-        : "projectSettings.group.generalDescription"),
+      description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
       hub: "project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],

@@ -372,7 +372,7 @@ describe("ExperimentalFlagsSection — who each switch affects (AQU-2053)", () =
       "Smart edits",
       "Harmonizer",
       "Smart edits: AI wording",
-      "Bible data enrichments",
+      "Bible data",
     ]) {
       expect(rowText(name)).toMatch(/Only on this device/)
     }

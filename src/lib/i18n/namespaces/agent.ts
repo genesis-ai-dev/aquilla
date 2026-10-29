@@ -85,7 +85,7 @@ export const agent = defineNamespace({
     "agent.run.friendly.sql": "Checked the project records",
     "agent.run.friendly.emit": "Staged drafts for review",
     "agent.run.friendly.docs": "Consulted the project documents",
-    "agent.run.friendly.aquifer": "Looked up Bible resources",
+    "agent.run.friendly.aquifer": "Looked up Bible data",
     "agent.run.friendly.read": "Read the passage",
     "agent.run.friendly.examples": "Gathered translation examples",
     "agent.run.friendly.search": "Searched the project",
@@ -124,7 +124,7 @@ export const agent = defineNamespace({
     "agent.card.tool.docs.label": "Consult the project documents",
     "agent.card.tool.docs.description":
       "Reads the project's own reference documents and translation guidance.",
-    "agent.card.tool.aquifer.label": "Look up Bible resources",
+    "agent.card.tool.aquifer.label": "Look up Bible data",
     "agent.card.tool.aquifer.description":
       "Fetches outside reference material such as notes and dictionaries.",
     "agent.card.tool.sql.label": "Check the project records",

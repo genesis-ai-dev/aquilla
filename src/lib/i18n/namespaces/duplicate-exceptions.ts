@@ -438,11 +438,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.section.bibleResources":
-    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
-    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
-    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
-    "vs a tooltip naming a search filter mode for the same underlying dataset.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +

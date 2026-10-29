@@ -13,7 +13,7 @@ function renderChoice(
   render(
     <I18nProvider>
       <InheritedSettingsChoice
-        title="Copy these from the upstream project"
+        title="Settings from Upstream"
         description="Turn on what this project should receive."
         receive={{ ...INHERIT_DEFAULTS }}
         detached={{}}

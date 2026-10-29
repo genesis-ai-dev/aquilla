@@ -602,6 +602,8 @@ describe("one sync request, many bounded invocations (AQU-1563)", () => {
 
       const failed = await postLinkSync(t, fakeProjectSync(t, 2).ns)
       expect(failed.status).toBe(502)
+      // [Pen test] the DO's failure text stays in the logs, not the response.
+      expect(await failed.text()).toBe("link sync failed")
       const claimed = await cursorOf(t)
       expect(claimed).toBeGreaterThan(0)
       expect(claimed).toBeLessThan(head)

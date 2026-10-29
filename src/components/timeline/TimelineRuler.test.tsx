@@ -25,6 +25,27 @@ describe("TimelineRuler", () => {
     expect(width).toBe("76px") // one step (2s at this zoom) × 38
   })
 
+  // Sam, Oct 28: "for short files, the timeline should always extend all the
+  // way to the end of the page."
+  it("runs a short file's ruler on to the edge of the view, but seeks no further than the end", () => {
+    const onScrub = vi.fn()
+    render(<TimelineRuler durationSec={20} pxPerSec={38} fillPx={1140} onScrub={onScrub} />)
+    const ruler = screen.getByTestId("tl-ruler")
+    expect(ruler.style.width).toBe("1140px") // 30 s of view, not 20 s of file
+    // step = 2s → 0,2,…,30: the ticks carry on past the end.
+    expect(ruler.childElementCount).toBe(16)
+    expect(screen.getByText("0:30")).toBeInTheDocument()
+    fireEvent.click(ruler, { clientX: 1000 }) // 26.3 s, past the end
+    expect(onScrub).toHaveBeenCalledWith(20)
+    // The 0:30 label at the very edge must not make the track scroll sideways.
+    expect(ruler.className).toContain("overflow-x-clip")
+  })
+
+  it("is the file's own width when the file is the longer", () => {
+    render(<TimelineRuler durationSec={60} pxPerSec={38} fillPx={1140} onScrub={() => {}} />)
+    expect(screen.getByTestId("tl-ruler").style.width).toBe("2280px")
+  })
+
   it("draws every tick when no window is given", () => {
     render(<TimelineRuler durationSec={20} pxPerSec={38} onScrub={() => {}} />)
     // step = 2s at 38px/s → 0,2,…,20

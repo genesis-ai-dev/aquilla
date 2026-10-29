@@ -7,8 +7,6 @@ import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-reva
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
-import { CATALOGS } from "@/lib/i18n/messages/all"
-import { answerFromCatalogsForTests } from "@/lib/i18n/messages"
 import {
   createOffMachineFetchGuard,
   takeOffMachineRequestViolations,
@@ -20,9 +18,11 @@ import {
 // stalled wait still prints the DOM.
 configure({ asyncUtilTimeout: STALL_WATCHDOG_MS })
 
-// AQU-2090: the app fetches a non-English catalog on demand; tests render in any
-// locale at once, reading every catalog straight from messages/all.ts.
-answerFromCatalogsForTests(CATALOGS)
+// English ships with the app, so a test that renders English needs no catalog.
+// Installing every catalog here (AQU-2090) was 47% of the CI unit job: 15 MB of
+// locale modules evaluated again in each isolated worker, for every test file
+// (AQU-1991). A test that asserts text in another locale imports
+// "@/test-utils/all-catalogs" itself.
 
 // Block unit tests from reaching anything off this machine (AQU-1277). The
 // auth/sync base URLs fall back to production when VITE_AUTH_BASE is unset, so

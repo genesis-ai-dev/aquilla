@@ -219,12 +219,13 @@ export function AppShell({
    * can refuse a viewport scroll ONLY here.
    *
    * Scoped rather than global, and a page that is not in this frame is why:
-   * /privacy-policy renders a 3,400px document straight into the body. A
-   * blanket `overflow: hidden` on html made two thirds of it unreachable —
-   * no wheel, no scrollbar, no End key — including the page's own analytics
-   * opt-out and every contact address on it. Login, the invite and verify
-   * routes, the approval page and the 404 are all in the same position, and
-   * three of them carry a comment saying they scroll the document by design.
+   * the in-app privacy policy (removed in AQU-2243, now a 301 to /privacy)
+   * rendered a 3,400px document straight into the body, and a blanket
+   * `overflow: hidden` on html made two thirds of it unreachable — no wheel,
+   * no scrollbar, no End key — including its own analytics opt-out. Login,
+   * the invite and verify routes, the approval page and the 404 are all in
+   * the same position, and three of them carry a comment saying they scroll
+   * the document by design, so the scoping still earns its keep.
    *
    * Inside the frame the opposite holds: every pane scrolls on its own, so a
    * document scroll can only slide the whole application off the top.

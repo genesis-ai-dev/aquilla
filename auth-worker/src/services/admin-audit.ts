@@ -106,6 +106,8 @@ export async function auditMembershipChange(
     projectId?: string
     /** The invitee's email on an invite change, when the invite has one. */
     email?: string | null
+    /** AQU-2238: true when a team.member.add granted someone with no org_members row. */
+    external?: boolean
   },
 ): Promise<void> {
   if (!(await isAdminActor(env, actor))) return
@@ -129,6 +131,7 @@ export async function auditMembershipChange(
       groupId: entry.where.scope === "team" ? entry.where.groupId : null,
       projectId: entry.where.scope === "project" ? entry.where.projectId : (entry.projectId ?? null),
       ...(entry.email !== undefined ? { email: entry.email } : {}),
+      ...(entry.external !== undefined ? { external: entry.external } : {}),
       roleBefore: entry.roleBefore,
       roleAfter: entry.roleAfter,
     }

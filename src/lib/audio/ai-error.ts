@@ -293,7 +293,17 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       raw,
     }
   }
+  if (m.includes("voice service took too long")) {
+    return {
+      category: "seed-vc-failed",
+      title: t("audio.aiError.voiceConvertSlowTitle"),
+      body: t("audio.aiError.voiceConvertSlowBody"),
+      raw,
+    }
+  }
   if (
+    m.includes("voice conversion failed") ||
+    m.includes("voice conversion couldn't") ||
     m.includes("voice cloning (seed-vc) failed") ||
     m.includes("voice cloning (seed-vc) couldn't") ||
     m.includes("voice convert failed")

@@ -19,6 +19,10 @@ import { fmtClock, niceTickSec } from "./format"
 export interface TimelineRulerProps {
   durationSec: number
   pxPerSec: number
+  /** Draw at least this wide (the track's visible width): a short file's
+   *  ruler runs on to the edge of the view, ticks and all, while clicks and
+   *  scrubs past its end still land on the end (Sam, Oct 28). */
+  fillPx?: number
   /** Visible window in track seconds. Omitted = draw every tick. */
   viewStartSec?: number
   viewEndSec?: number
@@ -35,6 +39,7 @@ export interface TimelineRulerProps {
 function TimelineRulerImpl({
   durationSec,
   pxPerSec,
+  fillPx = 0,
   viewStartSec,
   viewEndSec,
   onScrub,
@@ -47,14 +52,16 @@ function TimelineRulerImpl({
   // track rather than an infinitely wide one.
   const safeDuration = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0
   const spanSec = Math.max(safeDuration, step)
+  // What is drawn: the file, or the whole view when the file is shorter.
+  const drawSec = Math.max(spanSec, pxToSec(fillPx, pxPerSec))
   const from = Number.isFinite(viewStartSec) ? Math.max(0, viewStartSec as number) : 0
-  const to = Number.isFinite(viewEndSec) ? Math.min(spanSec, viewEndSec as number) : spanSec
+  const to = Number.isFinite(viewEndSec) ? Math.min(drawSec, viewEndSec as number) : drawSec
   const ticks: number[] = []
   // Snap the first tick DOWN onto the step grid: a label must sit at the same
   // absolute second whatever the window happens to start at, or the numbers
   // slide around as you scroll.
   for (let t = Math.floor(from / step) * step; t <= to; t += step) ticks.push(t)
-  const width = secToPx(spanSec, pxPerSec)
+  const width = secToPx(drawSec, pxPerSec)
 
   // AQU-646 stage 5: this band is a scrub surface now, as well as a place to
   // click. `onScrubMove` absent means no drag is wanted at all, which is what
@@ -97,7 +104,12 @@ function TimelineRulerImpl({
       // relative -> sticky is safe: sticky is still "positioned", so the
       // absolutely positioned ticks below keep this element as their
       // containing block.
-      className="sticky top-0 z-20 h-7 cursor-col-resize touch-none select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
+      //
+      // overflow-x-clip: a label on a tick at the very edge (a short file's
+      // ruler runs to the view's edge) must not widen the track and make it
+      // scroll sideways by its own few pixels. Clip, not hidden: no scroll
+      // container, so sticky holds, and the 1 px seam below still shows.
+      className="sticky top-0 z-20 h-7 overflow-x-clip cursor-col-resize touch-none select-none border-b border-border bg-background before:absolute before:inset-x-0 before:top-0 before:-bottom-px before:bg-muted/30"
       style={{ width: `${width}px` }}
       onPointerDown={scrub.onPointerDown}
       onClick={(e) => {
@@ -105,7 +117,7 @@ function TimelineRulerImpl({
         // would fight the landing seek the drag already issued.
         if (scrub.consumeDragClick()) return
         const rect = e.currentTarget.getBoundingClientRect()
-        onScrub(pxToSec(e.clientX - rect.left, pxPerSec))
+        onScrub(Math.min(spanSec, pxToSec(e.clientX - rect.left, pxPerSec)))
       }}
     >
       {ticks.map((t) => (

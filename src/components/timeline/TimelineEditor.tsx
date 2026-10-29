@@ -4821,8 +4821,15 @@ export function TimelineEditor({
                 through it would still be perfectly legible; this paints
                 `bg-background` and lays the same tint back over it, reproducing
                 today's composite to the pixel. */}
-            <div className="relative z-10 h-7 border-b border-border bg-background">
+            {/* ABOVE THE ROWS (z-40 over the row list's z-30), as its comment
+                below says: the names slide UNDER it, the way the chips slide
+                under the sticky ruler. Below them, a timeline scrolled down
+                put the first row's name over "Tracks" (AQU-2253: the pinned
+                Film row made it the common case). Opaque and on top, it covers
+                the edge rule, so it draws its own piece of it. */}
+            <div className="relative z-40 h-7 border-b border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
+              <div aria-hidden data-testid="tl-corner-rule" className="pointer-events-none absolute inset-y-0 right-0 w-px bg-border" />
               {/* THE CORNER CELL (media redesign, layout): "Tracks", and the
                   timeline's own Full screen, Fold and ⋯ — the timeline has no
                   title row, so its controls cost no row here (canvas board 23).

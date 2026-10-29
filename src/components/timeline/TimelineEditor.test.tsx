@@ -5770,3 +5770,22 @@ describe("TimelineEditor — the film track", () => {
     expect(screen.queryByTestId("tl-film-lane")).toBeNull()
   })
 })
+
+// AQU-2253: with the film pinned as the first row, a timeline scrolled down
+// slid "Film" up OVER the corner's "Tracks" — the track names sat one layer
+// above the corner they are meant to slide under (the ruler's opposite
+// number). The corner is opaque and on top; it draws its own piece of the
+// gutter's edge rule, which it now covers.
+describe("TimelineEditor — the corner stays above the scrolled track names", () => {
+  const z = (el: Element) => Number(/(?:^|\s)z-(\d+)(?:\s|$)/.exec(el.className)?.[1] ?? 0)
+  it("paints the corner above the gutter's rows, with its own piece of the edge rule", () => {
+    render(
+      <TimelineEditor fileId="zc" coreMediaUrl={null} editable onRetimeSubtitle={() => {}}
+        cells={[cell({ id: "d1", medium: "media", startTime: 0, endTime: 2, original: "Hello" })]} />,
+    )
+    const corner = screen.getByTestId("tl-corner").parentElement!
+    const rows = corner.nextElementSibling!
+    expect(z(corner)).toBeGreaterThan(z(rows))
+    expect(corner.querySelector('[data-testid="tl-corner-rule"]')).toBeTruthy()
+  })
+})

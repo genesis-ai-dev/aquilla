@@ -17,7 +17,11 @@
 //
 // Alias-free so auth-worker imports it by relative path.
 
-export const CLEANUP_MAX_TOKENS = 1_200
+/** The reply repeats the whole transcript (up to 4,000 characters, which can
+ *  be well over 1,000 tokens in a low-resource language) plus notes. The
+ *  route asks for no reasoning, but a model that reasons anyway spends from
+ *  the same budget (AQU-2226). Only the tokens used are billed. */
+export const CLEANUP_MAX_TOKENS = 4_000
 export const CLEANUP_MAX_PAIRS = 8
 export const CLEANUP_MAX_TERMS = 40
 export const CLEANUP_MAX_CONTEXT = 4

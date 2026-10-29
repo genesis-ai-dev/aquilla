@@ -49,13 +49,17 @@ export class ProjectSettings {
     await this.page.goto(`/project/${projectId}/settings/audio-media`)
     const setting = this.page.getByTestId("settings-allow-track-editing")
     await expect(setting).toBeVisible({ timeout: 10_000 })
-    await expect(setting).not.toBeChecked()
+    // AQU-2214: the box now reads ON while the project follows the default, so
+    // this helper pins an EXPLICIT project-level yes rather than flipping the
+    // switch. It stays in the specs that need track editing because an
+    // explicit choice is what they are actually asserting against, and because
+    // an org that turns the default off must not silently disarm them.
     // AQU-1768: a project follows the organization's default until it sets its
     // own, and the box stays locked to the organization's value until then.
     await this.page.getByTestId("allow-track-editing-source").click()
     await this.page.getByRole("option", { name: "Set for this project" }).click()
     await expect(setting).toBeEnabled()
-    await setting.click()
+    if (!(await setting.isChecked())) await setting.click()
     await this.page.getByRole("button", { name: /Save changes/i }).click()
     await expect(this.page.getByText("Saved: timeline track editing.", { exact: true }))
       .toBeVisible({ timeout: 10_000 })

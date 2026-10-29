@@ -1279,8 +1279,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip1 = screen.getByTestId("tl-target-v1")
     // v2's original waits for v1's TRANSLATION, not v1's original.
     expect(px(v2, "left")).toBeGreaterThanOrEqual(px(chip1, "left") + px(chip1, "width") - 0.5)
-    // …and each original keeps its own real length.
-    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 10, 5)
+    // …and each original is drawn as long as it sounds: v1's whole 6 s, v2's
+    // 10 s cut at its 4 s take (AQU-2204: only the recordings set a line's length).
+    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 4, 5)
   })
 
   it("a verse's two sides share a left edge", () => {
@@ -1381,8 +1382,8 @@ describe("TimelineEditor — audio-first mode", () => {
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
     expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
     expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
-    // Following the recordings each verse is as long as its longer side: 11 + 10.
-    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("21.0 s")
+    // Following the recordings each verse is as long as its take: 11 + 4.
+    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
     expect(screen.getByTestId("tl-timing-menu-mute-note")).toHaveTextContent(
       "Muting a track only changes what you hear. It never moves anything.",
     )
@@ -1420,6 +1421,93 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
     // The take starts where the pause ends.
     expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
+  // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
+  // move a recorded take around in the timeline." Following the recordings a
+  // take is NOT locked to the front of its line — dragging it right leaves a
+  // pause before it, dragging it left shortens that pause back to none. What
+  // is stored is the pause, measured from the line's own start, never the
+  // programme second the chip was dropped on.
+  describe("following the recordings, a take still moves inside its line (AQU-2215)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placedCell = (offsetMs?: number) =>
+      cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: {
+            type: "audio", url: "frontier-audio://take", durationMs: 2_000,
+            ...(offsetMs != null ? { targetOffsetMs: offsetMs } : {}),
+          },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+
+    const renderOne = (offsetMs: number | undefined, onRetimeTarget: () => void) =>
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[placedCell(offsetMs)]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+
+    /** The chip's own px/s, so the drag does not depend on the default zoom. */
+    const chipPxPerSec = (chip: Element) => px(chip, "width") / 2
+
+    it("dragging the take right stores the pause it leaves before its line", () => {
+      const onRetimeTarget = vi.fn()
+      renderOne(undefined, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 + perSec })
+      fireEvent.pointerUp(window, { clientX: 400 + perSec })
+      // Dragged 1 s right on a line starting at file second 0 → a 1 s pause,
+      // so the anchor stored is 1. Before this, the handler was withheld
+      // entirely in this mode and the chip could not be dragged at all.
+      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+      const [cellId, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      expect(cellId).toBe("p1")
+      expect(anchorSec).toBeCloseTo(1, 2)
+    })
+
+    it("dragging it back past the line's start shortens the pause to none, never below", () => {
+      const onRetimeTarget = vi.fn()
+      // Starts with a 1.5 s pause already.
+      renderOne(1_500, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 - perSec * 5 })
+      fireEvent.pointerUp(window, { clientX: 400 - perSec * 5 })
+      const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      // The line's own start — a take never begins before the line it performs.
+      expect(anchorSec).toBeCloseTo(0, 2)
+    })
+
+    it("a take of unknown length stays locked — there is no pause it could hold", () => {
+      const onRetimeTarget = vi.fn()
+      const vague = cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: { type: "audio", url: "frontier-audio://take" },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[vague]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+      const chip = screen.getByTestId("tl-target-p1")
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 500 })
+      fireEvent.pointerUp(window, { clientX: 500 })
+      // A placement the programme would not read back must not be stored: the
+      // chip would simply spring straight back to the front of its line.
+      expect(onRetimeTarget).not.toHaveBeenCalled()
+    })
   })
 
   it("picking a choice closes the menu (AQU-2204)", async () => {
@@ -5234,6 +5322,40 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(chip().className).not.toContain("ring-2")
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  // AQU-2213: an audio Bible book has no times of its own, so it can only
+  // follow its recordings — and the blade was held back in that mode, which
+  // left a whole class of file unable to split a take at all. Splitting is
+  // offered on every file, whichever clock it follows.
+  it("offers the blade, and splits, on a file following its recordings (AQU-2213)", () => {
+    const BOOK_TAKE = "audio-b1-1700000000-take.webm"
+    const onCutTargets = vi.fn()
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="bk" coreMediaUrl={null} editable onRetimeSubtitle={() => {}} timingMode="audioFirst"
+        onCutTargets={onCutTargets}
+        cells={[
+          cell({
+            id: "b1", medium: "text", original: "In the days when the judges ruled.",
+            selectedAudioId: BOOK_TAKE,
+            attachments: { [BOOK_TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 } },
+          }),
+          cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+        ]}
+      />,
+    )
+    expect(screen.getByTestId("tl-blade-toggle")).not.toBeDisabled()
+    // The verse's take fills its slot from 0 s; the playhead lands 2 s in.
+    fireEvent.click(screen.getByTestId("tl-ruler"), { clientX: 2 * 38 })
+    fireEvent.click(screen.getByTestId("tl-target-b1"))
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).toHaveBeenCalledTimes(1)
+    const [cuts] = onCutTargets.mock.calls[0]
+    expect(cuts).toHaveLength(1)
+    expect(cuts[0]).toMatchObject({ cellId: "b1", audioId: BOOK_TAKE })
+    expect(cuts[0].atMs).toBeGreaterThan(1900)
+    expect(cuts[0].atMs).toBeLessThan(2100)
   })
 })
 

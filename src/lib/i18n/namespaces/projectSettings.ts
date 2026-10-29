@@ -82,7 +82,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.checking.allSection": "All {section}",
 
     "projectSettings.checking.flagLabel": "Community checking (WIP)",
-    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days.",
+    "projectSettings.checking.flagDescription": "Try scoped listening links with guest feedback. Experimental; links expire after 30 days. Only on this device.",
     // ── Permission-denied (shared component, project-settings call sites) ──
     "projectSettings.permission.changeSharedSettingsAction": "change shared settings",
     "projectSettings.permission.roleOrHigher": "{role} or higher",
@@ -387,7 +387,7 @@ export const projectSettings = defineNamespace({
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingHint":
-      "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+      "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -463,7 +463,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.integrationsLabel": "Integrations",
     "projectSettings.group.integrationsDescription": "Monday.com board sync",
     // experimental group label → projectSettings.section.experimental (identical text)
-    "projectSettings.group.experimentalDescription": "Early features, this device only",
+    "projectSettings.group.experimentalDescription": "Autopilot, extensions, and other early features",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
     "projectSettings.section.sourceLink": "Source link",

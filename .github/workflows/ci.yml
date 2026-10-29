@@ -59,6 +59,7 @@ jobs:
       auth: ${{ steps.filter.outputs.auth }}
       sync: ${{ steps.filter.outputs.sync }}
       agent: ${{ steps.filter.outputs.agent }}
+      monitor: ${{ steps.filter.outputs.monitor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -311,6 +312,36 @@ jobs:
       - if: needs.changes.outputs.agent == 'true'
         run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
+
+  # Not a required check yet: add it to branch protection once it has run.
+  monitor-worker-tests:
+    needs: changes
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when worker scope did not resolve
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Report success when monitor-worker did not change
+        if: needs.changes.result == 'success' && needs.changes.outputs.monitor != 'true'
+        run: echo "monitor-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.monitor == 'true'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.monitor == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: monitor-worker/package-lock.json
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm ci
+        working-directory: monitor-worker
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm run type-check
+        working-directory: monitor-worker
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm test
+        working-directory: monitor-worker
 
   # NOTE: there is intentionally no `preview` job here. PR previews are owned
   # by Cloudflare Workers Builds (scripts/cloudflare-pr-preview.mjs), not this

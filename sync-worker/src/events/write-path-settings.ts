@@ -24,7 +24,7 @@ export interface WritePathSettings {
   archivedLanes?: unknown
   /** Unlocks the timeline only when exactly `false` (timing-authority.ts). */
   timingLocked?: unknown
-  /** Opts into timeline restructuring only when exactly `true`. */
+  /** Refuses timeline restructuring only when exactly `false` (AQU-2214). */
   allowTrackEditing?: unknown
   /** Validator threshold; honoured only when a number >= 1. */
   validationCount?: unknown
@@ -74,7 +74,8 @@ export const WRITE_PATH_COLUMN_LIST: readonly string[] = Object.keys(WRITE_PATH_
  * "recover" a text-delivered JSONB document would erase exactly that
  * distinction and unlock a locked timeline. A driver that did deliver JSONB as
  * text would simply fail every consumer's type guard, and each one's unset
- * default is its restrictive answer (locked / off / no threshold).
+ * default is its own built-in answer (locked / no threshold — and, since
+ * AQU-2214, track editing ON).
  */
 export function writePathSettingsFromRow(row: Record<string, unknown>): WritePathSettings {
   const out: Record<string, unknown> = {}

@@ -24,7 +24,7 @@ import {
 } from "../../../db/shared/asr-models"
 import {
   isAllowedExampleUrl, omniConfigured, omniTranscribe, omniTranscribeResponseSchema,
-  omniWarmingSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg,
+  omniWarmingSchema, OMNI_MAX_AUDIO_SECONDS, zeroShotEnabledForOrg, type OmniBackend,
 } from "./omni-asr"
 import {
   transcriptionSeconds, transcriptionCostBound, QWEN_ASR_MODEL, WHISPER_MODEL,
@@ -184,12 +184,13 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
   if (omniModel !== null && omniConfigured(env)) {
     const lang = toOmniCode(input.language)
     let response: Response
+    let backend: OmniBackend
     try {
-      response = await omniTranscribe(env, {
+      ({ response, backend } = await omniTranscribe(env, {
         model: omniModel, audio: input.audio.data,
         ...(lang ? { lang } : {}),
         ...(omniModel === "zs" ? { examples: input.examples } : {}),
-      })
+      }))
     } catch {
       // A timeout may follow GPU work: keep the reservation held.
       return fail(502, "Transcription provider unavailable")
@@ -214,7 +215,8 @@ export async function transcribe(env: Env, input: TranscribeInput): Promise<Tran
     if (!parsed.success) return fail(502, "Invalid transcription response")
     const { text, words, gpuSeconds, gpu, timingsApproximate } = parsed.data
     const rawCents = omniRawCostCents(gpuSeconds, gpu, amortization)
-    const headers: Record<string, string> = {}
+    // `gpu` came from the backend that answered, so rawCents prices its hardware.
+    const headers: Record<string, string> = { "X-Transcription-Backend": backend }
     if (usage) {
       let status: "settled" | "pending" = "settled"
       try { await settleWorkspaceUsage(env.AQUILLA_PG, usage.orgId, usage.requestId, rawCents) }

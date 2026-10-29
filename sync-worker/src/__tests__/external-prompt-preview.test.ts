@@ -46,6 +46,7 @@ interface PreviewBody {
     base: string
     brief: string
     rules: string
+    styleRules: string
     injectedTerms: {
       conceptId: string
       sourceTerm: string
@@ -339,6 +340,41 @@ describe("external prompt preview", () => {
       const { body } = await preview(testDb, token, "cell-media")
       expect(body.sourceText).toBe("")
       expect(body.warnings.map((w) => w.code)).toContain("empty_source")
+    })
+  })
+
+  describe("style rules (AQU-2195)", () => {
+    beforeEach(async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "God saw the light" })
+    })
+
+    async function styleRule(id: string, status: string, instruction: string, enabled = true) {
+      await testDb.pg.query(
+        `INSERT INTO style_rules (id, project_id, instruction, status, enabled) VALUES ($1, 'proj-a', $2, $3, $4)`,
+        [id, instruction, status, enabled],
+      )
+    }
+
+    it("shows approved, enabled rules and never proposed, rejected or disabled ones", async () => {
+      await styleRule("sr-1", "approved", "Use short sentences.")
+      await styleRule("sr-2", "proposed", "PROPOSED-ONLY wording.")
+      await styleRule("sr-3", "rejected", "REJECTED-ONLY wording.")
+      await styleRule("sr-4", "approved", "DISABLED wording.", false)
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.styleRules).toBe(
+        "Style rules that apply to this passage (MUST follow):\n- Use short sentences.",
+      )
+      const system = body.messages[0].content
+      expect(system).toContain("Use short sentences.")
+      expect(system).not.toContain("PROPOSED-ONLY")
+      expect(system).not.toContain("REJECTED-ONLY")
+      expect(system).not.toContain("DISABLED wording")
+    })
+
+    it("leaves the block empty when the project has no style rules", async () => {
+      const { body } = await preview(testDb, token)
+      expect(body.parts.styleRules).toBe("")
     })
   })
 

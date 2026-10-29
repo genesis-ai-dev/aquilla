@@ -4,9 +4,9 @@
 // (AQU-1771): the org may set a default, a project may set its own, and a key
 // ABSENT on the project means "use the org's". Absent on both falls through to
 // each reader's own built-in default, which this file deliberately does not
-// restate — the enforcement helpers keep their fail-safe answers (timing
-// LOCKED, track editing OFF, cell editing NOBODY, self-validation ON, audio
-// floor REVIEWER) exactly as before.
+// restate — the enforcement helpers own those answers (timing LOCKED, track
+// editing ON since AQU-2214, cell editing NOBODY, self-validation ON, audio
+// floor REVIEWER).
 //
 // The merge is per key and only takes values a reader would accept. A value
 // this build does not recognise is treated as absent on that side, so an org

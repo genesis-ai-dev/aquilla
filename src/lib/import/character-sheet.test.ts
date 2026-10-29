@@ -440,3 +440,62 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     expect(plan.distinctCharacters).toBe(41)
   })
 })
+
+// ── AQU-2197: the sheet's timecode read at the frame rate that lines it up ──
+// The follow-up to AQU-2193. A timecode sheet now matches BY TIME when some
+// common frame rate lines its rows up with the file's lines; the words are
+// only the fallback. The file's cells here carry no words at all, so nothing
+// below can be the word pass.
+describe("a sheet whose times are video timecode, read at its frame rate (AQU-2197)", () => {
+  const TC_HEADER = ["Line #", "startTime", "endTime", "Character", "Translation", "Camera", "TC In (orig)", "TC Out (orig)"]
+  const cols = guessCharacterColumns(TC_HEADER)!
+  const tcs = ["00:01:03:05", "00:01:06:15", "00:01:08:21", "00:01:10:05", "00:01:13:20", "00:02:40:11", "00:09:12:03"]
+  const sheet = readCharacterRows(
+    [TC_HEADER, ...tcs.map((tc, i) => [String(10 + i), tc, tc, `PERSON ${i} (ON)`, `Words ${i}`, "ON", tc, tc])],
+    cols,
+  )
+  const seconds = (tc: string, fps: number, nominal: number) => {
+    const [h, m, s, f] = tc.split(":").map(Number)
+    return ((h * 3600 + m * 60 + s) * nominal + f) / fps
+  }
+  const cellsAt = (fps: number, nominal: number) =>
+    tcs.map((tc, i) => ({ id: `c${i}`, startTime: seconds(tc, fps, nominal) }))
+
+  it("keeps the timecode on the row until the rate is known", () => {
+    expect(sheet[0].startSec).toBeUndefined()
+    expect(sheet[0].startTimecode).toEqual({ hours: 0, minutes: 1, seconds: 3, frames: 5, dropFrame: false })
+  })
+
+  it("matches every row by time at 24 frames a second", () => {
+    const p = planCharacterAssignments({ rows: sheet, cells: cellsAt(24, 24) })
+    expect(p.timecode).toEqual({ rows: 7, frameRate: "24" })
+    expect(p.unmatchedRows).toEqual([])
+    expect(p.matchedByWords).toBe(0)
+    expect(p.assignments.map((a) => a.cellId)).toEqual(["c0", "c1", "c2", "c3", "c4", "c5", "c6"])
+  })
+
+  it("tells 23.976 from 24 by the drift", () => {
+    const p = planCharacterAssignments({ rows: sheet, cells: cellsAt(24000 / 1001, 24) })
+    expect(p.timecode?.frameRate).toBe("23.976")
+    expect(p.unmatchedRows).toEqual([])
+  })
+
+  it("rules out a rate the frames exceed", () => {
+    const fast = readCharacterRows([TC_HEADER, ["1", "00:00:05:27", "", "A (ON)", "x", "ON", "", ""]], cols)
+    const p = planCharacterAssignments({ rows: fast, cells: [{ id: "c", startTime: 5 + 27 / 30 }] })
+    expect(p.timecode?.frameRate).toBe("30")
+  })
+
+  it("does not read the timecode against a file it doesn't fit, and still refuses without words", () => {
+    // Their VTT as delivered: the frames written as hundredths. No rate lines
+    // the rows up, and with no words to fall back on the sheet is refused.
+    const broken = tcs.map((tc, i) => {
+      const [h, m, s, f] = tc.split(":").map(Number)
+      return { id: `c${i}`, startTime: h * 3600 + m * 60 + s + f / 100 }
+    })
+    const p = planCharacterAssignments({ rows: sheet, cells: broken })
+    expect(p.timecode).toEqual({ rows: 7, frameRate: null })
+    expect(p.assignments).toEqual([])
+    expect(p.unmatchedRows).toHaveLength(7)
+  })
+})

@@ -180,6 +180,7 @@ export const editor = defineNamespace({
       "The file is still safe. Check your connection and try loading it again.",
     "editor.file.retryLoad": "Retry loading file",
     "editor.file.loadingFromCloud": "Loading file from the cloud",
+    "editor.file.loadingLanguages": "Loading this project's languages",
     "editor.file.noneSelectedTitle": "No file selected",
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
@@ -939,9 +940,9 @@ export const editor = defineNamespace({
       "Lines keep their times from the source, and its pauses stay. Only a project lead or above can change this.",
     "editor.timeline.timingModeFree": "Follows recordings",
     "editor.timeline.timingModeFreeHint":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer.",
+      "Lines play back to back, each as long as its recording.",
     "editor.timeline.timingModeFreeHintLocked":
-      "Lines play back to back, each as long as its recording, or its source if that runs longer. Only a project lead or above can change this.",
+      "Lines play back to back, each as long as its recording. Only a project lead or above can change this.",
     "editor.timeline.timingLabel": "Timing:",
     "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
     "editor.timeline.timingInfoAria": "About timing",
@@ -988,7 +989,6 @@ export const editor = defineNamespace({
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
     "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
-    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available while the file follows its recordings yet",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
@@ -1554,7 +1554,7 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttTimebaseFyi":
       "The timings will be adjusted slightly to line up with \"{fileName}\".",
     "editor.timeline.audioVttUnmeasurableFyi":
-      "The timings couldn't be checked against the subtitles — importing the file as delivered.",
+      "The timings couldn't be checked against the subtitles, so no drift correction is made.",
     "editor.timeline.audioVttReconcileNoop":
       "These are the {count} cues this file already has, on the same timings — " +
       "there is nothing to update.",
@@ -1681,6 +1681,11 @@ export const editor = defineNamespace({
     "editor.timeline.charactersFilledByPosition":
       "{count} rows do not quite match their line; the lines either side pin them, " +
       "so they are matched by position.",
+    "editor.timeline.charactersTimecodeRate":
+      "The sheet's times are video timecode, read at {rate} frames a second.",
+    "editor.timeline.charactersTimecodeNoRate":
+      "The sheet's times are video timecode that doesn't line up with this file's lines " +
+      "at any common frame rate, so its rows were matched by their words.",
     "editor.timeline.charactersCameraDisagreements":
       "In {count} rows the Camera column and the angle written into the name " +
       "disagree. The column wins.",
@@ -1798,6 +1803,17 @@ export const editor = defineNamespace({
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.play": "Play this line",
     "editor.voice.clone": "Clone voice from take",
+    "editor.voice.cloneTitle": "Make a voice from this take",
+    "editor.voice.cloneNamePlaceholder": "Voice name",
+    "editor.voice.cloneNameAriaLabel": "Name for the new voice",
+    "editor.voice.cloneSubmit": "Add to cast",
+    "editor.voice.cloneMoreOptions": "More options",
+    "editor.voice.clonedToast": "{name} is in the cast",
+    "editor.voice.changeTo": "Change to {voice}",
+    "editor.voice.workingAs": "Voicing as {voice}…",
+    "editor.voice.yourRecording": "Your recording",
+    "editor.voice.recordedBy": "Recorded by {name}",
+    "editor.voice.originalAudio": "Original audio",
     "editor.voice.generateFromText": "Generate audio from text",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
@@ -2034,6 +2050,11 @@ export const editor = defineNamespace({
 
     // — Write failures surfaced on the row ————————————————————————
     "editor.write.saveFailed": "Could not save — please try again",
+    "editor.write.refusedTitle": plural({
+      one: "{count} change wasn't saved",
+      other: "{count} changes weren't saved",
+    }),
+    "editor.write.refusedDetail": "{cell}: {reason}. The line now shows what was saved.",
     "editor.write.saveSourceFailed": "Could not save source edit — please try again",
     "editor.write.sourceEditingClosed":
       "Source editing is no longer available on this project — the source editor " +
@@ -3265,6 +3286,14 @@ export const editor = defineNamespace({
           "fetched from the server. It is a plain read, so it must NOT say " +
           "'syncing' — that word is reserved in this app for pushing the user's " +
           "own unsaved edits.",
+      },
+      "editor.file.loadingLanguages": {
+        description:
+          "Accessible label and status pill of the placeholder that stands in " +
+          "for the editor's rows while the project's target languages load " +
+          "(usually under a second). The rows are hidden because until then the " +
+          "app cannot tell which language's translations to show beside them. " +
+          "A plain read, so it must not say 'syncing'.",
       },
       "editor.file.noneSelectedTitle": {
         description:
@@ -6292,8 +6321,8 @@ export const editor = defineNamespace({
       "editor.timeline.timingModeFreeHint": {
         description:
           "One-line description under 'Follows recordings' in the Timing dropdown. 'Back to " +
-          "back' means each line starts where the previous one ends; each line lasts as long " +
-          "as its recording, or as its source line when that is longer.",
+          "back' means each line starts where the previous one ends; each line lasts exactly " +
+          "as long as its recording (the source is cut where the line ends).",
       },
       "editor.timeline.timingModeFreeHintLocked": {
         description:
@@ -6441,12 +6470,6 @@ export const editor = defineNamespace({
           "and S splits the selected take at the playhead without the blade — keep both as the " +
           "Latin letters B and S.",
         maxLength: 60,
-      },
-      "editor.timeline.bladeFreeTiming": {
-        description:
-          "Tooltip of the disabled blade button while the file's timing is 'Follows " +
-          "recordings' (lines laid out back to back). Use the same wording for that choice " +
-          "as the Timing dropdown does.",
       },
       "editor.timeline.takeMenuSplit": {
         description:
@@ -6744,6 +6767,29 @@ export const editor = defineNamespace({
           "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
+      "editor.voice.cloneTitle": { description: "Heading of the small popover that turns a line's audio take into a reusable voice." },
+      "editor.voice.cloneNamePlaceholder": { description: "Placeholder of the name field in that popover." },
+      "editor.voice.cloneNameAriaLabel": { description: "Accessible label of the name field in that popover." },
+      "editor.voice.cloneSubmit": { description: "Button in that popover: creates the voice from the take and adds it to the project's cast. Short." },
+      "editor.voice.cloneMoreOptions": { description: "Link in that popover: opens the full New voice dialog instead." },
+      "editor.voice.clonedToast": {
+        description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
+        placeholders: { name: "The new voice's name, e.g. 'Ana'." },
+      },
+      "editor.voice.changeTo": {
+        description: "Button beside a line's voice field: re-voices the line's audio into the voice it is cast as.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.workingAs": {
+        description: "Status beside a line's voice field while its audio is being generated or re-voiced.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.yourRecording": { description: "Shown in a line's voice field when the audio is the current user's own recording and no voice is assigned." },
+      "editor.voice.recordedBy": {
+        description: "Shown in a line's voice field when the audio is someone's recording and no voice is assigned.",
+        placeholders: { name: "Username of the person who recorded it." },
+      },
+      "editor.voice.originalAudio": { description: "Shown in a line's voice field when the audio is the imported original programme audio." },
       "editor.voice.clone": {
         description:
           "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
@@ -7838,6 +7884,26 @@ export const editor = defineNamespace({
           "queued locally — usually browser storage being full or blocked. The " +
           "optimistic text is rolled back, so the user must retype or retry. " +
           "Imperative second half.",
+      },
+      "editor.write.refusedTitle": {
+        description:
+          "Error toast title when the server refused one or more of the user's " +
+          "translation edits or validations after they were sent (for example, " +
+          "the line's language could not be identified). The edit is undone on " +
+          "screen; this tells the user it did not save, so they can redo it.",
+        maxLength: 48,
+        placeholders: {
+          count: "How many of the user's changes the server refused.",
+        },
+      },
+      "editor.write.refusedDetail": {
+        description:
+          "Body of that toast: which line, and the server's reason, followed by " +
+          "what the user now sees.",
+        placeholders: {
+          cell: "The line's reference (e.g. 'GEN 1:1') — never translate.",
+          reason: "The server's own explanation, in English — never translate.",
+        },
       },
       "editor.write.saveSourceFailed": {
         description:
@@ -9440,6 +9506,15 @@ export const editor = defineNamespace({
           "Note in the go-ahead summary for a SUBTITLE sheet: lines the " +
           "spreadsheet says nothing about are left exactly as they are.",
         placeholders: { count: "Number of lines absent from the sheet." },
+      },
+      "editor.timeline.charactersTimecodeRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode (hours:minutes:seconds:frame), and Aquilla found the frame rate at which they line up with the file's lines.",
+        placeholders: { rate: "The frame rate, as a number such as 24, 25 or 23.976. Do not translate it." },
+      },
+      "editor.timeline.charactersTimecodeNoRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode, but at no common frame rate do they line up with the file's lines (the file may have been re-timed or converted wrongly), so the rows were matched by their wording instead.",
       },
       "editor.timeline.charactersFilledByPosition": {
         description:

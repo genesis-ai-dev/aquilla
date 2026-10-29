@@ -157,13 +157,24 @@ describe("ProjectSettings — the Timeline card renders both boxes", () => {
 })
 
 describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
-  // The default is the whole point of the setting: a project that never turns
-  // it on should not be able to tell multi-track was built.
-  it("reads OFF on a project that has never heard of it", () => {
+  // AQU-2214 FLIPPED THIS DEFAULT, and the pair below is the regression guard.
+  // It shipped off-by-default — a project that never turned it on was not
+  // supposed to be able to tell multi-track was built — and Sam reversed that
+  // after the ETEN demo: adding a track is the ordinary case. What the flip
+  // must NOT do is overwrite a project that already answered, which is why the
+  // explicit-off case is asserted beside the unset one.
+  it("reads ON on a project that has never heard of it", () => {
     currentProject = makeProject({ allowTrackEditing: undefined })
     renderSettings()
-    expect(isChecked(box("settings-allow-track-editing"))).toBe(false)
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
     // Rendering a default must not look like an unsaved change.
+    expect(saveButton()).toBeNull()
+  })
+
+  it("reads OFF on a project that turned it off", () => {
+    currentProject = makeProject({ allowTrackEditing: false })
+    renderSettings()
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(false)
     expect(saveButton()).toBeNull()
   })
 
@@ -177,12 +188,13 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
   // Fails if `allowTrackEditing` is missing from the dirty check OR from its
   // dependency array — in the second case the memo holds a stale closure and
   // the box ticks with no Save button, which is the exact shape of an inert
-  // setting.
+  // setting. Post-AQU-2214 the box starts ON, so the toggle under test is the
+  // one that turns it OFF.
   it("offers to save once it is toggled", async () => {
     renderSettings()
     await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
-    expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(false)
     expect(saveButton()).toBeTruthy()
   })
 
@@ -195,13 +207,25 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
     const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(sent.allowTrackEditing).toBe(true)
+    expect(sent.allowTrackEditing).toBe(false)
   })
 
-  // The boxes are independent switches, not one policy. Turning track editing
-  // on must not disturb the timing lock, which is a different question (may
-  // timings MOVE) with a different default (on), nor the cell-editing tier
-  // AQU-1068 put in the retired add-lines box's place.
+  // AQU-2214: "Set for this project" on its own pins the default as the
+  // project's OWN answer — which is what an org-wide change must not be able
+  // to take away afterwards. Without the box being touched at all.
+  it("saves an explicit yes when the project only stops following the default", async () => {
+    renderSettings()
+    await setForThisProject("allow-track-editing-source")
+    expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).allowTrackEditing).toBe(true)
+  })
+
+  // The boxes are independent switches, not one policy. Changing track editing
+  // must not disturb the timing lock, which is a different question (may
+  // timings MOVE), nor the cell-editing tier AQU-1068 put in the retired
+  // add-lines box's place.
   it("does not disturb its neighbours", async () => {
     currentProject = makeProject({ timingLocked: true, cellEditingFloor: "none" })
     renderSettings()
@@ -210,7 +234,7 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
     const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(sent.allowTrackEditing).toBe(true)
+    expect(sent.allowTrackEditing).toBe(false)
     expect(sent).not.toHaveProperty("timingLocked")
     expect(sent).not.toHaveProperty("cellEditingFloor")
   })

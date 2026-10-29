@@ -44,6 +44,7 @@ import type { ProjectSetupCommand } from './commands-project-setup'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
+import { commitStyleRuleCommand, isStyleRuleCommand } from './commands-style-rules'
 import { commitEmitEvents } from './emit-events-engine'
 import { commitCellFields } from './cell-fields-engine'
 import { isCellFieldCommand, type CellFieldCommand } from './commands-cell-fields'
@@ -337,6 +338,12 @@ export async function commitChangesetCore(
   const memoryCmd = cs.commands.find(isMemoryCommand)
   if (memoryCmd) {
     return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
+  }
+
+  // AQU-2195 ReviewStyleRules: receipt-only; re-checks both role gates live.
+  const styleRuleCmd = cs.commands.find(isStyleRuleCommand)
+  if (styleRuleCmd) {
+    return commitStyleRuleCommand(db, cred, cs, styleRuleCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────

@@ -23,6 +23,8 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 import { setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { resetMilestoneSplitCacheForTests, setMilestoneSplit } from "@/lib/store/milestone-split-pref"
 
+// What the table asks the list to scroll to.
+const scrollToIndex = vi.hoisted(() => vi.fn(async (_args: { index: number }) => undefined))
 // The line the queue is running, as a store the follow driver subscribes to.
 const queueStub = vi.hoisted(() => ({
   runningCellId: null as string | null,
@@ -59,7 +61,7 @@ vi.mock("@legendapp/list/react", async () => {
     }, ref) {
       React.useImperativeHandle(ref, () => ({
         getState: () => ({ scroll: 0, positionAtIndex: (i: number) => i * 140, sizeAtIndex: () => 140 }),
-        scrollToIndex: async () => undefined,
+        scrollToIndex,
         scrollToOffset: async () => undefined,
       }))
       return React.createElement(
@@ -121,7 +123,11 @@ function makeStore(): CellStore {
   return store
 }
 
-function renderTable(store: CellStore, onActiveChapterChange?: (key: string | null) => void) {
+function renderTable(
+  store: CellStore,
+  onActiveChapterChange?: (key: string | null) => void,
+  onChapterPicked?: (key: string) => boolean | void,
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -144,6 +150,7 @@ function renderTable(store: CellStore, onActiveChapterChange?: (key: string | nu
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           onActiveChapterChange={onActiveChapterChange}
+          onChapterPicked={onChapterPicked}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -173,6 +180,7 @@ describe("the chapter picker follows the line playing (AQU-1758)", () => {
     setMilestoneSplit(false)
     queueStub.runningCellId = null
     queueStub.listeners.clear()
+    scrollToIndex.mockClear()
     // The timeline is stacked above the table, so the table follows playback.
     setMediaSyncActive(true)
   })
@@ -215,3 +223,48 @@ describe("the chapter picker follows the line playing (AQU-1758)", () => {
     expect(picker()).toHaveAccessibleName(`Current chapter: ${ruth1}. Choose chapter`)
   })
 })
+
+// AQU-1758 (Sam, Oct 29): picking a chapter during Play all jumps playback to
+// it and keeps playing, so the table keeps following the line playing there.
+// A pick that playback does not follow is navigation away, and lets go.
+describe("picking a chapter during Play all", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetMilestoneSplitCacheForTests()
+    setMilestoneSplit(false)
+    queueStub.runningCellId = null
+    queueStub.listeners.clear()
+    scrollToIndex.mockClear()
+    setMediaSyncActive(true)
+  })
+  afterEach(() => {
+    cleanup()
+    setMediaSyncActive(false)
+  })
+  const scrolledTo = () => scrollToIndex.mock.calls.map(([args]) => args.index)
+
+  it("keeps following the line playing when playback jumps to the chapter picked", () => {
+    const store = makeStore()
+    const picked = vi.fn(() => true)
+    renderTable(store, undefined, picked)
+    setRunning("rut-1-2")
+    fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
+    expect(picked).toHaveBeenCalledWith(store.getNavigationIndex()[1].key)
+    scrollToIndex.mockClear()
+    // Playback is on Ruth 2 now: its second line starts, and the table follows.
+    setRunning("rut-2-1")
+    setRunning("rut-2-2")
+    expect(scrolledTo()).toContain(4)
+  })
+
+  it("lets go of following when the pick is not where playback goes", () => {
+    const store = makeStore()
+    renderTable(store, undefined, () => false)
+    setRunning("rut-1-2")
+    fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
+    scrollToIndex.mockClear()
+    setRunning("rut-1-3")
+    expect(scrolledTo()).not.toContain(2)
+  })
+})
+

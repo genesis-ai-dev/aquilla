@@ -220,6 +220,7 @@ import {
   timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
+import { applyChapterPick, planChapterPick } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -13628,14 +13629,25 @@ export function ProjectWorkspace() {
     if (!chosenScopeKey || !queueChapterKey || queueChapterKey === chosenScopeKey) return
     if (getQueueState().kind === "paused") stopQueue()
   }, [chosenScopeKey, queueChapterKey])
-  // Picking a chapter mid-playback is navigation away from what is playing:
-  // it stops, and the timeline shows the chapter picked.
+  // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
+  // it and keeps playing, from its first line, in either timing. Picking one
+  // while playback is paused ends that playback, as before. Either way the
+  // timeline shows the chapter picked (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
-  const handleChapterPicked = useCallback((key: string) => {
-    const playing = queueChapterKeyRef.current
-    if (playing && playing !== key) stopQueue()
+  const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
+  chapterPickRunRef.current = { projectId: project?.id, session: frontierSession }
+  const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
+    const run = chapterRunRef.current
+    const plan = planChapterPick({
+      chapters: run?.chapters ?? [],
+      lines: run?.cells ?? [],
+      pickedKey: key,
+      playingKey: queueChapterKeyRef.current,
+      queueKind: getQueueState().kind,
+    })
+    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.

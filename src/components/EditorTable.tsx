@@ -1146,8 +1146,11 @@ interface EditorTableProps {
    * chapter. Null when the file has no chapters.
    */
   onActiveChapterChange?: (key: string | null) => void
-  /** AQU-1758: a chapter was picked in the chapter picker (not scrolled to). */
-  onChapterPicked?: (key: string) => void
+  /** AQU-1758: a chapter was picked in the chapter picker (not scrolled to).
+   *  Returns true when playback goes to that chapter (Sam, Oct 29: picking
+   *  one during Play all jumps there and keeps playing), so the table keeps
+   *  following the line playing instead of letting go. */
+  onChapterPicked?: (key: string) => boolean | void
   /**
    * ProjectWorkspace's parallelBiblesPanelActive: the editor, on a scripture
    * file. Bible data shows only then (AQU-1685).
@@ -1445,6 +1448,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const voiceFilterActive = bibleData.filteredCellIds !== null
   const splitByMilestone = useMilestoneSplit()
   const pendingJumpCellIdRef = useRef<string | null>(null)
+  /** How the pending jump treats playback-follow: a chapter pick playback
+   *  goes to keeps following (AQU-1758); every other jump lets go. */
+  const pendingJumpFollowRef = useRef<"engage" | "release">("release")
   const milestoneNavigation = useMemo(() =>
     readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(fileCellIds)),
   [cellStore, cellStoreVersion, fileCellIds])
@@ -2549,7 +2555,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
     if (!targetCellId) return
-    onChapterPicked?.(key)
+    // AQU-1758 (Sam, Oct 29): during Play all the pick is where playback goes,
+    // so the table keeps following it; otherwise it is navigation away.
+    const playbackFollows = onChapterPicked?.(key) === true
+    const follow = playbackFollows ? "engage" : "release"
     onNavigateToCell?.(targetCellId)
     setChapterNavigationSelection({
       fileId: audioFileId,
@@ -2561,16 +2570,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (voiceFilterActive) clearVoiceFilter()
     if (splitByMilestone || voiceFilterActive) {
       pendingJumpCellIdRef.current = targetCellId
+      pendingJumpFollowRef.current = follow
       return
     }
     const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
     if (index < 0) return
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
-    // Picking a range mid-playback is deliberate navigation AWAY — release
-    // following (its long smooth scroll used to trip the truce as a fake
-    // "user scroll" and kill follow as a side effect; now it's explicit).
-    programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
+    // Picking a range is explicit about following, either way: its long
+    // smooth scroll used to trip the truce as a fake "user scroll" and kill
+    // follow as a side effect. A pick playback does not go to is navigation
+    // AWAY and releases it; one it jumps to keeps it (AQU-1758).
+    programmaticListScroll(index, { viewPosition: 0, animated: true, follow })
   }, [audioFileId, clearVoiceFilter, idmlMilestoneNavigation, milestoneNavigation, onChapterPicked, onNavigateToCell, programmaticListScroll, splitByMilestone, voiceFilterActive])
 
   /**
@@ -2667,9 +2678,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       return
     }
     pendingJumpCellIdRef.current = null
+    const follow = pendingJumpFollowRef.current
+    pendingJumpFollowRef.current = "release"
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
-    programmaticListScroll(index, { viewPosition: 0, animated: false, follow: "release" })
+    programmaticListScroll(index, { viewPosition: 0, animated: false, follow })
   }, [displayCellIds, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical

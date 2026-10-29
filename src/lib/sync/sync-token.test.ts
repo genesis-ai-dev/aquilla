@@ -561,3 +561,24 @@ describe("makeSyncTokenMinter forceRefresh (AQU-1788)", () => {
     expect(await forced).toEqual({ token: "tok-forced", status: 200 })
   })
 })
+
+// AQU-2240: a hung mint must release the deduplicated request for reconnect.
+it("retries a timed-out mint without treating it as expired credentials", async () => {
+  vi.useFakeTimers()
+  const originalFetch = global.fetch
+  const unauthorized = vi.fn()
+  try {
+    const fetchSpy = vi.fn<typeof fetch>()
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: "recovered", expiresIn: 900 })))
+    global.fetch = fetchSpy
+    const mint = makeSyncTokenMinter(() => "jwt", "p", "f", {}, API, { onUnauthorized: unauthorized })
+    const stalled = mint()
+    await vi.advanceTimersByTimeAsync(15_000)
+    await expect(stalled).resolves.toEqual({ token: null, status: null })
+    expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true)
+    await expect(mint()).resolves.toMatchObject({ token: "recovered", status: 200 })
+    expect(unauthorized).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally { global.fetch = originalFetch; vi.useRealTimers() }
+})

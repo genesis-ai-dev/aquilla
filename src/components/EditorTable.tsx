@@ -818,6 +818,10 @@ export interface AudioLensContext {
   onPlayCell: (cellId: string, enrichedCell?: CellData) => void
   /** Open the "make a character from this voice" flow seeded with this cell's take. */
   onMakeCharacterFromCell: (cellId: string) => void
+  /** AQU-2212: clone this take straight into the cast as `name`. */
+  onCloneTake?: (cell: CellData, audioId: string, name: string) => Promise<void>
+  /** AQU-2212: "Add a voice…" from a line's voice dropdown. */
+  onAddVoice?: (cellId: string) => void
   /**
    * AQU-1642 follow-up: the one place to play from. The cards and ⋯ Play drive
    * the bottom bar's player through it, and selecting a verse moves it.
@@ -8435,7 +8439,11 @@ function EditorRow({
                 onPick: (atSeconds: number) => audioPlace.pickOnWaveform(cell.id, atSeconds),
               } : null}
               onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-              voicePicker={audioVoice && (
+              onCloneTake={audioLens.onCloneTake
+                ? (audioId, name) => audioLens.onCloneTake!(cell, audioId, name)
+                : undefined}
+              // AQU-2212: a pick acts on this line once it is accepted.
+              voicePicker={audioVoice && (({ takeLabel, onPicked }) => (
                 <CastGutterVoice
                   variant="field"
                   voice={audioVoice}
@@ -8444,11 +8452,15 @@ function EditorRow({
                   editable={editable && Boolean(onAssignCastVoice)}
                   voices={gutterVoices}
                   showLanguageBadge={gutterLanguageBadge}
-                  onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                  takeLabel={takeLabel}
+                  onPick={(voiceId, opts) => {
+                    if (onAssignCastVoice?.(cell, voiceId, opts) !== false) onPicked(voiceId)
+                  }}
                   onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
+                  onAddVoice={audioLens.onAddVoice ? () => audioLens.onAddVoice!(cell.id) : undefined}
                   countSpeakerLines={gutterCastName && countCastLines ? () => countCastLines(gutterCastName) : undefined}
                 />
-              )}
+              ))}
             />
           </div>
         ) : (

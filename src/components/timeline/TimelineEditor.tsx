@@ -2010,7 +2010,7 @@ export function TimelineEditor({
   // Bible book) lays its lines out in order — each at its recording's length,
   // or a dashed stand-in from its text — instead of parking them all in the
   // Untimed strip. The same rule as the transport's (programmeLines).
-  const { subtitle, dialogue, untimed, standInLines } = useMemo(() => {
+  const { subtitle, dialogue, untimed } = useMemo(() => {
     const lanes = deriveLanes(cells)
     if (timingMode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
       return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
@@ -2048,8 +2048,9 @@ export function TimelineEditor({
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
-    const { lines, untimed } = programmeLines(cells)
-    const recorded = buildProgramme(lines, untimed ? { standInLenSec: standInEstimator(lines) } : undefined)
+    const { lines } = programmeLines(cells)
+    // AQU-2204: following the recordings, an unrecorded line takes its stand-in.
+    const recorded = buildProgramme(lines, { standInLenSec: standInEstimator(lines) })
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
   }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
@@ -2064,9 +2065,11 @@ export function TimelineEditor({
         // so the cues are the verses; export stitches them the same way.
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
-        standInLines ? { standInLenSec: standInEstimator(subtitle) } : undefined,
+        // AQU-2204: following the recordings, every unrecorded line takes a
+        // stand-in length from its words, timed file or not.
+        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle) },
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, standInLines],
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
@@ -4013,9 +4016,14 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
             onSeek={laneProps.onSeek}
-            // SUB-53: a chip's position is computed in audio-first, so there
-            // is nothing to drag it to. Trimming stays — and re-flows.
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            // AQU-2215 (Sam, Oct 27): dragging a take is NOT withheld when the
+            // file follows its recordings any more. A chip's position is still
+            // computed there, but one part of it is a stored placement — the
+            // pause before the take (AQU-2204) — and that is what the drag
+            // changes. `TimelineLayout` inverts the gesture per mode and says
+            // which takes can hold a pause at all, so the mode question is
+            // answered in one module instead of by withholding the handler.
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4088,7 +4096,7 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}

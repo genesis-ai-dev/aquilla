@@ -369,7 +369,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, subscribeRejected, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
+import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
@@ -379,7 +381,9 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -1543,6 +1547,7 @@ export function ProjectWorkspace() {
   // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  const [makeCharacterMode, setMakeCharacterMode] = useState<"clone" | "character">("clone")
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
   // File the sidebar context menu asked to assign; null means "use the
@@ -2291,6 +2296,69 @@ export function ProjectWorkspace() {
     })
   }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
+  // AQU-1901: a refused edit is not a saved one. The server answers /events
+  // with a 200 and lists a refused write in `rejected[]` — a write with no lane
+  // on a project with only tagged lanes (the AQU-1900 422), or any other
+  // validation refusal — and the flusher drops it. Every hand-typed edit and
+  // validation goes out through a flush that cannot tell whose it was, so
+  // without this the line kept the typed text and the chip went back to
+  // "Synced". Undo it the way a dead-letter is undone (above), and say so.
+  // Flows that report their own refusals (AI drafts) claim them first.
+  //
+  // Unlike a dead-letter, a refusal leaves the server exactly as it was, so
+  // nothing that reads "what changed" will ever correct the line: the edit
+  // wrote the typed text into the store's own row, the drain's delta read
+  // finds no change, and the plain targeted revalidate is discarded when that
+  // drain bumps the store's generation mid-flight. So read the refused cells
+  // back here and install the server's rows directly — unless the reader has
+  // edited one again since (its freshness floor moved past the read).
+  const refusedEditProjectId = project?.id
+  useEffect(() => {
+    if (!refusedEditProjectId || !activeFileId) return
+    const projectId = refusedEditProjectId
+    const fileId = activeFileId
+    return subscribeRejected((entries) => {
+      const refused = laneWriteRejections(entries)
+      if (refused.length === 0) return
+      const restore = new Set<string>()
+      for (const entry of refused) {
+        if (entry.fileId !== fileId) continue
+        const key = laneCellKey(entry.cellId)
+        if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === entry.id) {
+          pendingTargetCommitHeadsRef.current.delete(key)
+        }
+        cellStore.clearOptimisticForCell(entry.cellId)
+        restore.add(entry.cellId)
+      }
+      if (restore.size > 0) {
+        const cellIds = [...restore]
+        void (async () => {
+          const startSeq = cellStore.getWriteSeq()
+          const mint = await getTokenForProjectFile(projectId, fileId)
+          if (!mint.token) return
+          const rows = await fetchCellsByIds(projectId, fileId, cellIds, mint.token)
+          for (const cellId of cellIds) {
+            const floor = cellStore.getFreshnessFloor(cellId)
+            if (floor !== undefined && floor > startSeq) continue
+            cellStore.replaceRowsForCell(cellId, rows.filter((row) => row.cellId === cellId))
+          }
+        })().catch((err) => {
+          console.warn("[refused-edit] could not read the refused cells back:", err)
+          for (const cellId of cellIds) revalidateCell(cellId)
+        })
+      }
+      const first = refused[0]
+      const label = first.fileId === fileId
+        ? (cellStore.getCellSummary(first.cellId)?.cellLabel || first.cellId)
+        : first.cellId
+      toast.add({
+        type: "error",
+        title: t("editor.write.refusedTitle", { count: refused.length }),
+        description: t("editor.write.refusedDetail", { cell: label, reason: first.reason }),
+      })
+    })
+  }, [refusedEditProjectId, activeFileId, cellStore, laneCellKey, revalidateCell, getTokenForProjectFile, t])
+
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
@@ -2537,6 +2605,31 @@ export function ProjectWorkspace() {
             // Turn this line's take into a reusable Cast character.
             onMakeCharacterFromCell: (cellId) => {
               setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("clone")
+              setMakeCharacterOpen(true)
+            },
+            // AQU-2212: Clone voice from take, without the dialog.
+            onCloneTake: async (cell, audioId, name) => {
+              const level = project?.syncRole?.level ?? null
+              if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
+                throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
+              }
+              const voice = await cloneVoiceFromTake({
+                projectId: audioProject.id, cell, audioId, name,
+                provider: resolveTtsProvider(tts.settings),
+                // A clone rides Inworld or Gemini, which take no target language.
+                paletteIndex: tts.allVoices.length,
+                session: frontierSession ?? null,
+              })
+              const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+              await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+              toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+            },
+            // "Add a voice…" opens New voice on the ready-made characters; the
+            // voice it adds is cast on the line it was opened from.
+            onAddVoice: (cellId) => {
+              setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("character")
               setMakeCharacterOpen(true)
             },
             place: audioViewPlace,
@@ -2545,6 +2638,7 @@ export function ProjectWorkspace() {
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
       tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
+      tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
     ],
   )
 
@@ -3071,17 +3165,22 @@ export function ProjectWorkspace() {
    * anchor chain honest; if that companion is the one refused, the row is
    * fine but the chain is not, and putting the row back is still the correct
    * repair.
+   *
+   * Returns the ids it reported, so the tab-wide rejection listener (AQU-1901)
+   * does not announce the same refusal a second time.
    */
   const rollbackRefusedCellChange = useCallback(
     (
-      entries: { kind: string }[],
+      entries: { id?: string; kind: string }[],
       cellId: string,
       restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
       message?: MessageKey,
-    ) => {
-      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+    ): string[] => {
+      const refused = entries.filter((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))
+      if (refused.length === 0) return []
       cellStore.rollbackOptimisticSourceChange(cellId, restore)
       if (message) toast.add({ type: "error", title: t(message) })
+      return refused.flatMap((e) => (e.id ? [e.id] : []))
     },
     [cellStore, toast, t],
   )
@@ -3340,7 +3439,7 @@ export function ProjectWorkspace() {
         // and present on the server, permanently. Put it back and say so.
         onRejected: (entries) => {
           refused = true
-          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
+          return rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
         },
         onForbidden: (entries) => {
           refused = true
@@ -3830,17 +3929,17 @@ export function ProjectWorkspace() {
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
-  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
-  // explicit act). The picker's scope (Oct 23) says how far it reaches: this
+  // gutter's picker. The assignment itself never synthesizes; in the Audio
+  // view the card then acts on the picked line (AQU-2212). The picker's scope (Oct 23) says how far it reaches: this
   // line, this character's lines in the file, or — AQU-2125 — the character
   // itself in every episode, cast once rather than line by line.
   // Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
-    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }) => {
+    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }): boolean => {
       const level = project?.syncRole?.level ?? null
       if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
         toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
-        return
+        return false
       }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
@@ -3850,6 +3949,7 @@ export function ProjectWorkspace() {
             .map((c) => c.id)
         : []
       tts.assignPick({ scope: opts?.scope ?? "line", lineId: cell.id, castName, fileLineIds, voiceId })
+      return true
     },
     [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t],
   )
@@ -6448,6 +6548,9 @@ export function ProjectWorkspace() {
     let sourceEventIdPin = commitCell.sourceEventId ?? null
     let eventId = ""
     let draftDeadLettered = false
+    // AQU-1901: refused outright (a lane or validation 4xx inside the 200, or
+    // a 403). Not retryable, and not saved: the row must not say "Saved".
+    let draftRefusal = null as string | null
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         eventId = await emitTargetCellCommit({
@@ -6483,20 +6586,18 @@ export function ProjectWorkspace() {
       }
       pendingCompletionEventIdRef.current.set(laneCellKey(cell.id), eventId)
       rememberPendingTargetCommit(cell.id, eventId, parentId)
-      draftDeadLettered = false
-      const flushedEventId = eventId
       // AQU-579: settle THIS event, not just "one batch". A single
       // flushOutboxBatch posts the oldest file group, so with any older row
       // queued the draft goes out later under the background flusher, where a
       // dead-letter only reaches the tab-wide stale listener — it clears the
       // shadow with no rebase, erasing the draft after "Saved".
-      await flushOutboxUntilSettled([flushedEventId], {
-        getTokenForFile: getTokenForProjectFile,
-        onStaleSiblings: (entries) => {
-          if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
-        },
-      })
+      const outcome = await settleOwnEvent(eventId, { getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
+      draftDeadLettered = outcome.kind === "dead-lettered"
+      if (outcome.kind === "refused") {
+        draftRefusal = outcome.reason
+        break
+      }
       if (!draftDeadLettered) break
 
       // The draft had no visible effect. Drop it from the pending-parent maps
@@ -6537,6 +6638,18 @@ export function ProjectWorkspace() {
         }
       }
       break
+    }
+    if (draftRefusal !== null) {
+      const key = laneCellKey(cell.id)
+      if (pendingCompletionEventIdRef.current.get(key) === eventId) pendingCompletionEventIdRef.current.delete(key)
+      if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === eventId) pendingTargetCommitHeadsRef.current.delete(key)
+      applyOptimisticTargetEdit(cell.id, {
+        value: commitCell.translated ?? "",
+        valueHtml: commitCell.translatedHtml ?? "",
+      })
+      revalidateCellStats(cell.id)
+      revalidateCell(cell.id)
+      throw new Error(draftRefusal)
     }
     if (draftDeadLettered) {
       // Rebase exhausted — a genuine concurrent conflict. Revert to the LIVE
@@ -6665,9 +6778,12 @@ export function ProjectWorkspace() {
 
     const staleIndexes = new Set<number>()
     const rejectedIndexes = new Map<number, Error>()
+    // Returns the ids it took, so the tab-wide listener (AQU-1901) leaves
+    // those to this flow's own report.
     const noteRejectedEntries = (
       entries: Array<{ id: string; status: number; reason: string }>,
-    ) => {
+    ): string[] => {
+      const claimed: string[] = []
       for (const entry of entries) {
         const preparedIndex = initialIndexByEventId.get(entry.id)
         if (preparedIndex === undefined) continue
@@ -6675,7 +6791,9 @@ export function ProjectWorkspace() {
           preparedIndex,
           new Error(entry.reason || `The server refused this draft (${entry.status})`),
         )
+        claimed.push(entry.id)
       }
+      return claimed
     }
     // AQU-579: settle this response's own events (see flushOutboxUntilSettled).
     await flushOutboxUntilSettled(eventIds, {
@@ -6793,7 +6911,8 @@ export function ProjectWorkspace() {
           const retryRejectedIndexes = new Map<number, Error>()
           const noteRetryRejected = (
             entries: Array<{ id: string; status: number; reason: string }>,
-          ) => {
+          ): string[] => {
+            const claimed: string[] = []
             for (const entry of entries) {
               const index = retryIndexByEventId.get(entry.id)
               if (index === undefined) continue
@@ -6801,7 +6920,9 @@ export function ProjectWorkspace() {
                 index,
                 new Error(entry.reason || `The server refused this draft (${entry.status})`),
               )
+              claimed.push(entry.id)
             }
+            return claimed
           }
           await flushOutboxUntilSettled(retryEventIds, {
             getTokenForFile: getTokenForProjectFile,
@@ -8660,6 +8781,15 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
+  // Same for the sidebar rollup refresh: its identity carries the active lane
+  // and the first file id (AQU-2118), both of which settle a few ms after the
+  // socket starts connecting on a fresh editor mount — and again on every lane
+  // switch. As an effect dependency that tore the socket down while it was
+  // still CONNECTING and opened a second one (dropping the focus lease and
+  // forcing a reconnect resync each time). The handlers read the latest
+  // callback through this ref instead.
+  const refreshAllFilesProgressRef = useRef(refreshAllFilesProgress)
+  refreshAllFilesProgressRef.current = refreshAllFilesProgress
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {
@@ -8761,7 +8891,7 @@ export function ProjectWorkspace() {
           revalidateAuditStats,
           invalidateProjectFileProgress: () => invalidateProjectFileProgress(pid),
           refreshComments,
-          refreshAllFilesProgress,
+          refreshAllFilesProgress: () => refreshAllFilesProgressRef.current(),
         })
       })
       reconciler = createWsReconciler(
@@ -9006,7 +9136,7 @@ export function ProjectWorkspace() {
               // The frame names no lane; the record on screen is the open
               // lane's (AQU-2118).
               invalidateFileProgress(pid, msg.file, activeLaneRef.current)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
@@ -9036,7 +9166,7 @@ export function ProjectWorkspace() {
               // A validation-threshold change alters every file's derived
               // validated count without mutating its progress histogram.
               invalidateProjectFileProgress(pid)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
@@ -9191,7 +9321,6 @@ export function ProjectWorkspace() {
     presenceStore,
     sendPresenceUpdate,
     refreshContextualDrafts,
-    refreshAllFilesProgress,
     revalidateAuditStats,
   ])
 
@@ -9986,9 +10115,12 @@ export function ProjectWorkspace() {
       cellsLoading,
       cellsError,
       hasLinkedPicture: activeFile?.orderedBy === "time" && Boolean(activeFile.coreMediaUrl),
+      // AQU-1901: no rows until the open lane can be named — paired with the
+      // '' fallback they read "empty" on a project with only tagged lanes.
+      lanesLoading: lanesPending,
     }),
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError,
-      activeFile?.orderedBy, activeFile?.coreMediaUrl]
+      activeFile?.orderedBy, activeFile?.coreMediaUrl, lanesPending]
   )
 
   const showFileStats = centerSurface === "editor"
@@ -15509,6 +15641,7 @@ export function ProjectWorkspace() {
     onClearCastVoice: handleClearCastVoice,
     onCloneVoice: (cellId) => {
       setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterMode("clone")
       setMakeCharacterOpen(true)
     },
   })
@@ -18459,6 +18592,14 @@ export function ProjectWorkspace() {
             setMakeCharacterSeedCellId(null)
           }}
           seedCellId={makeCharacterSeedCellId}
+          initialMode={makeCharacterMode}
+          // Added from a line's dropdown: cast it on that line too.
+          onAdded={makeCharacterMode === "character" && makeCharacterSeedCellId
+            ? (voice) => {
+                const cell = audioMergedCells.find((c) => c.id === makeCharacterSeedCellId)
+                if (cell) handleAssignCastVoice(cell, voice.id)
+              }
+            : undefined}
           tts={tts}
           projectId={project.id}
           fileId={activeFileId}
@@ -18692,6 +18833,7 @@ export function ProjectWorkspace() {
         referenceLines={anchorCueLines}
         existingCues={audioCues ?? undefined}
         takeCount={cueTakeCountRef.current()}
+        filmUrl={activeFile?.coreMediaUrl}
         // Deleting a file is PROJECT_LEAD, a step above the contributor floor
         // most of this dialog sits on, so the button is gated on its own kind
         // rather than on the import's.
@@ -18725,6 +18867,7 @@ export function ProjectWorkspace() {
           // so pressing again after a failure never writes twice.
           <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             onCancel={() => setCaptionDialogFileId(null)}
             onConfirm={async input => {
               if (!canManageSources) throw new Error(t("importExport.captionTrack.saveFailed"))
@@ -18758,6 +18901,7 @@ export function ProjectWorkspace() {
         ) : (
           <ImportTimelineTextDialog key={captionDialogFileId}
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             // AQU-1566: once the file has rows, its own Source text and Target
             // text rows are not something a caption file may replace.
             tracks={captionTrackDestinations(serverTimelineTracks.filter(track =>
@@ -18814,6 +18958,7 @@ export function ProjectWorkspace() {
         // about one file over a confirm button that would write to another.
         open={extractSubtitlesFileId !== null && extractSubtitlesFileId === activeFileId}
         textFileName={activeFile?.name ?? ""}
+        filmUrl={activeFile?.coreMediaUrl}
         onCancel={() => setExtractSubtitlesFileId(null)}
         onConfirm={(parsed) => {
           const fileId = extractSubtitlesFileId

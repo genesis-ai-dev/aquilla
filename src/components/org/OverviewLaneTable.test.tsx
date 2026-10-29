@@ -314,3 +314,28 @@ describe("OverviewLaneTable text columns (AQU-2194)", () => {
     expect(screen.getByText("Text Validated")).toBeInTheDocument()
   })
 })
+
+// An Audio language's bar in the Languages table is drawn in the audio (plum)
+// colours, like its row everywhere else; a Text language's stays blue.
+describe("OverviewLaneTable progress bar colours", () => {
+  const tones = (row: HTMLElement): string[] =>
+    [...row.querySelectorAll<HTMLElement>("[data-progress-tone]")].map((el) => el.dataset.progressTone ?? "")
+
+  it("draws an Audio language's bar in the audio colours", () => {
+    // Beside a Text language, so the Translated column (where the bar sits) shows.
+    renderLanes([
+      metricLane("sw", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 2 }),
+      metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
+    ])
+    const row = screen.getByTestId("overview-lane-audio-validated-sw").closest("tr") as HTMLElement
+    expect(tones(row)).toEqual(["audioValidated", "audioRecorded"])
+  })
+
+  it("keeps a Text language's bar in the text colours", () => {
+    renderLanes([
+      metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
+    ])
+    const row = screen.getByTestId("overview-lane-text-validated-de").closest("tr") as HTMLElement
+    expect(tones(row)).toEqual(["textValidated", "textTranslated"])
+  })
+})

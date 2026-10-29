@@ -12,6 +12,13 @@
 //                          picker, opened from a field — picking only assigns),
 //                          then the take's tools: the recorder, volume, clone
 //
+// AQU-2212: picking a voice ACTS on this line. On a take, a voice that can
+// re-voice (a clone or a character) converts it at once; with no take, the
+// voice reads the text. When the line's voice and its take part ways (a pick
+// for the whole file, or a stock voice over someone's recording), a labelled
+// "Change to …" / "Generate · …" button sits beside the field. A human take
+// with nobody cast names the recording in the field, not the default voice.
+//
 // The mic opens the recorder, which records over, uploads, generates again and
 // switches takes. A take whose audio is still here has no Generate of its own.
 // A take whose bytes are gone does: Generate sits on the card, because opening
@@ -37,7 +44,7 @@
 // only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AudioLines, CircleAlert, CopyPlus, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
+import { AudioLines, CircleAlert, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -56,6 +63,7 @@ import {
   changeVoiceQualityForSteps,
   changeVoiceSourceTake,
   generateSlotOverVoiceChange,
+  isVoiceChangedAudioId,
   voiceChangedSteps,
   type ChangeVoiceQuality,
 } from "@/lib/audio/change-voice"
@@ -78,10 +86,11 @@ import { withGroup } from "@/lib/history/history"
 import { playingInSlot, recordSlotChoice } from "@/lib/history/take-steps"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
+import { CloneFromTakeButton } from "./CloneFromTakeButton"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { ProjectRecord as Project, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -121,19 +130,32 @@ interface CellVoicePanelProps {
    * pause, and seek go through it so the cell highlight tracks this button.
    */
   controller?: UseCellAudioResult
-  /** Open the character creator seeded with THIS cell's take (clone source). */
+  /** Open the New voice dialog seeded with THIS cell's take ("More options"). */
   onMakeCharacter: () => void
+  /** Clone the take straight into the cast under `name`. Absent: the clone
+   *  button opens the dialog instead. */
+  onCloneTake?: (audioId: string, name: string) => Promise<void>
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** The line's voice picker, for the row under the waveform. The host owns
-   *  it — it is the Media view gutter's picker, in its field form. */
-  voicePicker?: ReactNode
+   *  it — it is the Media view gutter's picker, in its field form. As a
+   *  function it gets what the field should say about the take, and the
+   *  callback that makes a pick act on this line. */
+  voicePicker?: ReactNode | ((ctx: CellVoicePickerContext) => ReactNode)
   /**
    * Media redesign slice 2 (P2.3): false in a language that delivers Audio and
    * no text — there is no text to speak, so the card offers no "Generate"
    * (or "Generate audio from text"); Record, Change voice and the rest stay.
    */
   voiceFromText?: boolean
+}
+
+export interface CellVoicePickerContext {
+  /** What the field names when nobody is cast and the take is a person's
+   *  recording ("Your recording", "Recorded by Ana"), instead of the default voice. */
+  takeLabel?: string
+  /** Call after a pick is accepted: converts or generates this line in it. */
+  onPicked: (voiceId: string) => void
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
@@ -288,6 +310,7 @@ export function CellVoicePanel({
   recordUnavailable = null,
   onAfterGenerate,
   onMakeCharacter,
+  onCloneTake,
   controller,
   targetLang,
   voicePicker,
@@ -449,12 +472,16 @@ export function CellVoicePanel({
     localModelReady: ttsProviderModel(provider) !== "mms" && mmsStatus.kind === "ready",
   })
 
+  // The voice a Generate / Change voice started here is working in, for the
+  // row's "Changing to …" line (a pick acts before the cast settings catch up).
+  const [workingAs, setWorkingAs] = useState<string | null>(null)
+
   // Decision 11: the voice and the recording it stops from sounding are ONE
   // Undo step.
-  const voiceThenDisplace = useCallback(async (): Promise<boolean> => {
+  const voiceThenDisplace = useCallback(async (voiceId: string): Promise<boolean> => {
     const slot = generateSlotOverVoiceChange(cell)
     const ok = await generateCellVoice({
-      project, cell, session: sess, username, voiceId: active.id,
+      project, cell, session: sess, username, voiceId,
       slot,
       ...(targetLang ? { targetLang } : {}),
       surface: "voice-panel",
@@ -488,34 +515,77 @@ export function CellVoicePanel({
       )
     }
     return true
-  }, [project, cell, sess, username, active.id, targetLang, playableId, isSourceClip, projectId])
+  }, [project, cell, sess, username, targetLang, playableId, isSourceClip, projectId])
   const voiceAndDisplace = useCallback(
-    () => withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: cell.fileId }, () => voiceThenDisplace()),
+    (voiceId: string) =>
+      withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: cell.fileId }, () => voiceThenDisplace(voiceId)),
     [cell.fileId, voiceThenDisplace],
   )
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (voiceId: string = active.id) => {
     if (isVoicing || !canGenerate || !canEdit) return
     autoplayRef.current = true
-    const ok = await voiceAndDisplace()
+    setWorkingAs(findVoice(settings, voiceId)?.name ?? active.name)
+    const ok = await voiceAndDisplace(voiceId)
+    setWorkingAs(null)
     if (!ok) {
       autoplayRef.current = false
       return
     }
     onAfterGenerate()
-  }, [isVoicing, canGenerate, canEdit, onAfterGenerate, voiceAndDisplace])
+  }, [isVoicing, canGenerate, canEdit, active.id, active.name, settings, onAfterGenerate, voiceAndDisplace])
 
-  const changeVoice = useCallback(async () => {
-    if (isVoicing || changeBlocker != null || !canEdit) return
+  const changeVoice = useCallback(async (voice: Voice = active) => {
+    if (isVoicing || !canEdit || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
     autoplayRef.current = true
+    setWorkingAs(voice.name)
     const ok = await changeCellVoice({
-      projectId, cell, voice: active, session: sess, author: username,
+      projectId, cell, voice, session: sess, author: username,
       diffusionSteps,
       ...(targetLang ? { targetLang } : {}),
       recordStep: true, // decision 11: an Undo step
     })
+    setWorkingAs(null)
     if (ok) onAfterGenerate()
     else autoplayRef.current = false
-  }, [isVoicing, changeBlocker, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
+  }, [isVoicing, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
+
+  // A person's take: a recording (or the imported programme audio), not a
+  // generated voice or a conversion of one.
+  const humanTake = Boolean(
+    playableId && playableAtt && !isGenerated && !playableAtt.voiceId && !isVoiceChangedAudioId(playableId),
+  )
+  const recordedBy = humanTake && !isSourceClip ? playableAtt?.recordedBy : undefined
+  const takeLabel = !humanTake
+    ? undefined
+    : isSourceClip
+      ? t("editor.voice.originalAudio")
+      : recordedBy && recordedBy !== username
+        ? t("editor.voice.recordedBy", { name: recordedBy })
+        : t("editor.voice.yourRecording")
+  const generateReady = canGenerate && offlineGate.kind === "ok"
+
+  // What the line's voice would do to the take you hear, when the two differ.
+  const pendingFor = useCallback((voice: Voice): "change" | "generate" | null => {
+    if (!hasTake) return generateReady ? "generate" : null
+    if (playableAtt?.voiceId === voice.id) return null
+    if (changeVoiceBlocker(cell, voice, diffusionSteps) == null) return "change"
+    return generateReady && !humanTake ? "generate" : null
+  }, [hasTake, generateReady, playableAtt?.voiceId, cell, diffusionSteps, humanTake])
+
+  const onPicked = useCallback((voiceId: string) => {
+    if (!canEdit || isVoicing) return
+    const voice = findVoice(settings, voiceId)
+    if (!voice) return
+    const action = pendingFor(voice)
+    // A stock voice never reads over someone's recording on its own; the
+    // "Generate · …" button beside the field offers it.
+    if (action === "change") void changeVoice(voice)
+    else if (action === "generate") void generate(voice.id)
+  }, [canEdit, isVoicing, settings, pendingFor, changeVoice, generate])
+  const picker = typeof voicePicker === "function" ? voicePicker({ takeLabel, onPicked }) : voicePicker
+  const pending = hasTake && canEdit && explicitVoice && !isVoicing ? pendingFor(active) : null
+  const humanPending = pending == null && hasTake && canEdit && explicitVoice && !isVoicing && humanTake && generateReady
+    && playableAtt?.voiceId !== active.id
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -531,9 +601,10 @@ export function CellVoicePanel({
   // The row under the waveform (or the empty slot): the voice on the left,
   // the take's own tools on the right. Present in both states, so an empty
   // card and a full one are the same height.
-  const row = (tools: ReactNode) => (
+  const row = (tools: ReactNode, action?: ReactNode) => (
     <div data-slot="voice-card-row" className="mt-2 flex h-7 min-w-0 items-center gap-1">
-      {voicePicker && <div className="flex min-w-0 shrink items-center">{voicePicker}</div>}
+      {picker && <div className="flex min-w-0 shrink items-center">{picker}</div>}
+      {action}
       {tools && <div className="ms-auto flex shrink-0 items-center">{tools}</div>}
     </div>
   )
@@ -577,7 +648,7 @@ export function CellVoicePanel({
             <span role="status" className="text-center text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
             {failure ? (
               <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure })}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
                   <CircleAlert className="text-destructive" />
                   {t("editor.voice.tryAgain")}
                 </Button>
@@ -608,7 +679,7 @@ export function CellVoicePanel({
               </AppTooltip>
             ) : (
               <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
                   <Sparkles />
                   {t("editor.voice.generateWith", { voice: active.name })}
                 </Button>
@@ -688,7 +759,7 @@ export function CellVoicePanel({
                       ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
                       : t("editor.voice.changeVoiceTooltip", { name: active.name })
                 }
-                onChange={() => void changeVoice()}
+                onChange={() => void changeVoice(active)}
                 onQuality={(next) => { if (takeId) setPicked({ audioId: takeId, quality: next }) }}
               />
             )}
@@ -700,7 +771,7 @@ export function CellVoicePanel({
                   size="icon-sm"
                   aria-label={t("editor.voice.generateFromText")}
                   disabled={isVoicing}
-                  onClick={() => void generate()}
+                  onClick={() => void generate(active.id)}
                   className="shrink-0 text-muted-foreground"
                 >
                   <Wand2 className="h-3.5 w-3.5" />
@@ -724,22 +795,35 @@ export function CellVoicePanel({
               </AppTooltip>
             )}
             <VolumeButton volume={volume} onChange={changeVolume} />
-            {canEdit && (
-              <AppTooltip content={t("editor.voice.clone")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("editor.voice.clone")}
-                  data-testid="voice-card-clone"
-                  onClick={onMakeCharacter}
-                  className="shrink-0 text-muted-foreground"
-                >
-                  <CopyPlus className="h-3.5 w-3.5" />
-                </Button>
-              </AppTooltip>
+            {canEdit && playableId && (
+              <CloneFromTakeButton
+                suggestedName={recordedBy ?? (humanTake && !isSourceClip ? username : "")}
+                onClone={(name) => (onCloneTake ? onCloneTake(playableId, name) : Promise.resolve(onMakeCharacter()))}
+                onMoreOptions={onMakeCharacter}
+              />
             )}
           </>,
+          isVoicing && workingAs ? (
+            <span role="status" data-testid="voice-card-working" className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+              <Spinner className="size-3 shrink-0" />
+              <span className="truncate">{t("editor.voice.workingAs", { voice: workingAs })}</span>
+            </span>
+          ) : (pending || humanPending) && (
+            <Button
+              type="button"
+              size="xs"
+              data-testid="voice-card-apply"
+              className="min-w-0 shrink"
+              onClick={() => void (pending === "change" ? changeVoice(active) : generate(active.id))}
+            >
+              {pending === "change" ? <AudioLines /> : <Sparkles />}
+              <span className="truncate">
+                {pending === "change"
+                  ? t("editor.voice.changeTo", { voice: active.name })
+                  : t("editor.voice.generateWith", { voice: active.name })}
+              </span>
+            </Button>
+          ),
         )}
       </div>
     )
@@ -792,7 +876,7 @@ export function CellVoicePanel({
         )}
         {state === "failed" && (
           <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure ?? "" })}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
               <CircleAlert className="text-destructive" />
               {t("editor.voice.tryAgain")}
             </Button>
@@ -830,7 +914,7 @@ export function CellVoicePanel({
         )}
         {state === "ready" && (
           <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
               <Sparkles />
               {t("editor.voice.generateWith", { voice: active.name })}
             </Button>

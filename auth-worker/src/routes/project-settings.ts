@@ -40,13 +40,6 @@
 //
 // These keys are permission-scoped rather than dumb-stored:
 //
-//   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
-//            `targetLanes`, `archivedLanes`). A write whose only *changed*
-//            keys are language keys is gated by the org's configurable
-//            `languageEditMinRole` floor (default project_lead 500 when the
-//            org has not stored one — AQU-984) so project leads can correct a
-//            wrong or reset language without also receiving AI config,
-//            validation, or health. An explicit stored floor is kept.
 //   AQU-1246 `autopilotEnabled` (the project-wide opt-in to the experimental
 //            Autopilot surface). An autopilot-only write is admitted at
 //            project_lead 500 — whether your own project tries an experiment
@@ -92,7 +85,6 @@ import {
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
-  patchProjectSettingsShared,
   updateProjectSettingsShared,
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
@@ -152,22 +144,6 @@ const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
-
-/**
- * AQU-1086 / AQU-984: the project-language keys, gated by the org's
- * configurable `languageEditMinRole` (default project lead 500 when unset)
- * rather than the flat maintainer floor. The default target language and the
- * extra-lane registry are one scope on purpose: a lead who can change the
- * default target must be
- * able to add/archive a lane too, or the Project Info and Languages cards
- * disagree (AQU-898).
- */
-const LANGUAGE_KEYS = new Set([
-  "sourceLanguage",
-  "targetLanguage",
-  "targetLanes",
-  "archivedLanes",
-])
 
 /**
  * AQU-1246: the project-wide opt-in to the experimental Autopilot surface.
@@ -533,8 +509,6 @@ projectSettings.on(
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
       const noop = changed.length === 0
-      const languageOnly = changed.length > 0
-        && changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
@@ -549,7 +523,7 @@ projectSettings.on(
         && role.level >= ROLE.PROJECT_LEAD
         && leadMaySaveTtsSettings(storedTts, nextTts, visible, lanes)
       if (
-        !noop && !languageOnly && !autopilotOnly
+        !noop && !autopilotOnly
         && !countStructuralOnly && !alignmentSeedsOnly && !voiceLeadWrite
       ) {
         return c.json(
@@ -572,11 +546,6 @@ projectSettings.on(
             { error: `role >= ${noopFloor} required to save project settings (org termbaseEditMinRole)` },
             403,
           )
-        }
-      } else if (languageOnly) {
-        const languageFloor = await getLanguageEditMinRoleForProject(c.env, projectId)
-        if (role.level < languageFloor) {
-          return c.json(languageWriteDenial(languageFloor, role), 403)
         }
       } else if (autopilotOnly) {
         // AQU-1246: this is the gate that decides whether the experimental
@@ -844,36 +813,6 @@ async function denyLanguageWrite(
   return null
 }
 
-/** Add or remove one tag in targetLanes / archivedLanes, bumping the version. */
-export async function mergeSettingsArray(
-  db: AquillaDb,
-  projectId: string,
-  userId: number,
-  key: "targetLanes" | "archivedLanes",
-  tag: string,
-  present: boolean,
-): Promise<"ok" | "conflict" | "error"> {
-  if (!tag) return "ok"
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const current = await loadProjectSettings(db, projectId)
-    const raw = current.settings[key]
-    const list = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : []
-    const has = list.includes(tag)
-    if (has === present) return "ok"
-    const next = present ? [...list, tag] : list.filter((item) => item !== tag)
-    const result = await patchProjectSettingsShared(db, {
-      projectId,
-      ops: [{ key, value: next }],
-      ifMatchVersion: current.version,
-      updatedBy: userId,
-    })
-    if (result.status === "ok") return "ok"
-    if (result.status === "conflict") continue
-    return "error"
-  }
-  return "conflict"
-}
-
 /**
  * AQU-1816: a lane-row write relays to the project DO the way the settings
  * PATCH and the archive route already do, so a workspace open in another tab
@@ -934,7 +873,6 @@ projectSettings.post(
     )
     const resolvedDefault = defaultLane
       ? laneLanguage(defaultLane, {
-          settings: current.settings,
           role: "target",
           legacyTag: "",
         })
@@ -1128,24 +1066,8 @@ projectSettings.post(
     // refusal left is the last active one — a project must keep at least one
     // non-archived target lane.
     if (result.status === "last_lane") return c.json({ error: "last_lane" }, 400)
-    const tag = result.lane.legacyTag ?? ""
-    // The legacy `settings.archivedLanes` mirror holds TAGS, and the former
-    // default lane's tag is '' — which that array cannot name (every reader
-    // filters the empty string out). Its `lanes.archived_at` row is the only
-    // record of its archived state, so skip the mirror rather than push a ''
-    // entry no reader would honour.
-    if (tag !== "") {
-      const synced = await mergeSettingsArray(
-        c.env.AQUILLA_PG,
-        projectId,
-        user.id,
-        "archivedLanes",
-        tag,
-        archived,
-      )
-      if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
-      if (synced === "error") return c.json({ error: "write failed" }, 500)
-    }
+    // AQU-2223: `lanes.archived_at` is the only record. The retired
+    // `settings.archivedLanes` mirror is no longer written.
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
     try {
@@ -1245,7 +1167,6 @@ projectSettings.post(
         settings: { ...current.settings, ttsSettings: nextTts },
         ifMatchVersion: current.version,
         updatedBy: user.id,
-        registerLanes: false,
         blobs: c.env.SNAPSHOTS ?? null,
         r2KeyPrefix: c.env.R2_KEY_PREFIX,
       })

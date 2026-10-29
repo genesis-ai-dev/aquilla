@@ -148,7 +148,7 @@ export function resolveProjectTextDirection(
   const language = languageOverride
     ?? laneLanguage(
       { role: side },
-      { settings, role: side, legacyTag: side === 'source' ? null : '' },
+      { role: side, legacyTag: side === 'source' ? null : '' },
     )
   return languageDefaultDirection(language)
 }

@@ -1094,50 +1094,26 @@ export function isExtensionDataFile(file: Pick<FileReference, "role"> | null | u
 }
 
 /**
- * True for a subtitle import that actually HAS the video its cues were timed
- * against (`coreMediaUrl` — absent means no video). The one case where the
- * timing mode is not a choice: the cues belong to that footage, so laying them
- * end to end has nothing to fit.
- *
- * AQU-1704: the predicate the withdrawal in `resolveFileTimingMode` is scoped
- * to. AQU-646 withdrew Free timing from every subtitle import on the grounds
- * that "their cues are already timed to a video" — true of a film's VTT, and
- * false of an audio-only dubbing project, whose source IS an SRT and which has
- * no video at all. LOTE (sermon dubbing: podcast, YouTube, app) is that
- * project, and the blanket rule made the mode unreachable for it: the picker
- * was hidden AND the project-level key was inert, so a maintainer who set
- * `audioTimingMode=audioFirst` through the API saw playback carry on fitting
- * clips into the English cue slots — dead air after a short clip, overlap after
- * a long one. The footage, not the file format, is what makes the cues binding.
- */
-export function isVideoTimedSubtitleFile(
-  file: Pick<FileReference, "type" | "coreMediaUrl"> | null | undefined,
-): boolean {
-  return isSubtitleImportFile(file) && Boolean(file?.coreMediaUrl)
-}
-
-/**
  * AQU-2204 (Sam, Oct 26): a file whose lines are TIMED TO A FILM can only
- * follow its source. That is any file with footage linked (`coreMediaUrl`: an
- * uploaded film or a YouTube video), and any file carrying an audio cue file,
- * whose cues transcribe the film's own sound. Laying such a file's lines back
- * to back would pull the dub off the actors, so the timing control offers only
- * "Follows source" there, with an (i) saying why.
+ * follow its source: one carrying an audio cue file, whose cues transcribe the
+ * film's own sound. The timing control offers only "Follows source" there,
+ * with an (i) saying why.
  *
- * Supersedes the narrower AQU-1704 rule (`isVideoTimedSubtitleFile`), which
- * locked only subtitle imports with footage and let other video-linked files
- * pick Free timing through a "the video stays hidden" warning.
+ * AQU-2253 (Sam, Oct 29): a linked film on its own no longer counts. The film
+ * runs on its own clock in both timings, a strip from 0:00 to its end that
+ * never adjusts to the lines, so a file with footage linked may follow its
+ * recordings too: the lines then simply start together with the film. (Before
+ * this, AQU-1704 locked subtitle imports with footage and AQU-2204 every file
+ * with footage, because the film was hidden while following the recordings.)
  */
-export function isFilmTimedFile(
-  file: Pick<FileReference, "coreMediaUrl"> | null | undefined,
-  opts?: { hasAudioCues?: boolean },
-): boolean {
-  return Boolean(file?.coreMediaUrl) || Boolean(opts?.hasAudioCues)
+export function isFilmTimedFile(opts?: { hasAudioCues?: boolean }): boolean {
+  return Boolean(opts?.hasAudioCues)
 }
 
 /**
  * Resolve a file's audio timing mode: "Follows source" ("dubbing") for a file
- * timed to a film (see `isFilmTimedFile`), else the file's own choice, else the
+ * timed to a film (see `isFilmTimedFile`), else the file's own choice, else
+ * "Follows source" for a file with footage linked, else the
  * project-level value (the legacy Project Settings field, kept as a read-only
  * fallback so pre-existing projects keep the mode they had chosen), else
  * "Follows source". Mixed-mode projects are allowed by design.
@@ -1169,21 +1145,12 @@ export function resolveFileTimingMode(
     timedToLinkedVideo?: boolean
   },
 ): AudioTimingMode {
-  // AQU-646, rescoped by AQU-1704: Free timing does not exist for a subtitle
-  // import whose video is linked here. This check runs BEFORE the file's own
-  // choice, and withdrawing the mode at RESOLUTION rather than from the picker
-  // is still the point: the picker is hidden for these files, so any stored
-  // value would otherwise be one nobody can change back. That covers (a) a
-  // Free timing the user picked while the file had no video, followed by
-  // linking one (file.video.set leaves timingMode untouched), (b) a value
-  // written before AQU-646 or by an OLDER client that still offers the mode,
-  // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
-  if (isVideoTimedSubtitleFile(file)) return "dubbing"
-  // AQU-2204: every other file timed to a film follows its source too, whatever
-  // it stored — the control shows only "Follows source" for these files, so a
-  // stored "audioFirst" (picked before the rule, or by an older client) would
-  // otherwise be one nobody can see or change back.
-  if (isFilmTimedFile(file, { hasAudioCues: opts?.hasAudioCues })) return "dubbing"
+  // AQU-2204: a file timed to a film (an audio cue file) follows its source,
+  // whatever it stored — the control shows only "Follows source" for these
+  // files, so a stored "audioFirst" (picked before the rule, or by an older
+  // client) would otherwise be one nobody can see or change back. AQU-2253: a
+  // linked film alone no longer locks a file; see `isFilmTimedFile`.
+  if (isFilmTimedFile({ hasAudioCues: opts?.hasAudioCues })) return "dubbing"
   // AQU-2204 (board 24): nothing to follow, so it follows its recordings.
   if (opts?.nothingToFollow) return "audioFirst"
   // AQU-1704: every other file reads its own choice next, so the picker the
@@ -1191,6 +1158,12 @@ export function resolveFileTimingMode(
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
   if (opts?.timedToLinkedVideo) return "dubbing"
+  // AQU-2253: likewise any file with footage linked STARTS on its source. The
+  // legacy project-level Free timing never reached these files (they were
+  // locked), and a project of films opening on Follows recordings because of
+  // a key set for something else would be a surprise; the file's own choice,
+  // above, is what moves one.
+  if (file?.coreMediaUrl) return "dubbing"
   // AQU-2204 (Sam, Oct 27 — board 23's LOTE row): a NEW file with no linked
   // film starts on "Follows source", subtitle and cue files included. A LOTE
   // sermon's VTT and a Come and See audio-only project's base VTT look the same

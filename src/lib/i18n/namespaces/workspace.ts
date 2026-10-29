@@ -445,14 +445,6 @@ export const workspace = defineNamespace({
     // -- onboarding/steps/OrgStep --
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
 
-    // -- timeline/LinkVideoTimingDialog --
-    "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
-    "workspace.linkVideoTiming.description":
-      "This file follows its recordings. A file timed to a film always follows its source, so " +
-      "once the film is linked its lines keep the film's times and the film plays. No recordings " +
-      "or times change, and clearing the film lets the file follow its recordings again.",
-    "workspace.linkVideoTiming.linkAnyway": "Link the film",
-
     // -- timeline/TimingModeChangedDialog --
     "workspace.timingModeChanged.title": "Timing changed",
     "workspace.timingModeChanged.description":
@@ -1974,20 +1966,6 @@ export const workspace = defineNamespace({
           "names if useful, but keep it two comma-separated email-shaped examples.",
       },
 
-      "workspace.linkVideoTiming.title": {
-        description:
-          "Heading of the dialog shown when linking a film to a file whose timing " +
-          "is 'Follows recordings': a file timed to a film always follows its source, " +
-          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.linkVideoTiming.description": {
-        description: "Body copy of the same dialog: what linking does to the file's timing, and that nothing is lost.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.linkVideoTiming.linkAnyway": {
-        description: "Confirm button that links the film (and so switches the file to following its source).",
-      },
 
       "workspace.timingModeChanged.title": {
         description:

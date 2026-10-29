@@ -461,7 +461,6 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
-import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
@@ -2804,13 +2803,14 @@ export function ProjectWorkspace() {
   // which Free timing is the whole point. Read through the same predicate the
   // resolver uses so the picker and the mode can never disagree.
   //
-  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — footage
-  // linked of any kind, or an audio cue file, whose cues transcribe the film.
-  // Those offer only "Follows source"; the control shows it with an (i).
+  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — an audio
+  // cue file, whose cues transcribe the film. Those offer only "Follows
+  // source"; the control shows it with an (i). AQU-2253: a linked film on its
+  // own no longer counts — it runs on its own clock in both timings.
   const fileHasAudioCues = (hydratedProject?.files ?? []).some(
     (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
   )
-  const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
+  const timingFilmTimed = isFilmTimedFile({ hasAudioCues: fileHasAudioCues })
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
   // control greys "Follows source" out. AQU-1758: every file has the timeline
@@ -4122,8 +4122,9 @@ export function ProjectWorkspace() {
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
-  // mode as a side effect (a subtitle import with a video is always Original
-  // timing; clearing it brings back the file's own mode). Register that as our
+  // mode as a side effect (AQU-2253: a file with no timing of its own starts on
+  // Follows source once a film is linked, whatever its project's old Free
+  // timing setting says; clearing it brings that back). Register that as our
   // own write, or useTimingModeAck reads it as a collaborator's change and
   // blames "someone with settings access" for the user's own click. `timingAck`
   // is declared far below this callback, so it is reached through a ref that
@@ -4162,31 +4163,17 @@ export function ProjectWorkspace() {
     },
     [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
   )
-  // Flow B (2026-08-05): linking a video while in Free timing prompts to
-  // switch back (declinable, with the video-stays-hidden warning). NOTE the
-  // mode is computed INLINE — the `timingMode` const is declared ~2,700 lines
-  // below this callback (a temporal-dead-zone hazard in the deps). Pre-merge
-  // round: the mode is per-FILE now, resolved off the active file.
-  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
   /** The URL dialog lives here rather than in the timeline toolbar, because the
    *  video pane offers the same action from its could-not-load state. */
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
+  // AQU-2253: linking a film no longer asks first. A film runs on its own
+  // clock in both timings, so a file that follows its recordings keeps doing
+  // so (the "Linking a film makes this file follow its source" dialog went).
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      // AQU-2204: a file timed to a film always follows its source, so linking
-      // footage to a file that follows its recordings SWITCHES it — say so
-      // first. Asked of the file as it is now (before the link): that is the
-      // state the person is about to leave.
-      if (
-        url &&
-        resolveFileTimingMode(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }) === "audioFirst"
-      ) {
-        setPendingVideoUrl(url)
-        return
-      }
-      void applyLinkVideo(url) // clearing never prompts
+      void applyLinkVideo(url)
     },
-    [activeFile, project, applyLinkVideo, fileHasAudioCues, timingNothingToFollow],
+    [applyLinkVideo],
   )
 
   // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
@@ -18666,15 +18653,6 @@ export function ProjectWorkspace() {
           }
         />
       )}
-      <LinkVideoTimingDialog
-        open={pendingVideoUrl !== null}
-        onCancel={() => setPendingVideoUrl(null)}
-        onLinkAnyway={() => {
-          const u = pendingVideoUrl
-          setPendingVideoUrl(null)
-          if (u) void applyLinkVideo(u)
-        }}
-      />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned
           sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>

@@ -2350,7 +2350,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared || cellEditingFloor == null}
+                      disabled={!canEditShared}
                       value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
                         setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)

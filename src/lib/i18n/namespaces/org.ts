@@ -43,6 +43,25 @@ export const org = defineNamespace({
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
     "org.access.scope.lane": "language lane",
+
+    // -- AQU-2289 RoleDialog: the one dialog behind every Change role and Add member --
+    "org.roleDialog.addPersonTitle": "Add {name} to {where}",
+    "org.roleDialog.moreAboutRolesAriaLabel": "More about these roles",
+    "org.roleDialog.orgChangeSummary": "Sets their role in the organization.",
+    "org.roleDialog.orgRoleDetails":
+      "Maintainers and Owners see every project in the organization. Everyone else sees a project only once they're added to it, or to a team that has it.",
+    "org.roleDialog.orgAddSummary": "Add people to this organization, or invite them by email.",
+    "org.roleDialog.projectChangeSummary": "Sets their role on this project.",
+    "org.roleDialog.projectExceptionSummary":
+      "Sets a role for this project only. Their organization role still applies everywhere else.",
+    "org.roleDialog.teamAddSummary": "Add people from the organization, or invite someone from outside it.",
+    "org.roleDialog.ownerWarning": "Owners get full control of this organization, and this can't be undone here.",
+    "org.roleDialog.ownerWarningMoreAriaLabel": "More about making someone an Owner",
+    "org.roleDialog.ownerWarningDetails":
+      "That includes billing, members and deleting the organization. You keep your own ownership, so the organization is never left without an owner. Once someone is an Owner, their role is locked in the member list.",
+    "org.roleDialog.orgChangeForbidden": "Only organization owners can change member roles.",
+    "org.roleDialog.orgAddForbidden": "Only organization owners can add members.",
+    "org.roleDialog.setProjectRole": "Set a role for this project…",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
@@ -1791,6 +1810,26 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.roleDialog.addPersonTitle": {
+        description:
+          "AQU-2289: title of the role dialog when it adds one known person, e.g. from an empty cell of the members matrix.",
+        placeholders: {
+          name: "The person's username. Not translated.",
+          where: "The project's name. Not translated.",
+        },
+      },
+      "org.roleDialog.moreAboutRolesAriaLabel": {
+        description:
+          "AQU-2289: screen-reader name of the (i) button beside the role dialog's one-line description. It opens the longer explanation in place.",
+      },
+      "org.roleDialog.ownerWarningMoreAriaLabel": {
+        description:
+          "AQU-2289: screen-reader name of the (i) button on the role dialog's Owner warning. It opens what being an Owner means, in place.",
+      },
+      "org.roleDialog.ownerWarning": {
+        description:
+          "AQU-2289: one-line warning in the role dialog when an organization owner picks Owner for someone. The rest is behind an (i).",
+      },
       "org.access.addPeopleTo": {
         description:
           "AQU-1352: header of the add-people dialog on a team or project. {path} is the scope breadcrumb, e.g. 'Biblica › Pattani Malay Bible'.",

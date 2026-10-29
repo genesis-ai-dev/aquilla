@@ -17875,7 +17875,7 @@ export function ProjectWorkspace() {
             })
             setRecordingCellId(null)
             if (!rowId) return
-            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            if (timelineStacked && !dock.view.isShowing("text")) dock.show("text")
             // A frame later: during this click the recorder is still open, and
             // its focus trap would take the caret straight back.
             requestAnimationFrame(() => {

@@ -34,10 +34,11 @@ export interface DockLayout {
   fullUndo: UndoEntry[]
 }
 
-// THE SIZES ARE NOT HERE. The timeline's height and the film's width keep the
-// per-file keys they already had (timeline-pane-layout.ts, video-pane-layout.ts),
-// so nobody's remembered sizes are lost to this, and each file starts from its
-// kind's sizes (media-layout-start.ts) until someone drags.
+// THE SIZES ARE NOT HERE. The timeline's height keeps the per-file key it
+// already had (timeline-pane-layout.ts), and the film's width, one shared key
+// before, is per file now and still reads the shared one for a file with none
+// (video-pane-layout.ts), so nobody's remembered sizes are lost to this. With
+// neither, a file starts from its kind's sizes (media-layout-start.ts).
 
 /** Every file starts here: the film bottom left, the text bottom right. */
 export function startDockLayout(): DockLayout {

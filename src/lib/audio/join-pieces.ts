@@ -62,6 +62,10 @@ export interface JoinPiecesArgs {
   slot: string
   targetLang?: string
   username: string
+  /** The new take's name. Sam, Oct 29: "Take N", the way the recorder names a
+   *  new take — the caller works it out with `nextTakeLabel` over the line's
+   *  takes on this track. */
+  label?: string
 }
 
 async function bytesOf(url: string, args: JoinPiecesArgs, getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>): Promise<Uint8Array> {
@@ -84,6 +88,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
     cellId: args.cellId,
     slot: args.slot,
     username: args.username,
+    label: args.label,
     surface: "recording-tab" as const,
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
   }

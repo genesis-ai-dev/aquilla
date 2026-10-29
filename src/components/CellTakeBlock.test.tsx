@@ -55,6 +55,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
 }))
 
+const joinCalls: Array<Record<string, unknown>> = []
+vi.mock("@/lib/audio/join-pieces", () => ({
+  joinTakePieces: vi.fn(async (args: Record<string, unknown>) => { joinCalls.push(args); return "audio-c1-9-joined.wav" }),
+}))
+
 import { CellTakeBlock } from "./CellTakeBlock"
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import type { CellData } from "@/hooks/useCells"
@@ -614,5 +619,29 @@ describe("Join into one recording", () => {
   it("is not offered on a take of one piece", () => {
     draw()
     expect(screen.queryByTestId("cell-take-join")).toBeNull()
+  })
+
+  // Sam, Oct 29 (question 7): the joined take is named "Take N", numbered the
+  // way the recorder numbers a new take (nextTakeLabel): one past the highest
+  // "Take N" on this track, counting unnamed takes, the source clip and other
+  // tracks' takes left out.
+  it("names the joined take as the recorder would name the next take", async () => {
+    joinCalls.length = 0
+    const withOthers = {
+      ...owner,
+      attachments: {
+        ...(owner.attachments as Record<string, unknown>),
+        // A named take on this track, and the two unnamed pieces: Take 3 is next.
+        "audio-c1-0-old.wav": { type: "audio", url: "frontier-audio://audio-c1-0-old.wav", slot: "recording", label: "Take 1" },
+        // Not this track's, not a take, and gone: none of them counts.
+        "audio-c1-5-other.wav": { type: "audio", url: "frontier-audio://audio-c1-5-other.wav", slot: "track-2", label: "Take 9" },
+        "audio-f1-7-source.wav": { type: "audio", url: "frontier-audio://audio-f1-7-source.wav", slot: "recording" },
+        "audio-c1-8-gone.wav": { type: "audio", url: "frontier-audio://audio-c1-8-gone.wav", slot: "recording", label: "Take 8", isDeleted: true },
+      },
+    } as unknown as CellData
+    draw({ owner: withOthers, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(joinCalls).toHaveLength(1))
+    expect(joinCalls[0]).toMatchObject({ cellId: "c1", slot: "recording", label: "Take 3" })
   })
 })

@@ -73,6 +73,21 @@ describe("joinTakePieces", () => {
     expect(id).not.toBe("a.wav")
   })
 
+  // Sam, Oct 29 (question 7): the joined take is named "Take N", as the
+  // recorder names takes. The caller works N out (nextTakeLabel); both ways of
+  // joining store it on the new take.
+  it("the joined take carries the name it is given, on both ways of joining", async () => {
+    await joinTakePieces({ ...args, label: "Take 3", pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    await joinTakePieces({ ...args, label: "Take 4", pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900 },
+    ] })
+    expect(attaches.map((a) => a.label)).toEqual(["Take 3", "Take 4"])
+  })
+
   it("trimmed pieces: their audible parts, joined in order and uploaded as one WAV", async () => {
     await joinTakePieces({ ...args, pieces: [
       { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },

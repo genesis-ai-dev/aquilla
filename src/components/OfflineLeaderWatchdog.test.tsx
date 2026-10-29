@@ -83,11 +83,11 @@ describe("OfflineLeaderWatchdog", () => {
     const booting = () => {
       offlineStore = { store: null, loading: true, error: null }
     }
-    const renderBooting = (restart = vi.fn()) =>
+    const renderBooting = (restart = vi.fn(), rebuildStallMs = 120) =>
       render(
         <>
           <Toaster />
-          <OfflineLeaderWatchdog bootStallMs={40} bootCheckEveryMs={10} restart={restart} />
+          <OfflineLeaderWatchdog bootStallMs={40} rebuildStallMs={rebuildStallMs} bootCheckEveryMs={10} restart={restart} />
         </>,
       )
 
@@ -138,6 +138,18 @@ describe("OfflineLeaderWatchdog", () => {
       expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull()
     })
 
+    it("gives a rebuild that pauses longer than the boot limit time before prompting", async () => {
+      booting()
+      renderBooting(vi.fn(), 10_000)
+      reportOfflineRebuildProgress({ done: 10, total: 200 })
+      await screen.findByText(/Preparing your offline projects… 5%/)
+
+      // Quiet for well past bootStallMs (40 ms), still under rebuildStallMs.
+      await act(() => new Promise((r) => setTimeout(r, 150)))
+      expect(screen.getByText(/Preparing your offline projects… 5%/)).toBeInTheDocument()
+      expect(screen.queryByText(/taking a while to open/)).toBeNull()
+    })
+
     it("falls back to the restart prompt once the rebuild stops moving", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {})
       booting()
@@ -146,7 +158,7 @@ describe("OfflineLeaderWatchdog", () => {
       await screen.findByText(/Preparing your offline projects… 5%/)
 
       expect(await screen.findByText(/taking a while to open/)).toBeInTheDocument()
-      expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
+      await waitFor(() => expect(screen.queryByText(/Preparing your offline projects/)).toBeNull())
 
       // And back to progress if it picks up again.
       reportOfflineRebuildProgress({ done: 20, total: 200 })

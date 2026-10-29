@@ -15,6 +15,11 @@ const PREPARING_TOAST_ID = "offline-preparing"
 // minutes on a big store. The rebuild reports progress (boot-progress.ts), so
 // this only prompts a restart once boot has gone this long with no progress.
 const DEFAULT_BOOT_STALL_MS = 30_000
+// Once a rebuild is under way the leader can go minutes between events: on a
+// real 34k-cell store one 200 KB batch took 111 s, with the worker's event
+// loop blocked the whole time (2026-10-29), so a heartbeat can't tell a busy
+// leader from a dead one. Allow much longer before suggesting a restart.
+const DEFAULT_REBUILD_STALL_MS = 5 * 60_000
 const DEFAULT_BOOT_CHECK_EVERY_MS = 1_000
 const LOG_TAIL = 40
 
@@ -38,6 +43,7 @@ const restartApp = (): void => {
 
 type Props = {
   bootStallMs?: number
+  rebuildStallMs?: number
   bootCheckEveryMs?: number
   stallMs?: number
   checkEveryMs?: number
@@ -58,6 +64,7 @@ type Props = {
  */
 export function OfflineLeaderWatchdog({
   bootStallMs = DEFAULT_BOOT_STALL_MS,
+  rebuildStallMs = DEFAULT_REBUILD_STALL_MS,
   bootCheckEveryMs = DEFAULT_BOOT_CHECK_EVERY_MS,
   stallMs,
   checkEveryMs,
@@ -73,7 +80,7 @@ export function OfflineLeaderWatchdog({
     const check = () => {
       const progress = getOfflineBootProgress()
       const quietForMs = Date.now() - Math.max(startedAt, progress.lastProgressAt)
-      if (quietForMs >= bootStallMs) {
+      if (quietForMs >= (progress.rebuilding ? rebuildStallMs : bootStallMs)) {
         if (shown === "slow") return
         if (shown === "preparing") toast.close(PREPARING_TOAST_ID)
         shown = "slow"
@@ -128,7 +135,7 @@ export function OfflineLeaderWatchdog({
       toast.close(SLOW_BOOT_TOAST_ID)
       toast.close(PREPARING_TOAST_ID)
     }
-  }, [loading, bootStallMs, bootCheckEveryMs, restart, t])
+  }, [loading, bootStallMs, rebuildStallMs, bootCheckEveryMs, restart, t])
 
   useEffect(() => {
     if (!store) return

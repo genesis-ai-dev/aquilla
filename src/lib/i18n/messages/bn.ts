@@ -3657,7 +3657,6 @@ export const bn: Catalog = {
   "org.accessModelLegend.creator.description": "মালিক ভূমিকা স্থায়ী যতক্ষণ না প্রকল্পের মালিকানা হস্তান্তর হয়। প্রকল্পের সেটিংস → শেয়ারে পরিচালনা করুন।",
   "org.joinOrgPage.organizationLine": "প্রতিষ্ঠান: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "নামহীন প্রতিষ্ঠান",
-  "org.joinOrgPage.genericInviteFallback": "আপনাকে Aquilla-তে একটি প্রতিষ্ঠানে যোগ দিতে আমন্ত্রণ করা হয়েছে।",
   "org.joinOrgPage.cantJoinTitle": "যোগ দেওয়া যায় না",
   "org.joinOrgPage.youreInTitle": "আপনি ভিতরে",
   "org.joinOrgPage.joinedRedirect": "{org}-এ যোগ দিয়েছেন। সেখানে নিয়ে যাওয়া হচ্ছে…",

@@ -3131,7 +3131,6 @@ export const ru: Catalog = {
   "org.accessModelLegend.creator.description": "Роль владельца сохраняется, пока не передано право собственности на проект. Управляется в настройках проекта → «Поделиться».",
   "org.joinOrgPage.organizationLine": "Организация: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "Организация без названия",
-  "org.joinOrgPage.genericInviteFallback": "Вас пригласили вступить в организацию в Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "Не удаётся присоединиться",
   "org.joinOrgPage.youreInTitle": "Вы в организации",
   "org.joinOrgPage.joinedRedirect": "Вы присоединились к {org}. Переходим туда…",

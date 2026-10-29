@@ -3650,7 +3650,6 @@ export const pa: Catalog = {
   "org.accessModelLegend.creator.description": "ਮਾਲਕ ਭੂਮਿਕਾ ਉਦੋਂ ਤੱਕ ਸਥਾਈ ਹੈ ਜਦੋਂ ਤੱਕ ਪ੍ਰੋਜੈਕਟ ਮਾਲਕੀ ਤਬਦੀਲ ਨਾ ਹੋਵੇ. ਪ੍ਰੋਜੈਕਟ ਦੀਆਂ ਸੈਟਿੰਗਾਂ → ਸਾਂਝ ਵਿੱਚ ਸੰਭਾਲੋ.",
   "org.joinOrgPage.organizationLine": "ਸੰਸਥਾ: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "ਬਿਨਾਂ ਨਾਮ ਸੰਸਥਾ",
-  "org.joinOrgPage.genericInviteFallback": "ਤੁਹਾਨੂੰ Aquilla ਉੱਤੇ ਇੱਕ ਸੰਸਥਾ ਵਿੱਚ ਸ਼ਾਮਲ ਹੋਣ ਲਈ ਸੱਦਾ ਮਿਲਿਆ ਹੈ.",
   "org.joinOrgPage.cantJoinTitle": "ਸ਼ਾਮਲ ਨਹੀਂ ਹੋ ਸਕਦੇ",
   "org.joinOrgPage.youreInTitle": "ਤੁਸੀਂ ਅੰਦਰ ਹੋ",
   "org.joinOrgPage.joinedRedirect": "{org} ਵਿੱਚ ਸ਼ਾਮਲ ਹੋ ਗਏ. ਤੁਹਾਨੂੰ ਉੱਥੇ ਲੈ ਕੇ ਜਾ ਰਹੇ ਹਾਂ…",

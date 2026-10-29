@@ -3546,7 +3546,6 @@ export const pt: Catalog = {
   "org.accessModelLegend.creator.description": "A função de Proprietário é permanente até a propriedade do projeto ser transferida. Gerencie em Configurações → Compartilhar do projeto.",
   "org.joinOrgPage.organizationLine": "Organização: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "Organização sem nome",
-  "org.joinOrgPage.genericInviteFallback": "Você recebeu um convite para entrar em uma organização no Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "Não é possível entrar",
   "org.joinOrgPage.youreInTitle": "Você entrou",
   "org.joinOrgPage.joinedRedirect": "Você agora integra {org}. Estamos levando você para lá…",

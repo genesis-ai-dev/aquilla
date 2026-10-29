@@ -5,6 +5,8 @@ import { ensureAuthState } from "../../helpers/auth"
 import {
   addOrgMember,
   createOrg,
+  createOrgInvite,
+  listMyOrgs,
   createProjectInvite,
   createProjectServerSide,
   ROLE,
@@ -16,6 +18,21 @@ import {
   jwtFor,
   seedProjectWithFile,
 } from "../../helpers/seed-project"
+
+test("org invitation grants membership and remains usable by its member redeemer", async ({ alice, bob }) => {
+  const org = await createOrg(await jwtFor(alice.username), "Invitation preview regression")
+  const { token } = await createOrgInvite(await jwtFor(alice.username), org.id)
+  await bob.goto(`/join-org/${token}`)
+  await expect(bob.getByText(org.name!, { exact: true })).toBeVisible()
+  await bob.getByRole("button", { name: "Accept invitation", exact: true }).click()
+  await expect(bob).toHaveURL(new RegExp(`/orgs/${org.id}(?:/|$)`))
+  expect((await listMyOrgs(await jwtFor(bob.username))).some((item) => item.id === org.id)).toBe(true)
+
+  // A used token is unavailable anonymously, but the server permits the same
+  // still-member redeemer. The preview must send that caller's session.
+  await bob.goto(`/join-org/${token}`)
+  await expect(bob.getByRole("button", { name: "Accept invitation", exact: true })).toBeVisible()
+})
 
 /**
  * Share / invite — InviteLinkTab chrome is one surface session (1 reset).

@@ -1689,6 +1689,10 @@ export function TimelineEditor({
      * agree by inspection.
      */
     target: TrackDropTarget | null
+    /** Past the 3px threshold: a drag, not a press. Stays true once set, for
+     *  the rest of the gesture — unlike `target`, which goes back to null
+     *  over the row's own slot — so what it switches on cannot flicker. */
+    moved: boolean
   } | null>(null)
   const clock = useTimelineClock()
   const chipStripSlot = useUiSlot("media-chip-strip")
@@ -3151,7 +3155,7 @@ export function TimelineEditor({
     }
     const restoreUserSelect = document.body.style.userSelect
     document.body.style.userSelect = "none"
-    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null })
+    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false })
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
@@ -3167,7 +3171,7 @@ export function TimelineEditor({
         trackDragMovedRef.current = true
       }
       const target = moved ? resolve(ev) : null
-      setTrackDrag((d) => (d ? { ...d, dy, target } : d))
+      setTrackDrag((d) => (d ? { ...d, dy, target, moved } : d))
     }
     const stop = () => {
       window.removeEventListener("pointermove", onMove)
@@ -4795,7 +4799,17 @@ export function TimelineEditor({
               // rule still shows through every ordinary row and is covered only
               // where a row paints something opaque, which is what the folder
               // band is.
-              className="relative z-30"
+              //
+              // …AND OVER THE HEADER TOO, BUT ONLY MID-DRAG (AQU-2236). At rest
+              // the names pass under the header, as the chips pass under the
+              // ruler. During a drag the lane half of the drop line still draws
+              // over the ruler (its z-30 beats the ruler's z-20), so near the
+              // top the gutter half and the row in the air would vanish under
+              // the header while the lane half showed — and the drop still
+              // resolves up there. A dragged chip lifts its whole lane over the
+              // ruler for the same reason (TargetAudioLane): mid-gesture, the
+              // thing under the pointer is what you need to see.
+              className={cn("relative", trackDrag?.moved ? "z-50" : "z-30")}
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >

@@ -4970,6 +4970,7 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
   const header = () => screen.getByTestId("tl-gutter-toggle").parentElement as HTMLElement
   /** The div `handleTrackScroll` transforms; `role="list"` while rows can move. */
   const inner = () => gutter().querySelector('[role="list"]') as HTMLElement
+  const rows = () => Array.from(gutter().querySelectorAll<HTMLElement>("[data-tl-track-row]"))
 
   // Without `isolate` the column's numbers ranked in the workspace's own
   // stacking context, where 40 is the menus' tier (AppShell's z-scale): the
@@ -4995,6 +4996,27 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     const toggle = screen.getByTestId("tl-gutter-toggle")
     expect(toggle.classList).toContain("end-0")
     expect(toggle.classList).not.toContain("right-0")
+  })
+
+  // The lane half of the drop line already crosses the ruler (z-30 over its
+  // z-20). Mid-drag the names must cross the header too, the way a dragged
+  // chip's lane crosses the ruler, or near the top the gutter half of the line
+  // and the row in the air vanish under the header while the lane half shows.
+  it("lifts the names over the header while a row is dragged, and only then", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const raised = () => inner().classList.contains("z-50")
+    fireEvent.pointerDown(rows()[1], { button: 0, pointerId: 1, clientX: 8, clientY: 50 })
+    // A press is not a drag: under the 3px threshold nothing should pop.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 52 })
+    expect(raised()).toBe(false)
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 10 })
+    expect(raised()).toBe(true)
+    // Back over its own slot it is still a drag, and must not flicker.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(true)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(false)
+    expect(inner().classList).toContain("z-30")
   })
 })
 

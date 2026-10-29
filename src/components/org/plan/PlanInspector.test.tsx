@@ -745,6 +745,21 @@ describe("the chapter card", () => {
       .toEqual(["20 of 20 translated", "18 of 20 validated"])
   })
 
+  // AQU-2260 (Sam, Oct 29, third pass): the counts the percentages round away
+  // are printed in the details panel, under each bar, never on hover.
+  it("prints each bar's counts under it in the details panel", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [],
+    )
+    const card = screen.getByTestId("plan-chapter-detail")
+    expect(within(card).getByTestId("plan-bar-counts-text")).toHaveTextContent("20 of 20 translated · 18 of 20 validated")
+    const figure = within(card).getAllByTestId("plan-readout-figure")[0]!
+    await userEvent.setup().hover(figure)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
   it("draws a chip per short verse, in canonical order, and opens the cell", async () => {
     const onOpenCell = vi.fn()
     await openChapter(

@@ -416,6 +416,7 @@ export function PlanInspector({
                   translated: planPct(unit.filledCount, unit.totalCount),
                   validated: validatedPct,
                 })}
+                showCounts
                 tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
               />
             )}
@@ -430,6 +431,7 @@ export function PlanInspector({
                   recorded: planPct(unit.audioCount, audioTotal),
                   validated: planPct(unit.audioValidatedCount, audioTotal),
                 })}
+                showCounts
                 tips={readoutTips("audio", unit.audioCount, unit.audioValidatedCount, audioTotal)}
               />
             )}
@@ -854,10 +856,11 @@ function PlanChapterCard({
             translated: planPct(section.filledCount, section.totalCount),
             validated: planPct(section.validatedCount, section.totalCount),
           })}
-          // Percentages like every other bar, the counts one hover away (Sam,
-          // 2026-09-17, for consistency). "20 of 20 translated · 18 of 20
-          // validated" is what the hover says; the card's own header still
-          // says "2 cells not yet validated" in print.
+          // Percentages like every other bar (Sam, 2026-09-17, for
+          // consistency), and "20 of 20 translated · 18 of 20 validated"
+          // printed under it (AQU-2260: it was a hover). The card's own header
+          // still says "2 cells not yet validated".
+          showCounts
           tips={readoutTips("text", section.filledCount, section.validatedCount, section.totalCount)}
         />
       )}
@@ -871,6 +874,7 @@ function PlanChapterCard({
             recorded: planPct(section.audioCount, section.totalCount),
             validated: planPct(section.audioValidatedCount, section.totalCount),
           })}
+          showCounts
           tips={readoutTips("audio", section.audioCount, section.audioValidatedCount, section.totalCount)}
         />
       )}

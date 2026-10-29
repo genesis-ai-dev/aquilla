@@ -334,10 +334,10 @@ describe("VoicePlaybackBar — the chosen sound", () => {
 // strip along its bottom — the time, previous · play · next, speed, volume,
 // and nothing else.
 describe("VoicePlaybackBar — the media view's strip", () => {
-  it("is 28 px with the time at the left, the three transport buttons, then speed and volume", () => {
+  it("is 32 px with the time at the left, the three transport buttons, then speed and volume", () => {
     render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
     const strip = screen.getByTestId("media-play-strip")
-    expect(strip.className).toContain("h-7")
+    expect(strip.className).toContain("h-8")
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
     const centre = screen.getByTestId("top-transport")
     expect(Array.from(centre.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"))).toEqual([

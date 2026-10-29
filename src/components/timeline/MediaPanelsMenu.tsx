@@ -2,21 +2,25 @@
 // "Lean chrome: your mix", Oct 24.)
 //
 // A folded panel leaves nothing behind, so this is the way back to every one
-// of them: the film and the text, each a row you click to show or hide (✓
+// of them: the timeline, the film and the text, each a row you click to show or hide (✓
 // while it shows) with its key, where it sits in the row's tooltip; the way
 // out of full screen; and Reset layout, with the shortcuts behind its (i).
+// The (i) opens that note in place beneath Reset layout and closes it again
+// (Sam, Oct 28: "this (i) button doesnt work correctly" — a hover card that
+// covered the bar).
 // ⌘\ opens it from anywhere in the media view.
 //
 // Sam, Oct 28 ("a little bit too much going on… redundancy with the status
 // circle"): no status line — Live / Synced and the line counts are the top
-// bar's status ring's — and no Timeline row: it is always there, and ⌥1
-// still brings it back.
+// bar's status ring's. The Timeline row stays first: its corner's Fold folds
+// it to nothing too, and this is the way back ("Why does the timeline not
+// show up in panels?").
 
 import { Check, LayoutGrid, RotateCcw, Shrink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { undoTargets, type DockPanel } from "./media-dock-layout"
@@ -49,11 +53,19 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
 
   const stateWords = (parts: Array<string | null | false>) => parts.filter(Boolean).join(" · ")
 
-  const row = (id: DockPanel, n: number) => {
+  const row = (id: DockPanel | "timeline", n: number) => {
     let where: string
     let showing: boolean
     let toggle: (() => void) | null = null
-    if (id === "film" && filmHiddenByTiming) {
+    if (id === "timeline") {
+      showing = v.isOpen("tl")
+      where = stateWords([
+        t("editor.dock.whereTimeline"),
+        !showing && t("editor.dock.stateFolded"),
+        full === "tl" && t("editor.dock.stateFull"),
+      ])
+      toggle = showing ? () => dock.fold("tl") : () => dock.show("timeline")
+    } else if (id === "film" && filmHiddenByTiming) {
       showing = false
       where = t("editor.dock.filmHiddenByTiming")
     } else {
@@ -150,32 +162,53 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           {t("editor.dock.panels")}
         </div>
         <div className="flex flex-col">
+          {row("timeline", 1)}
           {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
           {row("text", 3)}
         </div>
-        <div className="flex items-center gap-1 border-t border-border pt-1.5">
-          <button
-            type="button"
-            data-testid="panels-reset"
-            onClick={dock.resetLayout}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50"
-          >
-            <RotateCcw className="size-3.5 shrink-0" aria-hidden />
-            {t("editor.dock.resetLayout")}
-          </button>
-          <VoiceInfoTip
-            label={t("editor.dock.resetInfoAria")}
-            content={
-              <span className="flex flex-col gap-1.5" data-testid="panels-reset-info">
-                <span>{`${t("editor.dock.rememberedNote", { file: fileName })} ${t(START_KEY[kind])}`}</span>
-                <span data-testid="panels-keys">
-                  {t("editor.dock.keysHint", { panels: keys.panels, full: keys.full, fold: keys.fold, restore: keys.restore })}
-                </span>
-              </span>
-            }
-          />
-        </div>
+        <ResetRow
+          onReset={dock.resetLayout}
+          note={`${t("editor.dock.rememberedNote", { file: fileName })} ${t(START_KEY[kind])}`}
+          keysLine={t("editor.dock.keysHint", { panels: keys.panels, full: keys.full, fold: keys.fold, restore: keys.restore })}
+        />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** Reset layout, and its (i) opening what Reset does and the keys beneath it.
+ *  Drawn inside the menu, so the note starts shut each time the menu opens. */
+function ResetRow({ onReset, note, keysLine }: { onReset: () => void; note: string; keysLine: string }) {
+  const t = useT()
+  const [infoOpen, toggleInfo] = useInfoOpen()
+  return (
+    <div className="flex flex-col border-t border-border pt-1.5">
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          data-testid="panels-reset"
+          onClick={onReset}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50"
+        >
+          <RotateCcw className="size-3.5 shrink-0" aria-hidden />
+          {t("editor.dock.resetLayout")}
+        </button>
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <InfoToggle
+            open={infoOpen}
+            onToggle={toggleInfo}
+            label={t("editor.dock.resetInfoAria")}
+            controls="panels-reset-info"
+            testId="panels-reset-info-toggle"
+          />
+        </span>
+      </div>
+      <InfoReveal open={infoOpen} id="panels-reset-info" testId="panels-reset-info" className="px-2 text-xs text-muted-foreground">
+        <span className="flex flex-col gap-1.5 pb-1">
+          <span>{note}</span>
+          <span data-testid="panels-keys">{keysLine}</span>
+        </span>
+      </InfoReveal>
+    </div>
   )
 }

@@ -57,6 +57,7 @@ export function CellAreaPlaceholder({
   if (state.kind === "load-error") {
     return <LoadError fileName={fileName} onRetryClick={onRetryClick} />
   }
+  if (state.kind === "lanes-loading") return <LanesLoading />
   return <SkeletonRows progress={progress} />
 }
 
@@ -122,6 +123,41 @@ function LoadError({
   )
 }
 
+/** AQU-1901: the rows may be here, but not which language's translations to
+ *  pair them with. Showing them anyway paired them with the default lane,
+ *  which a project with only tagged lanes does not have — every translated row
+ *  read "empty". The banner above says the same thing; this replaces the rows. */
+function LanesLoading() {
+  const t = useT()
+  return (
+    <LoadingTemplate
+      label={t("editor.file.loadingLanguages")}
+      className="h-full min-h-64"
+      templateClassName="min-h-64"
+      data-testid="cell-area-lanes-loading"
+    >
+      <SkeletonGrid />
+    </LoadingTemplate>
+  )
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="flex h-full min-h-64 flex-col">
+      <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
+            <Skeleton className="h-6 w-10" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-6 w-10" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SkeletonRows({ progress }: { progress?: UseActiveCellStoreResult["loadProgress"] }) {
   const t = useT()
   // AQU-819: this state is a plain read — the cells projection is being
@@ -136,18 +172,7 @@ function SkeletonRows({ progress }: { progress?: UseActiveCellStoreResult["loadP
       templateClassName="min-h-64"
       data-testid="cell-area-loading"
     >
-      <div className="flex h-full min-h-64 flex-col">
-        <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
-              <Skeleton className="h-6 w-10" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-16 w-full" />
-              <Skeleton className="h-6 w-10" />
-            </div>
-          ))}
-        </div>
-      </div>
+      <SkeletonGrid />
     </LoadingTemplate>
   )
 }

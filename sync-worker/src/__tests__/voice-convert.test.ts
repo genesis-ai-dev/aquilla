@@ -563,7 +563,7 @@ describe("POST /api/v1/voice/convert", () => {
     // 504, not the 502 a genuinely unreachable upstream gets — the user is told
     // the request was cancelled and is retryable, not that the box is down.
     expect(res.status).toBe(504)
-    expect(await res.text()).toMatch(/did not respond within 120s/)
+    expect(await res.text()).toMatch(/did not respond within 240s/)
     expect(calls).toHaveLength(1)
     expect((calls[0].init as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal)
   })

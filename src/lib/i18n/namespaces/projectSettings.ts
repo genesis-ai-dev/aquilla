@@ -392,7 +392,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
     "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
     "projectSettings.timeline.filmAndSourcesInfo":
-      "Shows the Film button in the media view's top bar, for linking a video, and the timeline's Sources menu, for importing audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
+      "Shows the Sources menu in the media view's top bar. Its first item is the film, for linking a video, and the rest import audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -1586,7 +1586,7 @@ export const projectSettings = defineNamespace({
       "projectSettings.timeline.filmAndSourcesLabel": {
         description:
           "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +
-          "dubbing tools — the Film button (link a video) and the timeline's Sources menu.",
+          "dubbing tools — the Sources menu in its top bar, whose first item is the film (link a video).",
       },
       "projectSettings.timeline.filmAndSourcesInfoAria": {
         description:
@@ -1595,8 +1595,8 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.timeline.filmAndSourcesInfo": {
         description:
-          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' and 'Film' " +
-          "are the names of those two controls in the media view.",
+          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' is the name " +
+          "of a menu in the media view's top bar, and the film is the first item in that menu.",
       },
       "projectSettings.shared.lastEdited": {
         description:

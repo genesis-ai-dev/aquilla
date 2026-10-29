@@ -1349,14 +1349,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
     "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
     "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
-    "projectSettings.monday.columnInfo.deadline": "The project's deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.deadline":
+      "The project deadline. Empty when the project has none.",
     "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
     "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
     "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
     "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
     "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
     "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
-    "projectSettings.monday.columnInfo.schedule_status": "On track, Due soon, Overdue or Behind plan, from the deadline and the plan's target dates.",
+    "projectSettings.monday.columnInfo.schedule_status":
+      "On track, Due soon, Overdue or Behind plan, from the project deadline and the plan's target " +
+      "dates.",
     "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
     "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
     "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",

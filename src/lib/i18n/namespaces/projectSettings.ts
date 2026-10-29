@@ -672,6 +672,20 @@ export const projectSettings = defineNamespace({
       "out means a book reads 100% once every verse is done.",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
+    // ── ProjectVisibilitySection ── AQU-2263: who sees this project's member
+    // list and each member's progress; a second home for the dashboard badges.
+    "projectSettings.visibility.groupLabel": "Member list and progress",
+    "projectSettings.visibility.groupDescription":
+      "Your organization decides who can see these. A project can make them stricter, never looser.",
+    "projectSettings.visibility.rosterLabel": "Who can see the member list",
+    "projectSettings.visibility.rosterDescription":
+      "The member list and member count, here and on the project's dashboard.",
+    "projectSettings.visibility.progressLabel": "Who can see each member's progress",
+    "projectSettings.visibility.progressDescription":
+      "Each member's progress on the project's dashboard. They also need to see the member list.",
+    // {role} is a plural role name: "Owners".
+    "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
     // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
@@ -3289,6 +3303,15 @@ export const projectSettings = defineNamespace({
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
           value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.visibility.onlyRoleLoosens": {
+        description:
+          "Under 'Who can see the member list' or 'Who can see each member's progress' in Project settings → Members, " +
+          "when this project set a stricter value than the reader's own role: only people with that role or higher may " +
+          "make it less strict again.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Owners'.",
         },
       },
       "projectSettings.mediaDefaults.cellEditingNobody": {

@@ -132,6 +132,7 @@ import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSec
 import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -1614,7 +1615,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     // AQU-2259: only the "this setting moved" note is left here, until it expires.
     { id: "section-user", label: "User", keywords: ["username", "author"], visible: settingMovedNotesShowing() },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
@@ -2479,6 +2480,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+        {/* AQU-2263: who sees the member list and each member's progress. The
+            organization's policy, which a project may only make stricter; a
+            second home beside the dashboard's badges, which stay. */}
+        {id && isCloudProject && projectPolicy.ready && sectionsToRender.some((s) => s.id === "section-members") && (
+          <div id="section-member-visibility">
+            <ProjectVisibilitySection
+              roster={projectPolicy.rosterViewMinRole}
+              progress={projectPolicy.memberProgressViewMinRole}
+              roleLevel={project?.syncRole?.level ?? 0}
+              canEdit={canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
+          </div>
         )}
 
         {/* AQU-1672: a direct, first-class entry to the translation brief.

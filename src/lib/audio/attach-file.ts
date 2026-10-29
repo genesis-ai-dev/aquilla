@@ -22,6 +22,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
 /** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
  *  enough: some mobile browsers report an empty or wrong MIME type for files
@@ -120,6 +121,9 @@ export interface AttachAudioFileArgs {
   targetLang?: string
   /** AQU-1572: where the upload came from, for telemetry ("recorder", "cell"). */
   surface: TelemetrySurface
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 export interface AttachAudioFileResult {
@@ -227,6 +231,9 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded("upload", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
+  }
 
   return { audioId: fullAudioId, url: result.url, durationMs }
 }

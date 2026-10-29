@@ -1,6 +1,6 @@
 // AQU-1767: the per-user edit history, who owns Cmd/Ctrl+Z, and (phase 2)
 // steps as data, groups, "undo to here", blocked steps and persistence.
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import {
   flushHistorySaveForTests,
   historyReady,
@@ -11,6 +11,8 @@ import {
   registerStepKinds,
   resetHistoryForTests,
   setHistoryScope,
+  setLaneSwitcher,
+  setFileNamer,
   setOpenFileProbe,
   undoLast,
   undoTo,
@@ -18,7 +20,7 @@ import {
   type StepHandler,
   type StepOutcome,
 } from "./history"
-import { clearHistoryStoreForTests } from "./history-store"
+import { clearHistoryStoreForTests, loadLaneHistories, saveLaneHistoryForTests } from "./history-store"
 import { setToastUndoAt, undoShortcutOwner } from "./arbiter"
 
 /** A step kind whose undo/redo log what they did, with a scripted outcome. */
@@ -188,6 +190,24 @@ describe("edit history", () => {
     expect((await undoLast())?.outcome.kind).toBe("done")
   })
 
+  // Slice 13 evidence (Oct 27): a take renamed in Ruth's Recording tab, undone
+  // from another file, said "Open the file it was made in to undo …": the
+  // rename is recorded with its file's id and no name. The workspace's namer
+  // fills the name in; a step that brings its own name keeps it.
+  it("names a step's file from its id when the step brought no name", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    setFileNamer((id) => (id === "file-1" ? "Ruth" : null))
+    recordStep(step("c", { fileId: "file-9" }))
+    recordStep({ ...step("b", { fileId: "file-1" }), fileName: "Ruth 1" })
+    recordStep(step("a", { fileId: "file-1" }))
+    expect(historyView().undoSteps.map((s) => s.fileName)).toEqual([null, "Ruth 1", "Ruth"])
+    setOpenFileProbe((id) => id === "file-2")
+    const r = await undoLast()
+    expect(r?.outcome).toEqual({ kind: "blocked", reason: "elsewhere" })
+    expect(r?.step.fileName).toBe("Ruth")
+  })
+
   it("keeps one stack per project and person", async () => {
     const log: string[] = []
     registerStepKinds({ "test.log": logKind(log) })
@@ -306,25 +326,34 @@ describe("persistence", () => {
     expect(log).toEqual(["undo saved-b"])
   })
 
-  it("each language's steps come back after a reload in that language only", async () => {
-    // Sam, 2026-10-14: the per-language histories are saved apart too. Saved
-    // under one key, a reload in French read back Spanish's steps, and Cmd+Z
-    // in French undid a Spanish delete.
-    setHistoryScope("p1", "sam", "Spanish")
-    await historyReady()
-    recordStep(step("es-delete"))
+  it("the per-language histories of before decision 11 join the project's history, stamped with their language", async () => {
+    // Gap 27: merged the first time the project opens on this device.
+    await saveLaneHistoryForTests("p1", "sam", "Spanish", {
+      undo: [{ id: "a", kind: "take.window", data: {}, labelKey: "es-trim", at: 10 }],
+      redo: [],
+      log: [],
+      gone: [],
+    })
+    await saveLaneHistoryForTests("p1", "sam", "French", {
+      undo: [
+        { id: "b", kind: "text.commit", data: { side: "target" }, labelKey: "fr-text", at: 20 },
+        { id: "c", kind: "row.add", data: {}, labelKey: "fr-row", at: 30 },
+      ],
+      redo: [],
+      log: [],
+      gone: [],
+    })
+    resetHistoryForTests() // a reload after the update
     setHistoryScope("p1", "sam", "French")
     await historyReady()
-    recordStep(step("fr-trim"))
-    await flushHistorySaveForTests()
-
-    resetHistoryForTests() // a reload: nothing in memory
-    setHistoryScope("p1", "sam", "French")
-    await historyReady()
-    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["fr-trim"])
-    setHistoryScope("p1", "sam", "Spanish")
-    await historyReady()
-    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["es-delete"])
+    expect(historyView().undoSteps.map((s) => [s.labelKey, s.lane])).toEqual([
+      ["es-trim", "Spanish"],
+      ["fr-text", "French"],
+      // A row belongs to every language.
+      ["fr-row", undefined],
+    ])
+    // The old rows are gone: a second reload reads the merged copy alone.
+    expect(await loadLaneHistories("p1", "sam")).toEqual([])
   })
 
   it("saved steps sit under anything recorded before the load finished", async () => {
@@ -338,43 +367,81 @@ describe("persistence", () => {
   })
 })
 
-// Sam, 2026-10-14: each language keeps its own history. Undo in French undoes
-// French's last step and never touches or waits on a Spanish one.
-describe("one history per language", () => {
-  it("undoes and redoes only the open language's steps", async () => {
+// Decision 11 (2026-10-20): one history per person and project, whatever
+// language is open; a step still knows its language, and undoing it opens
+// that language first (gap 24).
+describe("one history per project, every language", () => {
+  const laneStep = (name: string) => ({ kind: "test.log", data: { name }, labelKey: name })
+
+  it("undoes the newest step whatever language it was made in, opening that language first", async () => {
     const log: string[] = []
     registerStepKinds({ "test.log": logKind(log) })
-    setHistoryScope("p1", "sam", "Spanish")
-    await historyReady()
-    recordStep(step("es-delete"))
+    const opened: string[] = []
+    setLaneSwitcher(async (lane) => {
+      opened.push(lane)
+      setHistoryScope("p1", "sam", lane) // the workspace re-scopes as the language opens
+      return "ready"
+    })
+    setHistoryScope("p1", "sam", "Swahili")
+    recordStep(laneStep("sw-trim"))
     setHistoryScope("p1", "sam", "French")
-    await historyReady()
-    // French has done nothing yet: nothing to undo, and Spanish's step stays put.
-    expect(await undoLast()).toBeNull()
-    recordStep(step("fr-trim"))
-    expect((await undoLast())?.step.labelKey).toBe("fr-trim")
-    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual([])
-    setHistoryScope("p1", "sam", "Spanish")
-    await historyReady()
-    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["es-delete"])
-    expect((await undoLast())?.step.labelKey).toBe("es-delete")
-    // French's undone step is French's to redo, not Spanish's.
-    expect((await redoLast())?.step.labelKey).toBe("es-delete")
-    expect(log).toEqual(["undo fr-trim", "undo es-delete", "redo es-delete"])
+    recordStep(laneStep("fr-text"))
+    expect(historyView().undoSteps.map((s) => [s.labelKey, s.lane])).toEqual([
+      ["sw-trim", "Swahili"],
+      ["fr-text", "French"],
+    ])
+    expect((await undoLast())?.step.labelKey).toBe("fr-text")
+    expect(opened).toEqual([])
+    const second = await undoLast()
+    expect(second?.step).toMatchObject({ labelKey: "sw-trim", lane: "Swahili" })
+    expect(second?.outcome.kind).toBe("done")
+    expect(opened).toEqual(["Swahili"])
+    // Redo puts both back, in order; the French one opens French again.
+    expect((await redoLast())?.step.labelKey).toBe("sw-trim")
+    expect((await redoLast())?.step.labelKey).toBe("fr-text")
+    expect(opened).toEqual(["Swahili", "French"])
+    expect(log).toEqual(["undo fr-text", "undo sw-trim", "redo sw-trim", "redo fr-text"])
   })
 
-  it("files a step recorded from outside the editor under the language last open", async () => {
+  it("a step every language shares runs where you are, without switching", async () => {
+    const log: string[] = []
+    registerStepKinds({ "row.add": logKind(log) })
+    const switcher = vi.fn(async () => "ready" as const)
+    setLaneSwitcher(switcher)
+    setHistoryScope("p1", "sam", "Swahili")
+    recordStep({ kind: "row.add", data: { name: "row" }, labelKey: "row" })
+    setHistoryScope("p1", "sam", "French")
+    expect(historyView().undoSteps[0].lane).toBeUndefined()
+    expect((await undoLast())?.outcome.kind).toBe("done")
+    expect(switcher).not.toHaveBeenCalled()
+  })
+
+  it("a language that does not open in time keeps the step; one you may no longer open drops it", async () => {
     const log: string[] = []
     registerStepKinds({ "test.log": logKind(log) })
+    setHistoryScope("p1", "sam", "Swahili")
+    recordStep(laneStep("sw-a"))
+    recordStep(laneStep("sw-b"))
+    setHistoryScope("p1", "sam", "French")
+    setLaneSwitcher(async () => "blocked")
+    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "language" })
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["sw-a", "sw-b"])
+    setLaneSwitcher(async () => "denied")
+    expect((await undoLast())?.outcome).toEqual({ kind: "skipped", reason: "notAllowed" })
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["sw-a"])
+    expect(historyView().skipped.map((e) => e.reason)).toEqual(["notAllowed"])
+    expect(log).toEqual([])
+  })
+
+  it("files a step recorded from outside the editor in the project's one history", async () => {
+    const log: string[] = []
+    registerStepKinds({ "settings.project": logKind(log) })
     setHistoryScope("p1", "sam", "French")
     await historyReady()
     setHistoryScope(null, null)
     // A settings save names only its project and person.
-    recordStep(step("settings"), { projectId: "p1", username: "sam" })
+    recordStep({ kind: "settings.project", data: { name: "settings" }, labelKey: "settings" }, { projectId: "p1", username: "sam" })
     setHistoryScope("p1", "sam", "Spanish")
-    await historyReady()
-    expect(await undoLast()).toBeNull()
-    setHistoryScope("p1", "sam", "French")
     await historyReady()
     expect((await undoLast())?.step.labelKey).toBe("settings")
   })

@@ -19,6 +19,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { Voice } from "@/lib/parsers/types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { probeDurationMsSafe } from "@/lib/import"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { audioCachePutBlob } from "./bytes-cache"
@@ -214,6 +215,8 @@ export interface ChangeVoiceArgs {
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   diffusionSteps?: number
+  /** Decision 11: record an Undo step for the changed take. Bulk runs leave it off. */
+  recordStep?: boolean
 }
 
 export interface ChangeVoiceResult {
@@ -278,6 +281,13 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(cell.fileId)
+  if (args.recordStep) {
+    recordTakeAdded(
+      "changeVoice",
+      { cellId: cell.id, audioId: objectName, slot: take.slot, selectedBefore: playingInSlot(cell, take.slot) },
+      { fileId: cell.fileId },
+    )
+  }
   return { audioId: objectName, url: conv.url }
 }
 

@@ -83,7 +83,9 @@ import { keptWindowSec } from "@/lib/audio/kept-window"
 import { emitCellAudioDeselect } from "@/lib/sync/events-emit"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
-import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { withGroup } from "@/lib/history/history"
+import { playingInSlot, recordSlotChoice } from "@/lib/history/take-steps"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
 import { CloneFromTakeButton } from "./CloneFromTakeButton"
@@ -498,21 +500,18 @@ export function CellVoicePanel({
   // row's "Changing to …" line (a pick acts before the cast settings catch up).
   const [workingAs, setWorkingAs] = useState<string | null>(null)
 
-  const generate = useCallback(async (voiceId: string = active.id) => {
-    if (isVoicing || !canGenerate || !canEdit) return
-    autoplayRef.current = true
-    setWorkingAs(findVoice(settings, voiceId)?.name ?? active.name)
+  // Decision 11: the voice and the recording it stops from sounding are ONE
+  // Undo step.
+  const voiceThenDisplace = useCallback(async (voiceId: string): Promise<boolean> => {
+    const slot = generateSlotOverVoiceChange(cell)
     const ok = await generateCellVoice({
       project, cell, session: sess, username, voiceId,
-      slot: generateSlotOverVoiceChange(cell),
+      slot,
       ...(targetLang ? { targetLang } : {}),
       surface: "voice-panel",
+      history: { selectedBefore: playingInSlot(cell, slot ?? GENERATED_VOICE_SLOT) },
     })
-    setWorkingAs(null)
-    if (!ok) {
-      autoplayRef.current = false
-      return
-    }
+    if (!ok) return false
     // A line plays its recording ahead of a generated voice. The recorder
     // already clears a cell-owned take so the voice just made is what sounds;
     // do the same here, or Generate on a missing recording would leave the
@@ -534,9 +533,30 @@ export function CellVoicePanel({
       injectOptimisticAudioDeselect(cell.fileId, cell.id, RECORDING_SLOT, displaceP)
       await displaceP
       notifyAudioAttachmentsChanged(cell.fileId)
+      recordSlotChoice(
+        { cellId: cell.id, slot: RECORDING_SLOT, before: playingInSlot(cell, RECORDING_SLOT), after: null },
+        { fileId: cell.fileId },
+      )
+    }
+    return true
+  }, [project, cell, sess, username, targetLang, playableId, isSourceClip, projectId])
+  const voiceAndDisplace = useCallback(
+    (voiceId: string) =>
+      withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: cell.fileId }, () => voiceThenDisplace(voiceId)),
+    [cell.fileId, voiceThenDisplace],
+  )
+  const generate = useCallback(async (voiceId: string = active.id) => {
+    if (isVoicing || !canGenerate || !canEdit) return
+    autoplayRef.current = true
+    setWorkingAs(findVoice(settings, voiceId)?.name ?? active.name)
+    const ok = await voiceAndDisplace(voiceId)
+    setWorkingAs(null)
+    if (!ok) {
+      autoplayRef.current = false
+      return
     }
     onAfterGenerate()
-  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, active.name, settings, onAfterGenerate, targetLang, playableId, isSourceClip, projectId])
+  }, [isVoicing, canGenerate, canEdit, active.id, active.name, settings, onAfterGenerate, voiceAndDisplace])
 
   const changeVoice = useCallback(async (voice: Voice = active) => {
     if (isVoicing || !canEdit || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
@@ -546,6 +566,7 @@ export function CellVoicePanel({
       projectId, cell, voice, session: sess, author: username,
       diffusionSteps,
       ...(targetLang ? { targetLang } : {}),
+      recordStep: true, // decision 11: an Undo step
     })
     setWorkingAs(null)
     if (ok) onAfterGenerate()

@@ -72,6 +72,39 @@ describe("HistoryPanel", () => {
     expect(skipped.textContent).toContain("Someone changed it afterwards")
   })
 
+  it("names each step's file and language; a step every language shares names none (decision 11)", async () => {
+    setHistoryScope("p1", "sam", "sw")
+    act(() => recordStep({ kind: "test.step", data: { name: "trim" }, labelKey: "editor.history.stepTrim", fileName: "Ep 1" }))
+    setHistoryScope("p1", "sam", "fr")
+    act(() => recordStep({ kind: "test.step", data: { name: "text" }, labelKey: "editor.history.stepEditText", fileName: "Ep 1" }))
+    act(() => recordStep({ kind: "row.add", data: { name: "row" }, labelKey: "editor.history.stepAddRow", fileName: "Ep 1" }))
+    const names: Record<string, string> = { sw: "Swahili", fr: "French" }
+    render(<HistoryPanel onResult={vi.fn()} laneName={(tag) => names[tag] ?? tag} />)
+    await userEvent.click(screen.getByTestId("history-panel-trigger"))
+    const steps = within(await screen.findByTestId("history-panel-steps")).getAllByTestId("history-step")
+    expect(steps.map((li) => li.textContent)).toEqual([
+      expect.stringMatching(/Add row.*Ep 1(?!.*·)/),
+      expect.stringContaining("Edit translationEp 1 · French"),
+      expect.stringContaining("Ep 1 · Swahili"),
+    ])
+  })
+
+  it("shows someone else's approval as the reason a step was left alone", async () => {
+    registerStepKinds({
+      "test.approved": {
+        undo: async () => ({ kind: "skipped" as const, reason: "approved" as const, by: "ben" }),
+        redo: async () => ({ kind: "done" as const }),
+      } as unknown as StepHandler<never>,
+    })
+    act(() => recordStep({ kind: "test.approved", data: {}, labelKey: "editor.history.stepRecordTake" }))
+    render(<HistoryPanel onResult={vi.fn()} />)
+    await userEvent.click(screen.getByTestId("history-panel-trigger"))
+    await userEvent.click(screen.getByTestId("history-panel-undo"))
+    const skipped = await screen.findByTestId("history-panel-skipped")
+    expect(skipped.textContent).toContain("Record take")
+    expect(skipped.textContent).toContain("ben approved it afterwards")
+  })
+
   it("says so when there is nothing to undo", async () => {
     render(<HistoryPanel onResult={vi.fn()} />)
     await userEvent.click(screen.getByTestId("history-panel-trigger"))

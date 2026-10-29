@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useCallback, useMemo, useState, forwardRef, useImperativeHandle } from "react"
 import { recordStep } from "@/lib/history/history"
+import { settleSourceStep, type SourceSession } from "@/lib/history/source-steps"
 import { createPortal } from "react-dom"
 import {
   LegendList,
@@ -5848,6 +5849,10 @@ function EditorRow({
     setSourceEditing(true)
   }
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
+  const sourceDraftRef = useRef(sourceDraft)
+  sourceDraftRef.current = sourceDraft
+  /** Decision 11: the open source-editing session, for its Undo step. */
+  const sourceStepRef = useRef<SourceSession | null>(null)
   // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
   // stored value is the import FILENAME — an import record, not prose — so for
   // these cells the editor opens on the transcript (blank when untranscribed,
@@ -6798,12 +6803,22 @@ function EditorRow({
       console.warn("[source-edit] aborting: role too low for source.cell.commit")
       return
     }
+    // Decision 11: the session's Undo step starts from what the row showed
+    // before its first save (the draft of an earlier session, else the seed).
+    const shown = sourceDraftRef.current ?? (({ text, html }) => ({ value: text, valueHtml: html }))(sourceEditorSeed(cell))
     // Optimistic local hold so the source column shows the new text immediately
     // (cleared by the effect below once cell.original round-trips).
     setSourceDraft({ value, valueHtml })
     setWriteError(null)
     const parentId = resolveSourceCommitParent(pendingSourceCommitRef.current, cell.sourceEventId ?? null)
-    emitSourceCellCommit({
+    const session = (sourceStepRef.current ??= {
+      before: { value: shown.value, ...(shown.valueHtml !== undefined ? { valueHtml: shown.valueHtml } : {}) },
+      after: { value, valueHtml },
+      heads: parentId ? [parentId] : [],
+      writes: [],
+    })
+    session.after = { value, valueHtml }
+    const write = emitSourceCellCommit({
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,
@@ -6814,14 +6829,28 @@ function EditorRow({
       author: username,
     }).then((eventId) => {
       pendingSourceCommitRef.current = { eventId, parentId }
+      session.heads.push(eventId)
       void onCellCommitted?.(cell.id)
+      return true
     }).catch((err) => {
       console.error("[source-edit] enqueue failed:", err)
       const msg = err instanceof Error ? err.message : t("editor.write.saveSourceFailed")
       setWriteError(msg)
       setSourceDraft(null)
+      return false
     })
+    session.writes.push(write)
   }, [canEditSourceForCell, project.id, project.syncRole?.level, cell, username, onCellCommitted, t])
+
+  // Decision 11: the session becomes ONE Undo step once the source editor
+  // closes, after its saves are queued (so the step knows every head they made).
+  useEffect(() => {
+    if (sourceEditing) return
+    const session = sourceStepRef.current
+    sourceStepRef.current = null
+    if (!session) return
+    void settleSourceStep(session, { cellId: cell.id, fileId: cell.fileId })
+  }, [sourceEditing, cell.id, cell.fileId])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.

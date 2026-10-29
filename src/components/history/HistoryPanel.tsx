@@ -7,6 +7,10 @@
  * three always agree. "Undo to here" walks back one step at a time — each
  * step's own guard still decides — and stops at a step that has to wait for
  * its file to be opened.
+ *
+ * Decision 11: the history is the project's, not one language's, so each step
+ * names the language it was made in; and opening the panel catches up with the
+ * steps made on the person's other devices (gap 28).
  */
 import { useState } from "react"
 import { History, Redo2, Undo2 } from "lucide-react"
@@ -14,21 +18,33 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
-import { redoLast, undoLast, undoTo, type HistoryResult, type StepSummary } from "@/lib/history/history"
+import { redoLast, refreshHistory, undoLast, undoTo, type HistoryResult, type SkipLogEntry, type StepSummary } from "@/lib/history/history"
 import { useHistoryView } from "@/lib/history/useHistory"
 import { cn } from "@/lib/utils"
 
 export interface HistoryPanelProps {
   /** Say what happened (the workspace's toast reporter). */
   onResult: (which: "undo" | "redo", result: HistoryResult) => void
+  /** A language tag's name, the way the language switcher shows it. */
+  laneName?: (lane: string) => string
 }
 
-export function HistoryPanel({ onResult }: HistoryPanelProps) {
+export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
   const t = useT()
   const fmt = useFormat()
   const view = useHistoryView()
   const [open, setOpen] = useState(false)
   const name = (s: Pick<StepSummary, "labelKey" | "labelParams">) => t(s.labelKey as never, s.labelParams as never)
+  // Where a step was made: its file and, when it belongs to one, its language.
+  const place = (s: StepSummary): string | null => {
+    const language = s.lane !== undefined ? (laneName?.(s.lane) ?? s.lane) : null
+    if (s.fileName && language) return t("editor.history.stepPlace", { file: s.fileName, language })
+    return s.fileName || language
+  }
+  const onOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) void refreshHistory()
+  }
 
   const run = (which: "undo" | "redo") => {
     void (which === "undo" ? undoLast() : redoLast()).then((r) => {
@@ -43,17 +59,23 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
 
   const undoSteps = [...view.undoSteps].reverse()
   const redoSteps = [...view.redoSteps].reverse()
-  const reasonText = (reason: string) =>
-    reason === "changed"
+  const reasonText = (entry: SkipLogEntry) =>
+    entry.reason === "changed"
       ? t("editor.history.reasonChanged")
-      : reason === "gone"
+      : entry.reason === "gone"
         ? t("editor.history.reasonGone")
-        : reason === "unavailable"
+        : entry.reason === "unavailable"
           ? t("editor.history.reasonUnavailable")
-          : t("editor.history.reasonFailed")
+          : entry.reason === "approved"
+            ? t("editor.history.reasonApproved", { name: entry.by ?? "" })
+            : entry.reason === "notAllowed"
+              ? t("editor.history.reasonNotAllowed")
+              : entry.reason === "linesChanged"
+                ? t("editor.history.reasonLinesChanged")
+                : t("editor.history.reasonFailed")
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {/* The hover names it (AQU-2260); what it does is the panel itself. */}
       <AppTooltip content={t("editor.history.panelAria")}>
         <PopoverTrigger
@@ -108,8 +130,11 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
               </div>
               <ul>
                 {redoSteps.map((s) => (
-                  <li key={s.id} className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground line-through decoration-muted-foreground/40">
-                    <span className="min-w-0 flex-1 truncate">{name(s)}</span>
+                  <li key={s.id} className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground" data-testid="history-redo-step">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate line-through decoration-muted-foreground/40">{name(s)}</span>
+                      {place(s) && <span className="block truncate text-[11px]">{place(s)}</span>}
+                    </span>
                     <span className="tabular-nums">{fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}</span>
                   </li>
                 ))}
@@ -132,7 +157,7 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
                   <li key={s.id} className="group flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/60" data-testid="history-step">
                     <span className="min-w-0 flex-1">
                       <span className={cn("block truncate", i === 0 && "font-medium")}>{name(s)}</span>
-                      {s.fileName && <span className="block truncate text-[11px] text-muted-foreground">{s.fileName}</span>}
+                      {place(s) && <span className="block truncate text-[11px] text-muted-foreground">{place(s)}</span>}
                     </span>
                     <span className="tabular-nums text-muted-foreground">{fmt.time(s.at, { hour: "numeric", minute: "2-digit" })}</span>
                     <button
@@ -160,7 +185,7 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
                     <span className="block truncate">
                       {s.which === "redo" ? t("editor.history.notRedone", { step: name(s) }) : name(s)}
                     </span>
-                    <span className="block text-[11px] text-muted-foreground">{reasonText(s.reason)}</span>
+                    <span className="block text-[11px] text-muted-foreground">{reasonText(s)}</span>
                   </li>
                 ))}
               </ul>

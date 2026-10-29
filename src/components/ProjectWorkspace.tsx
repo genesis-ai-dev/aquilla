@@ -18260,7 +18260,7 @@ export function ProjectWorkspace() {
                 <SelectTrigger size="sm" className="w-full!" aria-label={t("editor.voice.changeVoiceQuality")}>
                   {t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality])}
                 </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false} align="start">
+                <SelectContent align="start">
                   <SelectGroup>
                     {CHANGE_VOICE_QUALITIES.map((q) => (
                       <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>

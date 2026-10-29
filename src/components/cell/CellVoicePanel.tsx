@@ -283,7 +283,7 @@ function ChangeVoiceButton({
               {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
             </SelectTrigger>
           </AppTooltip>
-          <SelectContent alignItemWithTrigger={false} align="start">
+          <SelectContent align="start">
             <SelectGroup>
               {CHANGE_VOICE_QUALITIES.map((q) => (
                 <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>

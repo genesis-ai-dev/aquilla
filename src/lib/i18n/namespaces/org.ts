@@ -814,12 +814,12 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.description": "People in this organization and their access.",
     "org.membersPage.orgPage.loadErrorTitle": "Couldn't load your organization",
     "org.membersPage.orgPage.loadErrorHint":
-      "Common causes: the Frontier worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
+      "Common causes: the Aquilla worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
     "org.membersPage.orgPage.signInTitle": "Sign in to manage members",
     "org.membersPage.orgPage.selectOrgDescription":
       "Member access is managed within a single organization. Choose one from the switcher to continue.",
     "org.membersPage.orgPage.signInDescription":
-      "Member access requires a Frontier session. Sign in from the dashboard and come back to this page.",
+      "Member access requires a Aquilla session. Sign in from the dashboard and come back to this page.",
     "org.membersPage.orgPage.pageDescriptionPrefix": "People in",
     "org.membersPage.orgPage.pageDescriptionSuffix":
       ". Org-level roles apply across every project; per-project access can be granted separately via the Add-to-projects flow.",

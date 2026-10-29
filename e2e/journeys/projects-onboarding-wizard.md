@@ -11,7 +11,7 @@ Smoke twin: `e2e/specs/projects/onboarding.smoke.spec.ts`
 
 1. Open `/onboarding`. Click **Get Started**.
 2. On the privacy step, click **Continue** (leave **Share usage data** as found).
-3. On **Create your Frontier account**, fill **Username**, **Email**, and **Password**, then click **Create account**. This is a real registration call, not a mock.
+3. On **Create your Aquilla account**, fill **Username**, **Email**, and **Password**, then click **Create account**. This is a real registration call, not a mock.
 4. On **What should we call you?**, the **Display name** field is pre-filled with the username. Replace it with a real name, then click **Continue**.
 5. On **How will you use Aquilla?**, click **Just me**.
 6. On **Create your first project**, fill **Project Name**, **Source Language**, and **Target language**, then click **Create Project**.

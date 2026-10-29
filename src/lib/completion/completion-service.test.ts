@@ -661,7 +661,7 @@ describe("complete", () => {
     fetchMock.mockResolvedValueOnce(new Response("Monthly credits exhausted", { status: 402 }))
     await expect(
       complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
-    ).rejects.toThrow(/Frontier AI limit reached: Monthly credits exhausted/)
+    ).rejects.toThrow(/Aquilla AI limit reached: Monthly credits exhausted/)
   })
 
   it("custom: POSTs to {endpoint}/v1/chat/completions without auth", async () => {

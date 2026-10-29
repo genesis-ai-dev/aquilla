@@ -1087,7 +1087,8 @@ export const editor = defineNamespace({
     "editor.history.reasonUnavailable": "This step can't be undone any more.",
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
     "editor.timeline.videoHiddenNote":
-      "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+      "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
+      "recordings.",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":

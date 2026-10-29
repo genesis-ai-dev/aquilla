@@ -401,7 +401,7 @@ export const projectSettings = defineNamespace({
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
     "projectSettings.field.decaySettings": "decay settings",
-    "projectSettings.field.audioMediaStrategy": "audio media strategy",
+    "projectSettings.field.audioMediaStrategy": "audio loading",
     "projectSettings.field.autoSync": "auto-sync",
     "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
@@ -461,8 +461,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
-    "projectSettings.group.audioMediaLabel": "Audio media",
-    "projectSettings.group.audioMediaDescription": "How audio is fetched from storage",
+    "projectSettings.group.audioMediaLabel": "Media",
+    "projectSettings.group.audioMediaDescription": "How audio loads, and the timeline",
     "projectSettings.group.metricsLabel": "AI metrics",
     "projectSettings.group.metricsDescription": "Post-edit distance and AI usage",
     "projectSettings.group.integrationsLabel": "Integrations",
@@ -503,7 +503,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.localModels": "Local AI models",
     "projectSettings.section.decay": "Decay",
     "projectSettings.section.validation": "Validation",
-    "projectSettings.section.audioMedia": "Audio Media",
+    "projectSettings.section.audioMedia": "Audio loading",
     "projectSettings.section.gitSync": "Git Sync",
     "projectSettings.section.terminology": "Terminology",
     "projectSettings.section.termbaseSharing": "Term Base Sharing",

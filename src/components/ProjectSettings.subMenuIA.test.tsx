@@ -345,6 +345,9 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Members")).toBeTruthy()
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
+    // AQU-2261: the pane holding Audio loading and Timeline is "Media".
+    expect(screen.getByText("Media")).toBeTruthy()
+    expect(screen.queryByText(/audio media/i)).toBeNull()
     // ...minus the sections that moved to the standalone Living Memory
     // surface (/project/:id/memory) — they must NOT be index rows anymore.
     // The Quality hub still renders with Validation & health alone.

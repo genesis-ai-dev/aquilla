@@ -1652,7 +1652,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
-    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio media strategy", "lazy", "eager"] },
+    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },
     { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
     { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so

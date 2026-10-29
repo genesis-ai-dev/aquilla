@@ -11,6 +11,7 @@ import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
+import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
@@ -576,6 +577,45 @@ describe("TimelineEditor", () => {
     expect(item()).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
     localStorage.removeItem("aquilla:timelineSnap")
+  })
+
+  // AQU-2251 (Sam, Oct 28): a playback setting, on by default.
+  it("Skip lines with nothing to play is on by default, toggles, and is remembered on this device", () => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveTextContent("Skip lines with nothing to play")
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBe("off")
+      expect(getSkipSilentLinesPref()).toBe(false)
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
+  })
+
+  it("Skip lines with nothing to play reads back off after a reload", () => {
+    localStorage.setItem("aq.skip-silent-lines.v1", "off")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBeNull()
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
   })
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {
@@ -1355,6 +1395,8 @@ describe("TimelineEditor — audio-first mode", () => {
     renderAt("audioFirst")
     expect(inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))).toBeInTheDocument()
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
+    // AQU-2251: following the recordings is where skipping lines matters most.
+    expect(screen.getByTestId("tl-skip-silent-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")

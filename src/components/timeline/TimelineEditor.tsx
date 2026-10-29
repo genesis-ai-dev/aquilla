@@ -29,6 +29,7 @@ import {
   ClipboardCheck,
   Eye,
   EyeOff,
+  FastForward,
   Film,
   FolderInput,
   FolderPlus,
@@ -158,6 +159,7 @@ import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtu
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
+import { setSkipSilentLinesPref, useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
@@ -1661,6 +1663,7 @@ export function TimelineEditor({
     })
   }
   const audioQuality = useAudioQualityPref()
+  const skipSilentLines = useSkipSilentLinesPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -4320,6 +4323,18 @@ export function TimelineEditor({
       >
         <AudioLines />
         {t("editor.timeline.qualityToggleAria")}
+      </DropdownMenuCheckboxItem>
+      {/* AQU-2251 (Sam, Oct 28): on, playback steps over a line with nothing
+          to hear (a stand-in nobody has recorded yet); off, it plays the
+          line through in silence for its length. The queue and the built-in
+          clock read the same remembered setting. */}
+      <DropdownMenuCheckboxItem
+        checked={skipSilentLines}
+        onCheckedChange={(on) => setSkipSilentLinesPref(on)}
+        data-testid="tl-skip-silent-toggle"
+      >
+        <FastForward />
+        {t("editor.timeline.skipSilentLines")}
       </DropdownMenuCheckboxItem>
       {/* SUB-53: nothing to snap to when positions are computed. */}
       {!audioFirst && (

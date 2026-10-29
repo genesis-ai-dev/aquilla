@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { ComponentProps } from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { expectDisabledNote, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectDisabledNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 

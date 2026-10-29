@@ -180,6 +180,7 @@ export const editor = defineNamespace({
       "The file is still safe. Check your connection and try loading it again.",
     "editor.file.retryLoad": "Retry loading file",
     "editor.file.loadingFromCloud": "Loading file from the cloud",
+    "editor.file.loadingLanguages": "Loading this project's languages",
     "editor.file.noneSelectedTitle": "No file selected",
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
@@ -686,7 +687,7 @@ export const editor = defineNamespace({
     "editor.selection.voiceTogetherSeedVcNotConfigured":
       "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
     "editor.selection.voiceTogetherSeedVcFailed":
-      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
+      "Voice conversion couldn't re-voice these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -1277,12 +1278,10 @@ export const editor = defineNamespace({
     "editor.dock.bottomRight": "Bottom right",
     "editor.dock.fullScreenTip": "Full screen: fold everything else ({keys})",
     "editor.dock.restoreTip": "Restore the other panels ({keys})",
-    "editor.dock.fullScreen": "Full screen: fold everything else",
     "editor.dock.restore": "Restore the other panels",
     "editor.dock.restoreShort": "Restore",
     "editor.dock.foldAreaTip": "Fold this area ({keys}). Nothing is left behind; the Panels button brings it back.",
     "editor.dock.foldTimelineTip": "Fold the timeline ({keys}). Nothing is left behind; the Panels button brings it back.",
-    "editor.dock.foldArea": "Fold this area",
     "editor.dock.foldTimeline": "Fold the timeline",
     "editor.dock.moreTip": "Move this panel, or more",
     "editor.dock.timelineMoreTip": "Timeline settings",
@@ -1299,6 +1298,7 @@ export const editor = defineNamespace({
     "editor.dock.timing": "Timing",
     "editor.dock.panels": "Panels",
     "editor.dock.panelsTip": "Panels · {keys}",
+    "editor.dock.whereTimeline": "Across the top",
     "editor.dock.stateFolded": "folded",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
@@ -2099,6 +2099,11 @@ export const editor = defineNamespace({
 
     // — Write failures surfaced on the row ————————————————————————
     "editor.write.saveFailed": "Could not save — please try again",
+    "editor.write.refusedTitle": plural({
+      one: "{count} change wasn't saved",
+      other: "{count} changes weren't saved",
+    }),
+    "editor.write.refusedDetail": "{cell}: {reason}. The line now shows what was saved.",
     "editor.write.saveSourceFailed": "Could not save source edit — please try again",
     "editor.write.sourceEditingClosed":
       "Source editing is no longer available on this project — the source editor " +
@@ -2802,16 +2807,11 @@ export const editor = defineNamespace({
           "full screen: it unfolds exactly the panels full screen folded.",
         placeholders: { keys: "The key that does the same, 'Esc'. Never translate." },
       },
-      "editor.dock.fullScreen": {
-        description:
-          "Menu item in a panel's ⋯ menu that makes the panel fill the media view " +
-          "by folding everything else. The shortcut is shown beside it.",
-      },
       "editor.dock.restore": {
         description:
-          "Menu item and button that unfold the panels full screen folded, " +
-          "putting the media view back as it was. Appears in a panel's ⋯ menu " +
-          "and the Panels menu.",
+          "Screen-reader name of the Restore button in the Panels menu, which " +
+          "unfolds the panels full screen folded, putting the media view back " +
+          "as it was.",
       },
       "editor.dock.foldAreaTip": {
         description:
@@ -2826,9 +2826,6 @@ export const editor = defineNamespace({
           "sign beside 'Tracks'): the timeline disappears completely, and the " +
           "Panels button brings it back.",
         placeholders: { keys: "A keyboard shortcut as this computer writes it, e.g. ⌘⇧F on a Mac or Ctrl+Shift+F elsewhere. Never translate." },
-      },
-      "editor.dock.foldArea": {
-        description: "Menu item in an area's ⋯ menu that folds the area away completely.",
       },
       "editor.dock.foldTimeline": {
         description: "Menu item in the timeline's ⋯ menu that folds the timeline away completely.",
@@ -2905,6 +2902,11 @@ export const editor = defineNamespace({
       "editor.dock.panelsTip": {
         description: "Tooltip of the Panels button, with its keyboard shortcut.",
         placeholders: { keys: "The shortcut, e.g. ⌘\\ or Ctrl+\\. Never translate." },
+      },
+      "editor.dock.whereTimeline": {
+        description:
+          "Where the timeline is, in the hover text of its row in the Panels menu: it " +
+          "always runs across the top of the media view and never moves (it can only be folded).",
       },
       "editor.dock.stateFolded": {
         description:
@@ -3504,6 +3506,14 @@ export const editor = defineNamespace({
           "fetched from the server. It is a plain read, so it must NOT say " +
           "'syncing' — that word is reserved in this app for pushing the user's " +
           "own unsaved edits.",
+      },
+      "editor.file.loadingLanguages": {
+        description:
+          "Accessible label and status pill of the placeholder that stands in " +
+          "for the editor's rows while the project's target languages load " +
+          "(usually under a second). The rows are hidden because until then the " +
+          "app cannot tell which language's translations to show beside them. " +
+          "A plain read, so it must not say 'syncing'.",
       },
       "editor.file.noneSelectedTitle": {
         description:
@@ -8036,6 +8046,26 @@ export const editor = defineNamespace({
           "queued locally — usually browser storage being full or blocked. The " +
           "optimistic text is rolled back, so the user must retype or retry. " +
           "Imperative second half.",
+      },
+      "editor.write.refusedTitle": {
+        description:
+          "Error toast title when the server refused one or more of the user's " +
+          "translation edits or validations after they were sent (for example, " +
+          "the line's language could not be identified). The edit is undone on " +
+          "screen; this tells the user it did not save, so they can redo it.",
+        maxLength: 48,
+        placeholders: {
+          count: "How many of the user's changes the server refused.",
+        },
+      },
+      "editor.write.refusedDetail": {
+        description:
+          "Body of that toast: which line, and the server's reason, followed by " +
+          "what the user now sees.",
+        placeholders: {
+          cell: "The line's reference (e.g. 'GEN 1:1') — never translate.",
+          reason: "The server's own explanation, in English — never translate.",
+        },
       },
       "editor.write.saveSourceFailed": {
         description:

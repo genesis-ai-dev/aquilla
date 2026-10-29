@@ -202,9 +202,17 @@ interface FileProjection {
 // check" about corrected episodes) — and both had the same shape: the client
 // mapped a field no route ever produced, and nothing anywhere could notice.
 // A direct test over a seeded row is the thing that notices.
+//
+// `recoverCellProfiles` reads `cells` for files whose meta never recorded an
+// import profile. Only the single-project route asks for it (AQU-2281): the
+// open workspace's sidebar folders and re-import menu are the only readers,
+// and they read GET /api/v2/projects/:id. The list route serves session boot
+// across every accessible project, where even a bounded probe per file is
+// tens of thousands of cell reads.
 export async function loadFilesByProject(
   env: AuthHonoEnv["Bindings"],
   projectIds: string[],
+  options: { recoverCellProfiles?: boolean } = {},
 ): Promise<Map<string, FileProjection[]>> {
   const byProject = new Map<string, FileProjection[]>()
   if (!env.AQUILLA_PG || projectIds.length === 0) return byProject
@@ -350,19 +358,34 @@ export async function loadFilesByProject(
   // files.meta empty, so the sidebar had no folder and re-import opened the
   // general upload. One source cell's profile is enough, and only files that
   // never recorded a parserVersion are looked up.
-  const missingProfile = [...byProject.values()].flat().filter((file) => !file.importProfile)
+  //
+  // AQU-2281: each file reads its first few source cells in index order and
+  // stops there. Asking for "any stamped source cell" instead read every
+  // source cell of every file that has none — nearly all of them — which cost
+  // GET /api/v2/projects 30–90 s. Every imported source cell carries the
+  // stamp, so the first few find it; the margin past one covers a cell added
+  // by hand that sorts ahead of the imported ones.
+  const missingProfile = options.recoverCellProfiles
+    ? [...byProject.values()].flat().filter((file) => !file.importProfile)
+    : []
   if (missingProfile.length > 0) {
     const fileIds = missingProfile.map((file) => file.id)
     const filePlaceholders = fileIds.map(() => "?").join(",")
     const profileRows = await env.AQUILLA_PG.prepare(
-      `SELECT DISTINCT ON (file_id) file_id,
-              metadata->'aquillaImport'->>'profileId' AS profile_id
-         FROM cells
-        WHERE project_id IN (${placeholders})
-          AND file_id IN (${filePlaceholders})
-          AND side = 'source'
-          AND metadata->'aquillaImport'->>'profileId' IS NOT NULL
-        ORDER BY file_id`,
+      `SELECT f.id AS file_id,
+              (SELECT s.profile_id
+                 FROM (SELECT c.metadata->'aquillaImport'->>'profileId' AS profile_id
+                         FROM cells c
+                        WHERE c.project_id = f.project_id
+                          AND c.file_id = f.id
+                          AND c.side = 'source'
+                        ORDER BY c.lane_id, c.cell_id
+                        LIMIT ${CELL_PROFILE_PROBE_ROWS}) s
+                WHERE s.profile_id IS NOT NULL
+                LIMIT 1) AS profile_id
+         FROM files f
+        WHERE f.project_id IN (${placeholders})
+          AND f.id IN (${filePlaceholders})`,
     )
       .bind(...projectIds, ...fileIds)
       .all<{ file_id: string; profile_id: string }>()
@@ -383,6 +406,9 @@ export async function loadFilesByProject(
   }
   return byProject
 }
+
+/** Source cells read per file when recovering a legacy import profile. */
+const CELL_PROFILE_PROBE_ROWS = 8
 
 function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
   return value === "ltr" || value === "rtl" ? value : undefined
@@ -857,7 +883,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 
   if (!row) return c.json({ error: "not found" }, 404)
 
-  const filesByProject = await loadFilesByProject(c.env, [projectId])
+  const filesByProject = await loadFilesByProject(c.env, [projectId], { recoverCellProfiles: true })
   const files = filesByProject.get(projectId) ?? []
 
   // AQU-1559: a link that follows a fixed list of the upstream's files, and how

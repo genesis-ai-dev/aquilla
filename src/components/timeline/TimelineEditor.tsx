@@ -2847,6 +2847,10 @@ export function TimelineEditor({
 
   const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
+  // A short file's timeline still runs to the edge of the view — the ruler and
+  // every row's ground — rather than stopping where the file ends (Sam, Oct
+  // 28). Scrolling, following and seeking still go by the file's own width.
+  const canvasWidthPx = Math.max(trackWidthPx, viewportPx)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
   // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
@@ -4452,12 +4456,11 @@ export function TimelineEditor({
         <OverflowMenu
           items={sourceMenuItems}
           triggerVariant="outline"
-          triggerSize="sm"
-          // Board 55, option E: its icon and a chevron, no words.
-          triggerClassName="gap-1 px-2"
+          triggerSize="icon-sm"
+          // Board 55, option E: its icon alone — no chevron (Sam, Oct 28:
+          // "shouldn't have a dropdown arrow"), like Check beside it.
           triggerTooltip={t("editor.timeline.sourcesTip")}
           triggerIcon={FolderInput}
-          triggerBadge={<ChevronDown className="size-3 text-muted-foreground" aria-hidden />}
           testId="tl-sources-menu"
           ariaLabel={t("editor.timeline.sourcesMenuAria")}
         />
@@ -5199,10 +5202,11 @@ export function TimelineEditor({
             className="overflow-auto overscroll-contain"
             onScroll={handleTrackScroll}
           >
-            <div className="relative" style={{ width: `${trackWidthPx}px` }}>
+            <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>
               <TimelineRuler
                 durationSec={durationSec}
                 pxPerSec={pxPerSec}
+                fillPx={canvasWidthPx}
                 viewStartSec={viewStartSec}
                 viewEndSec={viewEndSec}
                 onScrub={seekTo}

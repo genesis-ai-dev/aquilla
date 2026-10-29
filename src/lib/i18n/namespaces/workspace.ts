@@ -378,6 +378,7 @@ export const workspace = defineNamespace({
 
     // -- StatusBar --
     "workspace.statusBar.summary": "{total} cells · {translated} translated {pct}",
+    "workspace.statusBar.healthAria": "Project health: {percent}%",
     "workspace.statusBar.unvalidatedBadge": "{count} unvalidated",
     "workspace.statusBar.audioSummary": "{total} lines · {translated} recorded {pct}",
     "workspace.statusBar.unvalidatedAudioBadge": "{count} recorded, not validated",
@@ -1702,6 +1703,12 @@ export const workspace = defineNamespace({
         maxLength: 24,
       },
 
+      "workspace.statusBar.healthAria": {
+        description:
+          "Screen-reader name of the small health ring at the start of the editor's status bar. " +
+          "A click on it opens the cells that need attention most.",
+        placeholders: { percent: "The project's health score, 0 to 100." },
+      },
       "workspace.statusBar.summary": {
         description:
           "Main status line in the bottom footer bar, reporting overall " +

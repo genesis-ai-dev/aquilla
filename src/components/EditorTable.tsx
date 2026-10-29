@@ -3344,10 +3344,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
             column headings to describe — select-all, #, Source, Target — so
             the bar goes until it has some, in the Text view and the Media
-            view's Text pane alike. */}
+            view's Text pane alike.
+            AQU-2288: the bar sits outside the rows' scroller, so a scrollbar
+            there made the rows' 1fr tracks narrower than these and slid the
+            rows' Target column (checks, text) half the scrollbar's width left
+            of the marks and heading. Both reserve the same gutter instead — this one as an
+            overflow-hidden scroll container; every popup here portals. */}
         {!hideColumnHeaders && (
         <div data-testid="table-column-headers" className={cn(
-            "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
+            "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
               : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
@@ -3385,7 +3390,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
+          {/* AQU-2288: ltr like the rows' target column (EditorTargetCellColumn),
+              so in an rtl UI the marks stay on the side the checks are on. */}
+          <div data-testid="table-target-header" dir="ltr" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
                 check in both (Sam, 2026-09-28; the Text and Audio views). */}
@@ -3563,7 +3570,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
               onViewableItemsChanged={handleViewableItemsChanged}
               viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
-              style={{ flex: 1, minHeight: 0 }}
+              // AQU-2288: the column headings above reserve this same gutter,
+              // so the two grids share widths whether or not the rows overflow.
+              style={{ flex: 1, minHeight: 0, scrollbarGutter: "stable" }}
               contentContainerStyle={{ width: "100%" }}
             />
           </BibleDataProvider>

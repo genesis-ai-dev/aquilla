@@ -778,11 +778,6 @@ interface LoopArgs {
   resolvedLaneId: string
 }
 
-function parseSettingsObject(raw: unknown): Record<string, unknown> {
-  const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
     const v: unknown = JSON.parse(raw || "{}")
@@ -837,16 +832,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings,
-              settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
+      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ settings: unknown; brief_summary: string | null }>()
+      .first<{ brief_summary: string | null }>()
     if (settings) {
-      const parsed = parseSettingsObject(settings.settings)
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
-      languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
+      languages = languagesForLanes(lanes, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null

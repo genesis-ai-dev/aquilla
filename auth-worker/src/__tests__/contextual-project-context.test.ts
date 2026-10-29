@@ -523,12 +523,39 @@ describe("computeContextReadiness", () => {
 // parsing dropped those fields or the tick-side filter mismatched the client
 // predicate, a French-only rule would either lint every lane's drafts (false
 // violations) or none (silent non-enforcement).
+// AQU-2223: a drafting tag is checked against the lane rows, never the
+// retired settings registry.
 describe("isRegisteredTargetLane", () => {
-  it("matches the registered tag exactly, not the language", async () => {
-    await seedSettings("proj-ctx-reg", { targetLanes: ["Spanish"], archivedLanes: [] })
+  async function seedLane(projectId: string, id: string, tag: string, archivedAt: string | null = null) {
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position, archived_at)
+         VALUES (?, ?, 'target', ?, ?, 0, ?)`,
+      )
+      .bind(id, projectId, tag, tag, archivedAt)
+      .run()
+  }
+
+  it("matches a lane row's tag exactly, not the language", async () => {
+    await seedLane("proj-ctx-reg", "ctxreg1a", "Spanish")
     expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "Spanish")).toBe(true)
     expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "es")).toBe(false)
+    // No row tagged '' (a project made since AQU-1594): '' is still the default.
     expect(await isRegisteredTargetLane(db, "proj-ctx-reg", "")).toBe(true)
+  })
+
+  it("ignores a tag only the settings registry lists", async () => {
+    await seedSettings("proj-ctx-reg-blob", { targetLanes: ["French"], archivedLanes: [] })
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg-blob", "French")).toBe(false)
+  })
+
+  it("refuses an archived lane, the '' lane included (AQU-1462)", async () => {
+    await seedLane("proj-ctx-reg-arch", "ctxreg2a", "", "2026-10-01T00:00:00Z")
+    await seedLane("proj-ctx-reg-arch", "ctxreg2b", "fr", "2026-10-01T00:00:00Z")
+    await seedLane("proj-ctx-reg-arch", "ctxreg2c", "de")
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg-arch", "")).toBe(false)
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg-arch", "fr")).toBe(false)
+    expect(await isRegisteredTargetLane(db, "proj-ctx-reg-arch", "de")).toBe(true)
   })
 })
 
@@ -563,8 +590,8 @@ describe("lane-scoped authored rules (AQU-609)", () => {
 // rendering. WHY: the registry may list the primary language itself
 // (AQU-1473); that is the default lane, not a second one.
 describe("several target lanes (AQU-1699)", () => {
-  // AQU-1595: the lane rows are the list. The settings registry only answers
-  // for a project that has no rows yet.
+  // AQU-1595 / AQU-2223: the lane rows are the list. The settings registry is
+  // never read, even for a project with no rows.
   async function seedTargetLane(projectId: string, id: string, tag: string, archivedAt: string | null = null) {
     await db
       .prepare(
@@ -591,12 +618,8 @@ describe("several target lanes (AQU-1699)", () => {
     expect((await loadProjectContext(db, "proj-ctx-row-two")).multiLane).toBe(true)
   })
 
-  it("without lane rows, counts a registered lane beside the primary, but not the primary or an archived lane", async () => {
-    await seedSettings("proj-ctx-one-lane", { targetLanguage: "en", targetLanes: ["en"] })
-    expect((await loadProjectContext(db, "proj-ctx-one-lane")).multiLane).toBeUndefined()
-    await seedSettings("proj-ctx-archived-lane", { targetLanguage: "en", targetLanes: ["en", "fr"], archivedLanes: ["fr"] })
-    expect((await loadProjectContext(db, "proj-ctx-archived-lane")).multiLane).toBeUndefined()
+  it("without lane rows, does not read the settings registry", async () => {
     await seedSettings("proj-ctx-two-lanes", { targetLanguage: "en", targetLanes: ["en", "fr"] })
-    expect((await loadProjectContext(db, "proj-ctx-two-lanes")).multiLane).toBe(true)
+    expect((await loadProjectContext(db, "proj-ctx-two-lanes")).multiLane).toBeUndefined()
   })
 })

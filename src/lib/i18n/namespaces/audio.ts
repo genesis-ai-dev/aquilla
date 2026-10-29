@@ -253,6 +253,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
+    "audio.recordingModal.editTextTooltip": "Edit this text",
     "audio.recordingModal.notTranslated": "not translated",
     "audio.recordingModal.countingHint": "Recording starts in…",
     "audio.recordingModal.countingGo": "GO",
@@ -1871,6 +1872,12 @@ export const audio = defineNamespace({
         description:
           "Small caption above the translated text the user should read aloud into " +
           "the microphone — this is the actual script for the recording.",
+      },
+      "audio.recordingModal.editTextTooltip": {
+        description:
+          "Tooltip and screen-reader label on the small pencil beside the 'Read aloud' " +
+          "caption. Clicking it closes the recorder and puts the cursor in this line's " +
+          "translation in the editor, so a mistake in the script can be fixed right away.",
       },
       "audio.recordingModal.notTranslated": {
         description:

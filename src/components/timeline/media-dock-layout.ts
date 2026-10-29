@@ -124,9 +124,11 @@ export function foldRegion(layout: DockLayout, presence: DockPresence, region: D
   return next
 }
 
-/** Unfold a region by hand. Ends full screen: the note goes with it. */
+/** Unfold a region by hand. Ends full screen: the note goes with it. A region
+ *  already open unfolds nothing, so it ends nothing either: showing the
+ *  timeline while it is the full-screen region keeps the way back. */
 export function unfoldRegion(layout: DockLayout, region: DockRegion): DockLayout {
-  if (!layout.folded[region] && layout.fullUndo.length === 0) return layout
+  if (!layout.folded[region]) return layout
   const next = clone(layout)
   next.folded[region] = false
   next.fullUndo = []

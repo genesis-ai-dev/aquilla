@@ -337,11 +337,15 @@ export function useMediaDock(input: UseMediaDockInput) {
     [freeze, layout, presence, textGoingOutOfSight],
   )
 
-  /** Apply a layout that unfolds things: state first, then the sizes. */
+  /** Apply a layout that unfolds things: state first, then the sizes.
+   *  `alongside` is another update that has to land in the same commit. */
   const commitOpening = useCallback(
-    (next: DockLayout) => {
+    (next: DockLayout, alongside?: () => void) => {
       const before = view
-      flushSync(() => setLayout(next))
+      flushSync(() => {
+        setLayout(next)
+        alongside?.()
+      })
       const v = dockView(next, presence)
       for (const r of ["tl", "ll", "lr"] as const) {
         if (!before.isOpen(r) && v.isOpen(r)) delete frozenRef.current[r]
@@ -353,7 +357,9 @@ export function useMediaDock(input: UseMediaDockInput) {
 
   const unfold = useCallback(
     (region: DockRegion) => {
-      if (!layout.folded[region] && layout.fullUndo.length === 0) return
+      // Already open (Alt+1 on a full-screen timeline): nothing to unfold, and
+      // full screen's way back stays.
+      if (!layout.folded[region]) return
       commitOpening(unfoldRegion(layout, region))
     },
     [commitOpening, layout],
@@ -390,12 +396,17 @@ export function useMediaDock(input: UseMediaDockInput) {
       const { layout: next, foldLeft } = enterFullScreen(layout, presence, region, leftTab)
       textGoingOutOfSight(dockView(next, presence))
       for (const r of ["tl", "ll", "lr"] as const) if (r !== region && view.isOpen(r)) freeze(r)
+      const foldLeftPanel = foldLeft ? () => left.setTab(null) : undefined
       if (layout.folded[region]) {
-        commitOpening(next)
+        // The left panel folds in the SAME commit as the unfold. flushSync
+        // runs that commit's effects before it returns, so the one above that
+        // ends full screen when the left panel is open saw it still open and
+        // dropped the note just written: Esc then restored nothing.
+        commitOpening(next, foldLeftPanel)
       } else {
         setLayout(next)
+        foldLeftPanel?.()
       }
-      if (foldLeft) left.setTab(null)
     },
     [commitOpening, freeze, layout, left, presence, textGoingOutOfSight, view],
   )

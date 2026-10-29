@@ -687,9 +687,7 @@ export const org = defineNamespace({
       "Full control: add/remove org members, archive/restore projects, and all maintainer actions.",
 
     // -- OrgSidebar: left nav for org-scoped routes --
-    "org.orgSidebar.archived": "Archived projects",
-    // AQU-2261: the archived list's date column, apart from the page's name.
-    "org.archivedProjects.archivedOnColumn": "Archived",
+    "org.orgSidebar.archived": "Archived",
     "org.orgSidebar.admin": "Admin",
 
     // -- hooks/useOrgSettings: patch()/requestPromotion() error fallback when

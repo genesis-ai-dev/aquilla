@@ -171,7 +171,7 @@ export function OrgSidebar() {
         {isAdmin && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
-            {t("org.orgSidebar.archived")}
+            {t("editor.navTitle.archivedProjects")}
           </OrgNavLink>
         )}
         {showEgressNav && activeOrgId != null && (

@@ -2562,8 +2562,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
                     savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
-                      ? t("projectSettings.hint.custom")
-                      : t("projectSettings.hint.default")
+                      ? t("terminology.livingMemory.prompt.customBadge")
+                      : t("terminology.livingMemory.prompt.defaultBadge")
                   }
                 />
               </NavList>

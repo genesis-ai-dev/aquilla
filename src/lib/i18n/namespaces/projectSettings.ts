@@ -476,7 +476,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.hint.linked": "Linked",
     "projectSettings.hint.git": "Git",
     "projectSettings.hint.custom": "Custom",
-    "projectSettings.hint.default": "Default",
     "projectSettings.hint.postEdit": "Post-edit",
     "projectSettings.hint.integrations": "Monday.com, Airtable",
 

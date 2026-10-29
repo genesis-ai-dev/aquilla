@@ -107,6 +107,8 @@ export interface AddPeopleDialogProps extends Omit<RoleDialogBase, "level"> {
     | { kind: "custom"; body: ReactNode; footer?: ReactNode }
   /** Other ways in, as tabs after the people tab. */
   otherTabs?: ReadonlyArray<{ value: string; label: string; content: ReactNode }>
+  /** Shown above the people row, e.g. a load error. */
+  lead?: ReactNode
   /** Shown under the people row, e.g. a permission alert. */
   note?: ReactNode
 }
@@ -332,7 +334,7 @@ function ChangeBody({
   )
 }
 
-function AddBody({ level, callerLevel, summary, details, title, people, otherTabs, note }: AddPeopleDialogProps) {
+function AddBody({ level, callerLevel, summary, details, title, people, otherTabs, lead, note }: AddPeopleDialogProps) {
   const { t } = useI18n()
   const [tab, setTab] = useState(PEOPLE_TAB)
   const peopleBody = people.kind === "row"
@@ -343,6 +345,7 @@ function AddBody({ level, callerLevel, summary, details, title, people, otherTab
     : people.body
   const peopleTab = (
     <div className="space-y-3">
+      {lead}
       {peopleBody}
       {note}
     </div>

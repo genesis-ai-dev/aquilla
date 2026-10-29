@@ -1,7 +1,7 @@
 // Members settings pane — DataTable roster + Add dialog (members / invite tabs).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { MembersSection } from "./MembersSection"
 
@@ -184,6 +184,9 @@ describe("MembersSection", () => {
     renderSection()
     fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
     expect(screen.getByRole("dialog")).toBeTruthy()
+    // AQU-2289: the one role dialog, with the project list.
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-dialog-mode", "add")
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
     // AQU-1352 §3.9 rule 2: the header names the scope people are added to.
     expect(screen.getByRole("heading", { name: /^Add people to .*Pattani Malay Bible$/ })).toBeTruthy()
     expect(screen.getByRole("tab", { name: /add members/i })).toBeTruthy()
@@ -230,21 +233,43 @@ describe("MembersSection — caller-role gating (AQU-853)", () => {
   const openRowMenu = (username: string) =>
     fireEvent.click(screen.getByRole("button", { name: `Actions for ${username}` }))
 
+  // AQU-2289: Change role opens the one role dialog (it was a submenu).
+  const openChangeRole = (username: string) => {
+    openRowMenu(username)
+    fireEvent.click(screen.getByRole("menuitem", { name: /change role/i }))
+    const dialog = screen.getByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "change")
+    expect(dialog).toHaveAttribute("data-role-level", "project")
+    fireEvent.click(within(dialog).getByRole("combobox", { name: new RegExp(`role for ${username}`, "i") }))
+    return within(screen.getByRole("listbox"))
+  }
+
   it("offers the role picker to a maintainer, capped at their own level", () => {
     renderSection() // alice is maintainer (600)
-    openRowMenu("carol")
-    fireEvent.click(screen.getByRole("menuitem", { name: /change role/i }))
-    expect(screen.getByRole("menuitem", { name: /maintainer/i })).toBeTruthy()
-    expect(screen.getByRole("menuitem", { name: /contributor/i })).toBeTruthy()
+    const list = openChangeRole("carol")
+    expect(list.getByRole("option", { name: /^maintainer/i })).toBeTruthy()
+    expect(list.getByRole("option", { name: /^contributor/i })).toBeTruthy()
   })
 
   it("never offers a role above the caller's own level", () => {
     mockSessionUsername = "carol" // project_lead (500)
     renderSection()
-    openRowMenu("dave")
-    fireEvent.click(screen.getByRole("menuitem", { name: /change role/i }))
-    expect(screen.getByRole("menuitem", { name: /project lead/i })).toBeTruthy()
-    expect(screen.queryByRole("menuitem", { name: /maintainer/i })).toBeNull()
+    const list = openChangeRole("dave")
+    expect(list.getByRole("option", { name: /^project lead/i })).toBeTruthy()
+    expect(list.queryByRole("option", { name: /^maintainer/i })).toBeNull()
+  })
+
+  it("saves the new role through the dialog", async () => {
+    mockAdd.mockResolvedValue(null)
+    mockSessionUsername = "carol" // project_lead (500)
+    renderSection()
+    const list = openChangeRole("dave")
+    const reviewer = list.getByRole("option", { name: /^reviewer/i })
+    fireEvent.pointerMove(reviewer)
+    fireEvent.mouseMove(reviewer)
+    fireEvent.keyDown(reviewer, { key: "Enter" })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(mockAdd).toHaveBeenCalledWith("dave", 300))
   })
 
   it("tells a below-floor caller which role is required instead of offering a doomed picker", () => {

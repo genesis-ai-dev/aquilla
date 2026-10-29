@@ -23,7 +23,6 @@ import { defineNamespace, plural } from "./types"
 export const search = defineNamespace({
   keys: {
     // Mode toggle (dock panel + full-panel mode tabs)
-    "search.mode.searchTooltip": "Search text",
     "search.mode.replace": "Replace",
     "search.mode.replaceTooltip": "Find & Replace",
     "search.mode.bible": "Bible",
@@ -49,7 +48,6 @@ export const search = defineNamespace({
       one: "{count} result",
       other: "{count} results",
     }),
-    "search.dock.expandAllTooltip": "Expand all results in main area",
     "search.dock.expandAllAriaLabel": "Expand all results",
     "search.dock.expandAllLabel": "Expand all",
     "search.dock.moreResults": "{count} more — open full panel for all results",
@@ -184,9 +182,6 @@ export const search = defineNamespace({
       screenshot: "search",
     },
     keys: {
-      "search.mode.searchTooltip": {
-        description: "Tooltip on the dock's Search mode toggle. A short noun phrase.",
-      },
       "search.mode.replace": {
         description:
           "Short visible label on the Replace mode toggle/tab, in both the dock panel " +
@@ -267,11 +262,6 @@ export const search = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
-      },
-      "search.dock.expandAllTooltip": {
-        description:
-          "Tooltip on the dock's 'expand all results' icon button, which opens every " +
-          "current hit in the main editor area as a browsable list.",
       },
       "search.dock.expandAllAriaLabel": {
         description: "Accessible name (aria-label) of the same expand-all icon button.",

@@ -127,8 +127,6 @@ export const workspace = defineNamespace({
 
     // -- ProjectWorkspace: "Recently deleted" trash dialog --
     "workspace.trash.empty": "No recently deleted files.",
-    "workspace.trash.restoreTooltip": "Cells and audio come back intact",
-    "workspace.trash.purgeTooltip": "Permanently wipes R2 media",
     "workspace.trash.deleteForever": "Delete forever",
     "workspace.trash.retentionNote": "Files are kept for 30 days. \"Delete forever\" permanently wipes media.",
 
@@ -223,15 +221,12 @@ export const workspace = defineNamespace({
 
     // -- AgentDockPanel: "Summarize book/chapter" quick-action buttons above
     // the dock's agent chat, shown only for scripture files --
-    "workspace.agentDockPanel.summarizeBookTitle":
-      "Summarize {book} using vetted Bible resources, in your profile language",
 
     // -- AiModelConsentDialog --
     "workspace.aiConsent.downloadTitle": "Download {model}?",
     "workspace.aiConsent.downloadProgressNote":
       "While the model downloads, you'll see a progress percentage on the cell. The page won't reload.",
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
-    "workspace.aiConsent.enableAllTooltip": "Also pre-download the local AI models so they're ready next time",
     "workspace.aiConsent.enableAllButton": "Enable all local models",
     "workspace.aiConsent.justThisButton": "Just {model}",
     "workspace.aiConsent.sizeNote":
@@ -280,7 +275,6 @@ export const workspace = defineNamespace({
 
     // -- CellTranscribeBadge --
     "workspace.transcribeBadge.loadShort": "load",
-    "workspace.transcribeBadge.transcribingTooltip": "Transcribing audio…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
     "workspace.transcribeBadge.changeModel": "Change model",
     "workspace.transcribeBadge.waitingForModelPill": "waiting for model",
@@ -291,14 +285,9 @@ export const workspace = defineNamespace({
     // terminology.candidates.ngramLength "{count} word(s)" plural form) —
     // not re-pluralized here.
     "workspace.transcribeBadge.doneTooltip": "Transcribed {words} in {secs}s",
-    "workspace.transcribeBadge.doneTooltipClickable": "Transcribed {words} in {secs}s; click to view",
 
     // -- CellTranscriptPreview --
-    "workspace.transcriptPreview.retranscribeTooltip":
-      "Listen to the recording again and refresh the transcript",
     "workspace.transcriptPreview.transcribeAgain": "Transcribe again",
-    "workspace.transcriptPreview.replaceTextTooltip": "Replace your text with what the recording says",
-    "workspace.transcriptPreview.fillTextTooltip": "Fill in your text from the recording",
     "workspace.transcriptPreview.useWhatWasHeard": "Use what was heard",
     "workspace.transcriptPreview.useAsText": "Use as the text",
 
@@ -332,14 +321,8 @@ export const workspace = defineNamespace({
       "translated cells. Confirm correct pairs to teach the glosser; reject wrong ones to penalize " +
       "them. Both actions improve future back-translations. Only high-confidence suggestions are shown.",
     "workspace.alignment.needsConfirmation": "Needs confirmation ({count})",
-    "workspace.alignment.confirmTooltip":
-      "Confirm: mark \"{srcToken} -> {tgtToken}\" as a correct word-level alignment. Confirmed " +
-      "pairs teach the statistical glosser and improve future back-translations.",
     "workspace.alignment.confirmAriaLabel":
       "Confirm alignment: {srcToken} translates as {tgtToken}. This teaches the glosser.",
-    "workspace.alignment.rejectTooltip":
-      "Reject: mark \"{srcToken} -> {tgtToken}\" as an incorrect alignment. Rejected pairs are " +
-      "penalized so this suggestion won't appear again.",
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
@@ -373,8 +356,6 @@ export const workspace = defineNamespace({
     "workspace.assignedToMe.heading": "My assignments",
     "workspace.handedOut.heading": "Handed out by you",
     "workspace.handedOut.assignee": "To {username}",
-    "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
-    "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
       { one: "{done}/{total} cell", other: "{done}/{total} cells" },
       "total",
@@ -428,13 +409,10 @@ export const workspace = defineNamespace({
     "workspace.skeleton.loadingProject": "Loading project",
 
     // -- audio/DenoiseButton --
-    "workspace.denoise.removedTooltip": "Background noise removed from this take",
     "workspace.denoise.removedBadge": "Noise removed",
-    "workspace.denoise.revertTooltip": "Switch back to the original recording",
     "workspace.denoise.revertButton": "Revert",
 
     // -- chat/ChatComposer (Send reuses autopilot.steering.send, Stop reuses common.stop) --
-    "workspace.chatComposer.queueTooltip": "Queue — sends when the current run finishes",
     "workspace.chatComposer.queueMessage": "Queue message",
 
     // -- chat/ChatMarkdown --
@@ -802,14 +780,6 @@ export const workspace = defineNamespace({
           label: "The field's short name (e.g. 'Team name') — not translated as part of this key.",
         },
       },
-      "workspace.agentDockPanel.summarizeBookTitle": {
-        description:
-          "Tooltip/title on the 'Summarize book' quick-action button above the agent " +
-          "dock's chat, shown only when a scripture file is open. Queues an agent prompt " +
-          "that summarizes the book using vetted resources, replying in the reader's own " +
-          "profile language (not necessarily the UI language).",
-        placeholders: { book: "The open book's display name (e.g. 'Genesis') — not translated." },
-      },
       "workspace.sidebar.collapse": {
         description:
           "Tooltip and accessible name for the icon button in the top-left app " +
@@ -869,18 +839,6 @@ export const workspace = defineNamespace({
         description:
           "Empty-state text inside the 'Recently deleted' dialog (nav." +
           "sidebarSection.trash) when the project has no soft-deleted files.",
-      },
-      "workspace.trash.restoreTooltip": {
-        description:
-          "Tooltip on the Restore button (common.restore) for one soft-deleted " +
-          "file row, reassuring that its cells and audio return intact.",
-        maxLength: 48,
-      },
-      "workspace.trash.purgeTooltip": {
-        description:
-          "Tooltip on the 'Delete forever' button for one soft-deleted file row, " +
-          "warning that its stored media is permanently wiped.",
-        maxLength: 48,
       },
       "workspace.trash.deleteForever": {
         description:
@@ -1253,12 +1211,6 @@ export const workspace = defineNamespace({
         description: "Second line of body copy noting this consent prompt only appears once per browser.",
         screenshot: "confirm-dialog",
       },
-      "workspace.aiConsent.enableAllTooltip": {
-        description:
-          "Tooltip on the 'Enable all local models' button, explaining it " +
-          "pre-downloads every local model instead of just the one currently needed.",
-        screenshot: "confirm-dialog",
-      },
       "workspace.aiConsent.enableAllButton": {
         description:
           "Button that consents to and starts downloading every local AI " +
@@ -1447,9 +1399,6 @@ export const workspace = defineNamespace({
           "Deliberately terse — the pill is a few characters wide.",
         maxLength: 8,
       },
-      "workspace.transcribeBadge.transcribingTooltip": {
-        description: "Tooltip on the gutter pill shown while Whisper transcription is actively running on a cell.",
-      },
       "workspace.transcribeBadge.changeModel": {
         description:
           "Button in the failed-transcription popover. Opens Preferences → Local " +
@@ -1476,39 +1425,12 @@ export const workspace = defineNamespace({
           secs: "Transcription duration in seconds, one decimal place, as a plain number.",
         },
       },
-      "workspace.transcribeBadge.doneTooltipClickable": {
-        description:
-          "Same as workspace.transcribeBadge.doneTooltip, with a trailing clause added " +
-          "when the pill IS clickable (jumps to the transcript). Keep both variants in " +
-          "sync but do not merge them — the trailing clause must not appear when the pill " +
-          "isn't interactive.",
-        placeholders: {
-          words: "Pre-pluralized '{count} word'/'{count} words' phrase — already localized upstream.",
-          secs: "Transcription duration in seconds, one decimal place, as a plain number.",
-        },
-      },
 
-      "workspace.transcriptPreview.retranscribeTooltip": {
-        description:
-          "Tooltip on the 'Transcribe again' button in the per-cell " +
-          "transcript-preview panel, shown for both the stale-timing and " +
-          "differs-from-text states.",
-      },
       "workspace.transcriptPreview.transcribeAgain": {
         description:
           "Button that re-runs transcription on the cell's existing " +
           "recording. Appears in two visual variants (outline for stale, " +
           "ghost for differs) but identical text both times.",
-      },
-      "workspace.transcriptPreview.replaceTextTooltip": {
-        description:
-          "Tooltip on the adopt-transcript button when the cell already has " +
-          "text that would be overwritten by what the recording says.",
-      },
-      "workspace.transcriptPreview.fillTextTooltip": {
-        description:
-          "Tooltip on the adopt-transcript button when the cell has no text " +
-          "yet, so adopting the transcript fills it in rather than replacing anything.",
       },
       "workspace.transcriptPreview.useWhatWasHeard": {
         description:
@@ -1604,29 +1526,11 @@ export const workspace = defineNamespace({
           "count sits in parentheses and does not change the surrounding words.",
         placeholders: { count: "How many amber-band links are waiting for confirmation." },
       },
-      "workspace.alignment.confirmTooltip": {
-        description:
-          "Tooltip on the checkmark button beside one word-alignment link, explaining " +
-          "what confirming it does before the click.",
-        placeholders: {
-          srcToken: "The source-language word/token — not translated.",
-          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
-        },
-      },
       "workspace.alignment.confirmAriaLabel": {
         description:
           "Accessible name for the same checkmark confirm button as " +
           "workspace.alignment.confirmTooltip — read by a screen reader in place of the " +
           "icon-only button.",
-        placeholders: {
-          srcToken: "The source-language word/token — not translated.",
-          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
-        },
-      },
-      "workspace.alignment.rejectTooltip": {
-        description:
-          "Tooltip on the X button beside one word-alignment link, explaining what " +
-          "rejecting it does before the click.",
         placeholders: {
           srcToken: "The source-language word/token — not translated.",
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
@@ -1714,21 +1618,6 @@ export const workspace = defineNamespace({
           "Collapsible section heading in the workspace sidebar listing the " +
           "signed-in user's own open work assignments within this project.",
         screenshot: "workspace-nav",
-      },
-      "workspace.assignedToMe.jumpToTooltip": {
-        description:
-          "Tooltip on one assignment row in the 'My assignments' sidebar list, when the " +
-          "assignment carries no note. Clicking the row jumps the editor to that scope.",
-        placeholders: { scope: "The assignment's scope label (e.g. a book/chapter range) — not translated." },
-      },
-      "workspace.assignedToMe.jumpToWithNoteTooltip": {
-        description:
-          "Same as workspace.assignedToMe.jumpToTooltip, with the assignment's note " +
-          "appended after a colon when one was left for this assignment.",
-        placeholders: {
-          scope: "The assignment's scope label (e.g. a book/chapter range) — not translated.",
-          note: "Free-text note left on the assignment — not translated.",
-        },
       },
       "workspace.peerPresence.onlineCount": {
         description:
@@ -1914,29 +1803,13 @@ export const workspace = defineNamespace({
           "by the LoadingOverlay component — supply just the words here.",
       },
 
-      "workspace.denoise.removedTooltip": {
-        description:
-          "Tooltip on the 'Noise removed' badge shown once on-device noise " +
-          "reduction has produced a cleaned recording take.",
-      },
       "workspace.denoise.removedBadge": {
         description: "Badge confirming a cleaned take is currently selected, next to a checkmark icon.",
-      },
-      "workspace.denoise.revertTooltip": {
-        description:
-          "Tooltip on the Revert button beside the 'Noise removed' badge, " +
-          "explaining it switches back to the original, un-cleaned recording.",
       },
       "workspace.denoise.revertButton": {
         description: "Button that re-selects the original recording take instead of the denoised one.",
       },
 
-      "workspace.chatComposer.queueTooltip": {
-        description:
-          "Tooltip on the queue button shown while a run is streaming (only " +
-          "when queuing is supported), explaining it holds the message for " +
-          "after the current run finishes.",
-      },
       "workspace.chatComposer.queueMessage": {
         description:
           "Accessible name for the queue button in the chat composer, shown " +

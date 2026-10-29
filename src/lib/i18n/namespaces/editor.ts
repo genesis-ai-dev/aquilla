@@ -506,7 +506,6 @@ export const editor = defineNamespace({
     "editor.view.dirMixed": "mixed",
 
     // — Parallel-bibles reference sidebar ————————————————————————————
-    "editor.bibles.openTooltip": "Parallel bibles: see this verse in other versions",
     "editor.bibles.show": "Show parallel bibles",
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
@@ -534,8 +533,6 @@ export const editor = defineNamespace({
     "editor.bibles.attribution": "Text from the",
 
     // — Verse-resources reference sidebar (AQU-461) ————————————————————
-    "editor.resources.openTooltip":
-      "Verse resources: the people, places and terms this verse mentions",
     "editor.resources.show": "Show verse resources",
     "editor.resources.hide": "Hide verse resources",
     "editor.resources.edgeTab": "Helps",
@@ -694,13 +691,8 @@ export const editor = defineNamespace({
     "editor.selection.translateNoPermission":
       "You need contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
-    "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
     "editor.selection.validateText": "Validate text",
-    "editor.selection.validateTooltip": plural({
-      one: "Validate {count} cell",
-      other: "Validate {count} cells",
-    }),
     "editor.selection.validatePartial": plural({
       one: "Validate {count} of {total} selected cells",
       other: "Validate {count} of {total} selected cells",
@@ -732,19 +724,11 @@ export const editor = defineNamespace({
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
     "editor.selection.validateAudio": "Validate audio",
-    "editor.selection.validateAudioTooltip": plural({
-      one: "Validate {count} take in the selection",
-      other: "Validate {count} takes in the selection",
-    }),
     "editor.selection.validateAudioNoTakes": "Nothing recorded in the selection",
     "editor.selection.validateAudioAllMine": "You have validated every take in the selection",
     "editor.selection.validateAudioNothingEligible": "No takes here are yours to validate",
     "editor.selection.removeMyAudioValidations": "Remove my audio validations",
     "editor.selection.noAudioValidations": "You have not validated any take here",
-    "editor.selection.unvalidateAudioTooltip": plural({
-      one: "Remove your validation from {count} take",
-      other: "Remove your validation from {count} takes",
-    }),
     "editor.selection.unvalidatedAudioToast": plural({
       one: "Removed your validation from {count} take",
       other: "Removed your validation from {count} takes",
@@ -754,17 +738,9 @@ export const editor = defineNamespace({
       other: "Validated {count} takes",
     }),
     "editor.selection.noValidations": "No cells have your validation",
-    "editor.selection.unvalidateTooltip": plural({
-      one: "Remove your validation from {count} cell",
-      other: "Remove your validation from {count} cells",
-    }),
     "editor.selection.harmonize": "Harmonize…",
     "editor.selection.harmonizeNeedLead":
       "You need project lead role to run a harmonization sweep",
-    "editor.selection.harmonizeTooltip": plural({
-      one: "Open harmonize sweep for {count} selected cell",
-      other: "Open harmonize sweep for {count} selected cells",
-    }),
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
     "editor.selection.validatedToast": plural({
@@ -978,10 +954,6 @@ export const editor = defineNamespace({
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
     // back in whatever format it was actually recorded in.
-    "editor.timeline.qualityOriginalTooltip":
-      "Original quality (WAV) for generated voices — larger downloads. Recorded takes always play in the format they were captured.",
-    "editor.timeline.qualityCompressedTooltip":
-      "Compressed playback (smaller, faster). Toggle for original-quality generated voices.",
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
     "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
     "editor.timeline.snapOffTooltip": "Snapping off",
@@ -1099,7 +1071,6 @@ export const editor = defineNamespace({
     // Not "Edit history": that is the name of each line's own history drawer
     // (editor.history.title), and two buttons may not share one name.
     "editor.history.panelAria": "Undo history",
-    "editor.history.panelTooltip": "History: undo any of your recent steps",
     "editor.history.undoSection": "Can undo",
     "editor.history.redoSection": "Can redo",
     "editor.history.skippedSection": "Not undone or redone",
@@ -1159,8 +1130,6 @@ export const editor = defineNamespace({
     "editor.timeline.transcribeSelectionClear": "Clear selection",
     "editor.timeline.transcribeSelectionHint":
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
-    "editor.timeline.transcribeSelectionTooltip":
-      "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
     "editor.timeline.transcribeSelectionSharedTooltip": plural({
       one: "Some of these sections are performed by the same heard line, so this runs {count} transcription covering all of them.",
       other: "Some of these sections are performed by the same heard line, so this runs {count} transcriptions covering all of them.",
@@ -1500,7 +1469,6 @@ export const editor = defineNamespace({
     // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
     // indicator sits in a crowded toolbar where the shortest true string wins.
     "editor.hiddenCells.indicator": "{count} hidden",
-    "editor.hiddenCells.toggle": "Show hidden cells",
     "editor.hiddenCells.indicatorTooltip": plural({
       one:
         "{count} cell in this file is hidden: translators do not see it and exports " +
@@ -1829,7 +1797,6 @@ export const editor = defineNamespace({
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
     // Sam, 2026-09-28: the Audio view card — the take, then a row with its voice.
     "editor.voice.generateWith": "Generate · {voice}",
-    "editor.voice.generateDefaultTooltip": "Nobody chose a character for this line, so it uses the default voice",
     "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
     "editor.voice.generatingAs": "Generating as {voice}…",
     "editor.voice.tryAgain": "Try again",
@@ -2207,7 +2174,6 @@ export const editor = defineNamespace({
 
     // — Recording tab: the take that plays, and the others (2026-09-29) ————
     "editor.recordingTab.newTake": "New take",
-    "editor.recordingTab.newTakeTooltip": "Open the recorder to record, upload or generate a take",
     "editor.recordingTab.otherTakes": plural({
       one: "{count} other take",
       other: "{count} other takes",
@@ -4814,12 +4780,6 @@ export const editor = defineNamespace({
           "mid-sentence.",
         maxLength: 14,
       },
-      "editor.bibles.openTooltip": {
-        description:
-          "Tooltip on the collapsed right-edge tab that opens the parallel-bibles " +
-          "sidebar. Two halves: the feature's name, then what it does. 'Versions' " +
-          "here means published Bible translations, not document revisions.",
-      },
       "editor.bibles.show": {
         description:
           "Screen-reader name of that same collapsed edge tab. Imperative.",
@@ -4954,13 +4914,6 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
-      },
-      "editor.resources.openTooltip": {
-        description:
-          "Tooltip on the collapsed right-edge tab that opens the verse-resources " +
-          "sidebar. Two halves: the feature's name, then what it shows. 'Resources' " +
-          "here means published reference articles about the things the verse names " +
-          "(a person, a town, a key term), not files or project assets.",
       },
       "editor.resources.show": {
         description:
@@ -5616,27 +5569,12 @@ export const editor = defineNamespace({
           "Tooltip when the bulk-translate button is disabled because every " +
           "selected cell already has a translation, so there is nothing to draft.",
       },
-      "editor.selection.translateTooltip": {
-        description:
-          "Tooltip on the enabled bulk-translate button. 'Missing' means cells with " +
-          "no translation yet.",
-        placeholders: { count: "Number of empty cells that would be drafted." },
-      },
       "editor.selection.validate": {
         description:
           "Button in the selection toolbar that records the current user's sign-off " +
           "on the selected translations. Imperative verb; a count badge follows, so " +
           "keep the word alone short. It approves work, it does not check syntax.",
         maxLength: 16,
-      },
-      "editor.selection.validateTooltip": {
-        description:
-          "Tooltip on the enabled bulk-validate button, stating how many cells the click " +
-          "would sign off.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.validatePartial": {
         description:
@@ -5767,13 +5705,6 @@ export const editor = defineNamespace({
           + "validated any take in the selection.",
         maxLength: 60,
       },
-      "editor.selection.unvalidateAudioTooltip": {
-        description:
-          "Tooltip on the button that withdraws the reader's own validation "
-          + "from the selected recordings. Counts TAKES, not lines — a line "
-          + "with two tracks holds two.",
-        placeholders: { count: "How many takes the reader's vote comes off." },
-      },
       "editor.selection.unvalidatedAudioToast": {
         description:
           "Toast after withdrawing the reader's own validation from the "
@@ -5788,10 +5719,6 @@ export const editor = defineNamespace({
           + "recording. The word is 'validate', never 'approve'.",
         maxLength: 26,
       },
-      "editor.selection.validateAudioTooltip": {
-        description: "Tooltip for the button above, with the number of recordings it would sign off.",
-        placeholders: { count: "How many recordings the selection holds that this user can still validate." },
-      },
       "editor.selection.validatedAudioToast": {
         description: "Confirmation after the bulk recording validation above ran.",
         placeholders: { count: "How many recordings were validated." },
@@ -5800,15 +5727,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the remove-my-validations button is disabled because none of " +
           "the selected cells carries this user's sign-off.",
-      },
-      "editor.selection.unvalidateTooltip": {
-        description:
-          "Tooltip on the enabled remove-my-validations button, stating the scope. 'Your' " +
-          "keeps it clear that other reviewers are untouched.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.harmonize": {
         description:
@@ -5822,15 +5740,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the harmonize button is disabled because the user's project " +
           "role is below lead. 'Project lead' is a role name in this app.",
-      },
-      "editor.selection.harmonizeTooltip": {
-        description:
-          "Tooltip on the enabled harmonize button, stating the scope of the sweep it " +
-          "opens.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.clearTooltip": {
         description:
@@ -6421,18 +6330,6 @@ export const editor = defineNamespace({
           "are downloaded for playback — pressed means the larger original-quality " +
           "audio. Never visible.",
       },
-      "editor.timeline.qualityOriginalTooltip": {
-        description:
-          "Tooltip of that toggle while original quality is on. 'WAV' is the " +
-          "uncompressed audio file format — keep it as the file-format name. The last " +
-          "sentence warns that microphone recordings have no uncompressed form, so " +
-          "the setting does not affect them.",
-      },
-      "editor.timeline.qualityCompressedTooltip": {
-        description:
-          "Tooltip of the same toggle while compressed playback is on, naming the " +
-          "trade-off (smaller and faster) and what clicking switches to.",
-      },
       "editor.timeline.snapToggleAria": {
         description:
           "Accessible name of the toolbar toggle for snapping: while it is on, " +
@@ -6617,7 +6514,6 @@ export const editor = defineNamespace({
       "editor.history.redonePartly": { description: "Toast after Redo of a step made of several parts where some parts were changed since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
       "editor.history.panelTitle": { description: "Title of the History panel, which lists the user's recent steps they can undo." },
       "editor.history.panelAria": { description: "Accessible name of the button that opens the History panel." },
-      "editor.history.panelTooltip": { description: "Tooltip of the button that opens the History panel." },
       "editor.history.undoSection": { description: "Heading over the list of steps that can be undone (newest first)." },
       "editor.history.redoSection": { description: "Heading over the list of steps that were undone and can be redone." },
       "editor.history.skippedSection": { description: "Heading over recent undos/redos that did not happen, each with the reason." },
@@ -6877,11 +6773,6 @@ export const editor = defineNamespace({
           "the named voice (the line's character, or the project's default voice).",
         placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
         maxLength: 32,
-      },
-      "editor.voice.generateDefaultTooltip": {
-        description:
-          "Tooltip on that Generate button when nobody has chosen a character for the " +
-          "line, so it will use the project's default voice.",
       },
       "editor.voice.nothingToReadTooltip": {
         description:
@@ -8541,9 +8432,6 @@ export const editor = defineNamespace({
           "recorded, uploaded or generated. 'Take' as in one recording of a line.",
         maxLength: 14,
       },
-      "editor.recordingTab.newTakeTooltip": {
-        description: "Tooltip of the New take button: what the recorder it opens can do.",
-      },
       "editor.recordingTab.otherTakes": {
         description:
           "Heading over the list of a line's takes other than the one that plays, in " +
@@ -8817,13 +8705,6 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many cells in this file are hidden. Always one or more.",
         },
-      },
-      "editor.hiddenCells.toggle": {
-        description:
-          "Label of the switch beside the hidden-cell count. On, the parked cells are " +
-          "drawn dimmed instead of dropped from the list — it reveals them on this " +
-          "screen only and un-hides nothing for anyone else. Imperative.",
-        maxLength: 24,
       },
       "editor.issues.none": {
         description:

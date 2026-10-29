@@ -763,6 +763,9 @@ export interface EditorTableHandle {
    *  a row click doesn't scroll the table but must re-engage following). */
   setMediaFollow: (intent: "engage" | "release") => void
   focusCellEditorIndex: (index: number) => void
+  /** Put the caret in this cell's target editor, by id in DISPLAY space — the
+   *  recorder's "edit this text" pencil. False when the row is not listed. */
+  focusCellEditorId: (cellId: string) => boolean
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
   flashCell: (cellId: string, searchTerm: string) => void
@@ -2082,6 +2085,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       issueFollowCommand(intent)
     },
     focusCellEditorIndex: focusCellEditorByIndex,
+    focusCellEditorId: (cellId: string) => {
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      focusCellEditorByIndex(index)
+      return true
+    },
     getCurrentIndex: () => {
       // The last-active editor cell when it's on screen (so "Next unfinished"
       // advances past a just-jumped-to cell instead of re-finding it),

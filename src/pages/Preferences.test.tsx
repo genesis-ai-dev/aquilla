@@ -98,6 +98,8 @@ describe("Preferences", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
+    // AQU-2263: the one Share usage data setting, as onboarding shows it.
+    expect(screen.getByTestId("share-usage-data")).toBeInTheDocument()
   })
 
   it("workspace settings use a right-side layout select and confirm switch", () => {

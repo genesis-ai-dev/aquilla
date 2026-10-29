@@ -274,6 +274,11 @@ export const settings = defineNamespace({
     // so it says what the key is for and the line under it says what is used.
     "settings.providerKeys.geminiTtsDescription":
       "A Gemini key for the whole organization, for voices when a project and the person have no key of their own.",
+    // ── AQU-2263: the one description of "Share usage data", in Preferences
+    // and onboarding alike (ShareUsageDataSetting) ──
+    "settings.shareUsageData.description":
+      "Usage events, like creating a project or exporting, and session recordings that help us diagnose problems. " +
+      "Never the contents of your translations or files.",
     // ── AQU-2263: which AI key is in use right now (KeyInUseLine) ──
     // {name} is the platform provider's name, "Frontier".
     "settings.keyInUse.platform": "Using {name}. No key needed.",

@@ -231,6 +231,9 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   allowLineCreation: { kind: 'boolean' },
   allowTrackEditing: { kind: 'boolean' },
   timingLocked: { kind: 'boolean' },
+  // AQU-1758 (Sam's decision 7): "Show the film and sources tools in the media
+  // view". Unset, the project's kind decides (src/lib/media/film-and-sources.ts).
+  filmAndSources: { kind: 'boolean' },
   audioTimingMode: { kind: 'enum', values: ['dubbing', 'audioFirst'] },
   bibleResourcesEnabled: { kind: 'boolean' },
   // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).

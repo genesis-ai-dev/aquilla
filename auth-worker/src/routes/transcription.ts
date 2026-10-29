@@ -134,7 +134,12 @@ async function warm(c: AppContext, projectId: string, model: OmniModel, userId: 
   })
   if (!gate.ok) return c.json(gate.body, gate.status)
   try {
-    const response = await omniFetch(c.env, "/warm", { method: "POST", body: { model }, timeoutMs: 10000 })
+    const { response, backend } = await omniFetch(c.env, "/warm", { method: "POST", body: { model }, timeoutMs: 10000 })
+    if (backend === "primary" && response.ok) {
+      // The self-hosted models are always loaded: this warm-up started no GPU.
+      if (gate.usage) await releaseChatUsage(c.env, gate.usage)
+      return c.json({ ok: true }, 202)
+    }
     if (!response.ok) {
       // As for /transcribe: a 4xx other than 408 is refused before any GPU
       // starts, so it is proven free. Anything less certain stays held.
@@ -156,7 +161,7 @@ async function status(c: AppContext, projectId: string, model: OmniModel) {
   if (denied) return c.json({ error: denied.error }, denied.status)
   if (!omniConfigured(c.env)) return c.json({ error: "Omnilingual transcription is not configured" }, 503)
   try {
-    const response = await omniFetch(c.env, `/status?model=${model}`, { method: "GET", timeoutMs: 10000 })
+    const { response } = await omniFetch(c.env, `/status?model=${model}`, { method: "GET", timeoutMs: 10000 })
     if (!response.ok) return c.json({ error: "Status unavailable" }, 502)
     const parsed = omniStatusSchema.safeParse(await response.json().catch(() => null))
     if (!parsed.success) return c.json({ error: "Invalid status response" }, 502)

@@ -511,3 +511,46 @@ describe("useCellsAuditStats — sparse reads (AQU-2094)", () => {
     expect(result.current.complete).toBe(false)
   })
 })
+
+// AQU-2280. WHY: `applyCommittedCellStats` lands the author's own POST /events
+// response, and right after a reload the outbox drains the edits queued before
+// it — at the same moment the file's full read returns. The merge used to copy
+// a ref that only catches up with React state on the next render, so when the
+// read resolved and a flush landed before React painted in between, the flush
+// copied the pre-read (empty) map, added its one cell, and overwrote the
+// server's answer for every other cell: a whole file's validation pills went
+// blank, with nothing refetching them. The e2e gate on the commit chain
+// (commit-chain-linear.smoke.spec.ts) hit this one run in four.
+describe("useCellsAuditStats — a committed cell landing beside the full read (AQU-2280)", () => {
+  const committedRow: CellRow = {
+    cellId: "cell-9", side: "target", eventId: "ev-9", value: "new", valueHtml: null, type: null,
+    canonicalRef: null, anchorCellId: null, sourceEventId: null, lastEditor: "alice",
+    lastEditAt: 1234, validated: false, wordCount: 1,
+  }
+
+  it("keeps the read's validators when the commit merges before React renders the read", async () => {
+    let resolveRead!: (response: Response) => void
+    global.fetch = vi.fn().mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolveRead = resolve }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1))
+
+    let merged = false
+    await act(async () => {
+      resolveRead(new Response(JSON.stringify({ cells: STATS_RESPONSE, sparse: true }), { status: 200 }))
+      // The read's state update is queued but, inside one act() batch, not yet
+      // rendered — the gap between a response and the next paint in the app.
+      await new Promise((r) => setTimeout(r, 0))
+      merged = result.current.applyCommittedCellStats("cell-9", [committedRow])
+    })
+
+    expect(merged).toBe(true)
+    expect(result.current.byCellId.get("cell-1")?.activeValidators).toEqual(["alice", "bob"])
+    expect(result.current.byCellId.get("cell-2")?.editCount).toBe(7)
+    expect(result.current.byCellId.get("cell-9")).toMatchObject({ lastEditEventId: "ev-9", activeValidators: [] })
+    expect(result.current.complete).toBe(true)
+  })
+})

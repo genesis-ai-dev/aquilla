@@ -43,7 +43,7 @@ const PATCH_SETTINGS_CHECKS_DOC = `Built-in checks (Rules page name → id, defa
   const m = TEXT_CHECK_META[id]
   return `"${m.name}" → \`${id}\` (${m.defaultEnabled ? 'on' : 'off'}, ${m.defaultSeverity})`
 }).join('; ')}. Bible data checks, present only while the project's Bible data checks are on (all default on): ${BIBLE_CHECK_IDS.map((id) => `"${BIBLE_CHECK_META[id].name}" → \`${id}\``).join('; ')}.
-To override a check, write \`algorithmicChecks\` as a map from id to \`{ enabled, severity? }\`, e.g. \`{ "usfm-structure": { "enabled": false }, "footnote-quote-mismatch": { "enabled": false } }\`. Omit \`severity\` for the default; a check with no entry keeps its default. The op replaces the whole map, so start from \`settings.algorithmicChecks\` (GET .../settings) and add to it. \`algorithmicChecksByLane\` is \`{ [laneTag]: that same map }\` (\`""\` is the default lane); a lane's entry for a check replaces the project-wide entry for that check, and other checks fall through. \`rules\` holds only your own regex rules, never built-in checks. The "Style rules" section of the Rules page is a different store and cannot be written through \`rules\`.`
+To override a check, write \`algorithmicChecks\` as a map from id to \`{ enabled, severity? }\`, e.g. \`{ "usfm-structure": { "enabled": false }, "footnote-quote-mismatch": { "enabled": false } }\`. Omit \`severity\` for the default; a check with no entry keeps its default. The op replaces the whole map, so start from \`settings.algorithmicChecks\` (GET .../settings) and add to it. \`algorithmicChecksByLane\` is \`{ [laneTag]: that same map }\` (\`""\` is the default lane); a lane's entry for a check replaces the project-wide entry for that check, and other checks fall through. \`rules\` holds only your own regex rules, never built-in checks. The "Style rules" section of the Rules page is a different store and cannot be written through \`rules\`. To approve, reject or edit those, use ReviewStyleRules.`
 
 
 /** AQU-1282: the per-key restrictive direction, rendered from the same table the
@@ -535,6 +535,26 @@ Gotchas:
 - Rejected with \`not_found\` when nothing is currently APPROVED at that slug (a \`proposed\` entry is rejected in-app instead, not retired here).
 - A human-edited entry is refused (permission_denied) — retire it from the in-app Memory surface.
 Example: \`{ "kind": "RetireExample", "slug": "lord-as-hospod", "rationale": "Superseded by the divine-name decision." }\``,
+  },
+  {
+    kind: 'ReviewStyleRules',
+    title: 'Review style rules',
+    oneLiner: 'Approve, reject or edit proposed style rules in bulk (Rules > Style rules).',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ReviewStyleRules
+Params: \`{ projectId, decisions: [{ ruleId, action, ifMatchVersion, patch? }] }\` — sole command. \`action\` is \`approve\`, \`reject\` or \`update\`. \`projectId\` must match the changeset's project.
+Acts on the rules in the Style rules section of the Rules page (\`style_rules\`), the ones "Extract from knowledge base" proposes. List them first: \`GET /api/v1/external/projects/:projectId/style-rules?status=proposed\` (MCP: \`list_style_rules\`); each row carries the \`id\` and \`version\` to send back.
+- \`approve\` / \`reject\`: the rule must be \`proposed\`. Approving puts it into drafting prompts (only approved, enabled rules reach the copilot); rejecting keeps the row, marked rejected.
+- \`update\`: \`patch\` is required and only allowed here. Fields: \`instruction\`, \`category\`, \`severity\`, \`enabled\`. It edits the rule and leaves its status alone, marks it human-edited and bumps \`version\`. To edit then approve, stage two changesets (one rule appears once per command).
+- \`ifMatchVersion\` is the \`version\` you read. A rule that changed since then refuses the whole batch with \`plan_stale\`.
+Gotchas:
+- PROJECT_LEAD(500)+, the in-app review floor. In ask mode the human who confirms must hold it too; act mode with a PROJECT_LEAD credential applies directly.
+- At most 500 decisions per command and one decision per rule; split larger passes across changesets.
+- ALL OR NOTHING. Commit checks every decision against the live rows and writes only if all pass. A missing rule, an org-inherited rule (managed at the org level, shown with \`inherited: true\` on the list), a rule in the wrong state for its action, or a stale version refuses the whole commit with \`details.decisions: [{ index, ruleId, code: not_found|org_inherited|invalid_state|stale_version, message }]\` and changes nothing. Prepare runs the same check, so most of these surface before a human is asked.
+- The receipt lists each rule's \`ruleId\`, \`action\`, new \`status\` and \`version\`. Approve and reject leave \`version\` as it was; only \`update\` bumps it.
+Example: \`{ "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [{ "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 }, { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 }, { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } }] }\``,
   },
   {
     kind: 'InsertCell',

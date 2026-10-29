@@ -4,7 +4,10 @@
 import { describe, expect, it } from "vitest"
 import {
   buildProgramme,
+  canCarryTargetLead,
   cellStartProgrammeSec,
+  leadSecForMove,
+  MIN_TARGET_LEAD_SEC,
   programmeLines,
   programmeToSource,
   programmeToTarget,
@@ -60,9 +63,19 @@ describe("buildProgramme — laying the verses out", () => {
     expect(prog.totalSec).toBe(18)
   })
 
-  it("the ORIGINAL wins the slot when it is the longer side", () => {
-    const prog = buildProgramme([verse("v1", 0, 9, { durationMs: 4_000 })])
-    expect(prog.slots[0]).toMatchObject({ sourceLenSec: 9, targetLenSec: 4, slotLenSec: 9, clock: "source" })
+  // AQU-2204 (Sam, Oct 27): "Make 'Follows recordings' really follow the
+  // recordings." Free timing used to give the line the longer of the two.
+  it("a line is as long as its take even when the original runs longer — the original is cut where the line ends (AQU-2204)", () => {
+    const prog = buildProgramme([verse("v1", 0, 9, { durationMs: 4_000 }), verse("v2", 9, 12, { durationMs: 2_000 })])
+    expect(prog.slots[0]).toMatchObject({ sourceLenSec: 4, targetLenSec: 4, slotLenSec: 4, cardLenSec: 4, clock: "target" })
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 4 })
+    expect(prog.slots[1].startSec).toBe(4)
+  })
+
+  it("a line with no take takes its stand-in length, not its original's (AQU-2204)", () => {
+    const prog = buildProgramme([verse("v1", 0, 9), verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 2.5, clock: "source", standIn: true })
+    expect(prog.slots[1].startSec).toBe(2.5)
   })
 
   it("the TRANSLATION clocks the slot when it is the longer side", () => {
@@ -88,7 +101,8 @@ describe("buildProgramme — laying the verses out", () => {
     ])
     expect(trimmed.slots[0]).toMatchObject({ targetLenSec: 5, slotLenSec: 5 })
     expect(trimmed.slots[1].startSec).toBe(5)
-    expect(trimmed.totalSec).toBe(9)
+    // v2 is as long as its 3 s take (AQU-2204), not its 4 s original.
+    expect(trimmed.totalSec).toBe(8)
   })
 
   it("a take whose length isn't known borrows the original's, and gets no playback window", () => {
@@ -161,18 +175,18 @@ describe("buildProgramme — laying the verses out", () => {
 describe("looking a position up", () => {
   const prog = buildProgramme([
     verse("v1", 0, 6, { durationMs: 11_000 }), // slot 0→11: original 6s, translation 11s
-    verse("v2", 6, 16, { durationMs: 4_000 }), // slot 11→21: original 10s, translation 4s
+    verse("v2", 6, 16, { durationMs: 4_000 }), // slot 11→15: the translation's 4s; the original is cut there (AQU-2204)
   ])
 
   it("finds the verse a programme second falls in", () => {
     expect(slotAtProgrammeSec(prog, 0)?.cellId).toBe("v1")
     expect(slotAtProgrammeSec(prog, 10.9)?.cellId).toBe("v1")
     expect(slotAtProgrammeSec(prog, 11)?.cellId).toBe("v2")
-    expect(slotAtProgrammeSec(prog, 20.9)?.cellId).toBe("v2")
+    expect(slotAtProgrammeSec(prog, 14.9)?.cellId).toBe("v2")
   })
 
   it("past the end, or before the start, is nothing", () => {
-    expect(slotAtProgrammeSec(prog, 21)).toBeNull()
+    expect(slotAtProgrammeSec(prog, 15)).toBeNull()
     expect(slotAtProgrammeSec(prog, -1)).toBeNull()
     expect(slotAtProgrammeSec(prog, Number.NaN)).toBeNull()
   })
@@ -190,10 +204,12 @@ describe("looking a position up", () => {
     expect(programmeToSource(prog, 6)).toBeNull()
     expect(programmeToSource(prog, 10.9)).toBeNull()
     expect(programmeToTarget(prog, 10.9)).toMatchObject({ clipSec: 10.9 })
-    // v2 is the other way round: the translation runs out first.
+    // v2's original runs longer than its translation, so it is cut where the
+    // translation ends (AQU-2204): both stop at 4 s.
     expect(programmeToTarget(prog, 11 + 3.9)?.clipSec).toBeCloseTo(3.9, 6)
+    expect(programmeToSource(prog, 11 + 3.9)?.clipSec).toBeCloseTo(9.9, 6)
     expect(programmeToTarget(prog, 11 + 4)).toBeNull()
-    expect(programmeToSource(prog, 11 + 9.9)?.clipSec).toBeCloseTo(15.9, 6)
+    expect(programmeToSource(prog, 11 + 4)).toBeNull()
   })
 
   it("a head trim joins the clip past the trim", () => {
@@ -210,12 +226,14 @@ describe("looking a position up", () => {
     expect(sourceFileSecToProgramme(prog, 5)).toBe(5)
     // v2's original starts at file second 6 — now shown at programme second 11.
     expect(sourceFileSecToProgramme(prog, 6)).toBe(11)
-    expect(sourceFileSecToProgramme(prog, 15)).toBe(20)
+    expect(sourceFileSecToProgramme(prog, 9)).toBe(14)
+    // Past the take's end the original is cut, so it isn't on the programme.
+    expect(sourceFileSecToProgramme(prog, 15)).toBeNull()
     expect(sourceFileSecToProgramme(prog, 99)).toBeNull()
   })
 
   it("round-trips a source position through both directions", () => {
-    for (const fileSec of [0, 3.25, 6, 12, 15.75]) {
+    for (const fileSec of [0, 3.25, 6, 8, 9.75]) {
       const prog2 = sourceFileSecToProgramme(prog, fileSec)!
       expect(programmeToSource(prog, prog2)?.clipSec).toBeCloseTo(fileSec, 6)
     }
@@ -392,5 +410,89 @@ describe("buildProgramme — a pause before the take (AQU-2204)", () => {
     expect(prog.slots[0].targetLeadSec).toBeUndefined()
     expect(prog.slots[1].targetLeadSec).toBeUndefined()
     expect(prog.slots[0].slotLenSec).toBeCloseTo(3, 5)
+  })
+})
+
+// AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
+// move a recorded take around in the timeline." Following the recordings, what
+// moves is the PAUSE before the take, inside its own line.
+describe("moving a take inside its line (AQU-2215)", () => {
+  const placed = (offsetMs: number) => ({ durationMs: 3_000, targetOffsetMs: offsetMs }) as never
+  const slotOf = (cells: CellData[], id: string) => buildProgramme(cells).byCellId.get(id)!
+
+  describe("leadSecForMove", () => {
+    // v1's slot starts at 0 and v2's at 3 (v1: original 0-2, take 3 s).
+    const cells = [verse("v1", 0, 2, { durationMs: 3_000 }), verse("v2", 2, 4, { durationMs: 3_000 })]
+
+    it("is how far past its line's start the take was dragged — not the programme second", () => {
+      const slot = slotOf(cells, "v2")
+      expect(slot.startSec).toBeCloseTo(3, 5)
+      // Dropped at programme second 4.2 on a line that starts at 3 → a 1.2 s
+      // pause. Storing 4.2 would put the take on a second that nothing stores.
+      expect(leadSecForMove(slot, 4.2)).toBeCloseTo(1.2, 5)
+    })
+
+    it("shortens back to no pause at all on the left", () => {
+      const slot = slotOf(cells, "v2")
+      expect(leadSecForMove(slot, slot.startSec)).toBe(0)
+      // Past the line's start: a take never begins before the line it performs.
+      expect(leadSecForMove(slot, slot.startSec - 5)).toBe(0)
+    })
+
+    it("reads a nudge under the pause threshold as no pause, exactly as the layout does", () => {
+      const slot = slotOf(cells, "v1")
+      expect(leadSecForMove(slot, MIN_TARGET_LEAD_SEC / 2)).toBe(0)
+      expect(leadSecForMove(slot, MIN_TARGET_LEAD_SEC)).toBeCloseTo(MIN_TARGET_LEAD_SEC, 5)
+    })
+
+    it("round-trips: the pause a drag stores is the pause the next build reads back", () => {
+      const moved = [verse("v1", 0, 2, placed(1_400)), verse("v2", 2, 4, { durationMs: 3_000 })]
+      const prog = buildProgramme(moved)
+      expect(prog.slots[0].targetLeadSec).toBeCloseTo(1.4, 5)
+      // The line grew to hold the pause, so the line after it moved along.
+      expect(prog.slots[0].slotLenSec).toBeCloseTo(4.4, 5)
+      expect(prog.slots[1].startSec).toBeCloseTo(4.4, 5)
+    })
+  })
+
+  describe("canCarryTargetLead — only a take whose pause will be read back is movable", () => {
+    it("a timed line with a measured take can hold one", () => {
+      const cells = [verse("v1", 0, 2, { durationMs: 3_000 })]
+      expect(canCarryTargetLead(cells[0], slotOf(cells, "v1"))).toBe(true)
+    })
+
+    it("a take of unknown length cannot — it has no window to place", () => {
+      const cells = [verse("v1", 0, 2, {})]
+      expect(canCarryTargetLead(cells[0], slotOf(cells, "v1"))).toBe(false)
+    })
+
+    it("a split take cannot — its pieces sit end to end from the line's start", () => {
+      const TAKE = "audio-a-1700000000-take.wav"
+      const PIECE = "audio-a-1700000500-piece.wav"
+      const cells = [
+        verse("a", 0, 2, undefined, {
+          selectedAudioId: TAKE,
+          attachments: {
+            [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+            [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+            [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+          },
+        } as unknown as Partial<CellData>),
+      ]
+      const slot = slotOf(cells, "a")
+      expect(slot.targetPieces).toBeDefined()
+      expect(canCarryTargetLead(cells[0], slot)).toBe(false)
+    })
+
+    it("a line with no times of its own cannot — there is nothing to measure from", () => {
+      const takeId = "audio-u-1700000000-take.webm"
+      const cell = {
+        id: "u", fileId: "f1", original: "", translated: "", medium: "text",
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_000 } },
+      } as unknown as CellData
+      const prog = buildProgramme([cell], { standInLenSec: () => 2 })
+      expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(false)
+    })
   })
 })

@@ -26,6 +26,7 @@ import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalCommentsRequest } from './comments-route'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
+import { handleExternalStyleRulesReadRequest } from './style-rules-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
@@ -604,6 +605,30 @@ async function listMemory(
   if (cursor) params.set('cursor', cursor)
   const qs = params.toString() ? `?${params.toString()}` : ''
   return runMemoryRead(env, token, `${encodeURIComponent(projectId)}/memory${qs}`)
+}
+
+async function listStyleRules(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/style-rules${qs}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalStyleRulesReadRequest(req, env)
+  if (!res) return fail('not_found', 'style-rules read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 async function readCellMemory(
@@ -1431,6 +1456,8 @@ export async function callTool(
       return listMemory(env, token, args)
     case 'read_cell_memory':
       return readCellMemory(env, token, args)
+    case 'list_style_rules':
+      return listStyleRules(env, token, args)
     case 'read_quality':
       return readQuality(env, token, args)
     case 'read_term_consistency':

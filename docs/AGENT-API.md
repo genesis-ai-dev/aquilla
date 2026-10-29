@@ -1375,6 +1375,57 @@ and PatchSettings accepted any object for `rules`, `rulePenalties`,
   field named. Rules read back from `settings.rules` can be patched unchanged.
 - **Not covered.** The "Style rules" section of the Rules page lives in the `style_rules`
   table (auth-worker `/api/v2/projects/:id/style-rules`). It is a different store and is
-  not reachable through the `rules` key. AQU-2195 covers exposing it.
+  not reachable through the `rules` key. AQU-2195 (below) covers it.
 - **Source of truth.** Check ids, English names and defaults live in
   `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.
+
+## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
+
+"Extract from knowledge base" can propose hundreds of style rules, and until now only a
+person in the Rules page could read or decide them. An agent with a project credential
+can now do the whole pass.
+
+- **Reading.** `GET .../projects/:projectId/style-rules` (MCP `list_style_rules`). Needs
+  VIEWER, and a read-only credential works. Optional `?status=proposed|approved|rejected|archived`
+  (anything else is `validation_failed`) and `limit` (default 100, max 500) + `cursor`.
+  Each rule carries `id`, `instruction`, `category`, `scope`, `severity`, `enabled`, `status`,
+  `version`, `humanEdited` and `source`; a rule that cites a knowledge document also carries
+  `sourceDocTitle`. `inherited: true` marks a rule the project's org shares: it shows up here
+  as it does in the app, and it cannot be reviewed through the project. The rows, the
+  status filter and the ordering (newest first) come from the same code as the in-app list.
+- **Writing.** One command, `ReviewStyleRules`, a sole command in its changeset:
+
+  ```json
+  { "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [
+    { "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 },
+    { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 },
+    { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } } ] }
+  ```
+
+  `approve` and `reject` need a `proposed` rule. `update` takes a `patch` (required there,
+  refused elsewhere) of `instruction`, `category`, `severity` and `enabled`, marks the rule
+  human-edited and bumps its `version`; its status stays as it was. Editing a rule and
+  approving it takes two changesets, because a rule appears once per command.
+- **Floor.** PROJECT_LEAD, the in-app review floor: checked at prepare (`permission_denied`
+  below it) and re-resolved at commit. In ask mode the human who confirms must hold
+  PROJECT_LEAD too, and a confirmation from anyone lower refuses the commit without
+  consuming it. Unlike a Living Memory proposal there is no "lands as proposed" fallback:
+  approving a rule changes every later draft. Act mode with a PROJECT_LEAD credential
+  applies directly.
+- **Batch and atomicity.** At most 500 decisions per command, one per rule; split a longer
+  pass across changesets. Commit locks the rule rows, checks every decision, and writes
+  nothing unless all of them pass, in one transaction. A missing rule, an org-inherited
+  rule, a rule in the wrong state for its action, or a stale version refuses the whole
+  commit with `details.decisions: [{ index, ruleId, code, message }]` where `code` is
+  `not_found`, `org_inherited`, `invalid_state` or `stale_version`. Any `stale_version`
+  makes the error `plan_stale`: re-read the list and stage again. Prepare runs the same
+  check against the live rows, so most refusals arrive before a human is asked.
+- **Receipt.** `receipt.rules` lists each rule's `ruleId`, `action`, new `status` and
+  `version`. Approve and reject leave `version` unchanged (the in-app review does not bump
+  it either); only `update` does. `reviewed_by` is the credential owner's username, as with
+  the in-app route.
+- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` now returns the style-rules
+  block as `parts.styleRules` and in the assembled system message. It carries what the
+  editor's drafting call carries: approved, enabled rules (the project's and its org's) that
+  apply to that cell through the applicability graph. Proposed, rejected, archived and
+  disabled rules never appear.

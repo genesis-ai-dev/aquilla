@@ -85,6 +85,11 @@ describe('command catalog — invariants', () => {
       AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
       AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
       RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
+      ReviewStyleRules: {
+        kind: 'ReviewStyleRules',
+        projectId: 'p',
+        decisions: [{ ruleId: 'r1', action: 'approve', ifMatchVersion: 1 }],
+      },
       InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
       DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
       SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },

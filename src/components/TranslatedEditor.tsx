@@ -2199,11 +2199,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // Keep focus in the editor: a blur here would close the cell.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { void startLlmAsk() }}
-          className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-violet-700 opacity-70 transition-opacity hover:bg-violet-500/10 hover:opacity-100 dark:text-violet-300"
+          // Icon-only at rest so it can't cover text; the label slides out on hover/focus.
+          aria-label={t("smartEdits.askAi")}
+          className="group/ask-ai absolute bottom-1 right-1 inline-flex items-center rounded-full p-1 text-[11px] text-violet-700 opacity-60 transition-all hover:bg-background hover:px-2 hover:opacity-100 hover:shadow-sm hover:ring-1 hover:ring-violet-500/30 focus-visible:bg-background focus-visible:px-2 focus-visible:opacity-100 dark:text-violet-300"
           data-testid="smart-edit-ask-ai"
         >
-          <Sparkles className="size-3" aria-hidden />
-          {t("smartEdits.askAi")}
+          <Sparkles className="size-3 shrink-0" aria-hidden />
+          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all group-hover/ask-ai:ml-1 group-hover/ask-ai:max-w-40 group-focus-visible/ask-ai:ml-1 group-focus-visible/ask-ai:max-w-40">
+            {t("smartEdits.askAi")}
+          </span>
         </button>
       )}
       {llmAsk && (

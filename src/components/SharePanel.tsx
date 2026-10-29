@@ -325,9 +325,9 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
 
   // Lane limits apply to everyone below maintainer, project leads included
   // (AQU-1813 / AQU-2054). Maintainers and above see every lane; the server
-  // refuses to scope them, so they are not fetched. A lead's lanes are shown
-  // here and changed in the lane Staff popover — this panel does not edit
-  // them. Recomputed whenever the roster changes.
+  // refuses to scope them, so they are not fetched. A lead's lanes are
+  // edited here. A lane-limited caller can grant only the lanes they hold.
+  // Recomputed whenever the roster changes.
   const scopableUserIds = useMemo(
     () => members.filter((m) => m.role.level < ROLE.MAINTAINER).map((m) => m.userId),
     [members],
@@ -389,10 +389,24 @@ function MembersTab({ projectId, projectName }: { projectId: string; projectName
     return out
   }, [scopesByUser, scopeLaneRows])
 
+  const callerLaneValues = callerMember
+    ? (normalizedScopesByUser[callerMember.userId] ?? [])
+        .filter((scope) => scope.kind === "lane")
+        .map((scope) => scope.value)
+    : []
+  // No lane rows means every lane: a maintainer, or a lead who is not limited.
+  const grantableLaneValues =
+    callerMaxRole >= ROLE.MAINTAINER || callerLaneValues.length === 0 ? null : callerLaneValues
   const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes &&
     scopeOptionsReady && memberScopesReady &&
     loadedScopeOptionsKey === currentScopeKey && loadedMemberScopesKey === currentScopeKey
-    ? { lanes: scopeLanes, files: scopeFiles, scopesByUser: normalizedScopesByUser, onSave: handleSaveScopes }
+    ? {
+        lanes: scopeLanes,
+        files: scopeFiles,
+        scopesByUser: normalizedScopesByUser,
+        grantableLaneValues,
+        onSave: handleSaveScopes,
+      }
     : undefined
   const scopeError = scopeOptionsError ?? memberScopesError
   const supplementalErrors = Array.from(

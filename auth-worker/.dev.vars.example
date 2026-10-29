@@ -197,4 +197,7 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # the sync-worker must be publicly reachable: run a tunnel to :8789 and set
 # both SYNC_WORKER_URL (here) and DIARIZATION_PUBLIC_BASE (sync-worker) to it.
 # OMNI_ASR_MODAL_URL=""
+# Self-hosted server (infra/selfhost), tried before Modal, e.g.
+# http://127.0.0.1:8088 for a local `uvicorn omni_asr_server:app`.
+# OMNI_ASR_PRIMARY_URL=""
 # OMNI_SHARED_SECRET=""

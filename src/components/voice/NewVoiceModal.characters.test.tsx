@@ -40,7 +40,7 @@ function renderModal(props: { voice?: Voice | null; existingVoices?: Voice[] } =
   return { onSave, onClose }
 }
 
-const card = (name: string) => screen.getByText(name, { selector: "p" }).closest("li") as HTMLElement
+const card = (name: string) => screen.getByText(name, { selector: "p > span" }).closest("li") as HTMLElement
 
 describe("NewVoiceModal Characters tab", () => {
   it("adds a character to the cast in one click, with no engine or Create step", () => {
@@ -66,9 +66,18 @@ describe("NewVoiceModal Characters tab", () => {
   it("narrows the grid with filter chips", () => {
     renderModal()
     fireEvent.click(screen.getByRole("tab", { name: /Characters/ }))
-    fireEvent.click(screen.getByRole("button", { name: "Child" }))
-    expect(screen.getByText("Poppy")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Female" }))
+    fireEvent.click(screen.getByRole("button", { name: "Old" }))
+    expect(screen.getByText("Sage")).toBeInTheDocument()
     expect(screen.queryByText("Hearth")).toBeNull()
+  })
+
+  it("labels each card with sex, age and range only (AQU-2212)", () => {
+    renderModal()
+    fireEvent.click(screen.getByRole("tab", { name: /Characters/ }))
+    expect(within(card("Hearth")).getByText("Baritone")).toBeInTheDocument()
+    expect(within(card("Hearth")).getByText("Male · Middle-aged")).toBeInTheDocument()
+    expect(screen.queryByText(/storyteller/)).toBeNull()
   })
 
   it("editing a character voice re-points it and keeps the user's name", () => {

@@ -3,12 +3,13 @@ import { formatWorkerTestScope, resolveWorkerTestScope } from "./resolve-worker-
 
 describe("worker test scope", () => {
   it.each([
-    [["src/components/App.tsx"], { auth: false, sync: false, agent: false }],
-    [["auth-worker/src/index.ts"], { auth: true, sync: false, agent: false }],
-    [["src/lib/migrate/ids.ts"], { auth: true, sync: false, agent: false }],
-    [["sync-worker/src/index.ts"], { auth: false, sync: true, agent: false }],
-    [["agent-worker/src/index.ts"], { auth: false, sync: false, agent: true }],
-    [["auth-worker/src/index.ts", "sync-worker/src/index.ts"], { auth: true, sync: true, agent: false }],
+    [["src/components/App.tsx"], { auth: false, sync: false, agent: false, monitor: false }],
+    [["auth-worker/src/index.ts"], { auth: true, sync: false, agent: false, monitor: false }],
+    [["src/lib/migrate/ids.ts"], { auth: true, sync: false, agent: false, monitor: false }],
+    [["sync-worker/src/index.ts"], { auth: false, sync: true, agent: false, monitor: false }],
+    [["agent-worker/src/index.ts"], { auth: false, sync: false, agent: true, monitor: false }],
+    [["monitor-worker/src/index.ts"], { auth: false, sync: false, agent: false, monitor: true }],
+    [["auth-worker/src/index.ts", "sync-worker/src/index.ts"], { auth: true, sync: true, agent: false, monitor: false }],
   ])("selects suites for %j", (files, expected) => {
     expect(resolveWorkerTestScope(files)).toEqual(expected)
   })
@@ -27,16 +28,16 @@ describe("worker test scope", () => {
     ".github/workflows/ci.yml",
     ".github/workflows/deploy-workers.yml",
   ])("runs every suite for shared input %s", (file) => {
-    expect(resolveWorkerTestScope([file])).toEqual({ auth: true, sync: true, agent: true })
+    expect(resolveWorkerTestScope([file])).toEqual({ auth: true, sync: true, agent: true, monitor: true })
   })
 
   it("fails open when the caller cannot produce a trustworthy diff", () => {
     expect(resolveWorkerTestScope([], { forceAll: true }))
-      .toEqual({ auth: true, sync: true, agent: true })
+      .toEqual({ auth: true, sync: true, agent: true, monitor: true })
   })
 
   it("emits stable GitHub output keys", () => {
-    expect(formatWorkerTestScope({ auth: true, sync: false, agent: true }))
-      .toBe("auth=true\nsync=false\nagent=true\n")
+    expect(formatWorkerTestScope({ auth: true, sync: false, agent: true, monitor: false }))
+      .toBe("auth=true\nsync=false\nagent=true\nmonitor=false\n")
   })
 })

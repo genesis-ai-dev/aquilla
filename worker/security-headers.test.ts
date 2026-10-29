@@ -53,6 +53,41 @@ describe("YouTube iframe API script policy", () => {
   })
 })
 
+describe("third-party font hosts stay out of the CSP (AQU-2244)", () => {
+  // Geist ships from our own origin (`@fontsource-variable/geist`), so no
+  // surface needs Google's font CDNs. Allowing them would let a later change
+  // pull fonts from Google and hand every visitor's IP to a recipient the
+  // privacy policy does not name — the kind of regression that shows up in a
+  // legal review, not in a failing page.
+  const GOOGLE_FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"]
+
+  const TAURI_CSPS = ["../src-tauri/tauri.conf.json", "../src-tauri/tauri.mitm.conf.json"].map(
+    (file) =>
+      [
+        file,
+        JSON.stringify(JSON.parse(readFileSync(resolve(__dirname, file), "utf8")).app.security.csp),
+      ] as const,
+  )
+
+  it.each([
+    ["worker enforced", ENFORCED_CSP],
+    ["worker report-only", REPORT_ONLY_CSP],
+    ["static assets enforced", STATIC_HEADERS["Content-Security-Policy"]],
+    ["static assets report-only", STATIC_HEADERS["Content-Security-Policy-Report-Only"]],
+    ...TAURI_CSPS,
+  ])("%s policy allows no Google font host", (_surface, policy) => {
+    for (const host of GOOGLE_FONT_HOSTS) expect(policy).not.toContain(host)
+  })
+
+  it.each([
+    ["worker report-only", REPORT_ONLY_CSP],
+    ["static assets report-only", STATIC_HEADERS["Content-Security-Policy-Report-Only"]],
+  ])("%s keeps font-src to our own origin", (_surface, policy) => {
+    const directive = policy.split("; ").find((part) => part.startsWith("font-src "))
+    expect(directive).toBe("font-src 'self' data:")
+  })
+})
+
 describe("public/_headers — covers what the Worker cannot", () => {
   it("declares a catch-all rule (anything narrower would leave paths bare)", () => {
     expect(Object.keys(STATIC_HEADERS).length).toBeGreaterThan(0)

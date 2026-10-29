@@ -16,10 +16,11 @@ describe("locale registry", () => {
     expect(DEFAULT_LOCALE).toBe("en")
     expect(directionFor("en")).toBe("ltr")
   })
-  it("Arabic is the only RTL locale for now", () => {
+  it("Arabic and Urdu are the RTL locales", () => {
     expect(directionFor("ar")).toBe("rtl")
+    expect(directionFor("ur")).toBe("rtl")
     for (const l of LOCALES) {
-      if (l.code !== "ar") expect(l.dir).toBe("ltr")
+      if (l.code !== "ar" && l.code !== "ur") expect(l.dir).toBe("ltr")
     }
   })
   it("directionFor defaults unknown codes to LTR", () => {
@@ -306,6 +307,163 @@ describe("Hindi", () => {
         expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
       }
     }
+  })
+})
+
+describe("Hausa (AQU-2199)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const ha = LOCALES.find((l) => l.code === "ha")
+    expect(ha?.dir).toBe("ltr")
+    expect(ha?.englishName).toBe("Hausa")
+    // One catalog, worded as standard written Hausa (Kano / Boko).
+    expect(ha?.nativeName).toBe("Hausa")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.ha ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Hausa to regional browser codes", () => {
+    expect(normalizeLocale("ha-NG")).toBe("ha")
+    expect(normalizeLocale("ha-NE")).toBe("ha")
+    expect(detectInitialLocale(null, "ha-NG")).toBe("ha")
+  })
+  it("supplies Hausa's one/other forms for a count-governed key", () => {
+    const counted = CATALOGS.ha?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      // `one` is only for 1. 0 uses `other`. Identical wording is grammatical
+      // when the noun does not change, so the forms are not required to differ.
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
+describe("Urdu (AQU-2200)", () => {
+  it("is registered as a selectable RTL locale with its endonym", () => {
+    const ur = LOCALES.find((l) => l.code === "ur")
+    expect(ur?.dir).toBe("rtl")
+    expect(ur?.englishName).toBe("Urdu")
+    // One catalog, worded as Modern Standard Urdu. The menu stays the endonym.
+    expect(ur?.nativeName).toBe("اردو")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.ur ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Urdu to regional browser codes", () => {
+    expect(normalizeLocale("ur-PK")).toBe("ur")
+    expect(normalizeLocale("ur-IN")).toBe("ur")
+    expect(detectInitialLocale(null, "ur-PK")).toBe("ur")
+  })
+  it("supplies Urdu's one/other forms for a count-governed key", () => {
+    // `one` is only for 1. 0 uses `other`. The same wording on both forms is
+    // grammatical when the noun does not change.
+    const rules = new Intl.PluralRules("ur")
+    expect(rules.select(1)).toBe("one")
+    expect(rules.select(0)).toBe("other")
+    const counted = CATALOGS.ur?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      expect(counted.forms.one, "common.cellCount#one").toBeTruthy()
+      expect(counted.forms.other, "common.cellCount#other").toBeTruthy()
+    }
+  })
+})
+
+describe("Bengali (AQU-2201)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const bn = LOCALES.find((l) => l.code === "bn")
+    expect(bn?.dir).toBe("ltr")
+    expect(bn?.englishName).toBe("Bengali")
+    // One catalog, worded as Bangladeshi standard colloquial. The menu stays
+    // the language endonym, the same honesty as Português.
+    expect(bn?.nativeName).toBe("বাংলা")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.bn ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Bengali to regional browser codes", () => {
+    expect(normalizeLocale("bn-BD")).toBe("bn")
+    expect(normalizeLocale("bn-IN")).toBe("bn")
+    expect(detectInitialLocale(null, "bn-BD")).toBe("bn")
+  })
+  it("supplies Bengali's one/other forms for a count-governed key", () => {
+    // `one` covers 0 and 1. The noun does not change, so the two forms may
+    // share wording.
+    const counted = CATALOGS.bn?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
+describe("Amharic (AQU-2203)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const am = LOCALES.find((l) => l.code === "am")
+    expect(am?.dir).toBe("ltr")
+    expect(am?.englishName).toBe("Amharic")
+    // One catalog, worded as standard written Amharic (Addis Ababa). The menu
+    // stays the language endonym. Geʽez is LTR.
+    expect(am?.nativeName).toBe("አማርኛ")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.am ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("serves Amharic to regional browser codes", () => {
+    expect(normalizeLocale("am-ET")).toBe("am")
+    expect(detectInitialLocale(null, "am-ET")).toBe("am")
+  })
+  it("supplies Amharic's one/other forms for a count-governed key", () => {
+    // Amharic `one` covers 0 and 1. Identical wording on both forms is
+    // grammatical when the noun does not change.
+    const rules = new Intl.PluralRules("am")
+    expect(rules.select(0)).toBe("one")
+    expect(rules.select(1)).toBe("one")
+    const counted = CATALOGS.am?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      for (const category of ["one", "other"] as const) {
+        expect(counted.forms[category], `common.cellCount#${category}`).toBeTruthy()
+      }
+    }
+  })
+})
+
+describe("Punjabi (AQU-2202)", () => {
+  it("is registered as a selectable LTR locale with its endonym", () => {
+    const pa = LOCALES.find((l) => l.code === "pa")
+    expect(pa?.dir).toBe("ltr")
+    expect(pa?.englishName).toBe("Punjabi")
+    expect(pa?.nativeName).toBe("ਪੰਜਾਬੀ")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS.pa ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("folds Indian Punjabi onto this Gurmukhi catalog", () => {
+    expect(normalizeLocale("pa")).toBe("pa")
+    expect(normalizeLocale("pa-IN")).toBe("pa")
+    expect(detectInitialLocale(null, "pa-IN")).toBe("pa")
+    // This catalog is Gurmukhi. `pa-Arab` is Shahmukhi, so folding it here is
+    // the wrong script for a Shahmukhi reader. Shahmukhi needs its own future
+    // locale. `normalizeLocale` is unchanged, and the primary subtag still wins.
+    expect(normalizeLocale("pa-Arab")).toBe("pa")
+  })
+  it("supplies one and other, and one covers 0 and 1", () => {
+    // Punjabi `one` covers 0 and 1. Identical wording on both forms is
+    // grammatical when the noun does not change.
+    const counted = CATALOGS.pa?.["common.cellCount"]
+    expect(isPluralMessage(counted)).toBe(true)
+    if (isPluralMessage(counted)) {
+      expect(counted.forms.one).toBeTruthy()
+      expect(counted.forms.other).toBeTruthy()
+    }
+    const rules = new Intl.PluralRules("pa")
+    expect(rules.select(0)).toBe("one")
+    expect(rules.select(1)).toBe("one")
+    expect(rules.select(2)).toBe("other")
   })
 })
 

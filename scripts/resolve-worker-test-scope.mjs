@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 
-const ALL_WORKERS = Object.freeze({ auth: true, sync: true, agent: true })
+const ALL_WORKERS = Object.freeze({ auth: true, sync: true, agent: true, monitor: true })
 
 const SHARED_INPUTS = [
   /^\.github\/workflows\/(?:ci|deploy-workers)\.yml$/,
@@ -18,6 +18,7 @@ const WORKER_INPUTS = {
   auth: [/^auth-worker\//, /^src\/lib\/migrate\//, /^scripts\/mock-openrouter\./],
   sync: [/^sync-worker\//, /^scripts\/lib\/fold-projection\./],
   agent: [/^agent-worker\//],
+  monitor: [/^monitor-worker\//],
 }
 
 export function resolveWorkerTestScope(files, { forceAll = false } = {}) {
@@ -35,7 +36,7 @@ export function resolveWorkerTestScope(files, { forceAll = false } = {}) {
 }
 
 export function formatWorkerTestScope(scope) {
-  return ["auth", "sync", "agent"]
+  return ["auth", "sync", "agent", "monitor"]
     .map((worker) => `${worker}=${scope[worker] ? "true" : "false"}`)
     .join("\n") + "\n"
 }

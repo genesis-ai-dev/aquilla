@@ -14,7 +14,9 @@
 import { subtitleSpanSec, targetChipGeom, type SpanSec, type TargetChipGeom } from "./lane-timing"
 import {
   buildProgramme,
+  canCarryTargetLead,
   fileSpanToProgrammeSpan,
+  leadSecForMove,
   type BuildProgrammeOptions,
   type Programme,
   type ProgrammeSlot,
@@ -47,6 +49,25 @@ export interface TimelineLayout {
   chipSection(cell: CellData, att: Att): SpanSec | null
   /** Where clicking this cell should send playback, in the layout's seconds. */
   seekSecFor(cell: CellData): number | null
+  /**
+   * AQU-2215: whether a MOVE gesture on this take changes anything. Dubbing
+   * moves any chip; following the recordings only a take that can hold a
+   * pause before its line (`canCarryTargetLead`) — the others are computed
+   * end to end and have nowhere to go.
+   */
+  canRetimeTarget(cell: CellData, att: Att): boolean
+  /**
+   * The inverse of `targetGeom`, for the one thing a drag may change: the
+   * FILE-clock anchor to STORE for a take whose audible start was dragged to
+   * `audibleStartSec` on THIS layout's clock. Null when the take cannot be
+   * moved here.
+   *
+   * Dubbing's clock IS the file clock, so the answer is the drag's own anchor.
+   * Following the recordings the chip is drawn on the programme clock, which
+   * nothing stores — what the drag actually changed is the take's pause before
+   * its line, and that is an offset from the line's own start.
+   */
+  retimeAnchorSec(cell: CellData, att: Att, audibleStartSec: number): number | null
 }
 
 /** Trailing room past the last card, so the final chip isn't flush to the edge.
@@ -85,6 +106,13 @@ function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | n
     chipSection: (cell) => sectionSpan(cell),
     seekSecFor: (cell) =>
       typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : null,
+    canRetimeTarget: () => true,
+    // The clip's sample zero sits a head-trim before its audible start — the
+    // round-7 anchor, which is what the chip was already committing.
+    retimeAnchorSec: (cell, att, audibleStartSec) => {
+      const geom = targetChipGeom(cell, att)
+      return geom ? audibleStartSec - geom.trimStartSec : null
+    },
   }
 }
 
@@ -197,6 +225,24 @@ function audioFirstLayout(
       }
     },
     seekSecFor: (cell) => programme.byCellId.get(cell.id)?.startSec ?? null,
+    canRetimeTarget: (cell) => {
+      const slot = slotOf(cell)
+      return slot != null && canCarryTargetLead(cell, slot)
+    },
+    // AQU-2215 (Sam, Oct 27): "it should still be possible for me to move a
+    // recorded take around in the timeline." It is the PAUSE before the take
+    // that moves — the one thing about a take's placement that following the
+    // recordings keeps (AQU-2204) — so the drag's programme-clock start comes
+    // back as a file-clock anchor whose offset IS that pause. The line grows
+    // to hold it on the next build, which is what carries the later lines
+    // along; nothing about the programme clock is ever stored.
+    retimeAnchorSec: (cell, _att, audibleStartSec) => {
+      const slot = slotOf(cell)
+      if (!slot || !canCarryTargetLead(cell, slot)) return null
+      // `canCarryTargetLead` is what makes this cast safe: it is true only for
+      // a line with a real span, so `startTime` is a finite number.
+      return (cell.startTime as number) + leadSecForMove(slot, audibleStartSec)
+    },
   }
 }
 

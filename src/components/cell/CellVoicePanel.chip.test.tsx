@@ -41,7 +41,13 @@ vi.mock("@/lib/audio/audio-attachments-bus", async (importOriginal) => {
   }
 })
 
-import { CellVoicePanel } from "./CellVoicePanel"
+const changeCellVoice = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => true))
+vi.mock("@/lib/audio/change-voice", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audio/change-voice")>()
+  return { ...actual, changeCellVoice: (...a: unknown[]) => changeCellVoice(...a) }
+})
+
+import { CellVoicePanel, type CellVoicePickerContext } from "./CellVoicePanel"
 
 const voices: Voice[] = [
   { id: "v-mary", name: "Mary", color: "#000", provider: "gemini", voiceName: "Kore", prompt: "{text}" },
@@ -99,6 +105,7 @@ beforeEach(() => {
   runHere.kind = null
   runHere.sec = null
   generateCellVoice.mockClear()
+  changeCellVoice.mockClear()
   emitCellAudioDeselect.mockClear()
   injectOptimisticAudioDeselect.mockClear()
   notifyAudioAttachmentsChanged.mockClear()
@@ -235,10 +242,26 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     await expectTooltip(screen.getByRole("button", { name: "Volume" }), "Volume")
   })
 
-  it("asks the host to open the clone-from-take modal", async () => {
+  it("clones the take in one step: name it, press Clone (AQU-2212)", async () => {
     const user = userEvent.setup()
-    const { onMakeCharacter } = draw()
-    await user.click(screen.getByRole("button", { name: /clone/i }))
+    const onCloneTake = vi.fn(async () => {})
+    const { onMakeCharacter } = draw({ cell: recorded, onCloneTake })
+    await user.click(screen.getByRole("button", { name: /clone voice from take/i }))
+    // A person's own recording suggests their name.
+    const name = screen.getByTestId("voice-card-clone-name")
+    expect(name).toHaveValue("tester")
+    await user.clear(name)
+    await user.type(name, "Ana")
+    await user.click(screen.getByTestId("voice-card-clone-submit"))
+    expect(onCloneTake).toHaveBeenCalledWith("r1", "Ana")
+    expect(onMakeCharacter).not.toHaveBeenCalled()
+  })
+
+  it("still offers the full dialog under More options", async () => {
+    const user = userEvent.setup()
+    const { onMakeCharacter } = draw({ onCloneTake: vi.fn(async () => {}) })
+    await user.click(screen.getByRole("button", { name: /clone voice from take/i }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
     expect(onMakeCharacter).toHaveBeenCalledTimes(1)
   })
 
@@ -463,5 +486,68 @@ describe("CellVoicePanel — the row's player", () => {
     })
     fireEvent.click(screen.getByTestId("voice-card-waveform-play"))
     expect(play).toHaveBeenCalledOnce()
+  })
+})
+
+// AQU-2212: the field names what you hear, and a pick acts on the line.
+describe("CellVoicePanel — picking a voice acts on this line", () => {
+  const hearth: Voice = { id: "v-hearth", name: "Hearth", color: "#222", libraryVoiceId: "narrator-hearth" }
+  const withHearth = { voices: [...voices, hearth], defaultVoiceId: "v-mary" } as ProjectTtsSettings
+  const drawPicker = (over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) => {
+    let ctx: CellVoicePickerContext | null = null
+    draw({
+      voicePicker: (c) => {
+        ctx = c
+        return <span data-testid="picker" />
+      },
+      ...over,
+    })
+    return () => ctx!
+  }
+
+  it("names a person's recording instead of the default voice", () => {
+    expect(drawPicker({ cell: recorded })().takeLabel).toBe("Your recording")
+    cleanup()
+    const byAna = { ...recorded, attachments: { r1: { url: "blob:r", type: "audio/wav", recordedBy: "ana" } } } as unknown as CellData
+    expect(drawPicker({ cell: byAna })().takeLabel).toBe("Recorded by ana")
+    cleanup()
+    expect(drawPicker({ cell: generated })().takeLabel).toBeUndefined()
+  })
+
+  it("re-voices a recording at once when the pick is a character", async () => {
+    const ctx = drawPicker({ cell: recorded, settings: withHearth })
+    await act(async () => ctx().onPicked("v-hearth"))
+    expect(changeCellVoice).toHaveBeenCalledTimes(1)
+    expect(changeCellVoice.mock.calls[0][0]).toMatchObject({ voice: { id: "v-hearth" } })
+    expect(generateCellVoice).not.toHaveBeenCalled()
+  })
+
+  it("regenerates a generated take in a stock voice, but never reads over a recording", async () => {
+    let ctx = drawPicker({ cell: generated })
+    await act(async () => ctx().onPicked("v-john"))
+    expect(generateCellVoice.mock.calls[0][0]).toMatchObject({ voiceId: "v-john" })
+    cleanup()
+    generateCellVoice.mockClear()
+    ctx = drawPicker({ cell: recorded })
+    await act(async () => ctx().onPicked("v-john"))
+    expect(generateCellVoice).not.toHaveBeenCalled()
+  })
+
+  it("puts a labelled Change to … beside the field when the cast voice differs from the take", async () => {
+    const user = userEvent.setup()
+    draw({ cell: recorded, settings: { ...withHearth, castAssignments: { "cell-1": "v-hearth" } } as ProjectTtsSettings })
+    const apply = screen.getByTestId("voice-card-apply")
+    expect(apply).toHaveTextContent("Change to Hearth")
+    await user.click(apply)
+    expect(changeCellVoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers Generate for a stock voice cast over a recording, and nothing once the take matches", () => {
+    draw({ cell: recorded, settings: castJohn })
+    expect(screen.getByTestId("voice-card-apply")).toHaveTextContent("Generate · John")
+    cleanup()
+    const byJohn = { ...generated, attachments: { a1: { url: "blob:x", type: "audio/wav", voiceId: "v-john" } } } as unknown as CellData
+    draw({ cell: byJohn, settings: castJohn })
+    expect(screen.queryByTestId("voice-card-apply")).toBeNull()
   })
 })

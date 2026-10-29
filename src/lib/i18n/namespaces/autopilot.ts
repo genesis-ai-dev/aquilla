@@ -61,8 +61,7 @@ export const autopilot = defineNamespace({
 
     // — Discovery setting ———————————————————————————————————————————
     "autopilot.settings.experimentalTitle": "Experimental",
-    "autopilot.settings.experimentalDescription":
-      "Early features still in development. Autopilot is turned on for the whole project and everyone working on it; any other switch here stays on this device.",
+    "autopilot.settings.experimentalDescription": "Early features still in development.",
     "autopilot.settings.autopilotLabel": "Try Autopilot",
     "autopilot.settings.autopilotDescription":
       "Turns on Autopilot for this project, for everyone working on it. Until then, nothing about Autopilot appears anywhere. Turning it on does not start work: choose Run Autopilot when you are ready, and suggestions stay in review until you accept them.",

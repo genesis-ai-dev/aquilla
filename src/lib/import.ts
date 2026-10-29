@@ -104,6 +104,7 @@ import {
 import { ImportService } from "./import/import-service"
 import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
 import type { SubtitleCueRepair } from "./parsers/core-types"
+import type { FramesAsHundredths } from "./parsers/frame-timecode"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
@@ -511,6 +512,9 @@ export interface ImportResult {
    *  notices by `preparedParsedFile`; absent when nothing was repaired or
    *  refused. */
   cueRepair?: SubtitleCueRepair
+  /** AQU-2197: cue times that look like frame numbers written as hundredths.
+   *  The preview offers to convert them at a frame rate the person picks. */
+  framesAsHundredths?: FramesAsHundredths
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */

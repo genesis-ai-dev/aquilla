@@ -2,6 +2,7 @@ export interface WorkerTestScope {
   auth: boolean
   sync: boolean
   agent: boolean
+  monitor: boolean
 }
 
 export function resolveWorkerTestScope(

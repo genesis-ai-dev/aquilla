@@ -10,6 +10,7 @@
 // tells the orchestrator how much work remains.
 
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
+import { isRefusalReply } from "../../../../../src/lib/completion/refusal"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
@@ -94,7 +95,8 @@ export type DraftGeneration =
       ok: true
       fileId: string
       emits: DraftEmit[]
-      /** Cells in the work list the model returned no usable text for. */
+      /** Cells in the work list the model returned no usable text for —
+       *  an absent/empty entry, or a refusal instead of a translation. */
       missed: string[]
       /** Untranslated cells left in scope beyond this package. */
       remaining: number
@@ -389,9 +391,16 @@ export async function generateDrafts(
   const exampleIds = examplePairs.flatMap((example) => example.cellId ? [example.cellId] : [])
   const emits: DraftEmit[] = []
   const missed: string[] = []
+  const draftedIdx = new Set<number>()
   work.forEach((p, i) => {
     const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
-    if (t) {
+    // AQU-2217: the drafting model can fill a well-formed {"i","t"} entry with
+    // a refusal ("I'm sorry, but I cannot assist with that request."). That is
+    // not a translation, so it must never reach stageEvents and become a
+    // reviewable changeset entry — it joins `missed` like an absent entry, and
+    // the orchestrator is told to re-run those cells.
+    if (t && !isRefusalReply(t)) {
+      draftedIdx.add(i)
       emits.push({
         kind: "target.cell.commit",
         fileId: scope.fileId,
@@ -425,7 +434,7 @@ export async function generateDrafts(
     emits,
     missed,
     remaining,
-    drafted: work.filter((_, i) => drafts.has(i + 1)),
+    drafted: work.filter((_, i) => draftedIdx.has(i)),
     empty: false,
     notice: scope.notice,
   }

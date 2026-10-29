@@ -27,10 +27,12 @@ export const VENDOR_TIMEOUT_MS = {
   /** Modal diarization kick-off. Modal spawns the GPU job and answers at once;
    *  the turns arrive later on the callback, so this bounds the handshake only. */
   modalDiarizationStart: 20_000,
-  /** Modal Seed-VC voice conversion (AQU-1854). A cold L40S has to load
-   *  checkpoints off the Volume and run 50 diffusion steps; still far below
-   *  Modal's own 600 s function timeout. */
-  modalVoiceConvert: 120_000,
+  /** Modal voice conversion: Seed-VC (AQU-1854) or the voice forge's RVC
+   *  (character/custom voices). A cold call starts TWO containers — the web
+   *  endpoint, then the GPU one, which loads weights off the Volume — and took
+   *  over 120 s in practice (AQU-2212), failing the first Change voice after
+   *  idle. Still well below Modal's own 600 s function timeout. */
+  modalVoiceConvert: 240_000,
   /** Inworld TTS synthesis (AQU-1156). Above a real TTS-2 run on the longest
    *  text we accept, below the SPA's own `TTS_REQUEST_TIMEOUT_MS`. */
   inworldTts: 60_000,

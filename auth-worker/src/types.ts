@@ -190,6 +190,9 @@ export interface Env {
    *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
    *  transcription for non-Whisper languages answers 503. */
   OMNI_ASR_MODAL_URL?: string
+  /** Self-hosted Omnilingual ASR base URL (infra/selfhost), tried before
+   *  Modal; Modal takes over on a network error, timeout or 5xx. */
+  OMNI_ASR_PRIMARY_URL?: string
   /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
    *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
   OMNI_SHARED_SECRET?: string

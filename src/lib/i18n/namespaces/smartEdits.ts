@@ -4,10 +4,10 @@ export const smartEdits = defineNamespace({
   keys: {
     "smartEdits.flagLabel": "Smart edits",
     "smartEdits.flagDescription":
-      "Underline wordings your team has corrected elsewhere in this project, and suggest the same change. Suggestions come from your team's own edits; no AI model writes them.",
+      "Underline wordings your team has corrected elsewhere in this project, and suggest the same change. Suggestions come from your team's own edits; no AI model writes them. Only on this device.",
     "smartEdits.llmFlagLabel": "Smart edits: AI wording",
     "smartEdits.llmFlagDescription":
-      "When smart edits have no suggestion of their own, let you ask an AI model for one. Each request uses AI credits.",
+      "When smart edits have no suggestion of their own, let you ask an AI model for one. Each request uses AI credits. Only on this device.",
     "smartEdits.popoverTitle": "Suggested edit",
     "smartEdits.accept": "Accept",
     "smartEdits.dismiss": "Dismiss",

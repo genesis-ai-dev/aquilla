@@ -89,6 +89,12 @@ import {
   type MemoryCommand,
 } from './commands-memory'
 import {
+  STYLE_RULE_REVIEW_ROLE,
+  isStyleRuleCommand,
+  validateStyleRuleCommand,
+  type ReviewStyleRulesCommand,
+} from './commands-style-rules'
+import {
   isStructureCommandKind,
   structureCommandFloor,
   validateStructureCommand,
@@ -321,6 +327,7 @@ export interface LinkMediaCommand {
 
 export type Command =
   | MemoryCommand
+  | ReviewStyleRulesCommand
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
@@ -944,6 +951,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-2195 ReviewStyleRules — receipt-only, sole command.
+    if (isStyleRuleCommand(c as { kind: string })) {
+      const cmd = validateStyleRuleCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isStructureCommandKind(c.kind)) {
       const cmd = validateStructureCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -1132,6 +1145,10 @@ export function requiredRoleForCommand(
   // review-tier PROJECT_LEAD). Their own prepare/commit path re-checks it.
   if (isMemoryCommand(c)) {
     return memoryCommandFloor(c)
+  }
+  // AQU-2195: style-rule review is the in-app review floor (PROJECT_LEAD).
+  if (isStyleRuleCommand(c)) {
+    return STYLE_RULE_REVIEW_ROLE
   }
   // InsertCell / DeleteCell / SplitCell: PROJECT_LEAD, for the same reason
   // EmitEvents floors source.cell.* there — this surface never runs the app's

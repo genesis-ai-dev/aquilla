@@ -90,6 +90,10 @@ describe("POST /api/v2/orgs/accept-invite (redeem)", () => {
   })
 
   it("honors an email-bound invite for the matching email", async () => {
+    // AQU-1579: a matching address redeems only after email_verified_at is set.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE users SET email_verified_at = CURRENT_TIMESTAMP WHERE id = 3",
+    ).run()
     const minted = (await (await mint("wendi", { email: "bob@example.com" })).json()) as { token: string }
     const res = await accept("bob", minted.token)
     expect(res.status).toBe(200)

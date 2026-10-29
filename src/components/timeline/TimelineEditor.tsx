@@ -1748,7 +1748,6 @@ export function TimelineEditor({
   // more, so in it the editing tools (undo, redo, the blade) always live in
   // the timeline corner's ⋯ — History, ⌘Z / ⌘⇧Z, B and S are the quick ways.
   // Outside the media view (no bar) they stay in the tools row.
-  const toolsRowRef = useRef<HTMLDivElement | null>(null)
   const compactTools = Boolean(topToolsSlot)
 
   // AQU-646: bridge the audio play-queue into the timeline clock. Progress is
@@ -4697,7 +4696,7 @@ export function TimelineEditor({
           there is no top bar (outside the media view, and in the tests) the
           same tools render in a plain row here instead. */}
       {topToolsSlot ? createPortal(
-        <div ref={toolsRowRef} className="flex shrink-0 items-center gap-1.5">{topTools}</div>,
+        <div className="flex shrink-0 items-center gap-1.5">{topTools}</div>,
         topToolsSlot,
       ) : (
         <div

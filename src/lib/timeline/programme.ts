@@ -146,6 +146,12 @@ export interface ProgrammeLayer {
  * (`gapBeforeSec`, absent when they touch). The silence is someone's: a piece
  * dragged away from the one before it (Sam: deliberate silence, which belongs
  * to the line and plays as silence).
+ *
+ * A piece has ONE place, the one following the source reads: where its clip's
+ * start sits from its line's start. A cut leaves every piece the take's place,
+ * so following the recordings each piece is read from where it would sit if
+ * the take played straight through, its pieces end to end — `pieceAtSec`. A
+ * piece moved some distance in either timing is that distance along in both.
  */
 export interface ProgrammePiece {
   audioId: string
@@ -173,6 +179,20 @@ function pauseAskedSec(cell: CellData, att: NonNullable<CellData["attachments"]>
   }
   const geom = targetChipGeom(cell, att)
   return geom && typeof cell.startTime === "number" ? geom.anchor - cell.startTime : 0
+}
+
+/**
+ * AQU-1758: where a piece of a split take sits in its line's slot following
+ * the recordings, from its place (`pauseAskedSec`) and how long the pieces
+ * before it sound (`heardBeforeSec`): never over the piece in front, which
+ * ends at `floorSec` (0 for the first piece). Following the source the same
+ * place puts the piece where its sound is in the take; here the parts of the
+ * take nobody hears are left out — its head trim and anything cut away between
+ * the pieces — so its untouched pieces sit end to end.
+ */
+function pieceAtSec(askedSec: number, heardBeforeSec: number, floorSec: number): number {
+  const at = askedSec + heardBeforeSec
+  return at - floorSec >= MIN_TARGET_LEAD_SEC ? at : floorSec
 }
 
 export interface BuildProgrammeOptions {
@@ -238,12 +258,13 @@ function placeTake(cell: CellData, untimed: boolean, slot?: string): PlacedTake 
   let splitSpanMs = 0
   if (split) {
     let prevEnd = 0
+    let heard = 0
     pieces = split.pieces.map((p, i) => {
-      const asked = pauseAskedSec(cell, cell.attachments?.[p.audioId], untimed)
       const floor = i === 0 ? 0 : prevEnd
-      const atSec = asked - floor >= MIN_TARGET_LEAD_SEC ? asked : floor
+      const atSec = pieceAtSec(pauseAskedSec(cell, cell.attachments?.[p.audioId], untimed), heard, floor)
       const gap = atSec - floor
       prevEnd = atSec + (p.end - p.start)
+      heard += p.end - p.start
       return { ...p, atSec, ...(i > 0 && gap > 0 ? { gapBeforeSec: gap } : {}) }
     })
     splitLeadSec = pieces[0].atSec
@@ -698,4 +719,31 @@ export function canCarryTargetLead(_cell: CellData, slot: ProgrammeSlot): boolea
 export function leadSecForMove(slot: ProgrammeSlot, audibleStartSec: number): number {
   const lead = audibleStartSec - slot.startSec
   return lead >= MIN_TARGET_LEAD_SEC ? lead : 0
+}
+
+/**
+ * AQU-1758: `leadSecForMove` for piece `at` of the line's split take — the
+ * place to store (from its line's start, as `pauseAskedSec` reads it) for a
+ * piece whose sound was dragged to `audibleStartSec`. The inverse of
+ * `pieceAtSec`: held against the piece in front, as the programme holds it,
+ * then measured back without the pieces before it, so following the source
+ * the piece moves by exactly the distance it was dragged here.
+ *
+ * AQU-2252: `pieces` are the take's pieces as the programme placed them —
+ * the main take's (`targetPieces`) unless given, or those of a take on an
+ * added track that sets line lengths (its layers, in order), whose pieces
+ * have the same one place.
+ */
+export function pieceLeadSecForMove(
+  slot: ProgrammeSlot,
+  at: number,
+  audibleStartSec: number,
+  pieces: readonly Pick<ProgrammePiece, "start" | "end" | "atSec">[] = slot.targetPieces ?? [],
+): number {
+  let heard = 0
+  for (let i = 0; i < at; i++) heard += pieces[i].end - pieces[i].start
+  const prev = at > 0 ? pieces[at - 1] : null
+  const floor = prev ? prev.atSec + (prev.end - prev.start) : 0
+  const lead = audibleStartSec - slot.startSec
+  return (lead - floor >= MIN_TARGET_LEAD_SEC ? lead : floor) - heard
 }

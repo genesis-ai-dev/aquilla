@@ -244,7 +244,8 @@ describe("exportAudioByChapter — a book's dragged-open pauses", () => {
 
   it("puts every piece of a cut take in, with the silence dragged open between them", async () => {
     // One recording, 100 ms. Piece 1 is its 0–40 ms on the line's start;
-    // piece 2 is its 60–100 ms, placed at 100 ms: 60 ms of silence between.
+    // piece 2 is its 60–100 ms, moved 60 ms along from the first piece's end
+    // (to 100 ms): 60 ms of silence between.
     const recording = new Float32Array(100 * MS)
     recording.fill(0.5, 0, 50 * MS)
     recording.fill(-0.5, 50 * MS)
@@ -252,7 +253,7 @@ describe("exportAudioByChapter — a book's dragged-open pauses", () => {
       cells: [
         take("v1", "RUT 1:1", {
           "audio-v1-1700000000-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, trimEndMs: 40 },
-          "audio-v1-1700000001-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, trimStartMs: 60, pieceOf: "audio-v1-1700000000-take", targetOffsetMs: 100 },
+          "audio-v1-1700000001-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, trimStartMs: 60, pieceOf: "audio-v1-1700000000-take", targetOffsetMs: 60 },
         }),
       ],
       projectId: "p1",

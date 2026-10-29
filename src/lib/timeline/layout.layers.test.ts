@@ -294,8 +294,9 @@ describe("the programme's takes on added tracks (AQU-2252)", () => {
       selectedBySlot: { [TRACK]: TAKE },
       attachments: {
         [TAKE]: { type: "audio", url: "frontier-audio://take", slot: TRACK, durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
-        // The second piece dragged 2 s into the line.
-        [PIECE]: { type: "audio", url: "frontier-audio://take", slot: TRACK, pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700, targetOffsetMs: 2000 },
+        // The second piece moved 0.7 s along from the end of the first (AQU-1758:
+        // its clip's start 0.7 s after the line's): 2 s into the line.
+        [PIECE]: { type: "audio", url: "frontier-audio://take", slot: TRACK, pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700, targetOffsetMs: 700 },
       },
     } as unknown as CellData
     const layout = layoutOf([cell])
@@ -307,6 +308,51 @@ describe("the programme's takes on added tracks (AQU-2252)", () => {
     ])
     const piece = layout.targetGeom(cell, att(cell, PIECE), PIECE)!
     expect([piece.start, piece.end]).toEqual([expect.closeTo(2, 5), expect.closeTo(3.2, 5)])
+  })
+
+  // AQU-1758: a piece has ONE place, which both timings read — where its
+  // clip's start sits from its line's start — on an added track as on the
+  // main one. So a piece moved in one timing has moved as far in the other.
+  describe("a piece of a split take on an added track, in both timings (AQU-1758)", () => {
+    const TAKE = "audio-p1-1700000500-take.wav"
+    const PIECE = "audio-p1-1700000600-piece.wav"
+    /** A 6 s take on Track 1, on a line at 2–8 s, cut at 3 s: the second
+     *  piece keeps the take's place and starts 3 s into the recording. */
+    const cut = (pieceOffsetMs?: number) =>
+      ({
+        id: "p1", fileId: "f1", original: "", translated: "", medium: "media", startTime: 2, endTime: 8,
+        selectedBySlot: { [TRACK]: TAKE },
+        attachments: {
+          [TAKE]: { type: "audio", url: "frontier-audio://take", slot: TRACK, durationMs: 6000, trimEndMs: 3000 },
+          [PIECE]: {
+            type: "audio", url: "frontier-audio://take", slot: TRACK, pieceOf: TAKE, durationMs: 6000, trimStartMs: 3000,
+            ...(pieceOffsetMs != null ? { targetOffsetMs: pieceOffsetMs } : {}),
+          },
+        },
+      }) as unknown as CellData
+    const recordings = (cell: CellData) => buildTimelineLayout("audioFirst", [cell], [cell], null, STAND_IN)
+    const source = (cell: CellData) => buildTimelineLayout("dubbing", [cell], [cell])
+
+    it("never moved, it follows the first piece, 3 s into its line, in both", () => {
+      const cell = cut()
+      expect(recordings(cell).targetGeom(cell, att(cell, PIECE), PIECE)!.start).toBeCloseTo(3, 5)
+      expect(source(cell).targetGeom(cell, att(cell, PIECE), PIECE)!.start - 2).toBeCloseTo(3, 5)
+    })
+
+    it("dragged to 4 s into its line following the recordings, it is 4 s in following the source too", () => {
+      const cell = cut()
+      const anchor = recordings(cell).retimeAnchorSec(cell, att(cell, PIECE), 4, PIECE)!
+      const moved = cut(targetOffsetMsFor(cell, anchor))
+      expect(recordings(moved).targetGeom(moved, att(moved, PIECE), PIECE)!.start).toBeCloseTo(4, 5)
+      // Not 4 + its 3 s head: 7 s, over the line's last second.
+      expect(source(moved).targetGeom(moved, att(moved, PIECE), PIECE)!.start - 2).toBeCloseTo(4, 5)
+    })
+
+    it("dragged back over the first piece following the recordings, its place does not change", () => {
+      const cell = cut()
+      const anchor = recordings(cell).retimeAnchorSec(cell, att(cell, PIECE), 1.5, PIECE)!
+      expect(anchor).toBeCloseTo(source(cell).targetGeom(cell, att(cell, PIECE), PIECE)!.anchor, 5)
+    })
   })
 
   it("plays only the tracks it is told to", () => {

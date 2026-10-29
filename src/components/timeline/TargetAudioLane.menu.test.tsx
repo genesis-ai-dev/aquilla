@@ -517,7 +517,9 @@ describe("TargetAudioLane — the silence inside a split take (AQU-1758)", () =>
       selectedAudioId: SPLIT_TAKE,
       attachments: {
         [SPLIT_TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
-        [SPLIT_PIECE]: { type: "audio", url: "frontier-audio://t", slot: "recording", pieceOf: SPLIT_TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700, targetOffsetMs: 2000 },
+        [SPLIT_PIECE]: { type: "audio", url: "frontier-audio://t", slot: "recording", pieceOf: SPLIT_TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700,
+          // Moved 0.7 s along from the end of the first piece.
+          targetOffsetMs: 700 },
       },
     } as unknown as CellData
     const { buildTimelineLayout } = await import("@/lib/timeline/layout")

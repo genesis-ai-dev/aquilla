@@ -17,6 +17,7 @@ import {
   canCarryTargetLead,
   fileSpanToProgrammeSpan,
   leadSecForMove,
+  pieceLeadSecForMove,
   type BuildProgrammeOptions,
   type Programme,
   type ProgrammeLayer,
@@ -154,6 +155,25 @@ function audioFirstLayout(
     audioId != null ? (slot.layers?.find((l) => l.audioId === audioId) ?? null) : null
   const lineStartOf = (cell: CellData): number =>
     typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
+  /** AQU-2252: the pieces of the line's split take on `layer`'s track, in
+   *  order, as the programme placed them; none for a take never split. A track
+   *  that sets line lengths holds one take per line, so its layers are all of
+   *  that take. */
+  const trackPiecesOf = (slot: ProgrammeSlot, layer: ProgrammeLayer): ProgrammeLayer[] => {
+    const takes = (slot.layers ?? []).filter((l) => l.slot === layer.slot && l.setsLength)
+    return takes.length > 1 ? takes : []
+  }
+
+  /** Which piece of the line's split take starts `trimStartSec` into the
+   *  recording, or -1 (a take never split). A piece is known by where it
+   *  starts in the recording; pieces never share audio, so no two start in
+   *  the same place. */
+  const pieceIndexOf = (slot: ProgrammeSlot, trimStartSec: number): number =>
+    slot.targetPieces ? slot.targetPieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+  const trimStartOf = (att: Att): number =>
+    att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
+      ? att.trimStartMs / 1000
+      : 0
 
   /**
    * The dub chip, re-expressed against the programme clock. The trim maths in
@@ -165,10 +185,7 @@ function audioFirstLayout(
   const geomFor = (cell: CellData, att: Att, audioId?: string): TargetChipGeom | null => {
     const slot = slotOf(cell)
     if (!slot) return null
-    const trimStartSec =
-      att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
-        ? att.trimStartMs / 1000
-        : 0
+    const trimStartSec = trimStartOf(att)
     const durationSec =
       att?.durationMs != null && Number.isFinite(att.durationMs) && att.durationMs > 0
         ? att.durationMs / 1000
@@ -220,11 +237,10 @@ function audioFirstLayout(
     }
     // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit in the line's
     // slot in the order they come in the recording — the way its joined copy
-    // plays them. A piece is known by where it starts in the recording;
-    // pieces never share audio, so no two start in the same place. AQU-1758:
-    // each where it was placed (`atSec`), the gaps between them silence.
+    // plays them. AQU-1758: each where it was placed (`atSec`), the gaps
+    // between them silence.
     const pieces = slot.targetPieces
-    const at = pieces ? pieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+    const at = pieceIndexOf(slot, trimStartSec)
     if (pieces && at >= 0) {
       const start = slot.startSec + pieces[at].atSec
       return {
@@ -321,12 +337,22 @@ function audioFirstLayout(
         const trimStartSec = layer.window?.start ?? (att?.trimStartMs != null && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0)
         return lineStartOf(cell) + (audibleStartSec - slot.startSec) - trimStartSec
       }
-      if (layer) return layer.window ? lineStartOf(cell) + leadSecForMove(slot, audibleStartSec) : null
+      if (layer) {
+        if (!layer.window) return null
+        // AQU-1758: a piece of a split take there has the one place both
+        // timings read, as a piece on the main track has.
+        const pieces = trackPiecesOf(slot, layer)
+        const at = pieces.indexOf(layer)
+        return lineStartOf(cell) + (at >= 0
+          ? pieceLeadSecForMove(slot, at, audibleStartSec, pieces.map((l) => ({ ...l.window!, atSec: l.atSec })))
+          : leadSecForMove(slot, audibleStartSec))
+      }
       if (!canCarryTargetLead(cell, slot)) return null
       // AQU-1758: a line with no times of its own stores the pause from its
       // slot's start (a line start of 0), on the take — or on the piece, for
-      // a split take, each piece where it was dragged.
-      return lineStartOf(cell) + leadSecForMove(slot, audibleStartSec)
+      // a split take, each piece in the one place both timings read it from.
+      const at = pieceIndexOf(slot, trimStartOf(att))
+      return lineStartOf(cell) + (at >= 0 ? pieceLeadSecForMove(slot, at, audibleStartSec) : leadSecForMove(slot, audibleStartSec))
     },
     takeRole: (cell, audioId) => {
       const slot = slotOf(cell)

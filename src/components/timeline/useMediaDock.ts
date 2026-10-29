@@ -26,6 +26,9 @@
 // hook owns, and the HOST is moved between the areas' content boxes. A portal
 // whose container changes remounts everything under it; a host that moves
 // keeps it all mounted — the text table keeps its rows, the film keeps playing.
+// Except a YouTube film: it is an iframe, and a browser reloads an iframe that
+// moves. The host announces each move first (DOCK_HOST_MOVING), and the film
+// pane rebuilds that picture where it lands, from where it was.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
@@ -33,6 +36,7 @@ import { usePanelRef } from "react-resizable-panels"
 import {
   canRestore as canRestoreFrom,
   DOCK_AREAS,
+  DOCK_HOST_MOVING,
   DOCK_PANELS,
   dockView,
   enterFullScreen,
@@ -142,18 +146,21 @@ export function useMediaDock(input: UseMediaDockInput) {
   const presence = useMemo(() => ({ film: filmPresent }), [filmPresent])
 
   const [layout, setLayout] = useState<DockLayout>(() => readStoredDock(fileId) ?? startDockLayout())
-  // Per file, read on switch: the panels do not remount with the file.
-  const loadedFor = useRef(fileId)
-  useEffect(() => {
-    if (loadedFor.current === fileId) return
-    loadedFor.current = fileId
+  // Per file, read on switch: the panels do not remount with the file. Read
+  // during the render that brings the new file, so no commit ever pairs one
+  // file with the other's arrangement. Read in an effect, the switch's first
+  // commit still held the old file's layout: the sizes were put on the old
+  // file's areas (the film's width on what is now the text), and the old
+  // layout was written under the new file's key.
+  const [layoutFor, setLayoutFor] = useState(fileId)
+  if (layoutFor !== fileId) {
+    setLayoutFor(fileId)
     setLayout(readStoredDock(fileId) ?? startDockLayout())
-    lastOpenRef.current = {}
-  }, [fileId])
+  }
   // Written on change — only in the media lens, so a visit to the text lens
   // never writes what the reader arranged.
   useEffect(() => {
-    if (!timelineStacked || loadedFor.current !== fileId) return
+    if (!timelineStacked) return
     writeStoredDock(fileId, layout)
   }, [fileId, layout, timelineStacked])
 
@@ -270,7 +277,11 @@ export function useMediaDock(input: UseMediaDockInput) {
       if (!host) continue
       const area = v.areaOf(panel)
       const box = (area && boxesRef.current[area]) || parkingRef.current
-      if (box && host.parentElement !== box) moveKeepingScroll(host, box)
+      if (box && host.parentElement !== box) {
+        // A first placement moves nothing that has loaded; a move does.
+        if (host.parentElement) host.dispatchEvent(new Event(DOCK_HOST_MOVING))
+        moveKeepingScroll(host, box)
+      }
       // The text lens shows the text alone, whatever tab its area has up.
       const shown = stacked ? area !== null && v.activeOf(area) === panel : panel === "text"
       host.style.display = shown ? "" : "none"
@@ -306,6 +317,10 @@ export function useMediaDock(input: UseMediaDockInput) {
 
   const frozenRef = useRef<Partial<Record<DockRegion, { width: number; height: number }>>>({})
   const lastOpenRef = useRef<Partial<Record<DockRegion, number>>>({})
+  // A size noted on one file is never remembered for the next.
+  useEffect(() => {
+    lastOpenRef.current = {}
+  }, [fileId])
   const timelineContentRef = useRef<HTMLElement | null>(null)
   const freeze = useCallback((region: DockRegion) => {
     const el = region === "tl" ? timelineContentRef.current : boxesRef.current[region]
@@ -337,11 +352,15 @@ export function useMediaDock(input: UseMediaDockInput) {
     [freeze, layout, presence, textGoingOutOfSight],
   )
 
-  /** Apply a layout that unfolds things: state first, then the sizes. */
+  /** Apply a layout that unfolds things: state first, then the sizes.
+   *  `alongside` is another update that has to land in the same commit. */
   const commitOpening = useCallback(
-    (next: DockLayout) => {
+    (next: DockLayout, alongside?: () => void) => {
       const before = view
-      flushSync(() => setLayout(next))
+      flushSync(() => {
+        setLayout(next)
+        alongside?.()
+      })
       const v = dockView(next, presence)
       for (const r of ["tl", "ll", "lr"] as const) {
         if (!before.isOpen(r) && v.isOpen(r)) delete frozenRef.current[r]
@@ -353,7 +372,9 @@ export function useMediaDock(input: UseMediaDockInput) {
 
   const unfold = useCallback(
     (region: DockRegion) => {
-      if (!layout.folded[region] && layout.fullUndo.length === 0) return
+      // Already open (Alt+1 on a full-screen timeline): nothing to unfold, and
+      // full screen's way back stays.
+      if (!layout.folded[region]) return
       commitOpening(unfoldRegion(layout, region))
     },
     [commitOpening, layout],
@@ -373,6 +394,23 @@ export function useMediaDock(input: UseMediaDockInput) {
     [commitOpening, layout, presence, textGoingOutOfSight, unfold, view],
   )
 
+  /**
+   * Hide a panel that is showing. A tab beside another panel: that one shows
+   * instead, and the area stays (Sources › Hide film did this first). Alone in
+   * its area: the area folds. Folding a shared area would take the other tab
+   * out of sight with it.
+   */
+  const hide = useCallback(
+    (panel: DockPanel) => {
+      const area = view.areaOf(panel)
+      if (!area || !view.isShowing(panel)) return
+      const other = view.list(area).find((p) => p !== panel)
+      if (other) show(other)
+      else fold(area)
+    },
+    [fold, show, view],
+  )
+
   const move = useCallback(
     (panel: DockPanel, to: DockArea) => {
       const next = movePanel(layout, panel, to)
@@ -390,12 +428,17 @@ export function useMediaDock(input: UseMediaDockInput) {
       const { layout: next, foldLeft } = enterFullScreen(layout, presence, region, leftTab)
       textGoingOutOfSight(dockView(next, presence))
       for (const r of ["tl", "ll", "lr"] as const) if (r !== region && view.isOpen(r)) freeze(r)
+      const foldLeftPanel = foldLeft ? () => left.setTab(null) : undefined
       if (layout.folded[region]) {
-        commitOpening(next)
+        // The left panel folds in the SAME commit as the unfold. flushSync
+        // runs that commit's effects before it returns, so the one above that
+        // ends full screen when the left panel is open saw it still open and
+        // dropped the note just written: Esc then restored nothing.
+        commitOpening(next, foldLeftPanel)
       } else {
         setLayout(next)
+        foldLeftPanel?.()
       }
-      if (foldLeft) left.setTab(null)
     },
     [commitOpening, freeze, layout, left, presence, textGoingOutOfSight, view],
   )
@@ -575,10 +618,17 @@ export function useMediaDock(input: UseMediaDockInput) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reads the latest sizes through the closures
   }, [safeResize, safeSize, timelineStacked, view])
 
-  /** On a file switch or a return from the text lens, the remembered sizes. */
+  /**
+   * On a file switch or a return from the text lens, the remembered sizes —
+   * on the next frame. Files arrange their areas differently (one has the film
+   * bottom right, the next bottom left), and the group takes the panels' new
+   * minimums only on the render after this commit; a width put on now is held
+   * to the old file's floors.
+   */
   useEffect(() => {
     if (!timelineStacked) return
-    applySizes(view)
+    const frame = requestAnimationFrame(() => applySizes(latest.current.view))
+    return () => cancelAnimationFrame(frame)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per file / lens, not per fold
   }, [fileId, timelineStacked, filmPresent])
 
@@ -674,6 +724,7 @@ export function useMediaDock(input: UseMediaDockInput) {
     fold,
     unfold,
     show,
+    hide,
     move,
     activate,
     toggleFull,

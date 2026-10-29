@@ -1264,12 +1264,10 @@ export const editor = defineNamespace({
     "editor.dock.bottomRight": "Bottom right",
     "editor.dock.fullScreenTip": "Full screen: fold everything else ({keys})",
     "editor.dock.restoreTip": "Restore the other panels ({keys})",
-    "editor.dock.fullScreen": "Full screen: fold everything else",
     "editor.dock.restore": "Restore the other panels",
     "editor.dock.restoreShort": "Restore",
     "editor.dock.foldAreaTip": "Fold this area ({keys}). Nothing is left behind; the Panels button brings it back.",
     "editor.dock.foldTimelineTip": "Fold the timeline ({keys}). Nothing is left behind; the Panels button brings it back.",
-    "editor.dock.foldArea": "Fold this area",
     "editor.dock.foldTimeline": "Fold the timeline",
     "editor.dock.moreTip": "Move this panel, or more",
     "editor.dock.timelineMoreTip": "Timeline settings",
@@ -2796,16 +2794,11 @@ export const editor = defineNamespace({
           "full screen: it unfolds exactly the panels full screen folded.",
         placeholders: { keys: "The key that does the same, 'Esc'. Never translate." },
       },
-      "editor.dock.fullScreen": {
-        description:
-          "Menu item in a panel's ⋯ menu that makes the panel fill the media view " +
-          "by folding everything else. The shortcut is shown beside it.",
-      },
       "editor.dock.restore": {
         description:
-          "Menu item and button that unfold the panels full screen folded, " +
-          "putting the media view back as it was. Appears in a panel's ⋯ menu " +
-          "and the Panels menu.",
+          "Screen-reader name of the Restore button in the Panels menu, which " +
+          "unfolds the panels full screen folded, putting the media view back " +
+          "as it was.",
       },
       "editor.dock.foldAreaTip": {
         description:
@@ -2820,9 +2813,6 @@ export const editor = defineNamespace({
           "sign beside 'Tracks'): the timeline disappears completely, and the " +
           "Panels button brings it back.",
         placeholders: { keys: "A keyboard shortcut as this computer writes it, e.g. ⌘⇧F on a Mac or Ctrl+Shift+F elsewhere. Never translate." },
-      },
-      "editor.dock.foldArea": {
-        description: "Menu item in an area's ⋯ menu that folds the area away completely.",
       },
       "editor.dock.foldTimeline": {
         description: "Menu item in the timeline's ⋯ menu that folds the timeline away completely.",

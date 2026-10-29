@@ -7,6 +7,7 @@ import {
   isInworldAudioQuality,
   isInworldDeliveryMode,
 } from "./inworld-voice-settings"
+import { DEFAULT_ELEVENLABS_MODEL } from "./elevenlabs/settings"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "inworld"
 
@@ -91,6 +92,8 @@ export interface TtsProviderInfo {
   badge?: string
   localModel?: "mms"
   requiresGeminiKey?: boolean
+  /** BYOK engine whose key is the user's own, kept on this device (AQU-2299). */
+  requiresElevenLabsKey?: boolean
 }
 
 export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
@@ -114,6 +117,18 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     blurb: "Highest quality, promptable; many languages.",
     caveat: "Needs your own Google AI key.",
     hintKey: "audio.provider.geminiHint",
+  },
+  {
+    id: "elevenlabs",
+    title: "ElevenLabs",
+    shortTitle: "ElevenLabs",
+    tier: "cloud",
+    hasNamedVoices: true,
+    requiresElevenLabsKey: true,
+    badge: "Your key",
+    blurb: "Expressive multilingual voices, cloning and speech-to-speech.",
+    caveat: "Needs your own ElevenLabs API key.",
+    hintKey: "audio.provider.elevenLabsHint",
   },
   {
     id: "mms",
@@ -156,8 +171,11 @@ export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProv
   return provider
 }
 
+/** Engines that synthesize in the sync-worker (no client-side synth path):
+ *  hosted Inworld, and BYOK ElevenLabs (AQU-2299). */
 export function isServerTtsProvider(provider: TtsProvider | undefined): boolean {
-  return effectiveTtsProvider(provider) === "inworld"
+  const engine = effectiveTtsProvider(provider)
+  return engine === "inworld" || engine === "elevenlabs"
 }
 
 export function providerInfo(provider: TtsProvider | undefined): TtsProviderInfo {
@@ -221,6 +239,9 @@ export function defaultVoiceNameForProvider(
 ): string {
   const engine = effectiveTtsProvider(provider)
   if (engine === "inworld") return DEFAULT_INWORLD_VOICE
+  // An ElevenLabs voice is named by `voice.elevenLabs.voiceId`, picked in the
+  // voice browser — there is no default account voice to guess.
+  if (engine === "elevenlabs") return ""
   if (engine === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
 }
@@ -232,6 +253,10 @@ export function normalizeVoiceForProvider(
 ): Voice {
   const engine = effectiveTtsProvider(provider)
   const next: Voice = { ...voice, provider: engine }
+  if (engine !== "elevenlabs") {
+    delete next.elevenLabs
+    delete next.elevenLabsClone
+  }
   if (engine === "inworld") {
     if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE
     if (!isInworldAudioQuality(next.audioQuality)) {
@@ -240,10 +265,17 @@ export function normalizeVoiceForProvider(
     }
     return next
   }
-  delete next.language
   delete next.speakingRate
   delete next.deliveryMode
   delete next.audioQuality
+  if (engine === "elevenlabs") {
+    // Keeps `language` (it feeds `language_code` on models that take one) and
+    // the ElevenLabs block; drops the Inworld/Gemini timbre id.
+    delete next.voiceName
+    if (next.elevenLabs) next.elevenLabs = { ...next.elevenLabs, modelId: next.elevenLabs.modelId ?? DEFAULT_ELEVENLABS_MODEL }
+    return next
+  }
+  delete next.language
   if (engine === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next

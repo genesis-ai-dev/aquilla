@@ -601,6 +601,87 @@ export const audio = defineNamespace({
     "audio.provider.inworldHint":
       "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
+
+    // ElevenLabs engine (AQU-2299, bring-your-own-key): connect card, voice
+    // browser, model + settings, cloning, and its error popovers.
+    "audio.provider.elevenLabsHint": "Bring your own ElevenLabs key. Expressive voices in many languages, instant cloning and speech-to-speech.",
+    "audio.elevenLabs.connectTitle": "Connect ElevenLabs",
+    "audio.elevenLabs.connectBody": "Use your own ElevenLabs account. ElevenLabs bills the characters you use.",
+    "audio.elevenLabs.keyPlaceholder": "Paste your API key",
+    "audio.elevenLabs.keyAriaLabel": "ElevenLabs API key",
+    "audio.elevenLabs.connectButton": "Connect",
+    "audio.elevenLabs.keyStaysOnDevice": "Your key stays on this device",
+    "audio.elevenLabs.getKey": "Get a key",
+    "audio.elevenLabs.disconnect": "Disconnect",
+    "audio.elevenLabs.accountUnavailable": "Couldn't check your ElevenLabs account.",
+    "audio.elevenLabs.checkingAccount": "Checking your ElevenLabs account",
+    "audio.elevenLabs.connectedTooltip": "Connected with your key on this device",
+    "audio.elevenLabs.connectedAriaLabel": "Connected",
+    "audio.elevenLabs.charactersLeft": "{left} / {limit} characters left",
+    "audio.elevenLabs.quotaMeterAriaLabel": "ElevenLabs characters left this period",
+    "audio.elevenLabs.sourceGroupLabel": "Voice source",
+    "audio.elevenLabs.tabUse": "Use a voice",
+    "audio.elevenLabs.tabClone": "Clone a voice",
+    "audio.elevenLabs.searchPlaceholder": "Search your voices",
+    "audio.elevenLabs.searchAriaLabel": "Search ElevenLabs voices",
+    "audio.elevenLabs.filterGroupAriaLabel": "Filter voices by kind",
+    "audio.elevenLabs.categoryPremade": "Premade",
+    "audio.elevenLabs.categoryCloned": "Cloned",
+    "audio.elevenLabs.categoryDesigned": "Designed",
+    "audio.elevenLabs.categoryProfessional": "Professional",
+    "audio.elevenLabs.loadingVoices": "Loading voices",
+    "audio.elevenLabs.noVoices": "No voices match.",
+    "audio.elevenLabs.loadMore": "Show more voices",
+    "audio.elevenLabs.playPreviewAriaLabel": "Play a preview of {name}",
+    "audio.elevenLabs.pausePreviewAriaLabel": "Pause the preview of {name}",
+    "audio.elevenLabs.selectVoiceAriaLabel": "Use {name}",
+    "audio.elevenLabs.modelLabel": "Model",
+    "audio.elevenLabs.modelMultilingualV2": "Most natural; best for long narration",
+    "audio.elevenLabs.modelV3": "Most expressive delivery, in the most languages",
+    "audio.elevenLabs.modelFlash": "Fastest and cheapest; good for drafts",
+    "audio.elevenLabs.settingsLabel": "Voice settings",
+    "audio.elevenLabs.resetSettings": "Reset to defaults",
+    "audio.elevenLabs.stability": "Stability",
+    "audio.elevenLabs.stabilityHint": "Lower is more expressive and varied; higher is steadier from line to line.",
+    "audio.elevenLabs.similarity": "Similarity",
+    "audio.elevenLabs.similarityHint": "How closely the voice sticks to the original. Very high can bring back noise from the samples.",
+    "audio.elevenLabs.style": "Style",
+    "audio.elevenLabs.styleHint": "Exaggerates the voice's own style. Keep it at 0 for steady narration.",
+    "audio.elevenLabs.speed": "Speed",
+    "audio.elevenLabs.speedHint": "Talking speed. 1.00× is the voice's natural pace.",
+    "audio.elevenLabs.speakerBoost": "Speaker boost",
+    "audio.elevenLabs.speakerBoostHint": "Pushes the voice closer to the original speaker. Slightly slower to generate.",
+    "audio.elevenLabs.settingHelpAriaLabel": "About {setting}",
+    "audio.elevenLabs.stopPreview": "Stop",
+    "audio.elevenLabs.previewHint": "Reads a short sample line with these settings",
+    "audio.elevenLabs.previewNeedsVoice": "Preview needs an open project",
+    "audio.elevenLabs.previewSample": "In the beginning was the Word, and the Word was with God.",
+    "audio.elevenLabs.errorVoiceRequired": "Pick an ElevenLabs voice.",
+    "audio.elevenLabs.clonePlanNote": "Your ElevenLabs plan doesn't include instant voice cloning. Upgrade it in ElevenLabs to clone a voice.",
+    "audio.elevenLabs.cloneRecordingTips": "One speaker, clean speech · 1–2 min sounds best · up to 20 MB per file",
+    "audio.elevenLabs.cloneFromLines": "Use a take from this project's lines",
+    "audio.elevenLabs.cloneFromLinesAriaLabel": "Lines with a take",
+    "audio.elevenLabs.cloneMinimumHint": "{seconds} s minimum",
+    "audio.elevenLabs.cloneRecommendedHint": "1–2 min sounds best",
+    "audio.elevenLabs.cloneGreatHint": "Plenty for a good clone",
+    "audio.elevenLabs.removeNoise": "Remove background noise",
+    "audio.elevenLabs.removeNoiseHint": "Cleans the recordings before cloning. Leave it off for studio-quality audio, where it can lower quality.",
+    "audio.elevenLabs.removeNoiseHelpAriaLabel": "About removing background noise",
+    "audio.elevenLabs.cloning": "Cloning…",
+    "audio.elevenLabs.cloneButton": "Clone voice",
+    "audio.elevenLabs.cloneNameFirst": "Name the voice above first.",
+    "audio.aiError.elevenLabsNoKeyTitle": "ElevenLabs key needed",
+    "audio.aiError.elevenLabsNoKeyBody": "This voice uses ElevenLabs with your own API key, and this device has none. Connect your key in the Voice Studio (edit the voice) or in Project settings → Voice.",
+    "audio.aiError.elevenLabsInvalidKeyTitle": "ElevenLabs rejected your key",
+    "audio.aiError.elevenLabsInvalidKeyBody": "Check the key in your ElevenLabs account, then disconnect and connect it again.",
+    "audio.aiError.elevenLabsQuotaTitle": "Out of ElevenLabs characters",
+    "audio.aiError.elevenLabsQuotaBody": "Your ElevenLabs account has used this period's characters. Upgrade your ElevenLabs plan or wait for it to reset.",
+    "audio.aiError.elevenLabsCloneNotAllowedTitle": "Cloning isn't on your ElevenLabs plan",
+    "audio.aiError.elevenLabsCloneNotAllowedBody": "Instant voice cloning needs a paid ElevenLabs plan. Upgrade in ElevenLabs, or use one of your existing voices.",
+    "audio.aiError.elevenLabsRateLimitedTitle": "ElevenLabs is busy",
+    "audio.aiError.elevenLabsRateLimitedBody": "Too many ElevenLabs requests at once for your account. Wait a moment and try again.",
+    "audio.aiError.elevenLabsFailedTitle": "ElevenLabs couldn't do that",
+    "audio.aiError.elevenLabsFailedBody": "ElevenLabs didn't complete the request. Try again; if it keeps failing, check the voice still exists in your ElevenLabs account.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
     "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
     "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
@@ -2760,6 +2841,259 @@ export const audio = defineNamespace({
           "Tooltip on the Inworld TTS engine card in the TTS engine picker (New " +
           "Voice dialog). Hosted Inworld has two models: Standard is TTS 2 Flash " +
           "(faster) and Highest is TTS 2. No user API key, and usage is metered.",
+      },
+      "audio.provider.elevenLabsHint": {
+        description: "Tooltip on the ElevenLabs engine card in the TTS engine picker. The user must supply their own ElevenLabs API key; 'speech-to-speech' means re-voicing an existing recording into another voice. ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.elevenLabs.connectTitle": {
+        description: "Heading of the card where the user pastes their own ElevenLabs API key to use ElevenLabs voices. ElevenLabs is a brand name: do not translate it.",
+      },
+      "audio.elevenLabs.connectBody": {
+        description: "One-line explanation under 'Connect ElevenLabs': the user's own ElevenLabs account pays for usage, measured in characters of text spoken. Not Aquilla billing.",
+      },
+      "audio.elevenLabs.keyPlaceholder": {
+        description: "Placeholder inside the masked input where the user pastes their ElevenLabs API key.",
+      },
+      "audio.elevenLabs.keyAriaLabel": {
+        description: "Screen-reader name of the masked input for the user's ElevenLabs API key.",
+      },
+      "audio.elevenLabs.connectButton": {
+        description: "Button that checks the pasted ElevenLabs key against the user's account and saves it on this device. Short: sits beside the key input.",
+      },
+      "audio.elevenLabs.keyStaysOnDevice": {
+        description: "Reassurance under the key input: the ElevenLabs key is stored only in this browser for this user and is never shared with the project or teammates.",
+      },
+      "audio.elevenLabs.getKey": {
+        description: "Link that opens the ElevenLabs website's API-keys page in a new tab, where the user can create a key.",
+      },
+      "audio.elevenLabs.disconnect": {
+        description: "Button on the connected ElevenLabs bar that removes the saved key from this device.",
+      },
+      "audio.elevenLabs.accountUnavailable": {
+        description: "Shown on the connected bar when the account lookup failed for a reason we cannot name (e.g. offline). A Retry button follows.",
+      },
+      "audio.elevenLabs.checkingAccount": {
+        description: "Screen-reader label for the loading placeholder while the app reads the connected ElevenLabs account's plan and quota.",
+      },
+      "audio.elevenLabs.connectedTooltip": {
+        description: "Tooltip on the green dot of the connected ElevenLabs bar.",
+      },
+      "audio.elevenLabs.connectedAriaLabel": {
+        description: "Screen-reader name of the green status dot meaning the ElevenLabs key works.",
+      },
+      "audio.elevenLabs.charactersLeft": {
+        description: "Quota text on the connected ElevenLabs bar: how many characters of text the user's ElevenLabs plan can still speak this billing period, out of the plan's total.",
+        placeholders: {
+          "left": "Characters remaining, already formatted with digit grouping (e.g. 87,660).",
+          "limit": "The plan's total characters for the period, formatted (e.g. 100,000).",
+        },
+      },
+      "audio.elevenLabs.quotaMeterAriaLabel": {
+        description: "Screen-reader name of the thin meter bar showing remaining ElevenLabs characters.",
+      },
+      "audio.elevenLabs.sourceGroupLabel": {
+        description: "Screen-reader name of the two-way switch between using an existing ElevenLabs voice and cloning a new one.",
+      },
+      "audio.elevenLabs.tabUse": {
+        description: "Segment of a two-way switch: pick one of the voices already in the user's ElevenLabs account. Keep short.",
+      },
+      "audio.elevenLabs.tabClone": {
+        description: "Segment of a two-way switch: make a new ElevenLabs voice from recordings of a real speaker. Keep short.",
+      },
+      "audio.elevenLabs.searchPlaceholder": {
+        description: "Placeholder of the search box above the grid of the user's ElevenLabs voices.",
+      },
+      "audio.elevenLabs.searchAriaLabel": {
+        description: "Screen-reader name of the search box above the ElevenLabs voice grid.",
+      },
+      "audio.elevenLabs.filterGroupAriaLabel": {
+        description: "Screen-reader name of the row of filter chips (Premade, Cloned, Designed, Professional).",
+      },
+      "audio.elevenLabs.categoryPremade": {
+        description: "Chip/filter for ElevenLabs' own stock voices. One word if possible.",
+      },
+      "audio.elevenLabs.categoryCloned": {
+        description: "Chip/filter for voices cloned from recordings of a real person. One word if possible.",
+      },
+      "audio.elevenLabs.categoryDesigned": {
+        description: "Chip/filter for synthetic voices designed from a text description in ElevenLabs. One word if possible.",
+      },
+      "audio.elevenLabs.categoryProfessional": {
+        description: "Chip/filter for ElevenLabs Professional Voice Clones (high-fidelity clones trained on long recordings). One word if possible.",
+      },
+      "audio.elevenLabs.loadingVoices": {
+        description: "Screen-reader label for the placeholder cards shown while the ElevenLabs voice list loads.",
+      },
+      "audio.elevenLabs.noVoices": {
+        description: "Empty state of the ElevenLabs voice grid when the search or filter matches nothing.",
+      },
+      "audio.elevenLabs.loadMore": {
+        description: "Button under the voice grid that loads the next page of the account's voices.",
+      },
+      "audio.elevenLabs.playPreviewAriaLabel": {
+        description: "Screen-reader name of a voice card's round avatar, which plays ElevenLabs' sample clip of that voice.",
+        placeholders: {
+          "name": "The ElevenLabs voice's name, e.g. Rachel.",
+        },
+      },
+      "audio.elevenLabs.pausePreviewAriaLabel": {
+        description: "Screen-reader name of the voice card's avatar while its sample clip plays.",
+        placeholders: {
+          "name": "The ElevenLabs voice's name, e.g. Rachel.",
+        },
+      },
+      "audio.elevenLabs.selectVoiceAriaLabel": {
+        description: "Screen-reader name of a voice card; activating it makes that ElevenLabs voice this cast voice's voice.",
+        placeholders: {
+          "name": "The ElevenLabs voice's name, e.g. Rachel.",
+        },
+      },
+      "audio.elevenLabs.modelLabel": {
+        description: "Label of the select choosing which ElevenLabs speech model reads the lines.",
+      },
+      "audio.elevenLabs.modelMultilingualV2": {
+        description: "One-line description under the 'Multilingual v2' model option (product name, not translated).",
+      },
+      "audio.elevenLabs.modelV3": {
+        description: "One-line description under the 'Eleven v3' model option (product name, not translated).",
+      },
+      "audio.elevenLabs.modelFlash": {
+        description: "One-line description under the 'Flash v2.5' model option (product name, not translated).",
+      },
+      "audio.elevenLabs.settingsLabel": {
+        description: "Header of the collapsible section holding the ElevenLabs sliders (stability, similarity, style, speed) and speaker boost.",
+      },
+      "audio.elevenLabs.resetSettings": {
+        description: "Small link that puts every ElevenLabs voice setting back to its default.",
+      },
+      "audio.elevenLabs.stability": {
+        description: "Slider label: how consistent versus expressive the ElevenLabs voice is from line to line.",
+      },
+      "audio.elevenLabs.stabilityHint": {
+        description: "Tooltip explaining the Stability slider.",
+      },
+      "audio.elevenLabs.similarity": {
+        description: "Slider label: how closely generated speech sticks to the original voice (ElevenLabs 'similarity boost').",
+      },
+      "audio.elevenLabs.similarityHint": {
+        description: "Tooltip explaining the Similarity slider.",
+      },
+      "audio.elevenLabs.style": {
+        description: "Slider label: how much the voice's own speaking style is exaggerated (ElevenLabs 'style').",
+      },
+      "audio.elevenLabs.styleHint": {
+        description: "Tooltip explaining the Style slider.",
+      },
+      "audio.elevenLabs.speed": {
+        description: "Slider label: talking speed of the ElevenLabs voice.",
+      },
+      "audio.elevenLabs.speedHint": {
+        description: "Tooltip explaining the Speed slider. Keep '1.00×' as written.",
+      },
+      "audio.elevenLabs.speakerBoost": {
+        description: "Switch label for ElevenLabs' 'use speaker boost' option.",
+      },
+      "audio.elevenLabs.speakerBoostHint": {
+        description: "Tooltip explaining the Speaker boost switch.",
+      },
+      "audio.elevenLabs.settingHelpAriaLabel": {
+        description: "Screen-reader name of the small info button next to a voice setting; it shows that setting's explanation.",
+        placeholders: {
+          "setting": "The already-translated setting name, e.g. Stability.",
+        },
+      },
+      "audio.elevenLabs.stopPreview": {
+        description: "Same button while the preview plays; stops playback.",
+      },
+      "audio.elevenLabs.previewHint": {
+        description: "Muted note beside the Preview button. The sample uses a few of the user's ElevenLabs characters.",
+      },
+      "audio.elevenLabs.previewNeedsVoice": {
+        description: "Muted note beside a disabled Preview button when there is no project or sign-in to authorize the request.",
+      },
+      "audio.elevenLabs.previewSample": {
+        description: "The sample sentence the Preview button speaks aloud. Translate it into the UI language (the opening of the Gospel of John, as your language's Bible renders it).",
+      },
+      "audio.elevenLabs.errorVoiceRequired": {
+        description: "Error under the New voice form when saving an ElevenLabs voice before choosing one from the grid.",
+      },
+      "audio.elevenLabs.clonePlanNote": {
+        description: "Notice at the top of the Clone tab when the connected ElevenLabs plan cannot clone voices.",
+      },
+      "audio.elevenLabs.cloneRecordingTips": {
+        description: "Muted tips inside the drop zone for cloning samples. Keep the separators and numbers.",
+      },
+      "audio.elevenLabs.cloneFromLines": {
+        description: "Button opening a list of this project's lines that have a recording or generated take, to add one as a cloning sample.",
+      },
+      "audio.elevenLabs.cloneFromLinesAriaLabel": {
+        description: "Screen-reader name of the list of lines whose take can be added as a cloning sample.",
+      },
+      "audio.elevenLabs.cloneMinimumHint": {
+        description: "Hint beside the recordings length meter while there is too little audio to clone.",
+        placeholders: {
+          "seconds": "Minimum seconds of speech ElevenLabs needs, e.g. 10.",
+        },
+      },
+      "audio.elevenLabs.cloneRecommendedHint": {
+        description: "Hint beside the recordings length meter once the minimum is met but more audio would help.",
+      },
+      "audio.elevenLabs.cloneGreatHint": {
+        description: "Hint beside the recordings length meter once there is enough audio for a good clone.",
+      },
+      "audio.elevenLabs.removeNoise": {
+        description: "Switch label: ElevenLabs cleans background noise out of the samples before cloning.",
+      },
+      "audio.elevenLabs.removeNoiseHint": {
+        description: "Tooltip explaining the Remove background noise switch.",
+      },
+      "audio.elevenLabs.removeNoiseHelpAriaLabel": {
+        description: "Screen-reader name of the info button next to Remove background noise.",
+      },
+      "audio.elevenLabs.cloning": {
+        description: "Label of the Clone voice button while ElevenLabs creates the voice.",
+      },
+      "audio.elevenLabs.cloneButton": {
+        description: "Primary button that creates the ElevenLabs voice clone from the samples (after the consent box is ticked).",
+      },
+      "audio.elevenLabs.cloneNameFirst": {
+        description: "Muted note under a disabled Clone voice button when the Name field at the top of the dialog is empty.",
+      },
+      "audio.aiError.elevenLabsNoKeyTitle": {
+        description: "Popover title when a line uses an ElevenLabs voice but this device has no ElevenLabs key connected.",
+      },
+      "audio.aiError.elevenLabsNoKeyBody": {
+        description: "Popover body: how to connect the user's own ElevenLabs key. 'Project settings → Voice' names a settings page and section; use their translated names.",
+      },
+      "audio.aiError.elevenLabsInvalidKeyTitle": {
+        description: "Popover title when ElevenLabs answers that the user's API key is invalid or revoked.",
+      },
+      "audio.aiError.elevenLabsInvalidKeyBody": {
+        description: "Popover body for an invalid ElevenLabs key: the fix is to replace it.",
+      },
+      "audio.aiError.elevenLabsQuotaTitle": {
+        description: "Popover title when the user's ElevenLabs plan has used up its characters for the billing period.",
+      },
+      "audio.aiError.elevenLabsQuotaBody": {
+        description: "Popover body for an exhausted ElevenLabs quota. It is the user's ElevenLabs plan, not Aquilla's allowance.",
+      },
+      "audio.aiError.elevenLabsCloneNotAllowedTitle": {
+        description: "Popover title when the user's ElevenLabs plan cannot create voice clones.",
+      },
+      "audio.aiError.elevenLabsCloneNotAllowedBody": {
+        description: "Popover body when cloning is not on the user's ElevenLabs plan.",
+      },
+      "audio.aiError.elevenLabsRateLimitedTitle": {
+        description: "Popover title when ElevenLabs (or our per-user limit for it) refuses because of too many requests.",
+      },
+      "audio.aiError.elevenLabsRateLimitedBody": {
+        description: "Popover body for an ElevenLabs rate limit: waiting is the whole fix.",
+      },
+      "audio.aiError.elevenLabsFailedTitle": {
+        description: "Popover title for any other ElevenLabs failure.",
+      },
+      "audio.aiError.elevenLabsFailedBody": {
+        description: "Popover body for a generic ElevenLabs failure. Names only ElevenLabs.",
       },
       "audio.provider.geminiHint": {
         description:

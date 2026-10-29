@@ -14,7 +14,9 @@ import {
   subscribeClientLocalStorageOwner,
 } from "@/lib/frontier/client-local-storage"
 
-export type ApiKeyPurpose = "gemini-tts" | "completion"
+// "elevenlabs" (AQU-2299) is per user + device only: there is no project-level
+// ElevenLabs key, so resolveApiKey is never consulted for it.
+export type ApiKeyPurpose = "gemini-tts" | "completion" | "elevenlabs"
 
 const PREFIX = "frontier:user-api-key:"
 

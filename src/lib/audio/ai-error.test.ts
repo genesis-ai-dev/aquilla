@@ -336,3 +336,30 @@ describe("hosted transcription model failures", () => {
     expect(e.body).toMatch(/on this device/)
   })
 })
+
+// AQU-2299: the worker's ElevenLabs error body → errorFromElevenLabs (the real
+// producer of every thrown ElevenLabs message) → categorizeAiError. Each
+// failure gets its own ElevenLabs title, and no copy ever names another engine.
+describe("categorizeAiError — ElevenLabs (BYOK)", () => {
+  it("maps each worker error code to its ElevenLabs category", async () => {
+    const { errorFromElevenLabs, elevenLabsKeyMissingError } = await import("./elevenlabs/errors")
+    const body = (error: string) => JSON.stringify({ error, message: "x" })
+    const cases: [Error, string][] = [
+      [elevenLabsKeyMissingError(), "elevenlabs-key-missing"],
+      [errorFromElevenLabs(400, body("elevenlabs_key_missing")), "elevenlabs-key-missing"],
+      [errorFromElevenLabs(401, body("elevenlabs_invalid_key")), "elevenlabs-invalid-key"],
+      [errorFromElevenLabs(402, body("elevenlabs_quota_exceeded")), "elevenlabs-quota"],
+      [errorFromElevenLabs(403, body("elevenlabs_clone_not_allowed")), "elevenlabs-clone-not-allowed"],
+      [errorFromElevenLabs(429, body("elevenlabs_rate_limited")), "elevenlabs-rate-limited"],
+      [errorFromElevenLabs(429, JSON.stringify({ error: "rate_limited", message: "slow down" })), "elevenlabs-rate-limited"],
+      [errorFromElevenLabs(502, body("elevenlabs_failed")), "elevenlabs-failed"],
+      [errorFromElevenLabs(404, "voice not found"), "elevenlabs-failed"],
+    ]
+    for (const [err, category] of cases) {
+      const result = categorizeAiError(err.message)
+      expect(result.category, err.message).toBe(category)
+      expect(`${result.title} ${result.body}`).toMatch(/ElevenLabs/)
+      expect(`${result.title} ${result.body}`).not.toMatch(/Gemini|Inworld|OpenRouter/)
+    }
+  })
+})

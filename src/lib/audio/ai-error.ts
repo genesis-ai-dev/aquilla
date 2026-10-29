@@ -40,6 +40,8 @@ import {
   VOICE_CONVERT_FAILED_BODY,
   VOICE_CONVERT_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
+import { ELEVENLABS_ERROR_RE, type ElevenLabsFailure } from "./elevenlabs/errors"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** Shown when hosted drafting has no OpenRouter key. Names the setting to
  *  change and states that a user-supplied key is not Aquilla-billed. */
@@ -60,6 +62,12 @@ export type ErrorCategory =
   | "ai-allowance-exhausted"
   | "voice-convert-not-configured"
   | "voice-convert-failed"
+  | "elevenlabs-key-missing"
+  | "elevenlabs-invalid-key"
+  | "elevenlabs-quota"
+  | "elevenlabs-clone-not-allowed"
+  | "elevenlabs-rate-limited"
+  | "elevenlabs-failed"
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
@@ -101,6 +109,18 @@ function extractStatus(lowered: string): number | null {
   return match ? Number(match[1]) : null
 }
 
+/** ElevenLabs (AQU-2299, BYOK) failures by their message lead-in
+ *  (elevenlabs/errors.ts). Every title and body names ElevenLabs and only
+ *  ElevenLabs — the user's own key and account, never another engine. */
+const ELEVENLABS_CATEGORIES: Record<ElevenLabsFailure, { category: ErrorCategory; titleKey: MessageKey; bodyKey: MessageKey }> = {
+  "no key": { category: "elevenlabs-key-missing", titleKey: "audio.aiError.elevenLabsNoKeyTitle", bodyKey: "audio.aiError.elevenLabsNoKeyBody" },
+  "invalid key": { category: "elevenlabs-invalid-key", titleKey: "audio.aiError.elevenLabsInvalidKeyTitle", bodyKey: "audio.aiError.elevenLabsInvalidKeyBody" },
+  "out of characters": { category: "elevenlabs-quota", titleKey: "audio.aiError.elevenLabsQuotaTitle", bodyKey: "audio.aiError.elevenLabsQuotaBody" },
+  "cloning not allowed": { category: "elevenlabs-clone-not-allowed", titleKey: "audio.aiError.elevenLabsCloneNotAllowedTitle", bodyKey: "audio.aiError.elevenLabsCloneNotAllowedBody" },
+  "rate limited": { category: "elevenlabs-rate-limited", titleKey: "audio.aiError.elevenLabsRateLimitedTitle", bodyKey: "audio.aiError.elevenLabsRateLimitedBody" },
+  failed: { category: "elevenlabs-failed", titleKey: "audio.aiError.elevenLabsFailedTitle", bodyKey: "audio.aiError.elevenLabsFailedBody" },
+}
+
 export interface ActionableError {
   category: ErrorCategory
   /** One-line heading for the popover. Plain English, no jargon. */
@@ -126,6 +146,15 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       body: t("audio.aiError.transcriptionModelUnavailableBody"),
       raw,
     }
+  }
+
+  // ElevenLabs is bring-your-own-key: its failures are about the user's own
+  // key and account, so they are matched before every platform branch (none of
+  // the platform's budgets or ceilings apply to it).
+  const elevenLabs = raw.match(ELEVENLABS_ERROR_RE)
+  if (elevenLabs) {
+    const entry = ELEVENLABS_CATEGORIES[elevenLabs[1].toLowerCase() as ElevenLabsFailure]
+    return { category: entry.category, title: t(entry.titleKey), body: t(entry.bodyKey), raw }
   }
 
   // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once

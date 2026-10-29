@@ -27,9 +27,7 @@ import { convertToLibraryVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
-import { synthesizeCellTts } from "@/lib/sync/tts"
-import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
-import { inworldLanguageForRequest } from "./inworld-languages"
+import { synthesizeServerTts } from "./server-tts"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -93,22 +91,20 @@ export async function generateAndAttachCellVoice(
   })
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
-  // Inworld is server-side: the sync-worker synthesizes, stores the clip in
-  // R2, and returns its id — no client synth, no upload. Branch out entirely.
+  // Inworld and ElevenLabs are server-side: the sync-worker synthesizes,
+  // stores the clip in R2, and returns its id — no client synth, no upload.
+  // Branch out entirely.
   if (isServerTtsProvider(provider)) {
-    const language = inworldLanguageForRequest(voice, args.geminiContext?.targetLanguage)
-    const result = await synthesizeCellTts(
-      {
-        projectId: args.projectId,
-        fileId: args.fileId,
-        cellId: args.cellId,
-        text,
-        ...(language ? { language } : {}),
-        ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
-        ...inworldSynthFieldsFromVoice(voice),
-      },
+    const { result, ext: serverExt, mimeType: serverMime } = await synthesizeServerTts({
+      provider,
+      voice,
+      projectId: args.projectId,
+      fileId: args.fileId,
+      cellId: args.cellId,
+      text,
+      targetLanguage: args.geminiContext?.targetLanguage,
       getSyncToken,
-    )
+    })
     // A Voice library voice has no TTS timbre of its own: the stock voice reads
     // the line in the target language, then the voice forge re-voices that clip
     // into the character. RVC keeps the clip's length, so the duration holds.
@@ -135,7 +131,7 @@ export async function generateAndAttachCellVoice(
       url: audioUrl,
       durationMs: Math.round(result.durationSeconds * 1000),
       slot: args.slot ?? GENERATED_VOICE_SLOT,
-      mimeType: "audio/wav",
+      mimeType: voice.libraryVoiceId ? "audio/wav" : serverMime,
       voiceId: voice.id,
       ...(args.label ? { label: args.label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
@@ -151,7 +147,7 @@ export async function generateAndAttachCellVoice(
       audioId: objectName,
       url: audioUrl,
       slot: args.slot ?? GENERATED_VOICE_SLOT,
-      mimeType: "audio/wav",
+      mimeType: voice.libraryVoiceId ? "audio/wav" : serverMime,
       voiceId: voice.id,
       referenceAudioId: null,
       durationMs: Math.round(result.durationSeconds * 1000),
@@ -160,17 +156,18 @@ export async function generateAndAttachCellVoice(
       trimEndMs: null,
     }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
+    const playExt = voice.libraryVoiceId ? "wav" : serverExt
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,
       audioId,
-      ext: "wav",
+      ext: playExt,
       getSyncToken,
     })
     return {
       audioId: objectName,
       url: audioUrl,
-      blob: new Blob([bytes as BlobPart], { type: "audio/wav" }),
+      blob: new Blob([bytes as BlobPart], { type: voice.libraryVoiceId ? "audio/wav" : serverMime }),
     }
   }
 

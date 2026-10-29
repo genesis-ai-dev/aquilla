@@ -1,9 +1,10 @@
 // NewVoiceModal — one modal, three ways to make a voice:
-//   • TTS voice — name it, pick the engine (Inworld / Gemini / MMS —
+//   • TTS voice — name it, pick the engine (Inworld / Gemini / ElevenLabs / MMS —
 //     seeded from the project's configured engine), and fill that engine's
 //     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
 //     catalog voice (searchable API language + accent, then a stock speaker)
-//     or Voice Design, plus quality / delivery / speed).
+//     or Voice Design, plus quality / delivery / speed; ElevenLabs: connect
+//     your own key, then pick or clone an account voice — ElevenLabsVoiceFields).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
 //     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
 //   • Train voice — a custom voice from the org's recordings of a real person
@@ -40,6 +41,7 @@ import {
 } from "@/components/ui/select"
 import { CharacterVoicePicker } from "@/components/voice/CharacterVoicePicker"
 import { TrainVoicePanel } from "@/components/voice/TrainVoicePanel"
+import { ElevenLabsVoiceFields } from "@/components/voice/elevenlabs/ElevenLabsVoiceFields"
 import { voiceFromCharacter } from "@/lib/audio/character-voices"
 import { cn } from "@/lib/utils"
 import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
@@ -210,6 +212,8 @@ function NewVoiceModalBody({
 
   // Engine is per-voice; legacy voices without one follow the project default.
   const activeProvider = effectiveTtsProvider(draft.provider ?? projectProvider)
+  const elevenLabsActive = mode === "tts" && activeProvider === "elevenlabs"
+  const [elevenLabsCloning, setElevenLabsCloning] = useState(false)
 
   const pickProvider = useCallback((next: TtsProvider) => {
     setDraft((d) => {
@@ -279,6 +283,10 @@ function NewVoiceModalBody({
       && catalogLanguages.every((lane) => !toInworldLanguage(lane))
     ) {
       setTakeError(t("audio.newVoice.errorInworldLanguageRequired"))
+      return
+    }
+    if (mode === "tts" && effectiveTtsProvider(draft.provider ?? projectProvider) === "elevenlabs" && !draft.elevenLabs?.voiceId) {
+      setTakeError(t("audio.elevenLabs.errorVoiceRequired"))
       return
     }
     const designing = mode === "tts"
@@ -500,6 +508,19 @@ function NewVoiceModalBody({
                 previewIgnored={inworldSource === "design"}
               />
             )}
+            {activeProvider === "elevenlabs" && (
+              <ElevenLabsVoiceFields
+                draft={draft}
+                onChange={update}
+                projectId={projectId}
+                fileId={fileId}
+                session={session}
+                cells={cells}
+                targetLanguage={inworldLocaleLanguage}
+                editing={!isNew}
+                onCloningChange={setElevenLabsCloning}
+              />
+            )}
             {activeProvider === "gemini" && (
               <Field>
                 <FieldLabel htmlFor="voice-describe">{t("audio.newVoice.describeLabel")}</FieldLabel>
@@ -561,8 +582,12 @@ function NewVoiceModalBody({
               )}
               <div className="ms-auto flex gap-2">
                 <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
-                {!(isNew && (mode === "character" || mode === "train")) && (
-                  <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+                {!(isNew && (mode === "character" || mode === "train")) && !(elevenLabsActive && elevenLabsCloning) && (
+                  <Button
+                    type="button"
+                    onClick={() => void handleSave()}
+                    disabled={saving || (elevenLabsActive && !draft.elevenLabs?.voiceId)}
+                  >
                     {saving ? <Spinner className="size-3" /> : null}
                     {isNew ? t("audio.newVoice.createButton") : t("common.save")}
                   </Button>
@@ -614,7 +639,7 @@ function EngineGrid({
           >
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-medium">{info.shortTitle}</span>
-              {info.badge && <Badge>{info.badge}</Badge>}
+              {info.badge && <Badge variant={info.requiresElevenLabsKey ? "outline" : "default"}>{info.badge}</Badge>}
             </div>
             <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{info.blurb}</p>
             {info.caveat && (

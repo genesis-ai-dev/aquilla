@@ -16,6 +16,7 @@ import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleCustomVoiceRequest } from "./custom-voice"
 import { handleTtsRequest } from "./tts"
+import { handleElevenLabsRequest } from "./elevenlabs"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
@@ -202,6 +203,10 @@ declare global {
       INWORLD_API_BASE?: string
       INWORLD_TTS_MODEL?: string
       INWORLD_DEFAULT_VOICE?: string
+      /** ElevenLabs upstream origin (AQU-2299). Unset → https://api.elevenlabs.io.
+       *  ElevenLabs is BYOK: there is no house key — each user's own key arrives
+       *  per request in X-ElevenLabs-Key. `pnpm dev` points this at the mock. */
+      ELEVENLABS_BASE_URL?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -466,6 +471,9 @@ const worker = {
     if (customVoiceResponse) return withCors(customVoiceResponse, request)
     const ttsResponse = await handleTtsRequest(request, env)
     if (ttsResponse) return withCors(ttsResponse, request)
+    // AQU-2299: ElevenLabs, bring-your-own-key (the key rides each request).
+    const elevenLabsResponse = await handleElevenLabsRequest(request, env)
+    if (elevenLabsResponse) return withCors(elevenLabsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
     if (diarizationResponse) return withCors(diarizationResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)

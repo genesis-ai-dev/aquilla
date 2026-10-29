@@ -20,7 +20,7 @@ vi.mock("@/lib/history/history", () => ({ recordStep: vi.fn(), withGroup: async 
 
 import { RecordingTakes } from "./RecordingTakes"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
-import { __resetVoicingAsForTests, setVoicingAs } from "@/lib/audio/voicing-as"
+import { __resetVoicingAsForTests, whileVoicingAs } from "@/lib/audio/voicing-as"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
@@ -84,12 +84,14 @@ describe("RecordingTakes — the line's voice and its take (AQU-2212)", () => {
     expect(screen.getByTestId("voice-card-apply")).toHaveTextContent("Generate · Hearth")
   })
 
-  it("says Voicing as … while the line is voiced, in the button's place", () => {
+  it("says Voicing as … while the line is voiced, in the button's place", async () => {
     draw(cast("v-hearth"), { onApplyLineVoice: vi.fn() })
-    act(() => setVoicingAs("c1", "Hearth"))
+    let done!: () => void
+    let voicing!: Promise<void>
+    act(() => { voicing = whileVoicingAs("c1", "Hearth", () => new Promise<void>((r) => { done = r })) })
     expect(screen.getByTestId("voice-card-working")).toHaveTextContent("Voicing as Hearth…")
     expect(screen.queryByTestId("voice-card-apply")).toBeNull()
-    act(() => setVoicingAs("c1", null))
+    await act(async () => { done(); await voicing })
     expect(screen.queryByTestId("voice-card-working")).toBeNull()
     expect(screen.getByTestId("voice-card-apply")).toBeInTheDocument()
   })

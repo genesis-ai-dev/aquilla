@@ -6,7 +6,7 @@ vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
-import { __resetVoicingAsForTests, setVoicingAs } from "@/lib/audio/voicing-as"
+import { __resetVoicingAsForTests, whileVoicingAs } from "@/lib/audio/voicing-as"
 
 const TAKE = "audio-c1-1700000000-take.wav"
 
@@ -83,7 +83,7 @@ describe("TargetAudioLane — the line's voice and its take (AQU-2212)", () => {
     expect(screen.queryByTestId("tl-take-menu-apply-voice")).toBeNull()
   })
 
-  it("says Voicing as … on the clip while the line is voiced, and nothing after", () => {
+  it("says Voicing as … on the clip while the line is voiced, and nothing after", async () => {
     render(
       <TargetAudioLane
         {...base}
@@ -92,11 +92,13 @@ describe("TargetAudioLane — the line's voice and its take (AQU-2212)", () => {
       />,
     )
     expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
-    act(() => setVoicingAs("c1", "Hearth"))
+    let done!: () => void
+    let voicing!: Promise<void>
+    act(() => { voicing = whileVoicingAs("c1", "Hearth", () => new Promise<void>((r) => { done = r })) })
     expect(screen.getByTestId("tl-target-c1-working")).toHaveTextContent("Voicing as Hearth…")
     // It speaks in the take-voice label's place.
     expect(screen.queryByTestId("tl-target-c1-take-voice")).toBeNull()
-    act(() => setVoicingAs("c1", null))
+    await act(async () => { done(); await voicing })
     expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
   })
 })

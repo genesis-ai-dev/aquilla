@@ -19,6 +19,7 @@ import {
   leadSecForMove,
   type BuildProgrammeOptions,
   type Programme,
+  type ProgrammeLayer,
   type ProgrammeSlot,
 } from "./programme"
 import type { CellData } from "@/hooks/useCells"
@@ -39,14 +40,23 @@ export interface TimelineLayout {
   totalSec: number
   /** Where a card sits in its lane. */
   spanFor(cell: CellData, lane: "subtitle" | "source"): SpanSec | null
-  /** Where a section's dub chip sits, and its trim state. */
-  targetGeom(cell: CellData, att: Att): TargetChipGeom | null
+  /**
+   * Where a section's dub chip sits, and its trim state.
+   *
+   * AQU-2252: `audioId` names the take. Following the recordings a take on an
+   * added track is a LAYER, placed and sized on its own, so asking about one
+   * without naming it would get the main take's answer. Every caller that has
+   * the take's id passes it; leaving it out asks about the main take.
+   */
+  targetGeom(cell: CellData, att: Att, audioId?: string): TargetChipGeom | null
   /**
    * The span a dub chip is measured and clamped against. In dubbing that's the
    * frozen source split. In audio-first it runs from the clip's own zero (so
-   * the head trim can be dragged back off) to the end of the verse's slot.
+   * the head trim can be dragged back off) to the end of the verse's slot —
+   * and for a layer (AQU-2252), from its clip's zero, but never before its
+   * line's start, to the end of its own recording.
    */
-  chipSection(cell: CellData, att: Att): SpanSec | null
+  chipSection(cell: CellData, att: Att, audioId?: string): SpanSec | null
   /** Where clicking this cell should send playback, in the layout's seconds. */
   seekSecFor(cell: CellData): number | null
   /**
@@ -55,7 +65,7 @@ export interface TimelineLayout {
    * pause before its line (`canCarryTargetLead`) — the others are computed
    * end to end and have nowhere to go.
    */
-  canRetimeTarget(cell: CellData, att: Att): boolean
+  canRetimeTarget(cell: CellData, att: Att, audioId?: string): boolean
   /**
    * The inverse of `targetGeom`, for the one thing a drag may change: the
    * FILE-clock anchor to STORE for a take whose audible start was dragged to
@@ -67,7 +77,14 @@ export interface TimelineLayout {
    * nothing stores — what the drag actually changed is the take's pause before
    * its line, and that is an offset from the line's own start.
    */
-  retimeAnchorSec(cell: CellData, att: Att, audibleStartSec: number): number | null
+  retimeAnchorSec(cell: CellData, att: Att, audibleStartSec: number, audioId?: string): number | null
+  /**
+   * AQU-2252: whether this take is a LAYER here — a take on an added track
+   * while the file follows its recordings, drawn at its own length and place
+   * rather than its line's. Always false following the original, where every
+   * take is on the file clock alike.
+   */
+  isLayerTake(cell: CellData, audioId: string): boolean
 }
 
 /** Trailing room past the last card, so the final chip isn't flush to the edge.
@@ -113,6 +130,7 @@ function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | n
       const geom = targetChipGeom(cell, att)
       return geom ? audibleStartSec - geom.trimStartSec : null
     },
+    isLayerTake: () => false,
   }
 }
 
@@ -123,6 +141,11 @@ function audioFirstLayout(
 ): TimelineLayout {
   const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
+  /** AQU-2252: the take as a layer of its line, or null for the main take. */
+  const layerOf = (slot: ProgrammeSlot, audioId: string | undefined): ProgrammeLayer | null =>
+    audioId != null ? (slot.layers?.find((l) => l.audioId === audioId) ?? null) : null
+  const lineStartOf = (cell: CellData): number =>
+    typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
 
   /**
    * The dub chip, re-expressed against the programme clock. The trim maths in
@@ -131,7 +154,7 @@ function audioFirstLayout(
    * audible start land exactly on the slot start — and leaves every existing
    * resize calculation correct without touching it.
    */
-  const geomFor = (cell: CellData, att: Att): TargetChipGeom | null => {
+  const geomFor = (cell: CellData, att: Att, audioId?: string): TargetChipGeom | null => {
     const slot = slotOf(cell)
     if (!slot) return null
     const trimStartSec =
@@ -146,6 +169,33 @@ function audioFirstLayout(
       att?.trimEndMs != null && Number.isFinite(att.trimEndMs) && att.trimEndMs / 1000 > trimStartSec
         ? att.trimEndMs / 1000
         : null
+    // AQU-2252: a layer is drawn where it was put, at its own length — the
+    // programme placed it (`ProgrammeLayer`) and the transport plays it there.
+    // One of unknown length borrows its line's width from its own start, and
+    // says so, like the main take below.
+    const layer = layerOf(slot, audioId)
+    if (layer) {
+      const start = slot.startSec + layer.atSec
+      return layer.window
+        ? {
+            anchor: slot.startSec + layer.anchorSec,
+            start,
+            end: start + (layer.window.end - layer.window.start),
+            trimStartSec,
+            trimEndSec,
+            durationSec,
+            usingFallback: false,
+          }
+        : {
+            anchor: start - trimStartSec,
+            start,
+            end: start + slot.slotLenSec,
+            trimStartSec,
+            trimEndSec: null,
+            durationSec: null,
+            usingFallback: true,
+          }
+    }
     const anchor = slot.startSec - trimStartSec
     // No honest length → the chip borrows the verse's width and says so,
     // exactly as it does in dubbing mode.
@@ -193,10 +243,18 @@ function audioFirstLayout(
     }
   }
 
+  // AQU-2252: a layer may run on past the last line; the track reaches it.
+  let layerReachSec = 0
+  for (const slot of programme.slots) {
+    for (const l of slot.layers ?? []) {
+      if (l.window) layerReachSec = Math.max(layerReachSec, slot.startSec + l.atSec + (l.window.end - l.window.start))
+    }
+  }
+
   return {
     mode: "audioFirst",
     programme,
-    totalSec: programme.totalSec + TRACK_PAD_SEC,
+    totalSec: Math.max(programme.totalSec, layerReachSec) + TRACK_PAD_SEC,
     spanFor: (cell, lane) => {
       const slot = slotOf(cell)
       if (slot) {
@@ -214,18 +272,29 @@ function audioFirstLayout(
       return fileSpanToProgrammeSpan(programme, span.start, span.end)
     },
     targetGeom: geomFor,
-    chipSection: (cell, att) => {
+    chipSection: (cell, att, audioId) => {
       const slot = slotOf(cell)
       if (!slot) return null
-      const geom = geomFor(cell, att)
+      const geom = geomFor(cell, att, audioId)
+      // AQU-2252: a layer's head trim comes back off only as far as its line's
+      // start, and its tail reaches out to the end of its whole recording.
+      if (geom && layerOf(slot, audioId)) {
+        return {
+          start: Math.max(geom.anchor, slot.startSec),
+          end: geom.durationSec != null ? geom.anchor + geom.durationSec : geom.end,
+        }
+      }
       return {
         start: geom?.anchor ?? slot.startSec,
         end: slot.startSec + slot.slotLenSec,
       }
     },
     seekSecFor: (cell) => programme.byCellId.get(cell.id)?.startSec ?? null,
-    canRetimeTarget: (cell) => {
+    canRetimeTarget: (cell, _att, audioId) => {
       const slot = slotOf(cell)
+      // AQU-2252: a layer's place is its own stored offset, which the next
+      // layout reads straight back — so it moves whatever its length.
+      if (slot && layerOf(slot, audioId)) return true
       return slot != null && canCarryTargetLead(cell, slot)
     },
     // AQU-2215 (Sam, Oct 27): "it should still be possible for me to move a
@@ -235,14 +304,26 @@ function audioFirstLayout(
     // back as a file-clock anchor whose offset IS that pause. The line grows
     // to hold it on the next build, which is what carries the later lines
     // along; nothing about the programme clock is ever stored.
-    retimeAnchorSec: (cell, _att, audibleStartSec) => {
+    retimeAnchorSec: (cell, att, audibleStartSec, audioId) => {
       const slot = slotOf(cell)
-      if (!slot || !canCarryTargetLead(cell, slot)) return null
+      if (!slot) return null
+      // AQU-2252: a layer stores where its clip's sample zero goes — a head
+      // trim before where its sound was dropped, which is never before its
+      // line's start (the same floor, and the same wobble, as a pause).
+      const layer = layerOf(slot, audioId)
+      if (layer) {
+        const trimStartSec = layer.window?.start ?? (att?.trimStartMs != null && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0)
+        return lineStartOf(cell) + leadSecForMove(slot, audibleStartSec) - trimStartSec
+      }
+      if (!canCarryTargetLead(cell, slot)) return null
       // AQU-1758: a line with no times of its own stores the pause from its
       // slot's start (a line start of 0), on the take — or on the piece, for
       // a split take, each piece where it was dragged.
-      const lineStart = typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
-      return lineStart + leadSecForMove(slot, audibleStartSec)
+      return lineStartOf(cell) + leadSecForMove(slot, audibleStartSec)
+    },
+    isLayerTake: (cell, audioId) => {
+      const slot = slotOf(cell)
+      return slot != null && layerOf(slot, audioId) != null
     },
   }
 }

@@ -559,8 +559,13 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
+      // AQU-2252: following the recordings, never before the start of the
+      // span the layout measures the chip against. That IS `geom.anchor` for a
+      // line's main take; a layer's sample zero can sit before its line, and
+      // its head trim comes back off only as far as the line's start.
       const lo = Math.max(
         geom.anchor,
+        audioFirst ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
       )
@@ -615,7 +620,7 @@ function TargetAudioChip({
   // length are placed end to end and have nowhere to go, so they keep the
   // locked chip they have always had rather than springing back from a drag.
   const canMove =
-    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt) ?? true)
+    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt, chip.item.audioId) ?? true)
   // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
   // hide one (Sam lost a whole take under one). The logical span is untouched
   // — overflow warnings, trims, snapping and playback all still use the true
@@ -794,7 +799,7 @@ function TargetAudioChip({
         // the take's pause before its line. Either way what comes back is the
         // FILE-clock anchor, which is the only thing stored.
         const anchor = layout
-          ? layout.retimeAnchorSec(cell, chipAtt, s.start)
+          ? layout.retimeAnchorSec(cell, chipAtt, s.start, chip.item.audioId)
           : s.start - geom.trimStartSec
         if (anchor == null) return
         // Compared on the FILE clock for the same reason, so a drag that ends
@@ -1769,12 +1774,12 @@ export function TargetAudioLane({
   const chips: ChipGeometry[] = []
   for (const item of items) {
     const att = item.cell.attachments?.[item.audioId]
-    const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
+    const geom = layout ? layout.targetGeom(item.cell, att, item.audioId) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
     // AQU-2204: following its recordings, a line with NO times of its own (a
     // verse in a book with no times) still has its slot in the programme, so
     // its take is drawn there; only the source's clock needs the cell's times.
-    const section = layout?.chipSection(item.cell, att)
+    const section = layout?.chipSection(item.cell, att, item.audioId)
       ?? (typeof startTime === "number" && typeof endTime === "number" ? { start: startTime, end: endTime } : null)
     if (!geom || !section) continue
     const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
@@ -1810,8 +1815,9 @@ export function TargetAudioLane({
       resizable:
         !geom.usingFallback &&
         (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
+      // AQU-2252: a layer's length is its own, so its line's ratio is not its.
       ratio:
-        slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+        slot && !layout?.isLayerTake(item.cell, item.audioId) && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
           : null,
     })

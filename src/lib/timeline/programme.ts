@@ -28,6 +28,7 @@ import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 import { standInEstimator } from "./stand-in"
+import { isDefaultTrackSlot } from "./track-slots"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -91,6 +92,38 @@ export interface ProgrammeSlot {
    * lightly. Absent when the take starts on its line (or before it).
    */
   targetLeadSec?: number
+  /**
+   * AQU-2252 (Sam, Oct 28, option A): the line's takes on every track but the
+   * language's main one — its LAYERS. Absent when it has none. See
+   * `ProgrammeLayer`.
+   */
+  layers?: ProgrammeLayer[]
+}
+
+/**
+ * AQU-2252 (Sam, Oct 28, option A): a take on an added track, following the
+ * recordings. The MAIN track's take sets the line's length (above); a layer
+ * sets nothing. It keeps its own length and its own trim, and sits where it
+ * was put: its own stored offset from its line's start, which is where its
+ * clip's sample zero goes — so its sound starts a head trim later, a head trim
+ * moves only its left edge (like a region in a DAW), and it sits against its
+ * line exactly where it does following the original. It moves with its line
+ * and may run on past the line's end, over the lines after it, like a music
+ * bed or a second voice. It never sounds before its line's start: a place
+ * that would is drawn and played from the line's start instead.
+ */
+export interface ProgrammeLayer {
+  /** The track it is on — that track's storage slot. */
+  slot: string
+  audioId: string
+  /** Where it starts SOUNDING, in seconds from its line's start (never < 0). */
+  atSec: number
+  /** Where its clip's sample zero sits, from its line's start: `atSec` less
+   *  its head trim. */
+  anchorSec: number
+  /** Its window on its own clip's clock (head trim → tail trim); null when its
+   *  length isn't known, which leaves it nothing honest to play. */
+  window: Window | null
 }
 
 /**
@@ -136,6 +169,41 @@ export interface BuildProgrammeOptions {
    * one, else this) instead of being left out.
    */
   standInLenSec?(cell: CellData): number
+  /**
+   * AQU-2252: which tracks' takes are laid in as layers — their slots. The
+   * transport passes the tracks on screen, the ones it plays. Absent, every
+   * added track a line has a take on (what the drawing asks for: it looks a
+   * layer up by its take, so a track that is not drawn is never asked about).
+   */
+  layerSlots?: readonly string[]
+}
+
+function trimStartSecOf(att: { trimStartMs?: number } | undefined): number {
+  return att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0
+}
+
+/** AQU-2252: a line's layers — every piece of its selected take on each added
+ *  track, each placed on its own (see `ProgrammeLayer`). */
+function layersOf(cell: CellData, untimed: boolean, slots: readonly string[] | undefined): ProgrammeLayer[] {
+  const out: ProgrammeLayer[] = []
+  for (const slot of new Set(slots ?? Object.keys(cell.selectedBySlot ?? {}))) {
+    if (isDefaultTrackSlot(slot)) continue
+    for (const piece of resolveTargetPieces(cell, slot)) {
+      const att = cell.attachments?.[piece.audioId]
+      const trimStartSec = trimStartSecOf(att)
+      // The stored place is the clip's sample zero, from the line's start.
+      const atSec = Math.max(0, pauseAskedSec(cell, att, untimed) + trimStartSec)
+      const effMs = effectiveAttachmentDurationMs(att)
+      out.push({
+        slot,
+        audioId: piece.audioId,
+        atSec,
+        anchorSec: atSec - trimStartSec,
+        window: effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null,
+      })
+    }
+  }
+  return out
 }
 
 export interface Programme {
@@ -284,6 +352,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     // no take is clocked by its source, else nothing plays and playback steps
     // over it.
     const clock: ProgrammeSlot["clock"] = targetWindow ? "target" : sourceWindow ? "source" : null
+    // AQU-2252: the line's takes on the other tracks. They set nothing above.
+    const layers = layersOf(cell, untimed, opts?.layerSlots)
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -299,6 +369,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       ...(placedPieces ? { targetPieces: placedPieces } : {}),
       ...(usesStandIn ? { standIn: true as const } : {}),
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
+      ...(layers.length > 0 ? { layers } : {}),
     }
     slots.push(slot)
     byCellId.set(cell.id, slot)
@@ -335,9 +406,13 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
  * control measures and the bottom strip shows before anything plays, so none
  * of them can count a different length.
  */
-export function layOutProgramme(cells: readonly CellData[]): { programme: Programme; lines: CellData[]; untimed: boolean } {
+export function layOutProgramme(
+  cells: readonly CellData[],
+  /** AQU-2252: which tracks' takes are its layers (see BuildProgrammeOptions). */
+  opts?: Pick<BuildProgrammeOptions, "layerSlots">,
+): { programme: Programme; lines: CellData[]; untimed: boolean } {
   const { lines, untimed } = programmeLines(cells)
-  return { programme: buildProgramme(lines, { standInLenSec: standInEstimator(lines) }), lines, untimed }
+  return { programme: buildProgramme(lines, { standInLenSec: standInEstimator(lines), ...opts }), lines, untimed }
 }
 
 /**
@@ -346,13 +421,14 @@ export function layOutProgramme(cells: readonly CellData[]): { programme: Progra
  * timeline draws a hidden one where it always sat, faded — but a hidden
  * verse's take is taken out: it sounds only its original, clocked by it, and
  * one with no original has nothing left to play, so playback steps over it.
+ * AQU-2252: its takes on the other tracks (its layers) go with it.
  */
 export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<string>): Programme {
   if (hiddenCellIds.size === 0) return prog
   const byCellId = new Map<string, ProgrammeSlot>()
   const slots = prog.slots.map((slot) => {
     const out: ProgrammeSlot = hiddenCellIds.has(slot.cellId)
-      ? { ...slot, targetWindow: null, targetPieces: undefined, clock: slot.sourceWindow ? "source" : null }
+      ? { ...slot, targetWindow: null, targetPieces: undefined, layers: undefined, clock: slot.sourceWindow ? "source" : null }
       : slot
     byCellId.set(out.cellId, out)
     return out

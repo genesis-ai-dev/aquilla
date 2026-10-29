@@ -2654,7 +2654,7 @@ export function TimelineEditor({
     for (const item of items) {
       if (item.cell.id !== takeSel.cellId) continue
       const att = item.cell.attachments?.[item.audioId]
-      const geom = layout.targetGeom(item.cell, att)
+      const geom = layout.targetGeom(item.cell, att, item.audioId)
       if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
       const atMs = (sec - geom.anchor) * 1000
       return canCutAt(att, atMs) ? { cellId: item.cell.id, audioId: item.audioId, atMs } : null
@@ -2878,7 +2878,7 @@ export function TimelineEditor({
       // AQU-1767: a split take's length is all its pieces'.
       const geoms = targetItems
         .filter((t) => t.cell.id === currentCell.id)
-        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]))
+        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId))
       const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
         ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
         : null
@@ -2896,7 +2896,7 @@ export function TimelineEditor({
     let last = first
     while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
-      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
+      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId) : null
     const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
     if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
     const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
@@ -3849,7 +3849,7 @@ export function TimelineEditor({
     const fromItems = (items: readonly TargetAudioItem[]): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const item of items) {
-        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId], item.audioId)
         const span = geom ?? layout.spanFor(item.cell, "source")
         if (span) out.push({ startSec: span.start, endSec: span.end })
       }

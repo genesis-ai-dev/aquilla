@@ -213,10 +213,18 @@ function cellAnchorSec(cell: CellData, section: SpanSec): number {
  * unit-testable without a component. Clamped so a chip can never be anchored
  * before file zero — the same invariant the caller used to enforce on the
  * absolute value, restated in the offset domain.
+ *
+ * AQU-2252: …which a line with NO times does not have. It sits on no file
+ * clock, so there is no zero to fall off, and its offset is kept as asked: a
+ * head-trimmed take on an added track, dragged to the very start of its line,
+ * puts its sample zero a head trim BEFORE that start, and clamping it would
+ * spring the take a head trim to the right of where it was dropped.
  */
 export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
-  const startMs = Math.round((cell.startTime ?? 0) * 1000)
-  const floored = Math.max(-startMs, Math.round(anchorSec * 1000) - startMs)
+  const timed = typeof cell.startTime === "number" && Number.isFinite(cell.startTime)
+  const startMs = timed ? Math.round(cell.startTime! * 1000) : 0
+  const asked = Math.round(anchorSec * 1000) - startMs
+  const floored = timed ? Math.max(-startMs, asked) : asked
   // A cell starting at 0 clamps to -0, which is only ever confusing downstream.
   return floored === 0 ? 0 : floored
 }

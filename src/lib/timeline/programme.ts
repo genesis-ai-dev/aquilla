@@ -165,8 +165,31 @@ export const MIN_TARGET_LEAD_SEC = 0.05
  * no line start to measure from, so the take's own offset is read as the
  * pause from the start of its slot (Sam's decision 3). Zero when nobody
  * placed it.
+ *
+ * AQU-2267 (Sam, Oct 29): A TAKE HAS A PLACE IN EACH TIMING. Its place here,
+ * following the recordings, is `recordingsOffsetMs` — the same measure, where
+ * its clip's start was put from its line's start — and a move adds the same
+ * distance to both places, each held by its own timing's limits
+ * (lib/timeline/take-place). A take with no place of its own here (every take
+ * before AQU-2267, and any nobody has moved since) reads its place following
+ * the source, exactly as it always did.
+ *
+ * WHAT A HEAD TRIM DOES (settled by AQU-2252, kept here on purpose). The place
+ * is where the CLIP'S START sits, never where its sound starts:
+ *   - On the main track and a track that sets line lengths (a voice), following
+ *     the recordings, the take sounds from its place: the trimmed-off head is
+ *     simply not there. So a head trim TIGHTENS the line — the sound comes
+ *     earlier and the pause before it is unchanged. People trim leading
+ *     silence to tighten a read.
+ *   - On a track made a layer, and everywhere following the source
+ *     (`targetChipGeom`), the clip's start stays at its place and the sound
+ *     starts a head trim later: a head trim moves only the take's left edge,
+ *     and the sound stays where it was, like a region in a DAW.
  */
 function pauseAskedSec(cell: CellData, att: NonNullable<CellData["attachments"]>[string] | undefined, untimed: boolean): number {
+  // `!= null`-style: 0 is a real place (the line's own start), never "none".
+  const placedHere = att?.recordingsOffsetMs
+  if (typeof placedHere === "number" && Number.isFinite(placedHere)) return placedHere / 1000
   if (untimed) {
     const ms = att?.targetOffsetMs
     return typeof ms === "number" && Number.isFinite(ms) ? ms / 1000 : 0

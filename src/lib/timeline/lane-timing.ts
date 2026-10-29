@@ -238,6 +238,12 @@ export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
  * `usingFallback` marks that case for the UI (movable, not trimmable).
  * Note: takes that were cropped in the voice panel BEFORE round 7 now draw
  * shifted right by their head-trim — the audio itself is unchanged.
+ *
+ * AQU-2267: this is the take's place FOLLOWING THE SOURCE (`targetOffsetMs`).
+ * Following the recordings it has a place of its own (`recordingsOffsetMs`,
+ * read by lib/timeline/programme), and there a head trim on the main track or
+ * a voice track tightens the line instead — see `pauseAskedSec` there. On
+ * every track following the source, a head trim moves only the left edge.
  */
 export function targetChipGeom(
   cell: CellData,

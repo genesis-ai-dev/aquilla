@@ -83,7 +83,10 @@ describe("which projects the copy owes audio to", () => {
     expect(sql).toMatch(/FROM artifacts/)
     expect(sql).toMatch(/FROM diarization_jobs/)
     expect(sql).toMatch(/project_settings/)
-    expect(sql).toMatch(/referenceAudioId/)
+    expect(sql).toMatch(/designPreviewAudioId/)
+    expect(sql).toMatch(/customVoice/)
+    // AQU-2291: a removed short-clip clone clip is no reason to copy a project.
+    expect(sql).not.toMatch(/referenceAudioId/)
   })
 
   it("counts only live takes, and only live diarization jobs", async () => {

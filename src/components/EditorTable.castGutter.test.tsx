@@ -142,7 +142,7 @@ function audioLens(): AudioLensContext {
     onAssignCast: () => {},
     onAfterGenerate: () => {},
     onPlayCell: () => {},
-    onMakeCharacterFromCell: () => {},
+    onTrainVoiceFromTake: () => {},
   }
 }
 

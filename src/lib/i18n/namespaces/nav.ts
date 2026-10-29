@@ -199,13 +199,11 @@ export const nav = defineNamespace({
     "nav.workspaceActions.changeVoiceAll.description": plural(
       {
         one:
-          "Converts {n} cell to its assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cell to its assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
         other:
-          "Converts {n} cells to each assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cells to each assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
       },
       "n",
     ),
@@ -954,7 +952,7 @@ export const nav = defineNamespace({
       "nav.workspaceActions.changeVoiceAll.label": {
         description:
           "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
-          "recording and makes it sound like the cloned voice assigned to that cell. " +
+          "recording and makes it sound like the character or trained voice assigned to that cell. " +
           "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
           "from text.",
         maxLength: 40,
@@ -966,12 +964,9 @@ export const nav = defineNamespace({
       "nav.workspaceActions.changeVoiceAll.description": {
         description:
           "Body of the confirmation dialog above. The point to keep: only the speaker's " +
-          "sound changes, and a new reference clip or a different quality is redone.",
+          "sound changes, and a take already in its voice is left as it is.",
         placeholders: {
-          n: "How many cells will be converted at the quality chosen in this dialog. Takes already made from the current reference clip at that quality are not included.",
-          quality:
-            "The quality chosen in this dialog — Fast, Standard, or High — already " +
-            "translated. Insert it as given.",
+          n: "How many cells will be converted. Takes already in their assigned voice are not included.",
         },
         maxLength: 200,
       },

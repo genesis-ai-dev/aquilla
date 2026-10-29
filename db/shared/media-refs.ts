@@ -20,7 +20,9 @@ import type { AquillaDb } from "../shim/postgres"
 
 export type GcNamespace = "audio" | "voice" | "artifact"
 
-/** Suffix of the Inworld clone-id cache that rides alongside a reference clip. */
+/** Suffix of the Inworld clone-id cache that rode alongside a reference clip.
+ *  Nothing writes it since AQU-2291 removed Inworld cloning; legacy sidecars
+ *  still map onto their clip so they are collected with it. */
 export const CLONE_CACHE_SUFFIX = ".inworld.json"
 /** AQU-2095: suffix of the stored-waveform sidecar that rides alongside a clip.
  *  Mirrors PEAKS_SIDECAR_SUFFIX in src/lib/audio/peaks-sidecar.ts. */
@@ -48,8 +50,10 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
       if (!ref) return null
       return { namespace: "audio", projectId, ref: `${fileId}/${ref}` }
     }
-    // projects/{pid}/voices/{refId} and the {refId}.inworld.json clone cache,
-    // which lives or dies with the clip it was derived from.
+    // projects/{pid}/voices/{refId} and the legacy {refId}.inworld.json clone
+    // cache, which lives or dies with the clip it was derived from. Custom-voice
+    // consent records (voices/custom/{voiceId}/consent.json) are deeper and
+    // never classified, so never swept.
     if (parts.length === 4 && parts[2] === "voices") {
       const [, projectId, , name] = parts
       if (!projectId || !name) return null
@@ -145,28 +149,38 @@ export async function loadAudioRefs(db: AquillaDb, projectId: string): Promise<S
   return refs
 }
 
-/** Every reference-clip id a voice or a take still points at. */
+/**
+ * Every voices/ clip id a voice or a take still points at, as far as Postgres
+ * can tell. Custom-voice training recordings are named only by their consent
+ * record in R2, not by any row — the sweep adds those itself
+ * (`customVoiceTrainingRefs`, read by sync-worker/src/r2-gc.ts).
+ */
 export async function loadVoiceRefs(db: AquillaDb, projectId: string): Promise<Set<string>> {
   const refs = new Set<string>()
-  // The voice library lives in the project settings blob, so a clip the user
-  // uploaded and assigned to a voice is in use even before it has voiced a
-  // single line. Missing this is how a sweep eats someone's cloned voice.
+  // The voice library lives in the project settings blob, so a clip assigned
+  // to a voice is in use even before it has voiced a single line:
+  //   • designPreviewAudioId — the Inworld voice-design preview the voice
+  //     plays back when opened (docs/INWORLD-TTS.md);
+  //   • referenceAudioId — the short-clip clone voices AQU-2291 removed. Still
+  //     read so a settings blob that has not been rewritten yet keeps its clip:
+  //     a false KEEP costs storage, a false DELETE costs someone's audio.
   const voices = await db
     .prepare(
-      `SELECT DISTINCT v->>'referenceAudioId' AS ref
+      `SELECT DISTINCT r.ref
          FROM project_settings ps,
               jsonb_array_elements(
                 CASE WHEN jsonb_typeof(ps.settings::jsonb -> 'ttsSettings' -> 'voices') = 'array'
                      THEN ps.settings::jsonb -> 'ttsSettings' -> 'voices'
                      ELSE '[]'::jsonb END
-              ) AS v
-        WHERE ps.project_id = ? AND v->>'referenceAudioId' IS NOT NULL`,
+              ) AS v,
+              LATERAL (VALUES (v->>'designPreviewAudioId'), (v->>'referenceAudioId')) AS r(ref)
+        WHERE ps.project_id = ? AND r.ref IS NOT NULL`,
     )
     .bind(projectId)
     .all<{ ref: string }>()
   for (const r of voices.results ?? []) if (r.ref) refs.add(r.ref)
 
-  // And any take that records the clip it was cloned/denoised from, so "revert
+  // And any take that records the voices/ clip it was made from, so "revert
   // to source" keeps working.
   const takes = await db
     .prepare(
@@ -178,4 +192,24 @@ export async function loadVoiceRefs(db: AquillaDb, projectId: string): Promise<S
   for (const r of takes.results ?? []) if (r.ref) refs.add(r.ref)
 
   return refs
+}
+
+/** Custom-voice consent records: `voices/custom/{voiceId}/consent.json` under a
+ *  project prefix. Mirrors `customVoiceConsentKey` in sync-worker/src/custom-voice.ts. */
+export const CUSTOM_VOICE_CONSENT_RE = /\/voices\/custom\/[^/]+\/consent\.json$/
+
+/**
+ * The training recordings a custom voice's consent record names. They live in
+ * the same voices/ store as every other clip and no Postgres row points at
+ * them, so without this the sweep would delete a real person's recordings — the
+ * evidence the audit record describes — a day after training started.
+ *
+ * Throws on a record it cannot read: the caller must then treat the project's
+ * whole voices/ namespace as "cannot tell", never as "nothing referenced".
+ */
+export function customVoiceTrainingRefs(consentJson: string): string[] {
+  const parsed: unknown = JSON.parse(consentJson)
+  const ids = (parsed as { referenceAudioIds?: unknown } | null)?.referenceAudioIds
+  if (!Array.isArray(ids)) throw new Error("consent record has no referenceAudioIds")
+  return ids.filter((id): id is string => typeof id === "string" && id.length > 0)
 }

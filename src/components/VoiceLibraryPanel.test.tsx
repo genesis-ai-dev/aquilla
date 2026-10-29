@@ -3,7 +3,7 @@
  *
  * Confirms the panel is a pure selector: search + voice rows + narrator star,
  * plus a single "New voice" entry point that opens the unified modal (which
- * carries both TTS + Clone tabs, exercised in its own test) seeded with the
+ * carries the TTS / Characters / Train tabs, exercised in its own test) seeded with the
  * project's configured engine — not hardcoded Gemini.
  */
 
@@ -15,7 +15,7 @@ import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 
-// The unified create/clone modal is heavy (audio/network) — stub to a marker
+// The unified New voice modal is heavy (audio/network) — stub to a marker
 // that records the props the panel wires in.
 const modalProps: { last: NewVoiceModalProps | null } = { last: null }
 vi.mock("@/components/voice/NewVoiceModal", () => ({
@@ -141,14 +141,14 @@ describe("VoiceLibraryPanel (selector)", () => {
       provider: "mms",
       voices: [
         makeVoice({ id: "v-k", name: "Kiki", provider: "inworld", voiceName: "Dennis" }),
-        makeVoice({ id: "v-c", name: "Cloney", provider: undefined, voiceName: undefined, referenceAudioId: "ref-1.webm" }),
+        makeVoice({ id: "v-c", name: "Hearth", provider: undefined, voiceName: undefined, libraryVoiceId: "narrator-hearth" }),
         // No per-voice engine → falls back to the project engine (mms).
         makeVoice({ id: "v-legacy", name: "Legacy", provider: undefined, voiceName: undefined }),
       ],
       defaultVoiceId: "v-k",
     })
     expect(screen.getByText("Inworld")).toBeTruthy()
-    expect(screen.getByText("Clone")).toBeTruthy()
+    expect(screen.getByText("Character")).toBeTruthy()
     expect(screen.getByText("MMS")).toBeTruthy()
   })
 
@@ -409,7 +409,7 @@ describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
     )
     expect(screen.queryByText("Keean")).toBeNull()
 
-    const cloned: Voice = { id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" }
+    const cloned: Voice = { id: "v-anna", name: "Keean", color: "#0d9488", libraryVoiceId: "c-0a1b2c3d" }
     rerender(
       <VoiceLibraryPanel
         projectId="dev-project"

@@ -1,14 +1,14 @@
 // Tests for POST /api/v1/voice/convert. Mirrors audio.test.ts (stub R2 + direct
 // handler invocation) and additionally stubs global fetch to stand in for the
-// Seed-VC Modal endpoint.
+// voice forge Modal endpoint.
 
 import { describe, it, expect, afterEach } from "vitest"
 import { sign } from "hono/jwt"
 import { audioObjectKey } from "../audio"
 import {
   MAX_VOICE_CLIP_BYTES,
-  SEED_VC_REQUEST_TIMEOUT_MS,
   VOICE_CONVERT_MAX_PER_USER_PER_WINDOW,
+  VOICE_CONVERT_REQUEST_TIMEOUT_MS,
   handleVoiceConvertRequest,
   handleVoiceReferenceRequest,
   libraryVoiceKey,
@@ -18,8 +18,6 @@ import {
 import type { SyncTokenClaims } from "../auth"
 
 const SECRET = "voice-tests-secret"
-const MODAL_URL = "https://acct--seed-vc-web.modal.run/convert"
-const MODAL_TOKEN = "modal-shared-secret"
 const FORGE_URL = "https://acct--voice-forge-web.modal.run/convert"
 const FORGE_TOKEN = "forge-shared-secret"
 
@@ -115,8 +113,6 @@ type StubEnv = {
   SNAPSHOTS: ReturnType<typeof makeStubBucket>
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
-  SEED_VC_URL?: string
-  SEED_VC_TOKEN?: string
   VOICE_FORGE_URL?: string
   VOICE_FORGE_TOKEN?: string
   AQUILLA_PG?: unknown
@@ -126,8 +122,6 @@ function makeEnv(overrides: Partial<StubEnv> = {}): StubEnv {
   return {
     SNAPSHOTS: makeStubBucket(),
     SYNC_SECRET_KEY: SECRET,
-    SEED_VC_URL: MODAL_URL,
-    SEED_VC_TOKEN: MODAL_TOKEN,
     VOICE_FORGE_URL: FORGE_URL,
     VOICE_FORGE_TOKEN: FORGE_TOKEN,
     AQUILLA_PG: makeRateLimitDb().db,
@@ -189,12 +183,12 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res).toBeNull()
   })
 
-  it("503 when the Seed-VC endpoint isn't configured", async () => {
-    const env = makeEnv({ SEED_VC_URL: undefined, SEED_VC_TOKEN: undefined })
+  it("503 when the voice forge endpoint isn't configured", async () => {
+    const env = makeEnv({ VOICE_FORGE_URL: undefined, VOICE_FORGE_TOKEN: undefined })
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(503)
   })
@@ -203,7 +197,7 @@ describe("POST /api/v1/voice/convert", () => {
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     const res = (await call(makeEnv(), convertReq(form)))!
     expect(res.status).toBe(401)
   })
@@ -212,7 +206,7 @@ describe("POST /api/v1/voice/convert", () => {
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     const token = await makeToken({ projectId: "other" })
     const res = (await call(makeEnv(), convertReq(form, token)))!
     expect(res.status).toBe(403)
@@ -220,7 +214,7 @@ describe("POST /api/v1/voice/convert", () => {
 
   it("400 when required fields are missing", async () => {
     const form = new FormData()
-    form.append("projectId", "p1") // fileId + referenceAudioId omitted
+    form.append("projectId", "p1") // fileId + libraryVoiceId omitted
     const res = (await call(makeEnv(), convertReq(form, await makeToken())))!
     expect(res.status).toBe(400)
   })
@@ -234,7 +228,7 @@ describe("POST /api/v1/voice/convert", () => {
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", fileId)
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const token = await makeToken({ fileId })
     const res = (await call(makeEnv(), convertReq(form, token)))!
@@ -246,7 +240,7 @@ describe("POST /api/v1/voice/convert", () => {
     const form = new FormData()
     form.append("projectId", projectId)
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const token = await makeToken({ projectId })
     const res = (await call(makeEnv(), convertReq(form, token)))!
@@ -255,40 +249,56 @@ describe("POST /api/v1/voice/convert", () => {
 
   it("403 when the token is viewer-role (conversion requires CONTRIBUTOR+)", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const viewerToken = await makeToken({ role: 100 })
     const res = (await call(env, convertReq(form, viewerToken)))!
     expect(res.status).toBe(403)
   })
 
-  it("404 when the reference clip is absent", async () => {
-    const env = makeEnv()
-    stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+  // AQU-2291: the voice forge is the only conversion path, so the voice is
+  // mandatory — there is no reference-clip fallback any more.
+  it("400 naming libraryVoiceId when no voice is sent", async () => {
+    const calls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "missing.wav")
-    form.append("source", new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }), "source")
+    form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
+    const res = (await call(makeEnv(), convertReq(form, await makeToken())))!
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/libraryVoiceId/)
+    expect(calls).toHaveLength(0)
+  })
+
+  // AQU-2291: short-clip clone voices were removed. A stale client still
+  // sending one is told what to do instead, and no GPU is started.
+  it("400 telling the caller to train a custom voice when referenceAudioId is sent", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const calls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const res = (await call(env, convertReq(form, await makeToken())))!
-    expect(res.status).toBe(404)
+    expect(res.status).toBe(400)
+    expect(await res.text()).toMatch(/clone voices were removed; train a custom voice/)
+    expect(calls).toHaveLength(0)
   })
 
   it("converts an inline source and writes the result to R2", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9, 9]), "audio/wav")
     const converted = new Uint8Array([5, 6, 7, 8])
     const calls = stubModal(() => new Response(converted.buffer, { status: 200 }))
 
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
-    form.append("diffusionSteps", "12")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }), "source")
 
     const res = (await call(env, convertReq(form, await makeToken())))!
@@ -305,62 +315,62 @@ describe("POST /api/v1/voice/convert", () => {
 
     // Modal was called with the shared secret and a multipart body.
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(MODAL_URL)
-    expect((calls[0].init.headers as Record<string, string>)["X-Auth-Token"]).toBe(MODAL_TOKEN)
+    expect(calls[0].url).toBe(FORGE_URL)
+    expect((calls[0].init.headers as Record<string, string>)["X-Auth-Token"]).toBe(FORGE_TOKEN)
     const sentForm = calls[0].init.body as unknown as FormData
-    expect(sentForm.get("diffusion_steps")).toBe("12")
+    expect(sentForm.get("voice_id")).toBe("narrator-hearth")
     expect(sentForm.get("source")).toBeTruthy()
-    expect(sentForm.get("reference")).toBeTruthy()
+    // AQU-2291: nothing Seed-VC-shaped goes upstream any more.
+    expect(sentForm.get("reference")).toBeNull()
+    expect(sentForm.get("diffusion_steps")).toBeNull()
   })
 
   it("re-voices an existing recording referenced by sourceAudioId", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
     stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("sourceAudioId", "rec.webm")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(200)
   })
 
-  // AQU-1109: Change voice. The client reads the reference fingerprint and the
-  // cell seed back out of this id (src/lib/audio/change-voice.ts) — the
-  // fingerprint values here are asserted verbatim on that side too.
-  it("names a cellId conversion vc-<reference fingerprint>-audio-<cell>-…", async () => {
+  // AQU-1109: Change voice. The client reads the voice fingerprint and the
+  // cell seed back out of this id (src/lib/audio/change-voice.ts). AQU-2291:
+  // no `-q<steps>-` quality stamp — that was a Seed-VC diffusion-step count.
+  it("names a cellId conversion vc-<voice fingerprint>-audio-<cell>-…", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
     stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("sourceAudioId", "rec.webm")
     form.append("cellId", "GEN 1:1")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(200)
     const body = (await res.json()) as { objectName: string; url: string }
-    expect(body.objectName).toMatch(/^vc-a8dcd319-q10-audio-GEN_1_1-\d+-[0-9a-f]{8}\.wav$/)
+    const fp = voiceReferenceFingerprint(libraryVoiceKey("narrator-hearth"))
+    expect(body.objectName).toMatch(new RegExp(`^vc-${fp}-audio-GEN_1_1-\\d+-[0-9a-f]{8}\\.wav$`))
     expect(body.url).toBe(`frontier-audio://${body.objectName}`)
     expect(env.SNAPSHOTS._allKeys()).toContain(audioObjectKey(env, "p1", "f1", body.objectName))
   })
 
   it("keeps the legacy audio-clone- name when no cellId is sent", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
     stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("sourceAudioId", "rec.webm")
     const res = (await call(env, convertReq(form, await makeToken())))!
     const body = (await res.json()) as { objectName: string }
@@ -378,13 +388,12 @@ describe("POST /api/v1/voice/convert", () => {
   // check already enforced on projectId/fileId a few lines above it.
   it("rejects a sourceAudioId that could smuggle a path separator", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("sourceAudioId", "../other-project/secret.webm")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(400)
@@ -393,23 +402,21 @@ describe("POST /api/v1/voice/convert", () => {
 
   it("400 when neither a source file nor sourceAudioId is given", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(400)
   })
 
   it("502 when the Modal endpoint errors", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     stubModal(() => new Response("boom", { status: 500 }))
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(502)
@@ -417,10 +424,9 @@ describe("POST /api/v1/voice/convert", () => {
 
   // --- AQU-1854: bounded inputs, bounded rate, bounded upstream wait ----------
   //
-  // Conversion is the one audio path that holds several clips at once (source +
-  // reference up to Modal, converted wav back), so an unbounded input here is a
-  // Worker-memory failure rather than a slow request, and an unbounded call rate
-  // is unmetered L40S GPU spend. Each test below pins one of those bounds.
+  // Conversion holds several clips at once (source up to Modal, converted wav
+  // back), so an unbounded input here is a Worker-memory failure rather than a
+  // slow request, and an unbounded call rate is unmetered GPU spend. Each test below pins one of those bounds.
 
   function sizedBlob(bytes: number): Blob {
     return new Blob([new Uint8Array(bytes)], { type: "audio/wav" })
@@ -430,13 +436,12 @@ describe("POST /api/v1/voice/convert", () => {
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     return form
   }
 
   it("413 for an inline source clip over MAX_VOICE_CLIP_BYTES, before calling Modal", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = baseForm()
@@ -453,7 +458,6 @@ describe("POST /api/v1/voice/convert", () => {
 
   it("413 for a stored sourceAudioId recording over the cap, without buffering it", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     env.SNAPSHOTS._seed(
       audioObjectKey(env, "p1", "f1", "rec.webm"),
       new Uint8Array(MAX_VOICE_CLIP_BYTES + 1),
@@ -469,28 +473,11 @@ describe("POST /api/v1/voice/convert", () => {
     expect(modalCalls).toHaveLength(0)
   })
 
-  it("413 when the project's stored reference clip is over the cap", async () => {
-    const env = makeEnv()
-    env.SNAPSHOTS._seed(
-      voiceRefObjectKey(env, "p1", "ref1.wav"),
-      new Uint8Array(MAX_VOICE_CLIP_BYTES + 1),
-      "audio/wav",
-    )
-    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
-
-    const form = baseForm()
-    form.append("source", sizedBlob(16), "source")
-    const res = (await call(env, convertReq(form, await makeToken())))!
-    expect(res.status).toBe(413)
-    expect(((await res.json()) as { input: string }).input).toBe("reference clip")
-    expect(modalCalls).toHaveLength(0)
-  })
-
   it("413 on the declared Content-Length before the multipart body is parsed", async () => {
     const env = makeEnv()
     const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
-    // No Authorization header and no reference clip seeded: a 413 here proves
-    // the size check ran before parsing, auth, or any R2 read.
+    // No Authorization header and nothing seeded: a 413 here proves the size
+    // check ran before parsing, auth, or any R2 read.
     const req = new Request("https://w/api/v1/voice/convert", {
       method: "POST",
       body: "x",
@@ -504,7 +491,6 @@ describe("POST /api/v1/voice/convert", () => {
   it("429 once the user is at the per-window conversion cap, and spends no GPU", async () => {
     const { db, state } = makeRateLimitDb(VOICE_CONVERT_MAX_PER_USER_PER_WINDOW)
     const env = makeEnv({ AQUILLA_PG: db })
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = baseForm()
@@ -524,7 +510,6 @@ describe("POST /api/v1/voice/convert", () => {
   it("records one throttle event per accepted conversion, keyed by user", async () => {
     const { db, state } = makeRateLimitDb()
     const env = makeEnv({ AQUILLA_PG: db })
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = baseForm()
@@ -537,7 +522,6 @@ describe("POST /api/v1/voice/convert", () => {
 
   it("500 rather than unmetered GPU spend when the throttle's database is unbound", async () => {
     const env = makeEnv({ AQUILLA_PG: undefined })
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
 
     const form = baseForm()
@@ -547,9 +531,8 @@ describe("POST /api/v1/voice/convert", () => {
     expect(modalCalls).toHaveLength(0)
   })
 
-  it("504 when the Seed-VC call blows its deadline, and passes a timeout signal", async () => {
+  it("504 when the voice forge call blows its deadline, and passes a timeout signal", async () => {
     const env = makeEnv()
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     const calls = stubModal(() => {
       // What AbortSignal.timeout rejects a fetch with once the deadline passes.
       const err = new Error("The operation was aborted due to timeout")
@@ -568,19 +551,18 @@ describe("POST /api/v1/voice/convert", () => {
     expect((calls[0].init as { signal?: AbortSignal }).signal).toBeInstanceOf(AbortSignal)
   })
 
-  it("keeps the Seed-VC deadline under the client's own 90s..300s retry window", () => {
-    expect(SEED_VC_REQUEST_TIMEOUT_MS).toBeGreaterThan(60_000)
-    expect(SEED_VC_REQUEST_TIMEOUT_MS).toBeLessThan(300_000)
+  it("keeps the voice-convert deadline under the client's own 90s..300s retry window", () => {
+    expect(VOICE_CONVERT_REQUEST_TIMEOUT_MS).toBeGreaterThan(60_000)
+    expect(VOICE_CONVERT_REQUEST_TIMEOUT_MS).toBeLessThan(300_000)
   })
 
-  it("honors R2_KEY_PREFIX for both reference read and output write", async () => {
+  it("honors R2_KEY_PREFIX for the output write", async () => {
     const env = makeEnv({ R2_KEY_PREFIX: "pr-7" })
-    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
     stubModal(() => new Response(new Uint8Array([2, 2]).buffer, { status: 200 }))
     const form = new FormData()
     form.append("projectId", "p1")
     form.append("fileId", "f1")
-    form.append("referenceAudioId", "ref1.wav")
+    form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(200)
@@ -600,7 +582,7 @@ describe("POST /api/v1/voice/convert with a library voice", () => {
     return form
   }
 
-  it("re-voices a recording through the voice forge, not Seed-VC, with no reference clip", async () => {
+  it("re-voices a recording through the voice forge with no reference clip", async () => {
     const env = makeEnv()
     env.SNAPSHOTS._seed(audioObjectKey(env, "p1", "f1", "rec.webm"), new Uint8Array([4, 4]), "audio/webm")
     const calls = stubModal(() => new Response(new Uint8Array([7, 7]).buffer, { status: 200 }))
@@ -616,17 +598,12 @@ describe("POST /api/v1/voice/convert with a library voice", () => {
     expect(sent.get("source")).toBeTruthy()
     expect(sent.get("reference")).toBeNull()
     // Fingerprinted over the namespaced library key, so the client can tell a
-    // take made by this library voice from one made by any clone voice.
+    // take made by this voice from one made by any other (including legacy
+    // clone-voice takes fingerprinted over a reference clip id).
     const fp = voiceReferenceFingerprint(libraryVoiceKey("narrator-hearth"))
     expect(body.audioId.startsWith(`vc-${fp}-`)).toBe(true)
     const stored = await env.SNAPSHOTS._bytes(audioObjectKey(env, "p1", "f1", body.objectName))
     expect(stored && Array.from(stored)).toEqual([7, 7])
-  })
-
-  it("503 when the voice forge isn't configured, even with Seed-VC configured", async () => {
-    const env = makeEnv({ VOICE_FORGE_URL: undefined, VOICE_FORGE_TOKEN: undefined })
-    const res = (await call(env, convertReq(libraryForm(), await makeToken())))!
-    expect(res.status).toBe(503)
   })
 
   it("400 for a libraryVoiceId that isn't a plain voice id", async () => {
@@ -639,10 +616,12 @@ describe("POST /api/v1/voice/convert with a library voice", () => {
     expect(res.status).toBe(400)
   })
 
-  it("400 when both referenceAudioId and libraryVoiceId are sent", async () => {
+  it("400 when referenceAudioId rides along with a libraryVoiceId", async () => {
+    const calls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
     const res = (await call(makeEnv(), convertReq(libraryForm({ referenceAudioId: "ref1.wav" }),
       await makeToken())))!
     expect(res.status).toBe(400)
+    expect(calls).toHaveLength(0)
   })
 
   it("403 for a viewer-role token, before any GPU call", async () => {

@@ -189,11 +189,8 @@ declare global {
       ALLOW_UNAUTHENTICATED?: string
       /** Optional R2 key prefix for PR/staging isolation. */
       R2_KEY_PREFIX?: string
-      /** Seed-VC voice-clone Modal endpoint (infra/modal/seed_vc.py). */
-      SEED_VC_URL?: string
-      /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
-      SEED_VC_TOKEN?: string
-      /** Voice-forge library-voice endpoint (infra/modal/voice_forge.py `web`). */
+      /** Voice-forge endpoint (infra/modal/voice_forge.py `web`): the only
+       *  speech-to-speech path — library and custom voices (AQU-2291). */
       VOICE_FORGE_URL?: string
       /** Shared secret for the voice-forge endpoint (matches its VOICE_FORGE_TOKEN). */
       VOICE_FORGE_TOKEN?: string

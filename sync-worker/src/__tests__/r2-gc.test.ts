@@ -38,14 +38,14 @@ interface StubObject {
   body: string
 }
 
-function makeStubBucket(seed: Array<{ key: string; size?: number; uploaded?: number }> = []) {
+function makeStubBucket(seed: Array<{ key: string; size?: number; uploaded?: number; body?: string }> = []) {
   const store = new Map<string, StubObject>()
   for (const s of seed) {
     store.set(s.key, {
       key: s.key,
       size: s.size ?? 1024,
       uploaded: new Date(s.uploaded ?? OLD),
-      body: "",
+      body: s.body ?? "",
     })
   }
   return {
@@ -330,10 +330,11 @@ describe("sweepOrphanedR2Objects", () => {
     expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(false)
   })
 
-  it("keeps a voice-clone clip a voice in the project library points at", async () => {
+  it("keeps a legacy clone clip a voice in the project library still points at", async () => {
     // AC2, the case that is only visible in the settings blob: the user
     // uploaded a reference clip and assigned it to a voice, but has not voiced
-    // a single line yet, so nothing in cell_audio mentions it.
+    // a single line yet, so nothing in cell_audio mentions it. AQU-2291 removed
+    // clone voices; a blob not yet rewritten still keeps its clip.
     await seed("project_settings", [settingsWithVoiceRef("ref-in-use.webm")])
     const bucket = makeStubBucket([
       { key: "projects/p1/voices/ref-in-use.webm" },
@@ -349,6 +350,56 @@ describe("sweepOrphanedR2Objects", () => {
     expect(bucket._has("projects/p1/voices/ref-abandoned.webm")).toBe(false)
     expect(bucket._has("projects/p1/voices/ref-abandoned.webm.inworld.json")).toBe(false)
     expect(report.byNamespace.voice.orphaned).toBe(2)
+  })
+
+  // AQU-2291: with clone voices gone, the settings blob's remaining voices/
+  // reference is the Inworld voice-design preview a voice plays when opened.
+  it("keeps a voice-design preview clip a voice in the project library points at", async () => {
+    await seed("project_settings", [{
+      project_id: "p1",
+      settings: JSON.stringify({
+        ttsSettings: { voices: [{ id: "v1", name: "Pirate", designPreviewAudioId: "design-preview.wav" }] },
+      }),
+    }])
+    const bucket = makeStubBucket([
+      { key: "projects/p1/voices/design-preview.wav" },
+      { key: "projects/p1/voices/design-abandoned.wav" },
+    ])
+    await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has("projects/p1/voices/design-preview.wav")).toBe(true)
+    expect(bucket._has("projects/p1/voices/design-abandoned.wav")).toBe(false)
+  })
+
+  // Custom-voice training recordings sit in the same voices/ store and no
+  // Postgres row names them — only the consent record (custom-voice.ts) does.
+  // They are a real person's voice and the evidence that record describes.
+  it("keeps custom-voice training recordings its consent record names, and the record", async () => {
+    const consent = "projects/p1/voices/custom/c-0123456789ab/consent.json"
+    const bucket = makeStubBucket([
+      { key: consent, body: JSON.stringify({ voiceId: "c-0123456789ab", referenceAudioIds: ["rec-1.webm", "rec-2.webm"] }) },
+      { key: "projects/p1/voices/rec-1.webm" },
+      { key: "projects/p1/voices/rec-2.webm" },
+      { key: "projects/p1/voices/stray.webm" },
+    ])
+    const report = await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    expect(bucket._has(consent)).toBe(true)
+    expect(bucket._has("projects/p1/voices/rec-1.webm")).toBe(true)
+    expect(bucket._has("projects/p1/voices/rec-2.webm")).toBe(true)
+    expect(bucket._has("projects/p1/voices/stray.webm")).toBe(false)
+    expect(report.byNamespace.voice.orphaned).toBe(1)
+  })
+
+  it("sweeps no voice clip of a project whose consent record is unreadable", async () => {
+    const bucket = makeStubBucket([
+      { key: "projects/p1/voices/custom/c-0123456789ab/consent.json", body: "{not json" },
+      { key: "projects/p1/voices/rec-1.webm" },
+      { key: "projects/p1/files/f1/audio/tts-orphan.wav" },
+    ])
+    const report = await sweepOrphanedR2Objects(envFor(bucket), { now: NOW })
+    // Fail closed for the voice namespace only; audio is still judged.
+    expect(bucket._has("projects/p1/voices/rec-1.webm")).toBe(true)
+    expect(bucket._has("projects/p1/files/f1/audio/tts-orphan.wav")).toBe(false)
+    expect(report.errors.some((e) => /consent record unreadable/.test(e))).toBe(true)
   })
 
   it("keeps a clip a surviving take records as its source", async () => {

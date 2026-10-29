@@ -10,10 +10,11 @@
 //                          time bottom-left, the trim lines dragged right here
 //   [N Narrator ⌄]   🎤 🔊 ⧉  the row: the line's voice (the Media view gutter's
 //                          picker, opened from a field — picking only assigns),
-//                          then the take's tools: the recorder, volume, clone
+//                          then the take's tools: the recorder, volume, and
+//                          "Train a voice from this recording"
 //
 // AQU-2212: picking a voice ACTS on this line. On a take, a voice that can
-// re-voice (a clone or a character) converts it at once; with no take, the
+// re-voice (a character or a trained voice) converts it at once; with no take, the
 // voice reads the text. When the line's voice and its take part ways (a pick
 // for the whole file, or a stock voice over someone's recording), a labelled
 // "Change to …" / "Generate · …" button sits beside the field. A human take
@@ -44,7 +45,7 @@
 // only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AudioLines, CircleAlert, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
+import { AudioLines, CircleAlert, GraduationCap, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -53,21 +54,13 @@ import { WAVE_OVERLAY_CLASS } from "@/components/audio/chip-classes"
 import { TakeTimeReadout } from "@/components/audio/TakeTimeReadout"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Slider } from "@/components/ui/slider"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import {
-  CHANGE_VOICE_QUALITIES,
-  CHANGE_VOICE_QUALITY_STEPS,
   changeCellVoice,
   changeVoiceBlocker,
-  changeVoiceQualityForSteps,
-  changeVoiceSourceTake,
   generateSlotOverVoiceChange,
   isVoiceChangedAudioId,
-  voiceChangedSteps,
-  type ChangeVoiceQuality,
 } from "@/lib/audio/change-voice"
-import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { injectOptimisticAudioDeselect, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/voices"
@@ -84,7 +77,6 @@ import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
 import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
-import { CloneFromTakeButton } from "./CloneFromTakeButton"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -105,7 +97,7 @@ interface CellVoicePanelProps {
   settings?: ProjectTtsSettings
   session: unknown
   username: string
-  /** May this person change the line's audio (generate, record, trim, clone)?
+  /** May this person change the line's audio (generate, record, trim, train)?
    *  False draws the card read-only. */
   canEdit?: boolean
   /** Open the recorder on this line. Absent hides Record and the mic. */
@@ -128,11 +120,9 @@ interface CellVoicePanelProps {
    * pause, and seek go through it so the cell highlight tracks this button.
    */
   controller?: UseCellAudioResult
-  /** Open the New voice dialog seeded with THIS cell's take ("More options"). */
-  onMakeCharacter: () => void
-  /** Clone the take straight into the cast under `name`. Absent: the clone
-   *  button opens the dialog instead. */
-  onCloneTake?: (audioId: string, name: string) => Promise<void>
+  /** AQU-2291: "Train a voice from this recording" — open New voice on the
+   *  Train voice tab with this take as the first recording. Absent hides it. */
+  onTrainFromTake?: (audioId: string) => void
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** The line's voice picker, for the row under the waveform. The host owns
@@ -201,98 +191,33 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
   )
 }
 
-/** Change voice, with the action and its quality in a popover. The trigger is
- *  only the icon; it sits to the left of Generate. */
+/** Change voice: one icon button left of Generate. Disabled with the reason
+ *  in its tooltip when the line's voice can't (or needn't) re-voice the take. */
 function ChangeVoiceButton({
   disabled,
-  triggerDisabled,
-  qualityDisabled,
-  quality,
   reason,
   onChange,
-  onQuality,
 }: {
   disabled: boolean
-  /** Stock voices have nothing to copy. The icon stays grey and does not open. */
-  triggerDisabled: boolean
-  qualityDisabled: boolean
-  quality: (typeof CHANGE_VOICE_QUALITIES)[number]
   reason: string
   onChange: () => void
-  onQuality: (quality: (typeof CHANGE_VOICE_QUALITIES)[number]) => void
 }) {
   const t = useT()
-  const [open, setOpen] = useState(false)
-  const label = t("editor.voice.changeVoice")
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {/* Keyed on the greyed state. AppTooltip's stand-in for a disabled
-          button is a different element than the live trigger; leaving the
-          same tooltip mounted across that swap stops it opening again. */}
-      <AppTooltip key={triggerDisabled ? "grey" : "live"} content={triggerDisabled ? reason : label}>
-        <PopoverTrigger
-          disabled={triggerDisabled}
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={label}
-              data-testid="voice-card-change-voice"
-              disabled={triggerDisabled}
-              className="shrink-0 text-muted-foreground"
-            />
-          }
-        >
-          <AudioLines className="h-3.5 w-3.5" />
-        </PopoverTrigger>
-      </AppTooltip>
-      <PopoverContent align="start" side="bottom" className="w-44">
-        <AppTooltip content={reason} disabledTriggerClassName="w-full">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            className="w-full"
-            onClick={() => {
-              setOpen(false)
-              onChange()
-            }}
-          >
-            <AudioLines />
-            {label}
-          </Button>
-        </AppTooltip>
-        <Select
-          value={quality}
-          disabled={qualityDisabled}
-          onValueChange={(value) => {
-            if (value != null && (CHANGE_VOICE_QUALITIES as readonly string[]).includes(value)) {
-              onQuality(value as typeof quality)
-            }
-          }}
-        >
-          <AppTooltip content={t("editor.voice.changeVoiceQualityTooltip")} disabledTriggerClassName="w-full">
-            <SelectTrigger
-              size="sm"
-              disabled={qualityDisabled}
-              aria-label={t("editor.voice.changeVoiceQuality")}
-              className="w-full!"
-            >
-              {t(CHANGE_VOICE_QUALITY_LABEL[quality])}
-            </SelectTrigger>
-          </AppTooltip>
-          <SelectContent alignItemWithTrigger={false} align="start">
-            <SelectGroup>
-              {CHANGE_VOICE_QUALITIES.map((q) => (
-                <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </PopoverContent>
-    </Popover>
+    <AppTooltip content={reason}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label={t("editor.voice.changeVoice")}
+        data-testid="voice-card-change-voice"
+        disabled={disabled}
+        className="shrink-0 text-muted-foreground"
+        onClick={onChange}
+      >
+        <AudioLines className="h-3.5 w-3.5" />
+      </Button>
+    </AppTooltip>
   )
 }
 
@@ -307,8 +232,7 @@ export function CellVoicePanel({
   onRecord,
   recordUnavailable = null,
   onAfterGenerate,
-  onMakeCharacter,
-  onCloneTake,
+  onTrainFromTake,
   controller,
   targetLang,
   voicePicker,
@@ -429,16 +353,7 @@ export function CellVoicePanel({
     })
   }, [playableId, isSourceClip, cell.attachments, cell.fileId, cell.id, cell.selectedAudioId, projectId, username, targetLang])
 
-  // The menu shows THIS clip's quality (stamped into a converted id), not the
-  // device-wide choice the batch action uses. A pick is remembered only until
-  // this clip is replaced, so raising quality reconverts this take alone.
-  const takeId = changeVoiceSourceTake(cell)?.audioId
-  const [picked, setPicked] = useState<{ audioId: string; quality: ChangeVoiceQuality } | null>(null)
-  const quality = picked != null && picked.audioId === takeId
-    ? picked.quality
-    : changeVoiceQualityForSteps(takeId ? voiceChangedSteps(takeId) : null) ?? "standard"
-  const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
-  const changeBlocker = changeVoiceBlocker(cell, active, diffusionSteps)
+  const changeBlocker = changeVoiceBlocker(cell, active)
 
   // Generate and Change voice → autoplay once a fresh take lands (hasTake
   // flips, or the playable id swaps). `play` is read through a ref: listing
@@ -515,18 +430,17 @@ export function CellVoicePanel({
   }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, active.name, settings, onAfterGenerate, targetLang, playableId, isSourceClip, projectId])
 
   const changeVoice = useCallback(async (voice: Voice = active) => {
-    if (isVoicing || !canEdit || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
+    if (isVoicing || !canEdit || changeVoiceBlocker(cell, voice) != null) return
     autoplayRef.current = true
     setWorkingAs(voice.name)
     const ok = await changeCellVoice({
       projectId, cell, voice, session: sess, author: username,
-      diffusionSteps,
       ...(targetLang ? { targetLang } : {}),
     })
     setWorkingAs(null)
     if (ok) onAfterGenerate()
     else autoplayRef.current = false
-  }, [isVoicing, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
+  }, [isVoicing, canEdit, projectId, cell, active, sess, username, onAfterGenerate, targetLang])
 
   // A person's take: a recording (or the imported programme audio), not a
   // generated voice or a conversion of one.
@@ -547,9 +461,9 @@ export function CellVoicePanel({
   const pendingFor = useCallback((voice: Voice): "change" | "generate" | null => {
     if (!hasTake) return generateReady ? "generate" : null
     if (playableAtt?.voiceId === voice.id) return null
-    if (changeVoiceBlocker(cell, voice, diffusionSteps) == null) return "change"
+    if (changeVoiceBlocker(cell, voice) == null) return "change"
     return generateReady && !humanTake ? "generate" : null
-  }, [hasTake, generateReady, playableAtt?.voiceId, cell, diffusionSteps, humanTake])
+  }, [hasTake, generateReady, playableAtt?.voiceId, cell, humanTake])
 
   const onPicked = useCallback((voiceId: string) => {
     if (!canEdit || isVoicing) return
@@ -728,18 +642,14 @@ export function CellVoicePanel({
             {canEdit && changeBlocker !== "no-take" && (
               <ChangeVoiceButton
                 disabled={isVoicing || changeBlocker != null}
-                triggerDisabled={changeBlocker === "not-cloned"}
-                qualityDisabled={isVoicing || changeBlocker === "not-cloned" || active.libraryVoiceId != null}
-                quality={quality}
                 reason={
-                  changeBlocker === "not-cloned"
-                    ? t("editor.voice.changeVoiceNeedsClone", { name: active.name })
+                  changeBlocker === "not-trained"
+                    ? t("editor.voice.changeVoiceNeedsTraining", { name: active.name })
                     : changeBlocker === "up-to-date"
                       ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
                       : t("editor.voice.changeVoiceTooltip", { name: active.name })
                 }
                 onChange={() => void changeVoice(active)}
-                onQuality={(next) => { if (takeId) setPicked({ audioId: takeId, quality: next }) }}
               />
             )}
             {canEdit && canGenerate && (
@@ -774,12 +684,20 @@ export function CellVoicePanel({
               </AppTooltip>
             )}
             <VolumeButton volume={volume} onChange={changeVolume} />
-            {canEdit && playableId && (
-              <CloneFromTakeButton
-                suggestedName={recordedBy ?? (humanTake && !isSourceClip ? username : "")}
-                onClone={(name) => (onCloneTake ? onCloneTake(playableId, name) : Promise.resolve(onMakeCharacter()))}
-                onMoreOptions={onMakeCharacter}
-              />
+            {canEdit && playableId && humanTake && onTrainFromTake && (
+              <AppTooltip content={t("editor.voice.trainFromTake")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("editor.voice.trainFromTake")}
+                  data-testid="voice-card-clone"
+                  onClick={() => onTrainFromTake(playableId)}
+                  className="shrink-0 text-muted-foreground"
+                >
+                  <GraduationCap className="h-3.5 w-3.5" />
+                </Button>
+              </AppTooltip>
             )}
           </>,
           isVoicing && workingAs ? (

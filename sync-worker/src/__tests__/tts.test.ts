@@ -375,8 +375,6 @@ interface InworldCallRecord {
 function stubInworld(opts: {
   wav: Uint8Array
   status?: number
-  cloneVoiceId?: string
-  cloneStatus?: number
   designPreviews?: Array<{ voiceId: string; previewText?: string; previewAudio?: string }>
   designStatus?: number
   publishVoiceId?: string
@@ -391,12 +389,6 @@ function stubInworld(opts: {
       body: bodyText ? JSON.parse(bodyText) : init.body,
     })
     const path = String(url)
-    if (path.includes("voices:clone")) {
-      if (opts.cloneStatus && opts.cloneStatus !== 200) {
-        return new Response("clone error", { status: opts.cloneStatus })
-      }
-      return Response.json({ voice: { voiceId: opts.cloneVoiceId ?? "cloned-1" } })
-    }
     if (path.includes("voices:design")) {
       if (opts.designStatus && opts.designStatus !== 200) {
         return new Response("design error", { status: opts.designStatus })
@@ -768,7 +760,7 @@ describe("POST /api/v1/voice/tts", () => {
       expect(usageRows).toHaveLength(0)
     })
 
-    it("refuses before cloning a reference voice too", async () => {
+    it("refuses a stale clone-voice request (referenceAudioId) too", async () => {
       const { db } = makeStubDb(5, { creditRows: exhausted })
       const env = makeEnv(db, { CREDIT_ENFORCE: "true", SNAPSHOTS: makeStubBucket() })
       env.SNAPSHOTS._seed("projects/p1/voices/ref.wav", makeWav(1), "audio/wav")
@@ -858,56 +850,37 @@ describe("POST /api/v1/voice/tts", () => {
     expect(env.SNAPSHOTS._allKeys()).toContain(`pr-99/projects/p1/files/f1/audio/${body.objectName}`)
   })
 
-  it("clones from referenceAudioId then synthesizes with the cloned voiceId", async () => {
+  // AQU-2291: Inworld instant cloning was removed with short-clip clone
+  // voices. A stale client's referenceAudioId is ignored, not rejected: the
+  // line is synthesized with the voiceId it sent, no clone call is made, and no
+  // .inworld.json sidecar is written.
+  it("ignores referenceAudioId and synthesizes with the given voiceId", async () => {
     const { db } = makeStubDb()
     const env = makeEnv(db)
-    const refBytes = new Uint8Array([9, 9, 9])
-    env.SNAPSHOTS._seed("projects/p1/voices/ref1.wav", refBytes, "audio/wav")
-    const calls = stubInworld({ wav: makeWav(1), cloneVoiceId: "ws__ref_clone" })
+    env.SNAPSHOTS._seed("projects/p1/voices/ref1.wav", new Uint8Array([9, 9, 9]), "audio/wav")
+    const calls = stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
 
     const res = (await call(
       env,
-      ttsReq({ projectId: "p1", fileId: "f1", text: "cloned", referenceAudioId: "ref1.wav" }, token),
+      ttsReq({ projectId: "p1", fileId: "f1", text: "hi", voiceId: "Dennis", referenceAudioId: "ref1.wav" }, token),
     ))!
     expect(res.status).toBe(200)
-    expect(calls.map((c) => c.url)).toEqual([
-      `${INWORLD_API_BASE}/voices/v1/voices:clone`,
-      `${INWORLD_API_BASE}/tts/v1/voice`,
-    ])
-    expect((calls[1].body as { voiceId: string }).voiceId).toBe("ws__ref_clone")
-    expect(env.SNAPSHOTS._allKeys()).toContain("projects/p1/voices/ref1.wav.inworld.json")
+    expect(calls.map((c) => c.url)).toEqual([`${INWORLD_API_BASE}/tts/v1/voice`])
+    expect((calls[0].body as { voiceId: string }).voiceId).toBe("Dennis")
+    expect(env.SNAPSHOTS._allKeys().some((k) => k.endsWith(".inworld.json"))).toBe(false)
   })
 
-  it("reuses a cached Inworld clone id and does not clone again", async () => {
+  it("ignores even a malformed referenceAudioId rather than 400ing", async () => {
     const { db } = makeStubDb()
-    const env = makeEnv(db)
-    env.SNAPSHOTS._seed(
-      "projects/p1/voices/ref1.wav.inworld.json",
-      new TextEncoder().encode(JSON.stringify({ voiceId: "cached-voice" })),
-      "application/json",
-    )
     const calls = stubInworld({ wav: makeWav(1) })
     const token = await makeToken()
     const res = (await call(
-      env,
-      ttsReq({ projectId: "p1", fileId: "f1", text: "cached", referenceAudioId: "ref1.wav" }, token),
+      makeEnv(db),
+      ttsReq({ projectId: "p1", fileId: "f1", text: "hi", referenceAudioId: "../gone.wav" }, token),
     ))!
     expect(res.status).toBe(200)
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`${INWORLD_API_BASE}/tts/v1/voice`)
-    expect((calls[0].body as { voiceId: string }).voiceId).toBe("cached-voice")
-  })
-
-  it("404 when referenceAudioId is given but the clip is absent from R2", async () => {
-    const { db } = makeStubDb()
-    stubInworld({ wav: makeWav(1) })
-    const token = await makeToken()
-    const res = (await call(
-      makeEnv(db),
-      ttsReq({ projectId: "p1", fileId: "f1", text: "missing ref", referenceAudioId: "gone.wav" }, token),
-    ))!
-    expect(res.status).toBe(404)
   })
 })
 

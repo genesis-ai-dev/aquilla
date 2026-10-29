@@ -20,13 +20,12 @@
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
 import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
-import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { buildAudioId, uploadCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
-import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeCellTts } from "@/lib/sync/tts"
@@ -67,7 +66,6 @@ export interface CombinedVoiceResult {
   url: string
   /** Voice the clip was synthesized with (for trim re-attach metadata). */
   voiceId: string
-  referenceAudioId?: string
   /** The cells that were actually voiced, in document order (post-cap). */
   cells: CellData[]
   /** True if the selection was capped (too many cells / too much text). */
@@ -120,13 +118,13 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let audioId: string
     let ext: string
     let url: string
-    // Server-side branches (Inworld, clone) return WAV; the client-synth
+    // The server-side (Inworld) branch returns WAV; the client-synth
     // branch overrides when it compresses.
     let combinedMime = "audio/wav"
 
     if (isServerTtsProvider(provider)) {
       // Server-side: one Inworld call for the whole joined clip; the worker
-      // stores it (native clone when a reference is set) and returns its id.
+      // stores it and returns its id.
       onProgress?.("Synthesizing combined clip…")
       const language = inworldLanguageForRequest(voice, targetLanguage)
       const result = await synthesizeCellTts(
@@ -137,7 +135,6 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
           text: joined,
           ...(language ? { language } : {}),
           ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
-          ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
           ...inworldSynthFieldsFromVoice(voice),
         },
         getSyncToken,
@@ -164,56 +161,41 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         ),
       })
 
-      if (voice.referenceAudioId) {
-        onProgress?.("Applying voice clone…")
-        const conv = await convertToCloneVoice({
+      // FORTIFY: combined "voice together" clips are the LARGEST client-
+      // synth generations in the app (up to 12 cells of prosody in one
+      // file) and were still uploading raw WAV after the compression round
+      // shipped — the exact block generate-voice.ts uses, same fallback.
+      const baseId = buildAudioId(chosen[0].id)
+      let uploadBlob = ttsBlob
+      ext = "wav"
+      combinedMime = "audio/wav"
+      if (canEncodeOpus()) {
+        try {
+          const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
+          const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
+          uploadBlob = encoded.blob
+          combinedMime = encoded.mimeType
+          ext = encoded.ext
+        } catch (e) {
+          console.warn("[combined-voice] opus compress failed; uploading WAV", e)
+        }
+      }
+      const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: uploadBlob, getSyncToken })
+      audioId = res.audioId
+      url = res.url
+      // Local-first: the exact playable bytes are in hand — stock the byte
+      // cache so first playback/peaks/transcription need no re-download.
+      void audioCachePutBlob(res.audioId, ext, uploadBlob)
+      // Meeting note (2026-08-05): keep the original WAV obtainable — same
+      // base id, ext "wav", unattached, best-effort (see lossless-sibling).
+      if (ext === "webm") {
+        void uploadLosslessSiblingBestEffort({
           projectId: project.id,
           fileId,
-          referenceAudioId: voice.referenceAudioId,
-          source: ttsBlob,
+          audioId: baseId,
+          wavBlob: ttsBlob,
           getSyncToken,
         })
-        audioId = conv.audioId
-        ext = conv.ext
-        url = conv.url
-        await fetchCellAudio({ projectId: project.id, fileId, audioId: conv.audioId, ext: conv.ext, getSyncToken })
-      } else {
-        // FORTIFY: combined "voice together" clips are the LARGEST client-
-        // synth generations in the app (up to 12 cells of prosody in one
-        // file) and were still uploading raw WAV after the compression round
-        // shipped — the exact block generate-voice.ts uses, same fallback.
-        const baseId = buildAudioId(chosen[0].id)
-        let uploadBlob = ttsBlob
-        ext = "wav"
-        combinedMime = "audio/wav"
-        if (canEncodeOpus()) {
-          try {
-            const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
-            const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
-            uploadBlob = encoded.blob
-            combinedMime = encoded.mimeType
-            ext = encoded.ext
-          } catch (e) {
-            console.warn("[combined-voice] opus compress failed; uploading WAV", e)
-          }
-        }
-        const res = await uploadCellAudio({ projectId: project.id, fileId, audioId: baseId, ext, blob: uploadBlob, getSyncToken })
-        audioId = res.audioId
-        url = res.url
-        // Local-first: the exact playable bytes are in hand — stock the byte
-        // cache so first playback/peaks/transcription need no re-download.
-        void audioCachePutBlob(res.audioId, ext, uploadBlob)
-        // Meeting note (2026-08-05): keep the original WAV obtainable — same
-        // base id, ext "wav", unattached, best-effort (see lossless-sibling).
-        if (ext === "webm") {
-          void uploadLosslessSiblingBestEffort({
-            projectId: project.id,
-            fileId,
-            audioId: baseId,
-            wavBlob: ttsBlob,
-            getSyncToken,
-          })
-        }
       }
     }
     const objectName = `${audioId}.${ext}`
@@ -230,7 +212,6 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
         slot: "generatedVoice",
         mimeType: combinedMime,
         voiceId: voice.id,
-        ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
         // AQU-1591: a generated voice is a performance of ONE language, so it
         // belongs to the lane it was generated in. Without the tag it landed in
         // the default lane and was heard there instead.
@@ -248,7 +229,6 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       audioId: objectName,
       url,
       voiceId: voice.id,
-      ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       cells: chosen,
       truncated,
     }

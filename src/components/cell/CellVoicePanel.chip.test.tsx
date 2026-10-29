@@ -83,7 +83,7 @@ const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as
 
 function draw(over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) {
   const onRecord = vi.fn()
-  const onMakeCharacter = vi.fn()
+  const onTrainFromTake = vi.fn()
   renderWithTooltips(
     <CellVoicePanel
       cell={generated}
@@ -94,11 +94,11 @@ function draw(over: Partial<React.ComponentProps<typeof CellVoicePanel>> = {}) {
       username="tester"
       onRecord={onRecord}
       onAfterGenerate={() => {}}
-      onMakeCharacter={onMakeCharacter}
+      onTrainFromTake={onTrainFromTake}
       {...over}
     />,
   )
-  return { onRecord, onMakeCharacter }
+  return { onRecord, onTrainFromTake }
 }
 
 beforeEach(() => {
@@ -115,7 +115,7 @@ beforeEach(() => {
 const row = () => document.querySelector("[data-slot=voice-card-row]") as HTMLElement
 
 // Sam, 2026-09-28: the take, then a row under it with the line's voice, Generate
-// again, volume and clone. Validation lives in its column, not on the card.
+// again, volume and (on a recording) train-a-voice. Validation lives in its column, not on the card.
 describe("CellVoicePanel — the take, then a row with its voice", () => {
   it("has no validation of its own", () => {
     draw()
@@ -216,12 +216,13 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     expect(screen.getByRole("slider", { name: "End of the kept audio" })).toBeInTheDocument()
   })
 
-  it("ends the row in the take's tools — the recorder, volume, clone — always visible", () => {
-    draw()
+  it("ends the row in the take's tools — the recorder, volume, train — always visible", () => {
+    draw({ cell: recorded })
     const wave = screen.getByTestId("voice-card-waveform")
     const tools = row().lastElementChild!.querySelectorAll("button")
-    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(["Change voice", "Generate audio from text", "Record audio", "Volume", "Clone voice from take"])
-    for (const name of ["Change voice", "Generate audio from text", "Record audio", "Volume", "Clone voice from take"]) {
+    const names = ["Change voice", "Generate audio from text", "Record audio", "Volume", "Train a voice from this recording"]
+    expect([...tools].map((b) => b.getAttribute("aria-label"))).toEqual(names)
+    for (const name of names) {
       const b = screen.getByRole("button", { name })
       expect(row().lastElementChild!.contains(b)).toBe(true)
       expect(wave.contains(b)).toBe(false)
@@ -242,35 +243,28 @@ describe("CellVoicePanel — the take, then a row with its voice", () => {
     await expectTooltip(screen.getByRole("button", { name: "Volume" }), "Volume")
   })
 
-  it("clones the take in one step: name it, press Clone (AQU-2212)", async () => {
+  it("trains a voice from a recording: one click opens Train voice with this take (AQU-2291)", async () => {
     const user = userEvent.setup()
-    const onCloneTake = vi.fn(async () => {})
-    const { onMakeCharacter } = draw({ cell: recorded, onCloneTake })
-    await user.click(screen.getByRole("button", { name: /clone voice from take/i }))
-    // A person's own recording suggests their name.
-    const name = screen.getByTestId("voice-card-clone-name")
-    expect(name).toHaveValue("tester")
-    await user.clear(name)
-    await user.type(name, "Ana")
-    await user.click(screen.getByTestId("voice-card-clone-submit"))
-    expect(onCloneTake).toHaveBeenCalledWith("r1", "Ana")
-    expect(onMakeCharacter).not.toHaveBeenCalled()
+    const { onTrainFromTake } = draw({ cell: recorded })
+    const button = screen.getByTestId("voice-card-clone")
+    expect(button).toHaveAccessibleName("Train a voice from this recording")
+    await user.click(button)
+    expect(onTrainFromTake).toHaveBeenCalledWith("r1")
+    // No name popover any more: the New voice dialog asks for the speaker's name.
+    expect(screen.queryByTestId("voice-card-clone-name")).toBeNull()
   })
 
-  it("still offers the full dialog under More options", async () => {
-    const user = userEvent.setup()
-    const { onMakeCharacter } = draw({ onCloneTake: vi.fn(async () => {}) })
-    await user.click(screen.getByRole("button", { name: /clone voice from take/i }))
-    await user.click(screen.getByRole("button", { name: "More options" }))
-    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+  it("offers no training from a generated voice — it is not a person's recording", () => {
+    draw()
+    expect(screen.queryByTestId("voice-card-clone")).toBeNull()
   })
 
-  it("is read-only for someone who can't edit: no trimming, no recorder, no clone", () => {
-    draw({ canEdit: false })
+  it("is read-only for someone who can't edit: no trimming, no recorder, no training", () => {
+    draw({ canEdit: false, cell: recorded })
     // An untrimmed take shown read-only has no lines at all (a trimmed one
     // would show them grey).
     expect(screen.queryByRole("slider", { name: "Start of the kept audio" })).toBeNull()
-    expect(screen.queryByRole("button", { name: /clone/i })).toBeNull()
+    expect(screen.queryByTestId("voice-card-clone")).toBeNull()
     expect(screen.queryByTestId("voice-card-record")).toBeNull()
     expect(screen.getByRole("button", { name: "Volume" })).toBeInTheDocument()
   })

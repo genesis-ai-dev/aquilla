@@ -41,7 +41,7 @@ describe("CellVoicePanel — a piece of a split voice", () => {
       <CellVoicePanel
         cell={cell} project={project} projectId="proj-1" settings={settings}
         session={{ jwt: "x" } as unknown as never} username="tester"
-        onRecord={() => {}} onAfterGenerate={() => {}} onMakeCharacter={() => {}}
+        onRecord={() => {}} onAfterGenerate={() => {}}
       />
     )
     const { rerender } = renderWithTooltips(panel(split))

@@ -13,9 +13,6 @@ import type { Voice } from "@/lib/parsers/types"
 
 // ── Stub heavy audio / network dependencies ──────────────────────────────
 
-vi.mock("@/components/VoiceCloneSection", () => ({
-  VoiceCloneSection: () => null,
-}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: vi.fn(),
 }))

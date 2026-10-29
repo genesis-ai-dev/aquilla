@@ -4,9 +4,6 @@
 //   POST https://api.inworld.ai/tts/v1/voice
 //   Authorization: Basic $INWORLD_API_KEY
 //   { text, voiceId, modelId, audioConfig (speakingRate), language?, deliveryMode? }
-// Instant clone (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/clone-voice):
-//   POST https://api.inworld.ai/voices/v1/voices:clone
-//   { displayName, languageCode?, voiceSamples: [{ audioData: base64 }] }
 // Voice design (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/design-voice):
 //   POST https://api.inworld.ai/voices/v1/voices:design
 //   { designPrompt, designPromptMode?, previewText, languageCode?, voiceDesignConfig.numberOfSamples }
@@ -117,12 +114,6 @@ export interface SynthesizeInworldArgs {
 export interface SynthesizeInworldResult {
   wavBytes: ArrayBuffer
   durationSeconds: number
-}
-
-export interface CloneInworldArgs {
-  displayName: string
-  audioBytes: ArrayBuffer
-  language?: string
 }
 
 export interface DesignInworldVoiceArgs {
@@ -282,12 +273,6 @@ export function wavDurationSeconds(bytes: ArrayBuffer): number {
   return 0
 }
 
-function cloneDisplayName(raw: string): string {
-  const cleaned = raw.replace(/[^a-zA-Z0-9_]/g, "_").replace(/_+/g, "_")
-  const trimmed = cleaned.replace(/^_+|_+$/g, "") || "clone"
-  return `aq_${trimmed}`.slice(0, 60)
-}
-
 async function readInworldError(res: Response): Promise<string> {
   const text = await res.text().catch(() => "")
   const trimmed = text.trim()
@@ -298,40 +283,6 @@ async function readInworldError(res: Response): Promise<string> {
   } catch {
     return trimmed.slice(0, 500)
   }
-}
-
-export async function cloneInworldVoice(
-  config: InworldTtsConfig,
-  args: CloneInworldArgs,
-): Promise<string> {
-  const languageCode = toInworldLanguage(args.language)
-  const body: Record<string, unknown> = {
-    displayName: cloneDisplayName(args.displayName),
-    voiceSamples: [{ audioData: bytesToBase64(args.audioBytes) }],
-    audioProcessingConfig: { removeBackgroundNoise: true },
-  }
-  if (languageCode) body.languageCode = languageCode
-
-  let res: Response
-  try {
-    res = await fetchInworld(`${inworldApiBase(config)}/voices/v1/voices:clone`, {
-      method: "POST",
-      headers: {
-        Authorization: inworldAuthHeader(config.apiKey),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    })
-  } catch (err) {
-    throw new Error(`Inworld clone unreachable: ${String(err)}`)
-  }
-  if (!res.ok) {
-    throw new Error(`Inworld clone failed (${res.status}): ${await readInworldError(res)}`)
-  }
-  const json = (await res.json()) as { voice?: { voiceId?: string }; voiceId?: string }
-  const voiceId = json.voice?.voiceId ?? json.voiceId
-  if (!voiceId) throw new Error("Inworld clone returned no voiceId")
-  return voiceId
 }
 
 export function parseInworldDesignPromptMode(

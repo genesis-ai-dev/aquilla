@@ -55,7 +55,6 @@ describe("useProjectTts OmniVoice persist (AQU-1189)", () => {
       source: "both",
       project_provider_migrated: true,
       voice_count: 1,
-      cloned_voice_count: 0,
       from_languages: ["eng"],
       to_languages: ["en-US"],
     })

@@ -154,7 +154,6 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
@@ -242,7 +241,7 @@ export interface TimelineEditorProps {
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
    *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  onChangeVoice?(cellId: string): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void

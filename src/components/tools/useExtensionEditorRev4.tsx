@@ -48,7 +48,7 @@ import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminol
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { ToolRev4Services } from "@/lib/tools/host-handlers-rev4"
 import type { ToolOrigin } from "../../../shared/tools/manifest"
-import type { ToolAudioTake, ToolExample, ToolSmartEdit, ToolSourceActions, ToolVoiceTake } from "../../../shared/tools/editor-api-rev4"
+import { CLONE_REMOVED_MESSAGE, type ToolAudioTake, type ToolExample, type ToolSmartEdit, type ToolSourceActions, type ToolVoiceTake } from "../../../shared/tools/editor-api-rev4"
 import { ExtensionTermPopovers, type ExtensionTermRequest } from "./ExtensionTermPopovers"
 
 type InsertSpan = { startSec: number; endSec: number }
@@ -100,7 +100,6 @@ export interface ExtensionEditorRev4Args {
   ttsSettings: ProjectTtsSettings | undefined
   onAssignCastVoice: (cell: CellData, voiceId: string) => void
   onClearCastVoice: (cell: CellData) => void
-  onCloneVoice: (cellId: string) => void
 }
 
 export interface ExtensionEditorRev4 {
@@ -291,7 +290,8 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
           const v = resolveCastVoice(args_.ttsSettings, cell, cell.ttsSettings?.voiceId)
           current[cellId] = { id: v.id, name: v.name, explicit: Boolean(findVoice(args_.ttsSettings, assignedCastVoiceId(args_.ttsSettings, cell) ?? cell.ttsSettings?.voiceId)) }
         }
-        return { voices: getVoiceLibrary(args_.ttsSettings).map((v) => ({ id: v.id, name: v.name })), current, canClone: true }
+        // AQU-2291: short-clip cloning is gone; the field stays for rev4 callers.
+        return { voices: getVoiceLibrary(args_.ttsSettings).map((v) => ({ id: v.id, name: v.name })), current, canClone: false }
       },
       assignVoice: async (_f, cellId, voiceId) => {
         const cell = view(cellId)
@@ -299,9 +299,9 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
         else a().onClearCastVoice(cell)
         return true
       },
-      cloneVoice: async (_f, cellId) => {
-        a().onCloneVoice(cellId)
-        return true
+      // AQU-2291: kept so a rev4 extension calling it gets a clear answer.
+      cloneVoice: async () => {
+        throw new Error(CLONE_REMOVED_MESSAGE)
       },
       // ── 52: source editing and the cell menu ──────────────────────────────
       sourceActions: async (_f, cellId) => {

@@ -19,7 +19,6 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async () => "evt"),
 }))
 vi.mock("@/lib/sync/sync-worker-url", () => ({ syncWorkerHttpOrigin: () => "http://sync.test" }))
-vi.mock("@/lib/audio/reference-extract", () => ({ extractVoiceReference: vi.fn(async () => null) }))
 
 import { runDiarization } from "./run-diarization"
 import { assignedCastVoiceId } from "@/lib/audio/voices"

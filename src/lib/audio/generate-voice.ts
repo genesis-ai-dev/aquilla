@@ -1,12 +1,12 @@
 // Generate a cell's voice audio and attach it durably.
 //
-//   synthesize (Gemini/MMS TTS) → if the resolved voice is a clone voice
-//   (referenceAudioId set), re-voice the TTS output into that timbre via
-//   Seed-VC → upload to R2 → emit cell.audio.attach (generatedVoice slot).
+//   synthesize (Gemini/MMS TTS) → if the resolved voice is a library voice
+//   (libraryVoiceId set), re-voice the TTS output into it via the voice forge
+//   (RVC) → upload to R2 → emit cell.audio.attach (generatedVoice slot).
 //
 // Replaces the ripped synth-and-attach.ts path. Returns the playable blob so
-// the caller can play immediately without a second fetch (for clone voices the
-// blob is the converted clip, fetched back from R2).
+// the caller can play immediately without a second fetch (for library voices
+// the blob is the converted clip, fetched back from R2).
 
 import { synthesizeForCell } from "./tts"
 import { GENERATED_VOICE_SLOT } from "@/lib/timeline/track-slots"
@@ -23,7 +23,7 @@ import {
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
-import { convertToCloneVoice } from "./voice-clone"
+import { convertToLibraryVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
@@ -62,7 +62,6 @@ export interface GenerateAndAttachArgs {
   targetLang?: string
   /** Round 8c: TTS is a TAKE — its permanent name, set at birth. */
   label?: string
-  diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
   /** AQU-1572: where the generation was asked for ("recorder", "cell"…). Telemetry only. */
   surface?: TelemetrySurface
@@ -72,7 +71,7 @@ export interface GenerateAndAttachResult {
   audioId: string
   /** frontier-audio://<id>.<ext> stored on the attachment. */
   url: string
-  /** Playable bytes (converted clip for clone voices, TTS output otherwise). */
+  /** Playable bytes (converted clip for library voices, TTS output otherwise). */
   blob: Blob
 }
 
@@ -95,8 +94,7 @@ export async function generateAndAttachCellVoice(
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
   // Inworld is server-side: the sync-worker synthesizes, stores the clip in
-  // R2 (native voice-cloning when a reference is set), and returns its id —
-  // no client synth, no upload, no Seed-VC. Branch out entirely.
+  // R2, and returns its id — no client synth, no upload. Branch out entirely.
   if (isServerTtsProvider(provider)) {
     const language = inworldLanguageForRequest(voice, args.geminiContext?.targetLanguage)
     const result = await synthesizeCellTts(
@@ -107,7 +105,6 @@ export async function generateAndAttachCellVoice(
         text,
         ...(language ? { language } : {}),
         ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
-        ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
         ...inworldSynthFieldsFromVoice(voice),
       },
       getSyncToken,
@@ -119,7 +116,7 @@ export async function generateAndAttachCellVoice(
     let audioUrl = result.url
     let audioId = result.audioId
     if (voice.libraryVoiceId) {
-      const conv = await convertToCloneVoice({
+      const conv = await convertToLibraryVoice({
         projectId: args.projectId,
         fileId: args.fileId,
         libraryVoiceId: voice.libraryVoiceId,
@@ -140,7 +137,6 @@ export async function generateAndAttachCellVoice(
       slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
       voiceId: voice.id,
-      ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       ...(args.label ? { label: args.label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       // AQU-1572
@@ -157,7 +153,7 @@ export async function generateAndAttachCellVoice(
       slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
       voiceId: voice.id,
-      referenceAudioId: voice.referenceAudioId ?? null,
+      referenceAudioId: null,
       durationMs: Math.round(result.durationSeconds * 1000),
       label: args.label ?? null,
       trimStartMs: null,
@@ -190,23 +186,21 @@ export async function generateAndAttachCellVoice(
   let ext: string
   let url: string
   let playable: Blob
-  // Clone conversions come back from the worker as WAV; the plain-TTS branch
+  // Library conversions come back from the worker as WAV; the plain-TTS branch
   // overrides this when it compresses.
   let generatedMimeType = "audio/wav"
   /** Sample-exact duration from the opus encoder, when that path ran. */
   let encodedDurationMs: number | null = null
 
-  if (voice.referenceAudioId || voice.libraryVoiceId) {
-    // 2a. Clone: re-voice TTS output into the reference timbre (Seed-VC), or
-    // into a Voice library character (voice forge). The worker writes the
-    // converted wav to R2 and returns its id; fetch it back so we can play the
-    // actual converted audio (not the pre-conversion TTS).
-    const conv = await convertToCloneVoice({
+  if (voice.libraryVoiceId) {
+    // 2a. Library voice: re-voice TTS output into the character or trained
+    // voice (voice forge). The worker writes the converted wav to R2 and
+    // returns its id; fetch it back so we can play the actual converted audio
+    // (not the pre-conversion TTS).
+    const conv = await convertToLibraryVoice({
       projectId: args.projectId,
       fileId: args.fileId,
-      ...(voice.libraryVoiceId
-        ? { libraryVoiceId: voice.libraryVoiceId }
-        : { referenceAudioId: voice.referenceAudioId, diffusionSteps: args.diffusionSteps }),
+      libraryVoiceId: voice.libraryVoiceId,
       source: ttsBlob,
       getSyncToken,
     })
@@ -300,7 +294,6 @@ export async function generateAndAttachCellVoice(
     slot: args.slot ?? GENERATED_VOICE_SLOT,
     mimeType: generatedMimeType,
     voiceId: voice.id,
-    ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
     ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
     ...(args.label ? { label: args.label } : {}),
     ...(args.targetLang ? { targetLang: args.targetLang } : {}),
@@ -317,7 +310,7 @@ export async function generateAndAttachCellVoice(
     slot: args.slot ?? GENERATED_VOICE_SLOT,
     mimeType: generatedMimeType,
     voiceId: voice.id,
-    referenceAudioId: voice.referenceAudioId ?? null,
+    referenceAudioId: null,
     durationMs: generatedDurationMs ?? null,
     label: args.label ?? null,
     trimStartMs: null,

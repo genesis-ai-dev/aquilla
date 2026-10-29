@@ -26,7 +26,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
 
@@ -112,7 +112,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
 
@@ -176,7 +176,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
   }

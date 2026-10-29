@@ -21,9 +21,11 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    const convert = vi.fn()
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
     vi.doMock("./voices", () => ({
-      resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
+      // AQU-2291: a stored voice may still carry a removed short-clip clone id.
+      resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-old.wav" }),
     }))
     const { generateAndAttachCellVoice } = await import("./generate-voice")
     await generateAndAttachCellVoice({
@@ -54,6 +56,11 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(emitAttach).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice", durationMs: 1200 }),
     )
+    // …and is a plain TTS voice: no native clone, no conversion, and the
+    // voice's old clip is never stamped onto the take as its lineage.
+    expect((synthCellTts.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
+    expect(convert).not.toHaveBeenCalled()
+    expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
   })
 
   it("a character (library) voice reads with the stock voice, then re-voices that clip", async () => {
@@ -75,7 +82,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: convert }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({ id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }),
     }))
@@ -114,7 +121,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({ id: "v", name: "Kid", provider: "kokoro", voiceName: "af_heart" }),
     }))
@@ -149,7 +156,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({
         id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
@@ -191,7 +198,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "id", uploadCellAudio: vi.fn(),
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({
         id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
@@ -255,7 +262,7 @@ describe("generateAndAttachCellVoice routing", () => {
       buildAudioId: () => "base-id", uploadCellAudio: upload,
       fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     // The WAV-fallback path probes the blob's duration with a real media
     // element — which never resolves in jsdom.
     vi.doMock("@/lib/import", async (importActual) => ({

@@ -9,9 +9,9 @@
 //
 // Timing vs trim: tiled ranges become CELL TIMING (startMs/endMs — what
 // playback windows on). The tight detected boundaries stay as the attachment
-// TRIMS (trimStartMs/trimEndMs — what Whisper transcription and voice-clone
-// reference extraction slice), so transcripts don't fill with silence and a
-// diarized speaker's clone reference can never absorb a neighbor's audio.
+// TRIMS (trimStartMs/trimEndMs — what Whisper transcription slices), so
+// transcripts don't fill with silence and a diarized speaker's turn never
+// absorbs a neighbor's audio.
 
 export interface TimedRange {
   startMs: number

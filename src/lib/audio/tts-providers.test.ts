@@ -90,13 +90,6 @@ describe("TTS provider normalization", () => {
     expect(hint).toMatch(/Highest uses Inworld TTS 2/)
   })
 
-  it("marks only cloud engines as cloning-capable", () => {
-    const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.inworld.supportsCloning).toBe(true)
-    expect(byId.gemini.supportsCloning).toBe(true)
-    expect(byId.mms.supportsCloning).toBe(false)
-  })
-
   it("gives every engine named voices, including Inworld", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
     expect(byId.inworld.hasNamedVoices).toBe(true)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { screen, waitFor, within } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -27,14 +27,12 @@ vi.mock("@/lib/audio/change-voice", async (importOriginal) => ({
 import { CellVoicePanel } from "./CellVoicePanel"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { changeCellVoice, voiceReferenceFingerprint } from "@/lib/audio/change-voice"
-import { resetChangeVoiceQualityCacheForTests, setChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 
 const stock: Voice = { id: "v-mary", name: "Mary", color: "#000", provider: "gemini", voiceName: "Kore", prompt: "{text}" }
-const clone: Voice = {
-  id: "v-anna", name: "Anna", color: "#111", provider: "gemini", voiceName: "Kore", prompt: "{text}",
-  referenceAudioId: "ref-anna.wav",
-}
-const voices = [stock, clone]
+/** A trained custom voice — the kind of voice Change voice can use. */
+const anna: Voice = { id: "v-anna", name: "Anna", color: "#111", libraryVoiceId: "c-0a1b2c3d" }
+const voices = [stock, anna]
+const NOT_TRAINED = "Mary has no trained voice model yet — Change voice works with character voices and trained voices."
 
 const recorded = {
   id: "cell-1", fileId: "file-1", type: "text",
@@ -67,22 +65,14 @@ function renderPanel(
       username="tester"
       onRecord={onRecord}
       onAfterGenerate={onAfterGenerate}
-      onMakeCharacter={() => {}}
       voiceFromText={voiceFromText}
     />,
   )
   return { onAfterGenerate }
 }
 
-async function openChangeVoice(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByTestId("voice-card-change-voice"))
-  return screen.getByRole("dialog")
-}
-
 describe("CellVoicePanel voice actions (AQU-1109)", () => {
   beforeEach(() => {
-    localStorage.clear()
-    resetChangeVoiceQualityCacheForTests()
     vi.mocked(generateCellVoice).mockClear()
     vi.mocked(changeCellVoice).mockClear()
     play.mockClear()
@@ -122,20 +112,22 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     expect(vi.mocked(generateCellVoice).mock.calls[0][0]).toMatchObject({ slot: "recording" })
   })
 
-  it("Change voice converts the take into the assigned cloned voice", async () => {
+  it("Change voice converts the take into the assigned trained voice in one click", async () => {
     const user = userEvent.setup()
     const { onAfterGenerate } = renderPanel(recorded, "v-anna")
-    const dialog = await openChangeVoice(user)
-    const button = within(dialog).getByRole("button", { name: "Change voice" })
+    const button = screen.getByTestId("voice-card-change-voice")
     expect(button).toBeEnabled()
     await user.click(button)
     await waitFor(() => expect(onAfterGenerate).toHaveBeenCalledTimes(1))
+    // AQU-2291: no quality popover, no diffusion steps.
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(screen.queryByRole("combobox", { name: "Quality" })).toBeNull()
     expect(vi.mocked(changeCellVoice).mock.calls[0][0]).toMatchObject({
       projectId: "proj-1",
       voice: { id: "v-anna" },
       author: "tester",
-      diffusionSteps: 25,
     })
+    expect(vi.mocked(changeCellVoice).mock.calls[0][0]).not.toHaveProperty("diffusionSteps")
     expect(generateCellVoice).not.toHaveBeenCalled()
     expect(play).not.toHaveBeenCalled()
   })
@@ -151,11 +143,9 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       session: { jwt: "x" } as unknown as never,
       username: "tester",
       onAfterGenerate: () => {},
-      onMakeCharacter: () => {},
     }
     const { rerender } = renderWithTooltips(<CellVoicePanel cell={recorded} {...props} />)
-    const dialog = await openChangeVoice(user)
-    await user.click(within(dialog).getByRole("button", { name: "Change voice" }))
+    await user.click(screen.getByTestId("voice-card-change-voice"))
     await waitFor(() => expect(changeCellVoice).toHaveBeenCalled())
     expect(play).not.toHaveBeenCalled()
 
@@ -176,7 +166,7 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     await waitFor(() => expect(play).toHaveBeenCalledTimes(1))
   })
 
-  it("Change voice is greyed out, with a reason, for a stock voice", async () => {
+  it("Change voice is greyed out, with the not-trained reason, for a plain TTS voice", async () => {
     renderPanel(recorded, "v-mary")
     const trigger = screen.getByTestId("voice-card-change-voice")
     expect(trigger).toBeDisabled()
@@ -187,7 +177,7 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     expect(standIn).not.toHaveAttribute("disabled")
     await expectTooltip(
       standIn as HTMLElement,
-      "Mary has no reference clip. Assign a cloned voice to change this take.",
+      NOT_TRAINED,
     )
   })
 
@@ -202,7 +192,6 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       session: { jwt: "x" } as unknown as never,
       username: "tester",
       onAfterGenerate: () => {},
-      onMakeCharacter: () => {},
     }
     const { rerender } = renderWithTooltips(<CellVoicePanel {...props} />)
     expect(screen.getByTestId("voice-card-change-voice")).toBeEnabled()
@@ -218,12 +207,12 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     expect(standIn).not.toBeNull()
     await expectTooltip(
       standIn as HTMLElement,
-      "Mary has no reference clip. Assign a cloned voice to change this take.",
+      NOT_TRAINED,
     )
   })
 
   it("Change voice is disabled when the take already wears this voice", async () => {
-    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q25-audio-cell-1-2-bbbb`
+    const id = `vc-${voiceReferenceFingerprint("library:c-0a1b2c3d")}-audio-cell-1-2-bbbb`
     const converted = {
       ...recorded,
       selectedAudioId: id,
@@ -236,86 +225,27 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
       },
     } as unknown as CellData
     renderPanel(converted, "v-anna")
-    const dialog = await openChangeVoice(userEvent.setup())
-    expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeDisabled()
+    expect(screen.getByTestId("voice-card-change-voice")).toBeDisabled()
   })
 
-  it("offers Change voice again when the clone's reference clip changes", async () => {
-    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q25-audio-cell-1-2-bbbb`
-    const converted = {
-      ...recorded,
-      selectedAudioId: id,
-      attachments: {
-        ...(recorded.attachments as object),
-        [id]: {
-          url: "blob:y", type: "audio/wav", slot: "recording",
-          voiceId: "v-anna", referenceAudioId: "audio-cell-1-1-aaaa",
-        },
-      },
-    } as unknown as CellData
-    const moved: Voice = { ...clone, referenceAudioId: "ref-anna-new.wav" }
-    const settings = { voices: [stock, moved], defaultVoiceId: "v-anna" } as ProjectTtsSettings
+  it("blocks a voice that still carries a removed short-clip clone field (AQU-2291)", async () => {
+    const legacy = { ...stock, id: "v-old", name: "Mary", referenceAudioId: "ref.wav" } as Voice
+    const settings = { voices: [legacy], defaultVoiceId: "v-old" } as ProjectTtsSettings
     const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
     renderWithTooltips(
       <CellVoicePanel
-        cell={converted}
+        cell={recorded}
         project={project}
         projectId="proj-1"
         settings={settings}
         session={{ jwt: "x" } as unknown as never}
         username="tester"
         onAfterGenerate={() => {}}
-        onMakeCharacter={() => {}}
       />,
     )
-    const dialog = await openChangeVoice(userEvent.setup())
-    expect(within(dialog).getByRole("button", { name: "Change voice" })).toBeEnabled()
-  })
-
-  it("shows the quality stamped on this clip, not the device setting", async () => {
-    setChangeVoiceQuality("fast")
-    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q40-audio-cell-1-2-bbbb`
-    const converted = {
-      ...recorded,
-      selectedAudioId: id,
-      attachments: {
-        ...(recorded.attachments as object),
-        [id]: {
-          url: "blob:y", type: "audio/wav", slot: "recording",
-          voiceId: "v-anna", referenceAudioId: "audio-cell-1-1-aaaa",
-        },
-      },
-    } as unknown as CellData
-    renderPanel(converted, "v-anna")
-    const dialog = await openChangeVoice(userEvent.setup())
-    expect(within(dialog).getByRole("combobox", { name: "Quality" })).toHaveTextContent("High")
-  })
-
-  it("sends the quality the user picks, and a higher quality can run again", async () => {
-    const user = userEvent.setup()
-    const id = `vc-${voiceReferenceFingerprint("ref-anna.wav")}-q25-audio-cell-1-2-bbbb`
-    const converted = {
-      ...recorded,
-      selectedAudioId: id,
-      attachments: {
-        ...(recorded.attachments as object),
-        [id]: {
-          url: "blob:y", type: "audio/wav", slot: "recording",
-          voiceId: "v-anna", referenceAudioId: "audio-cell-1-1-aaaa",
-        },
-      },
-    } as unknown as CellData
-    renderPanel(converted, "v-anna")
-    const dialog = await openChangeVoice(user)
-    const quality = within(dialog).getByRole("combobox", { name: "Quality" })
-    expect(quality).toHaveTextContent("Standard")
-    await user.click(quality)
-    await user.click(screen.getByRole("option", { name: "High" }))
-    const button = within(dialog).getByRole("button", { name: "Change voice" })
-    expect(button).toBeEnabled()
-    await user.click(button)
-    await waitFor(() => expect(changeCellVoice).toHaveBeenCalled())
-    expect(vi.mocked(changeCellVoice).mock.calls[0][0]).toMatchObject({ diffusionSteps: 40 })
+    const trigger = screen.getByTestId("voice-card-change-voice")
+    expect(trigger).toBeDisabled()
+    await expectTooltip(trigger.closest('[data-slot="tooltip-disabled-trigger"]') as HTMLElement, NOT_TRAINED)
   })
 })
 

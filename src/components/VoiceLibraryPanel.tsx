@@ -1,8 +1,8 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
 // voices, pick which one is active, set the narrator. Making a voice is a single
-// "New voice" button → NewVoiceModal, which carries both ways to make one
-// (TTS / Clone) behind tabs, seeded with the project's configured engine.
-// Cloning from a source cell's audio controls is hosted at the workspace root
+// "New voice" button → NewVoiceModal, which carries every way to make one
+// (TTS / Character / Train) behind tabs, seeded with the project's configured
+// engine. Training from a line's take is hosted at the workspace root
 // (CloneVoiceModalHost) so the modal does not depend on this panel being mounted.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
@@ -141,7 +141,7 @@ export function VoiceLibraryPanel({
   const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
   // Keep the roster in sync with persisted settings so a voice created from
-  // the in-cell Clone host (which writes through tts.saveTts) appears here
+  // the in-cell New voice host (which writes through tts.saveTts) appears here
   // without a remount. First visit to a project still falls back to presets
   // when nothing has been saved yet.
   useEffect(() => {
@@ -464,9 +464,7 @@ function VoiceRow({
         : t("audio.library.trainingEngineLabel")
     : voice.libraryVoiceId
     ? t("audio.library.characterEngineLabel")
-    : voice.referenceAudioId
-      ? t("audio.library.cloneEngineLabel")
-      : providerInfo(voice.provider ?? projectProvider).shortTitle
+    : providerInfo(voice.provider ?? projectProvider).shortTitle
   const languageTag = languageForVoiceDescription(voice.language)
   const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (
@@ -490,7 +488,7 @@ function VoiceRow({
           />
         </span>
         <span className="block truncate text-[10px] leading-tight text-muted-foreground">
-          <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
+          <span className="font-medium">
             {engineLabel}
           </span>
           {languageName ? (

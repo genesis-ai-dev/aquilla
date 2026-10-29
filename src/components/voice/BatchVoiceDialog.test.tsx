@@ -69,7 +69,7 @@ const project = {
     defaultVoiceId: "v-anna",
     voices: [
       { id: "v-anna", name: "Anna" },
-      { id: "v-clone", name: "Joel clone", referenceAudioId: "ref.webm" },
+      { id: "v-joel", name: "Joel", libraryVoiceId: "c-0a1b2c3d" },
     ],
   },
 } as unknown as ProjectRecord
@@ -114,12 +114,12 @@ describe("BatchVoiceDialog", () => {
     expect(await screen.findByRole("button", { name: /Generate 2 lines in Anna/i })).toBeTruthy()
   })
 
-  it("lets the reader switch to a cloned voice and generates in it", async () => {
+  it("lets the reader switch to a trained voice and generates in it", async () => {
     const onClose = renderDialog([cell("a"), cell("b")])
-    await userEvent.click(await screen.findByRole("button", { name: /Joel clone/i }))
-    await userEvent.click(await screen.findByRole("button", { name: /Generate 2 lines in Joel clone/i }))
+    await userEvent.click(await screen.findByRole("button", { name: /Joel/i }))
+    await userEvent.click(await screen.findByRole("button", { name: /Generate 2 lines in Joel/i }))
     await waitFor(() => expect(mockRun).toHaveBeenCalledTimes(1))
-    expect(mockRun.mock.calls[0][0].voiceId).toBe("v-clone")
+    expect(mockRun.mock.calls[0][0].voiceId).toBe("v-joel")
     // The shared progress banner owns progress from here, so the modal gets
     // out of the way rather than covering the lines filling in behind it.
     expect(onClose).toHaveBeenCalled()

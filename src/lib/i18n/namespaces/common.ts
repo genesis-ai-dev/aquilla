@@ -324,8 +324,8 @@ export const common = defineNamespace({
       },
       "common.voices": {
         description:
-          "The set of speaking voices configured for a project — TTS configurations and " +
-          "cloned voices. Used both as the left-dock tab label that opens the voices panel " +
+          "The set of speaking voices configured for a project — TTS configurations, " +
+          "character voices and trained voices. Used both as the left-dock tab label that opens the voices panel " +
           "and as that panel's own heading. Plural noun; the tab is in a narrow rail.",
         screenshot: "audio-studio",
       },

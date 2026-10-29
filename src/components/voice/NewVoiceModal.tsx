@@ -6,22 +6,19 @@
 //     or Voice Design, plus quality / delivery / speed).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
 //     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
-//   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
-//     Gemini — MMS is on-device and cannot), and capture a short
-//     reference clip (record, upload, or reuse a take). Generation is re-voiced
-//     to match it. A local project default is remapped to Inworld on this tab.
 //   • Train voice — a custom voice from the org's recordings of a real person
 //     (TrainVoicePanel); consent is the org's, confirmed and kept on record.
+//     The only way to a real person's voice: short-clip cloning was removed
+//     (AQU-2291). Opened from a line's take, that take is the first recording.
 //   • Character — one click adds a ready-made synthetic character voice
 //     (CharacterVoicePicker, src/lib/audio/character-voices.ts). Change voice
 //     re-voices takes into it; no engine or reference clip to set up.
 //
-// Editing an existing voice reuses this same modal, locked to the voice's kind
-// (TTS: all three engines; clone: cloud clone engines only).
-// Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
+// Editing an existing voice reuses this same modal, locked to the voice's kind.
+// Deliberately de-purpled: TTS uses the brand accent.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AudioLines, Check, Drama, GraduationCap, Pause, Play, Sparkles, Star, Trash2, UserRound } from "lucide-react"
+import { useCallback, useMemo, useState } from "react"
+import { AudioLines, Drama, GraduationCap, Sparkles, Star, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -32,7 +29,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Spinner } from "@/components/ui/spinner"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
   SelectContent,
@@ -41,12 +38,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { VoiceCloneSection } from "@/components/VoiceCloneSection"
 import { CharacterVoicePicker } from "@/components/voice/CharacterVoicePicker"
 import { TrainVoicePanel } from "@/components/voice/TrainVoicePanel"
 import { voiceFromCharacter } from "@/lib/audio/character-voices"
 import { cn } from "@/lib/utils"
-import { isRecordedCloneClip, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
+import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
   DEFAULT_TTS_PROVIDER,
   GEMINI_TTS_VOICES,
@@ -57,7 +53,6 @@ import {
   isGeminiVoiceName,
   isInworldVoiceName,
   normalizeVoiceForProvider,
-  providerInfo,
   effectiveTtsProvider,
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
@@ -84,14 +79,13 @@ import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
 import { needsInworldLanguagePicker, toInworldLanguage } from "@/lib/audio/inworld-languages"
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
-import { audioMimeForExt } from "@/lib/audio/mime"
-import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
-import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
+import { uploadVoiceReference } from "@/lib/audio/voice-clone"
+import { fetchTakeAsFile } from "@/lib/audio/take-file"
 import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-type Mode = "tts" | "clone" | "character" | "train"
+type Mode = "tts" | "character" | "train"
 
 export interface NewVoiceModalProps {
   open: boolean
@@ -114,66 +108,41 @@ export interface NewVoiceModalProps {
   onSave: (voice: Voice) => void
   onDelete?: () => void
   onMakeDefault?: () => void
-  /** Open straight to a given tab (e.g. seeded "clone from this take"). */
+  /** Open straight to a given tab (e.g. "train" from a line's take). */
   initialMode?: Mode
-  /** When opened from a line's take, preselect + highlight that take. */
+  /** Opened from a line's take in "train" mode: that line, whose take starts
+   *  the training recordings. */
   seedCellId?: string | null
+  /** Which of the seed line's takes; defaults to its recording, then its
+   *  generated voice. */
+  seedAudioId?: string | null
   /** The project's current cast, so the Characters tab marks ones already added. */
   existingVoices?: readonly Voice[]
 }
 
 export function NewVoiceModal(props: NewVoiceModalProps) {
   if (!props.open) return null
-  return <NewVoiceModalBody key={props.voice?.id ?? props.seedCellId ?? "new"} {...props} />
+  return <NewVoiceModalBody key={props.voice?.id ?? props.seedAudioId ?? props.seedCellId ?? "new"} {...props} />
 }
 
-interface TakeSource {
-  cell: CellData
-  slot: "recorded" | "generated"
-  audioId: string
+/** The take a seeded "train" opening starts from, or null. */
+function seedTakeId(cells: CellData[], seedCellId?: string | null, seedAudioId?: string | null): { cell: CellData; audioId: string } | null {
+  const cell = seedCellId ? cells.find((c) => c.id === seedCellId) : undefined
+  if (!cell) return null
+  const audioId = seedAudioId ?? cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+  return audioId && cell.attachments?.[audioId]?.url ? { cell, audioId } : null
 }
-
-const slotUrl = (cell: CellData, audioId: string): string | undefined => cell.attachments?.[audioId]?.url
-const takeKey = (t: TakeSource): string => `${t.cell.id}:${t.slot}`
-
-function cellSnippet(cell: CellData): string {
-  const raw = (cell.translated || cell.original || cell.cellLabel || cell.id).trim()
-  return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw || cell.id
-}
-
-function audioSources(cells: CellData[]): TakeSource[] {
-  const out: TakeSource[] = []
-  for (const cell of cells) {
-    if (cell.selectedAudioId && slotUrl(cell, cell.selectedAudioId)) {
-      out.push({ cell, slot: "recorded", audioId: cell.selectedAudioId })
-    }
-    if (cell.selectedGeneratedVoiceAudioId && slotUrl(cell, cell.selectedGeneratedVoiceAudioId)) {
-      out.push({ cell, slot: "generated", audioId: cell.selectedGeneratedVoiceAudioId })
-    }
-  }
-  return out
-}
-
-const mimeForExt = (ext: string): string =>
-  ext === "webm" ? "audio/webm"
-  : ext === "mp3" ? "audio/mpeg"
-  : ext === "mp4" || ext === "m4a" ? "audio/mp4"
-  : ext === "wav" ? "audio/wav"
-  : "application/octet-stream"
-
-const CLONE_ENGINES = TTS_PROVIDER_INFOS.filter((p) => p.supportsCloning)
 
 function seedDraft(args: {
   voice: Voice | null
   projectProvider: TtsProvider
   targetLanguage?: string
   paletteIndex: number
-  initialMode?: Mode
   rotatedGeminiVoice: string
 }): Voice {
-  const { voice, projectProvider, targetLanguage, paletteIndex, initialMode, rotatedGeminiVoice } = args
+  const { voice, projectProvider, targetLanguage, paletteIndex, rotatedGeminiVoice } = args
   const engine = effectiveTtsProvider(projectProvider)
-  const base: Voice = voice
+  return voice
     ? { ...voice, provider: effectiveTtsProvider(voice.provider ?? engine) }
     : {
         id: newVoiceId(),
@@ -187,21 +156,16 @@ function seedDraft(args: {
           ? { audioQuality: DEFAULT_INWORLD_AUDIO_QUALITY, deliveryMode: DEFAULT_INWORLD_DELIVERY_MODE }
           : {}),
       }
-  const openingClone = Boolean(voice?.referenceAudioId) || initialMode === "clone"
-  if (openingClone && !providerInfo(base.provider ?? projectProvider).supportsCloning) {
-    return normalizeVoiceForProvider(base, DEFAULT_TTS_PROVIDER, { targetLanguage })
-  }
-  return base
 }
 
 function NewVoiceModalBody({
   onClose, voice, provider, targetLanguage, targetLanes, archivedLanes, isDefault, paletteIndex, projectId, fileId,
-  session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId, existingVoices,
+  session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId, seedAudioId, existingVoices,
 }: NewVoiceModalProps) {
   const t = useT()
   const isNew = voice === null
   const lockedMode: Mode | null = voice
-    ? (voice.customVoice ? "train" : voice.libraryVoiceId ? "character" : voice.referenceAudioId ? "clone" : "tts")
+    ? (voice.customVoice ? "train" : voice.libraryVoiceId ? "character" : "tts")
     : null
   const charactersInCast = useMemo(
     () => new Set((existingVoices ?? []).flatMap((v) => (v.libraryVoiceId ? [v.libraryVoiceId] : []))),
@@ -226,7 +190,6 @@ function NewVoiceModalBody({
       projectProvider,
       targetLanguage,
       paletteIndex,
-      initialMode,
       rotatedGeminiVoice,
     }),
   )
@@ -262,12 +225,14 @@ function NewVoiceModalBody({
     })
   }, [targetLanguage, rotatedGeminiVoice])
 
-  // ── Clone: reuse a take already in the project ──────────────────────────────
-  const takes = useMemo(() => {
-    const all = audioSources(cells)
-    return [...all.filter((t) => t.slot === "recorded"), ...all.filter((t) => t.slot === "generated")]
-  }, [cells])
-  const [liftingKey, setLiftingKey] = useState<string | null>(null)
+  // ── Train from a line's take: that take is the first recording ────────────
+  const seedTake = useMemo(() => seedTakeId(cells, seedCellId, seedAudioId), [cells, seedCellId, seedAudioId])
+  const seedRecording = useMemo(
+    () => (seedTake && projectId
+      ? () => fetchTakeAsFile({ projectId, cell: seedTake.cell, audioId: seedTake.audioId, session: session ?? null })
+      : undefined),
+    [seedTake, projectId, session],
+  )
   const [takeError, setTakeError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [inworldSource, setInworldSource] = useState<"prebuilt" | "design">(
@@ -278,33 +243,6 @@ function NewVoiceModalBody({
       ? { voiceId: voice.voiceName, unpublished: false }
       : null,
   )
-  const applyTake = useCallback(async (take: TakeSource) => {
-    if (liftingKey) return
-    if (!projectId) { setTakeError(t("audio.newVoice.errorNoProjectContext")); return }
-    const url = slotUrl(take.cell, take.audioId)
-    const parsed = url ? parseFrontierAudioUrl(url) : null
-    if (!parsed) { setTakeError(t("audio.newVoice.errorAudioUnavailable")); return }
-    const key = takeKey(take)
-    setLiftingKey(key)
-    setTakeError(null)
-    try {
-      const getSyncToken = audioSyncTokenFetcherForSession(session ?? null)
-      const bytes = await fetchCellAudio({
-        projectId, fileId: take.cell.fileId, audioId: parsed.audioId, ext: parsed.ext, getSyncToken,
-      })
-      const blob = new Blob([bytes as BlobPart], { type: mimeForExt(parsed.ext) })
-      const referenceAudioId = buildVoiceReferenceId(parsed.ext)
-      await uploadVoiceReference({ projectId, fileId: take.cell.fileId, referenceAudioId, blob, getSyncToken })
-      update({ referenceAudioId, referenceTakeKey: key })
-    } catch (e) {
-      setTakeError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLiftingKey(null)
-    }
-  }, [liftingKey, projectId, session, update, t])
-
-  const hasReference = Boolean(draft.referenceAudioId)
-
   const handleSave = useCallback(async () => {
     if (!draft.name.trim()) {
       setTakeError(t("audio.newVoice.errorNameRequired"))
@@ -319,7 +257,7 @@ function NewVoiceModalBody({
     }
     if (mode === "character") {
       // Only reachable while editing: a new character is added straight from
-      // its card. Keep identity + name, drop every engine/clone knob.
+      // its card. Keep identity + name, drop every engine knob.
       if (!draft.libraryVoiceId) {
         setTakeError(t("audio.newVoice.errorCharacterRequired"))
         return
@@ -332,10 +270,6 @@ function NewVoiceModalBody({
         ...(draft.laneId ? { laneId: draft.laneId } : {}),
       })
       onClose()
-      return
-    }
-    if (mode === "clone" && !hasReference) {
-      setTakeError(t("audio.newVoice.errorReferenceRequired"))
       return
     }
     if (
@@ -355,20 +289,7 @@ function NewVoiceModalBody({
       return
     }
     setTakeError(null)
-    const fallback = mode === "clone" ? "Cloned voice" : "New voice"
-    let next: Voice = { ...draft, name: draft.name.trim() || fallback }
-    if (mode === "clone") {
-      // A clone rides a cloning-capable engine; fall back to the hosted default
-      // if the draft's engine (mms) can't re-voice a reference.
-      const base = draft.provider ?? projectProvider
-      const cloneProvider = providerInfo(base).supportsCloning ? base : DEFAULT_TTS_PROVIDER
-      next = normalizeVoiceForProvider(next, cloneProvider, { targetLanguage })
-    } else if (next.referenceAudioId || next.referenceTakeKey) {
-      // A TTS voice never carries a reference (e.g. one added then abandoned by
-      // switching tabs) — a lingering one would silently make it a clone.
-      delete next.referenceAudioId
-      delete next.referenceTakeKey
-    }
+    let next: Voice = { ...draft, name: draft.name.trim() || "New voice" }
     if (designing && designSelection) {
       let voiceName = designSelection.voiceId
       let designPreviewAudioId = next.designPreviewAudioId
@@ -417,7 +338,7 @@ function NewVoiceModalBody({
     onSave(next)
     onClose()
   }, [
-    mode, draft, hasReference, projectProvider, targetLanguage, languagePicker, catalogLanguages,
+    mode, draft, projectProvider, languagePicker, catalogLanguages,
     inworldSource, designSelection, projectId, fileId, session, onSave, onClose, t,
   ])
 
@@ -437,22 +358,12 @@ function NewVoiceModalBody({
           {isNew && (
             <Tabs
               value={mode}
-              onValueChange={(value) => {
-                const next = value as Mode
-                setMode(next)
-                if (next === "clone") {
-                  const current = draft.provider ?? projectProvider
-                  if (!providerInfo(current).supportsCloning) pickProvider(DEFAULT_TTS_PROVIDER)
-                }
-              }}
+              onValueChange={(value) => setMode(value as Mode)}
               className="w-full gap-0"
             >
-              <TabsList size="lg" className="grid w-full grid-cols-4" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-3" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
-                </TabsTrigger>
-                <TabsTrigger value="clone">
-                  <UserRound /> {t("audio.newVoice.tabClone")}
                 </TabsTrigger>
                 <TabsTrigger value="character">
                   <Drama /> {t("audio.newVoice.tabCharacter")}
@@ -475,6 +386,7 @@ function NewVoiceModalBody({
                 fileId={fileId}
                 session={session}
                 onStarted={(started) => { onSave(started); onClose() }}
+                seedRecording={isNew ? seedRecording : undefined}
               />
             ) : mode === "character" ? (
               <CharacterVoicePicker
@@ -508,35 +420,23 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {/* Engine — TTS offers cloud + MMS; clone only the cloud engines that
-                can re-voice a reference. Same slot on both tabs so the control
-                doesn't jump. */}
+            {/* Engine — cloud engines + on-device MMS. */}
             <Field>
               <FieldLabel>{t("audio.newVoice.engineLabel")}</FieldLabel>
               <EngineGrid
-                infos={mode === "clone" ? CLONE_ENGINES : TTS_PROVIDER_INFOS}
+                infos={TTS_PROVIDER_INFOS}
                 active={activeProvider}
                 onPick={pickProvider}
               />
             </Field>
 
-            {mode === "tts" && activeProvider === "mms" && (
+            {activeProvider === "mms" && (
               <MmsLanguageField
                 value={draft.voiceName ?? ""}
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
             )}
-            {mode === "clone" && activeProvider === "inworld" && (
-              <InworldDesignLocaleFields
-                copy="catalog"
-                language={inworldLocaleLanguage}
-                onLanguageChange={setInworldLanguage}
-                projectId={projectId}
-                fileId={fileId}
-                session={session}
-              />
-            )}
-            {mode === "tts" && activeProvider === "inworld" && (
+            {activeProvider === "inworld" && (
               <>
                 <Tabs
                   value={inworldSource}
@@ -597,7 +497,7 @@ function NewVoiceModalBody({
               <InworldVoiceSettings
                 voice={draft}
                 onChange={update}
-                previewIgnored={mode === "tts" && inworldSource === "design"}
+                previewIgnored={inworldSource === "design"}
               />
             )}
             {activeProvider === "gemini" && (
@@ -613,20 +513,6 @@ function NewVoiceModalBody({
               </Field>
             )}
 
-            {mode === "clone" && (
-              <CloneReferenceSource
-                voice={draft}
-                projectId={projectId}
-                fileId={fileId}
-                session={session}
-                onChange={update}
-                takes={takes}
-                seedCellId={seedCellId}
-                liftingKey={liftingKey}
-                takeError={takeError}
-                onApplyTake={(take) => void applyTake(take)}
-              />
-            )}
             </>
             )}
             </FieldGroup>
@@ -700,204 +586,6 @@ function NewVoiceModalBody({
         />
       )}
     </>
-  )
-}
-
-type CloneSource = "record" | "line"
-
-function CloneReferenceSource({
-  voice,
-  projectId,
-  fileId,
-  session,
-  onChange,
-  takes,
-  seedCellId,
-  liftingKey,
-  takeError,
-  onApplyTake,
-}: {
-  voice: Voice
-  projectId?: string
-  fileId?: string | null
-  session?: FrontierSession | null
-  onChange: (patch: Partial<Voice>) => void
-  takes: TakeSource[]
-  seedCellId?: string | null
-  liftingKey: string | null
-  takeError: string | null
-  onApplyTake: (take: TakeSource) => void
-}) {
-  const t = useT()
-  const seededTakePresent = seedCellId != null && takes.some((take) => take.cell.id === seedCellId)
-  const clipFilled = isRecordedCloneClip(voice)
-  const [source, setSource] = useState<CloneSource>(
-    voice.referenceTakeKey || seededTakePresent ? "line" : "record",
-  )
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const urlRef = useRef<string | null>(null)
-  const [playingKey, setPlayingKey] = useState<string | null>(null)
-  const [loadingKey, setLoadingKey] = useState<string | null>(null)
-  const chosenRowRef = useRef<HTMLDivElement | null>(null)
-  const seededTake = seedCellId != null ? takes.find((take) => take.cell.id === seedCellId) : undefined
-  const highlightKey = voice.referenceTakeKey ?? (seededTake ? takeKey(seededTake) : null)
-
-  useLayoutEffect(() => {
-    if (source !== "line" || !highlightKey) return
-    chosenRowRef.current?.scrollIntoView({ block: "center" })
-  }, [source, highlightKey])
-
-  const stopPlayback = useCallback(() => {
-    audioRef.current?.pause()
-    audioRef.current = null
-    if (urlRef.current) {
-      URL.revokeObjectURL(urlRef.current)
-      urlRef.current = null
-    }
-    setPlayingKey(null)
-  }, [])
-
-  useEffect(() => () => stopPlayback(), [stopPlayback])
-
-  const playTake = useCallback(async (take: TakeSource) => {
-    const key = takeKey(take)
-    if (playingKey === key) {
-      stopPlayback()
-      return
-    }
-    stopPlayback()
-    if (!projectId) return
-    const url = slotUrl(take.cell, take.audioId)
-    const parsed = url ? parseFrontierAudioUrl(url) : null
-    if (!parsed) return
-    setLoadingKey(key)
-    try {
-      const bytes = await fetchCellAudio({
-        projectId,
-        fileId: take.cell.fileId,
-        audioId: parsed.audioId,
-        ext: parsed.ext,
-        getSyncToken: audioSyncTokenFetcherForSession(session ?? null),
-      })
-      const src = URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(parsed.ext) }))
-      urlRef.current = src
-      const audio = new Audio(src)
-      audioRef.current = audio
-      audio.onended = () => stopPlayback()
-      await audio.play()
-      if (audioRef.current !== audio) {
-        audio.pause()
-        return
-      }
-      setPlayingKey(key)
-    } catch {
-      stopPlayback()
-    } finally {
-      setLoadingKey((cur) => (cur === key ? null : cur))
-    }
-  }, [playingKey, stopPlayback, projectId, session])
-
-  return (
-    <Tabs
-      value={source}
-      onValueChange={(value) => setSource(value as CloneSource)}
-      className="gap-2"
-    >
-      <TabsList aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
-        <TabsTrigger value="record" className="pe-3">
-          {t("audio.newVoice.referenceLabel")}
-          {clipFilled && (
-            <span aria-hidden className="absolute end-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-emerald-500" />
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="line" className="pe-3">
-          {t("audio.newVoice.tabFromLine")}
-          {voice.referenceTakeKey && (
-            <span aria-hidden className="absolute end-2 top-1/2 size-1.5 -translate-y-1/2 rounded-full bg-emerald-500" />
-          )}
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="record" className="space-y-2">
-        <VoiceCloneSection
-          voice={voice}
-          projectId={projectId}
-          fileId={fileId}
-          session={session}
-          onChange={onChange}
-        />
-      </TabsContent>
-      <TabsContent value="line" className="space-y-2">
-        {takes.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("audio.newVoice.fromLineEmpty")}</p>
-        ) : (
-          <>
-            <div className="max-h-40 space-y-1 overflow-auto rounded-lg border bg-muted/20 p-1">
-              {takes.map((take) => {
-                const key = takeKey(take)
-                const chosen = key === highlightKey
-                return (
-                  <div
-                    key={key}
-                    ref={chosen ? chosenRowRef : undefined}
-                    className="flex w-full items-stretch rounded-md hover:bg-accent/40"
-                  >
-                    <AppTooltip content={playingKey === key ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        disabled={Boolean(liftingKey) || !projectId}
-                        aria-label={playingKey === key ? t("common.stop") : t("audio.takesStrip.playTakeTooltip")}
-                        className="ms-1.5 self-center"
-                        onClick={() => void playTake(take)}
-                      >
-                        {loadingKey === key ? (
-                          <Spinner className="size-3" />
-                        ) : playingKey === key ? (
-                          <Pause className="h-3.5 w-3.5" />
-                        ) : (
-                          <Play className="h-3.5 w-3.5" />
-                        )}
-                      </Button>
-                    </AppTooltip>
-                    <button
-                      type="button"
-                      onClick={() => onApplyTake(take)}
-                      disabled={Boolean(liftingKey) && liftingKey !== key}
-                      aria-pressed={chosen}
-                      className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-2.5 text-start text-xs disabled:opacity-50"
-                    >
-                      <span className="flex w-3.5 shrink-0 justify-center">
-                        {take.slot === "generated" && (
-                          <AppTooltip content={t("audio.newVoice.takeGenerated")}>
-                            <span className="inline-flex" aria-label={t("audio.newVoice.takeGenerated")}>
-                              <Sparkles className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                            </span>
-                          </AppTooltip>
-                        )}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{cellSnippet(take.cell)}</span>
-                      <span className="flex w-3.5 shrink-0 justify-center">
-                        {liftingKey === key ? (
-                          <Spinner className="size-3.5" aria-label={t("audio.newVoice.liftingTake")} />
-                        ) : chosen ? (
-                          <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                        ) : null}
-                      </span>
-                    </button>
-                  </div>
-                )
-              })}
-            </div>
-            {takeError && (
-              <p className="select-text cursor-text break-words rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-                {takeError}
-              </p>
-            )}
-          </>
-        )}
-      </TabsContent>
-    </Tabs>
   )
 }
 

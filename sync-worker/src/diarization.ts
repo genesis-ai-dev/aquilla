@@ -8,7 +8,7 @@
 //   GET  /api/v1/diarization/audio     — token-in-URL; Modal fetches the clip
 //   POST /api/v1/diarization/callback  — shared-secret; Modal posts turns back
 //
-// The browser never holds the Modal secret (mirrors voice-convert/Seed-VC). The
+// The browser never holds the Modal secret (mirrors voice-convert). The
 // flow is async because an episode takes minutes: `start` spawns the Modal job
 // and returns a jobId; Modal POSTs the turns to `callback` when done; the client
 // polls `status`. Modal fetches the audio from `audio` (token-gated URL) — it

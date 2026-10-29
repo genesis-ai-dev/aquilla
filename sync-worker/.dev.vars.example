@@ -37,24 +37,19 @@ ALLOW_UNAUTHENTICATED="true"
 # DIARIZATION_PUBLIC_BASE=""
 # DIARIZATION_SHARED_SECRET=""
 
-# Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS / clone engine.
+# Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS engine.
 # Paste the Portal API key as-is (the worker adds the Basic prefix).
 # Create a read-write key: https://platform.inworld.ai/  (or `inworld workspace add-key`)
-# Instant Voice Cloning needs write access on `voices`.
+# Voice Design (designing + publishing a voice) needs write access on `voices`.
 # Docs: docs/INWORLD-TTS.md
 INWORLD_API_KEY=""
 # INWORLD_API_BASE="https://api.inworld.ai"
 # INWORLD_TTS_MODEL="inworld-tts-2-flash"
 # INWORLD_DEFAULT_VOICE="Dennis"
 
-# Seed-VC voice conversion (Gemini/local clones, and "Change voice" on existing
-# takes). Either the Modal deploy's /convert URL, or the local server started by
-# `pnpm seed-vc:local`, which reads SEED_VC_TOKEN from this file:
-# SEED_VC_URL="http://127.0.0.1:8791/convert"
-# SEED_VC_TOKEN=""
-
-# Library voices (Change voice into a pre-built character voice): the
-# infra/modal/voice_forge.py deploy's /convert URL and its shared secret.
+# Voice conversion ("Change voice" into a library character voice or a trained
+# custom voice) — the only speech-to-speech path: the infra/modal/voice_forge.py
+# deploy's /convert URL and its shared secret.
 # VOICE_FORGE_URL="https://<workspace>--voice-forge-web.modal.run/convert"
 # VOICE_FORGE_TOKEN=""
 

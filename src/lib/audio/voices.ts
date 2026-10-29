@@ -17,7 +17,7 @@ export const DEFAULT_PROMPT_TEMPLATE = [
 /**
  * Built-in voices the user starts with. Just the Narrator — the project's
  * default speaker. Everything else is a character the user crafts (a preset
- * engine voice, or a cloned reference), so the cast starts clean instead of
+ * engine voice, a character voice or a trained voice), so the cast starts clean instead of
  * pre-stuffed with stock moods. Editable in place.
  *
  * Round 5 (AQU-646): deliberately NO `provider` — the Narrator follows the
@@ -65,11 +65,6 @@ export function upsertVoice(
 export function findVoice(settings: ProjectTtsSettings | undefined, voiceId: string | undefined): Voice | undefined {
   if (!voiceId) return undefined
   return getVoiceLibrary(settings).find((v) => v.id === voiceId)
-}
-
-/** Recorded/uploaded clone clip — not a take reused from a line. */
-export function isRecordedCloneClip(voice: Pick<Voice, "referenceAudioId" | "referenceTakeKey">): boolean {
-  return Boolean(voice.referenceAudioId) && !voice.referenceTakeKey
 }
 
 /**

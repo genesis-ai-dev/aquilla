@@ -151,7 +151,7 @@ export function InworldDesignLocaleFields({
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
-  /** Voice Design vs prebuilt/clone catalog — same picker, different hints. */
+  /** Voice Design vs prebuilt catalog — same picker, different hints. */
   copy?: "design" | "catalog"
   /** Prebuilt: only languages Inworld already has SYSTEM speakers for. */
   voicesOnly?: boolean

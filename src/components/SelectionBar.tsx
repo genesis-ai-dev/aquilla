@@ -61,8 +61,6 @@ const PARTIAL_REFS_SHOWN = 8
 const VOICE_TOGETHER_ENGINE_BODY: Partial<Record<ErrorCategory, MessageKey>> = {
   "hosted-tts-not-configured": "editor.selection.voiceTogetherInworldNotConfigured",
   "hosted-tts-failed": "editor.selection.voiceTogetherInworldFailed",
-  "seed-vc-not-configured": "editor.selection.voiceTogetherSeedVcNotConfigured",
-  "seed-vc-failed": "editor.selection.voiceTogetherSeedVcFailed",
 }
 
 interface Props {

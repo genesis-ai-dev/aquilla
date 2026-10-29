@@ -9,16 +9,16 @@ describe("RoleLockTooltip", () => {
   it("says which role may edit, on click", async () => {
     renderWithTooltips(<RoleLockTooltip reason="role" />)
     await expectClickNote(
-      screen.getByRole("button", { name: "Editing requires Maintainer role (600) or above." }),
-      "Editing requires Maintainer role (600) or above.",
+      screen.getByRole("button", { name: "Editing requires the Maintainer role or above." }),
+      "Editing requires the Maintainer role or above.",
     )
   })
 
   it("names the lower floor a style rule really needs", async () => {
     renderWithTooltips(<RoleLockTooltip reason="role" requiredRole="contributor" />)
     await expectClickNote(
-      screen.getByRole("button", { name: "This requires Contributor role (400) or above." }),
-      "This requires Contributor role (400) or above.",
+      screen.getByRole("button", { name: "This requires the Contributor role or above." }),
+      "This requires the Contributor role or above.",
     )
   })
 

@@ -405,19 +405,22 @@ export const org = defineNamespace({
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
     "org.teamDetail.roleDescriptionViewer":
-      "Viewer (100) — read-only access. No edit or management actions. Org membership at this level does not open projects until the person is added to a project or team.",
+      "Viewer — read-only access. No edit or management actions. Org membership at this level does " +
+      "not open projects until the person is added to a project or team.",
     "org.teamDetail.roleDescriptionCommenter":
-      "Commenter (200) — can read and leave comments. Cannot edit content.",
+      "Commenter — can read and leave comments. Cannot edit content.",
     "org.teamDetail.roleDescriptionReviewer":
-      "Reviewer (300) — can read, comment, and review. Cannot make direct edits.",
+      "Reviewer — can read, comment, and review. Cannot make direct edits.",
     "org.teamDetail.roleDescriptionContributor":
-      "Contributor (400) — can edit project content. Maximum level grantable via share link.",
+      "Contributor — can edit project content. Maximum level grantable via share link.",
     "org.teamDetail.roleDescriptionProjectLead":
-      "Project Lead (500) — can add members to projects, mint share-link invites, and lead project work.",
+      "Project lead — can add members to projects, mint share-link invites, and lead project work.",
     "org.teamDetail.roleDescriptionMaintainer":
-      "Maintainer (600) — can create/manage teams, rename the org, set project deadlines, and remove project members.",
+      "Maintainer — can create/manage teams, rename the org, set project deadlines, and remove " +
+      "project members.",
     "org.teamDetail.roleDescriptionOwner":
-      "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+      "Owner — full control: add/remove org members, archive/restore projects, and all maintainer " +
+      "actions.",
     "org.teamDetail.lockedOrgRoleUnknownDescription": "This member's org-level role is unknown.",
     "org.teamDetail.lockedOrgRoleTooltip":
       "{description} This permission is set at the org level and can only be changed by an org owner.",
@@ -691,10 +694,10 @@ export const org = defineNamespace({
       "keep deliverables with leads. Client-side formats (CSV, TSV) operate on " +
       "already-loaded cells and can't be enforced here.",
     "org.exportSettings.ownersOnlyPolicyNote": "Only org owners can change the export permission policy.",
-    "org.exportSettings.roleOptionPlain": "{role} ({level})",
-    "org.exportSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
-    "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
-    "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
+    "org.exportSettings.roleOptionPlain": "{role}",
+    "org.exportSettings.roleOptionViewer": "{role} — anyone with project access",
+    "org.exportSettings.roleOptionMaintainer": "{role} — default",
+    "org.exportSettings.roleOptionOwner": "{role} — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
 
     // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
@@ -704,8 +707,8 @@ export const org = defineNamespace({
       "download everything as one archive. Owners always can; each project's " +
       "export permission still applies to what ends up in the archive.",
     "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
-    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
-    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.roleOptionViewer": "{role} — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} — default",
     "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
@@ -2455,11 +2458,9 @@ export const org = defineNamespace({
       },
       "org.exportSettings.roleOptionPlain": {
         description:
-          "One entry in the export-permission dropdown, for the two roles that need no further explanation (contributor and project lead). Just the role's own name followed by its numeric level in brackets — the level is shown so administrators can see the ladder these roles sit on.",
+          "One entry in the export-permission dropdown, for the two roles that need no further explanation (contributor and project lead). Just the role's own name, with no level number (AQU-2261).",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionViewer": {
@@ -2467,8 +2468,6 @@ export const org = defineNamespace({
           "The lowest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone who can open the project export from it — i.e. the most permissive setting.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionMaintainer": {
@@ -2476,8 +2475,6 @@ export const org = defineNamespace({
           "Entry in the export-permission dropdown for the level a new organization starts on. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionOwner": {
@@ -2485,8 +2482,6 @@ export const org = defineNamespace({
           "The highest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying this choice narrows exporting to the fewest people — the opposite end of the ladder from org.exportSettings.roleOptionViewer.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.orgSettings.noSessionError": {
@@ -2517,8 +2512,6 @@ export const org = defineNamespace({
           "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.egressSettings.roleOptionOwner": {
@@ -2526,8 +2519,6 @@ export const org = defineNamespace({
           "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.egressSettings.saveFailedFallback": {

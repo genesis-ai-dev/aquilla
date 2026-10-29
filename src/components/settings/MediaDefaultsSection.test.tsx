@@ -73,7 +73,7 @@ describe("MediaDefaultsSection", () => {
     const settings = orgSettings()
     render(<MediaDefaultsSection orgSettings={settings} canEdit />)
     await userEvent.click(tierPicker())
-    await userEvent.click(await screen.findByRole("option", { name: "Contributor (400)" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Contributor" }))
     expect(settings.patch).toHaveBeenCalledExactlyOnceWith({ cellEditingFloor: "contributor" })
   })
 

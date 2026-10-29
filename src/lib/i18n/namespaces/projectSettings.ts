@@ -385,11 +385,11 @@ export const projectSettings = defineNamespace({
     // can edit") and are now the product's standard ladder, so a project admin
     // reads the same names here as on the Members panel.
     "projectSettings.cellEditing.optionNone": "No one — default",
-    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
-    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
-    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
-    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
+    "projectSettings.cellEditing.optionCommenter": "Commenter",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer",
+    "projectSettings.cellEditing.optionContributor": "Contributor",
+    "projectSettings.cellEditing.optionProjectLead": "Project lead",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.examplesRetrieved": "examples retrieved",
@@ -663,8 +663,8 @@ export const projectSettings = defineNamespace({
     // of minting duplicates. "(default)" is the only project-settings-owned text.
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
-      "Only users with at least this role can open a harmonization sweep on this " +
-      "project. The floor cannot be lowered below Project Lead (hard floor per spec).",
+      "Only users with at least this role can open a harmonization sweep on this project. The floor " +
+      "cannot be lowered below Project lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",

@@ -31,7 +31,7 @@ export function EgressAccessSection({ orgSettings, canEdit }: EgressAccessSectio
   const [error, setError] = useState<string | null>(null)
   const roleOption = (level: number, key: MessageKey) => ({
     level,
-    label: t(key, { role: resolveRoleName(t, level), level: String(level) }),
+    label: t(key, { role: resolveRoleName(t, level) }),
   })
   // Reuse the export-permission dropdown's entry shapes; the ends of the
   // ladder swap notes — OWNER is this floor's default, VIEWER its widest.

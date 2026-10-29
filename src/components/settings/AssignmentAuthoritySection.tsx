@@ -74,7 +74,7 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
           <Select
             items={ALL_ROLE_LEVELS.map((level) => ({
               value: String(level),
-              label: `${resolveRoleName(t, level)} (${level})`,
+              label: resolveRoleName(t, level),
             }))}
             value={String(assignmentMinRole)}
             onValueChange={(value) => {
@@ -93,7 +93,7 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               <SelectGroup>
                 {ALL_ROLE_LEVELS.map((level) => (
                   <SelectItem key={level} value={String(level)}>
-                    {resolveRoleName(t, level)} ({level})
+                    {resolveRoleName(t, level)}
                   </SelectItem>
                 ))}
               </SelectGroup>

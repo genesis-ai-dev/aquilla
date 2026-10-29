@@ -357,11 +357,11 @@ export const settings = defineNamespace({
     // are the fuller sentences shown once the dropdown is open. The role name +
     // numeric level are fixed per option (not a runtime placeholder) — same
     // treatment as settings.termbase.option* below.
-    "settings.rosterProgress.optionViewer": "Viewer (100) — anyone with access",
-    "settings.rosterProgress.optionContributor": "Contributor (400)",
-    "settings.rosterProgress.optionProjectLead": "Project lead (500)",
-    "settings.rosterProgress.optionMaintainer": "Maintainer (600) — default",
-    "settings.rosterProgress.optionOwner": "Owner (700) — most restrictive",
+    "settings.rosterProgress.optionViewer": "Viewer — anyone with access",
+    "settings.rosterProgress.optionContributor": "Contributor",
+    "settings.rosterProgress.optionProjectLead": "Project lead",
+    "settings.rosterProgress.optionMaintainer": "Maintainer — default",
+    "settings.rosterProgress.optionOwner": "Owner — most restrictive",
 
     // ── TermbaseEditSection (org settings → security) ──
     "settings.termbase.label": "Who can manage terminology",
@@ -372,9 +372,9 @@ export const settings = defineNamespace({
       "requires Maintainer.",
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
-    "settings.termbase.optionContributor": "Contributor (400) — translators manage terms",
-    "settings.termbase.optionProjectLead": "Project lead (500) — default",
-    "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.termbase.optionContributor": "Contributor — translators manage terms",
+    "settings.termbase.optionProjectLead": "Project lead — default",
+    "settings.termbase.optionMaintainer": "Maintainer — most restrictive",
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
     "settings.languageEdit.label": "Who can change project languages",
@@ -385,8 +385,8 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead (500) — default. Project managers fix their own languages",
-    "settings.languageEdit.optionMaintainer": "Maintainer (600) — only maintainers change languages",
+      "Project lead — default. Project managers fix their own languages",
+    "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
 
@@ -406,18 +406,16 @@ export const settings = defineNamespace({
       "this is set to.",
     // Open-dropdown option text for both comment floors; see the
     // roster/progress options above for why the level number is baked in.
-    "settings.commentPermissions.createOptionCommenter": "Commenter (200) — default",
-    "settings.commentPermissions.createOptionReviewer": "Reviewer (300) — reviewers and above",
-    "settings.commentPermissions.createOptionContributor":
-      "Contributor (400) — translators and above",
-    "settings.commentPermissions.createOptionProjectLead": "Project lead (500) — leads and above",
-    "settings.commentPermissions.createOptionMaintainer": "Maintainer (600) — most restrictive",
-    "settings.commentPermissions.resolveOptionCommenter":
-      "Commenter (200) — anyone who can comment",
-    "settings.commentPermissions.resolveOptionReviewer": "Reviewer (300) — reviewers and above",
-    "settings.commentPermissions.resolveOptionContributor": "Contributor (400) — default",
-    "settings.commentPermissions.resolveOptionProjectLead": "Project lead (500) — leads and above",
-    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.commentPermissions.createOptionCommenter": "Commenter — default",
+    "settings.commentPermissions.createOptionReviewer": "Reviewer — reviewers and above",
+    "settings.commentPermissions.createOptionContributor": "Contributor — translators and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.createOptionMaintainer": "Maintainer — most restrictive",
+    "settings.commentPermissions.resolveOptionCommenter": "Commenter — anyone who can comment",
+    "settings.commentPermissions.resolveOptionReviewer": "Reviewer — reviewers and above",
+    "settings.commentPermissions.resolveOptionContributor": "Contributor — default",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
     "settings.usage.historyLabel": "7-day audio history",

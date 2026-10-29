@@ -31,7 +31,7 @@ export function ExportPermissionsSection({ orgSettings, canEdit }: ExportPermiss
   const displayed = exportMinRole ?? ROLE.MAINTAINER
   const roleOption = (level: number, key: MessageKey) => ({
     level,
-    label: t(key, { role: resolveRoleName(t, level), level: String(level) }),
+    label: t(key, { role: resolveRoleName(t, level) }),
   })
   const roleOptions = [
     roleOption(ROLE.VIEWER, "org.exportSettings.roleOptionViewer"),

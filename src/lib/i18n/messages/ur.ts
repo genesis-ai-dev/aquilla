@@ -5531,7 +5531,7 @@ export const ur: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "اپنا: {endpoint}",
   "projectSettings.advancedLlm.notSet": "سیٹ نہیں",
   "projectSettings.advancedLlm.providerLabel": "فراہم کنندہ",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (تجویز کردہ) — آپ کے Aquilla لاگ ان سے {domain} بلاتا ہے۔ شروع سے کام کرتا ہے۔",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (تجویز کردہ) — آپ کا Aquilla لاگ ان استعمال کرتا ہے۔ شروع سے کام کرتا ہے۔",
   "projectSettings.advancedLlm.providerCustomName": "اپنا اختتامیہ",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost، خود میزبان، یا تیسرا فریق OpenAI-مطابق API (OpenRouter، OpenAI، Groq، Together، ...)۔ اپنی کلید لائیں۔",
   "projectSettings.advancedLlm.presetLabel": "فراہم کنندہ پیش سیٹ",

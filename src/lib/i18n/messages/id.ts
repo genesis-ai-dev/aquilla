@@ -4740,7 +4740,7 @@ export const id: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Khusus: {endpoint}",
   "projectSettings.advancedLlm.notSet": "belum diatur",
   "projectSettings.advancedLlm.providerLabel": "Penyedia",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (disarankan) — memanggil {domain} memakai login Aquilla Anda. Langsung bekerja tanpa penyiapan.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (disarankan) — memakai login Aquilla Anda. Langsung bekerja tanpa penyiapan.",
   "projectSettings.advancedLlm.providerCustomName": "Endpoint khusus",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, swakelola, atau API pihak ketiga yang kompatibel dengan OpenAI (OpenRouter, OpenAI, Groq, Together, ...). Pakai kunci Anda sendiri.",
   "projectSettings.advancedLlm.presetLabel": "Prasetel penyedia",

@@ -5402,7 +5402,7 @@ export const es: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Personalizado: {endpoint}",
   "projectSettings.advancedLlm.notSet": "sin definir",
   "projectSettings.advancedLlm.providerLabel": "Proveedor",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (recomendado) — llama a {domain} con tu inicio de sesión de Aquilla. Funciona sin configuración adicional.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (recomendado) — usa tu inicio de sesión de Aquilla. Funciona sin configuración adicional.",
   "projectSettings.advancedLlm.providerCustomName": "Punto de conexión personalizado",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, autohospedado o una API de terceros compatible con OpenAI (OpenRouter, OpenAI, Groq, Together, ...). Trae tu propia clave.",
   "projectSettings.advancedLlm.presetLabel": "Preajuste del proveedor",

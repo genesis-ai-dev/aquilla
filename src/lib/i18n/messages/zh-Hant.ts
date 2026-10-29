@@ -4658,7 +4658,7 @@ export const zh_Hant: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "自訂：{endpoint}",
   "projectSettings.advancedLlm.notSet": "尚未設定",
   "projectSettings.advancedLlm.providerLabel": "服務供應商",
-  "projectSettings.advancedLlm.providerFrontier": "{name}（建議）— 使用您的 Aquilla 登入身分呼叫 {domain}。開箱即用。",
+  "projectSettings.advancedLlm.providerFrontier": "{name}（建議）— 使用您的 Aquilla 登入身分。開箱即用。",
   "projectSettings.advancedLlm.providerCustomName": "自訂端點",
   "projectSettings.advancedLlm.providerCustom": "{name} — 本機、自行架設，或任何相容於 OpenAI 的第三方 API（OpenRouter、OpenAI、Groq、Together 等）。需自備金鑰。",
   "projectSettings.advancedLlm.presetLabel": "服務供應商預設組合",

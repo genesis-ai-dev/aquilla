@@ -5535,7 +5535,7 @@ export const pa: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "ਕਸਟਮ: {endpoint}",
   "projectSettings.advancedLlm.notSet": "ਸੈੱਟ ਨਹੀਂ",
   "projectSettings.advancedLlm.providerLabel": "ਪ੍ਰਦਾਤਾ",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (ਸਿਫ਼ਾਰਸ਼ੀ) — ਤੁਹਾਡੇ Aquilla ਲੌਗਇਨ ਨਾਲ {domain} ਨੂੰ ਕਾਲ ਕਰਦਾ ਹੈ. ਬਿਨਾਂ ਸੈੱਟਅੱਪ ਕੰਮ ਕਰਦਾ ਹੈ.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (ਸਿਫ਼ਾਰਸ਼ੀ) — ਤੁਹਾਡਾ Aquilla ਲੌਗਇਨ ਵਰਤਦਾ ਹੈ. ਬਿਨਾਂ ਸੈੱਟਅੱਪ ਕੰਮ ਕਰਦਾ ਹੈ.",
   "projectSettings.advancedLlm.providerCustomName": "ਕਸਟਮ ਐਂਡਪੌਇੰਟ",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, ਸਵੈ-ਹੋਸਟ, ਜਾਂ ਤੀਜੀ-ਧਿਰ OpenAI-ਅਨੁਕੂਲ API (OpenRouter, OpenAI, Groq, Together, ...). ਆਪਣੀ ਕੁੰਜੀ ਲਿਆਓ.",
   "projectSettings.advancedLlm.presetLabel": "ਪ੍ਰਦਾਤਾ ਪ੍ਰੀਸੈੱਟ",

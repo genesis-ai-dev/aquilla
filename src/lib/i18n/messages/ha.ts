@@ -5542,7 +5542,7 @@ export const ha: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Na musamman: {endpoint}",
   "projectSettings.advancedLlm.notSet": "ba a saita ba",
   "projectSettings.advancedLlm.providerLabel": "Mai bayarwa",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (an ba da shawara) — yana kira {domain} ta amfani da shigar Aquilla ɗinku. Yana aiki kai tsaye.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (an ba da shawara) — yana amfani da shigar Aquilla ɗinku. Yana aiki kai tsaye.",
   "projectSettings.advancedLlm.providerCustomName": "Ƙarshe na musamman",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, na gida, ko API da ta dace da OpenAI ta wani (OpenRouter, OpenAI, Groq, Together, ...). Ku kawo maɓallinku.",
   "projectSettings.advancedLlm.presetLabel": "Saitin mai bayarwa",

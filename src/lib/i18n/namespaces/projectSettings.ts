@@ -575,7 +575,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.providerLabel": "Provider",
     "projectSettings.advancedLlm.providerFrontierName": "Aquilla",
     "projectSettings.advancedLlm.providerFrontier":
-      "{name} (recommended) — calls {domain} using your Aquilla login. Works out of the box.",
+      "{name} (recommended) — uses your Aquilla login. Works out of the box.",
     "projectSettings.advancedLlm.providerCustomName": "Custom endpoint",
     "projectSettings.advancedLlm.providerCustom":
       "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API " +
@@ -2018,7 +2018,6 @@ export const projectSettings = defineNamespace({
         description: "Radio-option description for the Aquilla (recommended, default) completion provider.",
         placeholders: {
           name: "The bold provider name, already translated via projectSettings.advancedLlm.providerFrontierName and wrapped in <strong> by the caller.",
-          domain: "The literal, untranslated hostname 'api.frontierrnd.com', styled as inline code by the caller — insert exactly as given.",
         },
       },
       "projectSettings.advancedLlm.providerCustom": {

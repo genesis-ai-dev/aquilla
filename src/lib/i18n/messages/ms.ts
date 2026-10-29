@@ -4623,7 +4623,7 @@ export const ms: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Tersuai: {endpoint}",
   "projectSettings.advancedLlm.notSet": "tidak ditetapkan",
   "projectSettings.advancedLlm.providerLabel": "Pembekal",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (disyorkan) — memanggil {domain} menggunakan log masuk Aquilla anda. Berfungsi terus tanpa persediaan.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (disyorkan) — menggunakan log masuk Aquilla anda. Berfungsi terus tanpa persediaan.",
   "projectSettings.advancedLlm.providerCustomName": "Titik akhir tersuai",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, dihoskan sendiri, atau API serasi OpenAI pihak ketiga (OpenRouter, OpenAI, Groq, Together, ...). Bawa kunci anda sendiri.",
   "projectSettings.advancedLlm.presetLabel": "Praset pembekal",

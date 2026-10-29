@@ -4642,7 +4642,7 @@ export const th: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "กำหนดเอง: {endpoint}",
   "projectSettings.advancedLlm.notSet": "ยังไม่ได้ตั้งค่า",
   "projectSettings.advancedLlm.providerLabel": "ผู้ให้บริการ",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (แนะนำ) — เรียกใช้ {domain} โดยใช้การเข้าสู่ระบบ Aquilla ของคุณ ใช้งานได้ทันทีโดยไม่ต้องตั้งค่าเพิ่มเติม",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (แนะนำ) — ใช้การเข้าสู่ระบบ Aquilla ของคุณ ใช้งานได้ทันทีโดยไม่ต้องตั้งค่าเพิ่มเติม",
   "projectSettings.advancedLlm.providerCustomName": "เอนด์พอยต์กำหนดเอง",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, โฮสต์เอง หรือ API ที่รองรับ OpenAI จากบุคคลที่สาม (OpenRouter, OpenAI, Groq, Together, ...) ใช้คีย์ของคุณเอง",
   "projectSettings.advancedLlm.presetLabel": "พรีเซ็ตผู้ให้บริการ",

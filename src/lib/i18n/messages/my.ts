@@ -4640,7 +4640,7 @@ export const my: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "စိတ်ကြိုက်: {endpoint}",
   "projectSettings.advancedLlm.notSet": "သတ်မှတ်မထားပါ",
   "projectSettings.advancedLlm.providerLabel": "ပံ့ပိုးပေးသူ",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (အကြံပြုထားသည်) — သင့် Aquilla လော့ဂ်အင်ကို အသုံးပြု၍ {domain} ကို ခေါ်ဆိုသည်။ ချက်ချင်းအသုံးပြုနိုင်သည်။",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (အကြံပြုထားသည်) — သင့် Aquilla လော့ဂ်အင်ကို အသုံးပြုသည်။ ချက်ချင်းအသုံးပြုနိုင်သည်။",
   "projectSettings.advancedLlm.providerCustomName": "စိတ်ကြိုက် အင်းပွိုင့်",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost၊ ကိုယ်ပိုင်လက်ခံစက်၊ သို့မဟုတ် တတိယပါတီ OpenAI-ဟန်တူ API (OpenRouter, OpenAI, Groq, Together, ...)။ သင့်ကိုယ်ပိုင် key ကို ယူဆောင်လာပါ။",
   "projectSettings.advancedLlm.presetLabel": "ပံ့ပိုးပေးသူ ကြိုတင်သတ်မှတ်ချက်",

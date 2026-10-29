@@ -5430,7 +5430,7 @@ export const hi: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "कस्टम: {endpoint}",
   "projectSettings.advancedLlm.notSet": "सेट नहीं",
   "projectSettings.advancedLlm.providerLabel": "प्रदाता",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (अनुशंसित) — आपके Aquilla लॉगिन से {domain} कॉल करता है। तुरंत काम करता है।",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (अनुशंसित) — आपके Aquilla लॉगिन का उपयोग करता है। तुरंत काम करता है।",
   "projectSettings.advancedLlm.providerCustomName": "कस्टम एंडपॉइंट",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, स्व-होस्टेड, या तृतीय-पक्ष OpenAI-संगत API (OpenRouter, OpenAI, Groq, Together, ...)। अपनी कुंजी लाएँ।",
   "projectSettings.advancedLlm.presetLabel": "प्रदाता प्रीसेट",

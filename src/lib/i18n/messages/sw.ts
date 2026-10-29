@@ -5538,7 +5538,7 @@ export const sw: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Maalum: {endpoint}",
   "projectSettings.advancedLlm.notSet": "haijawekwa",
   "projectSettings.advancedLlm.providerLabel": "Mtoa huduma",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (inapendekezwa) — inawasiliana na {domain} kwa kuingia kwako kwa Aquilla. Inafanya kazi bila usanidi zaidi.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (inapendekezwa) — inatumia kuingia kwako kwa Aquilla. Inafanya kazi bila usanidi zaidi.",
   "projectSettings.advancedLlm.providerCustomName": "Ncha maalum",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, ya kujipangisha, au API ya mtu mwingine inayoendana na OpenAI (OpenRouter, OpenAI, Groq, Together, ...). Leta ufunguo wako mwenyewe.",
   "projectSettings.advancedLlm.presetLabel": "Mpangilio tayari wa mtoa huduma",

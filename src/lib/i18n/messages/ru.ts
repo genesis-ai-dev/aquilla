@@ -4776,7 +4776,7 @@ export const ru: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "Свой адрес: {endpoint}",
   "projectSettings.advancedLlm.notSet": "не задано",
   "projectSettings.advancedLlm.providerLabel": "Поставщик",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (рекомендуется) — обращается к {domain} с вашей учётной записью Aquilla. Работает без настройки.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (рекомендуется) — использует вашу учётную запись Aquilla. Работает без настройки.",
   "projectSettings.advancedLlm.providerCustomName": "Свой адрес",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, собственный сервер или сторонний API, совместимый с OpenAI (OpenRouter, OpenAI, Groq, Together, ...). Нужен свой ключ.",
   "projectSettings.advancedLlm.presetLabel": "Готовая настройка поставщика",

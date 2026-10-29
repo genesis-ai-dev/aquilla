@@ -5550,7 +5550,7 @@ export const bn: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "কাস্টম: {endpoint}",
   "projectSettings.advancedLlm.notSet": "সেট নেই",
   "projectSettings.advancedLlm.providerLabel": "সরবরাহকারী",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (সুপারিশ) — আপনার Aquilla লগইন দিয়ে {domain} ডাকে। বাক্স থেকেই কাজ করে।",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (সুপারিশ) — আপনার Aquilla লগইন ব্যবহার করে। বাক্স থেকেই কাজ করে।",
   "projectSettings.advancedLlm.providerCustomName": "কাস্টম এন্ডপয়েন্ট",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost, নিজে-হোস্ট, অথবা একটি তৃতীয়-পক্ষের OpenAI-সামঞ্জস্য API (OpenRouter, OpenAI, Groq, Together, ...)। নিজের কী আনুন।",
   "projectSettings.advancedLlm.presetLabel": "সরবরাহকারী প্রিসেট",

@@ -2685,11 +2685,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>

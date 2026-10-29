@@ -5544,7 +5544,7 @@ export const am: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "ብጁ፦ {endpoint}",
   "projectSettings.advancedLlm.notSet": "አልተቀናበረም",
   "projectSettings.advancedLlm.providerLabel": "አቅራቢ",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (ይመከራል) — የAquilla መግቢያዎን ተጠቅሞ {domain}ን ይጠራል። ወዲያውኑ ይሰራል።",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (ይመከራል) — የAquilla መግቢያዎን ይጠቀማል። ወዲያውኑ ይሰራል።",
   "projectSettings.advancedLlm.providerCustomName": "ብጁ የመጨረሻ ነጥብ",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost፣ እራስዎ ያስተናገዱት፣ ወይም ከOpenAI ጋር የሚስማማ የሶስተኛ ወገን API (OpenRouter፣ OpenAI፣ Groq፣ Together፣ ...)። የራስዎን ቁልፍ ይዘው ይምጡ።",
   "projectSettings.advancedLlm.presetLabel": "የአቅራቢ ቅድመ-ቅንብር",

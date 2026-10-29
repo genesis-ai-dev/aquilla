@@ -4650,7 +4650,7 @@ export const ar: Catalog = {
   "projectSettings.advancedLlm.customEndpointStatus": "مخصص: {endpoint}",
   "projectSettings.advancedLlm.notSet": "غير محدَّد",
   "projectSettings.advancedLlm.providerLabel": "المزوّد",
-  "projectSettings.advancedLlm.providerFrontier": "{name} (موصى به) — يتصل بـ {domain} باستخدام تسجيل دخولك إلى Aquilla. يعمل مباشرةً دون إعداد.",
+  "projectSettings.advancedLlm.providerFrontier": "{name} (موصى به) — يستخدم تسجيل دخولك إلى Aquilla. يعمل مباشرةً دون إعداد.",
   "projectSettings.advancedLlm.providerCustomName": "نقطة نهاية مخصصة",
   "projectSettings.advancedLlm.providerCustom": "{name} — localhost، أو استضافة ذاتية، أو واجهة برمجة تطبيقات متوافقة مع OpenAI من جهة خارجية (OpenRouter، OpenAI، Groq، Together، ...). أحضر مفتاحك الخاص.",
   "projectSettings.advancedLlm.presetLabel": "الإعداد المسبق للمزوّد",

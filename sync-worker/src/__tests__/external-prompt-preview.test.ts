@@ -5,7 +5,8 @@
 // The acceptance criteria this suite encodes:
 //   1. an agent gets the assembled prompt AND labeled parts for a cell
 //   2. a term added through the terminology path then appears in that cell's
-//      preview (observable cause→effect)
+//      preview (observable cause→effect) — and only when the cell's source
+//      actually bears it (AQU-2209)
 //   3. an example added to the project's validated corpus appears in previews
 //      for similar cells
 //   4. the preview MATCHES what the copilot actually sends — asserted by
@@ -45,6 +46,7 @@ interface PreviewBody {
     base: string
     brief: string
     rules: string
+    styleRules: string
     injectedTerms: {
       conceptId: string
       sourceTerm: string
@@ -341,6 +343,41 @@ describe("external prompt preview", () => {
     })
   })
 
+  describe("style rules (AQU-2195)", () => {
+    beforeEach(async () => {
+      await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "God saw the light" })
+    })
+
+    async function styleRule(id: string, status: string, instruction: string, enabled = true) {
+      await testDb.pg.query(
+        `INSERT INTO style_rules (id, project_id, instruction, status, enabled) VALUES ($1, 'proj-a', $2, $3, $4)`,
+        [id, instruction, status, enabled],
+      )
+    }
+
+    it("shows approved, enabled rules and never proposed, rejected or disabled ones", async () => {
+      await styleRule("sr-1", "approved", "Use short sentences.")
+      await styleRule("sr-2", "proposed", "PROPOSED-ONLY wording.")
+      await styleRule("sr-3", "rejected", "REJECTED-ONLY wording.")
+      await styleRule("sr-4", "approved", "DISABLED wording.", false)
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.styleRules).toBe(
+        "Style rules that apply to this passage (MUST follow):\n- Use short sentences.",
+      )
+      const system = body.messages[0].content
+      expect(system).toContain("Use short sentences.")
+      expect(system).not.toContain("PROPOSED-ONLY")
+      expect(system).not.toContain("REJECTED-ONLY")
+      expect(system).not.toContain("DISABLED wording")
+    })
+
+    it("leaves the block empty when the project has no style rules", async () => {
+      const { body } = await preview(testDb, token)
+      expect(body.parts.styleRules).toBe("")
+    })
+  })
+
   describe("terminology cause→effect", () => {
     beforeEach(async () => {
       await insertCell(testDb, { cellId: "cell-live", seq: 3, source: "the covenant endures" })
@@ -501,14 +538,83 @@ describe("external prompt preview", () => {
       expect(french.body.parts.rules).not.toContain("patto")
 
       const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
-      // The project's own unstamped rendering belongs to its `''` lane, so the
-      // Spanish lane lists the concept with nothing to enforce (AQU-1508).
+      // The project's own unstamped rendering belongs to its `''` lane, so in
+      // the Spanish lane that concept has nothing to enforce (AQU-1508) — and
+      // since AQU-2209 `injectedTerms` reports what the prompt INJECTED, a
+      // concept contributing no prompt text is no longer listed.
       expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
         ["up-cov", ["pacto"]],
-        ["own", []],
       ])
       expect(spanish.body.parts.rules).toContain("pacto")
       expect(spanish.body.parts.rules).not.toContain("alliance")
+    })
+
+    // AQU-2209 — the termbase is scoped to the cell, not dumped wholesale.
+    it("a concept absent from this cell's source injects nothing", async () => {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('c-absent', 'proj-a', 'Melchizedek', $1, 'active', 0, 1, 1)`,
+        [JSON.stringify([{ rendering: "Melchisédech", status: "preferred" }])],
+      )
+      const { body } = await preview(testDb, token)
+      expect(body.sourceText).toBe("the covenant endures")
+      expect(body.parts.rules).toBe("")
+      expect(body.parts.injectedTerms).toEqual([])
+      expect(body.messages[0].content).not.toContain("Melchisédech")
+    })
+
+    it("injects the present concept and leaves the rest of a big termbase out", async () => {
+      for (let i = 0; i < 50; i++) {
+        await testDb.pg.query(
+          `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+           VALUES ($1, 'proj-a', $2, $3, 'active', 0, 2, 2)`,
+          [`c-filler-${i}`, `filler${i}`, JSON.stringify([{ rendering: `relleno${i}`, status: "preferred" }])],
+        )
+      }
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('c-cov', 'proj-a', 'covenant', $1, 'active', 0, 1, 1)`,
+        [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
+      )
+      const { body } = await preview(testDb, token)
+      expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["c-cov"])
+      expect(body.parts.rules).toContain("alliance")
+      expect(body.parts.rules).not.toContain("relleno")
+      // The rules block stays a couple of lines, not one per concept.
+      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
+    })
+
+    it("renders the term as plain guidance, not as the match pattern", async () => {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+         VALUES ('c-cov', 'proj-a', 'covenant', $1, 'active', 0, 1, 1)`,
+        [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
+      )
+      const { body } = await preview(testDb, token)
+      expect(body.parts.rules).toContain('"covenant" → "alliance"')
+      // The matcher's boundary wrappers are internals, not project content.
+      expect(body.messages[0].content).not.toContain("\\p{L}")
+      expect(body.messages[0].content).not.toContain("(?<!")
+    })
+
+    it("warns when a term-dense source exceeds the injection cap", async () => {
+      // A source bearing more concepts than the cap allows: every concept's
+      // term is in the cell, so matching cannot narrow it any further.
+      const terms = Array.from({ length: 45 }, (_, i) => `term${i}`)
+      for (const [i, term] of terms.entries()) {
+        await testDb.pg.query(
+          `INSERT INTO concepts (concept_id, project_id, source_term, renderings, status, case_sensitive, created_at, updated_at)
+           VALUES ($1, 'proj-a', $2, $3, 'active', 0, $4, $4)`,
+          [`c-${i}`, term, JSON.stringify([{ rendering: `rend${i}`, status: "preferred" }]), i + 1],
+        )
+      }
+      await insertCell(testDb, { cellId: "cell-dense", seq: 20, source: terms.join(" ") })
+
+      const { body } = await preview(testDb, token, "cell-dense")
+      expect(body.parts.injectedTerms).toHaveLength(40)
+      expect(body.warnings.map((w) => w.code)).toContain("terms_capped")
+      expect(body.warnings.find((w) => w.code === "terms_capped")!.message).toContain("45")
+      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(40)
     })
 
     it("injects project rules from settings", async () => {
@@ -676,10 +782,11 @@ describe("external prompt preview", () => {
       // the route ever starts hand-rolling its own string concatenation — or
       // either shared module changes under it — this fails.
       //
-      // Note the compiled pattern is the wildcard-aware one from
-      // ./terminology/match (`(?<!\p{L})light(?!\p{L})`), not the bare term:
-      // going through the real compiler is precisely what makes this a
-      // fidelity check rather than a restatement.
+      // Going through the real compiler is precisely what makes this a
+      // fidelity check rather than a restatement: it is the compiler that
+      // decides the wildcard-aware pattern narrowing tests ("light" is in this
+      // source, so the term lands) and the plain `term` payload the prompt
+      // renders from (AQU-2209).
       const expected = buildPrompt({
         sourceLanguage: "English",
         targetLanguage: "French",

@@ -29,6 +29,8 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   ClipboardCheck,
+  Eye,
+  EyeOff,
   Film,
   FolderInput,
   FolderPlus,
@@ -55,6 +57,9 @@ import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
+import { standInEstimator } from "@/lib/timeline/stand-in"
+import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
 import { isImportedRow } from "@/lib/cell-editing-gate"
@@ -76,6 +81,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -107,6 +113,7 @@ import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
   folderIdsOf,
+  hiddenTracksOf,
   folderMembers,
   folderReachInPx,
   resolveDropTarget,
@@ -116,7 +123,7 @@ import {
   type TrackDropTarget,
   type TrackRow,
 } from "@/lib/timeline/track-groups"
-import { loadCollapsedFolders, saveCollapsedFolders, toggleCollapsed } from "@/lib/timeline/track-collapse"
+import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHiddenTracks, toggleCollapsed } from "@/lib/timeline/track-collapse"
 import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
@@ -134,7 +141,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
@@ -444,6 +451,9 @@ export interface TimelineEditorProps {
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
    *  dub row passes "recording", so its behaviour is unchanged. */
   onOpenRecording?(cellId: string, slot: string): void
+  /** AQU-1684: the slot the recorder is recording into while it is open, else
+   *  null — that track may not be hidden from under the take. */
+  recordingSlot?: string | null
   /** AQU-646 round 3 (text→media trace): seeds selection on mount — fills the
    *  chip strip, centers the track on the clip, and cues playback (paused)
    *  at its start via onSeekToTime, same semantics as a clean card click. */
@@ -483,6 +493,13 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
+  /** AQU-2204: the file is timed to a film (footage linked, or an audio cue
+   *  file), so it can only follow its source: the Timing control shows
+   *  "Follows source" as plain text with an (i) saying why. */
+  timingFilmTimed?: boolean
+  /** AQU-2204 (board 24): the file has no times and no source recording, so
+   *  there is nothing to follow: "Follows source" is greyed out with why. */
+  timingSourceUnavailable?: boolean
   /**
    * AQU-1119: collapse the timeline itself, and collapse the text section
    * whose header this component portals into the workspace's slot.
@@ -617,30 +634,6 @@ export interface TimelineEditorProps {
  *  parameter list would hand every render a new array and churn every memo
  *  downstream of it. */
 const DEFAULT_TRACKS = deriveTracksForFile(null)
-
-/** The timing modes' user-facing copy, per mode.
- *
- *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) resolves the same
- *  `editor.timeline.timingMode*` name/description keys for
- *  TimingModeChangedDialog; this table adds `lockedDescription` — the same
- *  sentence plus the below-maintainer note, kept whole rather than
- *  concatenated, because a `{mode}` frame filled with a translated noun
- *  cannot be made grammatical in every locale. */
-const TIMING_MODE_KEYS: Record<
-  AudioTimingMode,
-  { name: MessageKey; description: MessageKey; lockedDescription: MessageKey }
-> = {
-  dubbing: {
-    name: "editor.timeline.timingModeDubbing",
-    description: "editor.timeline.timingModeDubbingHint",
-    lockedDescription: "editor.timeline.timingModeDubbingHintLocked",
-  },
-  audioFirst: {
-    name: "editor.timeline.timingModeFree",
-    description: "editor.timeline.timingModeFreeHint",
-    lockedDescription: "editor.timeline.timingModeFreeHintLocked",
-  },
-}
 
 /** Each audio track's speaker-button copy. Whole sentences per track, not one
  *  frame per state with the track's name poured in — the name inflects. */
@@ -1217,6 +1210,7 @@ export function TimelineEditor({
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
+  recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
   onChipActivated,
@@ -1224,6 +1218,8 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  timingFilmTimed = false,
+  timingSourceUnavailable = false,
   soundSource,
   onCollapseSection,
   onCollapseTextSection,
@@ -1302,6 +1298,15 @@ export function TimelineEditor({
   useEffect(() => {
     setCollapsedFolders(loadCollapsedFolders(fileId))
   }, [fileId])
+  // AQU-1684: which tracks this person has hidden on THIS file — the same
+  // personal, per-file, on-this-device state as folder collapse (Sam's
+  // decision), re-read on a file switch for the same reason. Hiding changes
+  // only what is drawn: the queue sounds every track from `tracks`, hidden or
+  // not, and mute stays the speaker's.
+  const [hiddenTrackIds, setHiddenTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(fileId))
+  useEffect(() => {
+    setHiddenTrackIds(loadHiddenTracks(fileId))
+  }, [fileId])
 
   /**
    * The rows to draw: the tracks, with folder members lifted under their
@@ -1316,7 +1321,7 @@ export function TimelineEditor({
    * lanes render the same list, in the same order" a property of the code
    * rather than a coincidence two `.map` calls have to keep agreeing on.
    */
-  const trackRows = buildTrackRows(tracks, collapsedFolders)
+  const trackRows = buildTrackRows(tracks, collapsedFolders, hiddenTrackIds)
 
   function toggleFolder(folderId: string) {
     setCollapsedFolders((prev) => {
@@ -1353,10 +1358,67 @@ export function TimelineEditor({
     return created
   }
 
-  /** Is there anything to put in a track's menu at all? With neither rename
-   *  clearance nor the editing setting there is not, and the row renders
-   *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
-  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows)
+  /** Is there anything to put in a track's menu at all? AQU-1684: there always
+   *  is now — anyone may hide a track on their own screen, viewers included
+   *  (Sam's decision), so every row has the menu; for a viewer it holds Hide
+   *  alone. Before, a row with neither rename clearance nor the editing
+   *  setting had no trigger, no `⋯`, nothing. */
+  const canHideTracks = Boolean(fileId)
+  const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+
+  // ── AQU-1684: hiding tracks ───────────────────────────────────────────────
+  /** The lane a primary-button press began in, until it is let go: a chip or
+   *  region being dragged there. Its track may not be hidden mid-gesture. */
+  const [pressedLaneTrackId, setPressedLaneTrackId] = useState<string | null>(null)
+  function pressLane(trackId: string, e: ReactPointerEvent<HTMLDivElement>) {
+    // A right-click (or a macOS ctrl+click) opens the menu; it is no drag.
+    if (e.button !== 0 || e.ctrlKey) return
+    setPressedLaneTrackId(trackId)
+    const release = () => {
+      setPressedLaneTrackId(null)
+      window.removeEventListener("pointerup", release, true)
+      window.removeEventListener("pointercancel", release, true)
+    }
+    window.addEventListener("pointerup", release, true)
+    window.addEventListener("pointercancel", release, true)
+  }
+  /** Tracks that may not be hidden right now: the one the recorder is taking
+   *  into, the one being reordered and the lane a drag is under way in. */
+  function busyTrackIds(): ReadonlySet<string> {
+    const busy = new Set<string>()
+    if (recordingSlot) busy.add(trackIdForSlot(recordingSlot))
+    if (trackDrag) busy.add(trackDrag.trackId)
+    if (pressedLaneTrackId) busy.add(pressedLaneTrackId)
+    return busy
+  }
+  function hideTracks(trackIds: readonly string[]) {
+    const busy = busyTrackIds()
+    const hiding = trackIds.filter((id) => !busy.has(id))
+    if (hiding.length === 0) return
+    setHiddenTrackIds((prev) => {
+      const next = new Set(prev)
+      for (const id of hiding) next.add(id)
+      saveHiddenTracks(fileId, next)
+      return next
+    })
+    // Nothing stays selected, renamed or picked on a lane that is not drawn:
+    // S would split a take nobody can see.
+    setTrackSelection((cur) =>
+      hiding.includes(cur.primaryId ?? "") || cur.extraIds.some((id) => hiding.includes(id)) ? EMPTY_SELECTION : cur,
+    )
+    if (renamingTrackId && hiding.includes(renamingTrackId)) setRenamingTrackId(null)
+    if (selectedTake && hiding.includes(trackIdForSlot(selectedTake.slot))) setSelectedTake(null)
+  }
+  function showTracks(trackIds: readonly string[]) {
+    setHiddenTrackIds((prev) => {
+      const next = new Set(prev)
+      for (const id of trackIds) next.delete(id)
+      saveHiddenTracks(fileId, next)
+      return next
+    })
+  }
+  /** What "Hidden tracks" lists: hidden ones that still exist, never a folder. */
+  const hiddenTracks = hiddenTracksOf(tracks, hiddenTrackIds)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -1466,6 +1528,7 @@ export function TimelineEditor({
         canColour: Boolean(onSetTrackColor),
         canEdit: Boolean(trackEditing),
         canPromote: Boolean(onPromoteTrackToRows),
+        canHide: canHideTracks,
       }),
     )
   }
@@ -1542,6 +1605,7 @@ export function TimelineEditor({
       onRename: onRenameTrack ? setRenamingTrackId : undefined,
       onSetColor: onSetTrackColor,
       onPromote: onPromoteTrackToRows,
+      ...(canHideTracks ? { onHide: hideTracks, busyTrackIds: busyTrackIds() } : {}),
       editing: trackEditing
         ? {
             onLeaveFolder: trackEditing.onLeaveFolder,
@@ -1942,7 +2006,17 @@ export function TimelineEditor({
     )
   }
 
-  const { subtitle, dialogue, untimed } = useMemo(() => deriveLanes(cells), [cells])
+  // AQU-2204: following its recordings, a file with NO times at all (an audio
+  // Bible book) lays its lines out in order — each at its recording's length,
+  // or a dashed stand-in from its text — instead of parking them all in the
+  // Untimed strip. The same rule as the transport's (programmeLines).
+  const { subtitle, dialogue, untimed } = useMemo(() => {
+    const lanes = deriveLanes(cells)
+    if (timingMode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
+      return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
+    }
+    return { ...lanes, standInLines: false }
+  }, [cells, timingMode])
   const independentTextCells = useMemo(
     () => Object.values(textTrackCells ?? {}).flat(),
     [textTrackCells],
@@ -1966,6 +2040,19 @@ export function TimelineEditor({
   // become conditional on whether an audio VTT has been imported.
   const videoDurationSec = useVideoDurationSec(coreMediaUrl)
   const subtitleFileWithFootage = Boolean(coreMediaUrl) && dialogue.length === 0
+  // AQU-2204 (board 22): how long the file comes out with each choice, so the
+  // effect shows before anyone picks. Following the source: the source's own
+  // end (or the film's, when it runs longer). Following the recordings: the
+  // programme, laid out exactly as that choice lays it.
+  const timingLengths = useMemo(() => {
+    let sourceEnd = 0
+    for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
+    const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
+    const { lines } = programmeLines(cells)
+    // AQU-2204: following the recordings, an unrecorded line takes its stand-in.
+    const recorded = buildProgramme(lines, { standInLenSec: standInEstimator(lines) })
+    return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
+  }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -1978,6 +2065,9 @@ export function TimelineEditor({
         // so the cues are the verses; export stitches them the same way.
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
+        // AQU-2204: following the recordings, every unrecorded line takes a
+        // stand-in length from its words, timed file or not.
+        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle) },
       ),
     [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
   )
@@ -2481,9 +2571,13 @@ export function TimelineEditor({
   }
 
   // ── AQU-1767: cutting takes ─────────────────────────────────────────────
-  // Free timing lays lines out end to end and computes every position, so a
-  // piece has nowhere of its own to be; cutting waits for phase 4 there.
-  const canCut = Boolean(onCutTargets) && editable && !audioFirst
+  // AQU-2213: cutting is offered on EVERY file, whichever clock it follows.
+  // Free timing held it back only until a piece had somewhere of its own to
+  // be, and it has had one since phase 4 (the programme sizes a line by all of
+  // the take's pieces and the layout lays them end to end in its slot, where
+  // the joined clip plays them) — an audio Bible book, which has no times and
+  // so can only follow its recordings, was left unable to split at all.
+  const canCut = Boolean(onCutTargets) && editable
   const bladeActive = bladeOn && canCut
   // AQU-1767 (Sam, 2026-10-14): S splits the SELECTED take at the PLAYHEAD,
   // and nothing else — "splitting should never take place where the mouse is
@@ -2713,9 +2807,10 @@ export function TimelineEditor({
     // against the re-flowed track — the only honest numbers are durations.
     // Src = the original's window length, Tgt = the dub's measured length.
     if (audioFirst) {
-      const { startTime, endTime } = currentCell
-      const srcDurationSec =
-        typeof startTime === "number" && typeof endTime === "number" ? endTime - startTime : null
+      // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no
+      // SOURCE timing anywhere — not even the original's length — so only the
+      // recording's own length is read out.
+      const srcDurationSec = null
       // AQU-1767: a split take's length is all its pieces'.
       const geoms = targetItems
         .filter((t) => t.cell.id === currentCell.id)
@@ -2723,20 +2818,34 @@ export function TimelineEditor({
       const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
         ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
         : null
-      if (srcDurationSec == null && tgtDurationSec == null) return null
+      // Always the free readout, even with nothing measured: falling back to
+      // the plain row would print the line's SOURCE range.
       return { kind: "free" as const, srcDurationSec, tgtDurationSec }
     }
-    const i = targetItems.findIndex((t) => t.cell.id === currentCell.id)
-    if (i < 0) return null
+    // AQU-1767: a split take's pieces are consecutive items, and the pills read
+    // them as the one take they are (Sam, 2026-10-19): from the first piece's
+    // start to the last piece's end, the sound they keep added up, and how many
+    // pieces. Diff and overlap measure that span against the line and its
+    // neighbours — the silences between pieces are inside the take.
+    const first = targetItems.findIndex((t) => t.cell.id === currentCell.id)
+    if (first < 0) return null
+    let last = first
+    while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
       t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
-    const geom = geomOf(targetItems[i])
-    if (!geom || geom.usingFallback) return null
+    const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
+    if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
+    const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
+    const geom = {
+      start: Math.min(...spans.map((s) => s.start)),
+      end: Math.max(...spans.map((s) => s.end)),
+    }
+    const soundSec = spans.reduce((sum, s) => sum + (s.end - s.start), 0)
     const { startTime, endTime } = currentCell
-    const prev = geomOf(targetItems[i - 1])
-    const next = geomOf(targetItems[i + 1])
+    const prev = geomOf(targetItems[first - 1])
+    const next = geomOf(targetItems[last + 1])
     const { headSec, tailSec } = chipOverlaps(
-      { start: geom.start, end: geom.end },
+      geom,
       prev ? { start: prev.start, end: prev.end } : null,
       next?.start ?? null,
     )
@@ -2761,7 +2870,8 @@ export function TimelineEditor({
       kind: "dubbing" as const,
       startSec: geom.start,
       endSec: geom.end,
-      durationSec: geom.end - geom.start,
+      durationSec: soundSec,
+      ...(spans.length > 1 ? { pieces: spans.length } : {}),
       startDiffSec,
       endDiffSec,
       durationDiffSec: startDiffSec != null && endDiffSec != null ? startDiffSec + endDiffSec : null,
@@ -3906,9 +4016,14 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
             onSeek={laneProps.onSeek}
-            // SUB-53: a chip's position is computed in audio-first, so there
-            // is nothing to drag it to. Trimming stays — and re-flows.
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            // AQU-2215 (Sam, Oct 27): dragging a take is NOT withheld when the
+            // file follows its recordings any more. A chip's position is still
+            // computed there, but one part of it is a stored placement — the
+            // pause before the take (AQU-2204) — and that is what the drag
+            // changes. `TimelineLayout` inverts the gesture per mode and says
+            // which takes can hold a pause at all, so the mode question is
+            // answered in one module instead of by withholding the handler.
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -3981,7 +4096,7 @@ export function TimelineEditor({
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
-            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
@@ -4059,52 +4174,29 @@ export function TimelineEditor({
         {onCollapseSection && (
           <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
         )}
-        {/* Pre-merge round: the mode is FILE-level again (the video link it
-            interacts with is per-file), so the control returns to the
-            toolbar. Same clearance as before: `onChangeTimingMode` absent =
-            below the maintainer floor = the active mode renders as a plain
-            label instead of buttons. The wrapper keeps its testid +
-            data-mode so browser passes read the mode exactly as before.
-            AQU-646 stage 1: withheld outright for a file with only one mode
-            available to it — see `hideTimingMode`. */}
+        {/* AQU-2204: the file's one Timing control ("Follows source" /
+            "Follows recordings"). Self-contained so the layout work can move
+            it into the top bar beside the play controls as it is.
+            `onChangeTimingMode` absent = below project lead = plain text;
+            `timingFilmTimed` = a file timed to a film, which only follows
+            its source. */}
         {!hideTimingMode && (
-          <div
-            data-testid="tl-timing-mode"
-            data-mode={timingMode}
-            className="ms-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
-          >
-            {(["dubbing", "audioFirst"] as const).map((mode) =>
-              onChangeTimingMode ? (
-                <button
-                  key={mode}
-                  type="button"
-                  data-testid={`tl-timing-mode-${mode}`}
-                  aria-pressed={timingMode === mode}
-                  title={t(TIMING_MODE_KEYS[mode].description)}
-                  onClick={() => {
-                    if (timingMode !== mode) onChangeTimingMode(mode)
-                  }}
-                  className={cn(
-                    "px-2 py-1",
-                    timingMode === mode
-                      ? "bg-sky-100 font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                      : "bg-background text-foreground/60 hover:bg-muted",
-                  )}
-                >
-                  {t(TIMING_MODE_KEYS[mode].name)}
-                </button>
-              ) : timingMode === mode ? (
-                <span
-                  key={mode}
-                  data-testid={`tl-timing-mode-${mode}`}
-                  title={t(TIMING_MODE_KEYS[mode].lockedDescription)}
-                  className="px-2 py-1 text-foreground/70"
-                >
-                  {t(TIMING_MODE_KEYS[mode].name)}
-                </span>
-              ) : null,
-            )}
-          </div>
+          <TimingModeControl
+            className="ms-2"
+            mode={timingMode}
+            onChange={onChangeTimingMode}
+            filmTimed={timingFilmTimed}
+            sourceUnavailable={timingSourceUnavailable}
+            lengths={timingLengths}
+          />
+        )}
+        {/* AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip. */}
+        {layout.programme?.slots.some((slot) => slot.standIn) && (
+          <TimingInfoButton
+            label={t("editor.timeline.standInInfoAria")}
+            text={t("editor.timeline.standInInfo")}
+            testId="tl-stand-in-info"
+          />
         )}
         {/* AQU-646: the playhead is already shifted back by the delay the
             browser reports, so this does NOT say "there is latency" — it says
@@ -4213,11 +4305,9 @@ export function TimelineEditor({
             <>
               <AppTooltip
                 content={
-                  audioFirst
-                    ? t("editor.timeline.bladeFreeTiming")
-                    : bladeActive
-                      ? t("editor.timeline.bladeOnTooltip")
-                      : t("editor.timeline.bladeOffTooltip")
+                  bladeActive
+                    ? t("editor.timeline.bladeOnTooltip")
+                    : t("editor.timeline.bladeOffTooltip")
                 }
               >
                 <button
@@ -4297,6 +4387,39 @@ export function TimelineEditor({
 
               Built from `items`, not three hardcoded rows: stage 8's untimed
               pocket bin is the same category and will want a fourth. */}
+          {/* AQU-1684: THE WAY BACK. Present exactly while this person has
+              hidden something on this file, so a lane never vanishes without
+              trace: it names how many, and lists each to show again. */}
+          {hiddenTracks.length > 0 && (
+            <OverflowMenu
+              items={[
+                { id: "hidden-note", type: "label", label: t("editor.timeline.hiddenTracksNote") },
+                ...hiddenTracks.map((track) => ({
+                  id: `show-${track.id}`,
+                  label: t("editor.timeline.showTrack", { name: track.name }),
+                  icon: Eye,
+                  testId: `tl-show-track-${track.id}`,
+                  onClick: () => showTracks([track.id]),
+                })),
+                ...(hiddenTracks.length > 1
+                  ? [
+                      { id: "show-all-sep", type: "separator" as const },
+                      {
+                        id: "show-all",
+                        label: t("editor.timeline.showAllTracks"),
+                        testId: "tl-show-all-tracks",
+                        onClick: () => showTracks(hiddenTracks.map((track) => track.id)),
+                      },
+                    ]
+                  : []),
+              ]}
+              triggerVariant="outline"
+              triggerLabel={t("editor.timeline.hiddenTracks", { count: hiddenTracks.length })}
+              triggerIcon={EyeOff}
+              testId="tl-hidden-tracks"
+              ariaLabel={t("editor.timeline.hiddenTracksAria")}
+            />
+          )}
           {sourceMenuItems.length > 0 && sourcesUsable && (
             <OverflowMenu
               items={sourceMenuItems}
@@ -4989,7 +5112,13 @@ export function TimelineEditor({
                         rule above still holds. */}
                     <ContextMenuTrigger
                       render={
-                        <div className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")} />
+                        <div
+                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
+                          // AQU-1684: a drag under way in this lane keeps it
+                          // from being hidden. Capture, because the chips own
+                          // their pointerdown.
+                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
+                        />
                       }
                     >
                       {lane}

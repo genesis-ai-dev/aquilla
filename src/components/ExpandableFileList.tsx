@@ -52,7 +52,10 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { shouldDimUnassigned } from "@/lib/assignments/assigned-files"
 import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 
-interface FileStats { translated: number; validated: number; total: number }
+// AQU-2111: the shared shape, which now carries the audio pair too — a local
+// re-declaration would have dropped it silently on the way to FileRow.
+import type { FileStats } from "@/lib/progress/file-summary-progress"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** What the Reset-order confirmation needs to remember while it is open: which
  *  group is being reset, how to label it, and the writes that will clear it. */
@@ -125,6 +128,12 @@ interface Props {
   /** AQU-1083: the project's effective structural-cell policy, forwarded to
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
+  /**
+   * Media redesign: what the open language (`lane`) delivers, when someone has
+   * chosen. The expanded files' chapter grids draw in that unit; absent, each
+   * file's own evidence decides (AQU-2110).
+   */
+  delivers?: LaneDelivers | null
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
@@ -147,6 +156,8 @@ interface Props {
   assignedFileIds?: ReadonlySet<string>
   /** Opens the Segmentation dialog for the given file (rendered by the caller). */
   onSegmentation?: (fileId: string) => void
+  /** Opens the single-file re-import dialog for the given file. */
+  onReimport?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -166,6 +177,14 @@ interface Props {
   canExportByOrgPolicy?: boolean
   hasActiveChapters?: boolean
   getActiveChapterHealth?: () => BookHealthChapter[]
+  /**
+   * AQU-2118: the target lane every per-file `/progress` read here names —
+   * the lane the editor's switcher shows, so an expanded file's chapters and
+   * the hover prefetch report that lane and not the project's default. '' is
+   * the default lane. The collapsed bars come from `fileProgress`, which the
+   * caller already reads for this lane.
+   */
+  lane?: string
   /**
    * AQU-1531: lets another surface put the keyboard cursor in the filter box —
    * the Agent workbench's "Choose file" button, whose only other effect (show
@@ -207,11 +226,12 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
   deferSectionProgress,
+  lane = "",
   filterFocus,
   canReorderFiles = false,
   onReorderFiles,
@@ -249,9 +269,9 @@ export function ExpandableFileList({
   // the prefetch still happens, just behind the cells.
   useEffect(() => {
     if (deferSectionProgress) return
-    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
-    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile)
-  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, projectId])
+    if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile, lane)
+    for (const fileId of expanded) prefetchFileProgress(projectId, fileId, getTokenForFile, lane)
+  }, [activeFileId, deferSectionProgress, expanded, getTokenForFile, lane, projectId])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -608,8 +628,8 @@ export function ExpandableFileList({
                           insertBefore={preview !== null && preview.refusal === null && preview.toPosition === position}
                         >
                           <div
-                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
-                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile)}
+                            onPointerEnter={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
+                            onFocusCapture={() => prefetchFileProgress(projectId, file.id, getTokenForFile, lane)}
                           >
                           <FileRow
                             file={file}
@@ -633,6 +653,7 @@ export function ExpandableFileList({
                             onExport={onExport ? () => onExport(file.id) : undefined}
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
+                            onReimport={onReimport ? () => onReimport(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)
@@ -659,9 +680,11 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               countStructural={countStructural}
+                              delivers={delivers}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}
+                              lane={lane}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

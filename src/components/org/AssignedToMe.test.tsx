@@ -208,7 +208,8 @@ describe("AssignedToMe", () => {
     ])
     renderInbox()
 
-    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
+    // AQU-1510: a chapters scope reads as its chapters; the file has its own column.
+    await waitFor(() => expect(screen.getByText("MRK 1")).toBeInTheDocument())
     expect(screen.getByText("01-JHN.usfm")).toBeInTheDocument()
     expect(screen.getByText("02-MRK.usfm")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()
@@ -216,6 +217,20 @@ describe("AssignedToMe", () => {
     // Deadline DateTooltip: month + day, year only when it isn't this year.
     expect(screen.getByText(fmtDeadlineDate("2026-06-30"))).toBeInTheDocument()
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
+  })
+
+  // AQU-1969: a validate assignment's "done" is the caller's own approvals,
+  // and the row says it is validating work.
+  it("labels a validate assignment as validating", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John scope", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200, kind: "validate" },
+      { assignmentId: "a2", projectId: "pb", projectName: "Mark", fileId: "f2", fileName: "02-MRK.usfm", scopeKind: "books", scopeLabel: "Mark scope", targetLang: "", deadline: null, note: null, cellsTotal: 5, cellsDone: 1, createdAt: 100, kind: "translate" },
+    ])
+    renderInbox()
+
+    await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
+    expect(screen.getAllByText("Validating")).toHaveLength(1)
+    expect(screen.getByText("John scope").parentElement?.textContent).toContain("Validating")
   })
 
   // AQU-729 / AQU-538 (§3.5): every assignment shows its lane; named lanes use
@@ -276,7 +291,7 @@ describe("AssignedToMe", () => {
     renderInbox()
     await waitFor(() => expect(screen.getByText("JON 2")).toBeInTheDocument())
     // Chapters in reading order, whatever order they were ticked in.
-    fireEvent.click(screen.getByText("Ruth \u00b7 RUT 3, RUT 2"))
+    fireEvent.click(screen.getByText("RUT 2\u20133"))
     await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1))
     expect(navigate).toHaveBeenLastCalledWith("/project/pa/editor/file/f1?cellId=RUT%202%3A1&lane=&flash=1")
     fireEvent.click(screen.getByText("JON 2"))
@@ -335,11 +350,11 @@ describe("AssignedToMe", () => {
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "MRK" } })
-    await waitFor(() => expect(screen.getByText("Mark · MRK 1")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("MRK 1")).toBeInTheDocument())
     expect(screen.queryByText("John scope")).toBeNull()
 
     fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "01-JHN" } })
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
-    expect(screen.queryByText("Mark · MRK 1")).toBeNull()
+    expect(screen.queryByText("MRK 1")).toBeNull()
   })
 })

@@ -38,6 +38,8 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
 **InviteMember / SetRole / RemoveMember** (governance, 600 — always ask-mode; see §2).
 AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
 (structural, 400) and **RetireExample** (structural, 500).
+AQU-2195 adds **ReviewStyleRules** (structural, 500): bulk approve / reject / update of
+style rules, receipt-only and all-or-nothing; see AGENT-API.md's AQU-2195 addendum.
 
 ### Membership — InviteMember / SetRole / RemoveMember (AQU-1185)
 

@@ -16,7 +16,6 @@ import {
   CheckCheck,
   CheckIcon,
   CornerDownRight,
-  Languages,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,6 +31,7 @@ import {
   ComboboxSeparator,
   ComboboxTrigger,
 } from "@/components/ui/combobox"
+import { PROGRESS_ICON } from "@/lib/progress/progress-icons"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
@@ -40,26 +40,29 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import { progressPercent } from "@/lib/progress/progress-percent"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
+import {
+  progressViewFor,
+  type MilestoneProgress,
+  type MilestoneProgressView,
+} from "@/lib/progress/milestone-progress-view"
+import { deliversView, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 
-export interface MilestoneNavigationItem {
+/** AQU-2110: the figures a row carries, and the per-file choice of which to show. */
+export type { MilestoneProgress, MilestoneProgressView }
+
+export interface MilestoneNavigationItem extends MilestoneProgress {
   key: string
   kind: ImportMilestoneKind
   label: string
   shortLabel: string
   description: string
-  translated: number
-  validated: number
-  total: number
   subsections?: readonly MilestoneNavigationSubsection[]
 }
 
-export interface MilestoneNavigationSubsection {
+export interface MilestoneNavigationSubsection extends MilestoneProgress {
   key: string
   label: string
   firstCellId: string
-  translated: number
-  validated: number
-  total: number
 }
 
 /**
@@ -297,7 +300,7 @@ function ProgressLine({ icon: Icon, swatchClassName, label, value }: {
  * The swatch costs the column 8px: 64px is the narrowest that fits icon,
  * swatch and "100 %" in Geist at this size without spilling into the row.
  */
-function ProgressSummary({ translated, validated, total }: {
+function TextProgressColumn({ translated, validated, total }: {
   translated: number
   validated: number
   total: number
@@ -308,9 +311,9 @@ function ProgressSummary({ translated, validated, total }: {
   // rule as the label read out beside it (Jude 1 at 219/220 showed "100%").
   const asPercent = (part: number) => f.percent(percent(part, total) / 100)
   return (
-    <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+    <span data-progress-column="text" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
       <ProgressLine
-        icon={Languages}
+        icon={PROGRESS_ICON.text}
         swatchClassName={PROGRESS_BG.textTranslated}
         label={t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
         value={asPercent(translated)}
@@ -322,6 +325,59 @@ function ProgressSummary({ translated, validated, total }: {
         value={asPercent(validated)}
       />
     </span>
+  )
+}
+
+/**
+ * AQU-2110: the audio twin of the text column — recorded over validated, in
+ * the palette's magenta tones, so a chapter on an audio-only project reads
+ * 100% once every take is signed off instead of the 0% validated the text
+ * flag held it at. Same width, same two-line shape, same never-100 rule.
+ */
+function AudioProgressColumn({ audioRecorded, audioValidated, total }: {
+  audioRecorded: number
+  audioValidated: number
+  total: number
+}) {
+  const t = useT()
+  const f = useFormat()
+  const asPercent = (part: number) => f.percent(percent(part, total) / 100)
+  return (
+    <span data-progress-column="audio" className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+      <ProgressLine
+        icon={PROGRESS_ICON.audio}
+        swatchClassName={PROGRESS_BG.audioRecorded}
+        label={t("editor.milestone.percentRecorded", { percent: percent(audioRecorded, total) })}
+        value={asPercent(audioRecorded)}
+      />
+      <ProgressLine
+        icon={CheckCheck}
+        swatchClassName={PROGRESS_BG.audioValidated}
+        label={t("editor.milestone.percentAudioValidated", { percent: percent(audioValidated, total) })}
+        value={asPercent(audioValidated)}
+      />
+    </span>
+  )
+}
+
+/**
+ * The progress column(s) of one row, in the view `progressViewFor` chose for
+ * the whole file. In "both", the text column keeps its place and the audio
+ * column stands beside it; the popover grows by that column (see
+ * `ComboboxContent` below) so titles keep the room AQU-1485 bought them.
+ */
+function ProgressSummary({ view, translated, validated, total, audioRecorded = 0, audioValidated = 0 }: MilestoneProgress & {
+  view: MilestoneProgressView
+}) {
+  return (
+    <>
+      {view !== "audio" && (
+        <TextProgressColumn translated={translated} validated={validated} total={total} />
+      )}
+      {view !== "text" && (
+        <AudioProgressColumn audioRecorded={audioRecorded} audioValidated={audioValidated} total={total} />
+      )}
+    </>
   )
 }
 
@@ -342,11 +398,14 @@ function VirtualizedMilestoneList({
   activeRowKey,
   expandedKey,
   open,
+  progressView,
   virtualizerRef,
 }: {
   activeRowKey: string
   expandedKey: string
   open: boolean
+  /** AQU-2110: the file's choice of progress figures, shared by every row. */
+  progressView: MilestoneProgressView
   virtualizerRef: RefObject<MilestoneListVirtualizer | null>
 }) {
   const t = useT()
@@ -491,7 +550,7 @@ function VirtualizedMilestoneList({
                         text={t("editor.milestone.cellRange", { range: subsection.label })}
                       />
                     </span>
-                    <ProgressSummary {...subsection} />
+                    <ProgressSummary view={progressView} {...subsection} />
                   </>
                 ) : (
                   <>
@@ -504,7 +563,7 @@ function VirtualizedMilestoneList({
                         {row.milestone.description}
                       </span>
                     </span>
-                    <ProgressSummary {...row.milestone} />
+                    <ProgressSummary view={progressView} {...row.milestone} />
                   </>
                 )}
                 {expandable ? (
@@ -539,6 +598,7 @@ export function MilestoneNavigator({
   onSelect,
   compact = false,
   pageByMilestone = false,
+  delivers = null,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
@@ -551,6 +611,12 @@ export function MilestoneNavigator({
    * The picker still lists those ranges so a long section stays searchable.
    */
   pageByMilestone?: boolean
+  /**
+   * Media redesign: what the open language delivers, when someone has chosen.
+   * It decides the unit the rows are drawn in (`deliversView`); absent, the
+   * file's own evidence decides.
+   */
+  delivers?: LaneDelivers | null
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -560,6 +626,9 @@ export function MilestoneNavigator({
   const buttonGroupRef = useRef<HTMLDivElement | null>(null)
   const pickerCentered = useMinWidthLg()
   const vocabulary = useMemo(() => vocabularyFor(items), [items])
+  // AQU-2110: decided over the whole file, once, so every row agrees.
+  // Media redesign: what the language delivers wins where someone has chosen.
+  const progressView = useMemo(() => deliversView(delivers, progressViewFor(items)), [delivers, items])
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
@@ -814,8 +883,17 @@ export function MilestoneNavigator({
             // lg+: center under the trigger with the absolute picker.
             align={pickerCentered ? "center" : "start"}
             anchor={pickerCentered ? undefined : buttonGroupRef}
-            // min-w-56 trigger + two size-8 prev/next buttons
-            className="w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)] *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+            // min-w-56 trigger + two size-8 prev/next buttons. AQU-2110: a
+            // file showing text AND audio figures carries a second 4rem
+            // column, and the popover grows by exactly that so the title
+            // keeps the width AQU-1485 gave it. Both strings are written out
+            // in full because Tailwind only generates classes it can read.
+            className={cn(
+              progressView === "both"
+                ? "w-[calc(14rem+2rem+2rem+4rem)] min-w-[calc(14rem+2rem+2rem+4rem)]"
+                : "w-[calc(14rem+2rem+2rem)] min-w-[calc(14rem+2rem+2rem)]",
+              "*:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!",
+            )}
           >
             <ComboboxInput
               showTrigger={false}
@@ -836,6 +914,7 @@ export function MilestoneNavigator({
                   activeRowKey={activeRowKey}
                   expandedKey={expandedKey}
                   open={open}
+                  progressView={progressView}
                   virtualizerRef={virtualizerRef}
                 />
               </ComboboxGroup>

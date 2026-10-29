@@ -52,7 +52,7 @@ const passageSchema = z.object({
 
 export type HarmonizerSuggestion = HarmonizerFinding & { fileId: string }
 
-type JevOutcome = "skipped" | "model" | "no_key" | "timeout" | "upstream"
+type JevOutcome = "skipped" | "model" | "no_key" | "timeout" | "upstream" | "refused"
 
 aiHarmonize.post("/passage", authMiddleware, zValidator("json", passageSchema), async (c) => {
   const input = c.req.valid("json")
@@ -90,7 +90,7 @@ aiHarmonize.post("/passage", authMiddleware, zValidator("json", passageSchema), 
     return c.json({ suggestions: [], jev: "skipped" as JevOutcome, rateLimited: true })
   }
 
-  const called = await callJev(c.env, run.request, JEV_TIMEOUT_MS)
+  const called = await callJev(c.env, run.request, JEV_TIMEOUT_MS, { projectId: input.projectId, userId: user.id })
   if (!called.ok) return c.json({ suggestions: [], jev: called.reason as JevOutcome })
 
   const fileOf = new Map(input.cells.map((cell) => [cell.cellId, cell.fileId]))

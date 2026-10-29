@@ -10,6 +10,7 @@ export const nav = defineNamespace({
     // switch (AQU-353). Shared by every entry point that toggles this lens so
     // the name can never drift ("Audio" vs the old sidebar "Voice"). --
     "nav.lens.audio": "Audio",
+    "nav.lens.transcribe": "Transcribe",
     "nav.lens.media": "Media",
 
     // -- NavHistoryControls: back/forward arrows + hold-for-history popover --
@@ -216,14 +217,18 @@ export const nav = defineNamespace({
       one:
         "{count} line in this file holds more than one speaker. Split at its quotation " +
         "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. A translation that splits the same way is " +
-        "divided; any other stays whole on the first line and is marked for review.",
+        "language shares the new lines. Every existing translation is marked for review, " +
+        "so it has to be done again. A translation that splits the same way is divided " +
+        "between the new lines. Any other stays whole on the first line.",
       other:
         "{count} lines in this file hold more than one speaker. Split at their quotation " +
         "marks they become {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. A translation that splits the same way is " +
-        "divided; any other stays whole on the first line and is marked for review.",
+        "language shares the new lines. Every existing translation is marked for review, " +
+        "so it has to be done again. A translation that splits the same way is divided " +
+        "between the new lines. Any other stays whole on the first line.",
     }),
+    "nav.workspaceActions.splitQuotes.multiLaneWarning":
+      "Splitting changes the source all lanes share. Each lane's translations of these lines are marked so they have to be done again, and each lane keeps the voice it already gave a line on that line's new narration.",
     "nav.workspaceActions.splitQuotes.none":
       "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
     "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
@@ -344,6 +349,9 @@ export const nav = defineNamespace({
     "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
+    "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
+    "nav.fileRow.progressWithAudioAriaLabel":
+      "{translated}% translated, {validated}% validated, {recorded}% recorded, {audioValidated}% audio validated",
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
@@ -499,6 +507,12 @@ export const nav = defineNamespace({
           "ordered file: reveals the cast library, transport and per-line speaker " +
           "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
           "icon 'Text' tab in a two-tab segmented control.",
+      },
+      "nav.lens.transcribe": {
+        description:
+          "Third tab of the header lens switch, offered when the file has audio: a view for " +
+          "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
+          "beside the Text and Audio tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:
@@ -994,6 +1008,13 @@ export const nav = defineNamespace({
         description: "Confirm button of that dialog. Imperative.",
         maxLength: 24,
       },
+      "nav.workspaceActions.splitQuotes.multiLaneWarning": {
+        description:
+          "Extra paragraph on that dialog when the project has two or more target " +
+          "lanes. Says the split changes the source all lanes share, without saying how " +
+          "many lanes there are, marks each lane's translations to be done again, and " +
+          "keeps each lane's existing voice on the new narration lines.",
+      },
       "nav.workspaceActions.confirmAttribution": {
         description:
           "Checkbox label on the workspace-action confirmation dialog gating its " +
@@ -1429,6 +1450,28 @@ export const nav = defineNamespace({
         placeholders: {
           translated: "Percent of the file's cells translated, 0-100.",
           validated: "Percent of the file's cells validated, 0-100.",
+        },
+      },
+      "nav.fileRow.audioProgressAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file whose target language has no " +
+          "written form, so the row draws only the audio bar. 'Recorded' is lines " +
+          "that have a take; 'audio validated' is lines whose recording has been " +
+          "signed off.",
+        placeholders: {
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
+        },
+      },
+      "nav.fileRow.progressWithAudioAriaLabel": {
+        description:
+          "AQU-2111: the same slot's label on a file that has both target text and " +
+          "recordings, so the row draws a text bar above an audio bar.",
+        placeholders: {
+          translated: "Percent of the file's cells translated, 0-100.",
+          validated: "Percent of the file's cells validated, 0-100.",
+          recorded: "Percent of the file's lines with a recording, 0-100.",
+          audioValidated: "Percent of the file's lines whose audio is validated, 0-100.",
         },
       },
       "nav.fileRow.fileActions": {

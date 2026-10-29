@@ -5,6 +5,7 @@ import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
 import { shouldUseLocalLlm, completeWithLocalLlm } from "@/lib/offline/local-llm-client"
 import { t } from "@/lib/i18n/standalone"
+import { aiRefusalError } from "@/lib/billing/ai-refusal"
 import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
@@ -17,10 +18,12 @@ import {
   buildRulesBlock,
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
   precedingContextLabel,
   retainTranslationPairs,
   selectApprovedExamples,
+  selectInjectedTerms,
   type ChatMessage,
   type PrecedingContextEntry,
   type ValidatedPair,
@@ -32,12 +35,22 @@ export {
   buildRulesBlock,
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
   precedingContextLabel,
   retainTranslationPairs,
   selectApprovedExamples,
+  selectInjectedTerms,
 }
-export type { ChatMessage, PrecedingContextEntry, PromptRule, ValidatedPair } from "./prompt-build"
+export type {
+  ChatMessage,
+  InjectedTerm,
+  PrecedingContextEntry,
+  PromptRule,
+  PromptTermInfo,
+  TermSelection,
+  ValidatedPair,
+} from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -354,6 +367,15 @@ export interface PassageExample {
   cells: { source: string; target: string }[]
 }
 
+/**
+ * The source text a multi-cell prompt is about to translate, as one string for
+ * terminology narrowing (AQU-2209). Newline-joined: the matcher's word
+ * boundaries must not run two cells' text together into a false match.
+ */
+function joinedSource(cells: { source: string }[]): string {
+  return cells.map((c) => c.source).join("\n")
+}
+
 export function buildBatchPrompt(options: {
   sourceLanguage: string; targetLanguage: string; systemPrompt: string
   cells: { source: string }[]
@@ -380,9 +402,11 @@ export function buildBatchPrompt(options: {
   let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt
   const batchBriefBlock = buildBriefBlock(options.briefSummary)
   if (batchBriefBlock) baseSys = baseSys + "\n\n" + batchBriefBlock
-  // Inject rules block after the base system prompt.
+  // Inject rules block after the base system prompt. The batch's own source
+  // cells narrow terminology to the terms it actually contains (AQU-2209) —
+  // one system prompt serves the whole batch, so the union is the right scope.
   if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
+    const block = buildRulesBlock(options.rules, { sourceText: joinedSource(options.cells) })
     if (block) baseSys = baseSys + "\n\n" + block
   }
   const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
@@ -509,8 +533,9 @@ export function buildParagraphPrompt(options: {
   const briefBlock = buildBriefBlock(options.briefSummary)
   if (briefBlock) sys = sys + "\n\n" + briefBlock
 
+  // The paragraph's source cells narrow terminology to it (AQU-2209).
   if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
+    const block = buildRulesBlock(options.rules, { sourceText: joinedSource(options.cells) })
     if (block) sys = sys + "\n\n" + block
   }
   const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
@@ -715,10 +740,9 @@ export async function complete(options: CompleteOptions): Promise<string> {
     })
     if (!res.ok) {
       const text = await res.text().catch(() => "")
-      // Frontier returns 402 when subscription/credits are exhausted; surface message.
-      if (provider === "frontier" && res.status === 402) {
-        throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
-      }
+      // AQU-2068: the workspace's weekly AI is used up (402 or a legacy code).
+      const refused = provider === "frontier" ? aiRefusalError(res.status, text) : null
+      if (refused) throw refused
       // AQU-1158: hosted drafting has no OPENROUTER_API_KEY (typical on
       // api.dev). If the user pasted their own completion key, talk to
       // OpenRouter from the browser — that request never hits our chat

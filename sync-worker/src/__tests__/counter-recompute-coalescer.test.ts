@@ -151,24 +151,100 @@ describe('coalesceFileCounterRecompute', () => {
     await Promise.all([a, b])
   })
 
-  it('propagates a failure to every caller sharing the pass, and still runs the next one', async () => {
+  // AQU-2143: a pass runs on ONE caller's request-scoped connection, and that
+  // caller's POST can be aborted by its client (15 s) while the pass is still
+  // running. It used to take every co-committer's counters down with it, which
+  // in a bulk-validate burst is how a file's progress rows stayed at their
+  // pre-burst state: the passes that would have rewritten them died with the
+  // requests that happened to start them.
+  it("retries a failed pass on a co-committer's connection before giving up", async () => {
+    const g = gatedRecompute()
+    const a = coalesceFileCounterRecompute(impact('f1', ['c1']), g.recompute)
+    const b = coalesceFileCounterRecompute(impact('f1', ['c2']), g.recompute)
+    await flush()
+    expect(g.started).toBe(1)
+
+    // a's connection is torn down under the pass.
+    g.gates[0].reject(new Error('connection closed'))
+    await flush()
+
+    // The same drained impact, re-run on b's: one attempt, not a new pass.
+    expect(g.started).toBe(2)
+    expect(g.drained[1]).toEqual({ fileId: 'f1', cellIds: ['c1', 'c2'], fullSections: false })
+    g.gates[1].resolve()
+    expect(await Promise.all([a, b])).toEqual([undefined, undefined])
+  })
+
+  it('propagates the failure once every candidate connection is gone, and still runs the next pass', async () => {
     const g = gatedRecompute()
     const a = coalesceFileCounterRecompute(impact('f1', ['c1']), g.recompute)
     const b = coalesceFileCounterRecompute(impact('f1', ['c2']), g.recompute)
     await flush()
 
     const queued = coalesceFileCounterRecompute(impact('f1', ['c3']), g.recompute)
+    // Both sharers' connections die — the pass has nothing left to run on.
     g.gates[0].reject(new Error('boom'))
+    await flush()
+    g.gates[1].reject(new Error('boom'))
     await expect(a).rejects.toThrow('boom')
     await expect(b).rejects.toThrow('boom')
 
     // The queued pass is not cancelled by the failure: c3's counters still need
     // bringing up to date.
     await flush()
-    expect(g.started).toBe(2)
-    expect(g.drained[1].cellIds).toEqual(['c3'])
-    g.gates[1].resolve()
+    expect(g.started).toBe(3)
+    expect(g.drained[2].cellIds).toEqual(['c3'])
+    g.gates[2].resolve()
     await queued
+  })
+
+  it('stops retrying a pass after MAX_PASS_ATTEMPTS, however many callers share it', async () => {
+    // A database that is simply unreachable must cost a pass a bounded number
+    // of attempts, not one per sharer.
+    const g = gatedRecompute()
+    const calls = Array.from({ length: 8 }, (_, i) =>
+      coalesceFileCounterRecompute(impact('f1', [`c${i}`]), g.recompute),
+    )
+    // Settled before the gates fail, so the shared rejection is never unhandled.
+    const settled = Promise.all(calls.map((c) => expect(c).rejects.toThrow('unreachable')))
+    await flush()
+
+    for (let i = 0; i < 8 && g.gates[i]; i += 1) {
+      g.gates[i].reject(new Error('unreachable'))
+      await flush()
+    }
+    expect(g.started).toBe(3)
+    await settled
+  })
+
+  // The burst shape from the ticket, end to end: many concurrent requests on
+  // one file, the one whose connection the pass runs on torn down, and the file
+  // still ends at the state the last request committed rather than at its
+  // pre-burst value.
+  it('leaves the file at its final state when the request a pass runs on is torn down', async () => {
+    let applied = 0
+    /** A recompute that rewrites the file's row from everything committed. */
+    const pass = (alive: boolean) => async (d: CounterImpact): Promise<number> => {
+      if (!alive) throw new Error('connection closed')
+      applied = d.cellIds.size
+      return applied
+    }
+    const liveRequest = pass(true)
+
+    const first = coalesceFileCounterRecompute(impact('f1', ['c0']), liveRequest)
+    await flush()
+    expect(await first).toBe(1)
+
+    // The burst goes on. The next request's POST is aborted at the client's
+    // timeout, so the pass it starts has no connection left to run on — but
+    // four live co-committers merged into that same pass.
+    const abortedRequest = coalesceFileCounterRecompute(impact('f1', ['c1']), pass(false))
+    const live = ['c2', 'c3', 'c4', 'c5'].map((c) =>
+      coalesceFileCounterRecompute(impact('f1', [c]), liveRequest),
+    )
+
+    await Promise.all([abortedRequest, ...live])
+    expect(applied).toBe(5)
   })
 
   it('releases its slot once a file goes idle, so a long-lived isolate does not retain one per file', async () => {

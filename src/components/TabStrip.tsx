@@ -11,12 +11,17 @@ const TAB_WIDTH = "w-[200px]"
 const TAB_BASE =
   `group/tab relative flex h-7 ${TAB_WIDTH} shrink-0 items-center gap-1 overflow-hidden rounded-lg border px-1.5 text-xs leading-none`
 
+/** AQU-2138: fills come from the strip's own tokens (`--tab-*` in index.css),
+ *  not from --card: the active tab has to be distinct from the inactive tabs
+ *  AND from the bg-sidebar header behind the strip, in both themes. The active
+ *  fill is the tinted one and hover is neutral, so hovering an inactive tab
+ *  never reproduces the active look. */
 function tabClasses(active: boolean): string {
   return cn(
     TAB_BASE,
     active
-      ? "border-border bg-card text-foreground"
-      : "border-border/50 bg-card/60 text-muted-foreground hover:border-border hover:bg-card hover:text-foreground",
+      ? "border-border bg-[color:var(--tab-active)] text-foreground"
+      : "border-border/50 bg-[color:var(--tab-inactive)] text-muted-foreground hover:border-border hover:bg-[color:var(--tab-hover)] hover:text-foreground",
   )
 }
 
@@ -27,7 +32,9 @@ const TAB_CLOSE_OVERLAY =
 function tabLabelFadeClasses(active: boolean): string {
   return cn(
     "pointer-events-none absolute inset-y-0 end-0 z-1 w-5 bg-gradient-to-l to-transparent group-hover/tab:opacity-0",
-    active ? "from-card" : "from-card/60 group-hover/tab:from-card",
+    active
+      ? "from-[color:var(--tab-active)]"
+      : "from-[color:var(--tab-inactive)] group-hover/tab:from-[color:var(--tab-hover)]",
   )
 }
 
@@ -36,7 +43,9 @@ function tabCloseFadeClasses(active: boolean): string {
   return cn(
     TAB_CLOSE_OVERLAY,
     "end-5 w-4 bg-gradient-to-l to-transparent",
-    active ? "from-card" : "from-card/60 group-hover/tab:from-card",
+    active
+      ? "from-[color:var(--tab-active)]"
+      : "from-[color:var(--tab-inactive)] group-hover/tab:from-[color:var(--tab-hover)]",
   )
 }
 
@@ -45,7 +54,9 @@ function tabCloseSolidClasses(active: boolean): string {
   return cn(
     TAB_CLOSE_OVERLAY,
     "end-0 w-5",
-    active ? "bg-card" : "bg-card/60 group-hover/tab:bg-card",
+    active
+      ? "bg-[color:var(--tab-active)]"
+      : "bg-[color:var(--tab-inactive)] group-hover/tab:bg-[color:var(--tab-hover)]",
   )
 }
 
@@ -150,7 +161,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 onClose(tab.id)
               }}
               aria-label={t("nav.tabStrip.closeTab", { label })}
-              className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+              className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />
             </button>
@@ -195,7 +206,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
                 surfaceTab.onClose()
               }}
               aria-label={t("nav.tabStrip.closeTab", { label: surfaceTab.label })}
-              className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
+              className="absolute end-1 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100 group-focus-within/tab:opacity-100"
             >
               <X className="h-3 w-3" />
             </button>

@@ -44,6 +44,7 @@ import {
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -194,6 +195,20 @@ invites.post(
 
 invites.get("/mine", authMiddleware, async (c) => {
   const user = c.get("user")
+
+  // [Pen test] Auth & session mgmt (2026-10-26): registration never verifies
+  // the email, so anyone could register an invitee's address first and list
+  // (then accept) the invites sent to it. Email-matched discovery only trusts
+  // an address the account has proven it controls. Invite-link accept (the
+  // token holder path) is unchanged, so legit invitees see no new friction.
+  const verified = await c.env.AQUILLA_PG.prepare(
+    "SELECT email_verified_at FROM users WHERE id = ?",
+  )
+    .bind(user.id)
+    .first<{ email_verified_at: string | null }>()
+  if (!verified?.email_verified_at) {
+    return c.json({ invites: [] })
+  }
 
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT pi.token AS token,
@@ -431,6 +446,14 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       403,
     )
   }
+  // AQU-1579: the match above is only a string compare. Refuse before any
+  // row is claimed so an unverified account cannot spend the token.
+  const unverified = await emailBoundInviteUnverified(
+    c.env.AQUILLA_PG,
+    user.id,
+    first.email,
+  )
+  if (unverified) return c.json(unverified, 403)
 
   // Archived projects can't be joined via invite (mirrors legacy accept).
   const archivedRows = await c.env.AQUILLA_PG.prepare(

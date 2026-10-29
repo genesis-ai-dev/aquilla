@@ -17,7 +17,11 @@ export const fileDetails = defineNamespace({
     "fileDetails.imported": "Imported",
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
+    // Media redesign slice 2: a language that counts its recordings.
+    "fileDetails.audioProgressValue": "{recorded} of {total} lines recorded · {approved} approved",
+    "fileDetails.bothProgressValue": "{done} of {total} lines done on text and audio",
     "fileDetails.rename": "Rename",
+    "fileDetails.reimport": "Re-import",
     "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
     "fileDetails.downloadOriginal": "Download original",
@@ -123,6 +127,25 @@ export const fileDetails = defineNamespace({
           "progressValue string below.",
         maxLength: 20,
       },
+      "fileDetails.audioProgressValue": {
+        description:
+          "Progress row value for a language that delivers audio: lines recorded out of " +
+          "all lines, and lines whose recording is approved.",
+        placeholders: {
+          recorded: "Already-formatted count of lines with a recording.",
+          total: "Already-formatted count of the file's lines.",
+          approved: "Already-formatted count of lines with an approved recording.",
+        },
+      },
+      "fileDetails.bothProgressValue": {
+        description:
+          "Progress row value for a language that delivers text and audio: lines whose " +
+          "text is validated AND whose recording is approved, out of all lines.",
+        placeholders: {
+          done: "Already-formatted count of lines done on both halves.",
+          total: "Already-formatted count of the file's lines.",
+        },
+      },
       "fileDetails.progressValue": {
         description:
           "Progress row value combining two percentages, separated by a middle dot. " +
@@ -137,6 +160,12 @@ export const fileDetails = defineNamespace({
         description:
           "Action button that closes the modal and starts inline renaming of the file " +
           "in the sidebar. Imperative verb.",
+        maxLength: 24,
+      },
+      "fileDetails.reimport": {
+        description:
+          "Overflow-menu item on a file row that opens a dialog to replace or copy " +
+          "that file from a newly chosen source file. Imperative verb with a hyphen.",
         maxLength: 24,
       },
       "fileDetails.renameDialogTitle": {

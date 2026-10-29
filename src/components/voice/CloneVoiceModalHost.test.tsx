@@ -62,7 +62,10 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
     castStats: new Map(),
     saveTts: vi.fn(async () => {}),
     assignCells: vi.fn(),
+    assignCharacter: vi.fn(),
+    assignPick: vi.fn(),
     ...over,
+    applySplitCastCopies: over.applySplitCastCopies ?? vi.fn(),
   }
 }
 
@@ -139,6 +142,39 @@ describe("CloneVoiceModalHost", () => {
     expect(patch?.defaultVoiceId).toBe(narrator.id)
   })
 
+  it("carries the LANE's default along, not the project-wide one (AQU-2038)", () => {
+    // `saveTts` routes a `defaultVoiceId` patch to the active lane's star, so a
+    // clone made while lane B is open must not hand it the project's stored
+    // default — that would move lane B's star back onto it.
+    const laneVoice: Voice = { id: "v-lane", name: "Lane B reader", color: "#0e7490", laneId: "lane-b" }
+    const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator, laneVoice], defaultVoiceId: narrator.id }
+    const saveTts = vi.fn(async (_overrides: Partial<ProjectTtsSettings>) => {})
+    modalProps.last = null
+    renderWithTooltips(
+      <CloneVoiceModalHost
+        open
+        onClose={() => {}}
+        seedCellId="cell-1"
+        tts={makeTts({
+          settings,
+          laneSettings: { ...settings, defaultVoiceId: laneVoice.id },
+          allVoices: [narrator, laneVoice],
+          voices: [narrator, laneVoice],
+          defaultVoiceId: laneVoice.id,
+          saveTts,
+        })}
+        projectId="proj-1"
+        session={null}
+        cells={[]}
+      />,
+    )
+    modalProps.last!.onSave({ id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" })
+    expect(saveTts).toHaveBeenCalledTimes(1)
+    const patch = saveTts.mock.calls[0]?.[0]
+    expect(patch?.voices?.map((v) => v.id)).toEqual([narrator.id, laneVoice.id, "v-clone"])
+    expect(patch?.defaultVoiceId).toBe(laneVoice.id)
+  })
+
   it("does not persist when the caller is below the maintainer floor", () => {
     const saveTts = vi.fn(async () => {})
     modalProps.last = null
@@ -197,7 +233,9 @@ describe("Clone voice button → New voice modal (AQU-1001)", () => {
     renderWithTooltips(<Harness />)
     expect(screen.queryByTestId("new-voice-modal")).toBeNull()
 
+    // AQU-2212: the button clones in place; the dialog is under More options.
     await user.click(screen.getByRole("button", { name: /clone/i }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
 
     const modal = screen.getByTestId("new-voice-modal")
     expect(modal.getAttribute("data-mode")).toBe("clone")

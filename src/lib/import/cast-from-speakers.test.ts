@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData, castLikeSpeakers } from "./cast-from-speakers"
+import { buildCastAdditions, buildCastRemovals, buildSpeakerCastWrite, carriesCharacterSheetData, castLikeSpeakers } from "./cast-from-speakers"
+import { assignedCastVoiceId } from "@/lib/audio/voices"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 describe("buildCastAdditions", () => {
@@ -253,5 +254,75 @@ describe("carriesCharacterSheetData", () => {
     // An empty name is what a cleared cell looks like mid-flight; counting it
     // would make a second clear promise lines it would not change.
     expect(carriesCharacterSheetData({ metadata: { cast_name: "", line_number: "" } })).toBe(false)
+  })
+})
+
+describe("buildSpeakerCastWrite (AQU-2125)", () => {
+  const library = { voices: [{ id: "narr", name: "Narrator", color: "#fff" }], defaultVoiceId: "narr" }
+  let n = 0
+  const mint = () => `v${++n}`
+
+  it("casts each named speaker once, by character, and stores no line entries", () => {
+    n = 0
+    const pairs = [
+      { cellId: "c1", speaker: "JESUS", castNamed: true },
+      { cellId: "c2", speaker: "PETER", castNamed: true },
+      { cellId: "c3", speaker: "JESUS", castNamed: true },
+      { cellId: "c4", speaker: undefined },
+    ]
+    const out = buildSpeakerCastWrite(pairs, library, mint)
+    expect(out.castAssignments).toEqual({ "character:JESUS": "v1", "character:PETER": "v2" })
+    expect(out.voices.map((v) => v.name)).toEqual(["Narrator", "JESUS", "PETER"])
+  })
+
+  it("keeps one entry per line for lines the import could not name (a re-import)", () => {
+    n = 0
+    const out = buildSpeakerCastWrite(
+      [
+        { cellId: "c1", speaker: "JESUS", castNamed: true },
+        { cellId: "c9", speaker: "JESUS" },
+        { cellId: "c8", speaker: "MARY" },
+      ],
+      library,
+      mint,
+    )
+    expect(out.castAssignments).toEqual({ "character:JESUS": "v1", c9: "v1", c8: "v2" })
+    expect(out.voices.map((v) => v.name)).toEqual(["Narrator", "JESUS", "MARY"])
+  })
+
+  it("reuses a voice already named for the speaker, and never undoes a recast character", () => {
+    const settings = {
+      voices: [
+        { id: "narr", name: "Narrator", color: "#fff" },
+        { id: "jesus-old", name: "JESUS", color: "#0f0" },
+        { id: "clone", name: "Pedro (cloned)", color: "#00f" },
+      ],
+      castAssignments: { "character:JESUS": "clone", other: "narr" },
+    }
+    const out = buildSpeakerCastWrite([{ cellId: "c1", speaker: "JESUS", castNamed: true }], settings, () => "never")
+    expect(out.castAssignments).toEqual({ "character:JESUS": "clone", other: "narr" })
+    expect(out.voices).toHaveLength(3)
+  })
+
+  it("gives every line the same voice the old per-line casting did, on a real-sized project", () => {
+    // 12 episodes × 650 lines, 30 characters, cast the old way and the new way.
+    const names = Array.from({ length: 30 }, (_, i) => `CHARACTER ${i + 1}`)
+    const pairs = Array.from({ length: 12 * 650 }, (_, i) => ({
+      cellId: `ep${Math.floor(i / 650)}-line${i % 650}`,
+      speaker: i % 17 === 0 ? undefined : names[(i * 7) % names.length],
+    }))
+    let a = 0
+    const before = buildCastAdditions(pairs, library, () => `voice-${++a}`)
+    let b = 0
+    const after = buildSpeakerCastWrite(pairs.map((p) => ({ ...p, castNamed: Boolean(p.speaker) })), library, () => `voice-${++b}`)
+    const oldSettings = { ...library, voices: before.voices, castAssignments: before.castAssignments }
+    const newSettings = { ...library, voices: after.voices, castAssignments: after.castAssignments }
+    for (const p of pairs) {
+      const subject = { id: p.cellId, castName: p.speaker ?? null }
+      expect(assignedCastVoiceId(newSettings, subject)).toBe(assignedCastVoiceId(oldSettings, p.cellId))
+    }
+    expect(Object.keys(before.castAssignments).length).toBeGreaterThan(7000)
+    expect(Object.keys(after.castAssignments)).toHaveLength(30)
+    expect(after.voices).toEqual(before.voices)
   })
 })

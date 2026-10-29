@@ -8,6 +8,7 @@ export type {
   SourceLocation,
   TranslatableString,
   ParsedTextFileResult,
+  SubtitleCueRepair,
   ExportCellFields,
 } from "./core-types"
 // Also needed in local type positions below, not just re-exported.
@@ -95,28 +96,10 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-export type BuiltinCheckId =
-  | "empty-target"
-  | "target-equals-source"
-  | "placeholder-integrity"
-  | "number-integrity"
-  | "number-integrity-extra"
-  | "end-punctuation-mismatch"
-  | "punctuation-integrity"
-  | "double-space"
-  | "repeated-word"
-  | "unpaired-symbols"
-  | "abbreviation-mismatch"
-  /** AQU-1688: Bible data checks ("bkp:V1" …), run from pack facts. Present
-   *  only while the project's Bible data checks enrichment is on. */
-  | import("../../../db/shared/bible-checks/types").BibleCheckId
-  | "usfm-structure"
-  | "capitalization"
-  | "footnote-quote-mismatch"
-  | "corrupted-characters"
-  | "unpaired-quotes"
-  | "untranslated-fragment"
-  | "length-ratio"
+/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
+ *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
+ *  project's Bible data checks enrichment is on. */
+export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -142,6 +125,10 @@ export interface TranslationRule {
   autofixAttemptedAt?: string  // ISO; absent means never tried
   /** For org-scoped rules promoted from a project: the originating project id. */
   sourceProjectId?: string
+  /** Terminology rules only (AQU-2209): the regex-free term data prompt
+   *  injection reads instead of the `check` patterns — set by
+   *  `compileConceptsToRulesCore`, derived on read, never persisted. */
+  term?: import("../completion/prompt-build").PromptTermInfo
 }
 
 export type RuleCheck =
@@ -408,6 +395,29 @@ export interface Voice {
    * is set *without* this key (a recorded or uploaded clip).
    */
   referenceTakeKey?: string
+  /**
+   * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
+   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
+   * take into it through the voice forge instead of Seed-VC (sync-worker POST
+   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * words, pronunciation, timing and intonation are kept; only the timbre changes.
+   */
+  libraryVoiceId?: string
+  /**
+   * Set when `libraryVoiceId` is a custom voice trained from the organization's own
+   * recordings of a real speaker (src/lib/audio/custom-voice.ts). A display copy of
+   * the consent confirmation; the authoritative audit record lives server-side
+   * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
+   */
+  customVoice?: {
+    speakerName: string
+    /** ISO time the maintainer confirmed the consent statement. */
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+    /** ISO time training was queued, for the "ready in ~N min" hint. */
+    trainingStartedAt: string
+  }
 }
 
 export interface ProjectTtsSettings {
@@ -433,6 +443,24 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * AQU-2038: the per-lane cast, keyed by lane legacy tag (`''` is the default
+   * lane — the same convention as `cells`/`lanes` since AQU-538), then by
+   * cellId. A lane with no entry for a cell falls back to the project-wide
+   * `castAssignments` above, so every project that predates this field keeps
+   * generating exactly as it did. The empty string is a SENTINEL meaning "this
+   * lane uses its own default voice" — it has to be storable, because a lane
+   * that is sent back to its default must outrank a project-wide assignment
+   * naming a voice.
+   */
+  laneCastAssignments?: Record<string, Record<string, string>>
+  /**
+   * AQU-2038: the starred/default voice per lane, keyed by lane legacy tag.
+   * Absent for a lane that never starred one — it then falls back to
+   * `defaultVoiceId`. The empty-string sentinel means "this lane has no
+   * default of its own", which outranks the project-wide default.
+   */
+  laneDefaultVoiceId?: Record<string, string>
   /**
    * Character disagreements a person has settled. (AQU-646, 2026-08-18)
    *
@@ -586,6 +614,13 @@ export interface ProjectRecord {
     legacyTag: string | null
     position: number
     archivedAt: string | null
+    /** AQU-1954: the row's "Records audio" switch. */
+    recordsAudio?: boolean
+    /**
+     * Media redesign slice 1: what the language delivers, or null when nobody
+     * has chosen yet. Read it through `laneRowDelivers`.
+     */
+    delivers?: import("@/lib/lanes/lane-delivers").LaneDelivers | null
   }[]
   /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
   termMatching?: import("@/lib/terminology/types").TermMatchingSettings
@@ -594,6 +629,11 @@ export interface ProjectRecord {
   members: ProjectMember[]
   completionSettings?: CompletionSettings
   ttsSettings?: ProjectTtsSettings
+  /**
+   * AQU-2041: project leads may manage voices on lanes they can write.
+   * Absent is off. Only a maintainer can change it.
+   */
+  projectLeadsManageVoices?: boolean
   username?: string
   rules?: TranslationRule[]
   /** Per-project enable/severity overrides for built-in algorithmic checks.
@@ -631,11 +671,11 @@ export interface ProjectRecord {
    *  error, which is what keeps the two honest. */
   cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
-   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
-   *  on top of the maintainer floor, so with it off the write is refused even
-   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
-   *  to strand tracks that are already there. */
+   *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
+   *  SECOND gate on top of the maintainer floor, so with it off the write is
+   *  refused even to an owner. Rename and drag-to-reorder are NOT gated on it.
+   *  See ProjectWideSettings.allowTrackEditing for why switching it off is
+   *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
@@ -878,6 +918,8 @@ export interface FileReference {
   createdAt: string
   cellCount: number
   corpusMarker?: string  // From notebook metadata.corpusMarker, OT/NT fallback for biblical book stems
+  /** Importer profile (`parserVersion` before `@`). Re-import reopens that importer. */
+  importProfile?: string
   /**
    * AQU-1569: hand-placed position within this file's sidebar corpus group,
    * from files.meta.sortIndex (set via the `file.reorder` event). Fractional
@@ -1072,17 +1114,46 @@ export function isVideoTimedSubtitleFile(
 }
 
 /**
- * Resolve a file's audio timing mode: Original timing for a subtitle import
- * with footage linked (see `isVideoTimedSubtitleFile`), else the file's own
- * choice, else the project-level value (the legacy Project
- * Settings field, kept as a read-only fallback so pre-existing projects keep
- * the mode they had chosen), else Original timing. Mixed-mode projects are
- * allowed by design.
+ * AQU-2204 (Sam, Oct 26): a file whose lines are TIMED TO A FILM can only
+ * follow its source. That is any file with footage linked (`coreMediaUrl`: an
+ * uploaded film or a YouTube video), and any file carrying an audio cue file,
+ * whose cues transcribe the film's own sound. Laying such a file's lines back
+ * to back would pull the dub off the actors, so the timing control offers only
+ * "Follows source" there, with an (i) saying why.
+ *
+ * Supersedes the narrower AQU-1704 rule (`isVideoTimedSubtitleFile`), which
+ * locked only subtitle imports with footage and let other video-linked files
+ * pick Free timing through a "the video stays hidden" warning.
+ */
+export function isFilmTimedFile(
+  file: Pick<FileReference, "coreMediaUrl"> | null | undefined,
+  opts?: { hasAudioCues?: boolean },
+): boolean {
+  return Boolean(file?.coreMediaUrl) || Boolean(opts?.hasAudioCues)
+}
+
+/**
+ * Resolve a file's audio timing mode: "Follows source" ("dubbing") for a file
+ * timed to a film (see `isFilmTimedFile`), else the file's own choice, else the
+ * project-level value (the legacy Project Settings field, kept as a read-only
+ * fallback so pre-existing projects keep the mode they had chosen), else
+ * "Follows source". Mixed-mode projects are allowed by design.
  */
 export function resolveFileTimingMode(
   file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
   opts?: {
+    /**
+     * AQU-2204: the file carries an audio cue file (its cues transcribe the
+     * film), so it is timed to the film even with no footage linked here.
+     */
+    hasAudioCues?: boolean
+    /**
+     * AQU-2204 (board 24): the file has no times and no source recording, so
+     * there is nothing to follow — it follows its recordings, whatever it
+     * stored (the control greys "Follows source" out with the reason).
+     */
+    nothingToFollow?: boolean
     /**
      * AQU-1565 follow-up: the file is timed to a linked YouTube video, so its
      * DEFAULT is Original timing and the Media view shows the video. The
@@ -1105,11 +1176,23 @@ export function resolveFileTimingMode(
   // written before AQU-646 or by an OLDER client that still offers the mode,
   // and (c) inheritance from the LEGACY project-level `audioTimingMode` below.
   if (isVideoTimedSubtitleFile(file)) return "dubbing"
+  // AQU-2204: every other file timed to a film follows its source too, whatever
+  // it stored — the control shows only "Follows source" for these files, so a
+  // stored "audioFirst" (picked before the rule, or by an older client) would
+  // otherwise be one nobody can see or change back.
+  if (isFilmTimedFile(file, { hasAudioCues: opts?.hasAudioCues })) return "dubbing"
+  // AQU-2204 (board 24): nothing to follow, so it follows its recordings.
+  if (opts?.nothingToFollow) return "audioFirst"
   // AQU-1704: every other file reads its own choice next, so the picker the
   // workspace now shows a video-less subtitle file is not inert.
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Below the file's own choice, above the project's: see `timedToLinkedVideo`.
   if (opts?.timedToLinkedVideo) return "dubbing"
+  // AQU-2204 (Sam, Oct 27 — board 23's LOTE row): a NEW file with no linked
+  // film starts on "Follows source", subtitle and cue files included. A LOTE
+  // sermon's VTT and a Come and See audio-only project's base VTT look the same
+  // here, so neither is guessed into following its recordings; a lead switches
+  // a new LOTE file once. Files that chose Free timing keep that choice above.
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
   // arbitrary top-level keys), reads as Original timing. Same normalization

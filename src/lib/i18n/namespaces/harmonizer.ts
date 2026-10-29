@@ -4,7 +4,7 @@ export const harmonizer = defineNamespace({
   keys: {
     "harmonizer.flagLabel": "Harmonizer",
     "harmonizer.flagDescription":
-      "Check how cells fit together as a text, starting with quotations that open in one verse and never close. Suggestions appear beside smart edits, so smart edits must be on too.",
+      "Check how cells fit together as a text, starting with quotations that open in one verse and never close. Suggestions appear beside smart edits, so smart edits must be on too. Only on this device.",
     "harmonizer.popoverNote": "Checked across verses against the source by Jev.",
     "harmonizer.quotes.closeHere":
       "The quotation that opens in {openedIn} ends here in the source, so close it at the end of this verse.",

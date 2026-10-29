@@ -14,6 +14,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { PreviewPanel } from "@/components/import/PreviewPanel"
 import type { ImportResult } from "@/lib/import"
 import { parseTextFormat } from "@/lib/parsers/parse-text-formats"
+import { filmFetch } from "@/lib/parsers/frame-timecode.fixtures"
 
 const MB = 1024 * 1024
 
@@ -311,5 +312,96 @@ describe("PreviewPanel — USFM structure findings (AQU-1731)", () => {
     }) as unknown as ImportResult[]
     render(<PreviewPanel results={clean} onConfirm={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.queryByTestId("usfm-structure-findings")).toBeNull()
+  })
+
+  it("sends the sidebar re-import choice instead of confirming a normal import", () => {
+    const choices = [
+      ["Update this file", "update"],
+      ["Make updated copy", "updated-copy"],
+      ["Make a blank copy", "blank"],
+    ] as const
+    for (const [label, choice] of choices) {
+      const onConfirm = vi.fn()
+      const view = render(<PreviewPanel results={RESULTS} onConfirm={onConfirm} onCancel={vi.fn()} reimport />)
+      expect(screen.queryByRole("button", { name: /confirm import/i })).toBeNull()
+      fireEvent.click(screen.getByRole("button", { name: label }))
+      expect(onConfirm).toHaveBeenCalledWith({ reimportChoice: choice })
+      view.unmount()
+    }
+  })
+
+  it("shows how many cells a re-import would add and update", () => {
+    render(
+      <PreviewPanel
+        results={RESULTS}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        reimport
+        reimportChanges={{ added: 2, updated: 1, addedCells: [{ text: "A new line", number: 4 }], updatedCells: [{ text: "After", previous: "Before", number: 2 }] }}
+      />,
+    )
+    expect(screen.getByRole("region", { name: "Analysis" })).toBeTruthy()
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 cells added")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("4 A new line")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("1 cell updated")
+    expect(screen.getByTestId("reimport-changes")).toHaveTextContent("2 Before → After")
+  })
+})
+
+describe("PreviewPanel — subtitle times that are frames written as hundredths (AQU-2197)", () => {
+  const cue = (i: number, start: number, end: number) => ({
+    id: `c${i}`, original: `Line ${i}`, translated: "", group: `g${i}`, type: "cue",
+    context: `00:01:${String(Math.floor(start) - 60).padStart(2, "0")}.${String(Math.round((start % 1) * 1000)).padStart(3, "0")} --> 00:01:${String(Math.floor(end) - 60).padStart(2, "0")}.${String(Math.round((end % 1) * 1000)).padStart(3, "0")}`,
+    start, end,
+  })
+  const strings = [cue(0, 66.15, 67.18), cue(1, 68.21, 69.05)]
+  const RESULT = [{
+    name: "TheChosen_101_en_AUDIO_ONLY.vtt",
+    strings,
+    framesAsHundredths: { times: 4, maxFrame: 23, suggested: "24", rates: ["23.976", "24", "25", "29.97", "30"] },
+  }] as unknown as ImportResult[]
+
+  it("warns, shows the converted times, and converts at the suggested rate on confirm", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    expect(screen.getByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    // The cue list shows the times the import will write: frame 15 of 24 is .625.
+    expect(screen.getByText(/00:01:06\.625 --> 00:01:07\.750/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    const options = onConfirm.mock.calls[0][0]
+    expect([...options.frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "24"]])
+  })
+
+  it("keeps the times as they are when the person says so", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    expect(screen.getByText(/00:01:06\.150 --> 00:01:07\.180/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+    expect(onConfirm.mock.calls[0][0]?.frameRates).toBeUndefined()
+  })
+
+  it("says nothing for an ordinary subtitle file", () => {
+    render(<PreviewPanel results={[{ name: "ok.vtt", strings }] as unknown as ImportResult[]} onConfirm={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+
+  // Update existing, into a file with a linked film: the film's rate wins.
+  it("converts an update at the existing file's linked film's rate", async () => {
+    vi.stubGlobal("fetch", vi.fn(filmFetch("23.976")))
+    try {
+      const onConfirm = vi.fn()
+      render(<PreviewPanel results={RESULT} onConfirm={onConfirm} onCancel={vi.fn()}
+        filmUrls={new Map([["TheChosen_101_en_AUDIO_ONLY.vtt", "https://cdn.example.test/videos/preview-film/master.m3u8"]])} />)
+      await vi.waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+      await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled())
+      expect([...onConfirm.mock.calls[0][0].frameRates]).toEqual([["TheChosen_101_en_AUDIO_ONLY.vtt", "23.976"]])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

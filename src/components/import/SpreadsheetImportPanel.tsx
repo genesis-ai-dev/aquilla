@@ -21,10 +21,12 @@ import {
 } from "@/lib/parsers/spreadsheet"
 import { importFile, type ImportResult, type ImportContext } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { v7 as uuidv7 } from "uuid"
+import { SHEET_NAME_SEPARATOR } from "@/lib/import-collision"
+import { reimportFileIdsForResult, type ReimportTarget } from "@/lib/import/reimport-target"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 
 export interface SpreadsheetImportPanelProps {
@@ -45,6 +47,11 @@ export interface SpreadsheetImportPanelProps {
   /** File handed off from the general dropzone. It is parsed exactly once on
    * mount so CSV/TSV/XLSX always receive explicit column mapping. */
   initialFile?: File | null
+  /** AQU-2120: the existing file "Update existing" was chosen for on the
+   * re-import screen. Honoured only for the sheet whose emitted name is that
+   * file's own name, so another sheet of the same workbook still imports
+   * fresh instead of overwriting it. */
+  reimportTarget?: ReimportTarget | null
 }
 
 type Step = "file" | "sheet" | "mapping" | "uploading"
@@ -63,6 +70,7 @@ export function SpreadsheetImportPanel({
   onImported,
   onCancel,
   initialFile,
+  reimportTarget,
 }: SpreadsheetImportPanelProps) {
   const t = useT()
   const [step, setStep] = useState<Step>("file")
@@ -74,7 +82,7 @@ export function SpreadsheetImportPanel({
   const consumedInitialFile = useRef<File | null>(null)
   const commitCheckpoint = useRef<{
     refs: FileReference[]
-    speakerPairs: { cellId: string; speaker: string | undefined }[]
+    speakerPairs: SpeakerAssignment[]
     castApplied: boolean
   } | null>(null)
 
@@ -133,7 +141,9 @@ export function SpreadsheetImportPanel({
     }
 
     const strings = mappedRowsToStrings(mappedRows)
-    const sheetName = selectedSheet.name === fileName ? fileName : `${fileName} — ${selectedSheet.name}`
+    const sheetName = selectedSheet.name === fileName
+      ? fileName
+      : `${fileName}${SHEET_NAME_SEPARATOR}${selectedSheet.name}`
     const sourceFormat: FileType = sourceFile.name.toLowerCase().endsWith(".xlsx")
       ? "xlsx"
       : sourceFile.name.toLowerCase().endsWith(".tsv")
@@ -161,6 +171,7 @@ export function SpreadsheetImportPanel({
     setStep("uploading")
     onCommitError?.(null)
     try {
+      const reimportFileIds = reimportFileIdsForResult(importResult.name, reimportTarget ?? undefined)
       const ctx: ImportContext = {
         projectId,
         author: username,
@@ -168,6 +179,7 @@ export function SpreadsheetImportPanel({
         targetLanguage,
         targetLang,
         getToken,
+        ...(reimportFileIds ? { reimportFileIds } : {}),
       }
       if (!sourceFile) throw new Error(t("importExport.spreadsheet.sourceUnavailable"))
       const prepared: PreparedImportFile = {
@@ -188,14 +200,9 @@ export function SpreadsheetImportPanel({
       // Apply cast additions if any speaker/cast column was mapped
       if (!checkpoint.castApplied) {
         if (onCastUpdated && checkpoint.speakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(checkpoint.speakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(checkpoint.speakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
         // Replace the checkpoint rather than mutating it in place, so a retry
         // still sees the cast as applied without an in-place write to a value

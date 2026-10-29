@@ -425,3 +425,109 @@ describe("the shared-subtitle notice", () => {
     expect(screen.queryByTestId("rec-tts-shared-notice")).toBeNull()
   })
 })
+
+// Media redesign slice 2 (gap 8, P2.3): an Audio language has no translation,
+// so the performer reads the source, the recorder never says "not translated",
+// and there is no voice to generate from text.
+describe("what the performer reads in an Audio language", () => {
+  beforeEach(() => localStorage.clear())
+
+  function renderAudioOnly(cell: CellData, readAloudFor?: ReadAloudFor) {
+    renderWithTooltips(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={[cell]}
+        activeCellId={cell.id}
+        username="sam"
+        onActiveCellChange={() => {}}
+        readAloudFor={readAloudFor}
+        onClose={() => {}}
+        deliversAudioOnly
+      />,
+    )
+  }
+
+  it("reads the line's source text, never \"not translated\"", () => {
+    const verse = { ...cue, id: "v-3", original: "In the days when the judges ruled", translated: "" } as CellData
+    renderAudioOnly(verse)
+    expect(screen.getByTestId("rec-read-aloud").textContent).toBe("In the days when the judges ruled")
+    expect(screen.queryByText("not translated")).toBeNull()
+    expect(screen.queryByTestId("rec-generate-tts")).toBeNull()
+  })
+
+  it("reads the heard line's own words on a dubbing file", () => {
+    renderAudioOnly(cue, () => ({ text: "", reference: "Pay me, pay me", linkedCount: 1 }))
+    expect(screen.getByTestId("rec-read-aloud").textContent).toBe("Pay me, pay me")
+    expect(screen.queryByTestId("rec-cue-reference")).toBeNull()
+  })
+})
+
+// The pencil beside "Read aloud": a typo spotted mid-session is one click from
+// the editor, caret in the line's target text.
+describe("the edit-text pencil", () => {
+  beforeEach(() => localStorage.clear())
+
+  function renderWithEdit(cell: CellData, opts: { readAloudFor?: ReadAloudFor; deliversAudioOnly?: boolean } = {}) {
+    const onEditText = vi.fn()
+    renderWithTooltips(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={[cell]}
+        activeCellId={cell.id}
+        username="sam"
+        onActiveCellChange={() => {}}
+        readAloudFor={opts.readAloudFor}
+        deliversAudioOnly={opts.deliversAudioOnly}
+        onEditText={onEditText}
+        onClose={() => {}}
+      />,
+    )
+    return onEditText
+  }
+
+  it("sits beside the label when the line has text, and hands back the line it is on", () => {
+    const onEditText = renderWithEdit({ ...cue, translated: "Paie-moi" } as CellData)
+    fireEvent.click(screen.getByTestId("rec-edit-text"))
+    expect(onEditText).toHaveBeenCalledWith("cue-1")
+  })
+
+  it("is named for what it does", async () => {
+    renderWithEdit({ ...cue, translated: "Paie-moi" } as CellData)
+    expect(screen.getByRole("button", { name: "Edit this text" })).toBeInTheDocument()
+    await expectTooltip(screen.getByTestId("rec-edit-text"), "Edit this text")
+  })
+
+  // A cue's words live on its subtitle; the workspace resolves that row, so
+  // the modal reports the cue and nothing else.
+  it("is offered on a cue whose linked subtitle is translated", () => {
+    const onEditText = renderWithEdit(cue, { readAloudFor: () => ({ text: "Paie-moi, paie-moi" }) })
+    fireEvent.click(screen.getByTestId("rec-edit-text"))
+    expect(onEditText).toHaveBeenCalledWith("cue-1")
+  })
+
+  it("is absent on an untranslated line — there is nothing to correct", () => {
+    renderWithEdit(cue)
+    expect(screen.getByTestId("rec-read-aloud")).toHaveTextContent("not translated")
+    expect(screen.queryByTestId("rec-edit-text")).toBeNull()
+  })
+
+  it("is absent on whitespace-only text", () => {
+    renderWithEdit({ ...cue, translated: "   " } as CellData)
+    expect(screen.queryByTestId("rec-edit-text")).toBeNull()
+  })
+
+  // An Audio language reads the SOURCE here, which is not the target to edit.
+  it("is absent in an Audio language", () => {
+    renderWithEdit({ ...cue, translated: "" } as CellData, { deliversAudioOnly: true })
+    expect(screen.getByTestId("rec-read-aloud")).toHaveTextContent("Pay me, pay me")
+    expect(screen.queryByTestId("rec-edit-text")).toBeNull()
+  })
+
+  it("is absent when the workspace offers no way to edit", () => {
+    renderModal(() => ({ text: "Paie-moi" }))
+    expect(screen.getByTestId("rec-read-aloud")).toHaveTextContent("Paie-moi")
+    expect(screen.queryByTestId("rec-edit-text")).toBeNull()
+  })
+})

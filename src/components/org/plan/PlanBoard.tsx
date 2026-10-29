@@ -51,6 +51,7 @@ import {
   planUnitStatus,
   PLAN_GROUP_ORDER,
 } from "@/lib/plan/plan-status"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import {
   loadCollapsedGroups,
   loadPlanView,
@@ -213,9 +214,17 @@ export function PlanBoard({
   status = "ready", onRetry, orderRef,
   shortChaptersByUnit, frontMatterShortUnits, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
   recordsAudio = false,
+  delivers = null,
 }: {
   units: PlanUnit[]
   now: number
+  /**
+   * Media redesign slice 1: what the board's language delivers. An Audio
+   * language owes no text on any file — no "to translate", no text bar — and a
+   * Text and audio one owes it on every file. Text, and a language nobody has
+   * chosen for, keep the board's evidence (`textFileIds`), exactly as before.
+   */
+  delivers?: LaneDelivers | null
   /**
    * AQU-1954: the "Records audio" switch of the language the board is reading.
    * On, every file is expected to carry audio, so every row has an audio bar
@@ -364,7 +373,7 @@ export function PlanBoard({
   // `audioFiles`: derived from the UNFILTERED units, because whether a file is
   // audio-only is a fact about the file and must not change when the search
   // box hides its siblings.
-  const textFiles = useMemo(() => textFileIds(units), [units])
+  const textFiles = useMemo(() => textFileIds(units, delivers), [units, delivers])
   // `audioFiles` comes from the UNFILTERED units and is handed in rather than
   // re-derived: see groupPlanUnits' own note on why a search box must not be
   // able to change which group a row is in.
@@ -437,7 +446,10 @@ export function PlanBoard({
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
   // the strip is the one thing on this card a reader trusts without checking.
-  const summary = useMemo(() => planSummary(units, now, recordsAudio), [units, now, recordsAudio])
+  const summary = useMemo(
+    () => planSummary(units, now, recordsAudio, delivers),
+    [units, now, recordsAudio, delivers],
+  )
   // Audio bars vanish entirely on a text-only project rather than showing a
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.

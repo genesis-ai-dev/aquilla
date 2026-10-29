@@ -18,6 +18,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
 import { extractJsonStrings, listJsonStringPaths, type JsonStringLeaf } from "@/lib/parsers/json-i18n"
 import { importFile, type ImportResult, type ImportContext } from "@/lib/import"
+import { reimportFileIdsForResult, type ReimportTarget } from "@/lib/import/reimport-target"
 import type { PreparedImportFile } from "@/lib/import/import-service"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -38,6 +39,10 @@ export interface JsonImportPanelProps {
   onCancel: () => void
   /** File handed off from the general dropzone; parsed exactly once on mount. */
   initialFile?: File | null
+  /** AQU-2120: the existing file "Update existing" was chosen for on the
+   * re-import screen, so picking keys re-imports in place instead of making a
+   * second file with the same name. */
+  reimportTarget?: ReimportTarget | null
 }
 
 type Step = "reading" | "keys" | "uploading"
@@ -54,6 +59,7 @@ export function JsonImportPanel({
   onImported,
   onCancel,
   initialFile,
+  reimportTarget,
 }: JsonImportPanelProps) {
   const t = useT()
   const [step, setStep] = useState<Step>("reading")
@@ -106,6 +112,7 @@ export function JsonImportPanel({
     setStep("uploading")
     onCommitError?.(null)
     try {
+      const reimportFileIds = reimportFileIdsForResult(importResult.name, reimportTarget ?? undefined)
       const ctx: ImportContext = {
         projectId,
         author: username,
@@ -113,6 +120,7 @@ export function JsonImportPanel({
         targetLanguage,
         targetLang,
         getToken,
+        ...(reimportFileIds ? { reimportFileIds } : {}),
       }
       const prepared: PreparedImportFile = { fileType: "json", results: [importResult] }
       if (!importedRefs.current) {
@@ -126,7 +134,7 @@ export function JsonImportPanel({
       onCommitError?.(message)
       setStep("keys")
     }
-  }, [getToken, onCommitError, onImported, projectId, sourceLanguage, targetLanguage, targetLang, username, t])
+  }, [getToken, onCommitError, onImported, projectId, reimportTarget, sourceLanguage, targetLanguage, targetLang, username, t])
 
   const handleConfirm = useCallback((includePaths: string[]) => {
     const file = sourceFile.current

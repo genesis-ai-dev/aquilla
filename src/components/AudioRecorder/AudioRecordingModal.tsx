@@ -9,7 +9,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,8 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Switch } from "@/components/ui/switch"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { MIN_USEFUL_REGION_SEC, effectiveAttachmentDurationMs, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { MIN_USEFUL_REGION_SEC, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
+import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { setRecordingTakesDrawerOpen, useRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import {
@@ -89,6 +90,7 @@ import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { probeMicPermission } from "./probeMicPermission"
+import { isHiddenCell } from "@/lib/cells/hidden"
 
 interface Props {
   open: boolean
@@ -188,6 +190,21 @@ interface Props {
    * audio cues.
    */
   filmFileId?: string | null
+  /**
+   * Media redesign slice 2: the line's language delivers audio and no text.
+   * The performer reads the SOURCE (gap 8) — the cue's own words on a dubbing
+   * file — so the recorder never says "not translated", and there is no voice
+   * to generate from text the language will never have.
+   */
+  deliversAudioOnly?: boolean
+  /**
+   * The pencil beside "Read aloud": leave the recorder for the line's TARGET
+   * text, caret in it, so a typo spotted mid-session is one click from fixed.
+   * Called with the active cell's id — on a cue, the workspace resolves the
+   * subtitle row it performs. Absent ⇒ no pencil (a read-only member, a
+   * frozen lane).
+   */
+  onEditText?: (cellId: string) => void
   onClose: () => void
 }
 
@@ -213,7 +230,7 @@ type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "erro
 
 /** A way out of the recorder that a take sitting unsaved has to be asked about
  *  first — closing it, or stepping to another line. */
-type PendingExit = { kind: "close" } | { kind: "goto"; index: number }
+type PendingExit = { kind: "close" } | { kind: "goto"; index: number } | { kind: "edit"; cellId: string }
 
 // The read-aloud block's geometry, in one place and independent of whether the
 // film is showing. The line the operator performs from should look the same
@@ -367,10 +384,18 @@ function GroupedTakes({
 
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
-  onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
+  open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
+  onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onEditText, onClose,
+  deliversAudioOnly = false,
 }: Props) {
   const t = useT()
+  // Sam's decision (hidden lines on the timeline): Next, Previous, the
+  // line count and the step on after a take all walk past a hidden line. The
+  // line the recorder is open on stays, hidden or not, so it can still show.
+  const cells = useMemo(
+    () => allCells.filter((c) => !isHiddenCell(c) || c.id === activeCellId),
+    [allCells, activeCellId],
+  )
   // ONE mic stream and ONE capture graph for as long as this dialog is open
   // (round 4 of the take-head hunt). Opening and closing them around takes is
   // what made the OS reconfigure the input device — measured as the first
@@ -528,8 +553,13 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
-  const readAloudText = readAloud?.text ?? activeCell?.translated ?? ""
-  const readAloudReference = readAloud?.reference ?? null
+  // Media redesign slice 2 (gap 8): an Audio language has no translation to
+  // read, so the performer reads the source where the translation shows today
+  // — the heard line's own words on a dubbing file.
+  const readAloudText = deliversAudioOnly
+    ? (readAloud?.reference?.trim() || readAloud?.text?.trim() || activeCell?.original || "")
+    : readAloud?.text ?? activeCell?.translated ?? ""
+  const readAloudReference = deliversAudioOnly ? null : readAloud?.reference ?? null
   const readAloudCast = readAloud?.castName ?? null
   const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
   /**
@@ -731,11 +761,7 @@ export function AudioRecordingModal({
   // What the target bar is fed at rest: the part of the selected take that
   // plays, so an over-long take reads as over before anyone records (trim-aware:
   // a take trimmed on the timeline shows its trimmed length).
-  const readyKeptMs = readySplit
-    ? readySplit.reduce((sum, piece) => sum + (effectiveAttachmentDurationMs(piece as never) ?? 0), 0)
-    : readyAtt
-    ? effectiveAttachmentDurationMs(readyAtt as unknown as Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">)
-    : null
+  const readyKeptMs = takePlayedMs(readySplit ?? (readyAtt ? [readyAtt] : []))
   const readyBadge = readyAtt
     ? takeBadgeState(readyAtt, username, readValidationCountAudio(project))
     : null
@@ -1669,6 +1695,13 @@ export function AudioRecordingModal({
     if (hasUnsavedTake) { setPendingExit({ kind: "goto", index: idx }); return }
     onActiveCellChange(cells[idx].id)
   }, [canNav, cells, onActiveCellChange, hasUnsavedTake])
+  // Leaving to edit the text is an exit like the others, so an unsaved take
+  // asks first — the same question, the same answers.
+  const requestEditText = useCallback(() => {
+    if (!onEditText || !activeCell || !canNav) return
+    if (hasUnsavedTake) { setPendingExit({ kind: "edit", cellId: activeCell.id }); return }
+    onEditText(activeCell.id)
+  }, [onEditText, activeCell, canNav, hasUnsavedTake])
 
   // While the modal is open, claim the audio keyboard shortcuts so the global
   // Space handler doesn't toggle whatever clip the user was just playing.
@@ -2094,8 +2127,29 @@ export function AudioRecordingModal({
                 the performer's type. Sharing the label's row costs the line
                 nothing at all. */}
             <div className="flex items-baseline gap-2">
-              <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-                {t("audio.recordingModal.readAloudLabel")}
+              <div className="flex items-center gap-1">
+                <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+                  {t("audio.recordingModal.readAloudLabel")}
+                </div>
+                {/* Only over real target text: an untranslated line has nothing
+                    to correct, and an Audio language is reading the SOURCE
+                    here, which is not this member's to edit. */}
+                {onEditText && !deliversAudioOnly && readAloudText.trim() && (
+                  <AppTooltip content={t("audio.recordingModal.editTextTooltip")}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      data-testid="rec-edit-text"
+                      disabled={!canNav}
+                      onClick={requestEditText}
+                      aria-label={t("audio.recordingModal.editTextTooltip")}
+                      className="h-5 w-5 shrink-0 text-muted-foreground/60"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </AppTooltip>
+                )}
               </div>
               {readAloudCast && (
                 <div
@@ -2139,9 +2193,9 @@ export function AudioRecordingModal({
                   lineHeight: `${Math.round(readAloudPx * readAloudRatio)}px`,
                 }}
               >
-                {readAloudText || (
+                {readAloudText || (deliversAudioOnly ? null : (
                   <span className="text-base text-muted-foreground/60 italic">{t("audio.recordingModal.notTranslated")}</span>
-                )}
+                ))}
               </p>
             </div>
             {/* The cue's own transcript. Only shown when the line above came
@@ -2387,8 +2441,9 @@ export function AudioRecordingModal({
                       {t("audio.recordingModal.readyTakeCaption", {
                         label: (readySplit ? takeBaseLabel(readyAtt.label) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
-                        // prints them — the two must never disagree.
-                        seconds: (Math.floor((readyKeptMs ?? 0) / 100) / 10).toFixed(1),
+                        // prints them — the two must never disagree, nor
+                        // with the Recording tab (take-length.ts).
+                        seconds: formatTakeSeconds(readyKeptMs ?? 0),
                       })}
                       {/* No window to judge against: said on hover, beside the
                           take, rather than as a line of its own (Sam,
@@ -2519,6 +2574,7 @@ export function AudioRecordingModal({
               // button it belongs to.
               <div className="space-y-1.5">
               <div className="flex gap-2">
+                {!deliversAudioOnly && (
                 <AppTooltip
                   content={
                     !online
@@ -2583,6 +2639,7 @@ export function AudioRecordingModal({
                     </Button>
                   </span>
                 </AppTooltip>
+                )}
                 <input
                   ref={uploadInputRef}
                   type="file"
@@ -2899,6 +2956,7 @@ export function AudioRecordingModal({
               const next = exit?.kind === "goto" ? cells[exit.index] : null
               if (next) onActiveCellChange(next.id)
               else if (exit?.kind === "close") onClose()
+              else if (exit?.kind === "edit") onEditText?.(exit.cellId)
             }}
           >
             {t("audio.recordingModal.discardTake")}

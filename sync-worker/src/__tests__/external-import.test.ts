@@ -595,8 +595,7 @@ describe('PlanImport — commit', () => {
        VALUES ($1, $2::jsonb, 1)`,
       [PROJECT, JSON.stringify({ targetLanes: ['fr', 'arq'] })],
     )
-    // A settings write creates the lane rows in production (AQU-1532).
-    await ensureProjectLanes(tdb.db, PROJECT, { settings: { targetLanes: ['fr', 'arq'] } })
+    await ensureProjectLanes(tdb.db, PROJECT, { languages: { extraTargets: ['fr', 'arq'] } })
     const laneRows = await tdb.pg.query<{ id: string; legacy_tag: string }>(
       `SELECT id, legacy_tag FROM lanes WHERE project_id = $1 AND role = 'target'`,
       [PROJECT],

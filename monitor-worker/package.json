@@ -1,0 +1,20 @@
+{
+  "name": "aquilla-monitor",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --test-scheduled",
+    "deploy": "bash ../scripts/verify-deploy-branch.sh release && wrangler deploy --env=production",
+    "deploy:development": "wrangler deploy --env=development",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260924.1",
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "wrangler": "^4.138.0"
+  }
+}

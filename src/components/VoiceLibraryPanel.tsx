@@ -43,10 +43,12 @@ import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { voicesForLane } from "@/lib/audio/voice-lanes"
 import { formatVoiceLanguageName, languageForVoiceDescription } from "@/lib/audio/inworld-languages"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { useCustomVoiceStatus } from "@/hooks/useCustomVoiceStatus"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { canManageVoices } from "@/lib/audio/voice-permission"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -100,6 +102,12 @@ interface Props {
    * (600) — since that's the actual route this panel's writes flow through.
    */
   roleLevel?: number | null
+  /**
+   * AQU-2041. When the project lets project leads manage voices, a lead's
+   * controls follow that instead of the maintainer floor. Contributors stay
+   * blocked either way.
+   */
+  leadsManageVoices?: boolean
 }
 
 /** What the focused modal is doing right now. */
@@ -110,7 +118,7 @@ type Editing =
 
 export function VoiceLibraryPanel({
   targetLanguage, targetLanes, archivedLanes, settings, laneId, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel,
+  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel, leadsManageVoices = false,
 }: Props) {
   const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -129,7 +137,7 @@ export function VoiceLibraryPanel({
   // the server gates at maintainer (600). Fail-open (null roleLevel) for
   // local projects that never resolve a syncRole — same convention as
   // resolveEditorCapabilities / canPerform.
-  const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
+  const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
   const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
   // Keep the roster in sync with persisted settings so a voice created from
@@ -319,6 +327,9 @@ export function VoiceLibraryPanel({
                     onEdit={() => setEditing({ kind: "edit", voice })}
                     onMakeDefault={() => makeDefault(voice)}
                     onDelete={() => deleteVoice(voice)}
+                    projectId={projectId}
+                    fileId={fileId}
+                    session={session}
                   />
                 </div>
               )
@@ -363,6 +374,7 @@ export function VoiceLibraryPanel({
           fileId={fileId}
           session={session}
           cells={cells ?? []}
+          existingVoices={voices}
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
@@ -414,6 +426,7 @@ function VoiceActionMenu({
  *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
   voice, projectProvider, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
+  projectId, fileId, session,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
@@ -431,16 +444,29 @@ function VoiceRow({
   onEdit: () => void
   onMakeDefault: () => void
   onDelete: () => void
+  /** For polling a custom voice's training state. */
+  projectId?: string
+  fileId?: string | null
+  session?: FrontierSession | null
 }) {
   const t = useT()
   const { locale } = useI18n()
+  const customState = useCustomVoiceStatus(voice, { projectId, fileId, session })
   const actionsMenu = useMemo(() => createMenuHandle(), [])
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
-  const engineLabel = voice.referenceAudioId
-    ? t("audio.library.cloneEngineLabel")
-    : providerInfo(voice.provider ?? projectProvider).shortTitle
+  const engineLabel = voice.customVoice
+    ? customState === "ready"
+      ? t("audio.library.customEngineLabel")
+      : customState === "failed"
+        ? t("audio.library.trainingFailedLabel")
+        : t("audio.library.trainingEngineLabel")
+    : voice.libraryVoiceId
+    ? t("audio.library.characterEngineLabel")
+    : voice.referenceAudioId
+      ? t("audio.library.cloneEngineLabel")
+      : providerInfo(voice.provider ?? projectProvider).shortTitle
   const languageTag = languageForVoiceDescription(voice.language)
   const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (

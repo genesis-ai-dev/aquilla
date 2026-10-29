@@ -108,7 +108,7 @@ export function projectSettingsPath(projectId: string, section?: string): string
  * search box and matches cards in other groups, so the person arrived at what
  * looked like a search they never ran. `"languages"` is the Languages card
  * (Change target language…, the single-lane TARGET pill, "Set target
- * language"); `"add-lane"` is its "Add a target lane" field (Add lane…).
+ * language"); `"add-lane"` is its "Add language" form, opened (Add lane…).
  * The `focus` values are read by `SETTINGS_FOCUS_TARGETS` in ProjectSettings.
  */
 export function projectLanguageSettingsPath(
@@ -136,9 +136,9 @@ export function projectEditorPath(projectId: string, fileId?: string | null): st
   return fileId ? `${base}/file/${fileId}` : base
 }
 
-/** Same-origin relative path from `?return=` — rejects protocol-relative URLs. */
+/** Same-origin relative path from `?return=` — rejects protocol-relative URLs and backslashes (`/\\evil.com`). */
 export function safeReturnPath(raw: string | null | undefined): string | null {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null
   return raw
 }
 

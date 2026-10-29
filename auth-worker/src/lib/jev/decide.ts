@@ -9,15 +9,16 @@
  * It stores nothing — each caller records the decision next to the thing it
  * decided.
  *
- * Jev stays outside the credit guard (same call as the seam route): it is not a
- * drafting model and must never become user-selectable. Spend is bounded by a
- * per-project sliding window instead.
+ * Jev stays outside the legacy credit guard (same call as the seam route): it
+ * is not a drafting model and must never become user-selectable. Spend is
+ * bounded by a per-project sliding window, and since AQU-2064 every call also
+ * passes the entitlement check on the jev rail (lib/jev/client.ts).
  */
 
 import type { Env } from "../../types"
 import { enforceRateLimit, projectRateLimitIdentifier } from "../../../../db/shared/rate-limit"
 import { JEV_MODEL, type JevQuestion } from "../../../../src/lib/completion/seam-request"
-import { callJev } from "./client"
+import { callJev, jevUsageOf } from "./client"
 
 export type { JevQuestion }
 
@@ -58,9 +59,12 @@ export interface DecideInput {
   fallback: () => Record<string, JevAnswer>
   /** Absolute epoch ms. A sweep shares one budget across its calls. */
   deadline?: number
+  /** Who the call bills (AQU-2064). Omitted or null is the system: the react
+   *  sweep cron and background runs have no live user (spec §3.3). */
+  userId?: number | null
 }
 
-export type DecideReason = "disabled" | "no_key" | "capped" | "timeout" | "upstream" | "partial"
+export type DecideReason = "disabled" | "no_key" | "capped" | "timeout" | "upstream" | "refused" | "partial"
 
 export interface DecideResult {
   answers: Record<string, JevAnswer>
@@ -84,15 +88,6 @@ function parseAnswer(raw: unknown, question: JevQuestion): JevAnswer | undefined
     }
   }
   return { kind: "score", score: a.score, ...(Object.keys(probabilities).length ? { probabilities } : {}) }
-}
-
-function usageOf(body: unknown): DecideResult["usage"] {
-  const u = body && typeof body === "object" ? (body as { usage?: unknown }).usage : undefined
-  if (!u || typeof u !== "object") return null
-  const { input_tokens, output_tokens } = u as Record<string, unknown>
-  return typeof input_tokens === "number" && typeof output_tokens === "number"
-    ? { input_tokens, output_tokens }
-    : null
 }
 
 export async function decide(env: Env, input: DecideInput): Promise<DecideResult> {
@@ -122,7 +117,8 @@ export async function decide(env: Env, input: DecideInput): Promise<DecideResult
   })
   if (!capped.allowed) return heuristic("capped")
 
-  const called = await callJev(env, { model: JEV_MODEL, state: input.state, questions: input.questions }, timeoutMs)
+  const called = await callJev(env, { model: JEV_MODEL, state: input.state, questions: input.questions }, timeoutMs,
+    { projectId: input.projectId, userId: input.userId ?? null })
   if (!called.ok) return heuristic(called.reason)
   return decideResultFromBody(called.body, input.questions, input.fallback)
 }
@@ -154,6 +150,6 @@ export function decideResultFromBody(
     decidedBy: fromModel === total ? "model" : "mixed",
     ...(fromModel === total ? {} : { reason: "partial" as const }),
     model: JEV_MODEL,
-    usage: usageOf(body),
+    usage: jevUsageOf(body),
   }
 }

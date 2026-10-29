@@ -245,7 +245,7 @@ describe("EditorTable — character gutter", () => {
     const [cellArg, voiceId, opts] = onAssignCastVoice.mock.calls[0]
     expect(cellArg.id).toBe("cell-plain")
     expect(voiceId).toBe("v-john")
-    expect(opts).toEqual({ applyToSpeaker: false })
+    expect(opts).toEqual({ scope: "line" })
   })
 
   it("the Audio view offers the voice dropdown on a heading, and not on a section break", async () => {
@@ -257,17 +257,17 @@ describe("EditorTable — character gutter", () => {
     expect(within(rowEl("cell-heading")).queryByTestId("voice-card-empty")).toBeNull()
   })
 
-  it("the diarized speaker's apply-to-all footer rides along in the gutter popover", async () => {
+  it("the scope choice rides along in the gutter popover", async () => {
     const onAssignCastVoice = vi.fn()
     renderTable({ actions: { onAssignCastVoice } })
     await screen.findByText("Mary's line")
     fireEvent.click(within(rowEl("cell-cast")).getByTestId("gutter-voice"))
-    fireEvent.click(await screen.findByTestId("gutter-voice-all"))
+    fireEvent.click(await screen.findByTestId("gutter-voice-scope-everywhere"))
     fireEvent.click(screen.getByRole("button", { name: /John/ }))
     expect(onAssignCastVoice).toHaveBeenCalledWith(
       expect.objectContaining({ id: "cell-cast" }),
       "v-john",
-      { applyToSpeaker: true },
+      { scope: "everywhere" },
     )
   })
 })

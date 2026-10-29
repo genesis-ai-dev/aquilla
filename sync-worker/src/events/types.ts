@@ -145,6 +145,10 @@ export type EventKind =
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
+  // AQU-1408 §1: a hand-corrected statistical gloss. Its own kind rather than
+  // a flag on the BT event because the two are different readings of the same
+  // commit and must both be addressable — see db/postgres/migrations/0184_cell_glosses.sql.
+  | 'cell.gloss.set'
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comments, but their scope is
   // project-level — resolved into assignment_cells from the payload.
@@ -605,6 +609,18 @@ export interface EventPayloads {
      * source.cell.create UPSERT clobbering segment fields.
      */
     transcription?: string
+    /**
+     * Two-step transcription (migration 0186): what ASR heard, before learned
+     * corrections. Sent only by the transcription path; a correction never
+     * sends it and the projection keeps the stored value.
+     */
+    asr?: { text: string; model: string }
+    /**
+     * Provenance of an AI cleanup of this clip's transcript. An attach that
+     * carries new `timings` (or `transcription`) without it clears the stored
+     * value: the transcript is no longer the AI's.
+     */
+    transcriptAi?: { model: string; at: number; changes: number }
     /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -972,6 +988,23 @@ export interface EventPayloads {
     laneId?: string
   }
 
+  // ── Statistical gloss (non-chain-mutating) ─────────────────────────────
+  // AQU-1408 §1. The gloss is computed from the project's own translated
+  // pairs; this event carries the text a contributor PUT IN ITS PLACE. There
+  // is no `polished` flag: every row here is a human correction by
+  // construction, which is also why §2 can seed the glosser from it without
+  // asking who wrote it. An empty `glossText` clears the correction and falls
+  // the cell back to the computed gloss.
+  'cell.gloss.set': {
+    glossText: string
+    /** The target.cell.commit / target.cell.create event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads (legacy_tag; '' is the default). */
+    targetLang?: string
+    /** The lane row's id, when the caller has it. Must name the same lane as `targetLang`. */
+    laneId?: string
+  }
+
   // ── Assignments (project-level, non-chain-mutating) ─────────────────────
   // A manager assigns a book/chapter scope to a member. One assignment.create
   // regardless of scope size — the handler resolves `scope` into the cell set
@@ -1004,6 +1037,13 @@ export interface EventPayloads {
     deadline?: string | null
     /** Optional instruction note. */
     note?: string | null
+    /**
+     * AQU-1969: what the assignment hands out. Absent = 'translate', the only
+     * kind before this field existed, so every older event replays unchanged.
+     * 'validate' gives the assignee only the approving; its progress counts
+     * their own approvals in the scope.
+     */
+    kind?: 'translate' | 'validate'
   }
   'assignment.reassign': {
     assignmentId: string

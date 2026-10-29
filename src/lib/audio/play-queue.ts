@@ -11,12 +11,13 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { hasTiming, sortByLens } from "@/lib/timeline/derive"
-import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { buildProgramme, programmeLines, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { standInEstimator } from "@/lib/timeline/stand-in"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { joinedClip, seekableClip, tailCutNow } from "./tail-cut"
+import { takePlayWindow } from "./kept-window"
 import { preferredPlaybackExt } from "./lossless-sibling"
 import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-quality-pref"
 import { audioMimeForExt } from "./mime"
@@ -24,6 +25,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
+import { isHiddenCell } from "@/lib/cells/hidden"
 
 export type { QueueForFile }
 
@@ -112,6 +114,35 @@ export function useQueueCellPlayhead(cellId: string | undefined): number | null 
     () => {
       if (!cellId || state.kind !== "playing" || state.cellId !== cellId) return null
       return progress.currentTime
+    },
+    () => null,
+  )
+}
+
+/** What the transport is doing on this cell, or null when it is on another
+ *  cell or idle. Every other row keeps a stable null. (AQU-1642 follow-up) */
+export function useQueueCellKind(cellId: string | undefined): "playing" | "loading" | "paused" | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => {
+      if (!cellId) return null
+      if (state.kind !== "playing" && state.kind !== "loading" && state.kind !== "paused") return null
+      return state.cellId === cellId ? state.kind : null
+    },
+    () => null,
+  )
+}
+
+/** Clip seconds where the transport is on this cell — playing, opening it, or
+ *  paused there — otherwise null. Unlike useQueueCellPlayhead it holds the
+ *  place while paused, which is what the Audio view's card draws. */
+export function useQueueCellPosition(cellId: string | undefined): number | null {
+  return useSyncExternalStore(
+    subscribeClock,
+    () => {
+      if (!cellId) return null
+      if (state.kind !== "playing" && state.kind !== "loading" && state.kind !== "paused") return null
+      return state.cellId === cellId ? progress.currentTime : null
     },
     () => null,
   )
@@ -419,12 +450,20 @@ let pendingEarlyDubs: Array<{ cellId: string; slot: string; dueSec: number }> = 
 // With seamless same-clip advance the element OUTLIVES the cell it was opened
 // for — handlers must not close over a stale index/trim, they read these.
 let currentIndex = -1
-let currentTrim: { start: number; end: number } | null = null
+let currentTrim: MasterWindow | null = null
+/** Fires at the next edge of a line's own take — a split's gap or the trim's
+ *  end — so the take stops there and not up to a timeupdate (~250ms) later. */
+let takeEdgeTimer: ReturnType<typeof setTimeout> | null = null
 /** The cell ATTACHMENT url (e.g. frontier-audio://…) — NOT the resolved src,
  *  so the streaming→blob fallback swap doesn't break same-clip matching. */
 let currentAttachmentUrl: string | null = null
 /** Seek target applied on loadedmetadata (Safari rejects pre-metadata seeks). */
 let pendingStartSeconds: number | null = null
+/** A move within a line asked for while its clip was still being fetched. */
+let openingSeek: { cellId: string; sec: number } | null = null
+/** AQU-1767: the dubbing master's tick, at a given second — for the timer that
+ *  fires a made-ready dub at its start. Null with no master open. */
+let queueTickAt: ((atSec: number) => void) | null = null
 
 // ── SUB-53: audio-first transport state ─────────────────────────────────────
 // In DUBBING everything above holds: the imported file is the master and the
@@ -520,8 +559,11 @@ function disposeCurrent(): void {
   }
   currentIndex = -1
   currentTrim = null
+  clearTakeEdge()
   currentAttachmentUrl = null
   pendingStartSeconds = null
+  openingSeek = null
+  queueTickAt = null
   clearActiveAudioIf(coordinatorController)
   setProgress({ currentTime: 0, duration: 0 })
 }
@@ -533,6 +575,36 @@ function seekQueue(seconds: number): void {
   const d = currentAudio.duration
   currentAudio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(seconds, d)) : Math.max(0, seconds)
   setProgress({ currentTime: currentAudio.currentTime })
+  aimTakeEdge()
+}
+
+function clearTakeEdge(): void {
+  if (takeEdgeTimer != null) {
+    clearTimeout(takeEdgeTimer)
+    takeEdgeTimer = null
+  }
+}
+
+/**
+ * Aim the take-edge timer at the next place a line's own take stops sounding:
+ * the start of a split's gap, or the end of its trim. The tick it fires steps
+ * over the gap or ends the line, the same as a timeupdate there would — only
+ * on time.
+ */
+function aimTakeEdge(): void {
+  clearTakeEdge()
+  const audio = currentAudio
+  const w = currentTrim
+  if (!audio || audio.paused || !w?.take) return
+  const now = audio.currentTime
+  let edge = w.end
+  for (const g of w.gaps ?? []) if (g.start > now && g.start < edge) edge = g.start
+  if (!Number.isFinite(edge) || edge <= now) return
+  const rate = audio.playbackRate || 1
+  takeEdgeTimer = setTimeout(() => {
+    takeEdgeTimer = null
+    queueTickAt?.(Math.max(currentAudio?.currentTime ?? edge, edge))
+  }, ((edge - now) / rate) * 1000)
 }
 
 /** Set playback speed for the queue (applies live + to subsequent tracks). */
@@ -540,6 +612,7 @@ export function setQueueRate(rate: number): void {
   if (currentAudio) currentAudio.playbackRate = rate
   for (const e of overlayPool) if (e.element) e.element.playbackRate = rate
   setProgress({ rate })
+  aimTakeEdge()
 }
 
 /** Set queue volume 0..1 (applies live + to subsequent tracks). */
@@ -557,6 +630,10 @@ export function setQueueVolume(vol: number): void {
  * over a generated voice. Returns the attachment URL if one is playable.
  */
 function pickPlayableAudio(cell: CellData): { audioId: string; url: string } | undefined {
+  // Sam's decision (hidden lines): a hidden line's take is never played. Its
+  // section of an imported recording still is — masterAudioForCell asks for
+  // the source clip before it gets here.
+  if (isHiddenCell(cell)) return undefined
   const ids = [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId]
   for (const id of ids) {
     if (!id) continue
@@ -824,6 +901,9 @@ function progTargetEntry(): OverlayEntry | null {
  * stalling the transport; with neither side playable the verse is skipped.
  */
 function progEffectiveClock(slot: ProgrammeSlot): "source" | "target" | null {
+  // AQU-2204: during a take's pause the take still to come clocks its verse,
+  // so a source that ends inside the pause goes quiet instead of advancing.
+  if (progLead && progLead.cellId === slot.cellId) return "target"
   if (slot.clock === "target" && !progTargetEntry()) return slot.sourceWindow ? "source" : null
   return slot.clock
 }
@@ -844,21 +924,26 @@ function progRebuild(): void {
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
-  // drawing would disagree about where a verse is: same filter, same sort.
-  const mediaCells = sortByLens(
-    ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
-    "time",
-  )
-  // AQU-1704: a video-less subtitle import has no media cells, so its cues are
-  // the verses. TimelineEditor's layout falls back to the subtitle lane the same way.
-  const dialogue =
-    mediaCells.length > 0
-      ? mediaCells
-      : sortByLens(
-          ctx.cells.filter((c) => hasTiming(c)),
-          "time",
-        )
-  programme = buildProgramme(dialogue)
+  // drawing would disagree about where a verse is: ONE shared answer
+  // (programmeLines). AQU-1704: a video-less subtitle import's cues are the
+  // verses. AQU-2204: a file with no times at all lays its lines out in order,
+  // an unrecorded one at a stand-in length that playback steps over.
+  const { lines: dialogue, untimed } = programmeLines(ctx.cells)
+  // AQU-2204: following the recordings, every unrecorded line takes its stand-in.
+  const built = buildProgramme(dialogue, { standInLenSec: standInEstimator(dialogue) })
+  // A take whose length was never measured (a generated voice nobody has
+  // played yet) has no window the programme can play. On a file with times
+  // that is today's rule — the verse is silent — but a file with NO times only
+  // reaches the programme through AQU-2204's stand-ins, so there it keeps the
+  // plain line-by-line path it always had rather than going quiet.
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
+    programme = null
+    return
+  }
+  // Hidden lines keep their place (the timeline draws them there, faded) but
+  // their takes are taken out of what plays: a hidden verse sounds only its
+  // original, and one with no original is skipped.
+  programme = withoutHiddenTakes(built, new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
   setProgress({ duration: programme.totalSec })
 }
 
@@ -881,6 +966,7 @@ function progPrevPlayable(from: number): number {
 
 function progFinish(): void {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   progQuiet(currentAudio)
@@ -955,6 +1041,81 @@ interface ProgGate {
 
 let progGate: ProgGate | null = null
 let progGateSeq = 0
+
+/**
+ * AQU-2204 (Sam, Oct 26): a PAUSE someone left before a take
+ * (`slot.targetLeadSec`) is waited out, never skipped — the timeline draws it
+ * inside the line, so the transport must take as long. Until the pause is over
+ * the take isn't due: the verse sounds only its source (or holds the clock in
+ * silence), a ticker keeps the clock moving, and at the pause's end the take
+ * joins through an ordinary gate.
+ */
+interface ProgLead {
+  cellId: string
+  explicit: boolean
+  timer: ReturnType<typeof setTimeout> | null
+  ticker: ReturnType<typeof setInterval> | null
+}
+let progLead: ProgLead | null = null
+
+function progClearLead(): void {
+  if (progLead?.timer != null) clearTimeout(progLead.timer)
+  if (progLead?.ticker != null) clearInterval(progLead.ticker)
+  progLead = null
+}
+
+/** Wait out the pause from `atSec`, then bring the take in at its start. */
+function progArmLead(slot: ProgrammeSlot, atSec: number, explicit: boolean): void {
+  progClearLead()
+  const leadEndSec = slot.startSec + (slot.targetLeadSec ?? 0)
+  const rate = progress.rate || 1
+  const startedAt = performance.now()
+  const lead: ProgLead = { cellId: slot.cellId, explicit, timer: null, ticker: null }
+  lead.ticker = setInterval(() => {
+    if (progLead !== lead) return
+    const t = atSec + ((performance.now() - startedAt) / 1000) * rate
+    setProgress({ currentTime: Math.min(t, leadEndSec) })
+  }, 100)
+  lead.timer = setTimeout(() => progLeadEnd(lead), Math.max(0, ((leadEndSec - atSec) / rate) * 1000))
+  progLead = lead
+}
+
+function progLeadEnd(lead: ProgLead): void {
+  if (progLead !== lead) return
+  progClearLead()
+  const slot = progCurrentSlot()
+  const cell = slot ? activeContext?.cells.find((c) => c.id === slot.cellId) : undefined
+  if (!slot || !cell || slot.cellId !== lead.cellId) return
+  const leadSec = slot.targetLeadSec ?? 0
+  const target = slot.targetWindow ? progTargetFor(cell) : null
+  const sourcePlaying = Boolean(
+    currentAudio && !currentAudio.paused && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end,
+  )
+  // Nothing sounding (or no take any more): land on the take's start like a seek.
+  if (!sourcePlaying || !target) {
+    void progPlaySlot(progIndex, slot.startSec + leadSec, true, lead.explicit)
+    return
+  }
+  // The source plays on untouched; the take joins it through a dub-only gate.
+  const gate: ProgGate = {
+    token: ++progGateSeq,
+    cellId: slot.cellId,
+    into: leadSec,
+    wantPlay: true,
+    timer: null,
+    pending: new Set(["target"]),
+    dueSource: true,
+    dueTarget: true,
+    explicit: lead.explicit,
+  }
+  progGate = gate
+  progCueTarget(slot, cell, target, 0, gate)
+  if (progGate === gate && gate.pending.size === 0) {
+    progStartSides(gate)
+    return
+  }
+  if (progGate === gate) gate.timer = setTimeout(() => progGateTimeout(gate), GATE_TIMEOUT_MS)
+}
 
 function progClearGate(): void {
   if (progGate?.timer != null) clearTimeout(progGate.timer)
@@ -1237,7 +1398,7 @@ function progTargetTick(entry: OverlayEntry, audio: HTMLAudioElement): void {
   const slot = progCurrentSlot()
   if (!slot || slot.cellId !== entry.cellId) return
   if (slot.clock !== "target" || !slot.targetWindow) return
-  const t = slot.startSec + (audio.currentTime - slot.targetWindow.start)
+  const t = slot.startSec + (slot.targetLeadSec ?? 0) + (audio.currentTime - slot.targetWindow.start)
   setProgress({
     currentTime: Math.min(Math.max(t, slot.startSec), slot.startSec + slot.slotLenSec),
   })
@@ -1465,10 +1626,16 @@ async function progPlaySlot(
         Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
       )
   const into = at - slot.startSec
+  // AQU-2204: a pause someone left before the take. Until it is over the take
+  // isn't due; progArmLead waits it out and brings the take in at its start.
+  const leadSec = slot.targetLeadSec ?? 0
+  const leadAhead = Boolean(slot.targetWindow && leadSec > 0 && into < leadSec - 0.001)
+  const intoTake = Math.max(0, into - leadSec)
 
   // A newer slot open orphans any pending gate (and its timeout — a stale
   // 6s timer must never fire into this verse's cue).
   progClearGate()
+  progClearLead()
   // The dub side rides the overlay pool, so the speaker buttons, rate and
   // volume keep applying to it exactly as they do in dubbing mode.
   disposeAllOverlays()
@@ -1476,7 +1643,7 @@ async function progPlaySlot(
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
   const target = slot.targetWindow ? progTargetFor(cell) : null
-  const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
+  const dubDue = Boolean(slot.targetWindow && target && !leadAhead && into < leadSec + slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
   // Park the clock at the landing position. Under a gate this is where the
@@ -1491,7 +1658,7 @@ async function progPlaySlot(
     // remember whether the USER chose this verse so that re-entry keeps the
     // explicit flag a gate would have carried.
     progCuedExplicit = explicit
-    if (dubDue && target) progCueTarget(slot, cell, target, into, null)
+    if (dubDue && target) progCueTarget(slot, cell, target, intoTake, null)
     if (sourceDue && slot.sourceWindow) {
       await progOpenSource(cell, slot.sourceWindow.start + into)
     } else {
@@ -1505,6 +1672,14 @@ async function progPlaySlot(
   // `explicit` (already in hand) is the truth from here on.
   progCuedExplicit = false
 
+  if (leadAhead && !sourceDue) {
+    // AQU-2204: nothing sounds during the pause — hold the clock in silence
+    // for it, then the take comes in.
+    progQuiet(currentAudio)
+    setState({ kind: "playing", ...progStateCell() })
+    progArmLead(slot, at, explicit)
+    return
+  }
   if (!dubDue && !sourceDue) {
     // Nothing in this verse can sound from here (both sides already spent,
     // or neither loadable) — don't sit in silence.
@@ -1534,7 +1709,8 @@ async function progPlaySlot(
   if (sourceDue && !seamlessSrc) gate.pending.add("source")
   progGate = gate
 
-  if (dubDue && target) progCueTarget(slot, cell, target, into, gate)
+  if (leadAhead) progArmLead(slot, at, explicit)
+  if (dubDue && target) progCueTarget(slot, cell, target, intoTake, gate)
   if (sourceDue && slot.sourceWindow) {
     // Seamless: never progCueSource — progOpenSource's same-clip branch is an
     // unconditional seek (backward by the overshoot: an audible replay) plus
@@ -1640,6 +1816,48 @@ function findPrevPlayable(cells: CellData[], startIndex: number): number {
  * once per cell. Text cells' startTime/endTime are subtitle timings on the
  * video timeline, NOT offsets into their own recording, so they get no window.
  */
+/**
+ * What the master plays of the clip it opens for a cell, on that clip's clock.
+ * `take` marks a line's own take rather than a section of a shared recording.
+ */
+export interface MasterWindow {
+  start: number
+  end: number
+  /** Stretches inside the window that do not play: a split take's gaps. */
+  gaps?: readonly { start: number; end: number }[]
+  take?: true
+}
+
+/**
+ * The part of its clip the master plays for a cell. A media section's window
+ * when it has one (trimWindowForCell); otherwise, when the master is the line's
+ * own take, that take's kept part — its trim, or a split take's pieces — the
+ * same part the line's card, the Recording tab and the recorder play
+ * (takePlayWindow). Without this the bottom bar played a trimmed take whole.
+ * Null = the whole clip.
+ */
+export function masterWindowForCell(cell: CellData): MasterWindow | null {
+  const section = trimWindowForCell(cell)
+  if (section) return section
+  if (queueClockIsFileTime(cell)) return null
+  const take = masterAudioForCell(cell)
+  if (!take) return null
+  const kept = takePlayWindow(cell.attachments, take.audioId)
+  if (!kept) return null
+  return {
+    start: kept.start ?? 0,
+    end: kept.end ?? Number.POSITIVE_INFINITY,
+    ...(kept.gaps && kept.gaps.length > 0 ? { gaps: kept.gaps } : {}),
+    take: true,
+  }
+}
+
+/** Where a second inside a gap resumes: the gap's end. Null outside every gap. */
+function pastTakeGap(gaps: MasterWindow["gaps"], sec: number): number | null {
+  for (const g of gaps ?? []) if (sec >= g.start && sec < g.end - 0.005) return g.end
+  return null
+}
+
 export function trimWindowForCell(cell: CellData): { start: number; end: number } | null {
   if (cell.medium !== "media") return null
   // SUB-29/round 5: the window addresses the SHARED IMPORTED CLIP. A take
@@ -1707,7 +1925,9 @@ export function planSeek(
     // seek its own element (today's seekQueue semantics).
     const cur = cells[currentIdx]
     if (cur && masterAudioForCell(cur) && !trimWindowForCell(cur)) {
-      return { kind: "element", index: currentIdx, seconds }
+      // …inside the part of its take that plays.
+      const kept = masterWindowForCell(cur)
+      return { kind: "element", index: currentIdx, seconds: kept ? Math.min(Math.max(seconds, kept.start), kept.end) : seconds }
     }
     return { kind: "none" }
   }
@@ -1878,6 +2098,10 @@ export function planTargetOverlay(
   const cell = cells[index]
   const slot = opts?.slot ?? RECORDING_SLOT
   const isDefaultSlot = isDefaultTrackSlot(slot)
+  // Sam's decision (hidden lines on the timeline): a hidden line's takes never
+  // sound — under a recording, a film or the built-in clock, on any track.
+  // The recording under it plays on; only the dub is held back.
+  if (cell && isHiddenCell(cell)) return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   // `activeTargetForCell` gates on medium:"media"; `resolveTargetAudio` is the
   // same resolution without that gate, and is already what the video-first
   // timeline draws its dub chips from.
@@ -1972,6 +2196,7 @@ export function planEarlyDub(
   const isDefaultSlot = isDefaultTrackSlot(slot)
   for (let i = index + 1; i < cells.length; i++) {
     const next = cells[i]
+    if (isHiddenCell(next)) continue // its take never sounds (hidden lines)
     const target = isDefaultSlot ? activeTargetForCell(next) : resolveTargetAudio(next, slot)
     // Dub-less / take-only sections can't fire an overlay — keep scanning.
     // The source-clip requirement is the DEFAULT track's rule; an added
@@ -2105,6 +2330,7 @@ function applyTargetOverlays(
       { alreadySilenced },
     )
   }
+  stockUpcomingDubs(cells, masterSec, opts)
 }
 
 /** The fire body, callable WITHOUT touching `pendingDub` — the early-dub tick
@@ -2248,18 +2474,38 @@ interface StashedDub {
   element: HTMLAudioElement | null
   objectUrl: string | null
   stopAtClipSec: number | null
+  /** When it is due on the master's clock, for the timer that fires it then. */
+  dueSec: number | null
 }
 const dubStash = new Map<string, StashedDub>()
 const stashKey = (cellId: string, slot: string, audioId: string) => `${cellId}|${slot}|${audioId}`
 
+/** A dub to make ready ahead of its turn: one take, or one piece of a cut take. */
+interface DubStock {
+  cellId: string
+  slot: string
+  audioId: string
+  url: string
+  startAtClipSec: number
+  stopAtClipSec: number | null
+  dueSec?: number
+}
+
 function stockNextPiece(plan: Extract<TargetOverlayPlan, { kind: "fire" }>, cell: CellData, ctx: PlayContext): void {
-  const next = plan.nextPiece
-  if (!next || timingMode === "audioFirst") return
-  const key = stashKey(plan.cellId, plan.slot, next.audioId)
+  if (plan.nextPiece) stockDub({ cellId: plan.cellId, slot: plan.slot, ...plan.nextPiece, dueSec: plan.nextDueSec }, cell, ctx)
+}
+
+/** Resolve, make and load one dub's player, parked at its start, in the stash. */
+function stockDub(next: DubStock, cell: CellData, ctx: PlayContext): void {
+  if (timingMode === "audioFirst") return
+  const key = stashKey(next.cellId, next.slot, next.audioId)
   const had = dubStash.get(key)
-  if (had && had.stopAtClipSec === next.stopAtClipSec) return
+  if (had && had.stopAtClipSec === next.stopAtClipSec) {
+    if (next.dueSec != null) had.dueSec = next.dueSec
+    return
+  }
   if (had) disposeStashed(key)
-  const stash: StashedDub = { element: null, objectUrl: null, stopAtClipSec: next.stopAtClipSec }
+  const stash: StashedDub = { element: null, objectUrl: null, stopAtClipSec: next.stopAtClipSec, dueSec: next.dueSec ?? null }
   dubStash.set(key, stash)
   void (async () => {
     let resolved: ResolvedAudioSrc
@@ -2284,6 +2530,8 @@ function stockNextPiece(plan: Extract<TargetOverlayPlan, { kind: "fire" }>, cell
       if (next.startAtClipSec > 0 && Number.isFinite(el.duration)) {
         el.currentTime = Math.min(next.startAtClipSec, el.duration)
       }
+      // Ready now: if it is the next to start, the timer can aim at it.
+      if (dubStash.get(key) === stash) aimDueTimer()
     }
   })()
 }
@@ -2315,6 +2563,157 @@ function disposeStashed(key: string): void {
 
 function disposeDubStash(): void {
   for (const key of [...dubStash.keys()]) disposeStashed(key)
+  clearDueTimer()
+}
+
+// ── The next lines' takes, made ready ahead of their turn ───────────────────
+// The piece after a cut was made ready while the one before it played, but a
+// LINE's take was still made when it came due, and a fresh player is slow to
+// sound: in Safari's engine every line started about a tenth of a second
+// behind its waveform, against half that for a piece made ready (measured
+// 2026-10-15). So after every plan, each track's next takes to start — the
+// next lines' takes, and a cut take's next piece — are made and parked the
+// same way, and whatever is no longer among them is let go. A jump or a stop
+// throws the lot away with the overlays (disposeAllOverlays); the plan that
+// follows stocks afresh from wherever the playhead landed.
+
+/** How many takes ahead each track keeps ready: the next to start and the one
+ *  after it, so a short take is not over before its successor has loaded. */
+const STOCK_AHEAD = 2
+const NO_SOUNDING: ReadonlySet<string> = new Set()
+
+/**
+ * The takes (or pieces) on one track that start next after `atSec`, soonest
+ * first, at most STOCK_AHEAD. Asked of the same planner that fires them, at
+ * their own due second, so what is made ready is exactly what will be fired —
+ * the same piece, the same start in the clip, the same end.
+ */
+export function planUpcomingDubs(
+  cells: CellData[],
+  atSec: number,
+  opts?: TargetOverlayOptions & { slot?: string },
+): Array<DubStock & { dueSec: number }> {
+  const slot = opts?.slot ?? RECORDING_SLOT
+  const upcoming: Array<DubStock & { dueSec: number }> = []
+  for (let i = 0; i < cells.length; i++) {
+    const now = planTargetOverlay(cells, i, NO_SOUNDING, "advance", atSec, opts)
+    if (now.kind === "arm") {
+      const due = planTargetOverlay(cells, i, NO_SOUNDING, "advance", now.dueSec, opts)
+      if (due.kind !== "fire") continue
+      const { cellId, audioId, url, startAtClipSec, stopAtClipSec } = due
+      upcoming.push({ cellId, slot, audioId, url, startAtClipSec, stopAtClipSec, dueSec: now.dueSec })
+    } else if (now.kind === "fire" && now.nextPiece && now.nextDueSec != null) {
+      // Sounding now: its next piece is what this line starts next.
+      upcoming.push({ cellId: now.cellId, slot, ...now.nextPiece, dueSec: now.nextDueSec })
+    }
+  }
+  return upcoming.sort((a, b) => a.dueSec - b.dueSec).slice(0, STOCK_AHEAD)
+}
+
+/** Keep each track's next takes made and loaded; let go of every other. */
+function stockUpcomingDubs(cells: CellData[], atSec: number, opts?: TargetOverlayOptions): void {
+  const ctx = activeContext
+  if (!ctx || timingMode === "audioFirst" || !Number.isFinite(atSec)) return
+  const wanted = new Set<string>()
+  for (const slot of targetSlots) {
+    for (const next of planUpcomingDubs(cells, atSec, { ...opts, slot })) {
+      const cell = cells.find((c) => c.id === next.cellId)
+      if (!cell) continue
+      wanted.add(stashKey(next.cellId, next.slot, next.audioId))
+      stockDub(next, cell, ctx)
+    }
+  }
+  for (const key of [...dubStash.keys()]) if (!wanted.has(key)) disposeStashed(key)
+}
+
+// ── …and fired at its start, not on the tick after it ───────────────────────
+// A made-ready take only has to play, but it was still told to on the master's
+// next tick: up to 50ms late under the virtual clock, up to 250ms under a
+// recording or a film (their timeupdate is ~4Hz) — and a take that late is
+// seeked past its start, which stalls Safari as long again. A timer aimed at
+// the soonest made-ready take's start fires it then. Each tick re-aims it from
+// the live clock; a pause, a jump or a stop drops it.
+
+/** A timer this close to a take's start fires it (a clock read can trail the timer). */
+const DUE_EARLY_SEC = 0.012
+/** A picture's clock not heard from for this long is not running on: a stalled
+ *  film must not have its dubs fired on by a guess. Its ticks are ~4Hz. */
+const EXTERNAL_TICK_STALE_MS = 600
+let dueTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearDueTimer(): void {
+  if (dueTimer != null) {
+    clearTimeout(dueTimer)
+    dueTimer = null
+  }
+}
+
+/** The dubbing master's second right now, and its speed — null unless it is running. */
+function liveDubClock(): { sec: number; rate: number } | null {
+  if (timingMode === "audioFirst") return null
+  if (externalDubs) {
+    if (!externalDubs.playing || externalDubs.lastTickMs == null) return null
+    // The picture's clock arrives in ticks; between them it runs on at the
+    // speed the dubs themselves play at.
+    const sinceMs = performance.now() - externalDubs.lastTickMs
+    if (sinceMs > EXTERNAL_TICK_STALE_MS) return null
+    const rate = progress.rate || 1
+    return { sec: externalDubs.lastSec + (sinceMs / 1000) * rate, rate }
+  }
+  if (!currentAudio || currentAudio.paused || state.kind !== "playing") return null
+  return { sec: currentAudio.currentTime, rate: currentAudio.playbackRate || 1 }
+}
+
+/** Aim the timer at the soonest made-ready take still ahead of the clock. */
+function aimDueTimer(): void {
+  clearDueTimer()
+  const clock = liveDubClock()
+  if (!clock) return
+  let soonest = Infinity
+  for (const stash of dubStash.values()) {
+    if (stash.element && stash.element.readyState >= 1 && stash.dueSec != null && stash.dueSec > clock.sec && stash.dueSec < soonest) {
+      soonest = stash.dueSec
+    }
+  }
+  if (!Number.isFinite(soonest)) return
+  const dueSec = soonest
+  dueTimer = setTimeout(() => {
+    dueTimer = null
+    fireDueAt(dueSec)
+  }, Math.max(0, ((dueSec - clock.sec) / clock.rate) * 1000))
+}
+
+function fireDueAt(dueSec: number): void {
+  const clock = liveDubClock()
+  const ctx = activeContext
+  if (!clock || !ctx) return
+  if (dueSec - clock.sec > DUE_EARLY_SEC) {
+    aimDueTimer() // woke early against the live clock: aim again
+    return
+  }
+  const atSec = Math.max(clock.sec, dueSec)
+  if (externalDubs) {
+    // What the picture's next tick would do at this second, without moving
+    // its record of the clock (a tick that seemed to go backwards is a scrub).
+    const sounding = soundingKeys()
+    let fired = false
+    for (let i = 0; i < ctx.cells.length; i++) {
+      for (const slot of targetSlots) {
+        const plan = planTargetOverlay(ctx.cells, i, sounding, "advance", atSec, { masterIsExternal: true, slot })
+        if (plan.kind === "fire") {
+          executeFire(plan)
+          fired = true
+        }
+      }
+    }
+    if (fired) stockUpcomingDubs(ctx.cells, atSec, { masterIsExternal: true })
+  } else {
+    // The master's own tick, at this second: it fires the dub, or crosses
+    // into the section it belongs to and fires it there — and re-aims.
+    queueTickAt?.(atSec)
+    return
+  }
+  aimDueTimer()
 }
 
 /**
@@ -2739,6 +3138,37 @@ function progCueSource(cell: CellData, atClipSec: number, gate: ProgGate): void 
  *  `overlayAtSec`: where the master clock WILL be — callers that adopt before
  *  their element seek lands must pass the intended seconds, or the overlay
  *  plans off a stale position. */
+/**
+ * The dubbing master's fire point: every armed dub whose start `atSec` has
+ * reached, and any LATER section's backward-slid dub — planTargetOverlay at
+ * the EARLY cell's index supplies the trim-aware offset, past-end suppression,
+ * and the sounding guard for free; executeFire (not applyTargetOverlay) leaves
+ * the current cell's own arm untouched. Called by the master's tick and by the
+ * timer aimed at the next made-ready take (`aimDueTimer`).
+ */
+function fireDueQueueDubs(atSec: number): void {
+  if (pendingDubs.some((d) => atSec >= d.dueSec)) {
+    applyTargetOverlays(activeContext?.cells ?? [], currentIndex, "advance", atSec)
+  }
+  const dueEarly = pendingEarlyDubs.filter((d) => atSec >= d.dueSec)
+  if (dueEarly.length > 0) {
+    pendingEarlyDubs = pendingEarlyDubs.filter((d) => !dueEarly.includes(d))
+    const cells = activeContext?.cells ?? []
+    for (const early of dueEarly) {
+      const earlyIdx = cells.findIndex((c) => c.id === early.cellId)
+      const plan =
+        earlyIdx >= 0
+          ? planTargetOverlay(cells, earlyIdx, soundingKeys(), "advance", atSec, {
+              slot: early.slot,
+            })
+          : null
+      if (plan?.kind === "fire") executeFire(plan)
+    }
+    armEarlyDub() // self-healing: the next candidates, or none
+    stockUpcomingDubs(cells, atSec)
+  }
+}
+
 function adoptCell(
   index: number,
   seekTo: number | undefined,
@@ -2751,7 +3181,7 @@ function adoptCell(
   const cell = ctx.cells[index]
   if (!cell) return
   currentIndex = index
-  currentTrim = trimWindowForCell(cell)
+  currentTrim = masterWindowForCell(cell)
   setState({ kind: audio.paused ? "paused" : "playing", cellIndex: index, cellId: cell.id })
   ctx.onCellChange?.(index, cell.id)
   if (seekTo != null) {
@@ -2795,7 +3225,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   if (currentAudio && currentAttachmentUrl === playable.url) {
     // The element seek happens AFTER adoption — hand the overlay the intended
     // position so it doesn't plan off the pre-seek clock.
-    adoptCell(index, undefined, "seek", opts.atSeconds ?? trimWindowForCell(cell)?.start)
+    adoptCell(index, undefined, "seek", opts.atSeconds ?? masterWindowForCell(cell)?.start)
     const at = opts.atSeconds ?? currentTrim?.start
     if (at != null && currentAudio) {
       currentAudio.currentTime = at
@@ -2816,7 +3246,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   // on a cross-clip mid-play jump that 0 painted the playhead at x=0 for the
   // whole network resolve. Re-seed the intended start synchronously (the same
   // value the post-resolve code sets) so the readout never sees the reset.
-  setProgress({ currentTime: opts.atSeconds ?? trimWindowForCell(cell)?.start ?? 0, duration: 0 })
+  setProgress({ currentTime: opts.atSeconds ?? masterWindowForCell(cell)?.start ?? 0, duration: 0 })
   ctx.onCellChange?.(index, cell.id)
 
   const surfaceMissing = (missingCellId: string): void => {
@@ -2856,8 +3286,9 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   currentUrl = resolved.objectUrl
   currentAttachmentUrl = playable.url
   currentIndex = index
-  currentTrim = trimWindowForCell(cell)
-  pendingStartSeconds = opts.atSeconds ?? null
+  currentTrim = masterWindowForCell(cell)
+  pendingStartSeconds = openingSeek?.cellId === cell.id ? openingSeek.sec : (opts.atSeconds ?? null)
+  openingSeek = null
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = !audibility.source
@@ -2870,11 +3301,11 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     const c = activeContext?.cells[currentIndex]
     return { cellIndex: currentIndex, cellId: c?.id ?? cell.id }
   }
-  const applyAdvance = (plan: AdvancePlan): void => {
+  const applyAdvance = (plan: AdvancePlan, atSec?: number): void => {
     if (plan.kind === "seamless") {
       // Same clip: audio keeps playing straight through the boundary — just
       // make the next cell current (and rewind only for a real overlap).
-      adoptCell(plan.index, plan.seekTo, "advance")
+      adoptCell(plan.index, plan.seekTo, "advance", plan.seekTo ?? atSec)
       return
     }
     audio.onpause = null // don't let the pause handler flash a "paused" state
@@ -2896,42 +3327,39 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
       audio.currentTime = Number.isFinite(d) ? Math.max(0, Math.min(target, d)) : target
     }
   }
-  audio.ontimeupdate = () => {
+  // One tick of this master at `atSec`: its own timeupdate, or the timer aimed
+  // at the next made-ready dub (AQU-1767), which may land a hair before the
+  // element's clock reads the dub's start.
+  const tickAt = (atSec: number): void => {
     if (seq !== currentSeq) return
     // Round 6: an ARMED dub fires the moment the clock crosses its start.
     // Checked BEFORE the window-end advance — a due within one ~250ms tick of
     // the section end would otherwise be dropped by the advance's replan.
-    if (pendingDubs.some((d) => audio.currentTime >= d.dueSec)) {
-      applyTargetOverlays(activeContext?.cells ?? [], currentIndex, "advance", audio.currentTime)
-    }
-    // A LATER section's backward-slid dub fires here too — planTargetOverlay
-    // at the EARLY cell's index supplies the trim-aware offset, past-end
-    // suppression, and the sounding guard for free; executeFire (not
-    // applyTargetOverlay) leaves the current cell's own arm untouched.
-    const dueEarly = pendingEarlyDubs.filter((d) => audio.currentTime >= d.dueSec)
-    if (dueEarly.length > 0) {
-      pendingEarlyDubs = pendingEarlyDubs.filter((d) => !dueEarly.includes(d))
-      const cells = activeContext?.cells ?? []
-      for (const early of dueEarly) {
-        const earlyIdx = cells.findIndex((c) => c.id === early.cellId)
-        const plan =
-          earlyIdx >= 0
-            ? planTargetOverlay(cells, earlyIdx, soundingKeys(), "advance", audio.currentTime, {
-                slot: early.slot,
-              })
-            : null
-        if (plan?.kind === "fire") executeFire(plan)
-      }
-      armEarlyDub() // self-healing: the next candidates, or none
-    }
-    // A media segment's window ends before the shared clip does — treat
-    // reaching the window end as this cell's "ended" and advance.
-    if (currentTrim && audio.currentTime >= currentTrim.end) {
-      applyAdvance(planAdvance(activeContext?.cells ?? [], currentIndex, currentAttachmentUrl, audio.currentTime))
+    fireDueQueueDubs(atSec)
+    // A split take's gap does not play: carry on from its end.
+    const pastGap = currentTrim?.take ? pastTakeGap(currentTrim.gaps, atSec) : null
+    if (pastGap != null) {
+      audio.currentTime = pastGap
+      setProgress({ currentTime: pastGap })
+      aimTakeEdge()
       return
     }
+    // A media segment's window ends before the shared clip does — treat
+    // reaching the window end as this cell's "ended" and advance. A line's own
+    // take ends at its trim the same way.
+    if (currentTrim && atSec >= currentTrim.end) {
+      applyAdvance(planAdvance(activeContext?.cells ?? [], currentIndex, currentAttachmentUrl, atSec), atSec)
+      aimDueTimer()
+      return
+    }
+    // …and the next made-ready dub is fired by a timer at its start, not by
+    // the tick after it. (AQU-1767)
+    aimDueTimer()
+    aimTakeEdge()
     setProgress({ currentTime: audio.currentTime })
   }
+  queueTickAt = tickAt
+  audio.ontimeupdate = () => tickAt(audio.currentTime)
   audio.ondurationchange = () => {
     if (seq !== currentSeq) return
     if (Number.isFinite(audio.duration)) setProgress({ duration: audio.duration })
@@ -2948,10 +3376,14 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
       if (e.element) void e.element.play().catch(() => { /* user-driven, ignore */ })
     }
     setState({ kind: "playing", ...stateCell() })
+    aimDueTimer()
+    aimTakeEdge()
   }
   audio.onpause = () => {
     if (seq !== currentSeq) return
     for (const e of overlayPool) e.element?.pause()
+    clearDueTimer()
+    clearTakeEdge()
     if (audio.ended) return
     setState({ kind: "paused", ...stateCell() })
   }
@@ -3041,6 +3473,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
  *  prefetch can't survive into (or resurrect from) the fallback. */
 function progEngageForContext(): boolean {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   progRebuild()
@@ -3090,6 +3523,68 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
     return
   }
   void playAt(start, { explicit })
+}
+
+/**
+ * AQU-1642 follow-up: open the run at one line, at a second of its own clip —
+ * the Audio view's card and the ⋯ menu's Play. `play: false` opens it paused
+ * there, which is how a click on a card's waveform marks the place to start
+ * from. Without `atSeconds` it starts where the line's kept audio starts. The
+ * line was chosen, so a missing clip there says so rather than skipping on.
+ */
+export function startQueueAtCell(
+  ctx: PlayContext,
+  index: number,
+  opts: { atSeconds?: number; play?: boolean } = {},
+): void {
+  activeContext = ctx
+  if (timingMode === "audioFirst" && progEngageForContext()) {
+    // A file laid out as a programme has no per-clip second to aim at: start
+    // the line, as the bar would.
+    if (opts.play !== false) startQueue(ctx, index, true)
+    return
+  }
+  void playAt(index, {
+    ...(opts.atSeconds != null ? { atSeconds: opts.atSeconds } : {}),
+    autoplay: opts.play ?? true,
+    explicit: true,
+  })
+}
+
+/**
+ * AQU-1642 follow-up: move within the line the run is on, to a second of its
+ * clip (kept inside the part that plays). Playing or paused stays as it was.
+ * False — and nothing moves — when the run is not on this line.
+ */
+export function seekQueueInCell(cellId: string, seconds: number): boolean {
+  const ctx = activeContext
+  if (!ctx) return false
+  if (state.kind !== "playing" && state.kind !== "paused" && state.kind !== "loading") return false
+  if (state.cellId !== cellId) return false
+  if (!currentAudio) {
+    // Still fetching the line (a drag along a card that has just opened it):
+    // the open lands at the latest second instead of starting over.
+    const cell = ctx.cells.find((c) => c.id === cellId)
+    const w = cell ? masterWindowForCell(cell) : null
+    const at = w ? Math.min(Math.max(seconds, w.start), w.end) : seconds
+    openingSeek = { cellId, sec: at }
+    setProgress({ currentTime: at })
+    return true
+  }
+  const w = currentTrim
+  const kept = w ? Math.min(Math.max(seconds, w.start), w.end) : seconds
+  const at = pastTakeGap(w?.take ? w.gaps : undefined, kept) ?? kept
+  if (currentAudio.readyState < 1) {
+    // Still opening: Safari refuses a seek before the metadata, so it lands
+    // where the open would have.
+    pendingStartSeconds = at
+    setProgress({ currentTime: at })
+    return true
+  }
+  seekQueue(at)
+  applyTargetOverlays(ctx.cells, currentIndex, "seek", currentAudio.currentTime)
+  armEarlyDub()
+  return true
 }
 
 /**
@@ -3191,6 +3686,9 @@ export function pauseQueue(): void {
       setState({ kind: "paused", ...progStateCell() })
       return
     }
+    // AQU-2204: pausing inside a take's pause stops waiting it out; resume
+    // re-enters from where the clock stopped.
+    progClearLead()
     // The source may already be quiet (its part of the verse is over) while
     // the dub carries on — pause BOTH, then say so once.
     progQuiet(currentAudio)
@@ -3236,6 +3734,12 @@ export async function resumeQueue(): Promise<void> {
     }
     const slot = progCurrentSlot()
     if (!slot) return
+    // AQU-2204: paused inside a take's pause — re-enter, so the rest of the
+    // pause is waited out before the take.
+    if (slot.targetWindow && (slot.targetLeadSec ?? 0) > progress.currentTime - slot.startSec + 0.001) {
+      void progPlaySlot(progIndex, progress.currentTime, true, progCuedExplicit)
+      return
+    }
     // FORTIFY: a resume must obey the same rule as a slot open — sides start
     // TOGETHER. A paused CUE whose dub is still resolving (click-a-verse then
     // Space before the clip arrives) has a due side that is missing or still
@@ -3249,7 +3753,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && progTargetFor(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && progTargetFor(cell) && into < (slot.targetLeadSec ?? 0) + slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -3305,6 +3809,7 @@ export async function resumeQueue(): Promise<void> {
 
 export function stopQueue(): void {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   disposeCurrent()
@@ -3434,7 +3939,7 @@ export function updateQueueCells(cells: CellData[]): void {
     const idx = cells.findIndex((c) => c.id === anchorCellId)
     if (idx >= 0) {
       currentIndex = idx
-      currentTrim = trimWindowForCell(cells[idx])
+      currentTrim = masterWindowForCell(cells[idx])
     }
   }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)
@@ -3483,8 +3988,10 @@ export function hasAnyPlayableAudio(cells: CellData[]): boolean {
 // offsets and overlapping takes for free. The per-cell decision is still
 // `planTargetOverlay`, so the timing maths has exactly one home.
 
-/** Set while a linked picture is driving. Null = the queue owns playback. */
-let externalDubs: { playing: boolean; lastSec: number } | null = null
+/** Set while a linked picture is driving. Null = the queue owns playback.
+ *  `restock`: the next takes must be made ready on the next tick — the driver
+ *  began, the cells changed, or play was pressed. */
+let externalDubs: { playing: boolean; lastSec: number; restock: boolean; lastTickMs?: number } | null = null
 
 /** Beyond this, a clock move is a SCRUB rather than playback — the dubs that
  *  were ringing belong to a part of the film we have left. Generous next to
@@ -3494,7 +4001,7 @@ const EXTERNAL_SEEK_SLOP_SEC = 1.5
 /** Begin driving dubs from a picture. Idempotent; refreshes the cell list. */
 export function startExternalDubs(ctx: PlayContext): void {
   activeContext = ctx
-  if (!externalDubs) externalDubs = { playing: false, lastSec: 0 }
+  if (!externalDubs) externalDubs = { playing: false, lastSec: 0, restock: true }
 }
 
 /** Hand playback back (file switch, the picture going away, unmount). */
@@ -3509,6 +4016,7 @@ export function stopExternalDubs(): void {
 export function updateExternalDubCells(cells: CellData[]): void {
   if (!externalDubs || !activeContext) return
   activeContext = { ...activeContext, cells }
+  externalDubs.restock = true
 }
 
 /**
@@ -3518,6 +4026,8 @@ export function updateExternalDubCells(cells: CellData[]): void {
 export function setExternalDubsPlaying(playing: boolean): void {
   if (!externalDubs || externalDubs.playing === playing) return
   externalDubs.playing = playing
+  if (playing) externalDubs.restock = true
+  else clearDueTimer()
   for (const entry of overlayPool) {
     if (!entry.element) continue
     if (playing) void entry.element.play().catch(() => { /* user-driven, ignore */ })
@@ -3543,11 +4053,13 @@ export function tickExternalDubs(sec: number): void {
   // ringing dub four times a second.
   const seeked = drift < 0 || drift > EXTERNAL_SEEK_SLOP_SEC
   externalDubs.lastSec = sec
+  externalDubs.lastTickMs = performance.now()
   if (seeked) disposeAllOverlays()
 
   // Stage 3: every cell × every TRACK. Still one stateless sweep — the driver
   // needed no state of its own, so the fan-out is the whole change here.
   const sounding = soundingKeys()
+  let fired = false
   for (let i = 0; i < ctx.cells.length; i++) {
     for (const slot of targetSlots) {
       // `advance` even on a scrub: `seek` means "silence everything else",
@@ -3557,9 +4069,19 @@ export function tickExternalDubs(sec: number): void {
         masterIsExternal: true,
         slot,
       })
-      if (plan.kind === "fire") executeFire(plan)
+      if (plan.kind === "fire") {
+        executeFire(plan)
+        fired = true
+      }
     }
   }
+  // The next takes, made ready while these play. Not every tick: what is next
+  // only changes when something starts, the playhead jumps or the cells change.
+  if (seeked || fired || externalDubs.restock) {
+    externalDubs.restock = false
+    stockUpcomingDubs(ctx.cells, sec, { masterIsExternal: true })
+  }
+  aimDueTimer()
 }
 
 /** DEV seam for the browser passes, beside `__aqDubDebugSnapshot`. */

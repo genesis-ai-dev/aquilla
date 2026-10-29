@@ -1288,8 +1288,13 @@ the weekly-allowance reservation, and settlement on provider cost (Whisper/Qwen)
 metered GPU-seconds (Omnilingual). `creditsCharged` is that settlement in credit units;
 it is `null` while a provider cost is still being reconciled.
 
-**Credentials.** The tools need a **project-scoped** `aqk_` credential with
+**Credentials.** Ordinary REST callers need a **project-scoped** `aqk_` credential with
 **read-write** access (the call spends credits), and a contributor role or higher.
+
+Organization-scoped MCP OAuth connections can transcribe within their selected
+organizations and live project permissions. The MCP request remains resource-bound;
+its token cannot be replayed on ordinary REST. Write access, Contributor permissions
+and project credit admission still apply.
 
 **Windowing.** WAV is cut server-side: 30 s windows for Omnilingual, 60 s for
 Whisper/Qwen. Each boundary moves back up to 2 s to the quietest 20 ms frame, so
@@ -1336,3 +1341,91 @@ A take in a target lane is a recording of that lane's text, so its transcript
 is stored with `SetTranslation`. A source media cell's transcript uses
 `SetTranscription` instead (project-lead floor). Call `describe_command` for the
 exact parameters before staging either.
+
+## Status addendum (2026-10-26, AQU-2192 — built-in checks and rules over the settings surface)
+
+An agent could neither see nor set a project's checks. The built-in checks that are
+on by default are never stored, so the raw `settings` blob showed nothing about them,
+and PatchSettings accepted any object for `rules`, `rulePenalties`,
+`algorithmicChecks` and `algorithmicChecksByLane`.
+
+- **Reading.** `GET .../projects/:projectId/settings` and `GET .../projects/:projectId`
+  (and the MCP `get_project_settings` / `get_project`) now carry two more fields beside
+  `settings`: `builtinChecks`, `[{ id, name, enabled, severity, overridden }]` for the
+  whole project, and `builtinChecksByLane`, the same list for each lane that has its own
+  `algorithmicChecksByLane` entries, keyed by lane tag (`""` is the default lane). A lane
+  entry replaces the project-wide entry for that check, as on the Rules page. Bible data
+  checks (`bkp:…` ids) are listed only while the project's Bible data checks are on. A
+  lane the caller cannot see is left out. `settings` itself is unchanged: it is the raw
+  stored blob that PatchSettings patches against.
+- **Writing.** The four keys now have checked shapes (shown by
+  `describe_command("PatchSettings")`). To turn checks off on a web-article project:
+
+  ```json
+  { "kind": "PatchSettings", "projectId": "p1", "ifMatchVersion": 7, "ops": [
+    { "key": "algorithmicChecks", "value": {
+      "usfm-structure": { "enabled": false },
+      "footnote-quote-mismatch": { "enabled": false } } } ] }
+  ```
+
+  The op replaces the whole `algorithmicChecks` value, so start from the stored map in
+  `settings.algorithmicChecks` and add to it. Omit `severity` to keep the default. The
+  command's doc maps each Rules page name ("USFM markers") to its id (`usfm-structure`).
+  Unknown check ids, unknown fields and a `type: "builtin"` rule are rejected with the
+  field named. Rules read back from `settings.rules` can be patched unchanged.
+- **Not covered.** The "Style rules" section of the Rules page lives in the `style_rules`
+  table (auth-worker `/api/v2/projects/:id/style-rules`). It is a different store and is
+  not reachable through the `rules` key. AQU-2195 (below) covers it.
+- **Source of truth.** Check ids, English names and defaults live in
+  `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.
+
+## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
+
+"Extract from knowledge base" can propose hundreds of style rules, and until now only a
+person in the Rules page could read or decide them. An agent with a project credential
+can now do the whole pass.
+
+- **Reading.** `GET .../projects/:projectId/style-rules` (MCP `list_style_rules`). Needs
+  VIEWER, and a read-only credential works. Optional `?status=proposed|approved|rejected|archived`
+  (anything else is `validation_failed`) and `limit` (default 100, max 500) + `cursor`.
+  Each rule carries `id`, `instruction`, `category`, `scope`, `severity`, `enabled`, `status`,
+  `version`, `humanEdited` and `source`; a rule that cites a knowledge document also carries
+  `sourceDocTitle`. `inherited: true` marks a rule the project's org shares: it shows up here
+  as it does in the app, and it cannot be reviewed through the project. The rows, the
+  status filter and the ordering (newest first) come from the same code as the in-app list.
+- **Writing.** One command, `ReviewStyleRules`, a sole command in its changeset:
+
+  ```json
+  { "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [
+    { "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 },
+    { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 },
+    { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } } ] }
+  ```
+
+  `approve` and `reject` need a `proposed` rule. `update` takes a `patch` (required there,
+  refused elsewhere) of `instruction`, `category`, `severity` and `enabled`, marks the rule
+  human-edited and bumps its `version`; its status stays as it was. Editing a rule and
+  approving it takes two changesets, because a rule appears once per command.
+- **Floor.** PROJECT_LEAD, the in-app review floor: checked at prepare (`permission_denied`
+  below it) and re-resolved at commit. In ask mode the human who confirms must hold
+  PROJECT_LEAD too, and a confirmation from anyone lower refuses the commit without
+  consuming it. Unlike a Living Memory proposal there is no "lands as proposed" fallback:
+  approving a rule changes every later draft. Act mode with a PROJECT_LEAD credential
+  applies directly.
+- **Batch and atomicity.** At most 500 decisions per command, one per rule; split a longer
+  pass across changesets. Commit locks the rule rows, checks every decision, and writes
+  nothing unless all of them pass, in one transaction. A missing rule, an org-inherited
+  rule, a rule in the wrong state for its action, or a stale version refuses the whole
+  commit with `details.decisions: [{ index, ruleId, code, message }]` where `code` is
+  `not_found`, `org_inherited`, `invalid_state` or `stale_version`. Any `stale_version`
+  makes the error `plan_stale`: re-read the list and stage again. Prepare runs the same
+  check against the live rows, so most refusals arrive before a human is asked.
+- **Receipt.** `receipt.rules` lists each rule's `ruleId`, `action`, new `status` and
+  `version`. Approve and reject leave `version` unchanged (the in-app review does not bump
+  it either); only `update` does. `reviewed_by` is the credential owner's username, as with
+  the in-app route.
+- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` now returns the style-rules
+  block as `parts.styleRules` and in the assembled system message. It carries what the
+  editor's drafting call carries: approved, enabled rules (the project's and its org's) that
+  apply to that cell through the applicability graph. Proposed, rejected, archived and
+  disabled rules never appear.

@@ -10,11 +10,10 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
-import { admitChatUsage, providerRejectedPreModel, releaseChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
-import { weeklyUsageActive } from "../lib/billing/usage-mode"
+import { openRouterEstimate, providerRejectedPreModel, releaseChatUsage, settleChatUsage } from "../lib/billing/chat-usage"
+import { admitPaidCall } from "../lib/billing/paid-call"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
-import { checkAiSpendCeiling } from "../../../db/shared/ai-spend-ceiling"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
 import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
@@ -141,30 +140,22 @@ imports.post(
     const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
     if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
 
-    // Platform daily spend ceiling (AQU-1869) — outside the weekly/legacy
-    // split below, so a metered request is bounded by it too.
-    const spendCeiling = await checkAiSpendCeiling(c.env.AQUILLA_PG, c.env, "import-classify")
-    if (!spendCeiling.ok) return c.json(spendCeiling.body, spendCeiling.status)
-
     const project = await c.env.AQUILLA_PG.prepare(
       "SELECT org_id FROM projects WHERE id = ?",
     ).bind(input.projectId).first<{ org_id: number | null }>()
     const orgId = project?.org_id ?? 0
-    // Same local scripted-provider rehearsal gate as chat: one non-streaming
-    // provider call reserved before the request and settled from reported cost.
-    let usage: ChatUsage | undefined
-    const weekly = weeklyUsageActive(c.env, c.req.url)
-    if (weekly === "unavailable") return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-    if (weekly === "on") {
-      // Enforced usage never funds an unowned project from org 0.
-      if (orgId <= 0) return c.json({ error: "forbidden" }, 403)
-      const suppliedId = c.req.header("Idempotency-Key")
-      if (suppliedId && !z.string().uuid().safeParse(suppliedId).success) {
-        return c.json({ error: "invalid_request_id" }, 400)
-      }
-      usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
-    }
-    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    // AQU-2062: the one entitlement check — plan, key, platform spend ceiling
+    // (AQU-1869) and, when the meter is on, a reservation for this one
+    // non-streaming call, settled below from the reported cost.
+    const gate = await admitPaidCall(c.env, {
+      orgId, userId: user.id, projectId: input.projectId, rail: "llm",
+      requestUrl: c.req.url, idempotencyKey: c.req.header("Idempotency-Key"),
+      estimate: openRouterEstimate(c.env, { model,
+        promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS }),
+    })
+    if (!gate.ok) return c.json(gate.body, gate.status)
+    const { usage, apiKey } = gate
+    // Legacy credit/word guards are retired once the meter records this call.
     if (!usage) {
       const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
       if (!credits.ok) {
@@ -178,20 +169,6 @@ imports.post(
       if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
 
-    if (usage) {
-      try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: input.projectId,
-          model, promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS })
-        // A repeated key never starts another provider call.
-        if (!created) return c.json({ error: "usage_request_already_admitted" }, 409)
-      } catch (error) {
-        if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
-          return c.json({ error: "weekly_ai_allowance_exhausted", message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 429)
-        }
-        if (error instanceof Error && error.message === "Model price unavailable") return c.json({ error: "model_price_unavailable" }, 503)
-        return c.json({ error: "usage_accounting_unavailable" }, 503)
-      }
-    }
     // AQU-1849: total deadline (`stream: false` — nothing arrives until the
     // completion is whole), linked to the client's signal so a user who
     // navigates away still cancels upstream.
@@ -200,7 +177,7 @@ imports.post(
       const upstream = await fetch(resolveOpenRouterUrl(c.env), {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

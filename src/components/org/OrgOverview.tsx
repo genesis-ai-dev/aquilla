@@ -9,12 +9,12 @@ import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { translatedPct, validatedPct } from "@/lib/frontier/portfolio"
+import { startedPct, validatedPct } from "@/lib/frontier/portfolio"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
-import { CreditsPanel } from "./CreditsPanel"
-import { BillingUsagePanel } from "./BillingUsagePanel"
+import { OrgAiMeter } from "@/components/billing/AiMeter"
+import { orgSettingsPath } from "@/lib/navigation/org-paths"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -221,7 +221,9 @@ export function OrgOverview() {
         cell: ({ row }) => (
           <ValidatedBar
             fraction={validatedPct(row.original.project)}
-            translatedFraction={translatedPct(row.original.project)}
+            // Media redesign slice 1: the lines with any work in them, by
+            // what each language delivers (the translated share for Text).
+            translatedFraction={startedPct(row.original.project)}
           />
         ),
       },
@@ -449,39 +451,23 @@ export function OrgOverview() {
                 </SectionVisibilityGate>
               )}
               {jwt && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={ROLE.MAINTAINER}
-                  viewerRoleLevel={activeOrg?.role?.level ?? null}
+                // AQU-2068: every member sees the same % meter; it shows no
+                // amounts, so it needs no maintainer gate (the credit panels did).
+                <Section
+                  title={t("billing.meter.sectionTitle")}
+                  action={(activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER ? (
+                    <Link to={orgSettingsPath(activeOrgId, "billing")} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                      {t("billing.usage.open")}
+                    </Link>
+                  ) : undefined}
+                  data-testid="section-billing"
                 >
-                  <div
-                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
-                    data-testid="section-billing"
-                  >
-                    <BillingUsagePanel
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      orgRoleLevel={activeOrg?.role.level ?? 0}
-                    />
-                  </div>
-                </SectionVisibilityGate>
-              )}
-              {jwt && activeOrgId != null && (
-                <SectionVisibilityGate
-                  minRole={ROLE.MAINTAINER}
-                  viewerRoleLevel={activeOrg?.role?.level ?? null}
-                >
-                  <div
-                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
-                    data-testid="section-credits"
-                  >
-                    <CreditsPanel
-                      jwt={jwt}
-                      orgId={activeOrgId}
-                      orgRoleLevel={activeOrg?.role.level ?? 0}
-                      action={<SectionVisibilityBadge minRole={ROLE.MAINTAINER} />}
-                    />
-                  </div>
-                </SectionVisibilityGate>
+                  <OrgAiMeter
+                    jwt={jwt}
+                    orgId={activeOrgId}
+                    canManage={(activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER}
+                  />
+                </Section>
               )}
             </div>
           )}

@@ -64,6 +64,20 @@ describe("PericopeSuggestions", () => {
     expect(screen.queryByText(/of 20 Bibles/)).toBeNull()
   })
 
+  // AQU-2158: every row used to be labelled with the first row's book.
+  it("labels each range with its own book", async () => {
+    const user = userEvent.setup()
+    renderSuggestions([
+      suggestion({ key: "HOS:2.1-2.23", book: "HOS", start: { chapter: 2, verse: 1 }, end: { chapter: 2, verse: 23 }, startRef: "HOS 2:1", endRef: "HOS 2:23" }),
+      suggestion(),
+    ])
+
+    await user.click(screen.getByRole("button", { name: /suggested passages/i }))
+
+    expect(screen.getByText("Hosea 2:1–2:23")).toBeInTheDocument()
+    expect(screen.getByText("Genesis 1:1–2:3")).toBeInTheDocument()
+  })
+
   it("hands the chosen range back to the editor", async () => {
     const user = userEvent.setup()
     const chosen = suggestion()

@@ -8,6 +8,8 @@
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
 import { settingsKeyDocLines } from './project-settings-keys'
+import { BIBLE_CHECK_META, TEXT_CHECK_IDS, TEXT_CHECK_META } from './builtin-checks'
+import { BIBLE_CHECK_IDS } from './bible-checks/types'
 import { POLICY_DIRECTION_TABLE } from './policy-direction'
 
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
@@ -35,6 +37,14 @@ export interface CommandCatalogEntry {
 const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
   .map((line) => `\`${line}\``)
   .join(', ')
+
+// AQU-2192: the Rules page's check names, mapped to the ids `algorithmicChecks` is keyed by.
+const PATCH_SETTINGS_CHECKS_DOC = `Built-in checks (Rules page name → id, default): ${TEXT_CHECK_IDS.map((id) => {
+  const m = TEXT_CHECK_META[id]
+  return `"${m.name}" → \`${id}\` (${m.defaultEnabled ? 'on' : 'off'}, ${m.defaultSeverity})`
+}).join('; ')}. Bible data checks, present only while the project's Bible data checks are on (all default on): ${BIBLE_CHECK_IDS.map((id) => `"${BIBLE_CHECK_META[id].name}" → \`${id}\``).join('; ')}.
+To override a check, write \`algorithmicChecks\` as a map from id to \`{ enabled, severity? }\`, e.g. \`{ "usfm-structure": { "enabled": false }, "footnote-quote-mismatch": { "enabled": false } }\`. Omit \`severity\` for the default; a check with no entry keeps its default. The op replaces the whole map, so start from \`settings.algorithmicChecks\` (GET .../settings) and add to it. \`algorithmicChecksByLane\` is \`{ [laneTag]: that same map }\` (\`""\` is the default lane); a lane's entry for a check replaces the project-wide entry for that check, and other checks fall through. \`rules\` holds only your own regex rules, never built-in checks. The "Style rules" section of the Rules page is a different store and cannot be written through \`rules\`. To approve, reject or edit those, use ReviewStyleRules.`
+
 
 /** AQU-1282: the per-key restrictive direction, rendered from the same table the
  *  enforcing helper uses (db/shared/policy-direction.ts) so the doc an agent
@@ -180,14 +190,16 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     agentReachable: true,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
-Floors: every key needs MAINTAINER 600 (the language keys — sourceLanguage, targetLanguage, targetLanes, archivedLanes — use the org's language-edit floor, default 600, which an org may lower to PROJECT_LEAD 500).
+Floors: every key needs MAINTAINER 600. sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings and are rejected — languages and lanes are lane rows (CreateProject or ProjectSetup \`lanes\`).
 \`terminology\` is RETIRED (AQU-1724): key terms live in the concepts table, so prepare rejects a \`terminology\` op with \`validation_failed\`. Write terms with \`term.create\` / \`term.update\` events in an EmitEvents changeset (read the termbase with \`list_terms\` first).
 Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
+${PATCH_SETTINGS_CHECKS_DOC}
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
+- Checks and rules: \`rules\`, \`rulePenalties\`, \`algorithmicChecks\` and \`algorithmicChecksByLane\` are checked field by field; a wrong shape or an unknown field is \`validation_failed\` naming it. Read \`builtinChecks\` from GET .../settings to see what is on; \`settings\` alone shows only overrides.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 - RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "systemPrompt", "value": "Be concise." }], "ifMatchVersion": 7 }\``,
@@ -307,7 +319,7 @@ Example: \`{ "kind": "SetTranscription", "fileId": "f1", "cellId": "c3", "transc
     agentReachable: true,
     paramsDoc: `### SetTiming
 Params: \`{ fileId, cellId?, startMs?, endMs?, timingMode? }\` \u2014 at least one of (startMs+endMs) or timingMode.
-\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (MAINTAINER 600). A command carrying both needs the higher floor.
+\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (PROJECT_LEAD 500). A command carrying both needs the higher floor.
 Gotchas:
 - MILLISECONDS MUST BE INTEGERS. A fractional value is rejected at prepare with the offending number in the message (AQU-927: ms columns are BIGINT and one float used to fail every event in its flush). Round before sending; this surface will not round for you.
 - Projects default to TIMING LOCKED: while \`timingLocked\` is not exactly false, a retime needs MAINTAINER (600) unless the cell is a line someone added by hand. Prepare refuses rather than staging a plan you could not commit.
@@ -523,6 +535,26 @@ Gotchas:
 - Rejected with \`not_found\` when nothing is currently APPROVED at that slug (a \`proposed\` entry is rejected in-app instead, not retired here).
 - A human-edited entry is refused (permission_denied) — retire it from the in-app Memory surface.
 Example: \`{ "kind": "RetireExample", "slug": "lord-as-hospod", "rationale": "Superseded by the divine-name decision." }\``,
+  },
+  {
+    kind: 'ReviewStyleRules',
+    title: 'Review style rules',
+    oneLiner: 'Approve, reject or edit proposed style rules in bulk (Rules > Style rules).',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ReviewStyleRules
+Params: \`{ projectId, decisions: [{ ruleId, action, ifMatchVersion, patch? }] }\` — sole command. \`action\` is \`approve\`, \`reject\` or \`update\`. \`projectId\` must match the changeset's project.
+Acts on the rules in the Style rules section of the Rules page (\`style_rules\`), the ones "Extract from knowledge base" proposes. List them first: \`GET /api/v1/external/projects/:projectId/style-rules?status=proposed\` (MCP: \`list_style_rules\`); each row carries the \`id\` and \`version\` to send back.
+- \`approve\` / \`reject\`: the rule must be \`proposed\`. Approving puts it into drafting prompts (only approved, enabled rules reach the copilot); rejecting keeps the row, marked rejected.
+- \`update\`: \`patch\` is required and only allowed here. Fields: \`instruction\`, \`category\`, \`severity\`, \`enabled\`. It edits the rule and leaves its status alone, marks it human-edited and bumps \`version\`. To edit then approve, stage two changesets (one rule appears once per command).
+- \`ifMatchVersion\` is the \`version\` you read. A rule that changed since then refuses the whole batch with \`plan_stale\`.
+Gotchas:
+- PROJECT_LEAD(500)+, the in-app review floor. In ask mode the human who confirms must hold it too; act mode with a PROJECT_LEAD credential applies directly.
+- At most 500 decisions per command and one decision per rule; split larger passes across changesets.
+- ALL OR NOTHING. Commit checks every decision against the live rows and writes only if all pass. A missing rule, an org-inherited rule (managed at the org level, shown with \`inherited: true\` on the list), a rule in the wrong state for its action, or a stale version refuses the whole commit with \`details.decisions: [{ index, ruleId, code: not_found|org_inherited|invalid_state|stale_version, message }]\` and changes nothing. Prepare runs the same check, so most of these surface before a human is asked.
+- The receipt lists each rule's \`ruleId\`, \`action\`, new \`status\` and \`version\`. Approve and reject leave \`version\` as it was; only \`update\` bumps it.
+Example: \`{ "kind": "ReviewStyleRules", "projectId": "p1", "decisions": [{ "ruleId": "01J...", "action": "approve", "ifMatchVersion": 1 }, { "ruleId": "01K...", "action": "reject", "ifMatchVersion": 1 }, { "ruleId": "01L...", "action": "update", "ifMatchVersion": 1, "patch": { "severity": "major" } }] }\``,
   },
   {
     kind: 'InsertCell',

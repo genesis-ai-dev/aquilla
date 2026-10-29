@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
-import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { ROLE } from "@/lib/frontier/roles"
+import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import {
@@ -24,7 +26,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   Select,
@@ -36,6 +37,11 @@ import {
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
+import type { AssignmentKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "./AssignmentOverlapNotice"
 
 /**
  * Manager affordance (project_lead+) on the project overview: assign a book or
@@ -151,6 +157,8 @@ export function AssignWork({
   const [selectedChapters, setSelectedChapters] = useState<string[]>([])
   const [chapters, setChapters] = useState<string[]>([])
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const laneItems = useMemo(
@@ -186,6 +194,9 @@ export function AssignWork({
   }
   // AQU-1308: why the roster is empty, when it is empty for a reason.
   const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
+  // AQU-2194: whether the roster fetch for this opening has answered, so the
+  // "nobody else is on this project" line never flashes before it does.
+  const [rosterLoaded, setRosterLoaded] = useState(false)
 
   // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
   // Revelation) rather than the incoming prop order, matching the sidebar and
@@ -213,10 +224,12 @@ export function AssignWork({
     if (!open) return
     let cancelled = false
     setRosterError(null)
+    setRosterLoaded(false)
     fetchProjectRoster(jwt, projectId)
       .then((r) => {
         if (cancelled) return
         setMembers(r.kind === "ok" ? r.members : [])
+        setRosterLoaded(true)
         if (r.kind === "roster-hidden") setRosterError("hidden")
         else if (r.kind === "no-access") setRosterError("load-failed")
       })
@@ -224,6 +237,7 @@ export function AssignWork({
         if (cancelled) return
         setMembers([])
         setRosterError("load-failed")
+        setRosterLoaded(true)
         setError(e instanceof Error ? e.message : String(e))
       })
     return () => { cancelled = true }
@@ -240,6 +254,13 @@ export function AssignWork({
   )
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
+  // AQU-2194: nobody on the project to give language work to leaves the picker
+  // without a linguist and no word why (AssignModal's showStaffHint, same rule).
+  const showStaffHint =
+    rosterLoaded &&
+    !isSelfAssignMode &&
+    !rosterError &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
 
   useEffect(() => {
     if (isSelfAssignMode && effectiveCallerUserId != null) {
@@ -339,9 +360,11 @@ export function AssignWork({
         ...(targetLang ? { targetLang } : {}),
         ...(laneId ? { laneId } : {}),
         deadline: deadline || null,
+        kind,
       })
       setSelectedChapters([])
       setDeadlineDate(undefined)
+      setKind("translate")
       setOpen(false)
       onAssigned?.()
     } catch (e) {
@@ -350,6 +373,24 @@ export function AssignWork({
       setBusy(false)
     }
   }
+
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // No chapters ticked is the whole book, the same reading the submit takes.
+  const overlapScope = useMemo<OverlapScope | null>(
+    () => (orderedChosen.length > 0 ? { kind: "chapters", chapters: orderedChosen } : { kind: "file" }),
+    [orderedChosen],
+  )
+  const overlapFileIds = useMemo(() => (open && fileId ? [fileId] : []), [open, fileId])
+  const overlapMember = assigneeId === "" ? null : members.find((m) => m.userId === Number(assigneeId)) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneItems.length === 1 ? laneItems[0]!.value : selectedLane,
+    kind,
+  })
 
   if (!open) {
     return (
@@ -367,6 +408,7 @@ export function AssignWork({
   return (
     <div role="group" aria-label={t("dialog.assign.title")} className="mt-3 w-full rounded-md border p-3">
       <FieldGroup className="gap-4">
+        <AssignKindField id="assign-work-kind" value={kind} onChange={setKind} disabled={busy} />
         <Field>
           <FieldLabel htmlFor={laneItems.length > 1 ? "assign-work-lane" : undefined}>
             {t("dialog.assign.laneLabel")}
@@ -468,6 +510,9 @@ export function AssignWork({
                 {t("org.assignWork.selfAssignNote")}
               </FieldDescription>
             )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
+            )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}
             {rosterError && (
               <FieldError>
@@ -550,7 +595,7 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">
-              {t("dialog.assign.deadlineLabel")} <OptionalMark />
+              {t("dialog.assign.deadlineLabel")}
             </FieldLabel>
             <DatePicker
               id="assign-work-deadline"
@@ -577,6 +622,11 @@ export function AssignWork({
             {t("common.cancel")}
           </Button>
         </div>
+        <AssignmentOverlapNotice
+          overlaps={overlaps}
+          username={overlapMember?.username ?? ""}
+          fileName={(id) => sortedFiles.find((f) => f.id === id)?.label ?? id}
+        />
         {error && <FieldError>{error}</FieldError>}
       </FieldGroup>
     </div>

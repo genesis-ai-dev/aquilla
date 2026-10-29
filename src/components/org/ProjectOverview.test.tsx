@@ -22,6 +22,11 @@ vi.mock("@/lib/monday/api", () => ({
 }))
 
 const navigate = vi.fn()
+// AQU-2105: the LangQuest badge reads the project's link on open; unlinked here.
+vi.mock("@/lib/langquest/api", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/langquest/api")>()),
+  fetchLangQuestLink: vi.fn().mockResolvedValue(null),
+}))
 vi.mock("react-router-dom", async (importActual) => {
   const actual = await importActual<typeof import("react-router-dom")>()
   return { ...actual, useNavigate: () => navigate }
@@ -59,6 +64,7 @@ const LOADED_PROJECT_SETTINGS = {
   orgPolicy: null,
   visibilityFloors: null,
   patch: vi.fn(async () => ({ kind: "ok" as const })),
+  refresh: vi.fn(async () => null),
 }
 vi.mock("@/hooks/useProject", () => ({
   useProject: (...a: unknown[]) => {
@@ -128,7 +134,10 @@ type PortfolioProject = import("@/lib/frontier/portfolio").PortfolioProject
 // deadlineStatus stub — we control it per test via module-level variable
 let _deadlineStatusResult: "overdue" | "soon" | "ok" | null = null
 const getPortfolio = vi.fn((_jwt: string, _orgId: number): Promise<PortfolioProject[]> => Promise.resolve([]))
-vi.mock("@/lib/frontier/portfolio", () => ({
+vi.mock("@/lib/frontier/portfolio", async (importActual) => ({
+  // Media redesign slice 1: the real language-by-language measures
+  // (portfolioMeasure, laneStartedPct, …), which the stubs below never touch.
+  ...(await importActual<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
   // AQU-1566: audio is measured against the server's audio total (a dubbing
@@ -158,6 +167,20 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   DEADLINE_SOON_WINDOW_MS: 7 * 24 * 60 * 60 * 1000,
   isDeadlineOverdue: (deadlineUtcMidnight: number, nowMs: number) =>
     nowMs >= deadlineUtcMidnight + (24 + 12) * 60 * 60 * 1000,
+  // AQU-2116: real implementation, not a stub — the Progress card's whole text
+  // half hangs off this rule, so a wrong stub here would hide it.
+  isAudioOnlyView: (
+    p: { filledCells: number; audioCells: number; lanes?: Array<{ filledCells: number; role?: string }> },
+    lane: { filledCells: number; audioCells?: number } | null,
+  ) => {
+    if (lane != null) {
+      if (lane.audioCells == null) return false
+      return lane.filledCells === 0 && lane.audioCells > 0
+    }
+    const textAnywhere =
+      p.filledCells > 0 || (p.lanes ?? []).some((l) => l.role !== "source" && l.filledCells > 0)
+    return !textAnywhere && p.audioCells > 0
+  },
   // AQU-538 §3.3: real per-lane helpers so the lane table/tiles compute true %s.
   laneTranslatedPct: (l: { filledCells: number; totalCells: number }) => (l.totalCells > 0 ? l.filledCells / l.totalCells : 0),
   laneValidatedPct: (l: { validatedCells: number; totalCells: number }) => (l.totalCells > 0 ? l.validatedCells / l.totalCells : 0),
@@ -268,7 +291,10 @@ vi.mock("@/lib/progress/file-progress-resource", () => ({
 vi.mock("@/lib/sync/assignments", () => ({
   getWorkload: vi.fn(async () => []),
   getProjectAssignments: vi.fn(async () => []),
+  // AQU-1969: the Team card's read — the translate roster plus validate assignments.
+  getProjectTeamProgress: vi.fn(async () => ({ roster: [], validations: [] })),
   getMyAssignments: vi.fn(async () => []),
+  unassignAssignment: vi.fn(async () => {}),
 }))
 
 // AQU-498: member-activity fetch, consumed by useMemberActivity ->
@@ -306,7 +332,6 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
-  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -774,15 +799,15 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
 
     // Has Audio (coverage) tile should appear
     await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
-    // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
-    // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
-    // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
-    // For audio-only: filledCells=0 but totalCells=100, so text bars still show.
-    // Per AQU-168 spec: hide text metrics only when "no text content (translatable cells > 0)".
-    // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
-    // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
-    // This test therefore confirms Has Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
+    // AQU-2116: and the text figures are GONE. The card used to read
+    // "Translated 0% · Validated 0%" beside these real audio numbers, because
+    // the text tiles only ever asked whether the project had cells at all; a PM
+    // read those zeroes as "the verifications never registered".
+    const card = screen.getByTestId("progress-card")
+    expect(within(card).queryByText("Translated")).not.toBeInTheDocument()
+    expect(within(card).queryByText("Validated")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("stat-bar-textTranslated")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("stat-bar-textValidated")).not.toBeInTheDocument()
     // AQU-1092: the tile used to render a hardcoded "N/A" because the metric
     // was said not to exist. It does (cell_audio.approved, counted by the org
     // portfolio), so the tile shows a real number.
@@ -793,6 +818,132 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
     expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
+
+    // While they are hidden the Customize menu does not offer them either.
+    fireEvent.click(screen.getByTestId("customize-stats-trigger"))
+    await screen.findByTestId("customize-stat-audio-validated")
+    expect(screen.queryByTestId("customize-stat-translated")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("customize-stat-validated")).not.toBeInTheDocument()
+  })
+
+  it("AQU-2116: one target cell of text brings Translated/Validated back", async () => {
+    // Evidence both ways: the work became text work, so the text figures are
+    // owed again — and the Audio Validated figure must not budge.
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 1, // somebody wrote one target cell
+      validatedCells: 0, aiDraftedCells: 0,
+      audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
+    expect(within(card).getByTestId("stat-bar-textTranslated")).toHaveTextContent("1/100 cells")
+    // Unchanged by this fix: 15 of 100 cells.
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("15/100 cells")
+  })
+
+  it("AQU-2116: a language that records audio but has recorded nothing still shows its text figures", async () => {
+    // Absence of text is not evidence on its own — a text project on day one
+    // has none either. Only recordings with no text read as audio-only.
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 0, validatedCells: 0,
+      aiDraftedCells: 0,
+      audioTotalCells: 100, recordsAudio: true,
+      audioCells: 0, validatedAudioCells: 0,
+      recordedMs: 0, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    renderOverview()
+
+    const card = await screen.findByTestId("progress-card")
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(within(card).getAllByText("Validated").length).toBeGreaterThan(0)
+  })
+
+  // Media redesign slice 1 (P1.4): a language that delivers Audio has no text
+  // to translate, so its project shows no Translated or Validated tile at 0%.
+  it("an Audio language's project shows its recordings and no text tiles", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 45,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioTotalCells: 45, audioCells: 17, validatedAudioCells: 9, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 1,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 17, validatedAudioCells: 9, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("Audio Validated").length).toBeGreaterThan(0)
+    // 9 of 45 lines approved: 20%. 17 of 45 recorded: 38%.
+    expect(screen.getAllByText("20%").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("38%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Validated")).not.toBeInTheDocument()
+  })
+
+  // Sam, Oct 22: on "All", a Text language beside an Audio one reads its
+  // validated text over its own lines, as Translated does; the Audio
+  // language's approvals read only in the audio tiles.
+  it("counts only the text languages in the All tab's Validated, beside an Audio language", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "RUT", type: "usfm", createdAt: "x", cellCount: 45 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "Audio Bible", totalCells: 90,
+      filledCells: 30, validatedCells: 20, aiDraftedCells: 0,
+      audioTotalCells: 90, audioCells: 15, validatedAudioCells: 6, recordsAudio: true,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+      lanes: [{
+        lane: "fr", role: "target", name: "French", laneId: "ln-fr", position: 1,
+        totalCells: 45, filledCells: 30, validatedCells: 20, lastEditAt: null,
+        audioCells: 5, validatedAudioCells: 0, audioTotalCells: 45, recordsAudio: false,
+        delivers: "text", bothValidatedCells: 0,
+      }, {
+        lane: "sw", role: "target", name: "Swahili", laneId: "ln-sw", position: 2,
+        totalCells: 45, filledCells: 0, validatedCells: 0, lastEditAt: null,
+        audioCells: 10, validatedAudioCells: 6, audioTotalCells: 45, recordsAudio: true,
+        delivers: "audio", bothValidatedCells: 0,
+      }],
+    }])
+    renderOverview()
+
+    await waitFor(() => expect(screen.getAllByText("Validated").length).toBeGreaterThan(0))
+    // 20 of 45: 44%. The old mix, 26 of 90, would read 29%.
+    expect(screen.getAllByText("44%").length).toBeGreaterThan(0)
+    expect(screen.queryByText("29%")).not.toBeInTheDocument()
   })
 
   // AQU-489: a PM who has never seen the dashboard must be able to name what
@@ -942,6 +1093,28 @@ describe("ProjectOverview archive/restore", () => {
     fireEvent.click(btn)
 
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
+  })
+
+  // AQU-2097. WHY: the server refuses an archived project's reads, and the
+  // cards they feed hide on that refusal. Restore re-read only the project, so
+  // Progress, Languages and Team stayed gone, and the plan lost its language,
+  // until a manual reload.
+  it("Restore re-reads what the archive hid, without a reload (AQU-2097)", async () => {
+    const live = projectRecord({ level: 700 })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700, deletedAt: "2026-05-01" }), status: "ready", refresh })
+    refresh.mockImplementation(async () => {
+      useProject.mockReturnValue({ project: live, status: "ready", refresh })
+    })
+    unarchiveProjectRemote.mockResolvedValue({ kind: "restored" })
+    renderOverview()
+    await screen.findByTestId("overview-archived-notice")
+    const portfolioReads = getPortfolio.mock.calls.length
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }))
+
+    await waitFor(() => expect(screen.queryByTestId("overview-archived-notice")).toBeNull())
+    expect(LOADED_PROJECT_SETTINGS.refresh).toHaveBeenCalled()
+    await waitFor(() => expect(getPortfolio.mock.calls.length).toBeGreaterThan(portfolioReads))
   })
 
   // AQU-2088: the server refuses every per-project read for an archived
@@ -1875,18 +2048,18 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
   // not even see the "Activity" affordance to click.
 
   async function withWorkload() {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ validations: [], roster: [
       { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
-    ])
+    ] })
   }
 
-  // getProjectAssignments.mockResolvedValue persists across tests (clearAllMocks
+  // getProjectTeamProgress.mockResolvedValue persists across tests (clearAllMocks
   // clears call history, not implementation) — restore the file-wide empty
   // default so later describe blocks don't inherit this suite's workload.
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("clicking a teammate's Activity affordance renders recent actions + files rollup", async () => {
@@ -1947,14 +2120,14 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
 // 403 into an empty list and say "No open assignments in this project yet."
 describe("ProjectOverview Team card when the server refuses the read (AQU-1771)", () => {
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("hides the card instead of claiming there are no open assignments", async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
     const { UserError } = await import("@/lib/errors/user-error")
-    vi.mocked(getProjectAssignments).mockRejectedValue(new UserError(403, "", "project"))
+    vi.mocked(getProjectTeamProgress).mockRejectedValue(new UserError(403, "", "project"))
     useProject.mockReturnValue({
       project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
       status: "ready",
@@ -1963,7 +2136,7 @@ describe("ProjectOverview Team card when the server refuses the read (AQU-1771)"
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
-    await waitFor(() => expect(vi.mocked(getProjectAssignments)).toHaveBeenCalled())
+    await waitFor(() => expect(vi.mocked(getProjectTeamProgress)).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument())
     expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
   })
@@ -1980,6 +2153,79 @@ describe("ProjectOverview Team card when the server refuses the read (AQU-1771)"
   })
 })
 
+// ── AQU-1969: validate assignments on the Team card ─────────────────────────
+describe("ProjectOverview Team card validators (AQU-1969)", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  afterEach(async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
+  })
+
+  it("lists each validator's own approvals apart from the translate rows, furthest behind first", async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({
+      roster: [{ userId: 1, username: "alice", openAssignments: 1, cellsTotal: 10, cellsDone: 4 }],
+      validations: [
+        {
+          assignmentId: "v-near", assigneeUserId: 3, username: "bo", scopeLabel: "Deuteronomy 11",
+          targetLang: "", deadline: null, validation: { text: counts(10, 9, 0, 0), audio: counts(10, 0, 10, 0) },
+        },
+        {
+          assignmentId: "v-far", assigneeUserId: 2, username: "ana", scopeLabel: "Deuteronomy 1–10",
+          targetLang: "", deadline: null, validation: { text: counts(40, 34, 0, 2), audio: counts(40, 0, 40, 0) },
+        },
+      ],
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    const list = await screen.findByTestId("overview-team-validations")
+    expect(within(list).getByRole("heading", { name: "Validation assignments" })).toBeInTheDocument()
+    const rows = within(list).getAllByRole("listitem").map((li) => li.getAttribute("data-testid"))
+    expect(rows).toEqual(["overview-team-validation-v-far", "overview-team-validation-v-near"])
+    expect(screen.getByTestId("overview-team-validation-text-v-far").textContent).toBe(
+      "Deuteronomy 1–10 · Validated 34 of 40 · 6 left · 2 changed since",
+    )
+    // The translator's row is still there, unchanged.
+    expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+
+  it("does not call a project with only validators empty", async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({
+      roster: [],
+      validations: [{
+        assignmentId: "v1", assigneeUserId: 2, username: "ana", scopeLabel: "Genesis",
+        targetLang: "", deadline: null, validation: { text: counts(4, 4, 0, 0), audio: counts(4, 0, 4, 0) },
+      }],
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      memberProgressViewMinRole: 600,
+      canViewMemberProgress: true,
+    })
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready",
+      refresh,
+    })
+    renderOverview()
+
+    expect(await screen.findByTestId("overview-team-validation-v1")).toBeInTheDocument()
+    expect(screen.queryByText("No open assignments in this project yet.")).not.toBeInTheDocument()
+  })
+})
+
 // ── AQU-1172: Team card expand/collapse ─────────────────────────────────────
 
 describe("ProjectOverview Team card collapse (AQU-1172)", () => {
@@ -1988,15 +2234,15 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
   // is the working surface plus a chevron — collapse is per-page-load only.
 
   async function withWorkload() {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ validations: [], roster: [
       { userId: 1, username: "alice", openAssignments: 2, cellsTotal: 10, cellsDone: 4 },
-    ])
+    ] })
   }
 
   afterEach(async () => {
-    const { getProjectAssignments } = await import("@/lib/sync/assignments")
-    vi.mocked(getProjectAssignments).mockResolvedValue([])
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
   })
 
   it("starts expanded and hides the body when the header is clicked", async () => {
@@ -2445,8 +2691,11 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(sw).toHaveTextContent("Archived")
     expect(sw).toHaveTextContent("20%")
     // AQU-1764: one dimmed two-part bar, and the validated figure names itself
-    // since an archived row has no column headings.
-    expect(sw).toHaveTextContent("8% validated")
+    // since an archived row has no column headings. AQU-2178: it names which
+    // half it is, and a Text language that has recorded nothing shows only the
+    // text one — no audio phrase, rather than "0% audio validated".
+    expect(sw).toHaveTextContent("8% text validated")
+    expect(sw).not.toHaveTextContent("audio validated")
     const archivedBars = sw.querySelectorAll('[data-slot="progress-split-bar"]')
     expect(archivedBars).toHaveLength(1)
     expect(archivedBars[0].className).toContain("opacity-70")
@@ -2457,6 +2706,33 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-row-sw")).not.toBeInTheDocument()
   })
 
+  // AQU-2180: the Languages card is the only overview card built on the shared
+  // Section, so it used to inherit that card's bigger foreground title plus a
+  // subtitle no sibling card has. Compared against Progress, the card next to
+  // it, because "same as the other headings" is the actual contract.
+  it("gives the Languages heading the same type scale as the Progress heading, with no subtitle", async () => {
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject()])
+    renderOverview()
+
+    const table = await screen.findByTestId("overview-lane-table")
+    const languages = within(table).getByRole("heading", { level: 2, name: "Languages" })
+    const progress = screen.getByRole("heading", { level: 2, name: "Progress" })
+
+    // happy-dom resolves no stylesheet, so the utility classes that decide
+    // size, weight and colour are what there is to compare.
+    const typeScale = (h: HTMLElement) =>
+      h.className
+        .split(/\s+/)
+        .filter((c) => /^(text-(xs|sm|base|lg)|font-(normal|medium|semibold|bold)|text-(muted-)?foreground)$/.test(c))
+        .sort()
+    expect(typeScale(languages)).toEqual(typeScale(progress))
+    expect(typeScale(languages)).toEqual(["font-semibold", "text-muted-foreground", "text-xs"])
+
+    // The subtitle went with the restyle — the card header is heading + action.
+    expect(within(table).queryByText(/each target language on this project/i)).not.toBeInTheDocument()
+  })
+
   it("does not render an archived group when every lane is active", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
@@ -2465,17 +2741,26 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     expect(within(table).queryByTestId("overview-lane-archived-toggle")).not.toBeInTheDocument()
   })
 
-  it("does not render the lane table (or tabs) for a single-lane project", async () => {
+  it("AQU-2194: a single-language project shows the Languages table, with Staff… and Assign…, but no lane tabs", async () => {
+    // Come and See (Oct 26): a PM needs one place to put a linguist on a
+    // language, on every project. With one language the table used to be
+    // hidden, so Staff… was out of reach; the progress tabs stay hidden.
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
-      lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
+      lanes: [{ lane: "", laneId: "lane-bm", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
     })])
     renderOverview()
 
-    // The progress card still renders (Translated tile present) — just no lane UI.
-    await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
+    const table = await screen.findByTestId("overview-lane-table")
     expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
+    // One row, named by the project's target language (the '' lane).
+    const rows = within(table).getAllByTestId(/^overview-lane-row-/)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toHaveTextContent("Bambara")
+    // Its ⋯ menu offers Assign… and Staff….
+    fireEvent.click(within(table).getByTestId(/^overview-lane-actions-/))
+    expect(await screen.findByRole("menuitem", { name: /^Assign/ })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /^Staff/ })).toBeInTheDocument()
   })
 
   it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {
@@ -2497,6 +2782,38 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     // Back to All restores the cross-lane figures.
     fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
+  })
+
+  it("AQU-2116: an audio-only language tab hides the text figures; the text language's tab and All keep them", async () => {
+    // One project, two languages: Bambara records and writes nothing, es
+    // writes. The rule follows the tab being viewed, and "All" only drops the
+    // text figures when NO target language has any text.
+    useLaneProject()
+    getPortfolio.mockResolvedValue([laneProject({
+      audioCells: 60, validatedAudioCells: 40,
+      lanes: [
+        { ...TWO_LANES[0], filledCells: 0, validatedCells: 0, audioCells: 60, validatedAudioCells: 40 },
+        { ...TWO_LANES[1], audioCells: 0, validatedAudioCells: 0 },
+      ],
+    })])
+    renderOverview()
+
+    await screen.findByTestId("lane-filter-tabs")
+    const card = screen.getByTestId("progress-card")
+
+    // All: es has text, so the text figures stay.
+    expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0)
+
+    // Bambara (the default lane): recorded, no text → audio figures only.
+    fireEvent.click(screen.getByRole("tab", { name: "Bambara" }))
+    await waitFor(() => expect(within(card).queryByText("Translated")).not.toBeInTheDocument())
+    expect(within(card).queryByTestId("stat-bar-textValidated")).not.toBeInTheDocument()
+    expect(statTile("Audio Validated")).toHaveTextContent("20%") // 40 of 200 cells
+
+    // es: has text, owes no audio → its text figures are untouched.
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
+    await waitFor(() => expect(within(card).getAllByText("Translated").length).toBeGreaterThan(0))
+    expect(statTile("Translated")).toHaveTextContent("20%") // 20 of its 100 cells
   })
 
   it("AQU-1951: a language tab shows that language's recordings, over the project's audio cells", async () => {
@@ -3229,5 +3546,67 @@ describe("imported originals on the overview (AQU-656)", () => {
     expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
     expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-1969 (Sam, 2026-10-19: "It should be more easy to unassign work"): the
+// Team card's validation rows carry the org workload's one-click ×, offered by
+// the server's own rule — the org's assignment role in this project.
+describe("ProjectOverview one-click unassign (AQU-1969)", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const files = [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }]
+
+  async function withValidation() {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    const mod = await import("@/lib/sync/assignments")
+    vi.mocked(mod.getProjectTeamProgress).mockResolvedValue({
+      roster: [],
+      validations: [{
+        assignmentId: "v1", assigneeUserId: 3, username: "carol", scopeLabel: "GEN 1", targetLang: "",
+        deadline: null, validation: { text: counts(7, 2, 2, 0), audio: counts(7, 0, 7, 0) },
+      }],
+    })
+    return mod
+  }
+
+  it("a lead removes a validation assignment from the Team card: ×, then Confirm", async () => {
+    const mod = await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files } as never), status: "ready", refresh })
+    renderOverview()
+    const remove = await screen.findByTestId("overview-team-validation-remove-v1")
+    const readsBefore = vi.mocked(mod.getProjectTeamProgress).mock.calls.length
+    fireEvent.click(remove)
+    expect(mod.unassignAssignment).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByTestId("overview-team-validation-remove-v1-confirm"))
+    await waitFor(() => expect(mod.unassignAssignment).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", fileId: "f1", assignmentId: "v1" }),
+    ))
+    // The card is read again, as after an Assign.
+    await waitFor(() => expect(vi.mocked(mod.getProjectTeamProgress).mock.calls.length).toBeGreaterThan(readsBefore))
+  })
+
+  // Sam, 2026-10-20: an archived project's assignments are frozen with it.
+  // AQU-2088 hides an archived project's Team card behind the archived notice,
+  // so there is no row to remove from; the × must not appear anywhere either.
+  it("an archived project offers no × (its Team card is hidden)", async () => {
+    await withValidation()
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.MAINTAINER, files, deletedAt: "2026-10-01T00:00:00Z" } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-archived-notice")
+    expect(screen.queryByTestId("overview-team-validation-v1")).toBeNull()
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
+  })
+
+  it("a Contributor who can see the card gets no ×", async () => {
+    await withValidation()
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.CONTRIBUTOR,
+      memberProgressViewMinRole: ROLE.CONTRIBUTOR,
+    })
+    useProject.mockReturnValue({ project: projectRecord({ level: ROLE.CONTRIBUTOR, files } as never), status: "ready", refresh })
+    renderOverview()
+    await screen.findByTestId("overview-team-validation-v1")
+    expect(screen.queryByTestId("overview-team-validation-remove-v1")).toBeNull()
   })
 })

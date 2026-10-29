@@ -229,6 +229,28 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(screen.getByRole("menuitemcheckbox", { name: "Draft as you read" })).toHaveAttribute("aria-disabled", "true")
   })
 
+  it("does not offer Draft as you read in an Audio language, where nothing is drafted", async () => {
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={vi.fn()}
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[]}
+        onTranslateAsReadChange={vi.fn()}
+        audioLane
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Draft as you read" })).not.toBeInTheDocument()
+    // The rest of the editor tools stay.
+    expect(screen.getByText("Editor tools")).toBeVisible()
+    expect(screen.getByRole("menuitemcheckbox", { name: /Check file/ })).toBeVisible()
+  })
+
   it("moves Check file into File options as a stateful item", async () => {
     const onCheckToggle = vi.fn()
     render(

@@ -65,11 +65,11 @@ describe('AQU-1626 — search skips deleted files and hidden companions', () => 
   it('returns only the hit in the real file', async () => {
     const t = await fixture()
     const project = makeVerifiedProjectId(claims)
-    expect((await queryScopedSearch(t.db, project, 'quokka', {})).map((h) => h.fileId)).toEqual(['f-script'])
+    expect((await queryScopedSearch(t.db, project, 'quokka', { laneIds: null })).map((h) => h.fileId)).toEqual(['f-script'])
     // The exact-phrase form backs Find & Replace, which WRITES to what it
     // finds — so a cue sheet reaching this list is a corruption risk, not just
     // noise.
-    expect((await queryScopedExact(t.db, project, 'the quokka speaks', {})).map((h) => h.fileId)).toEqual(['f-script'])
+    expect((await queryScopedExact(t.db, project, 'the quokka speaks', { laneIds: null })).map((h) => h.fileId)).toEqual(['f-script'])
   })
 
   it('mines suggested terminology from the real file alone', async () => {
@@ -84,7 +84,7 @@ describe('AQU-1626 — search skips deleted files and hidden companions', () => 
       files: [],
       cells: [sourceCell('f-orphan', 'c1', 'the quokka speaks')],
     })
-    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', {})
+    const hits = await queryScopedSearch(t.db, makeVerifiedProjectId(claims), 'quokka', { laneIds: null })
     expect(hits.map((h) => h.fileId)).toEqual(['f-orphan'])
   })
 })

@@ -30,7 +30,10 @@ describe("MediaDefaultsSection", () => {
   it("shows the built-in defaults when the org set none", () => {
     render(<MediaDefaultsSection orgSettings={orgSettings()} canEdit />)
     expect(isOn(lockSwitch())).toBe(true)
-    expect(isOn(trackSwitch())).toBe(false)
+    // AQU-2214: track editing's built-in default is ON. This switch is what an
+    // org admin reads the built-in default off, so it has to agree with the
+    // project settings page and the write perimeter.
+    expect(isOn(trackSwitch())).toBe(true)
     expect(tierPicker().textContent).toContain("No one")
     expect(floorPicker().textContent).toContain("Reviewer")
   })
@@ -52,6 +55,16 @@ describe("MediaDefaultsSection", () => {
   it("saves a switch as the org default", async () => {
     const settings = orgSettings()
     render(<MediaDefaultsSection orgSettings={settings} canEdit />)
+    // Starts ON (AQU-2214), so the click an org admin makes here is the one
+    // that turns track editing off for every project that follows the default.
+    await userEvent.click(trackSwitch())
+    expect(settings.patch).toHaveBeenCalledExactlyOnceWith({ allowTrackEditing: false })
+  })
+
+  it("saves the switch back on from an org that turned it off", async () => {
+    const settings = orgSettings({ mediaDefaults: { allowTrackEditing: false } })
+    render(<MediaDefaultsSection orgSettings={settings} canEdit />)
+    expect(isOn(trackSwitch())).toBe(false)
     await userEvent.click(trackSwitch())
     expect(settings.patch).toHaveBeenCalledExactlyOnceWith({ allowTrackEditing: true })
   })

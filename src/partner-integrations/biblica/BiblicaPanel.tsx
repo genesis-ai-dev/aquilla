@@ -10,13 +10,22 @@
  * Default-exported because `React.lazy` expects a module with a default export.
  */
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { buildBulkCellsWithSpeakers } from "@/lib/import"
+import { countReimportDiff, type ReimportChangeCounts } from "@/lib/import/reimport-diff"
+import { ReimportAnalysis } from "@/components/import/ReimportAnalysis"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
-import { importBiblicaStudyNotes, type BiblicaProgress } from "./import"
-import type { BiblicaEdition } from "./editions"
+import { importBiblicaStudyNotes, previewBiblicaStudyNotes, type BiblicaProgress } from "./import"
+import {
+  BIBLICA_NOTES_PROFILE_ID,
+  EBL_PROFILE_ID,
+  REACH4LIFE_PROFILE_ID,
+  TREASURE_HUNT_PROFILE_ID,
+  type BiblicaEdition,
+} from "./editions"
 
 /**
  * One tick-box option on the Biblica panel: the label doubles as the control's
@@ -52,6 +61,14 @@ function BiblicaOption({
   )
 }
 
+function editionForProfile(profileId: string | undefined, corpusMarker: string | undefined): BiblicaEdition {
+  if (profileId === TREASURE_HUNT_PROFILE_ID || corpusMarker === "Treasure Hunt Bible") return "treasure-hunt"
+  if (profileId === REACH4LIFE_PROFILE_ID || corpusMarker === "Reach 4 Life") return "reach4life"
+  if (profileId === EBL_PROFILE_ID || corpusMarker === "Equipping Biblical Leaders") return "ebl"
+  if (profileId === BIBLICA_NOTES_PROFILE_ID || corpusMarker === "Biblica Study Notes") return "study-notes"
+  return "study-notes"
+}
+
 function BiblicaPanel({
   projectId,
   username,
@@ -59,6 +76,7 @@ function BiblicaPanel({
   targetLanguage,
   getToken,
   onImported,
+  reimport,
 }: PartnerImportPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
@@ -71,11 +89,51 @@ function BiblicaPanel({
   // study Bible marks its notes, the next two mark scripture instead, and an EBL
   // guide has no scripture to mark — and nothing in the package says which title
   // it is, so the person importing it does. One edition at a time, hence a single
-  // value rather than a flag per title.
-  const [edition, setEdition] = useState<BiblicaEdition>("study-notes")
+  // value rather than a flag per title. A re-import already knows which template
+  // created the file, so that choice stays locked.
+  const [edition, setEdition] = useState<BiblicaEdition>(
+    editionForProfile(reimport?.profileId, reimport?.corpusMarker),
+  )
+  const [changes, setChanges] = useState<ReimportChangeCounts | null>(null)
+  const [reading, setReading] = useState(false)
+  const existingSource = reimport?.existingSource
+  const recounting = reimport != null
 
-  async function handleImport() {
+  useEffect(() => {
+    if (!recounting || !file || !existingSource) {
+      setChanges(null)
+      setReading(false)
+      return
+    }
+    let cancelled = false
+    setReading(true)
+    setChanges(null)
+    setError(null)
+    void previewBiblicaStudyNotes(file, { edition, splitSentences })
+      .then((strings) => {
+        if (cancelled) return
+        const { cells } = buildBulkCellsWithSpeakers(strings, {
+          fileName: file.name,
+          fileType: "idml",
+        })
+        setChanges(countReimportDiff(cells, existingSource))
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setChanges(null)
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setReading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [recounting, file, existingSource, edition, splitSentences])
+
+  async function handleImport(mode?: "update" | "updated-copy" | "blank") {
     if (!file || importing) return
+    if (reimport && !mode) return
     setImporting(true)
     setError(null)
     setProgress({ phase: "parse" })
@@ -88,6 +146,16 @@ function BiblicaPanel({
           ...(sourceLanguage ? { sourceLanguage } : {}),
           ...(targetLanguage ? { targetLanguage } : {}),
           getToken,
+          ...(reimport && mode ? {
+            sidebarReimport: {
+              mode,
+              targetFileId: reimport.fileId,
+              existingNames: reimport.existingNames,
+              suffix: mode === "blank"
+                ? t("importExport.reimport.nameBlank")
+                : t("importExport.reimport.nameUpdated"),
+            },
+          } : {}),
         },
         setProgress,
         { splitSentences, edition },
@@ -154,6 +222,7 @@ function BiblicaPanel({
       {/* Which template to read the package with — a different question, and the
           three answers are alternatives, so they are grouped away from the cut
           setting above rather than sitting in one undifferentiated list. */}
+      {!reimport && (
       <fieldset className="flex flex-col gap-2 border-t border-border/60 pt-4">
         <legend className="sr-only">{t("importExport.biblica.editionQuestion")}</legend>
         <div className="flex flex-col gap-0.5">
@@ -186,6 +255,10 @@ function BiblicaPanel({
           onChange={(checked) => chooseEdition("ebl", checked)}
         />
       </fieldset>
+      )}
+      {reimport && (
+        <p className="text-xs text-muted-foreground">{t("importExport.reimport.hint")}</p>
+      )}
       {progress && (
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" && (
@@ -222,10 +295,28 @@ function BiblicaPanel({
         </div>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
-      <div className="flex justify-end">
-        <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
-        </Button>
+      {recounting && reading && !importing && (
+        <p className="text-xs text-muted-foreground">{t("importExport.biblica.readingPackage")}</p>
+      )}
+      {recounting && changes && <ReimportAnalysis changes={changes} />}
+      <div className="flex justify-end gap-2">
+        {reimport ? (
+          <>
+            <Button variant="outline" onClick={() => { void handleImport("blank") }} disabled={!file || importing}>
+              {t("importExport.reimport.blankCopy")}
+            </Button>
+            <Button variant="outline" onClick={() => { void handleImport("updated-copy") }} disabled={!file || importing}>
+              {t("importExport.reimport.updatedCopy")}
+            </Button>
+            <Button onClick={() => { void handleImport("update") }} disabled={!file || importing}>
+              {importing ? t("importExport.action.importing") : t("importExport.reimport.update")}
+            </Button>
+          </>
+        ) : (
+          <Button onClick={() => { void handleImport() }} disabled={!file || importing}>
+            {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
+          </Button>
+        )}
       </div>
     </div>
   )

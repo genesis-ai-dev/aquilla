@@ -68,6 +68,10 @@ export type OutboxEventKind =
   | "cell.link.set"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
+  // AQU-1408 §1: a hand-corrected statistical gloss (contributor-level;
+  // non-chain-mutating). Its own kind, not a flag on the BT event — the two
+  // are different readings of the same commit and both stay addressable.
+  | "cell.gloss.set"
   // File lifecycle.
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
@@ -407,6 +411,10 @@ export interface OutboxEventPayloads {
     role?: "dub" | "source"
     /** AQU-1767: born a piece of this take (a split take's cleaned copy). Fill-only. */
     pieceOf?: string
+    /** Two-step transcription (0186): what ASR heard, before learned corrections. */
+    asr?: { text: string; model: string }
+    /** Provenance of an AI cleanup; new timings without it clear the mark. */
+    transcriptAi?: { model: string; at: number; changes: number }
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -589,6 +597,23 @@ export interface OutboxEventPayloads {
     laneId?: string
   }
 
+  /**
+   * AQU-1408 §1: the statistical gloss as a contributor corrected it.
+   * Non-chain-mutating (parentId omitted). `targetEventId` pins the gloss to
+   * the commit whose words it reads. No `polished` dimension — every row is a
+   * human correction by construction. An empty `glossText` withdraws the
+   * correction and restores the computed gloss.
+   */
+  "cell.gloss.set": {
+    glossText: string
+    /** The target.cell.commit event_id this gloss reads. */
+    targetEventId: string
+    /** Lane whose translation this gloss reads. */
+    targetLang?: string
+    /** The lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+
   "file.create": {
     name: string
     fileType: string
@@ -699,6 +724,8 @@ export interface OutboxEventPayloads {
     assigneeUserId: number
     deadline?: string | null
     note?: string | null
+    /** AQU-1969: absent = 'translate', the only kind before this field. */
+    kind?: "translate" | "validate"
   }
   "assignment.reassign": {
     assignmentId: string
@@ -766,7 +793,7 @@ export interface OutboxEventPayloads {
   // defaults. Inside a patch, null means "clear THAT override" and an absent
   // key means "leave it alone"; `kind` has no null form because a track's
   // kind is its identity. The patch is FLAT on purpose — the projection
-  // strips nulls recursively. Maintainer floor, like file.timing.set.
+  // strips nulls recursively. Maintainer floor.
   //
   // The kind union is spelled out here rather than imported from
   // @/lib/timeline/tracks: this module is the wire mirror of

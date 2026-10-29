@@ -1,7 +1,8 @@
 // AQU-1768 — the org may set defaults for the media settings; a project's own
 // value wins; absent on both falls to each gate's built-in answer (timing
-// LOCKED, track editing OFF, audio floor reviewer, self-validation ON). These
-// pin the resolution on the server gates, which are what the settings mean.
+// LOCKED, track editing ON since AQU-2214, audio floor reviewer,
+// self-validation ON). These pin the resolution on the server gates, which are
+// what the settings mean.
 
 import { describe, it, expect, vi } from 'vitest'
 
@@ -85,17 +86,21 @@ describe('timing lock — project → org → locked', () => {
   })
 })
 
-describe('track editing — project → org → off', () => {
-  it('is off with nothing set anywhere', async () => {
+describe('track editing — project → org → ON (AQU-2214)', () => {
+  // The default flipped after the ETEN demo (Sam, Oct 27): adding a track is
+  // the ordinary case, so a project nobody has asked may restructure its
+  // timelines. The three tests under it are why that is a DEFAULT and not the
+  // removal of the gate — an explicit no still refuses, from either level.
+  it('is on with nothing set anywhere', async () => {
     const { db } = await makeTestDb()
     await seedOrg(db, null)
-    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(false)
+    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(true)
   })
 
-  it('follows an org that turns it on, when the project sets nothing', async () => {
+  it('follows an org that turns it off, when the project sets nothing', async () => {
     const { db } = await makeTestDb()
-    await seedOrg(db, { allowTrackEditing: true })
-    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(true)
+    await seedOrg(db, { allowTrackEditing: false })
+    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(false)
   })
 
   it("keeps the project's own off over the org's on", async () => {
@@ -103,6 +108,20 @@ describe('track editing — project → org → off', () => {
     await seedOrg(db, { allowTrackEditing: true })
     await setProjectSettings(db, { allowTrackEditing: false })
     expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(false)
+  })
+
+  it("keeps the project's own on over the org's off", async () => {
+    const { db } = await makeTestDb()
+    await seedOrg(db, { allowTrackEditing: false })
+    await setProjectSettings(db, { allowTrackEditing: true })
+    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(true)
+  })
+
+  it('ignores a project value that is not a boolean and falls to the default', async () => {
+    const { db } = await makeTestDb()
+    await seedOrg(db, null)
+    await setProjectSettings(db, { allowTrackEditing: 'false' })
+    expect(await resolveAllowTrackEditing(db, PROJECT)).toBe(true)
   })
 })
 

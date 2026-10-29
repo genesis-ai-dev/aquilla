@@ -3,7 +3,9 @@
 Pushes each project's progress into a Monday.com board. Built in AQU-506,
 moved onto the generic `integration_*` tables in AQU-683, fixed up in AQU-1770.
 This is the short contract the code comments point at; the code is the
-detail.
+detail. The Airtable integration (AQU-804, [AIRTABLE-INTEGRATION.md](AIRTABLE-INTEGRATION.md))
+has the same shape and shares the push triggers, the push bookkeeping
+(`lib/integrations/`) and most of the settings components.
 
 ## Shape
 
@@ -27,6 +29,39 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
 `src/lib/monday/types.ts`.
 
 - `itemGranularity`: one item for the project, or one per file.
+- `itemNameTemplate` (optional): names each row; `{projectName}` and
+  `{fileName}` are filled in. Any spelling of those two is read
+  (`{{project_name}}`, `{ projectName }`; `lib/integrations/item-name.ts`) and
+  stored in that one form; a template naming anything else is dropped with a
+  warning. A row whose template comes out empty, or that was written for the
+  other kind of row, gets the default name: the project's, or
+  "<project> — <file>". The AI is told the syntax and to leave it out unless
+  the board's rows follow a pattern. (A board set up with AI on 2026-10-27
+  showed its project's row as `{{project_name}}`: nothing filled that in.)
+- `fileSubitems` (one item per project only): each file is a subitem of the
+  project's row, so the row keeps the overall number and the files under it
+  show where it comes from. Present means on. New links set up through the
+  wizard with one item for the project have it on; project settings has a
+  "Files as subitems" switch (`PATCH { fileSubitems: true|false }`, which
+  pushes straight away when it turns them on). A mapping saved by hand or by
+  the AI never changes it. The push (`lib/monday/subitems.ts`):
+  - finds the board Monday keeps the subitems on (the parent board's Subitems
+    column; on a board without one, creating the first subitem makes it),
+  - maps that board's columns once, for the metrics the project's row maps
+    that a file has its own value of (`SUBITEM_METRICS`: the percentages and
+    counts, Status, the file's link, its plan units) plus an Aquilla ID,
+    adding any missing under Aquilla's titles (Monday's own "Status" on the
+    subitems board is used as it is), and keeps the result as
+    `fileSubitems.boardId` / `columns`. A mapping edit that changes which of
+    those metrics the row shows maps them again on the next push;
+  - lists the row's subitems each push, adopts one already there for a file
+    (Aquilla ID, else name), creates the rest under the file's name, and
+    writes every file's values and name. Item links use
+    `entity_kind = 'subitem'`. A subitem column Monday refuses is dropped
+    from `fileSubitems.columns` (turning the switch off and on maps it
+    again). Files removed from the project keep their subitems.
+  - The board's Subitems column never shows as "new" under "Board structure
+    changed" while `fileSubitems` is on.
 - `groupId`: the Monday group new rows go in. Linking sets it, never the
   client or the AI: the group a project on this board already uses (so a
   renamed group keeps working), else a group titled "Aquilla projects", else a
@@ -42,6 +77,12 @@ Defined twice, kept in lockstep: `auth-worker/src/lib/monday/types.ts` and
   - `has_audio_pct`: share of cells with a recording (a selected dub take), the
     dashboard's "Has audio", from `file_section_progress.audio_count`, less
     recorded headings when headings don't count. Per file, the file's own.
+  - Totals count every active target language once per file. A language
+    added after a file was last recomputed has no `file_section_progress` row
+    for that file yet; it still owes all of its lines, so it adds the file's
+    `cell_count` (less headings when they don't count) to the total and
+    nothing done. Before 2026-10-27 such a file was counted once in all, and
+    not at all for a language missing while another had a row.
   - `deadline`: the project's deadline (`projects.deadline_at`, a calendar
     date) on a date or text column; a project without one clears the cell (an
     empty value). File rows carry the project's deadline. Setting or clearing
@@ -146,9 +187,10 @@ contract beyond "maintainer can, member can view":
   column anyone else adds still does.
 - `POST /internal/push` is sync-worker's nudge after an edit. A push runs at
   once if the last one was over 2 minutes ago, otherwise the link is marked
-  dirty and the 5-minute cron flushes it.
+  dirty and the 5-minute cron flushes it. It schedules every progress-sync
+  link of the project, Airtable's too (`lib/integrations/push.ts`).
 - Settings that change the pushed numbers mark links dirty too (AQU-1771,
-  `db/shared/monday-dirty.ts`): a project's `countStructuralCells`,
+  `db/shared/progress-sync-dirty.ts`): a project's `countStructuralCells`,
   `validationCount` or `validationCountAudio`; the org's headings rule or its
   approvals defaults (every link in the org); and clearing project overrides. The settings routes then
   push those dirty links straight after the response (`pushDirtyLinksNow`,

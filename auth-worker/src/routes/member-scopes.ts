@@ -9,8 +9,9 @@
 //       Replace-set a member's scopes (project_lead 500+). Body:
 //         { scopes: Array<{ kind: 'lane' | 'file', value: string }> }
 //       An empty array clears all scopes (unscoped = today's behavior).
-//       Scoping a user whose effective role is >= 500 is rejected with 400 —
-//       leads/maintainers/owners must stay unscoped.
+//       Scoping a maintainer or above is rejected with 400. A project lead
+//       can be lane-scoped. A lead who holds only some lanes can grant only
+//       those lanes, and cannot clear someone to every lane.
 //       AQU-1607: a 'lane' value is a `lanes.id`. A legacy tag that names
 //       exactly one of the project's target lanes is converted to that id on
 //       the way in, so an older client still sending `''` for the default
@@ -116,6 +117,68 @@ async function loadScopes(
     .bind(projectId, userId)
     .all<{ kind: "lane" | "file"; value: string }>()
   return (rows.results ?? []).map((r) => ({ kind: r.kind, value: r.value }))
+}
+
+function laneValuesOf(scopes: readonly MemberScope[]): string[] {
+  return scopes.filter((scope) => scope.kind === "lane").map((scope) => scope.value)
+}
+
+/**
+ * A project lead below maintainer who already has lane rows holds only those
+ * lanes. Null means the caller holds every lane (no rows, or maintainer+).
+ * Stored values are resolved to lane ids when the project has lane rows, so
+ * a legacy tag and the id of the same lane compare equal.
+ */
+async function lanesHeldByCaller(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  callerId: number,
+  callerLevel: number,
+): Promise<string[] | null> {
+  if (callerLevel >= ROLE.MAINTAINER) return null
+  const raw = laneValuesOf(await loadScopes(env, projectId, callerId))
+  if (raw.length === 0) return null
+  const lanes = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  if (lanes.length === 0) return raw
+  return laneScopeIdsForStorage(raw, lanes).laneIds
+}
+
+/**
+ * A lane-limited lead may add or remove only lanes they hold. Lanes they do
+ * not hold stay on the target. An empty result means every lane, which would
+ * hand out languages the caller does not hold, so that save is refused.
+ * Someone who already has every lane cannot be narrowed by this caller.
+ */
+async function mergeLanesALimitedCallerMayGrant(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  callerId: number,
+  callerLevel: number,
+  targetUserId: number,
+  requestedLaneIds: string[],
+): Promise<{ laneIds: string[] } | { error: string; lanes?: string[] }> {
+  const held = await lanesHeldByCaller(env, projectId, callerId, callerLevel)
+  if (held == null) return { laneIds: requestedLaneIds }
+  const allowed = new Set(held)
+  const lanes = await loadTargetLaneIdentities(env.AQUILLA_PG, projectId)
+  const existingRaw = laneValuesOf(await loadScopes(env, projectId, targetUserId))
+  const existingIds =
+    lanes.length === 0 ? existingRaw : laneScopeIdsForStorage(existingRaw, lanes).laneIds
+  if (existingIds.length === 0) {
+    const novel = requestedLaneIds.filter((id) => !allowed.has(id))
+    if (novel.length > 0) return { error: "you can only grant lanes you hold", lanes: novel }
+    if (requestedLaneIds.length > 0) {
+      return { error: "you cannot change lanes for someone who already has every lane" }
+    }
+    return { laneIds: requestedLaneIds }
+  }
+  const novel = requestedLaneIds.filter((id) => !allowed.has(id) && !existingIds.includes(id))
+  if (novel.length > 0) return { error: "you can only grant lanes you hold", lanes: novel }
+  const preserved = existingIds.filter((id) => !allowed.has(id))
+  const granted = requestedLaneIds.filter((id) => allowed.has(id))
+  const merged = [...new Set([...granted, ...preserved])]
+  if (merged.length === 0) return { error: "you cannot grant every lane" }
+  return { laneIds: merged }
 }
 
 /**
@@ -292,6 +355,15 @@ memberScopes.put(
       return c.json({ error: "project_lead required to manage scopes" }, 403)
     }
 
+    // [Pen test] Authorization & access control (2026-10-20): a project lead
+    // can be limited to some lanes. An empty replace-set means "every lane", so
+    // a lane-limited lead could clear their OWN scopes and widen themselves to
+    // every lane. Below Maintainer (who already reads every lane) nobody edits
+    // their own scopes; another lead or a maintainer does it.
+    if (targetUserId === user.id && callerRole.level < ROLE.MAINTAINER) {
+      return c.json({ error: "you cannot change your own lane scopes" }, 403)
+    }
+
     // Project must exist (also gives org/creator context for role resolution).
     const projectRow = await c.env.AQUILLA_PG.prepare(
       "SELECT id, created_by, org_id FROM projects WHERE id = ?",
@@ -346,6 +418,23 @@ memberScopes.put(
       }
       laneIds = converted.laneIds
     }
+
+    const limited = await mergeLanesALimitedCallerMayGrant(
+      c.env,
+      projectId,
+      user.id,
+      callerRole.level,
+      targetUserId,
+      laneIds,
+    )
+    if ("error" in limited) {
+      return c.json(
+        { error: limited.error, ...(limited.lanes ? { lanes: limited.lanes } : {}) },
+        403,
+      )
+    }
+    laneIds = limited.laneIds
+
     const storedScopes: MemberScope[] = [
       ...laneIds.map((value): MemberScope => ({ kind: "lane", value })),
       ...scopes.filter((s) => s.kind === "file"),

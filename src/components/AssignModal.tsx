@@ -58,9 +58,11 @@ import {
 } from "@/components/ui/select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AssignKindField } from "@/components/AssignKindField"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
@@ -69,7 +71,10 @@ import {
   getFileChapters,
   AssignmentEmitError,
 } from "@/lib/sync/assignments"
-import type { AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { AssignmentKind, AssignmentScopeEntry, AssignmentScopeKind } from "@/lib/sync/assignments"
+import type { OverlapScope } from "@/lib/sync/assignment-overlap"
+import { useAssignmentOverlap } from "@/hooks/useAssignmentOverlap"
+import { AssignmentOverlapNotice } from "@/components/org/AssignmentOverlapNotice"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   canOpenAssignUi,
@@ -259,6 +264,8 @@ export function AssignModal({
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
+  // AQU-1969: Translate (the assignment as it always was) unless chosen.
+  const [kind, setKind] = useState<AssignmentKind>("translate")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
   // AQU-538 (§3.5): the target-language lane this assignment is pinned to. '' =
   // default lane. Only surfaced when the project has extra lanes.
@@ -310,6 +317,7 @@ export function AssignModal({
       setError(null)
       setNote("")
       setDeadlineDate(undefined)
+      setKind("translate")
     }
   }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane, effectiveDelegate])
 
@@ -399,6 +407,18 @@ export function AssignModal({
   // up with nothing to choose, and that is a different sentence.
   const noStaffedLanes =
     Boolean(lanes?.length) && lanesStaffedBy(lanes ?? [], staffedLaneIds).length === 0
+  // AQU-2194: with nobody on the project to give language work to, the picker
+  // holds only the caller (and perhaps the project's maintainers and owners)
+  // and nothing says why: people who only reach the project through the
+  // organisation are left out (AQU-676), and nobody has been staffed on the
+  // new language yet. Say so, and where people are added (the language's
+  // Staff… on the project Overview). Self-assign mode, a missing roster and
+  // the no-staffed-lanes line above already say their own piece.
+  const showStaffHint =
+    !isSelfAssignMode &&
+    !rosterUnavailable &&
+    !noStaffedLanes &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
   // AQU-1977: given the project's own lanes, a pick that names none of them —
   // an empty default on a project that has no '' lane — reads as the first.
   const laneValue =
@@ -540,6 +560,7 @@ export function AssignModal({
           targetLang: laneTagForAssignment(laneValue),
           deadline,
           note: note.trim() || null,
+          kind,
         })
         const failed = results.filter((r) => r.error)
         const succeeded = results.length - failed.length
@@ -619,6 +640,7 @@ export function AssignModal({
         targetLang: laneTagForAssignment(laneValue),
         deadline,
         note: note.trim() || null,
+        kind,
       })
       onAssigned()
       onOpenChange(false)
@@ -645,8 +667,39 @@ export function AssignModal({
     jwt, projectId, author, note, onAssigned, onOpenChange,
     roleLevel, allowSelfAssignment, assignmentMinRole, effectiveDelegate, isLaneDelegate,
     effectiveCallerUserId, deadlineDate, groupLabelByFileId,
-    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, t,
+    laneValue, noStaffedLanes, isScripture, segmentNoun, selectUnitErrorKey, assigneeRefusal, kind, t,
   ])
+
+  // AQU-1510: say so when this would assign someone lines they already hold.
+  // A selection has no chapters to compare, so it is not checked.
+  const overlapScope = useMemo<OverlapScope | null>(() => {
+    if (scopeKind === "verses" || scopeKind === "books") return { kind: "file" }
+    if (scopeKind === "chapters" && selectedChapters.size > 0) {
+      return { kind: "chapters", chapters: [...selectedChapters] }
+    }
+    return null
+  }, [scopeKind, selectedChapters])
+  const overlapFileIds = useMemo(
+    () => (scopeKind === "books" ? [...selectedFileIds] : activeFileId ? [activeFileId] : []),
+    [scopeKind, selectedFileIds, activeFileId],
+  )
+  const overlapMember = members.find((m) => String(m.userId) === selectedMemberId) ?? null
+  const overlaps = useAssignmentOverlap({
+    jwt,
+    projectId,
+    fileIds: overlapFileIds,
+    scope: overlapScope,
+    assigneeUserId: overlapMember?.userId ?? null,
+    lane: laneValue,
+    kind,
+  })
+  const overlapFileName = useCallback(
+    (fileId: string) => {
+      const file = projectFiles.find((f) => f.id === fileId)
+      return file ? fileDisplayName(file) : fileId
+    },
+    [projectFiles],
+  )
 
   // Role gate (AQU-496 / AQU-581): a caller at the org's assignment floor
   // always renders; below that, only when one of the org's two carve-outs
@@ -685,6 +738,9 @@ export function AssignModal({
             max-h-[85dvh] DialogContent. */}
         <DialogBody>
         <FieldGroup className="py-1">
+          {/* AQU-1969: what the work is comes before which lines and who. */}
+          <AssignKindField id="assign-modal-kind" value={kind} onChange={setKind} disabled={submitting} />
+
           <Field>
             <FieldLabel htmlFor="assign-modal-scope">{t("dialog.assign.scopeLabel")}</FieldLabel>
             <Select
@@ -893,6 +949,9 @@ export function AssignModal({
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
             )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-modal-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
+            )}
             {/* AQU-1308: never leave an empty "Select member…" unexplained. */}
             {rosterUnavailable && (
               <FieldError>
@@ -928,6 +987,11 @@ export function AssignModal({
             />
           </Field>
 
+          <AssignmentOverlapNotice
+            overlaps={overlaps}
+            username={overlapMember?.username ?? ""}
+            fileName={overlapFileName}
+          />
           {error && <FieldError>{error}</FieldError>}
         </FieldGroup>
         </DialogBody>

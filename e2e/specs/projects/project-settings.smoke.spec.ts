@@ -70,9 +70,15 @@ test("project settings renames the project and edits a lane language", async ({ 
   await expect(alice.locator("#pname")).toHaveValue(renamedName, { timeout: 10_000 })
 
   // AQU-1594: source language moved off Project Info onto the source lane.
-  const sourceLanguage = alice.getByLabel(/^Source Language$/i)
+  // AQU-2168: the Languages table shows it as one line with "Change", which
+  // opens the lane's Name / Language / Code fields with Save.
+  await expect(alice.getByTestId("source-language-line")).toBeVisible({ timeout: 10_000 })
+  const changeSource = alice.getByTestId("source-language-change")
+  await expect(changeSource).toBeEnabled()
+  await changeSource.click()
+  const sourceEditor = alice.locator('[data-testid^="lane-edit-"]')
+  const sourceLanguage = sourceEditor.getByLabel(/^Language$/i)
   await expect(sourceLanguage).toBeVisible({ timeout: 10_000 })
-  await expect(sourceLanguage).toBeEnabled()
   const laneSaved = alice.waitForResponse(
     (response) =>
       response.request().method() === "PATCH" &&
@@ -80,10 +86,10 @@ test("project settings renames the project and edits a lane language", async ({ 
       response.ok(),
   )
   await sourceLanguage.fill("English (US)")
-  await sourceLanguage.blur()
+  await sourceEditor.locator('[data-testid^="lane-save-"]').click()
   await laneSaved
   await alice.reload()
-  await expect(alice.getByLabel(/^Source Language$/i)).toHaveValue("English (US)", { timeout: 10_000 })
+  await expect(alice.getByTestId("source-language-line")).toContainText("English (US)", { timeout: 10_000 })
 
   // AQU-825: Knowledge Base originals cross SPA → auth-worker → Postgres + R2.
   // Exercise the real upload, rehydrate it after navigation, read the server-

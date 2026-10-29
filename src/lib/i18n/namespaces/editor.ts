@@ -116,6 +116,7 @@ export const editor = defineNamespace({
       one: "{count} cell with stale source",
       other: "{count} cells with stale source",
     }),
+    "editor.reimport.sourceReview": "The source text changed in a re-import. The translation was kept. Validating this cell clears the highlight.",
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
@@ -179,6 +180,7 @@ export const editor = defineNamespace({
       "The file is still safe. Check your connection and try loading it again.",
     "editor.file.retryLoad": "Retry loading file",
     "editor.file.loadingFromCloud": "Loading file from the cloud",
+    "editor.file.loadingLanguages": "Loading this project's languages",
     "editor.file.noneSelectedTitle": "No file selected",
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
@@ -345,6 +347,10 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    // AQU-2110 — the audio pair, shown instead of (audio-only file) or beside
+    // (file with text and takes) the two above.
+    "editor.milestone.percentRecorded": "{percent}% recorded",
+    "editor.milestone.percentAudioValidated": "{percent}% audio validated",
     // AQU-515 — pericope suggestions, offered beside the division picker when
     // the open file addresses scripture.
     "editor.pericope.trigger": "Suggested passages",
@@ -681,7 +687,7 @@ export const editor = defineNamespace({
     "editor.selection.voiceTogetherSeedVcNotConfigured":
       "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
     "editor.selection.voiceTogetherSeedVcFailed":
-      "Voice cloning (Seed-VC) couldn't convert these lines. This is not a Gemini key problem.",
+      "Voice conversion couldn't re-voice these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -925,16 +931,49 @@ export const editor = defineNamespace({
     "editor.timeline.unmuteTargetAudio": "Unmute target audio",
     "editor.timeline.targetAudioAudible": "Target audio is audible — click to mute",
     "editor.timeline.targetAudioMuted": "Target audio is muted — click to unmute",
-    "editor.timeline.timingModeDubbing": "Original's timing",
+    // AQU-2204 (Sam, Oct 26): the two timing modes are named for what the
+    // file FOLLOWS. Stored values are unchanged ("dubbing" / "audioFirst").
+    "editor.timeline.timingModeDubbing": "Follows source",
     "editor.timeline.timingModeDubbingHint":
-      "The translation is fitted to the original recording's timing.",
+      "Lines keep their times from the source, and its pauses stay.",
     "editor.timeline.timingModeDubbingHintLocked":
-      "The translation is fitted to the original recording's timing. Only a maintainer can change this.",
-    "editor.timeline.timingModeFree": "Free timing",
+      "Lines keep their times from the source, and its pauses stay. Only a project lead or above can change this.",
+    "editor.timeline.timingModeFree": "Follows recordings",
     "editor.timeline.timingModeFreeHint":
-      "Verses are laid end to end — each takes as much room as its longer side.",
+      "Lines play back to back, each as long as its recording.",
     "editor.timeline.timingModeFreeHintLocked":
-      "Verses are laid end to end — each takes as much room as its longer side. Only a maintainer can change this.",
+      "Lines play back to back, each as long as its recording. Only a project lead or above can change this.",
+    "editor.timeline.timingLabel": "Timing:",
+    "editor.timeline.timingMenuAria": "Timing: {mode}. Change what this file's timeline follows",
+    "editor.timeline.timingInfoAria": "About timing",
+    "editor.timeline.timingInfo":
+      "Follows source keeps every line where the source puts it, with its pauses, so the " +
+      "translation is fitted to the original. Follows recordings plays the lines back to back " +
+      "at their recordings' length, and the source's own times aren't shown. Switching changes " +
+      "no recordings and no times, and applies for everyone on this file.",
+    "editor.timeline.timingInfoReadOnly":
+      "Follows source keeps every line where the source puts it, with its pauses. Follows " +
+      "recordings plays the lines back to back at their recordings' length. Only a project " +
+      "lead or above can change this file's timing.",
+    "editor.timeline.timingLockedFilm":
+      "This file's lines are timed to the film, so it always follows its source.",
+    "editor.timeline.standInInfoAria": "Why some lines show no times",
+    "editor.timeline.standInInfo":
+      "A line with no times of its own and no recording yet still takes room on the timeline, " +
+      "at a stand-in length worked out from its text at the language's reading pace. It has no " +
+      "real time, so it shows none. Recording the line replaces the stand-in with the recording's length.",
+    "editor.timeline.timingMenuHeading": "What decides how long each line is",
+    "editor.timeline.timingMenuMuteNote": "Muting a track only changes what you hear. It never moves anything.",
+    "editor.timeline.timingSourceUnavailable": "This file has no times and no source recording to follow.",
+    "editor.timeline.timingInfoNothingToFollow":
+      "This file has no times and no source recording, so it follows its recordings: the lines " +
+      "play back to back, each as long as its recording. A line not recorded yet takes a " +
+      "stand-in length from its words.",
+    "editor.timeline.timingLengthSeconds": "{seconds} s",
+    "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
+    "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
+    "editor.timeline.timingLengthLong": "{length} long",
+    "editor.timeline.takeLeadPause": "A pause someone left before this take",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -950,7 +989,6 @@ export const editor = defineNamespace({
     "editor.timeline.bladeToggleAria": "Blade: cut a take where you click",
     "editor.timeline.bladeOnTooltip": "Blade on: click a take to cut it there (B)",
     "editor.timeline.bladeOffTooltip": "Blade (B): click to cut · S splits at the playhead",
-    "editor.timeline.bladeFreeTiming": "Cutting takes isn't available in Free timing yet",
     // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
     "editor.timeline.takeMenuSplit": "Split here",
     "editor.timeline.takeMenuReRecord": "Re-record this line",
@@ -1269,6 +1307,22 @@ export const editor = defineNamespace({
     // AQU-1566: a caption track on a linked video with no rows can become the
     // file's rows. It asks first, because the track leaves the timeline.
     "editor.timeline.trackUseAsRows": "Use as this file's rows",
+    // AQU-1684: hiding a track is personal — this screen only — and there is
+    // always a way back, the "Hidden tracks" menu in the timeline's toolbar.
+    "editor.timeline.trackHide": "Hide track",
+    "editor.timeline.trackHideCount": plural({
+      one: "Hide {count} track",
+      other: "Hide {count} tracks",
+    }),
+    "editor.timeline.trackHideBusy": "Can't hide a track while it's recording or being dragged",
+    "editor.timeline.hiddenTracks": plural({
+      one: "Hidden tracks ({count})",
+      other: "Hidden tracks ({count})",
+    }),
+    "editor.timeline.hiddenTracksAria": "Tracks you have hidden on this timeline",
+    "editor.timeline.hiddenTracksNote": "Hidden for you, on this device",
+    "editor.timeline.showTrack": "Show {name}",
+    "editor.timeline.showAllTracks": "Show all tracks",
     "editor.timeline.useAsRowsTitle": "Use \"{track}\" as this file's rows?",
     "editor.timeline.useAsRowsBody":
       "Its captions become rows you can translate in the Text view. The track " +
@@ -1410,7 +1464,9 @@ export const editor = defineNamespace({
     "editor.splitQuotes.narration": "Narration",
     "editor.splitQuotes.quotation": "Quotation",
     "editor.splitQuotes.translationsNote":
-      "A translation that splits the same way is divided between the new lines. Any other translation stays whole on the first line and is marked for review.",
+      "Every translation of this line is marked for review, so it has to be done again. A translation that splits the same way is divided between the new lines. Any other stays whole on the first line.",
+    "editor.splitQuotes.multiLaneWarning":
+      "Splitting changes the source all lanes share. Each lane's translation of this line is marked so it has to be done again, and each lane keeps the voice it already gave this line on the new narration lines.",
     "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
     "editor.splitQuotes.confirm": plural({
       one: "Split into {count} line",
@@ -1430,6 +1486,8 @@ export const editor = defineNamespace({
     "editor.splitQuotes.unchangedToast": "That couldn\u2019t be split. Nothing was changed.",
     "editor.splitQuotes.failedToast": "That line couldn\u2019t be split, so it has been put back.",
     "editor.splitQuotes.forbiddenToast": "You don\u2019t have permission to split lines here, so it has been put back.",
+    "editor.splitQuotes.castFailedToast":
+      "The lines were split, but their voices could not be copied onto the new narration lines.",
     // AQU-1422: the reversible sibling of "Remove this line". The wording says
     // "cell" rather than "line" on purpose — one hide parks the row in EVERY
     // language lane at once, so calling it a line invites the reading that it
@@ -1496,7 +1554,7 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttTimebaseFyi":
       "The timings will be adjusted slightly to line up with \"{fileName}\".",
     "editor.timeline.audioVttUnmeasurableFyi":
-      "The timings couldn't be checked against the subtitles — importing the file as delivered.",
+      "The timings couldn't be checked against the subtitles, so no drift correction is made.",
     "editor.timeline.audioVttReconcileNoop":
       "These are the {count} cues this file already has, on the same timings — " +
       "there is nothing to update.",
@@ -1623,6 +1681,11 @@ export const editor = defineNamespace({
     "editor.timeline.charactersFilledByPosition":
       "{count} rows do not quite match their line; the lines either side pin them, " +
       "so they are matched by position.",
+    "editor.timeline.charactersTimecodeRate":
+      "The sheet's times are video timecode, read at {rate} frames a second.",
+    "editor.timeline.charactersTimecodeNoRate":
+      "The sheet's times are video timecode that doesn't line up with this file's lines " +
+      "at any common frame rate, so its rows were matched by their words.",
     "editor.timeline.charactersCameraDisagreements":
       "In {count} rows the Camera column and the angle written into the name " +
       "disagree. The column wins.",
@@ -1740,6 +1803,17 @@ export const editor = defineNamespace({
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.play": "Play this line",
     "editor.voice.clone": "Clone voice from take",
+    "editor.voice.cloneTitle": "Make a voice from this take",
+    "editor.voice.cloneNamePlaceholder": "Voice name",
+    "editor.voice.cloneNameAriaLabel": "Name for the new voice",
+    "editor.voice.cloneSubmit": "Add to cast",
+    "editor.voice.cloneMoreOptions": "More options",
+    "editor.voice.clonedToast": "{name} is in the cast",
+    "editor.voice.changeTo": "Change to {voice}",
+    "editor.voice.workingAs": "Voicing as {voice}…",
+    "editor.voice.yourRecording": "Your recording",
+    "editor.voice.recordedBy": "Recorded by {name}",
+    "editor.voice.originalAudio": "Original audio",
     "editor.voice.generateFromText": "Generate audio from text",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
@@ -1976,6 +2050,11 @@ export const editor = defineNamespace({
 
     // — Write failures surfaced on the row ————————————————————————
     "editor.write.saveFailed": "Could not save — please try again",
+    "editor.write.refusedTitle": plural({
+      one: "{count} change wasn't saved",
+      other: "{count} changes weren't saved",
+    }),
+    "editor.write.refusedDetail": "{cell}: {reason}. The line now shows what was saved.",
     "editor.write.saveSourceFailed": "Could not save source edit — please try again",
     "editor.write.sourceEditingClosed":
       "Source editing is no longer available on this project — the source editor " +
@@ -1988,6 +2067,9 @@ export const editor = defineNamespace({
     "editor.cellMenu.trigger": "Cell actions",
     "editor.cellMenu.editTimestamps": "Edit timestamps",
     "editor.cellMenu.timingLocked": "Timing is locked for this project.",
+    // AQU-2204: the source's times aren't shown while a file follows its recordings.
+    "editor.cellMenu.timestampsFollowsRecordings":
+      "This file follows its recordings, so the source's times aren't shown. Switch its Timing to Follows source to edit them.",
     "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
     "editor.cellMenu.startLabel": "Start time",
     "editor.cellMenu.endLabel": "End time",
@@ -2003,6 +2085,10 @@ export const editor = defineNamespace({
     "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
+    "editor.source.multiLaneTitle": "Change the source every language shares?",
+    "editor.source.multiLaneBody":
+      "All lanes share this source. Changing it marks each lane's translation of this line for review. The words stay, and so does the approval.",
+    "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
     "editor.source.placeholder": "Source text…",
@@ -2094,6 +2180,14 @@ export const editor = defineNamespace({
       "Built statistically from this project's translated pairs — no AI involved. " +
       "It's only as good as the corpus so far: expect rough, literal, sometimes " +
       "wrong word choices. Use it as a hint, not a reading.",
+    "editor.bt.glossEditTooltip": "Correct this gloss",
+    "editor.bt.glossEditAria": "Correct the statistical gloss",
+    "editor.bt.glossCorrected": "Corrected by a translator",
+    "editor.bt.glossEditHint":
+      "Your correction replaces the gloss for everyone on this project, and " +
+      "teaches these word choices to the glosses of other cells. Clear the box " +
+      "to go back to the computed gloss.",
+    "editor.bt.glossContributorRequired": "Contributor+ required to correct the gloss",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
     "editor.transcript.editTooltip": "Correct the transcript",
@@ -2296,6 +2390,12 @@ export const editor = defineNamespace({
       one: "Validated {count} repeated row",
       other: "Validated {count} repeated rows",
     }, "count"),
+    // AQU-2176 — the dialog that names them.
+    "editor.repetition.validatedBody": plural({
+      one: "This row was signed off with yours. Choose it to go to it.",
+      other: "These rows were signed off with yours. Choose one to go to it.",
+    }, "count"),
+    "editor.repetition.validatedRowNumber": "Row {number}",
     "editor.repetition.unvalidatedRepeats": plural({
       one: "{count} repeated row has this text but isn't validated",
       other: "{count} repeated rows have this text but aren't validated",
@@ -2416,10 +2516,27 @@ export const editor = defineNamespace({
       },
       "editor.repetition.validated": {
         description:
-          "Toast confirming that the repeated rows were filled in and marked " +
-          "validated. Paired with an Undo action.",
+          "Title of the dialog confirming that the repeated rows were filled in " +
+          "and marked validated. The dialog lists those rows and carries Undo, " +
+          "Done, and sometimes 'Ask me each time'.",
         placeholders: {
           count: "How many repeated rows were validated. Always 1 or more.",
+        },
+      },
+      "editor.repetition.validatedBody": {
+        description:
+          "Body of that dialog, under the title. Explains that these rows were " +
+          "validated as a side effect of the row the reviewer validated " +
+          "themselves, and that each listed row is clickable and jumps the " +
+          "editor to it. 'Signed off' means 'marked as validated'.",
+      },
+      "editor.repetition.validatedRowNumber": {
+        description:
+          "Label for one listed row in that dialog: the row's position in the " +
+          "file, as the editor's left gutter numbers it. Sits beside the row's " +
+          "reference or timecode, so keep it very short.",
+        placeholders: {
+          number: "The row's number in the file, already formatted. Never empty.",
         },
       },
       "editor.repetition.unvalidatedRepeats": {
@@ -2889,6 +3006,11 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.reimport.sourceReview": {
+        description:
+          "Tooltip on a cell outlined in yellow after a sidebar re-import changed its source " +
+          "text. Explains that the translation was kept and that validating the cell removes the outline.",
+      },
       "editor.rail.moreActions": {
         description:
           "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
@@ -3164,6 +3286,14 @@ export const editor = defineNamespace({
           "fetched from the server. It is a plain read, so it must NOT say " +
           "'syncing' — that word is reserved in this app for pushing the user's " +
           "own unsaved edits.",
+      },
+      "editor.file.loadingLanguages": {
+        description:
+          "Accessible label and status pill of the placeholder that stands in " +
+          "for the editor's rows while the project's target languages load " +
+          "(usually under a second). The rows are hidden because until then the " +
+          "app cannot tell which language's translations to show beside them. " +
+          "A plain read, so it must not say 'syncing'.",
       },
       "editor.file.noneSelectedTitle": {
         description:
@@ -3543,6 +3673,55 @@ export const editor = defineNamespace({
           "timeline, offered only on a linked video that has no rows yet. It turns " +
           "this track's captions into the file's own rows (after a confirmation).",
         maxLength: 32,
+      },
+      "editor.timeline.trackHide": {
+        description:
+          "Item in a timeline track's right-click menu (and its ⋯ menu) on the Media " +
+          "view. It hides the track's lane on this person's own screen only — nothing " +
+          "is deleted or muted, and nobody else is affected. A 'track' is one row of the " +
+          "timeline, e.g. the source audio or a dub track.",
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideCount": {
+        description:
+          "The same item when several timeline tracks are selected: hides all of them " +
+          "on this person's own screen.",
+        placeholders: { count: "How many tracks will be hidden; it also selects the plural form." },
+        maxLength: 30,
+      },
+      "editor.timeline.trackHideBusy": {
+        description:
+          "Hover text on the greyed-out 'Hide track' item while that track is recording " +
+          "a take or being dragged, which is when it may not be hidden.",
+      },
+      "editor.timeline.hiddenTracks": {
+        description:
+          "Label of a toolbar menu button on the Media view's timeline, shown only while " +
+          "the person has hidden some tracks. Opening it lists those tracks so each can " +
+          "be shown again. Keep the count in brackets after the words.",
+        placeholders: { count: "How many tracks are hidden; it also selects the plural form." },
+        maxLength: 26,
+      },
+      "editor.timeline.hiddenTracksAria": {
+        description:
+          "Screen-reader name of that 'Hidden tracks' menu button.",
+      },
+      "editor.timeline.hiddenTracksNote": {
+        description:
+          "A heading at the top of the 'Hidden tracks' menu saying that hiding applies " +
+          "only to this person, on this device — collaborators still see the tracks.",
+        maxLength: 40,
+      },
+      "editor.timeline.showTrack": {
+        description:
+          "Item in the 'Hidden tracks' menu that brings one hidden timeline track back " +
+          "into view.",
+        placeholders: { name: "The track's own name, e.g. 'Source audio' or a name someone gave it. Content, never translate." },
+      },
+      "editor.timeline.showAllTracks": {
+        description:
+          "Last item in the 'Hidden tracks' menu: brings every hidden track back into view.",
+        maxLength: 30,
       },
       "editor.timeline.useAsRowsTitle": {
         description:
@@ -3944,6 +4123,32 @@ export const editor = defineNamespace({
           "reviewer has marked validated. Validated is a stronger state than " +
           "translated, so the two words must stay clearly different.",
         maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentRecorded": {
+        description:
+          "AQU-2110: first line of the AUDIO progress figure in the picker row — " +
+          "the share of the division's lines that carry a recording. Shown instead " +
+          "of the two text lines on a file whose target language has no written " +
+          "form (recordings, no text), and beside them on a file that has both. " +
+          "Same fixed column as editor.milestone.percentTranslated, so it must fit " +
+          "one short line; a marker icon and a magenta swatch carry the meaning " +
+          "visually, this wording is hover text and what a screen reader reads.",
+        maxLength: 20,
+        placeholders: {
+          percent: "Whole-number percentage, already rounded, without the % sign.",
+        },
+      },
+      "editor.milestone.percentAudioValidated": {
+        description:
+          "AQU-2110: second line of that audio figure — the share of the division's " +
+          "lines whose recording has been signed off (every chosen take meets the " +
+          "project's audio validation requirement). Must read as distinct from " +
+          "editor.milestone.percentValidated, which is about the TEXT; on a file " +
+          "showing both, the two sit side by side.",
+        maxLength: 24,
         placeholders: {
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
@@ -4432,13 +4637,13 @@ export const editor = defineNamespace({
         description:
           "Label of the switch that draws bold and italic runs as small inline " +
           "blocks inside the cell, once a translation has been placed into those " +
-          "runs. An empty untranslated cell stays blank. Regular text stays " +
-          "ordinary, so the translator types around those blocks and can click or " +
-          "arrow into one to type that phrase in bold or italic. An empty block " +
-          "in a placed translation shows a faint name until they type. Consecutive " +
-          "regular runs are one typing space: an empty one shows a single faint " +
-          "Regular, with no box and no gap between the runs. Applies to this " +
-          "browser only.",
+          "runs. An empty untranslated cell stays blank and can still be typed. " +
+          "After the words are in the runs, the cell stops accepting typing so " +
+          "the side of a bold or italic block can be dragged, like resizing a " +
+          "window, to take in or give back whole words. Turning the switch off " +
+          "makes the cell editable again. An empty block shows a faint name. " +
+          "Consecutive regular runs stay one sentence, with no box. Applies to " +
+          "this browser only.",
         maxLength: 32,
       },
       "editor.view.lowMemory": {
@@ -6087,44 +6292,128 @@ export const editor = defineNamespace({
       },
       "editor.timeline.timingModeDubbing": {
         description:
-          "Name of one of the two timing modes, shown on a small segmented control in " +
-          "the timeline toolbar. In this mode the translated audio has to fit inside " +
-          "the original recording's timing — the possessive is the point: the timing " +
-          "belongs to the original, not to the translation.",
-        maxLength: 20,
+          "Name of one of the two timing choices, shown in the timeline's Timing dropdown " +
+          "and after 'Timing:'. The file's lines keep the times the SOURCE gives them (the " +
+          "film, the original recording or the cue file), so the translation is fitted to " +
+          "the original. 'Follows' = takes its timing from.",
+        maxLength: 24,
       },
       "editor.timeline.timingModeDubbingHint": {
         description:
-          "Hover title of that mode's button, explaining what the mode does to the " +
-          "timeline: every translated line is placed to match where the original " +
-          "recording says it.",
+          "One-line description under 'Follows source' in the Timing dropdown: every line " +
+          "stays where the source puts it, and the silences between lines stay too.",
       },
       "editor.timeline.timingModeDubbingHintLocked": {
         description:
           "The same sentence as editor.timeline.timingModeDubbingHint plus the note " +
-          "that the mode is read-only for this user, shown when their role is below " +
-          "maintainer so the control renders as a plain label. Kept as one key so the " +
+          "that the choice is read-only for this user, shown when their role is below " +
+          "project lead so the control renders as plain text. Kept as one key so the " +
           "two sentences can be ordered naturally in the target language.",
       },
       "editor.timeline.timingModeFree": {
         description:
-          "Name of the other timing mode, on the same segmented control: the " +
-          "translation sets its own pace instead of fitting the original's timing. " +
-          "'Free' means unconstrained by the original, not 'free of charge'.",
-        maxLength: 20,
+          "Name of the other timing choice in the same dropdown: the lines take their " +
+          "timing from the RECORDINGS (the translation's own audio) and play back to back, " +
+          "instead of keeping the source's times. Use the same word for 'Follows' as in " +
+          "editor.timeline.timingModeDubbing.",
+        maxLength: 24,
       },
       "editor.timeline.timingModeFreeHint": {
         description:
-          "Hover title of that mode's button. 'Verses' are the numbered lines of the " +
-          "text; 'laid end to end' means each one starts where the previous ends, and " +
-          "each gets as much room as whichever side (original or translation) runs " +
-          "longer.",
+          "One-line description under 'Follows recordings' in the Timing dropdown. 'Back to " +
+          "back' means each line starts where the previous one ends; each line lasts exactly " +
+          "as long as its recording (the source is cut where the line ends).",
       },
       "editor.timeline.timingModeFreeHintLocked": {
         description:
           "The same sentence as editor.timeline.timingModeFreeHint plus the note that " +
-          "only a maintainer can change the mode, shown when this user's role is " +
+          "only a project lead or above can change it, shown when this user's role is " +
           "below that floor. One key so the two sentences can be ordered naturally.",
+      },
+      "editor.timeline.timingLabel": {
+        description:
+          "Label before the file's current timing choice in the timeline header, as in " +
+          "'Timing: Follows source'. Keep the colon (or your language's equivalent).",
+        maxLength: 16,
+      },
+      "editor.timeline.timingMenuAria": {
+        description:
+          "Accessible name of the Timing dropdown's button. {mode} is the current choice " +
+          "(editor.timeline.timingModeDubbing or editor.timeline.timingModeFree).",
+        placeholders: { mode: "The file's current timing choice, e.g. 'Follows source'." },
+      },
+      "editor.timeline.timingInfoAria": {
+        description: "Accessible name of the small (i) button beside the Timing dropdown.",
+      },
+      "editor.timeline.timingInfo": {
+        description:
+          "Tooltip of that (i): the longer explanation of the two timing choices, for " +
+          "someone who can change it. Use the same names as the dropdown.",
+      },
+      "editor.timeline.timingInfoReadOnly": {
+        description:
+          "The same (i) tooltip for someone below project lead, who sees the timing as " +
+          "plain text: the two choices in brief, then who can change it.",
+      },
+      "editor.timeline.timingLockedFilm": {
+        description:
+          "Tooltip of the (i) beside 'Timing: Follows source' on a file whose lines are " +
+          "timed to a film (a linked video, or an audio cue file): why it cannot follow its " +
+          "recordings.",
+      },
+      "editor.timeline.standInInfoAria": {
+        description:
+          "Accessible name of an (i) button on the timeline, shown when some lines have no " +
+          "times of their own and are drawn with a dashed outline.",
+      },
+      "editor.timeline.standInInfo": {
+        description:
+          "Tooltip of that (i): why a line with no times and no recording still takes room " +
+          "on the timeline (a stand-in length from its text) and why it shows no time.",
+      },
+      "editor.timeline.timingMenuHeading": {
+        description:
+          "First line of the Timing menu (choices 'Follows source' / 'Follows recordings'), " +
+          "above the two choices. Not clickable.",
+      },
+      "editor.timeline.timingMenuMuteNote": {
+        description:
+          "Last line of the Timing menu, under the two choices: muting a track on the timeline " +
+          "changes only what you hear, never where lines sit.",
+      },
+      "editor.timeline.timingSourceUnavailable": {
+        description:
+          "Line under the greyed-out 'Follows source' choice in the Timing menu, on a file whose " +
+          "lines have no times and no source recording (e.g. a Bible book with no reading): why " +
+          "it can't be picked.",
+      },
+      "editor.timeline.timingInfoNothingToFollow": {
+        description:
+          "Tooltip of the (i) beside the Timing control on a file with no times and no source " +
+          "recording: it follows its recordings, and unrecorded lines take a stand-in length.",
+      },
+      "editor.timeline.timingLengthSeconds": {
+        description: "A file's length under a minute, e.g. '16.8 s'.",
+        placeholders: { seconds: "Seconds with one decimal, e.g. 16.8." },
+      },
+      "editor.timeline.timingLengthMinutes": {
+        description: "A file's length under an hour, e.g. '12 min 4 s'.",
+        placeholders: { minutes: "Whole minutes, 1 to 59.", seconds: "Whole seconds left over, 0 to 59." },
+      },
+      "editor.timeline.timingLengthHours": {
+        description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
+        placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
+      },
+      "editor.timeline.timingLengthLong": {
+        description:
+          "Beside the Timing control: how long the file comes out with the current choice. " +
+          "For example '16.8 s long'.",
+        placeholders: { length: "The file's length, already formatted, e.g. '16.8 s' or '12 min 4 s'." },
+      },
+      "editor.timeline.takeLeadPause": {
+        description:
+          "Hover text on a faint stretch of the timeline just before a recording, inside its " +
+          "line: the person who placed or recorded the take left this pause before it.",
       },
       "editor.timeline.qualityToggleAria": {
         description:
@@ -6181,12 +6470,6 @@ export const editor = defineNamespace({
           "and S splits the selected take at the playhead without the blade — keep both as the " +
           "Latin letters B and S.",
         maxLength: 60,
-      },
-      "editor.timeline.bladeFreeTiming": {
-        description:
-          "Tooltip of the disabled blade button when the file is in 'Free timing' " +
-          "(the mode where lines are laid out end to end). Use the same name for Free timing " +
-          "as the timing-mode picker does.",
       },
       "editor.timeline.takeMenuSplit": {
         description:
@@ -6484,6 +6767,29 @@ export const editor = defineNamespace({
           "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
+      "editor.voice.cloneTitle": { description: "Heading of the small popover that turns a line's audio take into a reusable voice." },
+      "editor.voice.cloneNamePlaceholder": { description: "Placeholder of the name field in that popover." },
+      "editor.voice.cloneNameAriaLabel": { description: "Accessible label of the name field in that popover." },
+      "editor.voice.cloneSubmit": { description: "Button in that popover: creates the voice from the take and adds it to the project's cast. Short." },
+      "editor.voice.cloneMoreOptions": { description: "Link in that popover: opens the full New voice dialog instead." },
+      "editor.voice.clonedToast": {
+        description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
+        placeholders: { name: "The new voice's name, e.g. 'Ana'." },
+      },
+      "editor.voice.changeTo": {
+        description: "Button beside a line's voice field: re-voices the line's audio into the voice it is cast as.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.workingAs": {
+        description: "Status beside a line's voice field while its audio is being generated or re-voiced.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.yourRecording": { description: "Shown in a line's voice field when the audio is the current user's own recording and no voice is assigned." },
+      "editor.voice.recordedBy": {
+        description: "Shown in a line's voice field when the audio is someone's recording and no voice is assigned.",
+        placeholders: { name: "Username of the person who recorded it." },
+      },
+      "editor.voice.originalAudio": { description: "Shown in a line's voice field when the audio is the imported original programme audio." },
       "editor.voice.clone": {
         description:
           "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
@@ -7579,6 +7885,26 @@ export const editor = defineNamespace({
           "optimistic text is rolled back, so the user must retype or retry. " +
           "Imperative second half.",
       },
+      "editor.write.refusedTitle": {
+        description:
+          "Error toast title when the server refused one or more of the user's " +
+          "translation edits or validations after they were sent (for example, " +
+          "the line's language could not be identified). The edit is undone on " +
+          "screen; this tells the user it did not save, so they can redo it.",
+        maxLength: 48,
+        placeholders: {
+          count: "How many of the user's changes the server refused.",
+        },
+      },
+      "editor.write.refusedDetail": {
+        description:
+          "Body of that toast: which line, and the server's reason, followed by " +
+          "what the user now sees.",
+        placeholders: {
+          cell: "The line's reference (e.g. 'GEN 1:1') — never translate.",
+          reason: "The server's own explanation, in English — never translate.",
+        },
+      },
       "editor.write.saveSourceFailed": {
         description:
           "The same failure for an edit to the SOURCE text, which only project " +
@@ -7608,6 +7934,12 @@ export const editor = defineNamespace({
           "times. Only on files that run on a clock (subtitles, cue sheets). " +
           "Imperative.",
         maxLength: 24,
+      },
+      "editor.cellMenu.timestampsFollowsRecordings": {
+        description:
+          "Why a line's 'Edit timestamps' entry is unavailable: the file's Timing is 'Follows " +
+          "recordings', where the source's own times aren't shown. Use the same names as the " +
+          "timeline's Timing dropdown.",
       },
       "editor.cellMenu.timingLocked": {
         description:
@@ -7707,6 +8039,21 @@ export const editor = defineNamespace({
           "Tooltip and screen-reader name of the pencil that opens the source text " +
           "for editing. Only project leads see it; changing source text propagates " +
           "downstream, so it is deliberately explicit. Imperative.",
+        maxLength: 24,
+      },
+      "editor.source.multiLaneTitle": {
+        description:
+          "Heading of the dialog that appears before the source editor opens, when " +
+          "the project has two or more target languages. A question.",
+      },
+      "editor.source.multiLaneBody": {
+        description:
+          "Body of that dialog. Says all lanes share the source, without saying how " +
+          "many there are. A change marks each lane's translation for review. The " +
+          "translation stays, and so does its approval.",
+      },
+      "editor.source.multiLaneConfirm": {
+        description: "Confirm button of that dialog. Imperative. Opens the source editor.",
         maxLength: 24,
       },
       "editor.source.doneEditing": {
@@ -8082,6 +8429,39 @@ export const editor = defineNamespace({
           "how much has been translated so far, and it should be treated as a hint. " +
           "The honesty here is the point — do not soften it.",
       },
+      "editor.bt.glossEditTooltip": {
+        description:
+          "AQU-1408. Tooltip on the pencil that opens the statistical gloss for " +
+          "editing. 'Correct' rather than 'edit': the gloss is a computed guess " +
+          "and the user is fixing it, not authoring from scratch. Imperative.",
+        maxLength: 24,
+      },
+      "editor.bt.glossEditAria": {
+        description:
+          "AQU-1408. Accessible name of the same pencil button. Spells out what is " +
+          "being corrected, since a screen-reader user has no section heading " +
+          "adjacent to the control.",
+      },
+      "editor.bt.glossCorrected": {
+        description:
+          "AQU-1408. Small badge beside the statistical-gloss heading when the text " +
+          "shown is a human correction rather than the computed gloss. A reader " +
+          "who cannot tell the two apart cannot weigh either.",
+        maxLength: 26,
+      },
+      "editor.bt.glossEditHint": {
+        description:
+          "AQU-1408. Small print under the gloss edit box. Three points, in order: " +
+          "the correction is shared with the project, it also teaches other cells' " +
+          "glosses, and an empty box restores the computed gloss. The third point " +
+          "is the only discoverable path back, so keep it.",
+      },
+      "editor.bt.glossContributorRequired": {
+        description:
+          "AQU-1408. Tooltip on the disabled gloss pencil for a member below " +
+          "contributor. Says the required level outright rather than hiding the " +
+          "control, so the member knows what to ask for.",
+      },
       "editor.bt.alignment": {
         description:
           "Heading of a collapsed section showing which source words correspond to " +
@@ -8333,8 +8713,16 @@ export const editor = defineNamespace({
       },
       "editor.splitQuotes.translationsNote": {
         description:
-          "Note in the dialog about existing translations of the line: divided when they have " +
-          "matching quotation marks, otherwise kept on the first line and flagged for review.",
+          "Note in the dialog about existing translations of the line: every one is marked " +
+          "for review. A translation with matching quotation marks is divided between the " +
+          "new lines; any other stays whole on the first line.",
+      },
+      "editor.splitQuotes.multiLaneWarning": {
+        description:
+          "Warning under that note, shown only when the project has two or more target " +
+          "lanes. Says the split changes the source all lanes share, without saying how " +
+          "many lanes there are, marks each lane's translation to be done again, and " +
+          "keeps each lane's existing voice on the new narration lines.",
       },
       "editor.splitQuotes.recordingsNote": {
         description:
@@ -8378,6 +8766,11 @@ export const editor = defineNamespace({
         description:
           "Toast when the server refused a split for lack of permission; the line has been " +
           "restored as it was.",
+      },
+      "editor.splitQuotes.castFailedToast": {
+        description:
+          "Error toast after a split whose lines did change, when the voice copy did not " +
+          "save. The new narration lines still need the voice the original line had.",
       },
       // AQU-1422 — hide / show one cell.
       "editor.row.hideCell": {
@@ -9113,6 +9506,15 @@ export const editor = defineNamespace({
           "Note in the go-ahead summary for a SUBTITLE sheet: lines the " +
           "spreadsheet says nothing about are left exactly as they are.",
         placeholders: { count: "Number of lines absent from the sheet." },
+      },
+      "editor.timeline.charactersTimecodeRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode (hours:minutes:seconds:frame), and Aquilla found the frame rate at which they line up with the file's lines.",
+        placeholders: { rate: "The frame rate, as a number such as 24, 25 or 23.976. Do not translate it." },
+      },
+      "editor.timeline.charactersTimecodeNoRate": {
+        description:
+          "Note in the go-ahead summary of the character-sheet import: the sheet wrote its times as video timecode, but at no common frame rate do they line up with the file's lines (the file may have been re-timed or converted wrongly), so the rows were matched by their wording instead.",
       },
       "editor.timeline.charactersFilledByPosition": {
         description:

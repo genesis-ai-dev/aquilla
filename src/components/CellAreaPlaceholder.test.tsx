@@ -23,6 +23,17 @@ describe("CellAreaPlaceholder", () => {
     expect(screen.getByRole("status", { name: "Loading file from the cloud" })).toHaveTextContent("Loading file from the cloud… · 50%")
   })
 
+  // AQU-1901: rows paired with a guessed lane read "empty"; none are shown
+  // until the project's languages load.
+  it("says it is loading the project's languages, with no row or editor in it", () => {
+    render(<CellAreaPlaceholder state={{ kind: "lanes-loading" }} fileName="GEN" hasFiles filesLoaded />)
+    const status = screen.getByRole("status", { name: "Loading this project's languages" })
+    expect(status).toHaveAttribute("aria-busy", "true")
+    expect(status.querySelector("[inert]")).not.toBeNull()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+    expect(screen.queryByText(/empty/i)).not.toBeInTheDocument()
+  })
+
   it("keeps unresolved rows inert, supports retry, and disappears when complete", () => {
     const retry = vi.fn()
     const { rerender } = render(<CellRowsLoadStatus loading error={false} onRetryClick={retry} />)

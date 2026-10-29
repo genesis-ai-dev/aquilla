@@ -71,7 +71,32 @@ refresh deletes `integration_connections` (and by cascade the Monday board
 links) right after the restore, because the copy carries every production
 org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
-count first).
+count first). **The restore copies rows, not blobs**, so every audio take it
+brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
+playback on `dev.aquilla.app` 404s;
+`pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
+referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
+what the nightly cleanup protects — the same reference queries, shared in
+`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
+`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+(`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
+refuses any destination but the dev bucket and any database but the dev branch.
+
+**Audio follows the rows, as its own step.** The restore copies every audio row
+and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
+dev` step that runs the copy across every project with media, most recently
+active first (AQU-2115, `pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
+in the job on purpose: the restore has already succeeded by then, so a copy
+failure turns only that step red and `dev.aquilla.app` still shows the data the
+restore wrote. The first backfill (~561k objects / 167 GB) is bigger than one
+run, so each run takes a wall-clock budget (`DEV_AUDIO_COPY_BUDGET_MINUTES`),
+stops at a project boundary, and resumes on the next run — there is no cursor,
+only the rule that an object already in dev is never copied twice. Every run
+writes its counts to the run page's summary. Two dispatch inputs bracket it:
+`preflight_only` copies nothing, and `media_copy_only` copies without restoring
+(use it to push the backfill along during the day, or to re-run after a
+failure). Without `R2_ACCOUNT_ID` and the AQU-2113 copy key the step prints a
+`::warning` and skips, leaving the restore green.
 
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
@@ -165,11 +190,34 @@ its job. Keep this section in step with that manifest — a contract test assert
 | Web (development) | `.` (repo root) | `aquilla-web-development` | none |
 | Identity (production) | `auth-worker` | `aquilla-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `OMNI_SHARED_SECRET` |
 | Identity (development) | `auth-worker` | `aquilla-dev-identity` | `DISCORD_FEEDBACK_WEBHOOK_URL`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `SECRET_KEY`, `SYNC_SECRET_KEY`, `FRONTIER_D1_API_TOKEN`, `FRONTIER_D1_DATABASE_ID`, `GITLAB_ADMIN_TOKEN`, `MONDAY_CLIENT_SECRET`, `MONDAY_SIGNING_SECRET`, `MONDAY_TOKEN_KEY`, `OMNI_SHARED_SECRET` |
-| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL` |
-| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY` |
+| Sync (production) | `sync-worker` | `aquilla-sync-worker` | `SYNC_SECRET_KEY`, `DIARIZATION_MODAL_URL`, `DIARIZATION_PUBLIC_BASE`, `DIARIZATION_SHARED_SECRET`, `INWORLD_API_KEY`, `SEED_VC_TOKEN`, `SEED_VC_URL`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
+| Sync (development) | `sync-worker` | `aquilla-sync-worker-dev` | `SYNC_SECRET_KEY`, `VOICE_FORGE_TOKEN`, `VOICE_FORGE_URL` |
 
 `SYNC_SECRET_KEY` signs the `/sync-token` JWTs the sync Worker verifies, so the identity
 and sync Workers in the same environment must hold the identical value.
+
+`VOICE_FORGE_URL` and `VOICE_FORGE_TOKEN` point the sync Worker's `/audio/voice-convert`
+route at the Modal `voice-forge` speech-to-speech service for character-library voices
+(`infra/modal/voice_forge.py`); the token must equal the `VOICE_FORGE_TOKEN` in that
+app's `voice-forge-auth` Modal secret. Both sync Workers require them: development
+since the character voice library (#1576), production since custom voice training
+(#1589) made the forge a production dependency. A Worker without them answers a
+library-voice conversion with `503 voice conversion not configured` and a training
+start with `503 voice training not configured`; cloned-voice conversions still go to
+Seed-VC and are unaffected.
+
+Omnilingual ASR has two backends. `OMNI_ASR_MODAL_URL` is the Modal app
+(`infra/modal/omni_asr.py`). `OMNI_ASR_PRIMARY_URL` is an optional self-hosted
+server (`infra/selfhost/`, for example a GPU box behind a Cloudflare Tunnel at
+`https://omni-asr.aquilla.app`). Both are plain `[vars]` in
+`auth-worker/wrangler.toml`, not secrets. When the primary is set, identity
+probes its `/healthz` with a 3 s timeout before each call and uses it when it
+answers; on a failed probe, a network error, a 60 s timeout or a 5xx it calls
+Modal instead. It never retries a 4xx. Each call is billed on the `gpu` name
+that the answering backend reports (`db/shared/omni-asr-cost.ts`). Both backends
+check the same `OMNI_SHARED_SECRET`: when you rotate it, also update
+`/etc/aquilla-omni.env` on the self-hosted box and restart `omni-asr@<user>`,
+or the box answers 401 and every call fails (a 401 does not fall back).
 
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,

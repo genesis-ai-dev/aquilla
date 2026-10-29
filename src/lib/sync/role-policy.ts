@@ -138,6 +138,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "comment.resolve": ROLE.COMMENTER,
 
   "cell.backtranslation.set": ROLE.CONTRIBUTOR,
+  // AQU-1408 §1: correcting the gloss is the same act at a different grain.
+  "cell.gloss.set": ROLE.CONTRIBUTOR,
 
   "assignment.create": ROLE.PROJECT_LEAD,
   "assignment.reassign": ROLE.PROJECT_LEAD,
@@ -167,8 +169,10 @@ const REQUIRED_ROLE: Record<string, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   "cast.assign": ROLE.MAINTAINER,
-  // Structural — keeps the clearance the setting had in Project Settings.
-  "file.timing.set": ROLE.MAINTAINER,
+  // AQU-2204 (Sam, Oct 26): project lead and above choose what a file's
+  // timeline follows ("Follows source" / "Follows recordings"), per file, for
+  // everyone on it. Was maintainer (the Project Settings clearance it came from).
+  "file.timing.set": ROLE.PROJECT_LEAD,
   // Track structure IS file structure: a rename or reorder relayouts the
   // timeline for everyone who opens the file, so it sits with file.timing.set
   // rather than with the contributor-level file.rename / file.video.set.

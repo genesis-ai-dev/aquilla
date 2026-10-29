@@ -4,6 +4,8 @@
 // (docs/MONDAY-INTEGRATION.md). The `config` JSONB on integration_links
 // is a MondayMapping; keep both copies in lockstep.
 
+import type { ColumnProfile } from "@/lib/integrations/sync-ui"
+
 export type MondayMetricKey =
   | "completion_pct" // filled/total across project (or file) as number 0-100, 1dp
   | "validated_pct" // cells meeting text validation threshold %
@@ -50,6 +52,12 @@ export interface MondayMapping {
   columns: MondayColumnMapping[]
   /** AI rationale, shown in UI. */
   notes?: string
+  /**
+   * Each file as a subitem of the project's item ('project' only). Present
+   * means on; the server fills in the subitems board and its columns on the
+   * first push. Turned on or off with PATCH `{ fileSubitems }`.
+   */
+  fileSubitems?: { boardId?: string; columns: MondayColumnMapping[] }
 }
 
 /** Every metric key, in display order — drives the metric Select in the editor. */
@@ -187,6 +195,13 @@ export const MONDAY_WRITABLE_TYPES_BY_METRIC: Record<MondayMetricKey, readonly s
   external_id: TEXT_TYPES,
 }
 
+/** Monday's column types for the shared progress-sync UI (src/lib/integrations/sync-ui.ts). */
+export const MONDAY_COLUMN_PROFILE: ColumnProfile = {
+  catalog: MONDAY_COLUMN_CATALOG,
+  writableTypesByMetric: MONDAY_WRITABLE_TYPES_BY_METRIC,
+  readOnlyTypes: MONDAY_READONLY_COLUMN_TYPES,
+}
+
 const normalizeColumnTitle = (title: string | undefined): string =>
   (title ?? "").toLowerCase().replace(/[^a-z0-9%]/g, "")
 
@@ -194,22 +209,24 @@ const normalizeColumnTitle = (title: string | undefined): string =>
  * Is this metric already on the board? Either a mapping row sends it to a
  * column, or the board has a column under Aquilla's title (case and spacing
  * ignored) of a type the metric can write — the same match the server uses to
- * reuse a column instead of creating a second one.
+ * reuse a column instead of creating a second one. `profile` says what the
+ * provider's types are (Airtable's fields too — AQU-804).
  */
 export function metricOnBoard(
   metric: MondayMetricKey,
   rows: MondayColumnMapping[],
   boardColumns: Array<{ id: string; title: string; type: string }> | null | undefined,
+  profile: ColumnProfile = MONDAY_COLUMN_PROFILE,
 ): boolean {
   if (rows.some((r) => r.metric === metric && r.columnId)) return true
-  const entry = MONDAY_COLUMN_CATALOG.find((c) => c.metric === metric)
+  const entry = profile.catalog.find((c) => c.metric === metric)
   if (!entry || !boardColumns) return false
   const want = normalizeColumnTitle(entry.title)
   return boardColumns.some(
     (c) =>
       normalizeColumnTitle(c.title) === want &&
-      !MONDAY_READONLY_COLUMN_TYPES.has(c.type) &&
-      MONDAY_WRITABLE_TYPES_BY_METRIC[metric].includes(c.type),
+      !profile.readOnlyTypes.has(c.type) &&
+      profile.writableTypesByMetric[metric].includes(c.type),
   )
 }
 

@@ -12,6 +12,8 @@ import {
 } from "./download"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import type { ResolveProjectResult } from "@/lib/sync/cloud-projects"
+import type { ProjectSettingsResponse } from "@/lib/sync/project-settings"
+import { readProjectSettingsSnapshot } from "./project-snapshot"
 
 let store: Store<typeof schema>
 let storeId = 0
@@ -46,6 +48,14 @@ function cellRow(overrides: Partial<CellRow> & Pick<CellRow, "cellId" | "side">)
   }
 }
 
+const settingsResponse = {
+  version: 3,
+  updatedAt: "",
+  updatedBy: null,
+  settings: { targetLanguage: "fr" },
+  lanes: [],
+} as unknown as ProjectSettingsResponse
+
 function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProjectDeps {
   const files: FileSummary[] = [
     {
@@ -76,6 +86,7 @@ function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProject
   }
   return {
     resolveCloudProjectResult: async () => okResult,
+    fetchProjectSettingsResult: async () => ({ ok: true, value: settingsResponse }),
     fetchSyncToken: async () => ({ token: "sync-tok", expiresIn: 900, role: { level: 700, name: "owner", source: "creator" } }),
     fetchProjectFiles: async () => files,
     streamFileCells: async (_p, _fileId, _jwt, onPage) => {
@@ -92,9 +103,17 @@ function fakeDeps(overrides: Partial<DownloadProjectDeps> = {}): DownloadProject
   }
 }
 
+/** Unsigned JWT-shaped token for `sub` — only its subject is ever read. */
+function tokenFor(sub: string): string {
+  const encode = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "")
+  return `${encode({ alg: "HS256" })}.${encode({ sub })}.sig`
+}
+
+const jwt = tokenFor("anna")
+
 describe("downloadProjectOffline", () => {
   it("writes project, file, and cell rows and marks the project ready", async () => {
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
 
     const project = store.query(tables.projects.select().where({ id: "proj1" }).first())
     expect(project?.name).toBe("Genesis Project")
@@ -111,8 +130,24 @@ describe("downloadProjectOffline", () => {
     expect(offlineRow?.status).toBe("ready")
   })
 
+  it("keeps the project's settings response so it can be edited offline", async () => {
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+    expect(readProjectSettingsSnapshot(store, "proj1", "anna")).toEqual(settingsResponse)
+    expect(readProjectSettingsSnapshot(store, "proj1", "ben")).toBeNull()
+  })
+
+  it("fails and rolls back when the settings can't be fetched", async () => {
+    await expect(
+      downloadProjectOffline(store, "proj1", jwt, fakeDeps({
+        fetchProjectSettingsResult: async () => ({ ok: false, status: 502, message: "bad gateway" }),
+      })),
+    ).rejects.toThrow(/settings/)
+    expect(store.query(tables.projects.select().where({ id: "proj1" }).first())).toBeUndefined()
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }).first())).toBeUndefined()
+  })
+
   it("clears progress after completion", async () => {
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     expect(getDownloadProgress("proj1")).toBeNull()
   })
 
@@ -124,7 +159,7 @@ describe("downloadProjectOffline", () => {
         seenDuringStream = getDownloadProgress("proj1")
       },
     })
-    await downloadProjectOffline(store, "proj1", "jwt", deps)
+    await downloadProjectOffline(store, "proj1", jwt, deps)
     expect(seenDuringStream).toEqual({ projectId: "proj1", filesTotal: 1, filesDone: 0, cellsDone: 1 })
   })
 
@@ -133,7 +168,7 @@ describe("downloadProjectOffline", () => {
       events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: new Date(), queueDepth: 0 }),
     )
     let called = false
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps({
       fetchProjectFiles: async () => {
         called = true
         return []
@@ -144,9 +179,9 @@ describe("downloadProjectOffline", () => {
 
   it("is a no-op while the same project is downloading in this session", async () => {
     const never = () => new Promise<never>(() => {})
-    void downloadProjectOffline(store, "proj1", "jwt", fakeDeps({ resolveCloudProjectResult: never }))
+    void downloadProjectOffline(store, "proj1", jwt, fakeDeps({ resolveCloudProjectResult: never }))
     let called = false
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps({
       resolveCloudProjectResult: async () => {
         called = true
         return never()
@@ -166,7 +201,7 @@ describe("downloadProjectOffline", () => {
     store.commit(events.fileSynced({ id: "kept", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
     let verify = () => {}
     let resolved = false
-    const download = downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+    const download = downloadProjectOffline(store, "proj1", jwt, fakeDeps({
       whenStoreVerified: () => new Promise<void>((resolve) => (verify = resolve)),
       resolveCloudProjectResult: async () => {
         resolved = true
@@ -192,7 +227,7 @@ describe("downloadProjectOffline", () => {
   it("waits for the store to be verified before downloading a project it doesn't show", async () => {
     let verify = () => {}
     let resolved = false
-    const download = downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+    const download = downloadProjectOffline(store, "proj1", jwt, fakeDeps({
       whenStoreVerified: () => new Promise<void>((resolve) => (verify = resolve)),
       resolveCloudProjectResult: async () => {
         resolved = true
@@ -219,7 +254,7 @@ describe("downloadProjectOffline", () => {
     )
     store.commit(events.fileSynced({ id: "kept", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
 
-    await expect(downloadProjectOffline(store, "proj1", "jwt", fakeDeps({
+    await expect(downloadProjectOffline(store, "proj1", jwt, fakeDeps({
       whenStoreVerified: () => new Promise<never>(() => {}),
       verifyTimeoutMs: 10,
     }))).rejects.toThrow(/isn't ready yet/)
@@ -240,8 +275,8 @@ describe("downloadProjectOffline", () => {
         return fakeDeps().resolveCloudProjectResult(...args)
       },
     })
-    const first = downloadProjectOffline(store, "proj1", "jwt", deps)
-    const second = downloadProjectOffline(store, "proj1", "jwt", deps)
+    const first = downloadProjectOffline(store, "proj1", jwt, deps)
+    const second = downloadProjectOffline(store, "proj1", jwt, deps)
     verify()
     await Promise.all([first, second])
 
@@ -255,7 +290,7 @@ describe("downloadProjectOffline", () => {
     )
     store.commit(events.fileSynced({ id: "gone", projectId: "proj1", name: "Exodus", type: "usfm", sequenceIndex: 0 }))
 
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
 
     const files = store.query(tables.files.select().where({ projectId: "proj1" }))
     expect(files.map((f) => f.id)).toEqual(["file1"])
@@ -269,7 +304,7 @@ describe("downloadProjectOffline", () => {
         throw new Error("network down")
       },
     })
-    await expect(downloadProjectOffline(store, "proj1", "jwt", deps)).rejects.toThrow("network down")
+    await expect(downloadProjectOffline(store, "proj1", jwt, deps)).rejects.toThrow("network down")
 
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.projects.select().where({ id: "proj1" }))).toHaveLength(0)
@@ -312,7 +347,7 @@ describe("downloadProjectOffline", () => {
         await onPage([cellRow({ cellId: "c1", side: "source" })], true)
       },
     })
-    await expect(downloadProjectOffline(store, "proj1", "jwt", deps)).rejects.toThrow("boom")
+    await expect(downloadProjectOffline(store, "proj1", jwt, deps)).rejects.toThrow("boom")
     expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.files.select().where({ projectId: "proj1" }))).toHaveLength(0)
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
@@ -322,7 +357,7 @@ describe("downloadProjectOffline", () => {
     const deps = fakeDeps({
       resolveCloudProjectResult: async () => ({ ok: false, reason: "not-found" }) as ResolveProjectResult,
     })
-    await expect(downloadProjectOffline(store, "proj1", "jwt", deps)).rejects.toThrow(/not-found/)
+    await expect(downloadProjectOffline(store, "proj1", jwt, deps)).rejects.toThrow(/not-found/)
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 })
@@ -333,7 +368,7 @@ describe("removeOfflineProject", () => {
   })
 
   it("deletes project/file/cell rows and reports ok when the queue is empty", async () => {
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     const result = removeOfflineProject(store, "proj1")
     expect(result).toEqual({ ok: true })
     expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
@@ -342,8 +377,61 @@ describe("removeOfflineProject", () => {
     expect(store.query(tables.offlineProjects.select().where({ projectId: "proj1" }))).toHaveLength(0)
   })
 
+  it("removes the whole copy in one commit and leaves other projects alone", async () => {
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
+    store.commit(
+      events.syncCursorSet({ projectId: "proj1", fileId: "file1", serverSeq: 9, projectEpoch: 1 }),
+      events.offlineProjectStatusSet({ projectId: "proj2", status: "ready", syncedAt: null, queueDepth: 0 }),
+      events.projectSynced({ id: "proj2", name: "Mark", orgId: "org1", settings: null, syncedAt: null }),
+      events.fileSynced({ id: "fileB", projectId: "proj2", name: "MRK", type: "usfm", sequenceIndex: 0 }),
+      events.cellsSynced({
+        projectId: "proj2",
+        fileId: "fileB",
+        rows: [
+          {
+            cellId: "m1",
+            side: "source",
+            value: "hello",
+            valueHtml: null,
+            eventId: "evtB",
+            sourceEventId: null,
+            validated: false,
+            aiDrafted: false,
+            sequenceIndex: 0,
+            canonicalRef: null,
+            targetLang: "",
+            laneId: null,
+          },
+        ],
+      }),
+      events.syncCursorSet({ projectId: "proj2", fileId: "fileB", serverSeq: 3, projectEpoch: 1 }),
+    )
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" })).length).toBeGreaterThan(0)
+
+    const commit = store.commit
+    let commits = 0
+    store.commit = ((...args: Parameters<typeof commit>) => {
+      commits += 1
+      return commit(...args)
+    }) as typeof commit
+    try {
+      expect(removeOfflineProject(store, "proj1")).toEqual({ ok: true })
+    } finally {
+      store.commit = commit
+    }
+
+    expect(commits).toBe(1)
+    expect(store.query(tables.cells.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.syncCursors.select().where({ projectId: "proj1" }))).toHaveLength(0)
+    expect(store.query(tables.cells.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.files.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.projects.select().where({ id: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.syncCursors.select().where({ projectId: "proj2" }))).toHaveLength(1)
+    expect(store.query(tables.offlineProjects.select().where({ projectId: "proj2" }))).toHaveLength(1)
+  })
+
   it("blocks removal when a pending write is queued, and reports the depth", async () => {
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     store.commit(
       events.eventQueued({
         id: "q1",
@@ -365,7 +453,7 @@ describe("removeOfflineProject", () => {
   })
 
   it("blocks removal when a write is stuck failed (not just pending/flushing)", async () => {
-    await downloadProjectOffline(store, "proj1", "jwt", fakeDeps())
+    await downloadProjectOffline(store, "proj1", jwt, fakeDeps())
     store.commit(
       events.eventQueued({
         id: "q1",
@@ -437,6 +525,7 @@ describe("recoverInterruptedDownloads", () => {
     const never = () => new Promise<never>(() => {})
     const stalled: DownloadProjectDeps = {
       resolveCloudProjectResult: never,
+      fetchProjectSettingsResult: never,
       fetchSyncToken: never,
       fetchProjectFiles: never,
       streamFileCells: never,

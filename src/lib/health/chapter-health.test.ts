@@ -4,6 +4,10 @@ import { chapterHealthBuilderFor, createChapterHealthBuilder, type ChapterHealth
 interface Summary {
   status: string
   translated: string
+  aiDrafted?: boolean
+  laneStatus?: string
+  hasOwnTake?: boolean
+  audioApproved?: boolean
 }
 
 function harness() {
@@ -86,6 +90,51 @@ describe("createChapterHealthBuilder", () => {
     expect(second[0]).not.toBe(first[0])
     expect(second[0].translated).toBe(3)
     expect(second[1]).toBe(first[1])
+  })
+
+  it("marks an AI draft nobody has validated, and only that (AQU-2159)", () => {
+    const h = harness()
+    h.summaries.set("b", { status: "unvalidated", translated: "draft", aiDrafted: true })
+    // Validated AI text is validated: the stripes are for drafts awaiting a person.
+    h.summaries.set("a", { status: "validated", translated: "done", aiDrafted: true })
+    const first = h.builder.build(h.chapters, h.readers)
+    expect(first[0].cells?.[0]).toEqual({ id: "a", stage: "validated", health: 100, hasIssue: false })
+    expect(first[0].cells?.[1]).toEqual({ id: "b", stage: "automatic", health: 55, hasIssue: false, aiDrafted: true })
+
+    // A person rewrites the draft: same stage, same score, a new square.
+    h.summaries.set("b", { status: "unvalidated", translated: "rewritten", aiDrafted: false })
+    const second = h.builder.build(h.chapters, h.readers)
+    expect(second[0].cells?.[1]).toEqual({ id: "b", stage: "automatic", health: 55, hasIssue: false })
+    expect(second[0]).not.toBe(first[0])
+  })
+
+  it("carries a check's flag only on a line that has text (AQU-2159)", () => {
+    const h = harness()
+    h.issues.add("a")
+    h.issues.add("c")
+    const cells = h.builder.build(h.chapters, h.readers)[0].cells ?? []
+    expect(cells.map((cell) => cell.hasIssue)).toEqual([true, false, false])
+  })
+
+  it("carries what a line holds when its square comes from a language that counts recordings", () => {
+    const h = harness()
+    // A Text and audio language: "c" has a recording and no text, "b" typed text and no recording.
+    h.summaries.set("c", { status: "empty", translated: "", laneStatus: "unvalidated", hasOwnTake: true })
+    h.summaries.set("b", { status: "unvalidated", translated: "draft", laneStatus: "unvalidated" })
+    h.summaries.set("a", { status: "validated", translated: "done", laneStatus: "validated", hasOwnTake: true, audioApproved: true })
+    const [chapter] = h.builder.build(h.chapters, h.readers)
+    expect(chapter.cells?.[2]).toMatchObject({ id: "c", stage: "automatic", lineParts: { text: "none", audio: "recorded" } })
+    expect(chapter.cells?.[1]).toMatchObject({ id: "b", stage: "automatic", lineParts: { text: "typed", audio: "none" } })
+    expect(chapter.cells?.[0]).toMatchObject({ id: "a", stage: "validated", lineParts: { text: "validated", audio: "approved" } })
+    // A Text language's line carries nothing extra.
+    const plain = harness()
+    expect(plain.builder.build(plain.chapters, plain.readers)[0].cells?.[1]).not.toHaveProperty("lineParts")
+    // A recording approved later replaces the square's object.
+    const before = chapter.cells?.[2]
+    h.summaries.set("c", { status: "empty", translated: "", laneStatus: "unvalidated", hasOwnTake: true, audioApproved: true })
+    const after = h.builder.build(h.chapters, h.readers)[0].cells?.[2]
+    expect(after).not.toBe(before)
+    expect(after).toMatchObject({ lineParts: { text: "none", audio: "approved" } })
   })
 
   it("reflects an issue appearing on a cell", () => {

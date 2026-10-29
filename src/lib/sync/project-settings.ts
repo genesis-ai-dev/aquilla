@@ -18,6 +18,7 @@ import type { InheritedFromLink } from "@/lib/sync/inherited-settings"
 import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -165,15 +166,20 @@ export interface ProjectWideSettings {
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
    *
-   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
-   * floor change: `file.track.set` is already maintainer-floored, so this
-   * answers *whether*, not *who*, and with it off the write is refused even to
-   * an owner. Multi-track is capability for clients who want it; a project that
-   * never turns it on should not be able to tell it was built.
+   * ON UNLESS EXPLICITLY TURNED OFF (AQU-2214, Sam, after the ETEN demo). It
+   * shipped the other way round — multi-track read as capability for the
+   * clients who asked for it, so a project that never turned it on was not
+   * supposed to be able to tell it was built. Adding a track turned out to be
+   * the ordinary case, so the DEFAULT flipped and the gate did not: it is
+   * still a SECOND gate rather than a floor change (`file.track.set` is
+   * already maintainer-floored, so this answers *whether*, not *who*), and an
+   * explicit `false` here — or inherited from the org — still refuses the
+   * write to an owner. Only the unset reading changed, on the client and at
+   * the perimeter alike; a project or org that already chose keeps its choice.
    *
    * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
-   * ship, and a new setting defaulting to off must not silently take an
-   * existing capability away from every project that has one. They stay
+   * shipped before the setting existed, which must not take an existing
+   * capability away from a project that switches this OFF. They stay
    * maintainer-only, which is what they were.
    *
    * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.
@@ -214,6 +220,13 @@ export interface ProjectWideSettings {
    * keep it; see `isAutopilotVisible` in src/lib/features/flags.ts.
    */
   autopilotEnabled?: boolean
+  /**
+   * AQU-2041: when on, a project lead can create, edit, and assign voices on
+   * the lanes they can write. Absent or false keeps voice management at
+   * maintainer. Only a maintainer can change this key. Turning it off leaves
+   * voices that were already created.
+   */
+  projectLeadsManageVoices?: boolean
   /**
    * AQU-1937: the per-project "Smart Extensions" switch. Absent / false = the
    * project is exactly today's Aquilla: the native editor, the built-in
@@ -515,13 +528,6 @@ export interface ProjectSettingsResponse {
    */
   orgMediaDefaults?: MediaDefaults
   /**
-   * Whether the org lets bulk text validation take untouched AI drafts. On
-   * this response for the same reason as the line above, and because a project
-   * member outside the org cannot read the org's settings at all. Null when
-   * the project has no org; optional on an older server.
-   */
-  orgAllowBulkValidateAiDrafts?: boolean | null
-  /**
    * AQU-1771: the rest of the org's policy this project's surfaces apply —
    * both visibility floors, assignment authority, the repetition default, the
    * export floor — carried here so a member outside the org gets the org's
@@ -558,6 +564,13 @@ export interface ProjectLaneView {
    * server that predates migration 0173, which reads as off.
    */
   recordsAudio?: boolean
+  /**
+   * Media redesign slice 1: what this language delivers — Text, Audio, or
+   * Text and audio. Null is "not chosen yet" (a language that had "Records
+   * audio" on before this existed), which counts as before and asks for a
+   * choice. Absent from a server that predates migration 0187.
+   */
+  delivers?: LaneDelivers | null
 }
 
 export type PatchResult =
@@ -667,6 +680,8 @@ export async function createProjectLane(
     language: string
     code?: string | null
     allowDuplicateName?: boolean
+    /** Media redesign slice 1: what the language delivers. Omitted, Text. */
+    delivers?: LaneDelivers
   },
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CreateLaneResult> {
@@ -690,29 +705,37 @@ export async function createProjectLane(
   return { kind: "ok", lane: body.lane }
 }
 
-/** AQU-1954: POST /api/v2/projects/:id/lanes/:laneId/records-audio. */
-export async function setProjectLaneRecordsAudio(
+export type SetLaneDeliversResult =
+  | { kind: "ok"; lane: ProjectLaneView | null }
+  /** The caller is below the project's language-edit floor. */
+  | { kind: "forbidden" }
+  | { kind: "error"; message: string }
+
+/** Media redesign slice 1: POST /api/v2/projects/:id/lanes/:laneId/delivers. */
+export async function setProjectLaneDelivers(
   jwt: string,
   projectId: string,
   laneId: string,
-  recordsAudio: boolean,
+  delivers: LaneDelivers,
   apiUrl: string = FRONTIER_API_URL,
-): Promise<{ kind: "ok" } | { kind: "error"; message: string }> {
+): Promise<SetLaneDeliversResult> {
   let res: Response
   try {
     res = await fetch(
-      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/records-audio`,
+      `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/lanes/${encodeURIComponent(laneId)}/delivers`,
       {
         method: "POST",
         headers: authHeaders(jwt),
-        body: JSON.stringify({ recordsAudio }),
+        body: JSON.stringify({ delivers }),
       },
     )
   } catch (e) {
     return { kind: "error", message: e instanceof Error ? e.message : String(e) }
   }
+  if (res.status === 403) return { kind: "forbidden" }
   if (!res.ok) return { kind: "error", message: `save failed (${res.status})` }
-  return { kind: "ok" }
+  const body = (await res.json().catch(() => null)) as { lane?: ProjectLaneView } | null
+  return { kind: "ok", lane: body?.lane ?? null }
 }
 
 /** POST /api/v2/projects/:id/lanes/:laneId/archive. */
@@ -915,4 +938,52 @@ export async function patchProjectSettings(
   // actual count). Handing the raw JSON to a toast showed them the braces.
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: errorMessageFrom(text) }
+}
+
+/**
+ * AQU-2101: what the voice copy did.
+ * `saved` — the server accepted it. Apply the same copy locally.
+ * `unsaved` — the request never landed (network, 5xx, version conflict)
+ * after a few tries. Do not paint a local copy the server does not have.
+ * `refused` — the server rejected the body or the role. Same: leave local alone.
+ */
+export type SplitCastCopyStatus = "saved" | "unsaved" | "refused"
+
+const SPLIT_CAST_ATTEMPTS = 3
+
+function splitCastRefused(status: number): boolean {
+  return status === 400 || status === 403 || status === 422
+}
+
+/**
+ * AQU-2101: ask the server to copy each lane's cast of these rows onto the new
+ * narration pieces. The server holds every lane, including ones this client
+ * was not shown. `fileId` is how it checks the new pieces really were split
+ * from those rows.
+ */
+export async function postSplitCastCopies(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<SplitCastCopyStatus> {
+  const body = JSON.stringify({ fileId, splits })
+  for (let attempt = 0; attempt < SPLIT_CAST_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/split-casts`,
+        {
+          method: "POST",
+          headers: authHeaders(jwt),
+          body,
+        },
+      )
+      if (res.ok) return "saved"
+      if (splitCastRefused(res.status)) return "refused"
+    } catch {
+      // A dropped request is worth another try. A refusal is not.
+    }
+  }
+  return "unsaved"
 }

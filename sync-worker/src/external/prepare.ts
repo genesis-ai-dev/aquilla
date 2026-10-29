@@ -61,6 +61,7 @@ import { prepareProjectSetup } from './prepare-project-setup'
 import type { ProjectSetupCommand } from './commands-project-setup'
 import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
+import { isStyleRuleCommand, prepareStyleRuleCommand } from './commands-style-rules'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
 import { isCellFieldCommand, CELL_FIELDS_MAX_COMMANDS, type CellFieldCommand } from './commands-cell-fields'
@@ -363,6 +364,16 @@ export async function prepareChangesetCore(
     return prepareMemoryCommand(db, cred, projectId, id, autonomyMode, memoryCommand, env)
   }
 
+  // AQU-2195 ReviewStyleRules: sole command, receipt-only, its own PROJECT_LEAD
+  // check and live-state validation, so it skips the generic role gate below.
+  const styleRuleCommand = validated.commands.find(isStyleRuleCommand)
+  if (styleRuleCommand) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ReviewStyleRules must be the only command in a changeset')
+    }
+    return prepareStyleRuleCommand(db, cred, projectId, id, autonomyMode, styleRuleCommand, env)
+  }
+
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
   // call, never a role baked into the credential). Scope alone (checked above)
   // does not imply membership: a non-member with a project-scoped credential
@@ -642,7 +653,7 @@ export async function prepareChangesetCore(
       Number(cred.userId),
       resolvedRole.level,
     )
-    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
     const resolved: SetTranslationCommand[] = []
     for (const [index, c] of setCommands.entries()) {
       const lane = resolveTargetLaneId(c.laneId, `commands[${index}]`, laneCtx)
@@ -763,7 +774,7 @@ async function expandDraftCells(
   const lane = resolveTargetLaneId(
     cmd.laneId,
     'DraftCells.laneId',
-    laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds),
+    laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds),
   )
   if (!lane.ok) throw new ExternalError('validation_failed', lane.message)
   const laneId = lane.lane.id
@@ -900,7 +911,7 @@ async function preparePlanImport(
     Number(cred.userId),
     callerRoleLevel,
   )
-  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
@@ -1102,7 +1113,7 @@ async function prepareLinkMedia(
     Number(cred.userId),
     roleLevel,
   )
-  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
   const resolvedCmds: LinkMediaCommand[] = []
 
   for (const [index, cmd] of cmds.entries()) {

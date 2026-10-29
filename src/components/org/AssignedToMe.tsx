@@ -5,10 +5,12 @@ import { Building2 } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -24,7 +26,7 @@ import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { getFileSectionProgress } from "@/lib/progress/file-progress-resource"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
-import { assignmentSectionKeys, resolveAssignmentLandingCell } from "./assignment-landing"
+import { assignmentScopeText, assignmentSectionKeys, resolveAssignmentLandingCell } from "./assignment-landing"
 
 /**
  * The lane is always emitted, as an empty `?lane=` for a default-lane
@@ -168,8 +170,11 @@ export function AssignedToMe() {
       const getToken = () => (token ??= fetchSyncToken(jwt, a.projectId, fileId)
         .then((r) => r.token)
         .catch(() => null))
-      const cellId = await resolveAssignmentLandingCell(a, async (key) =>
-        (await getFileSectionProgress(a.projectId, fileId, key, getToken, a.targetLang ?? "")).verses,
+      const cellId = await resolveAssignmentLandingCell(
+        a,
+        async (key) =>
+          (await getFileSectionProgress(a.projectId, fileId, key, getToken, a.targetLang ?? "")).verses,
+        a.laneDelivers,
       ).catch(() => null)
       navigate(cellId
         ? editorCellHref(a.projectId, fileId, cellId, assignmentLane(a), true)
@@ -192,13 +197,25 @@ export function AssignedToMe() {
           const a = row.original
           return (
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate">{a.scopeLabel}</span>
+              {/* AQU-1510: the scope is what tells two rows on one book
+                  apart, so it reads as ranges and the full list is a hover
+                  away rather than clipped off the edge. */}
+              <AppTooltip content={a.scopeLabel}>
+                <span className="truncate" data-testid={`assigned-scope-${a.assignmentId}`}>
+                  {assignmentScopeText(a)}
+                </span>
+              </AppTooltip>
               <AssignmentLaneBadge
                 targetLang={a.targetLang}
                 laneName={a.laneName}
                 defaultLaneLabel={defaultLaneLabelByProjectId.get(a.projectId) ?? ""}
                 fallbackLabel={laneFallbackLabel}
               />
+              {/* AQU-1969: a validate assignment's progress is this person's
+                  own approvals; say which kind it is. */}
+              {a.kind === "validate" && (
+                <Badge variant="outline" className="shrink-0">{t("org.validationProgress.kindChip")}</Badge>
+              )}
             </div>
           )
         },
@@ -243,9 +260,12 @@ export function AssignedToMe() {
               <div className="h-1.5 w-full max-w-[7.5rem] overflow-hidden rounded-full bg-muted">
                 <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
               </div>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
-              </span>
+              {/* AQU-1510: the count is this assignment's cells, not the file's. */}
+              <AppTooltip content={t("org.assignedToMe.cellsProgressHint", { done: a.cellsDone, total: a.cellsTotal })}>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
+                </span>
+              </AppTooltip>
             </div>
           )
         },
@@ -298,6 +318,11 @@ export function AssignedToMe() {
             <DataTable
               columns={columns}
               data={rows}
+              // AQU-1510: fixed layout, so the columns keep their widths and a
+              // long scope truncates inside its own column instead of
+              // stretching the table past the page and scrolling the start
+              // of the label (or the whole label) out of view.
+              tableClassName="table-fixed"
               loading={loading}
               loadingLabel={t("org.assignedToMe.loadingLabel")}
               getRowId={(a) => a.assignmentId}

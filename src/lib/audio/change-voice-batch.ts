@@ -78,7 +78,7 @@ export function planChangeVoiceAll(
       skipped["voice-reference"]++
       continue
     }
-    const voice = resolveCastVoice(settings, cell.id)
+    const voice = resolveCastVoice(settings, cell)
     const blocker = changeVoiceBlocker(cell, voice, diffusionSteps)
     if (blocker) {
       skipped[blocker]++

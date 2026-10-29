@@ -108,8 +108,9 @@ export interface OrgWideSettings {
   /**
    * AQU-1768: org-wide defaults for the media settings. A project that sets
    * none of its own follows these; absent here, each reader keeps its
-   * built-in default (timing locked, track editing off, cell editing nobody,
-   * audio self-validation on, audio floor reviewer). Enforced on the server.
+   * built-in default (timing locked, track editing ON since AQU-2214, cell
+   * editing nobody, audio self-validation on, audio floor reviewer). Enforced
+   * on the server.
    */
   timingLocked?: boolean
   allowTrackEditing?: boolean
@@ -126,21 +127,6 @@ export interface OrgWideSettings {
    * shipped with. A project may override it either way.
    */
   autoPropagateRepetitions?: boolean
-  /**
-   * Whether bulk text validation — the selection bar's "Validate text" and the
-   * file menu's "Batch validate text…" — may sign off untouched AI drafts.
-   *
-   * Unset means NO, which is the rule both surfaces have always applied (an AI
-   * draft nobody has edited is reviewed one cell at a time; see
-   * `isBulkValidationEligible`). An org that reviews drafts in place and signs
-   * a passage off at once opts in. Sam, 2026-10-01: org-wide, off by default.
-   *
-   * Not a permission policy — it changes what a validate gesture covers, not
-   * who may validate — so it rides the general MAINTAINER write gate, like
-   * `autoPropagateRepetitions`. In-app only: the external Agent API keeps its
-   * own no-bypass rule (AQU-1184).
-   */
-  allowBulkValidateAiDrafts?: boolean
   /**
    * AQU-1037: Minimum effective project role allowed to assign, reassign, or
    * unassign file/chapter/target-lane work and route AI changesets. Default

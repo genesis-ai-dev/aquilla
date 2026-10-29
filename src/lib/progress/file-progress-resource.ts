@@ -19,6 +19,12 @@ export interface ProgressCounts {
    */
   audioCount?: number
   audioValidatedCount?: number
+  /**
+   * Media redesign slice 2: lines with both their text and their recording
+   * validated (what a "Text and audio" language counts as done). Optional for
+   * the same reason as the audio pair.
+   */
+  bothValidatedCount?: number
 }
 
 export interface FileProgressResponse {

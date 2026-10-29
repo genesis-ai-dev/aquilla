@@ -112,12 +112,30 @@ export async function generateAndAttachCellVoice(
       },
       getSyncToken,
     )
+    // A Voice library voice has no TTS timbre of its own: the stock voice reads
+    // the line in the target language, then the voice forge re-voices that clip
+    // into the character. RVC keeps the clip's length, so the duration holds.
+    let objectName = result.objectName
+    let audioUrl = result.url
+    let audioId = result.audioId
+    if (voice.libraryVoiceId) {
+      const conv = await convertToCloneVoice({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        libraryVoiceId: voice.libraryVoiceId,
+        sourceAudioId: result.objectName,
+        getSyncToken,
+      })
+      objectName = `${conv.audioId}.${conv.ext}`
+      audioUrl = conv.url
+      audioId = conv.audioId
+    }
     const attachEventId = await emitCellAudioAttach({
       projectId: args.projectId,
       fileId: args.fileId,
       cellId: args.cellId,
-      audioId: result.objectName,
-      url: result.url,
+      audioId: objectName,
+      url: audioUrl,
       durationMs: Math.round(result.durationSeconds * 1000),
       slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
@@ -134,8 +152,8 @@ export async function generateAndAttachCellVoice(
     // Round 8: shadow-inject so the sparkle chip appears at its real length
     // instantly — the notify's refetch would otherwise read pre-flush state.
     injectOptimisticAudioAttachment(args.fileId, args.cellId, {
-      audioId: result.objectName,
-      url: result.url,
+      audioId: objectName,
+      url: audioUrl,
       slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
       voiceId: voice.id,
@@ -149,13 +167,13 @@ export async function generateAndAttachCellVoice(
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,
-      audioId: result.audioId,
+      audioId,
       ext: "wav",
       getSyncToken,
     })
     return {
-      audioId: result.objectName,
-      url: result.url,
+      audioId: objectName,
+      url: audioUrl,
       blob: new Blob([bytes as BlobPart], { type: "audio/wav" }),
     }
   }
@@ -178,16 +196,18 @@ export async function generateAndAttachCellVoice(
   /** Sample-exact duration from the opus encoder, when that path ran. */
   let encodedDurationMs: number | null = null
 
-  if (voice.referenceAudioId) {
-    // 2a. Clone: re-voice TTS output into the reference timbre. The worker
-    // writes the converted wav to R2 and returns its id; fetch it back so we
-    // can play the actual cloned audio (not the pre-conversion TTS).
+  if (voice.referenceAudioId || voice.libraryVoiceId) {
+    // 2a. Clone: re-voice TTS output into the reference timbre (Seed-VC), or
+    // into a Voice library character (voice forge). The worker writes the
+    // converted wav to R2 and returns its id; fetch it back so we can play the
+    // actual converted audio (not the pre-conversion TTS).
     const conv = await convertToCloneVoice({
       projectId: args.projectId,
       fileId: args.fileId,
-      referenceAudioId: voice.referenceAudioId,
+      ...(voice.libraryVoiceId
+        ? { libraryVoiceId: voice.libraryVoiceId }
+        : { referenceAudioId: voice.referenceAudioId, diffusionSteps: args.diffusionSteps }),
       source: ttsBlob,
-      diffusionSteps: args.diffusionSteps,
       getSyncToken,
     })
     audioId = conv.audioId

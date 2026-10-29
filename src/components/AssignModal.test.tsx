@@ -9,6 +9,7 @@ vi.mock("@/lib/sync/assignments", () => ({
   createAssignment: vi.fn(),
   createBulkFileAssignments: vi.fn(),
   getFileChapters: vi.fn(),
+  getUnitAssignments: vi.fn().mockResolvedValue([]),
   AssignmentEmitError: class AssignmentEmitError extends Error {
     constructor(message: string) { super(message); this.name = "AssignmentEmitError" }
   },
@@ -18,12 +19,13 @@ vi.mock("@/lib/frontier/roles", async (importOriginal) => {
   return { ...actual }
 })
 
-import { createAssignment, createBulkFileAssignments, getFileChapters } from "@/lib/sync/assignments"
+import { createAssignment, createBulkFileAssignments, getFileChapters, getUnitAssignments } from "@/lib/sync/assignments"
 import { ROLE } from "@/lib/frontier/roles"
 
 const mockCreate = vi.mocked(createAssignment)
 const mockBulkCreate = vi.mocked(createBulkFileAssignments)
 const mockChapters = vi.mocked(getFileChapters)
+const mockUnit = vi.mocked(getUnitAssignments)
 
 const BASE_PROPS = {
   open: true,
@@ -52,6 +54,7 @@ beforeEach(() => {
     args.entries.map((e) => ({ fileId: e.fileId, assignmentId: `assign-${e.fileId}` })),
   )
   mockChapters.mockResolvedValue(["GEN 1", "GEN 2", "GEN 3"])
+  mockUnit.mockResolvedValue([])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -188,6 +191,74 @@ describe("project-member-only assignee picker (AQU-676)", () => {
   })
 })
 
+describe("nobody else on the project yet (AQU-2194)", () => {
+  // Come and See, Oct 26: a PM added a target language and opened Assign work
+  // to give it to a linguist. The linguist was in the organisation but not on
+  // the project, so (AQU-676) the picker held only the PM, with no word why.
+  const CREATOR = {
+    userId: 5,
+    username: "wendi",
+    role: { level: 600, name: "maintainer", source: "creator" as const },
+    secondarySources: [],
+  }
+  const LINGUIST_IN_ORG_ONLY = {
+    userId: 7,
+    username: "kofi",
+    role: { level: 400, name: "contributor", source: "org" as const },
+    secondarySources: [],
+  }
+
+  it("says why only the caller can be picked, and links a maintainer to where people are added", () => {
+    render(<AssignModal {...BASE_PROPS} roleLevel={ROLE.MAINTAINER} members={[CREATOR, LINGUIST_IN_ORG_ONLY]} />)
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/only people on this project/i)
+    const link = screen.getByRole("link", { name: /add someone to this project/i })
+    expect(link.getAttribute("href")).toBe("/project/proj-1/settings/members")
+  })
+
+  it("still says it when the only others are the project's maintainers or owners", () => {
+    // The real shape: the project's creator (an org owner) is listed, the PM
+    // is a Project lead, and the linguist isn't on the project.
+    const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
+    render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
+    // A Project lead can't open the Members settings, so no link: who to ask.
+    const hint = screen.getByTestId("assign-modal-staff-hint")
+    expect(hint.textContent).toMatch(/ask a project maintainer/i)
+    expect(screen.queryByRole("link", { name: /add someone to this project/i })).toBeNull()
+  })
+
+  it("says nothing once someone else is on the project", () => {
+    render(<AssignModal {...BASE_PROPS} members={[CREATOR, ...BASE_PROPS.members, LINGUIST_IN_ORG_ONLY]} />)
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves a project with nobody on any language to the line that already says so", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        lanes={[{ legacyTag: "ha", label: "Hausa", laneId: "lane-ha" }]}
+        staffedLaneIds={[]}
+      />,
+    )
+    expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toBeTruthy()
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+
+  it("leaves self-assign mode to its own explanation", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        members={[CREATOR, LINGUIST_IN_ORG_ONLY]}
+        roleLevel={ROLE.CONTRIBUTOR}
+        allowSelfAssignment
+        callerUserId={5}
+      />,
+    )
+    expect(screen.queryByTestId("assign-modal-staff-hint")).toBeNull()
+  })
+})
+
 // Base UI Select renders a combobox trigger; options live in a portaled popup.
 // The shared helper drives the pointer sequence Base UI requires to commit a
 // choice (see src/test-utils/select.tsx); here we additionally hold it to
@@ -218,6 +289,77 @@ describe("verses scope", () => {
     expect(args.jwt).toBe("test-jwt")
     expect(args.author).toBe("wendi")
     expect(args.projectId).toBe("proj-1")
+  })
+})
+
+// ── AQU-1510: warn when the person already holds these lines ─────────────────
+describe("overlap warning (AQU-1510)", () => {
+  it("says anna already holds GEN 2, and still assigns the whole file", async () => {
+    mockUnit.mockResolvedValue([
+      {
+        assignmentId: "held",
+        assigneeUserId: 42,
+        username: "anna",
+        scopeLabel: "Genesis · GEN 2",
+        targetLang: "",
+        deadline: null,
+        cellsTotal: 5,
+        translated: 0,
+        validated: 0,
+        recorded: 0,
+        audioValidated: 0,
+        chapters: [{ key: "GEN 2", total: 5, translated: 0, validated: 0, recorded: 0, audioValidated: 0 }],
+      },
+    ])
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /anna/)
+    expect(await screen.findByTestId("assignment-overlap")).toHaveTextContent(
+      "anna already holds GEN 2 in Genesis",
+    )
+    fireEvent.click(screen.getByRole("button", { name: /assign/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+  })
+
+  it("stays quiet for bob, who holds nothing here", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/assign to/i, /bob/)
+    await waitFor(() => expect(mockUnit).toHaveBeenCalledWith("test-jwt", "proj-1", "file-1", "", ""))
+    expect(screen.queryByTestId("assignment-overlap")).not.toBeInTheDocument()
+  })
+})
+
+// ── Task: translate or validate (AQU-1969) ───────────────────────────────────
+describe("task (AQU-1969)", () => {
+  it("opens on Translate, and a translate assignment says so", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    expect(screen.getByRole("combobox", { name: /task/i }).textContent).toMatch(/translate/i)
+    // The validate-only sentence is not there to explain the default.
+    expect(screen.queryByText(/lines they approve themselves/i)).toBeNull()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0].kind).toBe("translate")
+  })
+
+  it("sends a Validate assignment, and says what its progress will count", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    expect(screen.getByText(/lines they approve themselves/i)).toBeTruthy()
+    await pickSelectOption(/assign to/i, /anna/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ kind: "validate", assigneeUserId: 42, scopeKind: "books" })
+  })
+
+  it("gives every file of a books batch the chosen kind", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    await pickSelectOption(/task/i, /validate/i)
+    await pickSelectOption(/scope/i, /books \(files\)/i)
+    fireEvent.click(screen.getByText("Genesis"))
+    await pickSelectOption(/assign to/i, /bob/)
+    fireEvent.click(screen.getByRole("button", { name: /^assign$/i }))
+    await waitFor(() => expect(mockBulkCreate).toHaveBeenCalledTimes(1))
+    expect(mockBulkCreate.mock.calls[0][0].kind).toBe("validate")
   })
 })
 

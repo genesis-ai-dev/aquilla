@@ -14,6 +14,7 @@ import { handleDbTimeoutsRequest } from "./db-timeouts-route"
 import { handleAudioRequest } from "./audio"
 import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
+import { handleCustomVoiceRequest } from "./custom-voice"
 import { handleTtsRequest } from "./tts"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
@@ -77,6 +78,10 @@ import {
   PROJECTION_SNAPSHOT_CRON,
   runProjectionSnapshotSweep,
 } from "./projection-snapshot-cron"
+import {
+  PROGRESS_SELFHEAL_CRON,
+  runProgressSelfHealSweep,
+} from "./progress-selfheal-cron"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
 import { handleStaleSourceRequest } from "./events/stale-source-route"
@@ -92,9 +97,11 @@ import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-route"
 import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
+import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
+import { handleExternalStyleRulesReadRequest } from "./external/style-rules-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -117,6 +124,7 @@ import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
+import { handleHealthRequest } from "./health-route"
 import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 declare global {
@@ -185,6 +193,10 @@ declare global {
       SEED_VC_URL?: string
       /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
       SEED_VC_TOKEN?: string
+      /** Voice-forge library-voice endpoint (infra/modal/voice_forge.py `web`). */
+      VOICE_FORGE_URL?: string
+      /** Shared secret for the voice-forge endpoint (matches its VOICE_FORGE_TOKEN). */
+      VOICE_FORGE_TOKEN?: string
       /**
        * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
        * See docs/INWORLD-TTS.md.
@@ -227,16 +239,9 @@ declare global {
       POSTHOG_KEY?: string
       /** PostHog ingest host. Defaults to https://eu.i.posthog.com (AQU-854). */
       POSTHOG_HOST?: string
-      /**
-       * Flat per-call TTS cost estimate in cents (amortised GPU cold-start etc.).
-       * Default: 2 (2¢ per synthesis call). Spec § Config.
-       */
-      TTS_COST_CENTS_PER_CALL?: string
-      /**
-       * Additional per-audio-second cost in cents. Default: 0.
-       * Tune once actual GPU billing is available.
-       */
-      TTS_COST_PER_AUDIO_SEC_CENTS?: string
+      /** off | shadow | enforce — the unified billing meter for TTS,
+       *  voice-convert and diarization (db/shared/ai-entitlement.ts). */
+      BILLING_METER_MODE?: string
       /**
        * Platform-wide daily AI spend ceiling in US dollars, checked before
        * every paid AI call in this worker too — TTS, voice-convert,
@@ -268,6 +273,14 @@ declare global {
        * next rebuild replays further back.
        */
       PROJECTION_SNAPSHOT_MODE?: string
+      /**
+       * AQU-2145 progress self-heal sweep (progress-selfheal-cron.ts): `off`
+       * skips it, unset/anything else runs it. A var so the sweep can be
+       * stopped without waiting on a release — a skipped night only means a
+       * file whose progress rows fell behind its audio events stays wrong one
+       * more day.
+       */
+      PROGRESS_SELFHEAL_MODE?: string
     }
   }
 }
@@ -394,6 +407,13 @@ const worker = {
     const background = trackBackgroundWork(ctx)
     const routeCtx = background.ctx
     try {
+    // Uptime probe for monitor-worker/. Runs after the shim so it exercises the
+    // real Postgres path, and ahead of every auth-gated route.
+    const healthResponse = await handleHealthRequest(request, {
+      db: env.AQUILLA_PG,
+      r2: env.SNAPSHOTS,
+    })
+    if (healthResponse) return healthResponse
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
     // AQU-346: eject a removed member's live WS sessions + denylist their
@@ -445,6 +465,8 @@ const worker = {
     if (voiceConvertResponse) return withCors(voiceConvertResponse, request)
     const voiceReferenceResponse = await handleVoiceReferenceRequest(request, env)
     if (voiceReferenceResponse) return withCors(voiceReferenceResponse, request)
+    const customVoiceResponse = await handleCustomVoiceRequest(request, env)
+    if (customVoiceResponse) return withCors(customVoiceResponse, request)
     const ttsResponse = await handleTtsRequest(request, env)
     if (ttsResponse) return withCors(ttsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
@@ -512,6 +534,8 @@ const worker = {
     if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
+    const glossReadResponse = await handleCellGlossesReadRequest(request, env)
+    if (glossReadResponse) return withCors(glossReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // AQU-1233: agent-facing comment reads. Its own module (rather than another
@@ -525,6 +549,9 @@ const worker = {
     // suffix routes second matches the ordering convention above.
     const externalMemoryReadResponse = await handleExternalMemoryReadRequest(request, env)
     if (externalMemoryReadResponse) return withCors(externalMemoryReadResponse, request)
+    // AQU-2195: style-rule reads (the Rules page's Style rules section).
+    const externalStyleRulesResponse = await handleExternalStyleRulesReadRequest(request, env)
+    if (externalStyleRulesResponse) return withCors(externalStyleRulesResponse, request)
     // AQU-858: agent-callable round-trip export (the mirror of the artifact
     // import tools). Its path (.../files/:fileId/export) is disjoint from the
     // external read routes above, so ordering is for readability only.
@@ -720,12 +747,13 @@ export default {
     return response
   },
 
-  // Two crons on this worker: the AQU-1856 nightly R2 orphan sweep and the
-  // AQU-1833 projection-snapshot sweep. Unlike `fetch` above, each builds its
-  // own Postgres handle (r2-gc-cron.ts / projection-snapshot-cron.ts), since
-  // the scheduled entrypoint never passes through that wrapper.
+  // Three crons on this worker: the AQU-1856 nightly R2 orphan sweep, the
+  // AQU-1833 projection-snapshot sweep, and the AQU-2145 progress self-heal
+  // sweep. Unlike `fetch` above, each builds its own Postgres handle
+  // (r2-gc-cron.ts / projection-snapshot-cron.ts / progress-selfheal-cron.ts),
+  // since the scheduled entrypoint never passes through that wrapper.
   //
-  // Both are bounded and resumable, so a cron that throws is logged and
+  // All three are bounded and resumable, so a cron that throws is logged and
   // swallowed: the runtime's retry would otherwise thrash on a bad night, and
   // a missed night costs only progress, never correctness.
   async scheduled(
@@ -747,6 +775,14 @@ export default {
         await runProjectionSnapshotSweep(env)
       } catch (err) {
         console.error("[projection-snapshot] sweep failed:", err)
+      }
+      return
+    }
+    if (controller.cron === PROGRESS_SELFHEAL_CRON) {
+      try {
+        await runProgressSelfHealSweep(env)
+      } catch (err) {
+        console.error("[progress-selfheal] sweep failed:", err)
       }
       return
     }

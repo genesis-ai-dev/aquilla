@@ -1,6 +1,7 @@
 import {
   mergeIdmlSliceTargetHtml,
   projectIdmlUnitToLocator,
+  releaseOversizedNoBreakInPackage,
   validateIdmlTranslation,
   type IdmlDiagnostic,
   type IdmlExportReport,
@@ -18,6 +19,10 @@ import {
   readIdmlRejoinMetadata,
   type IdmlRejoinMetadata,
 } from "@/lib/idml/rejoin"
+import {
+  chooseIdmlHtmlMatchingTranslation,
+  idmlEditableSlotText,
+} from "@/lib/idml/protected-html"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
@@ -77,8 +82,11 @@ export async function exportIdml(
       exported.report.warnings,
     )
   }
+  // The proof above still sees NoBreak. A translated run can outgrow the
+  // column and stop composition; release that only on the bytes we hand back.
+  const repaired = await releaseOversizedNoBreakInPackage(exported.bytes)
   return {
-    blob: new Blob([exactArrayBuffer(exported.bytes)], { type: IDML_MIME }),
+    blob: new Blob([exactArrayBuffer(repaired)], { type: IDML_MIME }),
     report: exported.report,
     diagnostics,
   }
@@ -296,8 +304,17 @@ function cellContract(cell: CellData): CellContract {
   if (reflowedHtml !== targetHtml) {
     const reflowed = validateIdmlTranslation(cell.originalHtml, reflowedHtml, metadata)
     if (reflowed.valid) {
-      targetHtml = reflowedHtml
-      targetSlots = reflowed.slots
+      const chosen = chooseIdmlHtmlMatchingTranslation(
+        targetHtml,
+        reflowedHtml,
+        idmlEditableSlotText(targetSlots, metadata.editableSlotIndexes),
+        idmlEditableSlotText(reflowed.slots, metadata.editableSlotIndexes),
+        cell.translated,
+      )
+      if (chosen !== targetHtml) {
+        targetHtml = reflowedHtml
+        targetSlots = reflowed.slots
+      }
     }
   }
 

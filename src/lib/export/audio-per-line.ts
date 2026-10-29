@@ -49,7 +49,7 @@ import { readWavFormat, trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { stripInternalIds } from "./internal-id-names"
-import { isSilencedForExport } from "./audio-validation-scope"
+import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import {
   characterFileKey,
   characterIdentity,
@@ -150,7 +150,8 @@ export function collectPerLineClips(
     }
 
     if (audioTracks.length === 0) {
-      const audioId = cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId
+      // AQU-2148: the slot that still has audio, not whichever pointer is set.
+      const audioId = defaultTrackTakeId(cell)
       if (!audioId) continue
       const pieces = piecesOfTake(cell, audioId)
       pieces.forEach((pieceId, i) => {
@@ -180,7 +181,7 @@ export function collectPerLineClips(
     for (const track of audioTracks) {
       const isDefault = isDefaultTrackSlot(slotForTrack(track.id))
       const audioId = isDefault
-        ? (cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId)
+        ? defaultTrackTakeId(cell)
         : cell.selectedBySlot?.[track.id]
       if (!audioId) continue
       const pieces = piecesOfTake(cell, audioId)
@@ -363,6 +364,9 @@ export interface ExportPerLineArgs {
   decode?: (bytes: Uint8Array) => Promise<Float32Array>
 }
 
+/** How many clips ahead of the one being written are fetched (and decoded). */
+const PREFETCH = 6
+
 export async function exportAudioPerLine(
   args: ExportPerLineArgs,
 ): Promise<{ blob: Blob; files: number; clips: number; skipped: number; untimed: number; untrimmed: number }> {
@@ -387,13 +391,75 @@ export async function exportAudioPerLine(
   // Takes that carry a trim this exporter could not apply — every non-WAV.
   // Reported rather than swallowed: the file is longer than the line sounds.
   let untrimmed = 0
-  // AQU-1575: the last take decoded, kept by its stored id. A combined
-  // generation is attached under ONE id to every line it covers, and those
-  // lines are neighbours, so this spares decoding the same long clip once per
-  // line — without holding more than one take's audio at a time.
-  let lastDecoded: { key: string; pcm: Float32Array } | null = null
-
+  // Fetching, and for "wav" decoding, run up to PREFETCH clips ahead of the
+  // one being written, so an 800-line export is not 800 round-trips laid end
+  // to end. Everything after the bytes arrive — naming, trimming, counting,
+  // the zip — still happens one clip at a time, in order.
+  //
+  // AQU-1575: a combined generation is attached under ONE id to every line it
+  // covers, so decodes are shared by stored id: one decode per take, dropped
+  // once the last line that uses it has been written. That holds about
+  // PREFETCH takes' audio at a time.
+  const keyOf = (clip: PerLineClip): string | null => {
+    const parsed = parseFrontierAudioUrl(clip.url)
+    return parsed ? `${parsed.audioId}.${parsed.ext}` : null
+  }
+  const sourceOf = async (clip: PerLineClip): Promise<{ bytes: Uint8Array; ext: string }> => {
+    const parsed = parseFrontierAudioUrl(clip.url)!
+    const cell = cellById.get(clip.cellId)!
+    // Lossless preference, same rule as the character export: a generated
+    // voice keeps its original WAV as an unattached sibling under the same
+    // id, and an export must never hand over the lossy copy.
+    // Off the CLIP, not the cell's default-track pointer: an added track's one
+    // slot holds recorded and generated takes alike, so the pointer describes
+    // a different track entirely and would call every added-track take
+    // "recorded" — handing over the lossy webm where a lossless WAV sibling
+    // exists.
+    if (clip.generated === true && parsed.ext === "webm") {
+      const wav = await args
+        .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
+        .catch(() => null)
+      if (wav && wav.length > 0) return { bytes: wav, ext: "wav" }
+    }
+    const stored = await args.fetchBytes({
+      projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
+    })
+    if (stored.length === 0) throw new Error("empty audio")
+    return { bytes: stored, ext: parsed.ext }
+  }
+  const usesLeft = new Map<string, number>()
   for (const clip of clips) {
+    const key = keyOf(clip)
+    if (key) usesLeft.set(key, (usesLeft.get(key) ?? 0) + 1)
+  }
+  const decoded = new Map<string, Promise<Float32Array>>()
+  type Loaded = { pcm: Float32Array } | { bytes: Uint8Array; ext: string }
+  const load = (clip: PerLineClip): Promise<Loaded> | null => {
+    const key = keyOf(clip)
+    if (!key) return null
+    if (!(toWav && decode)) return sourceOf(clip)
+    let pcm = decoded.get(key)
+    if (!pcm) {
+      pcm = sourceOf(clip).then((src) => decode(src.bytes))
+      decoded.set(key, pcm)
+    }
+    return pcm.then((p) => ({ pcm: p }))
+  }
+  const loading: (Promise<Loaded> | null)[] = []
+  const startLoading = (upTo: number) => {
+    while (loading.length < Math.min(upTo, clips.length)) {
+      const p = load(clips[loading.length])
+      // Awaited in order below; this only stops a failure that is still
+      // queued from being reported as unhandled.
+      p?.catch(() => {})
+      loading.push(p)
+    }
+  }
+
+  for (const [i, clip] of clips.entries()) {
+    startLoading(i + 1 + PREFETCH)
+    const loaded = loading[i]
+    loading[i] = null
     const parsed = parseFrontierAudioUrl(clip.url)
     if (!parsed) {
       skipped += 1
@@ -403,29 +469,7 @@ export async function exportAudioPerLine(
     }
     const cell = cellById.get(clip.cellId)!
     try {
-      // Lossless preference, same rule as the character export: a generated
-      // voice keeps its original WAV as an unattached sibling under the same
-      // id, and an export must never hand over the lossy copy.
-      // Off the CLIP, not the cell's default-track pointer: an added track's one
-      // slot holds recorded and generated takes alike, so the pointer describes
-      // a different track entirely and would call every added-track take
-      // "recorded" — handing over the lossy webm where a lossless WAV sibling
-      // exists.
-      const generated = clip.generated === true
-      const fetchSource = async (): Promise<{ bytes: Uint8Array; ext: string }> => {
-        if (generated && parsed.ext === "webm") {
-          const wav = await args
-            .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
-            .catch(() => null)
-          if (wav && wav.length > 0) return { bytes: wav, ext: "wav" }
-        }
-        const stored = await args.fetchBytes({
-          projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: parsed.ext,
-        })
-        if (stored.length === 0) throw new Error("empty audio")
-        return { bytes: stored, ext: parsed.ext }
-      }
-
+      const got = await loaded!
       const attachment = cell.attachments?.[clip.audioId]
       let bytes: Uint8Array
       let ext: string
@@ -434,12 +478,7 @@ export async function exportAudioPerLine(
         // mono — the chapter export's path. The source is the one above, so a
         // generated take still starts from its lossless sibling where there is
         // one, and only falls back to decoding the compressed webm.
-        const key = `${parsed.audioId}.${parsed.ext}`
-        let pcm: Float32Array | null = lastDecoded?.key === key ? lastDecoded.pcm : null
-        if (!pcm) {
-          pcm = await decode((await fetchSource()).bytes)
-          lastDecoded = { key, pcm }
-        }
+        const pcm = "pcm" in got ? got.pcm : new Float32Array(0)
         if (pcm.length === 0) throw new Error("empty audio")
         const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
           trimStartMs: attachment?.trimStartMs,
@@ -449,7 +488,8 @@ export async function exportAudioPerLine(
         bytes = new Uint8Array(await encodeWavPcm16(kept, TARGET_RATE).arrayBuffer())
         ext = "wav"
       } else {
-        const source = await fetchSource()
+        if ("pcm" in got) throw new Error("unreachable: decoded without the wav format")
+        const source = got
         bytes = source.bytes
         ext = source.ext
 
@@ -537,12 +577,20 @@ export async function exportAudioPerLine(
       console.warn(`[audio-per-line] skipping ${clip.audioId} (${clip.cellId}):`, err)
       skipped += 1
     }
+    const key = keyOf(clip)!
+    const left = (usesLeft.get(key) ?? 1) - 1
+    usesLeft.set(key, left)
+    if (left === 0) decoded.delete(key)
     done += 1
     args.onProgress?.(done, clips.length)
   }
 
   // The same `folders` the zip was built from — see `buildManifestCsv`.
-  if (manifest.length > 0) zip.file("manifest.csv", buildManifestCsv(manifest, folders.size > 0))
-  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
+  if (manifest.length > 0) {
+    zip.file("manifest.csv", buildManifestCsv(manifest, folders.size > 0), { compression: "DEFLATE" })
+  }
+  // DEFLATE buys almost nothing on audio and costs a long hang at the end of a
+  // big export, so only the manifest is compressed.
+  const blob = await zip.generateAsync({ type: "blob", compression: "STORE" })
   return { blob, files: manifest.length, clips: clips.length, skipped, untimed, untrimmed }
 }

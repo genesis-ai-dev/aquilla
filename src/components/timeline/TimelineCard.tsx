@@ -30,6 +30,7 @@ import { readSelectMods, type SelectMods } from "./selection"
 import { fmtClock, fmtDragTime } from "./format"
 import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const MIN_DUR_SEC = 0.2
@@ -109,6 +110,13 @@ export interface TimelineCardProps {
   /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
    *  back to the pre-SUB-53 computation (the dubbing answer). */
   span?: { start: number; end: number }
+  /** AQU-2204: leave the time range off this card. A file that follows its
+   *  recordings shows no SOURCE times anywhere (Sam, Oct 26), so its source
+   *  rows' cards carry their words and nothing else. */
+  hideTime?: boolean
+  /** AQU-2204: the card's length is a stand-in — the line has no times of its
+   *  own and no recording yet — so it is drawn dashed and shows no time. */
+  standIn?: boolean
   /**
    * AQU-646 round 8: hard walls this card may not cross. Absent = unbounded,
    * which is every lane but the VTT-plus-footage Subtitles track.
@@ -150,6 +158,8 @@ export function TimelineCard({
   snap,
   span,
   bounds,
+  hideTime = false,
+  standIn = false,
   onSelect,
   onRetime,
   onSeek,
@@ -330,6 +340,8 @@ export function TimelineCard({
   // The em-dash placeholder reads as content. A line nobody has written yet
   // shows its timecode and nothing else, in either track.
   const label = blank ? "" : labelText || cell.cellLabel || "—"
+  // A hidden line's text card, not the source-audio region it sits on.
+  const hiddenLine = isHiddenCell(cell) && !isDialogue
   const castName =
     cell.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
@@ -344,6 +356,8 @@ export function TimelineCard({
       // honors this opt-in) — a card's activation is selection, already done.
       data-spacebar-transport=""
       data-multi-selected={multiSelected ? "" : undefined}
+      data-hidden-line={hiddenLine ? "" : undefined}
+      data-stand-in={standIn ? "" : undefined}
       onClick={(e) => {
         // AQU-928: a modified click BUILDS a selection — it must not also yank
         // playback to this clip, which is what makes multi-select usable.
@@ -411,6 +425,9 @@ export function TimelineCard({
         // The Source track reserves it for the opposite — audio with no cell —
         // so a blank cell there is an ordinary chip with nothing written on it.
         blank && !isDialogue && "border-dashed bg-transparent",
+        // AQU-2204: a stand-in length is not a real time — dashed, like the
+        // app's other placeholders, so it never reads as a measured span.
+        standIn && "border-dashed",
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
         // AQU-928: no ring-offset — the lighter, flush ring reads as "also in
         // the selection" next to the primary's offset one.
@@ -429,6 +446,10 @@ export function TimelineCard({
         // .24 → .12 on source audio, which is where it was obvious enough to
         // report (2026-08-27).
         !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_FILL_CLASS : "hover:bg-muted/30"),
+        // Sam's decision: a hidden line is drawn where it sits, faded the way
+        // the table fades a revealed hidden row. Its source-audio card is not:
+        // the recording under it still plays.
+        hiddenLine && "opacity-60",
       )}
       style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >
@@ -497,6 +518,9 @@ export function TimelineCard({
             line at a fixed height, and the recording modal, where "on camera"
             is the fact that changes how a take is performed. */}
         {castName && <span className="font-medium text-foreground/80">{castName}</span>}
+        {/* AQU-2204: no time on a card whose times aren't shown (a source row
+            while the file follows its recordings) or aren't real (a stand-in). */}
+        {(drag || (!hideTime && !standIn)) && (
         <span className="truncate font-mono tabular-nums">
           {/* SUB-11: while dragging, show the live preview bounds (ms) rather
               than the stale committed props. */}
@@ -504,6 +528,7 @@ export function TimelineCard({
             ? `${fmtDragTime(previewStart)}–${fmtDragTime(previewEnd)}`
             : `${fmtClock(startSec, true)}–${fmtClock(endSec, true)}`}
         </span>
+        )}
       </div>
       )}
       {showsGrips && (

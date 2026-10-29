@@ -12,6 +12,13 @@
 //                          picker, opened from a field — picking only assigns),
 //                          then the take's tools: the recorder, volume, clone
 //
+// AQU-2212: picking a voice ACTS on this line. On a take, a voice that can
+// re-voice (a clone or a character) converts it at once; with no take, the
+// voice reads the text. When the line's voice and its take part ways (a pick
+// for the whole file, or a stock voice over someone's recording), a labelled
+// "Change to …" / "Generate · …" button sits beside the field. A human take
+// with nobody cast names the recording in the field, not the default voice.
+//
 // The mic opens the recorder, which records over, uploads, generates again and
 // switches takes. A take whose audio is still here has no Generate of its own.
 // A take whose bytes are gone does: Generate sits on the card, because opening
@@ -37,7 +44,7 @@
 // only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { AudioLines, CircleAlert, CopyPlus, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
+import { AudioLines, CircleAlert, Mic, Sparkles, Volume2, VolumeX, Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -56,6 +63,7 @@ import {
   changeVoiceQualityForSteps,
   changeVoiceSourceTake,
   generateSlotOverVoiceChange,
+  isVoiceChangedAudioId,
   voiceChangedSteps,
   type ChangeVoiceQuality,
 } from "@/lib/audio/change-voice"
@@ -66,6 +74,7 @@ import { assignedCastVoiceId, findVoice, resolveCastVoice } from "@/lib/audio/vo
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
+import { queueClockIsFileTime, useQueueCellKind, useQueueCellPosition } from "@/lib/audio/play-queue"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { keptWindowSec } from "@/lib/audio/kept-window"
@@ -75,10 +84,11 @@ import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
 import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { takeTrackColor, takeTrackVars } from "@/lib/timeline/take-colors"
 import { cn } from "@/lib/utils"
+import { CloneFromTakeButton } from "./CloneFromTakeButton"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import type { ProjectRecord as Project, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectRecord as Project, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -107,17 +117,43 @@ interface CellVoicePanelProps {
   /** Retained for host compatibility; per-cell playback now runs locally. */
   onPlay?: () => void
   /**
+   * AQU-1642 follow-up (Sam, 2026-10-17): the Audio view's one place to play
+   * from. The card's corner button presses it (Play, and Stop while the bottom
+   * bar's run is on this line), a click along the waveform puts the place
+   * there, and the card draws where the run is on this line, paused included.
+   */
+  place?: { onPress: () => void; onPick: (atSeconds: number) => void } | null
+  /**
    * The row's player for this line's recording (or generated voice). Play,
    * pause, and seek go through it so the cell highlight tracks this button.
    */
   controller?: UseCellAudioResult
-  /** Open the character creator seeded with THIS cell's take (clone source). */
+  /** Open the New voice dialog seeded with THIS cell's take ("More options"). */
   onMakeCharacter: () => void
+  /** Clone the take straight into the cast under `name`. Absent: the clone
+   *  button opens the dialog instead. */
+  onCloneTake?: (audioId: string, name: string) => Promise<void>
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** The line's voice picker, for the row under the waveform. The host owns
-   *  it — it is the Media view gutter's picker, in its field form. */
-  voicePicker?: ReactNode
+   *  it — it is the Media view gutter's picker, in its field form. As a
+   *  function it gets what the field should say about the take, and the
+   *  callback that makes a pick act on this line. */
+  voicePicker?: ReactNode | ((ctx: CellVoicePickerContext) => ReactNode)
+  /**
+   * Media redesign slice 2 (P2.3): false in a language that delivers Audio and
+   * no text — there is no text to speak, so the card offers no "Generate"
+   * (or "Generate audio from text"); Record, Change voice and the rest stay.
+   */
+  voiceFromText?: boolean
+}
+
+export interface CellVoicePickerContext {
+  /** What the field names when nobody is cast and the take is a person's
+   *  recording ("Your recording", "Recorded by Ana"), instead of the default voice. */
+  takeLabel?: string
+  /** Call after a pick is accepted: converts or generates this line in it. */
+  onPicked: (voiceId: string) => void
 }
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
@@ -272,9 +308,12 @@ export function CellVoicePanel({
   recordUnavailable = null,
   onAfterGenerate,
   onMakeCharacter,
+  onCloneTake,
   controller,
   targetLang,
   voicePicker,
+  place = null,
+  voiceFromText = true,
 }: CellVoicePanelProps) {
   const t = useT()
   const sess = session as FrontierSession | null
@@ -284,14 +323,14 @@ export function CellVoicePanel({
   // computed upstream. Same three-part rule the picker uses, so the card's
   // Generate names exactly the voice the picker shows.
   const active = useMemo(
-    () => resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId),
-    [settings, cell.id, cell.ttsSettings?.voiceId],
+    () => resolveCastVoice(settings, cell, cell.ttsSettings?.voiceId),
+    [settings, cell, cell.ttsSettings?.voiceId],
   )
   // Nobody chose a character: Generate falls back to the default voice and
   // says so in its tooltip.
   const explicitVoice = useMemo(
-    () => Boolean(findVoice(settings, assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId)),
-    [settings, cell.id, cell.ttsSettings?.voiceId],
+    () => Boolean(findVoice(settings, assignedCastVoiceId(settings, cell) ?? cell.ttsSettings?.voiceId)),
+    [settings, cell, cell.ttsSettings?.voiceId],
   )
 
   const status = useTtsStatus(ttsStatusKey(cell.id))
@@ -299,7 +338,7 @@ export function CellVoicePanel({
   const failure = status.kind === "error" ? status.message : null
 
   const isParatext = cell.type === "paratext"
-  const canGenerate = Boolean(cell.translated?.trim()) && !isParatext
+  const canGenerate = voiceFromText && Boolean(cell.translated?.trim()) && !isParatext
 
   // Preferred playable attachment: a real recording wins over generated voice.
   const playableId = useMemo(() => {
@@ -347,6 +386,19 @@ export function CellVoicePanel({
   const playableAtt = playableId ? cell.attachments?.[playableId] : undefined
   const kept = keptWindowSec(cell, playableId, playableAtt)
   const isSourceClip = kept.kind === "section"
+  // AQU-1642 follow-up: where the bottom bar's run is on this line. Its clock
+  // is this card's only when the run plays what the card shows — the line's
+  // take, or an imported section's recording; otherwise no place is drawn.
+  const runKind = useQueueCellKind(place ? cell.id : undefined)
+  const runAt = useQueueCellPosition(place ? cell.id : undefined)
+  const run = place
+    ? {
+        kind: runKind,
+        sec: queueClockIsFileTime(cell) === isSourceClip ? runAt : null,
+        onPress: place.onPress,
+        onPick: place.onPick,
+      }
+    : null
   // AQU-1767: a piece of a split take trims back out only as far as its
   // neighbouring piece (Sam, 2026-10-15).
   const pieceLimits = useMemo(() => {
@@ -418,15 +470,21 @@ export function CellVoicePanel({
     localModelReady: ttsProviderModel(provider) !== "mms" && mmsStatus.kind === "ready",
   })
 
-  const generate = useCallback(async () => {
+  // The voice a Generate / Change voice started here is working in, for the
+  // row's "Changing to …" line (a pick acts before the cast settings catch up).
+  const [workingAs, setWorkingAs] = useState<string | null>(null)
+
+  const generate = useCallback(async (voiceId: string = active.id) => {
     if (isVoicing || !canGenerate || !canEdit) return
     autoplayRef.current = true
+    setWorkingAs(findVoice(settings, voiceId)?.name ?? active.name)
     const ok = await generateCellVoice({
-      project, cell, session: sess, username, voiceId: active.id,
+      project, cell, session: sess, username, voiceId,
       slot: generateSlotOverVoiceChange(cell),
       ...(targetLang ? { targetLang } : {}),
       surface: "voice-panel",
     })
+    setWorkingAs(null)
     if (!ok) {
       autoplayRef.current = false
       return
@@ -454,19 +512,59 @@ export function CellVoicePanel({
       notifyAudioAttachmentsChanged(cell.fileId)
     }
     onAfterGenerate()
-  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, onAfterGenerate, targetLang, playableId, isSourceClip, projectId])
+  }, [isVoicing, canGenerate, canEdit, project, cell, sess, username, active.id, active.name, settings, onAfterGenerate, targetLang, playableId, isSourceClip, projectId])
 
-  const changeVoice = useCallback(async () => {
-    if (isVoicing || changeBlocker != null || !canEdit) return
+  const changeVoice = useCallback(async (voice: Voice = active) => {
+    if (isVoicing || !canEdit || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
     autoplayRef.current = true
+    setWorkingAs(voice.name)
     const ok = await changeCellVoice({
-      projectId, cell, voice: active, session: sess, author: username,
+      projectId, cell, voice, session: sess, author: username,
       diffusionSteps,
       ...(targetLang ? { targetLang } : {}),
     })
+    setWorkingAs(null)
     if (ok) onAfterGenerate()
     else autoplayRef.current = false
-  }, [isVoicing, changeBlocker, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
+  }, [isVoicing, canEdit, projectId, cell, active, sess, username, diffusionSteps, onAfterGenerate, targetLang])
+
+  // A person's take: a recording (or the imported programme audio), not a
+  // generated voice or a conversion of one.
+  const humanTake = Boolean(
+    playableId && playableAtt && !isGenerated && !playableAtt.voiceId && !isVoiceChangedAudioId(playableId),
+  )
+  const recordedBy = humanTake && !isSourceClip ? playableAtt?.recordedBy : undefined
+  const takeLabel = !humanTake
+    ? undefined
+    : isSourceClip
+      ? t("editor.voice.originalAudio")
+      : recordedBy && recordedBy !== username
+        ? t("editor.voice.recordedBy", { name: recordedBy })
+        : t("editor.voice.yourRecording")
+  const generateReady = canGenerate && offlineGate.kind === "ok"
+
+  // What the line's voice would do to the take you hear, when the two differ.
+  const pendingFor = useCallback((voice: Voice): "change" | "generate" | null => {
+    if (!hasTake) return generateReady ? "generate" : null
+    if (playableAtt?.voiceId === voice.id) return null
+    if (changeVoiceBlocker(cell, voice, diffusionSteps) == null) return "change"
+    return generateReady && !humanTake ? "generate" : null
+  }, [hasTake, generateReady, playableAtt?.voiceId, cell, diffusionSteps, humanTake])
+
+  const onPicked = useCallback((voiceId: string) => {
+    if (!canEdit || isVoicing) return
+    const voice = findVoice(settings, voiceId)
+    if (!voice) return
+    const action = pendingFor(voice)
+    // A stock voice never reads over someone's recording on its own; the
+    // "Generate · …" button beside the field offers it.
+    if (action === "change") void changeVoice(voice)
+    else if (action === "generate") void generate(voice.id)
+  }, [canEdit, isVoicing, settings, pendingFor, changeVoice, generate])
+  const picker = typeof voicePicker === "function" ? voicePicker({ takeLabel, onPicked }) : voicePicker
+  const pending = hasTake && canEdit && explicitVoice && !isVoicing ? pendingFor(active) : null
+  const humanPending = pending == null && hasTake && canEdit && explicitVoice && !isVoicing && humanTake && generateReady
+    && playableAtt?.voiceId !== active.id
 
   // Section breaks (paratext) aren't voiced — render nothing.
   if (isParatext) return null
@@ -482,9 +580,10 @@ export function CellVoicePanel({
   // The row under the waveform (or the empty slot): the voice on the left,
   // the take's own tools on the right. Present in both states, so an empty
   // card and a full one are the same height.
-  const row = (tools: ReactNode) => (
+  const row = (tools: ReactNode, action?: ReactNode) => (
     <div data-slot="voice-card-row" className="mt-2 flex h-7 min-w-0 items-center gap-1">
-      {voicePicker && <div className="flex min-w-0 shrink items-center">{voicePicker}</div>}
+      {picker && <div className="flex min-w-0 shrink items-center">{picker}</div>}
+      {action}
       {tools && <div className="ms-auto flex shrink-0 items-center">{tools}</div>}
     </div>
   )
@@ -513,7 +612,7 @@ export function CellVoicePanel({
         (playableId === cell.selectedAudioId && audioIdSeededWith(playableId, cell.id))
       ),
     )
-    const missingGenerate = !missingOwnTake || !canEdit ? undefined : (
+    const missingGenerate = !missingOwnTake || !canEdit || !voiceFromText ? undefined : (
       <div
         className="flex max-w-[calc(100%-2.5rem)] flex-wrap items-center justify-center gap-x-2 gap-y-1"
         onPointerDown={(e) => e.stopPropagation()}
@@ -528,7 +627,7 @@ export function CellVoicePanel({
             <span role="status" className="text-center text-[10px] font-medium text-muted-foreground">{MISSING_AUDIO_MESSAGE}</span>
             {failure ? (
               <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure })}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
                   <CircleAlert className="text-destructive" />
                   {t("editor.voice.tryAgain")}
                 </Button>
@@ -559,7 +658,7 @@ export function CellVoicePanel({
               </AppTooltip>
             ) : (
               <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
+                <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
                   <Sparkles />
                   {t("editor.voice.generateWith", { voice: active.name })}
                 </Button>
@@ -571,54 +670,66 @@ export function CellVoicePanel({
     )
     return (
       <div className="min-w-0" dir="ltr" data-voice-card="">
-        <TakeWaveform
-          controller={audio}
-          audioId={playableId}
-          kept={kept}
-          height={56}
-          missingAction={missingGenerate}
-          // A source section wears the lighter rung, as the source row's own
-          // chips do; a take the dub track's (or its own track's) colour.
-          kind={isSourceClip || isGenerated ? "generated" : "take"}
-          trackVars={trackVars}
-          strategy={project.audioMediaStrategy ?? "lazy"}
-          trimEditable={!isSourceClip && canEdit}
-          {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
-          onCommitTrim={commitTrim}
-          className="voice-card-wave"
-          testId="voice-card-waveform"
-        >
-          <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
-            <TakeTimeReadout currentTime={currentTime} duration={duration} kept={kept} testId="voice-card-time" />
-            {voiceDiffers && (
-              <AppTooltip content={takeVoiceTip}>
-                <span
-                  data-wave-overlay=""
-                  data-testid="voice-card-take-voice"
-                  data-tone={pillOnAmber ? "blue" : "amber"}
-                  className={cn(
-                    "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
-                    // A see-through fill, so the take shows through it (Sam).
-                    pillOnAmber
-                      ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
-                      : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
-                    WAVE_OVERLAY_CLASS,
-                  )}
-                >
-                  <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
-                  <span className="sr-only">{takeVoiceTip}</span>
-                </span>
-              </AppTooltip>
-            )}
-          </span>
-        </TakeWaveform>
+        {/* AQU-1642 follow-up: the waveform is a play control — its button
+            and a click along it set the place to play from, so pressing it
+            never counts as selecting the verse (which sends the place to the
+            verse's start). */}
+        <div data-place-control="">
+          <TakeWaveform
+            controller={audio}
+            audioId={playableId}
+            kept={kept}
+            height={56}
+            missingAction={missingGenerate}
+            // A source section wears the lighter rung, as the source row's own
+            // chips do; a take the dub track's (or its own track's) colour.
+            kind={isSourceClip || isGenerated ? "generated" : "take"}
+            trackVars={trackVars}
+            strategy={project.audioMediaStrategy ?? "lazy"}
+            trimEditable={!isSourceClip && canEdit}
+            {...(pieceLimits ? { trimLimits: pieceLimits } : {})}
+            onCommitTrim={commitTrim}
+            run={run}
+            className="voice-card-wave"
+            testId="voice-card-waveform"
+          >
+            <span className="pointer-events-none absolute bottom-1 left-2 z-10 flex items-center gap-1">
+              <TakeTimeReadout
+                currentTime={run?.sec != null && !audio.isPlaying ? run.sec : currentTime}
+                duration={duration}
+                kept={kept}
+                testId="voice-card-time"
+              />
+              {voiceDiffers && (
+                <AppTooltip content={takeVoiceTip}>
+                  <span
+                    data-wave-overlay=""
+                    data-testid="voice-card-take-voice"
+                    data-tone={pillOnAmber ? "blue" : "amber"}
+                    className={cn(
+                      "pointer-events-auto flex h-4 items-center rounded px-1.5 text-[10px] font-semibold ring-1 ring-inset",
+                      // A see-through fill, so the take shows through it (Sam).
+                      pillOnAmber
+                        ? "bg-blue-500/30 text-blue-800 ring-blue-600/60 dark:bg-blue-400/30 dark:text-blue-100 dark:ring-blue-400/60"
+                        : "bg-amber-400/45 text-amber-800 ring-amber-600/60 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-400/60",
+                      WAVE_OVERLAY_CLASS,
+                    )}
+                  >
+                    <span aria-hidden>{takeVoiceName ?? t("editor.voice.removedVoice")}</span>
+                    <span className="sr-only">{takeVoiceTip}</span>
+                  </span>
+                </AppTooltip>
+              )}
+            </span>
+          </TakeWaveform>
+        </div>
         {row(
           <>
             {canEdit && changeBlocker !== "no-take" && (
               <ChangeVoiceButton
                 disabled={isVoicing || changeBlocker != null}
                 triggerDisabled={changeBlocker === "not-cloned"}
-                qualityDisabled={isVoicing || changeBlocker === "not-cloned"}
+                qualityDisabled={isVoicing || changeBlocker === "not-cloned" || active.libraryVoiceId != null}
                 quality={quality}
                 reason={
                   changeBlocker === "not-cloned"
@@ -627,7 +738,7 @@ export function CellVoicePanel({
                       ? t("editor.voice.changeVoiceUpToDate", { name: active.name })
                       : t("editor.voice.changeVoiceTooltip", { name: active.name })
                 }
-                onChange={() => void changeVoice()}
+                onChange={() => void changeVoice(active)}
                 onQuality={(next) => { if (takeId) setPicked({ audioId: takeId, quality: next }) }}
               />
             )}
@@ -639,7 +750,7 @@ export function CellVoicePanel({
                   size="icon-sm"
                   aria-label={t("editor.voice.generateFromText")}
                   disabled={isVoicing}
-                  onClick={() => void generate()}
+                  onClick={() => void generate(active.id)}
                   className="shrink-0 text-muted-foreground"
                 >
                   <Wand2 className="h-3.5 w-3.5" />
@@ -663,22 +774,35 @@ export function CellVoicePanel({
               </AppTooltip>
             )}
             <VolumeButton volume={volume} onChange={changeVolume} />
-            {canEdit && (
-              <AppTooltip content={t("editor.voice.clone")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t("editor.voice.clone")}
-                  data-testid="voice-card-clone"
-                  onClick={onMakeCharacter}
-                  className="shrink-0 text-muted-foreground"
-                >
-                  <CopyPlus className="h-3.5 w-3.5" />
-                </Button>
-              </AppTooltip>
+            {canEdit && playableId && (
+              <CloneFromTakeButton
+                suggestedName={recordedBy ?? (humanTake && !isSourceClip ? username : "")}
+                onClone={(name) => (onCloneTake ? onCloneTake(playableId, name) : Promise.resolve(onMakeCharacter()))}
+                onMoreOptions={onMakeCharacter}
+              />
             )}
           </>,
+          isVoicing && workingAs ? (
+            <span role="status" data-testid="voice-card-working" className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+              <Spinner className="size-3 shrink-0" />
+              <span className="truncate">{t("editor.voice.workingAs", { voice: workingAs })}</span>
+            </span>
+          ) : (pending || humanPending) && (
+            <Button
+              type="button"
+              size="xs"
+              data-testid="voice-card-apply"
+              className="min-w-0 shrink"
+              onClick={() => void (pending === "change" ? changeVoice(active) : generate(active.id))}
+            >
+              {pending === "change" ? <AudioLines /> : <Sparkles />}
+              <span className="truncate">
+                {pending === "change"
+                  ? t("editor.voice.changeTo", { voice: active.name })
+                  : t("editor.voice.generateWith", { voice: active.name })}
+              </span>
+            </Button>
+          ),
         )}
       </div>
     )
@@ -716,7 +840,10 @@ export function CellVoicePanel({
     </AppTooltip>
   ) : null
 
-  const state = isVoicing ? "generating" : failure ? "failed" : !canGenerate ? "notext" : offlineGate.kind !== "ok" ? "offline" : "ready"
+  // Media redesign slice 2: an Audio language's empty card offers Record only.
+  const state = isVoicing ? "generating"
+    : !voiceFromText ? "record-only"
+    : failure ? "failed" : !canGenerate ? "notext" : offlineGate.kind !== "ok" ? "offline" : "ready"
   return (
     <div className="min-w-0" dir="ltr" data-voice-card="">
       <div data-testid="voice-card-empty" data-state={state} className={slotClass} style={trackVars}>
@@ -728,7 +855,7 @@ export function CellVoicePanel({
         )}
         {state === "failed" && (
           <AppTooltip content={t("editor.voice.failedTooltip", { reason: failure ?? "" })}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate()}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-retry" onClick={() => void generate(active.id)}>
               <CircleAlert className="text-destructive" />
               {t("editor.voice.tryAgain")}
             </Button>
@@ -766,7 +893,7 @@ export function CellVoicePanel({
         )}
         {state === "ready" && (
           <AppTooltip content={t("editor.voice.generateDefaultTooltip")} disabled={explicitVoice}>
-            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate()}>
+            <Button type="button" variant="outline" size="xs" data-testid="voice-card-generate" onClick={() => void generate(active.id)}>
               <Sparkles />
               {t("editor.voice.generateWith", { voice: active.name })}
             </Button>

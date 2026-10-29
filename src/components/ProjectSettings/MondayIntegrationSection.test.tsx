@@ -159,13 +159,36 @@ describe("MondayIntegrationSection", () => {
     renderSection()
 
     await waitFor(() => expect(screen.getByText("Translation Tracker")).toBeTruthy())
-    expect(screen.getByRole("switch")).toBeTruthy()
+    expect(screen.getByRole("switch", { name: /^sync$/i })).toBeTruthy()
+    expect(screen.getByRole("switch", { name: /files as subitems/i }).getAttribute("aria-checked")).toBe("false")
     expect(screen.getByRole("button", { name: /sync now/i })).toBeTruthy()
     expect(screen.getByText(/last push .*ok/i)).toBeTruthy()
     // Mapping editor is present for maintainers, seeded from config. It waits
     // for the board-columns read (AQU-1770), which settles after the link does.
     expect(await screen.findByTestId("monday-mapping-editor")).toBeTruthy()
     expect(screen.getByLabelText(/reconfigure with ai/i)).toBeTruthy()
+  })
+
+  it("turns files as subitems on and says how the push went", async () => {
+    mocked.fetchMondayLink.mockResolvedValue({ linked: true, link: makeLink() })
+    mocked.fetchMondayConnection.mockResolvedValue({ connected: true })
+    mocked.fetchMondayBoardStructure.mockResolvedValue({ columns: [], groups: [] })
+    const withSubitems = makeLink({
+      config: { ...makeLink().config, fileSubitems: { boardId: "777", columns: [] } },
+    })
+    mocked.patchMondayLink.mockResolvedValue({
+      link: withSubitems,
+      warnings: [],
+      push: { ok: true, pushed: true, itemsUpserted: 11 },
+    })
+
+    renderSection()
+    const toggle = await screen.findByRole("switch", { name: /files as subitems/i })
+    fireEvent.click(toggle)
+
+    await waitFor(() => expect(mocked.patchMondayLink).toHaveBeenCalledWith("tok", "p1", { fileSubitems: true }))
+    await waitFor(() => expect(screen.getByText(/one item for the project, with a subitem per file\./i)).toBeTruthy())
+    expect(screen.getByRole("switch", { name: /files as subitems/i }).getAttribute("aria-checked")).toBe("true")
   })
 
   it("linked with stale structure: shows the amber review banner", async () => {

@@ -186,10 +186,13 @@ export interface Env {
    *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
    *  domain a user approves for an extension. */
   TOOLS_WEB_ALLOWED_DOMAINS?: string
-  /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
+  /** Omnilingual ASR Modal app base URL (infra/modal/omni_asr.py),
    *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
    *  transcription for non-Whisper languages answers 503. */
   OMNI_ASR_MODAL_URL?: string
+  /** Self-hosted Omnilingual ASR base URL (infra/selfhost), tried before
+   *  Modal; Modal takes over on a network error, timeout or 5xx. */
+  OMNI_ASR_PRIMARY_URL?: string
   /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
    *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
   OMNI_SHARED_SECRET?: string
@@ -234,6 +237,12 @@ export interface Env {
    * token encrypted before it unreadable — the org reconnects.
    */
   MONDAY_TOKEN_KEY?: string
+  /**
+   * LangQuest API base for project links (lib/langquest/client.ts). Unset ⇒
+   * https://next.langquest.org/api/v1; point a preview at
+   * https://next-preview.langquest.org/api/v1.
+   */
+  LANGQUEST_API_BASE?: string
   /** Monday app id (plain var; informational/config). */
   MONDAY_APP_ID?: string
   /** Monday app slug (plain var; informational/config). */
@@ -242,6 +251,15 @@ export interface Env {
    *  the Monday Developer Center (the SPA's /oauth/callback route; the SPA
    *  forwards code+state to the worker). Default: https://aquilla.app/oauth/callback. */
   MONDAY_REDIRECT_URI?: string
+
+  // ── Airtable integration (routes/airtable.ts, lib/airtable/*) — AQU-804 ──
+  /**
+   * Base URL of the Airtable Web API, default https://api.airtable.com. Set
+   * only to point a local stack at a stand-in Airtable (an unset value is
+   * what every deployment wants). The connection's personal access token
+   * lives encrypted in integration_connections, never here.
+   */
+  AIRTABLE_API_URL?: string
   /** API-facing origin for OAuth redirect + webhook URLs (e.g.
    *  https://api.aquilla.app/identity). Falls back to BASE_URL when unset. */
   BASE_URL_API?: string
@@ -387,6 +405,9 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
+  /** off | shadow | enforce — the one meter switch (db/shared/ai-entitlement.ts).
+   *  When set it wins over the two flags above (lib/billing/paid-call.ts). */
+  BILLING_METER_MODE?: string
   /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
    *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
@@ -433,9 +454,11 @@ export type Variables = {
 }
 
 /**
- * Row shape of the `users` table. Mirrors the schema in
- * `apps/identity/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
- * columns were removed in the clean-break migration (2026-05-13).
+ * Row shape of the `users` table — the columns this worker types off its
+ * `SELECT *` lookups. The live schema is `db/postgres/schema.sql`, which also
+ * carries display_name / avatar_url / email_verified_at (read elsewhere, by
+ * their own row types). Legacy gitlab_* / stripe_* columns were removed in the
+ * clean-break migration (2026-05-13).
  */
 export interface UserRow {
   id: number
@@ -495,7 +518,7 @@ export interface JWTPayload {
 }
 
 /**
- * Sync-token claim shape — must match apps/sync/src/auth.ts.
+ * Sync-token claim shape — must match sync-worker/src/auth.ts.
  * See `docs/SYNC.md` (this repo) for the security model.
  */
 export interface SyncTokenClaims {
@@ -609,7 +632,8 @@ export interface ProjectRow {
   archived_at: string | null
 }
 
-/** Numeric ladder; mirrors src/lib/frontier/roles.ts and apps/sync/. */
+/** Numeric ladder; mirrors src/lib/frontier/roles.ts and
+ *  sync-worker/src/events/role-policy.ts. */
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,

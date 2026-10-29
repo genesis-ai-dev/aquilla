@@ -130,7 +130,7 @@ describe("ExportDialog — native download is the primary action", () => {
 
   it("idml mapping failure: blocks translated download and offers the exact original plus re-import", async () => {
     const original = new Uint8Array([80, 75, 3, 4, 73, 68, 77, 76]).buffer
-    const onReimport = vi.fn()
+    const onRepairIdmlCopy = vi.fn().mockResolvedValue({ name: "layout (repaired)", unmatched: 0 })
     mockSidecar.mockResolvedValue(original)
     mockExportIdml.mockRejectedValue(new Error("Protected IDML anchor 2 was reordered."))
 
@@ -140,7 +140,7 @@ describe("ExportDialog — native download is the primary action", () => {
         activeFileName="layout.idml"
         activeFileType="idml"
         projectFiles={[{ id: "f1", name: "layout.idml", type: "idml" }]}
-        onReimport={onReimport}
+        onRepairIdmlCopy={onRepairIdmlCopy}
       />,
     )
 
@@ -163,8 +163,10 @@ describe("ExportDialog — native download is the primary action", () => {
     expect(mockDownload.mock.calls[0]?.[1]).toBe("layout-original.idml")
     expect(await mockDownload.mock.calls[0]?.[0].arrayBuffer()).toEqual(original)
 
-    fireEvent.click(screen.getByRole("button", { name: /Repair by re-importing/i }))
-    expect(onReimport).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: /Repair a copy/i }))
+    await waitFor(() => expect(onRepairIdmlCopy).toHaveBeenCalledWith(
+      expect.objectContaining({ fileId: "f1", fileName: "layout.idml" }),
+    ))
   })
 
   it("idml success records aggregate-only release telemetry", async () => {

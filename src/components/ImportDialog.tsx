@@ -53,6 +53,7 @@ import {
   type ParatextPlan,
   prepareEBibleTargetImport,
   applyEBibleTargetImport,
+  buildBulkCellsWithSpeakers,
   prepareImportFile,
   type EBibleProgress,
   type EBibleTargetProgress,
@@ -64,6 +65,8 @@ import {
   type ImportResult,
 } from "@/lib/import"
 import type { PreparedImportFile } from "@/lib/import/import-service"
+import { countReimportDiff, type ReimportCountedCell } from "@/lib/import/reimport-diff"
+import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
@@ -77,7 +80,8 @@ import { formatBytesProgress } from "@/lib/format-bytes"
 import type { CellUnit, FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
 import { filterEpubStrings } from "@/lib/parsers/epub"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { convertFramesAsHundredths } from "@/lib/parsers/frame-timecode"
+import { buildSpeakerCastWrite, type SpeakerAssignment } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
 import { detectParatextProject, type ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -99,6 +103,7 @@ import { getTestament } from "@/lib/codex-editor/bible-books"
 import { languagesEqual } from "@/lib/language-normalize"
 import { EBibleTargetReviewPanel } from "@/components/EBibleTargetReviewPanel"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
+import { reimportTargetFor, type ReimportTarget } from "@/lib/import/reimport-target"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import {
   EMPTY_UPLOAD_HEADER,
@@ -131,7 +136,7 @@ import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
-import { partnerIntegrations } from "@/lib/partners/registry"
+import { partnerIdForImportedFile, partnerIntegrations } from "@/lib/partners/registry"
 import type { PartnerImportPanelProps } from "@/lib/partners/types"
 import { LinkSourceFlow } from "@/components/ProjectSettings/LinkSourceFlow"
 import { ROLE } from "@/lib/frontier/roles"
@@ -153,6 +158,7 @@ import {
 } from "@/lib/import/import-file-gate"
 import { filesForBook, type TranslationDestination } from "@/lib/import/translation-destination"
 import { parsedResultBooks, reimportKeysFor } from "@/lib/import/reimport-keys"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import { TranslationCheckPanel } from "@/components/import/TranslationCheckPanel"
 import { ImportOptionCard } from "@/components/import/ImportOptionCard"
 import {
@@ -337,7 +343,10 @@ interface ImportDialogProps {
    * ProjectWorkspace (AQU-272 glue); FileReference satisfies { name }.
    * Fresh projects (empty array or absent) skip the detection step.
    */
-  existingFiles?: { id?: string; name: string; bookCode?: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string; coreMediaUrl?: string | null }[]
+  /** Sidebar re-import of one file already in the project. One upload, then
+   *  the three choices; the collision panel is not shown. */
+  reimportTarget?: { fileId: string; name: string; importProfile?: string; corpusMarker?: string } | null
   /**
    * DCS (Door43) import (spec §8/§9): persist the `dcsUpstream` cursor to the
    * current project's settings after a successful import, pinning it to the
@@ -389,6 +398,10 @@ interface ImportDialogProps {
   /** AQU-1365: the "A translation" path. Absent, the dialog offers source
    *  import only, as before. */
   translation?: TranslationImportHost
+  /** IDML Update Existing places kept translations into the new style runs.
+   *  Absent when AI completion is not configured; the re-import still updates
+   *  the source and leaves every translation where it is. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -412,12 +425,14 @@ export function ImportDialog({
   onCastUpdated,
   sourceCells,
   existingFiles,
+  reimportTarget = null,
   patchDcsCursor,
   excludeFrontMatter,
   cellUnit,
   linkSource,
   sourceDisabledReason = null,
   translation,
+  alignReimportedIdml,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -516,11 +531,15 @@ export function ImportDialog({
     commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
     returnScreen: "upload" | "spreadsheet" | "jsonKeys" | "gdrive"
+    filmUrls?: ReadonlyMap<string, string>
   } | null>(null)
   const [spreadsheetSeedFile, setSpreadsheetSeedFile] = useState<File | null>(null)
+  // AQU-2120: the existing file the collision screen chose for the seed file.
+  const [spreadsheetReimportTarget, setSpreadsheetReimportTarget] = useState<ReimportTarget | null>(null)
   const [spreadsheetReturnScreen, setSpreadsheetReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-525: a single JSON file goes through the key picker before import.
   const [jsonSeedFile, setJsonSeedFile] = useState<File | null>(null)
+  const [jsonReimportTarget, setJsonReimportTarget] = useState<ReimportTarget | null>(null)
   const [jsonReturnScreen, setJsonReturnScreen] = useState<"landing" | "upload" | "gdrive">("landing")
   // AQU-430: upload progress surfaced from UploadPanel's doCommit while the
   // preview screen is active (UploadPanel is unmounted; these live here so
@@ -531,6 +550,9 @@ export function ImportDialog({
   // UploadPanel is unmounted here, so its local error never shows — surface it
   // up to this level and pass it to PreviewPanel instead of failing silently.
   const [previewCommitError, setPreviewCommitError] = useState<string | null>(null)
+  // Source cells of the file being re-imported, so the preview can say how
+  // many cells the upload would add or update. Null until that read finishes.
+  const [reimportSources, setReimportSources] = useState<ReimportCountedCell[] | null>(null)
   // AQU-249 fix (Fix 3): guard against Radix delivering onOpenChange(false) twice
   // in the same macrotask (closure-captured pendingImport stays non-null until
   // the re-render). Consumed synchronously so the second call is a no-op.
@@ -549,8 +571,11 @@ export function ImportDialog({
   // Reset to landing each time the dialog opens.
   useEffect(() => {
     if (open) {
-      setScreen("landing")
-      setPartnerId(null)
+      const reimportPartner = reimportTarget
+        ? partnerIdForImportedFile(reimportTarget)
+        : null
+      setPartnerId(reimportPartner)
+      setScreen(reimportTarget ? (reimportPartner ? "partner" : "upload") : "landing")
       setPendingImport(null)
       setImportResult(null)
       setImportResultError(null)
@@ -559,12 +584,59 @@ export function ImportDialog({
       setPreviewUploadPhase("")
       setPreviewUploadProgress(null)
       setSpreadsheetSeedFile(null)
+      setSpreadsheetReimportTarget(null)
       setSpreadsheetReturnScreen("landing")
+      setJsonSeedFile(null)
+      setJsonReimportTarget(null)
       setConfirming(false)
       setConfirmError(null)
       flushingRef.current = false
     }
-  }, [open])
+  }, [open, reimportTarget])
+
+  const reimportFileId = reimportTarget?.fileId ?? null
+  useEffect(() => {
+    if (!open || !reimportFileId) {
+      setReimportSources(null)
+      return
+    }
+    let cancelled = false
+    setReimportSources(null)
+    void (async () => {
+      try {
+        const token = await getToken(reimportFileId)
+        if (!token || cancelled) return
+        const rows = await fetchAllFileCells(projectId, reimportFileId, token, "source")
+        if (cancelled) return
+        setReimportSources(rows.map((row) => ({
+          cellId: row.cellId,
+          value: row.value,
+          valueHtml: row.valueHtml,
+          canonicalRef: row.canonicalRef,
+          anchorCellId: row.anchorCellId,
+          ...(row.metadata ? { metadata: row.metadata } : {}),
+        })))
+      } catch {
+        if (!cancelled) setReimportSources(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open, reimportFileId, projectId, getToken])
+
+  const reimportChanges = useMemo(() => {
+    if (!reimportTarget || !previewState || !reimportSources) return null
+    try {
+      const cells = previewState.results.flatMap((result) => {
+        const fileType = detectFileType(result.originalName ?? result.name) ?? "txt"
+        return buildBulkCellsWithSpeakers(result.strings, { fileName: result.name, fileType }).cells
+      })
+      return countReimportDiff(cells, reimportSources)
+    } catch {
+      return null
+    }
+  }, [reimportTarget, previewState, reimportSources])
 
   const finishPendingImport = useCallback(async (
     captured: NonNullable<typeof pendingImport>,
@@ -1042,7 +1114,17 @@ export function ImportDialog({
       <DialogContent className="flex max-h-[90dvh] sm:max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>
-            {screen === "landing" ? (
+            {reimportTarget && (screen === "upload" || screen === "preview" || screen === "partner") ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => onOpenChange(false)}
+                  label={t("common.cancel")}
+                />
+                <span className="min-w-0 truncate">
+                  {t("importExport.reimport.title", { name: reimportTarget.name })}
+                </span>
+              </div>
+            ) : screen === "landing" ? (
               t("nav.workspaceActions.import")
             ) : screen === "direction" ? (
               t("importExport.dialog.titleDirection")
@@ -1217,6 +1299,7 @@ export function ImportDialog({
               setPartnerId(selectedPartnerId ?? null)
               if (s === "spreadsheet") {
                 setSpreadsheetSeedFile(null)
+                setSpreadsheetReimportTarget(null)
                 setSpreadsheetReturnScreen("landing")
               }
               setScreen(s)
@@ -1281,20 +1364,22 @@ export function ImportDialog({
               setCollisionState({ collisions, proceed })
               setScreen("collision")
             }}
-            onPreview={(results, commit) => {
+            onPreview={(results, commit, filmUrls) => {
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit, returnScreen: "upload" })
+              setPreviewState({ results, commit, returnScreen: "upload", filmUrls })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("upload")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("upload")
               setScreen("jsonKeys")
             }}
@@ -1304,6 +1389,8 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
+            reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("upload")}
           />
         )}
@@ -1329,20 +1416,22 @@ export function ImportDialog({
               setCollisionState({ collisions, proceed })
               setScreen("collision")
             }}
-            onPreview={(results, commit) => {
+            onPreview={(results, commit, filmUrls) => {
               setPreviewUploadPhase("")
               setPreviewUploadProgress(null)
               setPreviewCommitError(null)
-              setPreviewState({ results, commit, returnScreen: "gdrive" })
+              setPreviewState({ results, commit, returnScreen: "gdrive", filmUrls })
               setScreen("preview")
             }}
-            onSpreadsheetFile={(file) => {
+            onSpreadsheetFile={(file, reimportTarget) => {
               setSpreadsheetSeedFile(file)
+              setSpreadsheetReimportTarget(reimportTarget ?? null)
               setSpreadsheetReturnScreen("gdrive")
               setScreen("spreadsheet")
             }}
-            onJsonFile={(file) => {
+            onJsonFile={(file, reimportTarget) => {
               setJsonSeedFile(file)
+              setJsonReimportTarget(reimportTarget ?? null)
               setJsonReturnScreen("gdrive")
               setScreen("jsonKeys")
             }}
@@ -1352,6 +1441,7 @@ export function ImportDialog({
             onImported={handleChildImported}
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
+            alignReimportedIdml={alignReimportedIdml}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
@@ -1460,6 +1550,15 @@ export function ImportDialog({
           onImported: async (ref) => {
             await handleChildImported([ref])
           },
+          ...(reimportTarget ? {
+            reimport: {
+              fileId: reimportTarget.fileId,
+              ...(reimportTarget.importProfile ? { profileId: reimportTarget.importProfile } : {}),
+              ...(reimportTarget.corpusMarker ? { corpusMarker: reimportTarget.corpusMarker } : {}),
+              existingNames: (existingFiles ?? []).map((file) => file.name),
+              ...(reimportSources ? { existingSource: reimportSources } : {}),
+            },
+          } : {}),
         })}
 
         {screen === "sdbh" && (
@@ -1496,8 +1595,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={spreadsheetSeedFile}
+            reimportTarget={spreadsheetReimportTarget}
             onCancel={() => {
               setSpreadsheetSeedFile(null)
+              setSpreadsheetReimportTarget(null)
               setScreen(spreadsheetReturnScreen)
             }}
           />
@@ -1524,8 +1625,10 @@ export function ImportDialog({
               await handleChildImported(refs)
             }}
             initialFile={jsonSeedFile}
+            reimportTarget={jsonReimportTarget}
             onCancel={() => {
               setJsonSeedFile(null)
+              setJsonReimportTarget(null)
               setScreen(jsonReturnScreen)
             }}
           />
@@ -1651,6 +1754,9 @@ export function ImportDialog({
             uploadPhase={previewUploadPhase}
             uploadProgress={previewUploadProgress}
             error={previewCommitError}
+            reimport={reimportTarget != null}
+            reimportChanges={reimportChanges}
+            filmUrls={previewState.filmUrls}
           />
         )}
 
@@ -1711,6 +1817,7 @@ export function ImportDialog({
               username={username}
               targetLang={targetLang}
               fileName={translationDestination?.name ?? ""}
+              filmUrl={translationDestination?.coreMediaUrl}
               cells={translation.activeFileCells}
               getToken={getToken}
               applyOptimisticTargetEdits={translation.applyOptimisticTargetEdits}
@@ -2094,14 +2201,20 @@ interface UploadPanelProps {
    * AQU-287: files already in the project. Passed to detectCollisions before
    * any import starts; on collision, onCollision is called instead of proceeding.
    */
-  existingFiles?: { id?: string; name: string; bookCode?: string }[]
+  existingFiles?: { id?: string; name: string; bookCode?: string; coreMediaUrl?: string | null }[]
   /** AQU-287: called when collisions are detected; parent shows the collision screen. */
   onCollision?: (collisions: CollisionResult[], proceed: (resolution: CollisionResolution) => void | Promise<void>) => void
   /**
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
+   * AQU-2197: `filmUrls` names the linked film of the existing file a result
+   * updates (by result name), for the preview's frame check.
    */
-  onPreview?: (results: ImportResult[], commit: (options?: PreviewConfirmOptions) => Promise<void>) => void
+  onPreview?: (
+    results: ImportResult[],
+    commit: (options?: PreviewConfirmOptions) => Promise<void>,
+    filmUrls?: ReadonlyMap<string, string>,
+  ) => void
   /**
    * AQU-430: callbacks for the parent to receive upload progress while the
    * preview screen is shown (UploadPanel is unmounted during preview). The
@@ -2114,17 +2227,23 @@ interface UploadPanelProps {
   onCommitError?: (message: string | null) => void
   /** Spreadsheet-shaped files need explicit column mapping before preview.
    * Keep this handoff inside the unified Upload files entry point so users do
-   * not have to know which specialized importer to choose. */
-  onSpreadsheetFile: (file: File) => void
+   * not have to know which specialized importer to choose.
+   * AQU-2120: the handoff carries the re-import target the collision screen
+   * resolved for this file, so "Update existing" updates instead of quietly
+   * creating a second file with the same name. */
+  onSpreadsheetFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-525: a lone JSON file goes through the key picker, so the user says
-   * which keys hold translatable text before any cell is created. */
-  onJsonFile: (file: File) => void
+   * which keys hold translatable text before any cell is created.
+   * AQU-2120: carries the re-import target, as `onSpreadsheetFile` does. */
+  onJsonFile: (file: File, reimportTarget?: ReimportTarget) => void
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to parseFile /
    *  the Paratext preview). */
   excludeFrontMatter?: boolean
   /** AQU-1720: per-project import cell unit, forwarded into prepareImportFile
    *  so a dubbing project's paragraphs arrive as whole cells. */
   cellUnit?: CellUnit
+  /** Sidebar re-import: one file, no collision panel, commit carries the choice. */
+  reimportTarget?: { fileId: string; name: string; importProfile?: string; corpusMarker?: string } | null
   /** AQU-823: "gdrive" swaps the dropzone for the Google Drive picker while
    *  reusing this panel's preview/collision/commit machinery unchanged. */
   variant?: "upload" | "gdrive"
@@ -2140,6 +2259,8 @@ interface UploadPanelProps {
     /** Every file in the batch, flagged or not, media included. */
     fileCount: number,
   ) => Promise<boolean>
+  /** IDML Update Existing places kept translations into the new style runs. */
+  alignReimportedIdml?: IdmlReimportAlignHost
 }
 
 /** AQU-1365: one parsed text upload, as the translation check sees it. */
@@ -2250,7 +2371,7 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget = null }: UploadPanelProps) {
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2287,17 +2408,27 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     async (files: FileList | File[]) => {
       setError(null)
       const list = Array.from(files)
+      if (reimportTarget && list.length !== 1) {
+        setError(t("importExport.reimport.oneFile"))
+        return
+      }
       // A Paratext project (zipped, or a folder/multi-select containing
       // Settings.xml) is imported as one unit — but first ask source vs target.
       const entries = await filesToProjectEntries(list)
       const detected = detectParatextProject(entries)
       if (detected) {
+        if (reimportTarget) {
+          setError(t("importExport.reimport.oneDocument"))
+          return
+        }
         setParatextChoice({ entries, bookCount: detected.sfmEntries.length })
         return
       }
 
       // AQU-287: single-file collision check before parsing/uploading.
-      if (existingFiles && existingFiles.length > 0 && onCollision) {
+      // A sidebar re-import already named its file, so a different upload name
+      // still updates that file and this panel is skipped.
+      if (!reimportTarget && existingFiles && existingFiles.length > 0 && onCollision) {
         const incoming = list.map((f) => ({ name: f.name }))
         const collisions = detectCollisions(incoming, existingFiles)
         if (collisions.length > 0) {
@@ -2322,7 +2453,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doImportFiles(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, t]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, t, reimportTarget]
   )
 
   /** Inner helper: import a resolved list of files (after collision resolution).
@@ -2335,12 +2466,19 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const doImportFiles = useCallback(
     async (list: File[], reimportFileIds?: ReadonlyMap<string, string>, answeredNames?: ReadonlySet<string>) => {
       const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
+      if (reimportTarget && spreadsheets.length > 0) {
+        setError(t("importExport.reimport.oneDocument"))
+        return
+      }
       if (spreadsheets.length > 0) {
         if (list.length !== 1) {
           setError(t("importExport.upload.oneSpreadsheetAtATime"))
           return
         }
-        onSpreadsheetFile(spreadsheets[0])
+        onSpreadsheetFile(
+          spreadsheets[0],
+          reimportTargetFor(spreadsheets[0].name, reimportFileIds, existingFiles),
+        )
         return
       }
 
@@ -2350,7 +2488,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       // behavior (every string leaf of every file) so bulk imports still work,
       // and an unparseable .json still falls through to the normal pipeline,
       // which reports the parse error (or classifies the file).
-      if (list.length === 1 && detectFileType(list[0].name) === "json" && withinUploadCeiling(list[0])) {
+      if (!reimportTarget && list.length === 1 && detectFileType(list[0].name) === "json" && withinUploadCeiling(list[0])) {
         const candidate = list[0]
         const parseable = await candidate.arrayBuffer().then((bytes) => {
           try {
@@ -2361,7 +2499,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }
         })
         if (parseable) {
-          onJsonFile(candidate)
+          onJsonFile(candidate, reimportTargetFor(candidate.name, reimportFileIds, existingFiles))
           return
         }
       }
@@ -2473,14 +2611,40 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         if (reviewed === null) return
         const toPreview = async (files: File[], fileIds: ReadonlyMap<string, string> | undefined) => {
           const remainingResults = files.flatMap(file => preparedByFile.get(file)?.results ?? [])
+          if (reimportTarget && (remainingResults.length !== 1 || mediaFiles.length > 0)) {
+            setError(t("importExport.reimport.oneDocument"))
+            setImporting(false)
+            return
+          }
           if (remainingResults.length === 0 && mediaFiles.length > 0) {
             await doCommit(files, preparedByFile, fileIds, reviewed.sources)
             return
           }
 
+          // AQU-2197: an update of a file with a linked film reads that film's
+          // frame rate for the frame check.
+          const filmUrls = new Map(remainingResults.flatMap((result) => {
+            const id = reimportKeysFor(result).map((key) => fileIds?.get(key)).find(Boolean)
+            const url = id ? existingFiles?.find((file) => file.id === id)?.coreMediaUrl : null
+            return url ? [[result.name, url] as const] : []
+          }))
+
           // Hand off to parent to show the preview screen.
           // The commit closure does the actual upload.
           onPreview(remainingResults, async (options) => {
+            // AQU-2197: re-time the subtitle files whose cue times the person
+            // chose to read as frame numbers, at the rate they picked.
+            if (options?.frameRates && options.frameRates.size > 0) {
+              for (const [file, prepared] of preparedByFile) {
+                preparedByFile.set(file, {
+                  ...prepared,
+                  results: prepared.results.map((result) => {
+                    const rate = result.framesAsHundredths ? options.frameRates!.get(result.name) : undefined
+                    return rate ? { ...result, strings: convertFramesAsHundredths(result.strings, rate) } : result
+                  }),
+                })
+              }
+            }
             if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
               for (const [file, prepared] of preparedByFile) {
                 preparedByFile.set(file, {
@@ -2494,15 +2658,15 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 })
               }
             }
-            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
-          })
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources, options?.reimportChoice)
+          }, filmUrls)
         }
 
         // AQU-1365: before any cell exists, ask about an upload that looks
         // like a translation of a file already here (its book is here, or it
         // says it's in the target language). The parent shows the question
         // and resumes with the person's answer.
-        if (onTranslationCheck) {
+        if (onTranslationCheck && !reimportTarget) {
           const textUploads = reviewed.files.filter(file => !mediaFiles.includes(file))
           const uploads = await uploadsForTranslationCheck(textUploads, preparedByFile, {
             names: answeredNames ?? new Set(),
@@ -2523,7 +2687,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, onTranslationCheck, t]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -2533,6 +2697,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       preparedByFile?: ReadonlyMap<File, PreparedImportFile>,
       reimportFileIds?: ReadonlyMap<string, string>,
       mediaSources?: ReadonlyMap<File, MediaTextSource>,
+      reimportChoice?: "update" | "updated-copy" | "blank",
     ) => {
       setImporting(true)
       setProgress(null)
@@ -2563,7 +2728,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const allRefs: FileReference[] = []
       const allSkipped: { book: string; reason: string }[] = []
       // Accumulate speaker pairs across all subtitle files in this batch.
-      const allSpeakerPairs: { cellId: string; speaker: string | undefined }[] = []
+      const allSpeakerPairs: SpeakerAssignment[] = []
       // AQU-520: byte totals so the progress UI can show "X / Y MB", not just a
       // cell count/percentage that "feels stalled" on large partner imports.
       // Totals come from the real File.size; within a file we scale by the cell
@@ -2576,14 +2741,9 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const persistCastAdditions = async () => {
         castAttempted = true
         if (onCastUpdated && allSpeakerPairs.some((p) => p.speaker)) {
-          const additions = buildCastAdditions(allSpeakerPairs, ttsSettings, uuidv7)
-          await onCastUpdated({
-            voices: additions.voices,
-            castAssignments: {
-              ...(ttsSettings?.castAssignments ?? {}),
-              ...additions.castAssignments,
-            },
-          })
+          // AQU-2125: a line the import named is cast by its character.
+          const cast = buildSpeakerCastWrite(allSpeakerPairs, ttsSettings, uuidv7)
+          await onCastUpdated({ voices: cast.voices, castAssignments: cast.castAssignments })
         }
       }
       try {
@@ -2605,9 +2765,35 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             targetLang,
             identityToken,
             reimportFileIds,
+            ...(reimportTarget && reimportChoice ? {
+              sidebarReimport: {
+                mode: reimportChoice,
+                targetFileId: reimportTarget.fileId,
+                existingNames: (existingFiles ?? []).map((entry) => entry.name),
+                suffix: t(reimportChoice === "blank"
+                  ? "importExport.reimport.nameBlank"
+                  : "importExport.reimport.nameUpdated"),
+              },
+            } : {}),
             mediaTextSource: mediaSources?.get(file),
             origins: originsRef.current ?? undefined,
             getToken,
+            alignReimportedIdml,
+            onPhase: (phase) => {
+              setPhase(phase)
+              onCommitPhase?.(phase)
+            },
+            onAlignProgress: (count, total) => {
+              const frac = total > 0 ? Math.min(count / total, 1) : 0
+              const next: ImportUploadProgress = {
+                count,
+                total,
+                bytesReceived: bytesBefore + Math.round(frac * (file.size || 0)),
+                bytesTotal,
+              }
+              setProgress(next)
+              onCommitProgress?.(next)
+            },
             onCellEnqueued: (count, total) => {
               const p = t("importExport.upload.uploadingFile", { fileName: file.name })
               setPhase(p)
@@ -2698,7 +2884,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, alignReimportedIdml, t, reimportTarget, existingFiles]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -2818,11 +3004,12 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               {t("importExport.upload.chooseFiles")}
               <input
                 type="file"
-                multiple
+                multiple={!reimportTarget}
                 className="hidden"
                 onChange={handleFileInput}
               />
             </Button>
+            {!reimportTarget && (
             <Button variant="outline" nativeButton={false} render={<label />}>
               {t("importExport.upload.chooseFolder")}
               {/* Folder picker for an unzipped Paratext project. */}
@@ -2835,6 +3022,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 onChange={handleFileInput}
               />
             </Button>
+            )}
           </div>
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
             <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryScripture")}</span> — USFM, USX, SFM</p>
@@ -4214,6 +4402,13 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
       {collisions.some((collision) => collision.ambiguous) && (
         <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
           {t("importExport.collision.ambiguousWarning")}
+        </p>
+      )}
+      {/* AQU-2120: media has no in-place re-import, so say so rather than
+          leaving a disabled button unexplained. */}
+      {collisions.some((collision) => collision.updateUnsupported) && (
+        <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
+          {t("importExport.collision.mediaUpdateUnavailable")}
         </p>
       )}
 

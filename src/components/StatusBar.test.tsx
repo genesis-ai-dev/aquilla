@@ -164,6 +164,61 @@ it("never reads 100% while a cell is untranslated", () => {
   expect(plain()).toContain("252 translated (100%)")
 })
 
+// AQU-2111: the footer counts the open file itself, so it is the other half of
+// the "an audio-only file reads 0%" bug. The audio figures ride in on the same
+// progress prop; `StatusBarView` is rendered directly here because the pair is
+// counted from the attachment map, not from cells.
+describe("StatusBar and audio figures", () => {
+  const plain = (el: HTMLElement) => (el.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
+  const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={0} />)
+
+  it("reports the recorded figure, and no text figures, on an audio-only file", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 5, audioValidated: 5 })
+    expect(plain(container)).toContain("10 lines")
+    expect(plain(container)).toContain("5 recorded (50%)")
+    expect(plain(container)).not.toContain("translated")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    const badge = screen.getByTestId("status-bar-validated-audio")
+    expect(plain(badge)).toContain("5 audio validated")
+    expect(badge.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioValidated)
+  })
+
+  it("splits recorded-but-unvalidated from audio-validated, in the audio tones", () => {
+    const { container } = view({ total: 10, translated: 0, validated: 0, recorded: 6, audioValidated: 2 })
+    expect(plain(container)).toContain("6 recorded (60%)")
+    const pending = screen.getByTestId("status-bar-unvalidated-audio")
+    expect(plain(pending)).toContain("4 recorded, not validated")
+    expect(pending.querySelector("[aria-hidden]")!.className).toContain(PROGRESS_BG.audioRecorded)
+  })
+
+  it("keeps the text summary and adds the audio badges on a file with both", () => {
+    const { container } = view({ total: 10, translated: 8, validated: 5, recorded: 4, audioValidated: 1 })
+    expect(plain(container)).toContain("8 translated (80%)")
+    expect(plain(container)).toContain("3 unvalidated")
+    expect(plain(container)).toContain("5 validated")
+    expect(plain(container)).toContain("3 recorded, not validated")
+    expect(plain(container)).toContain("1 audio validated")
+  })
+
+  // WHY: an absent pair is "not known here" (an older sync-worker, or the
+  // attachment map before it loads) and a zero is "none" — neither may put a
+  // "0 recorded" badge in a text project's footer.
+  it("draws nothing for audio when there is none, absent or zero", () => {
+    for (const progress of [
+      { total: 10, translated: 8, validated: 5 },
+      { total: 10, translated: 8, validated: 5, recorded: 0, audioValidated: 0 },
+    ]) {
+      const { container, unmount } = view(progress)
+      expect(plain(container)).toContain("8 translated (80%)")
+      expect(plain(container)).not.toContain("recorded")
+      expect(plain(container)).not.toContain("audio validated")
+      unmount()
+    }
+  })
+})
+
 it("groups the badge counts the way the counts beside them are grouped", () => {
   // The footer read "1,208 cells · 1,207 translated" and then "1207 validated".
   const many = Array.from({ length: 2500 }, (_, i) =>
@@ -172,4 +227,92 @@ it("groups the badge counts the way the counts beside them are grouped", () => {
   const plain = (container.textContent ?? "").replace(/[\u2066-\u2069]/g, "")
   expect(plain).toContain("1,207 validated")
   expect(plain).toContain("1,293 unvalidated")
+})
+
+// Media redesign slice 2: the footer counts a language that delivers audio by
+// its audio, through the same live counter (the store's `laneStatus`).
+/** Without the bidi isolates the footer wraps every number in. */
+const plain = (text: string | null) => (text ?? "").replace(/[\u2066-\u2069]/g, "")
+
+describe("StatusBar in a language that counts its recordings", () => {
+  const audioCells = [
+    ...Array.from({ length: 6 }, (_, i) => ({ id: `a${i}`, status: "empty", laneStatus: "validated" })),
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `r${i}`, status: "empty", laneStatus: "unvalidated" })),
+    ...Array.from({ length: 35 }, (_, i) => ({ id: `e${i}`, status: "empty", laneStatus: "empty" })),
+  ] as CellSummary[]
+
+  function AudioFooter({ cells: rows, delivers, extra }: {
+    cells: readonly CellSummary[]
+    delivers: "audio" | "text_and_audio"
+    extra?: { needsText: number; needsAudio: number; textTranslated?: number; textValidated?: number; recorded?: number; audioValidated?: number }
+  }) {
+    const { fileProgress } = useHealth(new Map([["active", rows]]), [], { enabled: false })
+    const progress = { ...fileProgress.get("active")!, delivers, ...extra }
+    return <StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={50} />
+  }
+
+  it("Audio: 45 lines with 10 recorded and 6 approved, and no text badges (P2.1)", () => {
+    render(<AudioFooter cells={audioCells} delivers="audio" />)
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("45 lines · 10 recorded (22%)")
+    expect(screen.getByTestId("status-bar-unvalidated-audio").textContent).toMatch(/4.* recorded, not validated/)
+    expect(screen.getByTestId("status-bar-validated-audio").textContent).toMatch(/6.* audio validated/)
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByText(/translated/)).toBeNull()
+  })
+
+  it("Text: a language that delivers text draws no audio, however much is recorded", () => {
+    render(
+      <StatusBarView
+        progress={{ total: 10, translated: 5, validated: 2, recorded: 8, audioValidated: 3, delivers: "text" }}
+        getHealthByCell={() => []}
+        projectHealth={50}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 cells · 5 translated (50%)")
+    expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
+  })
+
+  it("nobody chose: a file with recordings and no text reads its audio (AQU-2110's evidence)", () => {
+    render(
+      <StatusBarView
+        progress={{ total: 10, translated: 0, validated: 0, recorded: 8, audioValidated: 3 }}
+        getHealthByCell={() => []}
+        projectHealth={50}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 8 recorded (80%)")
+  })
+
+  it("Text and audio: lines done on both halves, and how much of each half is left (P2.6)", () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `d${i}`, status: "validated", laneStatus: "validated" })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, status: "validated", laneStatus: "unvalidated" })),
+      { id: "x", status: "empty", laneStatus: "empty" },
+    ] as CellSummary[]
+    render(<AudioFooter cells={rows} delivers="text_and_audio" extra={{ needsText: 3, needsAudio: 4 }} />)
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
+    expect(screen.getByTestId("status-bar-text-left").textContent).toMatch(/Text left: .*3/)
+    expect(screen.getByTestId("status-bar-audio-left").textContent).toMatch(/Audio left: .*4/)
+  })
+
+  it("Text and audio: the file row's two halves leave the footer's done figure alone (Sam, Oct 24)", () => {
+    const rows = [
+      ...Array.from({ length: 4 }, (_, i) => ({ id: `d${i}`, status: "validated", laneStatus: "validated" })),
+      ...Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, status: "validated", laneStatus: "unvalidated" })),
+      { id: "x", status: "empty", laneStatus: "empty" },
+    ] as CellSummary[]
+    render(
+      <AudioFooter
+        cells={rows}
+        delivers="text_and_audio"
+        extra={{ needsText: 3, needsAudio: 4, textTranslated: 9, textValidated: 9, recorded: 6, audioValidated: 6 }}
+      />,
+    )
+    expect(plain(screen.getByTestId("status-bar-summary").textContent)).toBe("10 lines · 4 done (40%)")
+    expect(screen.queryByTestId("status-bar-unvalidated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated")).toBeNull()
+    expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
+    expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
+  })
 })

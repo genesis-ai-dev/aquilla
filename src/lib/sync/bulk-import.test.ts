@@ -660,4 +660,44 @@ describe("reconcileSourceImport", () => {
     const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
     expect(payload.artifactId).toBeUndefined()
   })
+
+  it("uploads a fork's original only after the destination file exists", async () => {
+    const order: string[] = []
+    vi.mocked(sourceUpload.uploadSourceOriginal).mockImplementation(async () => {
+      order.push("upload")
+      return { artifactId: "artifact-copy", key: "key", sha256: "digest" }
+    })
+    const fetchSpy = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      order.push("reconcile")
+      return Response.json({
+        fileId: "file-copy", replayed: false, matched: 1, added: 0,
+        changed: 1, unchanged: 0, retainedMissing: 0, importedTargets: 0,
+      })
+    })
+    await reconcileSourceImport({
+      projectId: "p1",
+      fileId: "file-copy",
+      file: { id: "fork-event", name: "Genesis (updated)", fileType: "idml", parserVersion: "builtin:biblica-study-notes@1" },
+      cells: [makeCell(0)],
+      rawSource: "idml-package",
+      rawSourceFormat: "idml",
+      fork: true,
+      sourceFileId: "file-original",
+      reviewChangedSource: true,
+      getToken: async () => "tok",
+      fetchImpl: fetchSpy as typeof fetch,
+    })
+
+    expect(order).toEqual(["reconcile", "upload"])
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+    expect(payload.artifactId).toBeUndefined()
+    expect(payload.fork).toBe(true)
+    expect(payload.sourceFileId).toBe("file-original")
+    expect(vi.mocked(sourceUpload.uploadSourceOriginal)).toHaveBeenCalledWith(expect.objectContaining({
+      fileId: "file-copy",
+      format: "idml",
+      updateSourceSidecar: true,
+      profileId: "builtin:biblica-study-notes",
+    }))
+  })
 })

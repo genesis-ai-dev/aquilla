@@ -20,6 +20,11 @@ import { sortByLens } from "@/lib/timeline/derive"
 import { splitLineOrigin } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
+import {
+  EMPTY_AUDIO_PROGRESS_CELL_IDS,
+  sameAudioProgressCellIds,
+  type AudioProgressCellIds,
+} from "@/lib/progress/audio-progress-cells"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
@@ -27,9 +32,36 @@ import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate
 import { useOfflineStore } from "@/context/OfflineStoreContext"
 import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
 import { subscribeToDiscardedOfflineCommits } from "@/lib/offline/refused-writes"
+import {
+  laneCountsAudio,
+  laneLineStatus,
+  type LaneDelivers,
+  type LaneLineState,
+} from "@/lib/lanes/lane-delivers"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+/** AQU-2094: what a sparse audit read says about a cell it leaves out. */
+const NO_AUDIT: CellAuditStats = Object.freeze({
+  cellId: "",
+  editCount: 0,
+  contentHash: "",
+  lastEditAt: null,
+  lastEditEventId: null,
+  activeValidators: Object.freeze([]) as unknown as string[],
+  waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
+})
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
+/**
+ * The per-cell bits the navigation rollup counts, and the progress cache
+ * compares: a cell's entry in the mask changes exactly when one of its five
+ * figures would. AQU-2110 added the last three; the first two are the pair
+ * every surface showed before it.
+ */
+const FLAG_TRANSLATED = 1
+const FLAG_VALIDATED = 2
+const FLAG_TEXT_TRANSLATED = 4
+const FLAG_AUDIO_RECORDED = 8
+const FLAG_AUDIO_VALIDATED = 16
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
@@ -124,6 +156,26 @@ export interface CellSummary {
   selectedGeneratedVoiceAudioId?: string
   /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
   hasOwnTake?: boolean
+  /** AQU-2125: the character this line names (`metadata.cast_name`), trimmed.
+   *  Carried so the cast lookup can find a character's voice from a summary.
+   *  Absent on a line that names nobody. */
+  castName?: string
+  /** Media redesign slice 2: mirrors `CellData.audioApproved`. */
+  audioApproved?: boolean
+  /** Media redesign slice 2: mirrors `CellData.laneStatus`. */
+  laneStatus?: CellData["status"]
+}
+
+/**
+ * Media redesign slice 2: what the active language delivers, and which of the
+ * open file's lines carry a recording in it and an approved one. Set by the
+ * workspace from the lane-scoped attachment read, apart from `setRuntime` for
+ * the reason `setOwnTakeCellIds` is.
+ */
+export interface LaneAudioState {
+  delivers: LaneDelivers | null
+  recorded: ReadonlySet<string>
+  approved: ReadonlySet<string>
 }
 
 export interface CellTextPair {
@@ -143,7 +195,33 @@ export interface CellCommitHandle {
   sourceEventId: string | null
 }
 
-export interface CellNavigationEntry {
+/**
+ * The five figures a division's progress is read from.
+ *
+ * `translated` / `validated` are the pair every surface has always shown:
+ * translated is target text OR a take of the line's own (AQU-646), validated
+ * is the projected TEXT flag. AQU-2110 adds the three beside them, counted
+ * over the same cells by the same structural and hidden-cell rules:
+ *
+ *   - `textTranslated`: target text only. What tells an audio-only file
+ *     apart — recordings and no text — from one that has both, which is the
+ *     per-file decision the chapter picker makes about which figures to show.
+ *   - `audioRecorded` / `audioValidated`: the audio pair, from the id sets
+ *     the workspace feeds in through `setAudioProgressCellIds`. Audio
+ *     validation lives nowhere in the cell projection, so until that lands
+ *     both read 0 — which is "not known yet", not "none", and why the picker
+ *     only switches to audio figures once something is recorded.
+ */
+export interface CellNavigationProgress {
+  translated: number
+  validated: number
+  textTranslated: number
+  audioRecorded: number
+  audioValidated: number
+  total: number
+}
+
+export interface CellNavigationEntry extends CellNavigationProgress {
   key: string
   label: string
   shortLabel: string
@@ -151,21 +229,15 @@ export interface CellNavigationEntry {
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
   subsections: readonly CellNavigationSubsection[]
 }
 
-export interface CellNavigationSubsection {
+export interface CellNavigationSubsection extends CellNavigationProgress {
   key: string
   label: string
   firstCellId: string
   firstIndex: number
   cellIds: readonly string[]
-  translated: number
-  validated: number
-  total: number
 }
 
 export const MILESTONE_SUBSECTION_SIZE = 50
@@ -195,6 +267,12 @@ interface RuntimeContext {
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
   /**
+   * AQU-2094: `auditStats` came from a sparse read, so a cell missing from it
+   * has no validators and no waivers. That is an answer, not "not loaded yet":
+   * the row's denormalized `validated` column must not speak for the cell.
+   */
+  auditStatsComplete?: boolean
+  /**
    * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
    * cell's id, not the file-seeded imported source clip).
    *
@@ -205,6 +283,20 @@ interface RuntimeContext {
    * `cell_audio`, which is a much bigger change for the same answer.
    */
   ownTakeCellIds?: ReadonlySet<string>
+  /**
+   * AQU-2110: which cells are recorded, and which of those are audio
+   * validated, for the navigation rollup's audio figures. Fed in the same way
+   * as `ownTakeCellIds` and for the same reason — audio is not in the cell
+   * projection — through `setAudioProgressCellIds`. Unlike that set it is
+   * not part of any cell's view model, so changing it rebuilds the
+   * navigation index and nothing else.
+   */
+  audioProgressCellIds?: AudioProgressCellIds
+  /**
+   * Media redesign slice 2: see `LaneAudioState`. Absent, or a language that
+   * delivers Text, and every line is counted by its text exactly as before.
+   */
+  laneAudio?: LaneAudioState
   /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
@@ -485,8 +577,105 @@ export class CellStore {
     this.emit(changed)
   }
 
+  /**
+   * AQU-2110: which cells are recorded and which are audio validated, for the
+   * navigation rollup (the chapter picker and the sidebar's chapter grid).
+   *
+   * Audio validation is not part of any cell's view model — no row, summary
+   * or status reads it — so unlike `setOwnTakeCellIds` this bumps no cell
+   * version and rebuilds no derived view. It re-counts the navigation index
+   * alone and wakes the whole-file subscribers, which is what moves a
+   * chapter's figure the moment a take is validated, with no reload and
+   * without touching the file-progress snapshot.
+   *
+   * The audio bits ride the same flags bitmask the progress cache compares,
+   * so a membership change misses that cache on its own and an identical
+   * set — a refetch that changed nothing — returns before any work.
+   */
+  setAudioProgressCellIds(next: AudioProgressCellIds): void {
+    const prev = this.ctx.audioProgressCellIds ?? EMPTY_AUDIO_PROGRESS_CELL_IDS
+    if (sameAudioProgressCellIds(prev, next)) {
+      this.ctx = { ...this.ctx, audioProgressCellIds: next }
+      return
+    }
+    this.ctx = { ...this.ctx, audioProgressCellIds: next }
+    // A dirty derived index will rebuild the navigation on its next read;
+    // a clean one is re-counted here so the snapshot beside it is kept.
+    if (!this.derivedIndexesDirty) {
+      this.navIndex = this.buildNavigationIndex(this.order).entries
+    }
+    this.fileVersion++
+    this.emitAll()
+  }
+
+  /**
+   * Media redesign slice 2: what the active language delivers and which lines
+   * are recorded and approved in it. A language that counts its recordings
+   * re-derives every line's progress status from them (`applyOwnTake`); a
+   * Text language ignores it. The chapter counts read the navigation rollup's
+   * audio figures instead, which the workspace feeds the SAME two sets
+   * through `setAudioProgressCellIds`. Bumps exactly the cells whose answer
+   * changed, or every cell when the choice itself did.
+   */
+  setLaneAudio(next: LaneAudioState): void {
+    const prev = this.ctx.laneAudio
+    if (
+      prev
+      && prev.delivers === next.delivers
+      && prev.recorded === next.recorded
+      && prev.approved === next.approved
+    ) return
+    this.ctx = { ...this.ctx, laneAudio: next }
+    const wasCounted = laneCountsAudio(prev?.delivers)
+    const isCounted = laneCountsAudio(next.delivers)
+    if (!wasCounted && !isCounted) return
+    if ((prev?.delivers ?? null) !== next.delivers) {
+      this.bumpAllCells()
+      this.fileVersion++
+      this.rebuildDerivedIndexes()
+      this.emit(this.order)
+      return
+    }
+    const changed = new Set<string>()
+    const diff = (a: ReadonlySet<string>, b: ReadonlySet<string>) => {
+      for (const id of a) if (!b.has(id)) changed.add(id)
+      for (const id of b) if (!a.has(id)) changed.add(id)
+    }
+    diff(prev?.recorded ?? EMPTY_TAKES, next.recorded)
+    diff(prev?.approved ?? EMPTY_TAKES, next.approved)
+    if (changed.size === 0) return
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.rebuildDerivedIndexes()
+    this.emit(changed)
+  }
+
+  /**
+   * Media redesign slice 2: a line's state in a language that counts its
+   * recordings, or null in a Text language (whose lines keep today's rules).
+   */
+  private laneLineOf(cellId: string, textFilled: boolean, textValidated: boolean): LaneLineState | null {
+    const lane = this.ctx.laneAudio
+    if (!lane || !laneCountsAudio(lane.delivers)) return null
+    return {
+      textFilled,
+      textValidated,
+      recorded: lane.recorded.has(cellId),
+      audioApproved: lane.approved.has(cellId),
+    }
+  }
+
+  /** The audit entry for a cell (see `RuntimeContext.auditStatsComplete`). */
+  private auditOf(cellId: string, stats: ReadonlyMap<string, CellAuditStats> = this.ctx.auditStats): CellAuditStats | undefined {
+    return stats.get(cellId) ?? (this.ctx.auditStatsComplete ? NO_AUDIT : undefined)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
+    // AQU-2094: the first sparse read changes what every cell's MISSING entry
+    // means, which no diff of the two maps can see — so it refreshes every
+    // cell, as a threshold change does.
+    const completeChanged = Boolean(this.ctx.auditStatsComplete) !== Boolean(next.auditStatsComplete)
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     // AQU-1083: a structural-policy flip changes which cells every derived
@@ -510,6 +699,9 @@ export class CellStore {
       lane: nextLane,
       countStructural: nextCountStructural,
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+      // AQU-2110: same hand-off, same rule.
+      audioProgressCellIds: next.audioProgressCellIds ?? this.ctx.audioProgressCellIds,
+      laneAudio: next.laneAudio ?? this.ctx.laneAudio,
     }
     if (showHiddenChanged) {
       this.visibleOrderCache = null
@@ -526,7 +718,7 @@ export class CellStore {
       this.replaceRows(this.toRows(), { full: true, maxServerSeq: this.maxServerSeq })
       return
     }
-    if (statsChanged || userChanged) {
+    if (statsChanged || userChanged || completeChanged) {
       // Invariant: a per-cell version bump is ALWAYS paired with a per-cell
       // emit of the same set. Editor rows read useSyncExternalStore over
       // getCellVersion; a bump without an emit lets a parent-driven render
@@ -535,7 +727,7 @@ export class CellStore {
       // row then stays stale until remount. The old bumpAllCells()-but-emit-
       // only-the-changed-cells shape here was exactly that: audit-stats churn
       // during a batch silently inflated every cell's version.
-      if (userChanged) {
+      if (userChanged || completeChanged) {
         this.bumpAllCells()
         this.rebuildDerivedIndexes()
         this.emit(this.order)
@@ -554,7 +746,33 @@ export class CellStore {
   }
 
   reset(projectId: string | null, fileId: string | null): void {
+    // AQU-2132: a DIFFERENT file's recorded / audio-validated lines say nothing
+    // about this one, exactly as `hiddenCellIds` and `removedCellIds` below say
+    // nothing about it. Both sets are handed in from the attachment read
+    // (`setOwnTakeCellIds` / `setAudioProgressCellIds`), which re-asserts per
+    // file, so keeping them across a switch let file B count file A's takes
+    // until that read landed — the footer, the chapter picker and the sidebar's
+    // chapter grid all read this rollup.
+    //
+    // Scoped to a file CHANGE on purpose. `reset()` also runs on every full
+    // re-read of the SAME file, where the sets are still the truth and the
+    // hand-off has nothing new to re-assert: clearing there would blank the
+    // three surfaces on a refetch and leave them blank, which is the defect
+    // this ticket is about rather than a fix for it.
+    const fileChanged = (this.ctx.fileId ?? null) !== (fileId ?? null)
     this.ctx = { ...this.ctx, projectId, fileId }
+    if (fileChanged) {
+      this.ctx = {
+        ...this.ctx,
+        ownTakeCellIds: EMPTY_TAKES,
+        audioProgressCellIds: EMPTY_AUDIO_PROGRESS_CELL_IDS,
+        // Media redesign: the same for the lane's recorded / approved lines;
+        // what the language delivers is the project's, and stays.
+        ...(this.ctx.laneAudio
+          ? { laneAudio: { delivers: this.ctx.laneAudio.delivers, recorded: EMPTY_TAKES, approved: EMPTY_TAKES } }
+          : {}),
+      }
+    }
     // Rows still subscribed to the outgoing cells must hear about the reset —
     // emitAll() alone only wakes subscribeAll consumers (footer/table shell),
     // and a per-cell subscriber left unnotified keeps rendering the old file's
@@ -826,7 +1044,7 @@ export class CellStore {
       this.ctx.fileId ?? "",
       this.ctx.username,
       this.ctx.requiredValidations,
-      this.ctx.auditStats.get(cellId),
+      this.auditOf(cellId),
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
@@ -851,6 +1069,14 @@ export class CellStore {
    * can see WHY the status is what it is.
    */
   private applyOwnTake(cell: CellData): void {
+    // Media redesign slice 2: in a language that counts its recordings, the
+    // line's PROGRESS status follows what the language delivers. `status`
+    // itself stays the text's, for the dozen readers that mean text.
+    const line = this.laneLineOf(cell.id, Boolean(cell.translated.trim()), cell.status === "validated")
+    if (line) {
+      cell.audioApproved = line.audioApproved
+      cell.laneStatus = laneLineStatus(this.ctx.laneAudio?.delivers, line)
+    }
     if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
     // ONLY the flag, since 2026-09-22. This used to flip an empty line's
     // status to unvalidated/validated as well, so that a dub with no text
@@ -928,10 +1154,13 @@ export class CellStore {
       transcription: view.transcription,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
+      audioApproved: view.audioApproved,
+      laneStatus: view.laneStatus,
       // AQU-1424: so the surfaces that read SUMMARIES rather than rows — the
       // chapter health builder's `isExcluded`, and batch drafting's target list —
       // can apply the same predicate without reaching back into the store's rows.
       hidden: view.hidden,
+      ...summaryCastName(view.metadata),
     }
     const entry = {
       version,
@@ -1618,7 +1847,7 @@ export class CellStore {
 
     const target = this.targetById.get(cellId)
     const threshold = Math.min(15, Math.max(1, this.ctx.requiredValidations))
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const beforeValidation = validationContribution(audit, existing, threshold)
     const afterValidation = validationContribution(audit, target, threshold)
     const validationUnchanged = beforeValidation.endorsements === afterValidation.endorsements
@@ -2367,6 +2596,10 @@ export class CellStore {
    * Callers must retain the full rebuild for structural/footnote/validation changes.
    */
   private updateTargetFilledProgress(cellId: string, before: boolean, after: boolean): boolean {
+    // Media redesign slice 2: a language that counts its recordings counts a
+    // line by the shared rule, which these text deltas do not speak for; the
+    // full rebuild does.
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
@@ -2386,16 +2619,23 @@ export class CellStore {
       sections: snapshot.sections.map(counts => counts.key === section
         ? { ...counts, filledCount: counts.filledCount + delta } : counts),
     }
-    // Navigation treats an audio take as translated even with empty text.
-    if (!this.ctx.ownTakeCellIds?.has(cellId)) {
-      this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
-        ...item,
-        translated: item.translated + delta,
-        subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
-          ? { ...subsection, translated: subsection.translated + delta } : subsection),
-      } : item)
-      this.navigationProgressCache.delete(this.order)
-    }
+    // Navigation treats an audio take as translated even with empty text, so
+    // `translated` holds still on a line that has one — but `textTranslated`
+    // is text alone (AQU-2110) and always moves with the edit, or an
+    // optimistic first word on an audio-only file would leave the picker
+    // believing the file still has no text.
+    const hasOwnTake = this.ctx.ownTakeCellIds?.has(cellId) === true
+    const patch = <T extends CellNavigationProgress>(counts: T): T => ({
+      ...counts,
+      textTranslated: counts.textTranslated + delta,
+      translated: hasOwnTake ? counts.translated : counts.translated + delta,
+    })
+    this.navIndex = this.navIndex.map((item, index) => index === entryIndex ? {
+      ...patch(item),
+      subsections: item.subsections.map((subsection, subIndex) => subIndex === subsectionIndex
+        ? patch(subsection) : subsection),
+    } : item)
+    this.navigationProgressCache.delete(this.order)
     return true
   }
 
@@ -2404,10 +2644,11 @@ export class CellStore {
    * file totals prefer audit validators, navigation uses the projected flag.
    */
   private updateTargetValidationProgress(cellId: string, previous: CellRow, next: CellRow): boolean {
+    if (laneCountsAudio(this.ctx.laneAudio?.delivers)) return false
     const snapshot = this.fileProgressSnapshot
     const source = this.sourceById.get(cellId)
     if (this.derivedIndexesDirty || !snapshot || !source) return false
-    const audit = this.ctx.auditStats.get(cellId)
+    const audit = this.auditOf(cellId)
     const before = validationContribution(audit, previous, snapshot.validationCount)
     const after = validationContribution(audit, next, snapshot.validationCount)
     const validatedDelta = Number(after.validated) - Number(before.validated)
@@ -2475,8 +2716,8 @@ export class CellStore {
       const source = this.sourceById.get(id)
       if (!source) continue
       const target = this.targetById.get(id)
-      const before = validationContribution(previous.get(id), target, threshold)
-      const after = validationContribution(next.get(id), target, threshold)
+      const before = validationContribution(this.auditOf(id, previous), target, threshold)
+      const after = validationContribution(this.auditOf(id, next), target, threshold)
       if (before.endorsements === after.endorsements && before.validated === after.validated) continue
       add("", before, after)
       const section = source.canonicalRef ? sectionLabelFromCanonical(source.canonicalRef) : ""
@@ -2557,7 +2798,7 @@ export class CellStore {
       // that counts headings also start counting parked ones.
       if (source && !isHiddenCell(source)
         && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
-        const audit = this.ctx.auditStats.get(id)
+        const audit = this.auditOf(id)
         const endorsements = audit ? audit.activeValidators.length : Math.max(0, target?.endorsementCount ?? 0)
         const authoritative = audit !== undefined || target?.endorsementCount !== undefined
         const validated = authoritative ? endorsements >= progressThreshold : Boolean(target?.validated)
@@ -2678,17 +2919,28 @@ export class CellStore {
         ?? ""
       // Navigation counts an audio take as translated, and uses the projected
       // validation flag. Keep these semantics distinct from file progress.
-      flags[index] = (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId) ? 1 : 0)
-        | (target?.validated ? 2 : 0)
+      //
+      // AQU-2110: the text-only and audio bits ride the same mask, so a take
+      // being validated misses the cache exactly as a text edit does.
+      const hasText = targetValue.trim().length > 0
+      const audio = this.ctx.audioProgressCellIds
+      flags[index] = (hasText || this.ctx.ownTakeCellIds?.has(cellId) ? FLAG_TRANSLATED : 0)
+        | (target?.validated ? FLAG_VALIDATED : 0)
+        | (hasText ? FLAG_TEXT_TRANSLATED : 0)
+        | (audio?.recorded.has(cellId) ? FLAG_AUDIO_RECORDED : 0)
+        | (audio?.audioValidated.has(cellId) ? FLAG_AUDIO_VALIDATED : 0)
       if (cached?.flags[index] !== flags[index]) unchanged = false
     }
     if (unchanged && cached) return { entries: cached.entries, milestoneByCellId: derived.milestoneByCellId }
 
     this.work.navigationIndexRebuilds++
     const displayIndexByCellId = new Map(ids.map((id, index) => [id, index]))
-    const progressFor = (cellIds: readonly string[]) => {
+    const progressFor = (cellIds: readonly string[]): CellNavigationProgress => {
       let translated = 0
       let validated = 0
+      let textTranslated = 0
+      let audioRecorded = 0
+      let audioValidated = 0
       let total = 0
       for (const cellId of cellIds) {
         // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
@@ -2707,15 +2959,20 @@ export class CellStore {
         total += 1
         const index = displayIndexByCellId.get(cellId)
         const value = index === undefined ? 0 : flags[index]
-        if (value & 1) translated++
-        if (value & 2) validated++
+        if (value & FLAG_TRANSLATED) translated++
+        if (value & FLAG_VALIDATED) validated++
+        if (value & FLAG_TEXT_TRANSLATED) textTranslated++
+        if (value & FLAG_AUDIO_RECORDED) audioRecorded++
+        if (value & FLAG_AUDIO_VALIDATED) audioValidated++
       }
-      return { translated, validated, total }
+      return { translated, validated, textTranslated, audioRecorded, audioValidated, total }
     }
     const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
       // AQU-1083: `total` is summed from the subsections rather than read off
       // `group.cellIds.length` because progressFor may skip structural cells.
-      const progress = { translated: 0, validated: 0, total: 0 }
+      const progress: CellNavigationProgress = {
+        translated: 0, validated: 0, textTranslated: 0, audioRecorded: 0, audioValidated: 0, total: 0,
+      }
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
@@ -2723,6 +2980,9 @@ export class CellStore {
         const counts = progressFor(cellIds)
         progress.translated += counts.translated
         progress.validated += counts.validated
+        progress.textTranslated += counts.textTranslated
+        progress.audioRecorded += counts.audioRecorded
+        progress.audioValidated += counts.audioValidated
         progress.total += counts.total
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,
@@ -2785,6 +3045,8 @@ export interface UseActiveCellStoreOptions {
   username?: string
   requiredValidations?: number
   auditStats?: ReadonlyMap<string, CellAuditStats>
+  /** AQU-2094: see `RuntimeContext.auditStatsComplete`. */
+  auditStatsComplete?: boolean
   getToken?: (fileId: string) => Promise<string | null>
   enabled?: boolean
   /**
@@ -2832,6 +3094,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     username = "local",
     requiredValidations = 1,
     auditStats = EMPTY_STATS,
+    auditStatsComplete = false,
     getToken,
     enabled = true,
     lane = "",
@@ -2889,8 +3152,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural, showHidden })
-  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under
@@ -3495,6 +3758,12 @@ export function useCellStoreVersion(store: CellStore): number {
 export function useCellStoreViews(store: CellStore): CellViewModel[] {
   const version = useCellStoreVersion(store)
   return useMemo(() => readAtVersion(version, () => store.getAllCellViews()), [store, version])
+}
+
+function summaryCastName(metadata: CellData["metadata"]): { castName?: string } {
+  const raw = metadata?.cast_name
+  const name = typeof raw === "string" ? raw.trim() : ""
+  return name ? { castName: name } : {}
 }
 
 function deriveStatus(translated: string, validated: boolean): CellData["status"] {

@@ -42,7 +42,7 @@
 // cell, carries no votes and is not somebody's unvalidated recording.
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { audioEntryFromCell } from "@/lib/audio/audio-validation-permissions"
-import { isTakeValidated, selectedDubTakes } from "@/lib/sync/cell-audio-read-types"
+import { isTakeValidated, selectedDubTakes, selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import type { ExportContentMode } from "./validation-scope"
 
 /** The cell fields this module reads. `CellData` satisfies it; so does the
@@ -111,6 +111,57 @@ export function unvalidatedAudioLineIds(
     if (takes.some((take) => !isTakeValidated(take.attachment, requirement))) ids.push(cell.id)
   }
   return ids
+}
+
+/**
+ * The take the default track SHIPS for a cell — the recording slot's when it is
+ * still there, else the generated voice's. (AQU-2148)
+ *
+ * Every audio deliverable used to read `selectedAudioId ??
+ * selectedGeneratedVoiceAudioId` and write back whatever came out. That is the
+ * precedence `resolveTargetAudio` draws the timeline with, MINUS its one guard:
+ * that the clip the pointer names is still live. A selection outlives its take
+ * — removing a take leaves the pointer behind until something re-selects — so a
+ * line whose old recording was deleted and whose new voice arrived in the
+ * `generatedVoice` slot resolved to the dead id, found no attachment, and was
+ * dropped from the deliverable ENTIRELY: a cell exporting silence on every
+ * character track while the line's own audio control played its new take, and
+ * nothing in the preview to say so (The Journey — Arabic, Joel, 2026-10-23).
+ *
+ * This is not a new rule. `selectedDubTakes` — what the gutter's ticks and
+ * AQU-965's validated-only scope are both measured over — already falls
+ * through, because `audioEntryFromCell` drops a deleted attachment before it
+ * resolves. The export was the one surface still reading the raw pointers, so
+ * it shipped a different take from the one every other surface named. Them
+ * agreeing is the whole point.
+ *
+ * STRICTLY A FALL-THROUGH. A slot holding anything usable resolves to exactly
+ * the id it always did, so no deliverable loses a take it ships today. Only a
+ * cell that ships NOTHING today can change, and it changes to the take that
+ * sounds.
+ *
+ * Deliberately WITHOUT `resolveTargetAudio`'s `audioIdSeededWith` dub guard.
+ * That reads provenance off the id's seed and defaults an ambiguous or legacy
+ * id to SOURCE, so applying it here would withdraw takes from deliverables
+ * that ship them today — the opposite failure, and not this ticket's to risk.
+ */
+export function defaultTrackTakeId(
+  cell: Pick<AudioScopableCell, "attachments" | "selectedAudioId" | "selectedGeneratedVoiceAudioId">,
+): string | null {
+  const usable = (audioId: string): boolean => {
+    const att = cell.attachments?.[audioId]
+    return Boolean(att?.url) && att?.isDeleted !== true
+  }
+  const live = (audioId: string | undefined): string | null => {
+    if (!audioId) return null
+    if (usable(audioId)) return audioId
+    // AQU-1767: a cut take is several selected pieces over one recording. The
+    // pointer can name a piece somebody removed while its siblings still
+    // sound, and the slot still has audio to ship — so the slot is live and the
+    // caller resolves the pieces as it already does.
+    return selectedPieceIds(cell.attachments, audioId).some(usable) ? audioId : null
+  }
+  return live(cell.selectedAudioId) ?? live(cell.selectedGeneratedVoiceAudioId)
 }
 
 /**

@@ -13,7 +13,8 @@ import { v7 as uuidv7 } from "uuid"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { emitSourceCellCreate, emitSourceCellDelete, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { buildSpeakerCastWrite } from "@/lib/import/cast-from-speakers"
+import { characterCastKey } from "@/lib/audio/voices"
 import { extractVoiceReference, type ReferenceRange } from "@/lib/audio/reference-extract"
 import { turnsToSegments, speakerLabel, type DiarizationTurn } from "@/lib/timeline/diarization"
 import type { CellData } from "@/hooks/useCells"
@@ -144,7 +145,7 @@ async function applyTurns(
     }
   }
 
-  const pairs: { cellId: string; speaker: string }[] = []
+  const pairs: { cellId: string; speaker: string; castNamed: true }[] = []
   let prevCellId: string | null = null
   let seq = 0
   for (const s of segments) {
@@ -159,6 +160,10 @@ async function applyTurns(
       sequenceIndex: seq,
       startMs: s.startMs,
       endMs: s.endMs,
+      // AQU-2125: "Speaker 2" is the line's character, so the speaker is cast
+      // once rather than every turn. A person renaming the voice later renames
+      // the voice, not the lines.
+      metadata: { cast_name: speakerLabel(s.speaker) },
       author: args.author,
     })
     await emitCellAudioAttach({
@@ -175,14 +180,14 @@ async function applyTurns(
       role: "source",
       author: args.author,
     })
-    pairs.push({ cellId, speaker: speakerLabel(s.speaker) })
+    pairs.push({ cellId, speaker: speakerLabel(s.speaker), castNamed: true })
     prevCellId = cellId
     seq += 1
   }
 
-  // Cast: one "Speaker N" voice per cluster, assigned to its cells. Merge the
-  // new assignments into any existing ones (don't clobber other files).
-  const additions = buildCastAdditions(pairs, args.ttsSettings, () => uuidv7())
+  // Cast: one "Speaker N" voice per cluster, cast once by character (AQU-2125).
+  // The map comes back whole, other files' casting included.
+  const cast = buildSpeakerCastWrite(pairs, args.ttsSettings, () => uuidv7())
 
   // AQU-646: give each Speaker voice a clone reference extracted from that
   // speaker's own turns in the imported clip, so generating target audio on
@@ -200,11 +205,11 @@ async function applyTurns(
   }
   const voiceIdBySpeaker = new Map<string, string>()
   for (const p of pairs) {
-    const vid = additions.castAssignments[p.cellId]
+    const vid = cast.castAssignments[characterCastKey(p.speaker)]
     if (vid && !voiceIdBySpeaker.has(p.speaker)) voiceIdBySpeaker.set(p.speaker, vid)
   }
   const getSyncToken = (_pid: string, fid: string) => args.getToken(fid)
-  const voices = [...additions.voices]
+  const voices = [...cast.voices]
   for (const [speaker, ranges] of speakerRanges) {
     const voiceId = voiceIdBySpeaker.get(speaker)
     if (!voiceId) continue
@@ -225,10 +230,7 @@ async function applyTurns(
     }
   }
 
-  await args.saveTts({
-    voices,
-    castAssignments: { ...(args.ttsSettings?.castAssignments ?? {}), ...additions.castAssignments },
-  })
+  await args.saveTts({ voices, castAssignments: cast.castAssignments })
 
   return { speakers: speakers.length, segments: segments.length }
 }

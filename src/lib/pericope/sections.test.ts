@@ -99,6 +99,9 @@ describe("ref helpers", () => {
     expect(parseRef("1SA 3:1a")).toEqual({ book: "1SA", address: { chapter: 3, verse: 1 } })
     expect(parseRef("gen 2:4")).toEqual({ book: "GEN", address: { chapter: 2, verse: 4 } })
     expect(parseRef("not a ref")).toBeUndefined()
+    // AQU-2158: a two-to-four character token is not a book code by itself.
+    expect(parseRef("CH 4:21")).toBeUndefined()
+    expect(parseRef("A1 1:1")).toBeUndefined()
   })
 
   it("maps OSIS abbreviations that differ from the USFM code", () => {

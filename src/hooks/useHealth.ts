@@ -13,6 +13,9 @@ export interface HealthCell {
   medium?: CellData["medium"]
   transcription?: string
   hasOwnTake?: boolean
+  /** Media redesign slice 2: the line's progress status by what its language
+   *  delivers; absent in a Text language, where progress reads `status`. */
+  laneStatus?: CellData["laneStatus"]
   endorsementCount?: number
   threads?: CellData["threads"]
 }
@@ -200,8 +203,12 @@ function deriveAuxStats(fileCells: Map<string, readonly HealthCell[]>): {
     let validated = 0
     let fileOpen = 0
     for (const cell of cells) {
-      if (cell.status !== "empty") translated++
-      if (cell.status === "validated") validated++
+      // Media redesign slice 2: a language that counts its recordings counts
+      // a line by `laneStatus` (recorded / approved for Audio); a Text
+      // language has none and counts its text, exactly as before.
+      const progress = cell.laneStatus ?? cell.status
+      if (progress !== "empty") translated++
+      if (progress === "validated") validated++
       const threads = cell.threads ?? []
       let openForCell = 0
       for (const t of threads) if (t.status === "open") openForCell++
@@ -244,7 +251,8 @@ function sameHealthInputs(
         || a.original !== b.original || a.translated !== b.translated
         || a.endorsementCount !== b.endorsementCount
         || a.medium !== b.medium || a.transcription !== b.transcription
-        || a.hasOwnTake !== b.hasOwnTake || a.threads !== b.threads) return false
+        || a.hasOwnTake !== b.hasOwnTake || a.laneStatus !== b.laneStatus
+        || a.threads !== b.threads) return false
     }
   }
   return true

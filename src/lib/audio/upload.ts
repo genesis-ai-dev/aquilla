@@ -105,14 +105,25 @@ export function buildFrontierAudioUrl(audioId: string, ext: string): string {
   return `${AUDIO_URL_SCHEME}://${audioId}.${ext}`
 }
 
-function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
-  const objectName = `${audioId}.${ext}`
+/**
+ * The HTTP endpoint of ONE object under a file's audio prefix.
+ *
+ * `objectName` is the R2 object's own filename: `<audioId>.<ext>` for a clip,
+ * and that plus a suffix for a sidecar that rides alongside it (AQU-2095's
+ * peaks sidecar — see peaks-sidecar.ts). The worker route accepts any
+ * `[A-Za-z0-9._-]+` name, so a sidecar needs no endpoint of its own.
+ */
+export function audioObjectEndpoint(projectId: string, fileId: string, objectName: string): string {
   return (
     `${syncWorkerHttpOrigin()}/audio/` +
     `${encodeURIComponent(projectId)}/` +
     `${encodeURIComponent(fileId)}/` +
     `${encodeURIComponent(objectName)}`
   )
+}
+
+function audioEndpoint(projectId: string, fileId: string, audioId: string, ext: string): string {
+  return audioObjectEndpoint(projectId, fileId, `${audioId}.${ext}`)
 }
 
 export interface UploadCellAudioArgs {

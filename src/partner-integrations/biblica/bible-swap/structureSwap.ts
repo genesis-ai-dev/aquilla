@@ -37,7 +37,7 @@ import type {
     SwapStats,
 } from "./types";
 import { verseKey } from "./types";
-import type { VersificationPlan } from "./versificationPlan";
+import type { BibleVerseSlice, VersificationPlan } from "./versificationPlan";
 import {
     bibleSlicesForStudyRange,
     buildInsertSlicesFromRefs,
@@ -490,6 +490,32 @@ export function applyBlockSplices(
 }
 
 /**
+ * Keep verse 1 in a chapter span that starts there when the plan never mapped
+ * it. That verse is the superscription that also holds `cv:dc` and `meta:c`
+ * (Habakkuk 3). Dropping it leaves the chapter number and the first verse out
+ * of the export, and every later verse stays keyed to the previous chapter.
+ */
+function withChapterOpeningVerse(
+    slices: BibleVerseSlice[],
+    book: string,
+    chapter: string,
+    spanFirstVerse: number,
+    plan: VersificationPlan,
+    bibleVerseIndex: BibleVerseIndex | null
+): BibleVerseSlice[] {
+    if (spanFirstVerse > 1) return slices;
+    if (slices.some((slice) => slice.firstVerse <= 1 && slice.lastVerse >= 1)) {
+        return slices;
+    }
+    const planned = plan.verseMap.get(verseKey(book, chapter, "1"));
+    if (planned?.action === "remove") return slices;
+    const bibleChapter =
+        planned?.action === "replace" ? planned.bible.chapter : (slices[0]?.chapter ?? chapter);
+    if (!bibleVerseIndex?.has(verseKey(book, bibleChapter, "1"))) return slices;
+    return [{ chapter: bibleChapter, firstVerse: 1, lastVerse: 1 }, ...slices];
+}
+
+/**
  * Build structure-swap splices without applying them (for tests/diagnostics).
  */
 export function buildStructureSwapSplices(
@@ -619,7 +645,18 @@ export function buildStructureSwapSplices(
             let lastContentSpliceIndex = -1;
             spans.forEach((span, idx) => {
                 // Slices use Bible chapter numbers; do not filter against study chapter.
-                const slices = spanSlices[idx];
+                // A numbered superscription (HAB 3:1) carries the visible chapter
+                // drop cap. The study scan used to skip it, so the plan had no
+                // replace entry and this span was rewritten from verse 2, deleting
+                // the drop cap and verse 1.
+                const slices = withChapterOpeningVerse(
+                    spanSlices[idx],
+                    book,
+                    chapter,
+                    span.firstVerse,
+                    plan,
+                    bibleVerseIndex
+                );
 
                 if (slices.length === 0) {
                     if (

@@ -1,9 +1,9 @@
 // Flow B (decision 2026-08-05, simplified 2026-08-06; pre-merge round:
 // file-scoped — the timing mode is per-file now, set from the timeline
-// toolbar). Linking a video while the file is in Free timing — the video
-// won't be visible there, so warn before linking. A combined
-// switch-and-link action was deliberately dropped to keep the privilege
-// story simple — revisit later if the two-step trip proves annoying.
+// toolbar). AQU-2204 (Sam, Oct 26): a file timed to a film always follows its
+// source, so linking a film to a file that follows its recordings SWITCHES it.
+// This says so before the link is made; clearing the film later gives the file
+// its own choice back.
 
 import { Button } from "@/components/ui/button"
 import {

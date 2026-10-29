@@ -18,6 +18,12 @@ import {
 // stalled wait still prints the DOM.
 configure({ asyncUtilTimeout: STALL_WATCHDOG_MS })
 
+// English ships with the app, so a test that renders English needs no catalog.
+// Installing every catalog here (AQU-2090) was 47% of the CI unit job: 15 MB of
+// locale modules evaluated again in each isolated worker, for every test file
+// (AQU-1991). A test that asserts text in another locale imports
+// "@/test-utils/all-catalogs" itself.
+
 // Block unit tests from reaching anything off this machine (AQU-1277). The
 // auth/sync base URLs fall back to production when VITE_AUTH_BASE is unset, so
 // a missing or exhausted fetch mock used to hit api.aquilla.app for real. This

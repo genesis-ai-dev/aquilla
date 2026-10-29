@@ -20,6 +20,10 @@ import {
 import { readWordSnapshot, resetWordUsage, writeOrgBillingOverrides } from "../lib/billing/words"
 import { grantCredits, resetCreditUsage } from "../lib/credits"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
+import { isMissingColumn, readWouldBlockReport, teamCostCheck } from "../lib/billing/admin-plan"
+import { meterMode } from "../../../db/shared/ai-entitlement"
+import { resolveOrgPlan } from "../../../db/shared/org-plan"
+import { ADMIN_BILLING_PAGE_MAX, readAdminBillingOrgs } from "../lib/billing/admin-org-list"
 
 const adminBilling = new Hono<AuthHonoEnv>()
 
@@ -46,6 +50,9 @@ function publicPlan(plan: ReturnType<typeof resolveFieldPlan>, stored: FieldPlan
     freeWeeklyRawUsd: policy.freeWeeklyRawUsd,
     teamMultipleOfFree: policy.teamMultipleOfFree,
     teamWeeklyRawUsd: teamWeeklyRawUsd(policy),
+    // AQU-2067: Team's worst-case raw cost against its revenue (spec Q7).
+    teamCost: teamCostCheck(policy),
+    unitsPerRawUsd: rawUsdToAllowanceUnits(1),
     // Internal display units for admin screens only; users see a percentage.
     freeWeeklyUnits: rawUsdToAllowanceUnits(policy.freeWeeklyRawUsd),
     teamWeeklyUnits: rawUsdToAllowanceUnits(teamWeeklyRawUsd(policy)),
@@ -73,6 +80,7 @@ adminBilling.get("/billing/plans", async (c) => {
     plan: publicPlan(plan, rec.settings.fieldPlan),
     version: rec.version,
     weeklyUsageEnforced: c.env.BILLING_WEEKLY_USAGE_ENFORCE === "true",
+    meterMode: meterMode(c.env),
     stripeConfigured: stripeConfigured(c.env),
     note: stripeConfigured(c.env)
       ? "Saving a new dollar amount creates a Stripe Price for future checkouts. Existing subscribers keep their current price."
@@ -149,45 +157,35 @@ adminBilling.patch("/billing/plans", zValidator("json", fieldPlanPatchSchema), a
   return c.json({ plan: publicPlan(plan, saved.record.settings.fieldPlan), version: saved.record.version, warnings })
 })
 
-adminBilling.get("/billing/orgs", async (c) => {
+const orgListSchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  tier: z.enum(["free", "team", "enterprise", "paid"]).optional(),
+  sort: z.enum(["name", "usage"]).default("name"),
+  limit: z.coerce.number().int().min(1).max(ADMIN_BILLING_PAGE_MAX).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+})
+
+/** One page of orgs with usage and plan. `total` counts every match, so the
+ * console can page and search instead of loading the whole platform. */
+adminBilling.get("/billing/orgs", zValidator("query", orgListSchema), async (c) => {
   const rec = await loadPlatformSettings(c.env)
   const catalog = resolveFieldPlan(rec.settings.fieldPlan, c.env)
-  const { results } = await c.env.AQUILLA_PG.prepare(
-    `SELECT o.id, o.name, u.username AS owner_username, b.weekly_allowance
-      FROM organizations o LEFT JOIN users u ON u.id = o.owner_user_id
-      LEFT JOIN org_billing b ON b.org_id = o.id ORDER BY o.name ASC NULLS LAST, o.id ASC`,
-  ).all<{ id: number; name: string | null; owner_username: string | null; weekly_allowance: number | null }>()
+  const query = c.req.valid("query")
+  const { orgs, total } = await readAdminBillingOrgs(c.env.AQUILLA_PG, catalog, query)
+  return c.json({ orgs, total, limit: query.limit, offset: query.offset, plan: publicPlan(catalog, rec.settings.fieldPlan) })
+})
 
-  const orgs = []
-  for (const org of results) {
-    const snap = await readWordSnapshot(c.env.AQUILLA_PG, org.id, catalog)
-    orgs.push({
-      orgId: org.id,
-      ownerUsername: org.owner_username,
-      weeklyAllowance: org.weekly_allowance,
-      orgName: org.name,
-      plan: snap.plan,
-      status: snap.status,
-      wordsUsed: snap.wordsUsed,
-      allowanceWords: snap.allowanceWords,
-      remainingWords: snap.remaining,
-      addonPacks: snap.addonPacks,
-      complimentaryWords: snap.complimentaryWords,
-      hardCapWords: snap.hardCapWords,
-      periodStart: snap.periodStart,
-      periodEnd: snap.periodEnd,
-      creditsUsed: snap.creditsUsed,
-      allowanceCredits: snap.allowanceCredits,
-      remainingCredits: snap.remainingCredits,
-      complimentaryCredits: snap.complimentaryCredits,
-      includedCredits: snap.includedCredits,
-      languageCount: snap.languageCount,
-      includedCreditsOverride: snap.includedCreditsOverride,
-      billedLanguageCountOverride: snap.billedLanguageCountOverride,
-      wordsPerCredit: snap.wordsPerCredit,
-    })
-  }
-  return c.json({ orgs, plan: publicPlan(catalog, rec.settings.fieldPlan) })
+/** One org's row, in the list's shape — the console refreshes just that row
+ * after a plan change or grant instead of reloading every page. */
+adminBilling.get("/billing/orgs/:orgId", async (c) => {
+  const raw = c.req.param("orgId") ?? ""
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: "invalid_org" }, 400)
+  const rec = await loadPlatformSettings(c.env)
+  const catalog = resolveFieldPlan(rec.settings.fieldPlan, c.env)
+  const { orgs } = await readAdminBillingOrgs(c.env.AQUILLA_PG, catalog, { orgId, limit: 1, offset: 0 })
+  if (orgs.length === 0) return c.json({ error: "not_found" }, 404)
+  return c.json({ org: orgs[0] })
 })
 
 const orgPatchSchema = z.object({
@@ -242,6 +240,59 @@ adminBilling.patch("/billing/org/:orgId", zValidator("json", orgPatchSchema), as
     includedCreditsOverride: snap.includedCreditsOverride,
     billedLanguageCountOverride: snap.billedLanguageCountOverride,
   })
+})
+
+const orgPlanSchema = z.object({
+  tier: z.enum(["free", "team", "enterprise"]),
+  // Enterprise only. null = no end date; after it ends the org gets a 14-day
+  // Team-sized grace, then Free (spec Q5).
+  contractEndsAt: z.string().datetime({ offset: true }).nullable().optional(),
+  reason: z.string().trim().min(1).max(500),
+}).strict()
+
+/** AQU-2067: set an org's one plan (org_billing.tier, spec §4.2). The legacy
+ * `plan` column is left alone for the Field code that still reads it (T18). */
+adminBilling.patch("/billing/org/:orgId/plan", zValidator("json", orgPlanSchema), async (c) => {
+  const raw = c.req.param("orgId") ?? ""
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: "invalid_org" }, 400)
+  const { tier, contractEndsAt, reason } = c.req.valid("json")
+  if (tier !== "enterprise" && contractEndsAt) return c.json({ error: "contract_end_requires_enterprise" }, 400)
+  const db = c.env.AQUILLA_PG
+  if (!db.transaction) return c.json({ error: "transactions_unavailable" }, 503)
+  const endsAt = tier === "enterprise" ? (contractEndsAt ?? null) : null
+  let result: "saved" | "not_found"
+  try {
+    result = await db.transaction(async tx => {
+      const org = await tx.prepare("SELECT id FROM organizations WHERE id = ? FOR UPDATE").bind(orgId).first()
+      if (!org) return "not_found" as const
+      await tx.prepare(`INSERT INTO org_billing (org_id, tier, contract_ends_at) VALUES (?, ?, ?::timestamptz)
+        ON CONFLICT (org_id) DO UPDATE SET tier = excluded.tier, contract_ends_at = excluded.contract_ends_at,
+          updated_at = now()`)
+        .bind(orgId, tier, endsAt).run()
+      // Audit failure rolls back the plan change.
+      await tx.prepare("INSERT INTO admin_audit_log (user_id, action, detail) VALUES (?, ?, ?)")
+        .bind(c.get("user").id, "billing.org_plan.update", JSON.stringify({ orgId, tier, contractEndsAt: endsAt, reason })).run()
+      return "saved" as const
+    })
+  } catch (err) {
+    if (isMissingColumn(err)) return c.json({ error: "migration_0182_pending" }, 409)
+    throw err
+  }
+  if (result === "not_found") return c.json({ error: "not_found" }, 404)
+  const plan = await resolveOrgPlan(db, orgId)
+  return c.json({
+    orgId, tier, contractEndsAt: endsAt,
+    resolvedTier: plan?.tier ?? tier, planSource: plan?.source ?? "stored",
+    graceEndsAt: plan?.graceEndsAt ?? null, effectiveWeeklyAllowance: plan?.weeklyAllowanceUnits ?? null,
+  })
+})
+
+/** AQU-2067: orgs and users the meter would have refused in each org's current
+ * and previous weekly period (spec §5.4 shadow review). */
+adminBilling.get("/billing/would-block", async (c) => {
+  const orgs = await readWouldBlockReport(c.env.AQUILLA_PG)
+  return c.json({ meterMode: meterMode(c.env), orgs })
 })
 
 const grantWordsSchema = z.object({
@@ -303,16 +354,24 @@ adminBilling.post("/billing/org/:orgId/reset-credits", zValidator("json", resetS
 })
 
 const weeklyGrantSchema = z.object({
-  allowance: z.number().int().min(0).max(10_000_000).nullable(),
+  allowance: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  // AQU-2067: admins state allowances in raw provider dollars (spec §2.3).
+  allowanceRawUsd: z.number().min(0).max(10_000).nullable().optional(),
   reason: z.string().trim().min(1).max(500),
-}).strict()
+}).strict().refine(b => (b.allowance === undefined) !== (b.allowanceRawUsd === undefined), {
+  message: "Send exactly one of allowance or allowanceRawUsd",
+})
 adminBilling.patch('/billing/org/:orgId/weekly-allowance', zValidator('json', weeklyGrantSchema), async c => {
   const raw = c.req.param('orgId') ?? ''
   const orgId = Number(raw)
   if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
   const db = c.env.AQUILLA_PG
   if (!db.transaction) return c.json({ error: 'transactions_unavailable' }, 503)
-  const { allowance, reason } = c.req.valid('json')
+  const body = c.req.valid('json')
+  const reason = body.reason
+  const allowance = body.allowanceRawUsd !== undefined
+    ? (body.allowanceRawUsd === null ? null : rawUsdToAllowanceUnits(body.allowanceRawUsd))
+    : body.allowance ?? null
   const result = await db.transaction(async tx => {
     const org = await tx.prepare('SELECT id FROM organizations WHERE id = ? FOR UPDATE').bind(orgId).first()
     if (!org) return 'not_found' as const

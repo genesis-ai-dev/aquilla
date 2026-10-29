@@ -46,11 +46,16 @@ export function overlaySettings(
   // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
   // never renders (found by the add-target-language e2e journey).
   assign("targetLanes", settings.targetLanes)
-  // AQU-601: archived-lane markers overlay alongside the registry so the
-  // workspace switcher can hide archived lanes by default.
-  assign("archivedLanes", settings.archivedLanes)
   if (lanes) {
     draft().lanes = lanes
+    // AQU-601: archived-lane markers ride alongside the registry so the lane
+    // lists can hide archived lanes. AQU-2223: they come from the rows'
+    // `archivedAt` — the settings mirror is no longer written, so it misses
+    // every lane archived since. The tags are the rows' own; `''` (the former
+    // default lane) is never a registry entry, so it is left out.
+    draft().archivedLanes = lanes.flatMap((lane) =>
+      lane.role === "target" && lane.archivedAt && lane.legacyTag ? [lane.legacyTag] : [],
+    )
   }
   if (settings.systemPrompt != null) {
     if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
@@ -96,6 +101,10 @@ export function overlaySettings(
   // see no Autopilot at all — the surfaces render only when this is on (or the
   // legacy device-local flag was already stored true).
   assign("autopilotEnabled", settings.autopilotEnabled)
+  // AQU-2041: the voice-management switch. Absent stays off; a stored false
+  // must still reach the workspace or a lead keeps the controls after a
+  // maintainer turns them off.
+  assign("projectLeadsManageVoices", settings.projectLeadsManageVoices)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   // AQU-1686: must reach the workspace, or the pack client loads layers for
   // enrichments the project switched off. Validated on the way in, the same

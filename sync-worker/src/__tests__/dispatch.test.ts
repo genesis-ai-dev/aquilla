@@ -40,6 +40,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.delete': {},
     'file.restore': {},
     'cell.backtranslation.set': { btText: 'hello', targetEventId: 'evt-tgt-1', polished: false },
+    'cell.gloss.set': { glossText: 'hello', targetEventId: 'evt-tgt-1' },
     'comment.create': { commentId: 'cmt-1', scope: { kind: 'project' }, body: 'hi', parentCommentId: null },
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
     'comment.delete': { commentId: 'cmt-1' },
@@ -165,9 +166,10 @@ describe('dispatchEvent', () => {
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
-    // + 1 validated recompute + 1 endorsement_count recompute (AD-14 pass 1)
-    // + 1 files-counter recompute (approved_count moves) = 6
-    expect(outcome.result.stmts.length).toBe(6)
+    // + 1 validated recompute + 1 reviewLanes clear (sidebar re-import)
+    // + 1 endorsement_count recompute (AD-14 pass 1)
+    // + 1 files-counter recompute (approved_count moves) = 7
+    expect(outcome.result.stmts.length).toBe(7)
     expect(outcome.result.dirtyTables).toContain('cell_validators')
     expect(outcome.result.dirtyTables).toContain('files')
   })

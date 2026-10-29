@@ -16,7 +16,7 @@ const ATOMIC_TERMS = new Set(
     'Aquilla', 'Codex', 'Honeycomb', 'Context', 'Paratext', 'Scripture Forge',
     'Door43', 'DCS', 'Gitea', 'unfoldingWord', 'Bible Aquifer', 'Aquifer',
     'Langquest', 'LangQuest', 'Modal', 'Cloudflare', 'OpenRouter', 'Neon',
-    'GitHub', 'GitLab', 'Google', 'Google Drive', 'Dropbox', 'Monday.com',
+    'GitHub', 'GitLab', 'Google', 'Google Drive', 'Dropbox', 'Monday.com', 'Airtable',
     'Kokoro', 'Gemini', 'Claude', 'OpenAI', 'Anthropic', 'ElevenLabs',
     // file + data formats
     'USFM', 'USX', 'USJ', 'IDML', 'TSV', 'CSV', 'JSON', 'JSONL', 'XML', 'YAML',

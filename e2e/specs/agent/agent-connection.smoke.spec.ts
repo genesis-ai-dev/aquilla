@@ -83,14 +83,14 @@ test("OAuth browser consent grants Act to selected current organizations only (A
   expect(credential.scope).toBe("act")
   const headers = { Authorization: `Bearer ${credential.access_token}` }
   const future = await createOrganization("OAuth future membership")
-  async function callMcp(name: string) {
+  async function callMcp(name: string, args: Record<string, unknown> = {}) {
     const response = await fetch(`${sync}/api/v1/external/mcp`, {
       method: "POST", headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: {} } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
     })
     expect(response.status).toBe(200)
     const body = await response.json() as { result: { content: { text: string }[]; isError?: boolean } }
-    expect(body.result.isError).not.toBe(true)
+    expect(body.result.isError, body.result.content[0].text).not.toBe(true)
     return JSON.parse(body.result.content[0].text)
   }
   const body = await callMcp("list_orgs") as { orgs: { id: string }[] }
@@ -99,6 +99,24 @@ test("OAuth browser consent grants Act to selected current organizations only (A
   expect(body.orgs.map(org => String(org.id))).not.toContain(String(future.id))
   expect(await callMcp("get_identity_and_scope"))
     .toMatchObject({ mode: "act", orgIds: expect.arrayContaining([String(included.id)]) })
+  const seeded = await seedProjectWithFile(jwt, { name: "OAuth artifact import", orgId: included.id })
+  const uploaded = await callMcp("upload_artifact", {
+    projectId: seeded.projectId, name: "oauth-source.txt", kind: "source",
+    contentType: "text/plain", encoding: "utf8", data: "Original OAuth import text.",
+  })
+  expect(typeof uploaded.artifactId).toBe("string")
+  const preview = await callMcp("preview_import", { projectId: seeded.projectId, artifactId: uploaded.artifactId })
+  expect(preview.totalCells).toBe(1)
+  const plan = await callMcp("prepare_import", { projectId: seeded.projectId, artifactId: uploaded.artifactId })
+  expect(plan.mode).toBe("act")
+  const committed = await callMcp("confirm_changeset", {
+    projectId: seeded.projectId, changesetId: plan.changesetId, digest: plan.digest,
+  })
+  const detail = await callMcp("get_project", { projectId: seeded.projectId })
+  const lane = detail.lanes.find((item: { role: string }) => item.role === "target")
+  expect(lane).toBeDefined()
+  const content = await callMcp("read_content", { projectId: seeded.projectId, fileId: committed.receipt.fileId, lane: lane.id })
+  expect(JSON.stringify(content)).toContain("Original OAuth import text.")
   // OAuth resource scope is separate from the user's live permission ceiling.
   expect((await fetch(`${sync}/api/v1/external/me`, { headers })).status).toBe(401)
 })

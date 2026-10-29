@@ -29,10 +29,8 @@ import { sign, verify } from "hono/jwt"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Context } from "hono"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { ROLE, type Env } from "../types"
-import { getEffectiveOrgRole } from "../services/org-permissions"
-import { resolveProjectRole } from "../services/project-permissions"
+import { authMiddleware, resolveSession, type AuthHonoEnv } from "../middleware/auth"
+import type { Env } from "../types"
 import {
   encryptMondayToken,
   decryptMondayToken,
@@ -76,7 +74,10 @@ import {
   AnalyzeUpstreamError,
   NoBoardsError,
 } from "../lib/monday/analyze"
-import { pushBoardLink, schedulePush } from "../lib/monday/push"
+import { LlmRefusedError } from "../lib/billing/paid-llm"
+import { pushBoardLink } from "../lib/monday/push"
+import { subitemMetricsFor } from "../lib/monday/subitems"
+import { schedulePush } from "../lib/integrations/push"
 import {
   addMissingColumns,
   createCleanBoard,
@@ -85,12 +86,16 @@ import {
   isCreatableMetric,
   PROJECTS_GROUP_TITLE,
 } from "../lib/monday/columns"
-import { notifySyncWorkerOfMondayLinkChange } from "../services/sync-worker-notify"
 import { secureCompare } from "../utils/secure-compare"
+import {
+  getProjectOrgId,
+  MANAGE_MIN_ROLE,
+  notifyLinkChangedBestEffort,
+  orgGuard,
+  projectGuard,
+} from "./_integration-helpers"
 
 const monday = new Hono<AuthHonoEnv>()
-
-const MANAGE_MIN_ROLE = ROLE.MAINTAINER
 
 /**
  * Public base of THIS worker, for the webhook URL Monday calls back. It must
@@ -157,49 +162,12 @@ async function orgTokenOr409(
   }
 }
 
-async function getProjectOrgId(env: Env, projectId: string): Promise<number | null> {
-  const row = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-  return row?.org_id ?? null
-}
-
 async function getLink(env: Env, projectId: string): Promise<IntegrationLinkRow | null> {
   return env.AQUILLA_PG.prepare(
     "SELECT * FROM integration_links WHERE project_id = ? AND provider = ?",
   )
     .bind(projectId, PROVIDER)
     .first<IntegrationLinkRow>()
-}
-
-/** Guard: caller must have >= minRole on the org. Returns role or an error Response. */
-async function orgGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ orgId: number } | Response> {
-  const orgId = parseInt(c.req.param("orgId") ?? "", 10)
-  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
-  const role = await getEffectiveOrgRole(c.env, orgId, c.get("user"))
-  if (role == null) return c.json({ error: "no access to org" }, 403)
-  if (minRole != null && role < minRole) {
-    return c.json({ error: `org role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { orgId }
-}
-
-/** Guard: caller must have >= minRole on the project. */
-async function projectGuard(
-  c: Context<AuthHonoEnv>,
-  minRole: number | null,
-): Promise<{ projectId: string } | Response> {
-  const projectId = c.req.param("projectId") ?? ""
-  if (!projectId) return c.json({ error: "invalid projectId" }, 400)
-  const role = await resolveProjectRole(c.env, c.get("user"), projectId)
-  if (!role) return c.json({ error: "no access to project" }, 403)
-  if (minRole != null && role.level < minRole) {
-    return c.json({ error: `project role >= maintainer (${minRole}) required` }, 403)
-  }
-  return { projectId }
 }
 
 function linkResponse(link: IntegrationLinkRow, orgConnected: boolean) {
@@ -319,6 +287,17 @@ monday.get("/oauth/callback", async (c) => {
   }
   const orgId = Number(state.orgId)
   if (!Number.isFinite(orgId)) return fail("bad_state", 401)
+
+  // [Pen test] API security (2026-10-22): the state JWT alone proves who
+  // STARTED the flow, not who is finishing it. Without this binding an
+  // attacker could start a flow for their own org and lure a victim admin
+  // through Monday's consent screen, parking the victim's Monday token on the
+  // attacker's org (OAuth login-CSRF). The SPA already holds the session, so
+  // the caller sends it and it must be the user who minted the state.
+  const session = await resolveSession(c.env, c.req.header("Authorization"))
+  if (!session.ok || session.user.username !== state.userId) {
+    return fail("session_mismatch", 401)
+  }
   const backTo =
     typeof state.backTo === "string" && isSafeAppPath(state.backTo)
       ? state.backTo
@@ -528,28 +507,6 @@ const putLinkSchema = z.object({
   enabled: z.boolean().optional(),
 })
 
-/**
- * AQU-1828: the project's DO caches "this project has no Monday link" so it
- * stops nudging identity on every edit. Any change to the link row has to drop
- * that cache, or a freshly linked project would not start pushing until the
- * DO's backstop TTL lapsed. Best-effort: `executionCtx` is absent in some test
- * harnesses, and the link row itself is already durable.
- */
-function notifyLinkChangedBestEffort(
-  c: {
-    env: Parameters<typeof notifySyncWorkerOfMondayLinkChange>[0]
-    executionCtx: { waitUntil(promise: Promise<unknown>): void }
-  },
-  projectId: string,
-): void {
-  const notifyPromise = notifySyncWorkerOfMondayLinkChange(c.env, projectId)
-  try {
-    c.executionCtx.waitUntil(notifyPromise)
-  } catch {
-    void notifyPromise
-  }
-}
-
 monday.put(
   "/projects/:projectId/link",
   authMiddleware,
@@ -571,6 +528,10 @@ monday.put(
     const structure = await fetchBoardStructure(token, body.boardId)
     const { mapping, warnings } = sanitizeMapping(body.config, structure)
     if (!mapping) return c.json({ error: "invalid config", warnings }, 400)
+    // Files as subitems: the push finds this board's subitems board and its
+    // columns afresh (lib/monday/subitems.ts); whatever came with the config
+    // was found for another link or board.
+    if (mapping.fileSubitems) mapping.fileSubitems = { columns: [] }
 
     // New rows go in an "Aquilla projects" group so they sit together, not
     // among the board's own rows. The server picks it: the AI may suggest a
@@ -675,8 +636,9 @@ async function moveItemsToGroupBestEffort(
   groupId: string,
 ): Promise<void> {
   try {
+    // Subitems live on their own board and follow their row wherever it goes.
     const items = await env.AQUILLA_PG.prepare(
-      "SELECT external_item_id FROM integration_item_links WHERE link_id = ?",
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = ? AND entity_kind <> 'subitem'",
     )
       .bind(linkId)
       .all<{ external_item_id: string }>()
@@ -693,6 +655,8 @@ async function moveItemsToGroupBestEffort(
 const patchLinkSchema = z.object({
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
+  /** Files as subitems of the project's row, on or off (the only way to change it). */
+  fileSubitems: z.boolean().optional(),
 })
 
 monday.patch(
@@ -708,6 +672,8 @@ monday.patch(
 
     const warnings: string[] = []
     let configJson: string | null = null
+    const savedMapping = sanitizeMapping(parseJsonColumn(link.config, null)).mapping
+    let nextMapping: MondayMapping | null = null
     // Set only when the board was re-read just now: replaces the link-time
     // snapshot and clears the "Board structure changed" flag.
     let freshStructureJson: string | null = null
@@ -743,8 +709,33 @@ monday.patch(
       if (!result.mapping.groupId && savedGroupId && structure?.groups.some((g) => g.id === savedGroupId)) {
         result.mapping.groupId = savedGroupId
       }
-      configJson = JSON.stringify(result.mapping)
+      // Nor file subitems: only `fileSubitems` turns them on or off, so a
+      // mapping saved by hand or proposed by the AI keeps the saved choice.
+      // When the row's columns change what a file's subitem would show, the
+      // push finds the subitem columns again.
+      const savedSubitems = savedMapping?.fileSubitems
+      delete result.mapping.fileSubitems
+      if (savedSubitems && result.mapping.itemGranularity === "project") {
+        const same = subitemMetricsFor(result.mapping).join() === subitemMetricsFor(savedMapping!).join()
+        result.mapping.fileSubitems = same ? savedSubitems : { columns: [] }
+      }
+      nextMapping = result.mapping
     }
+    let subitemsTurnedOn = false
+    if (body.fileSubitems !== undefined) {
+      const base = nextMapping ?? savedMapping
+      if (!base) return c.json({ error: "invalid config", warnings }, 400)
+      if (!body.fileSubitems) {
+        delete base.fileSubitems
+      } else if (base.itemGranularity !== "project") {
+        warnings.push("files are subitems only under one item for the whole project")
+      } else if (!base.fileSubitems) {
+        base.fileSubitems = { columns: [] }
+        subitemsTurnedOn = true
+      }
+      nextMapping = base
+    }
+    if (nextMapping) configJson = JSON.stringify(nextMapping)
 
     await c.env.AQUILLA_PG.prepare(
       `UPDATE integration_links
@@ -766,8 +757,9 @@ monday.patch(
 
     // Turning Sync back on pushes straight away: edits made while it was off
     // were never queued, so nothing else would bring the board up to date.
+    // So does turning file subitems on, so the files show up now.
     let push: Awaited<ReturnType<typeof pushBoardLink>> | undefined
-    if (body.enabled === true && !link.enabled) {
+    if ((body.enabled === true && !link.enabled) || (subitemsTurnedOn && fresh.enabled)) {
       push = await pushBoardLink(c.env, fresh)
       fresh = (await getLink(c.env, guard.projectId)) ?? fresh
     }
@@ -806,8 +798,12 @@ async function boardChanges(
       known.push({ id: column.id, title: column.title, type: column.type })
     }
   }
+  // With files as subitems the Subitems column is Aquilla's own (its first
+  // subitem is what adds it to a board without one), not one to map.
+  const ownsSubitems = parseJsonColumn<Partial<MondayMapping>>(link.config, {}).fileSubitems != null
   const newColumns = live.columns
     .filter((col) => !known.some((k) => k.id === col.id))
+    .filter((col) => !(ownsSubitems && col.type === "subtasks"))
     .map(({ id, title, type }) => ({ id, title, type }))
   const stale = newColumns.length > 0
   if (stale !== link.remote_state_stale || acknowledge.length > 0) {
@@ -934,6 +930,8 @@ monday.post(
 
     const summary = await computeProjectMetrics(c.env.AQUILLA_PG, guard.projectId, { appBaseUrl: c.env.BASE_URL })
     if (!summary) return c.json({ error: "project not found" }, 404)
+    // AQU-2063: the model calls bill the project's org, as the person asking.
+    const paidScope = { orgId, userId: c.get("user").id, projectId: guard.projectId, rail: "llm" as const }
 
     let boardId = body.boardId
     let boardName: string | null = null
@@ -941,7 +939,7 @@ monday.post(
     let structure, sampleItems
     try {
       if (!boardId) {
-        const choice = await selectBoardForProject(c.env, {
+        const choice = await selectBoardForProject(c.env, paidScope, {
           boards: await listBoards(token),
           summary,
         })
@@ -967,7 +965,7 @@ monday.post(
       : undefined
 
     try {
-      const result = await analyzeBoardMapping(c.env, {
+      const result = await analyzeBoardMapping(c.env, paidScope, {
         structure,
         sampleItems,
         summary,
@@ -987,6 +985,7 @@ monday.post(
         boardReason,
       })
     } catch (err) {
+      if (err instanceof LlmRefusedError) return c.json(err.refusal.body, err.refusal.status)
       console.error("[monday] analyze failed:", err)
       // Upstream outage gets a clear, distinct shape (the body snippet is
       // logged server-side only — never leaked to the client).

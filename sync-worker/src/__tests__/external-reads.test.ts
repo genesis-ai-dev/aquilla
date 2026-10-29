@@ -174,6 +174,97 @@ describe("external read surface", () => {
       expect(detail.settings.targetLanes).toEqual(["es"])
     })
 
+    // AQU-2192: `settings` holds only overrides, so the checks in force ride beside it.
+    describe("effective built-in checks", () => {
+      type CheckRow = { id: string; name: string; enabled: boolean; severity: string; overridden: boolean }
+      let token: string | undefined
+      beforeEach(() => {
+        token = undefined
+      })
+      async function readChecks(walled = false) {
+        token ??= await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+        const res = await handleExternalReadRequest(
+          req("/api/v1/external/projects/proj-a/settings", token),
+          walled ? { ...env(testDb), LANE_READ_WALL: "1" } : env(testDb),
+        )
+        return (await res!.json()) as {
+          settings: Record<string, unknown>
+          builtinChecks: CheckRow[]
+          builtinChecksByLane: Record<string, CheckRow[]>
+        }
+      }
+      const byId = (rows: CheckRow[], id: string) => rows.find((row) => row.id === id)!
+
+      it("lists the defaults for a project that never stored an override, without Bible checks", async () => {
+        await seedSettings({ targetLanguage: "fr" }, 1)
+        const body = await readChecks()
+        expect(body.builtinChecks).toHaveLength(18)
+        expect(byId(body.builtinChecks, "usfm-structure")).toEqual({
+          id: "usfm-structure", name: "USFM markers", enabled: true, severity: "major", overridden: false,
+        })
+        expect(byId(body.builtinChecks, "length-ratio")).toMatchObject({ enabled: false, overridden: false })
+        expect(body.builtinChecks.some((row) => row.id.startsWith("bkp:"))).toBe(false)
+        expect(body.builtinChecksByLane).toEqual({})
+        // The raw blob stays raw: PatchSettings patches against it.
+        expect(body.settings).toEqual({ targetLanguage: "fr" })
+      })
+
+      it("lays the project override over the defaults, and a lane entry over that per check", async () => {
+        await seedSettings(
+          {
+            algorithmicChecks: {
+              "usfm-structure": { enabled: false },
+              "footnote-quote-mismatch": { enabled: false, severity: "major" },
+            },
+            algorithmicChecksByLane: { es: { "usfm-structure": { enabled: true, severity: "minor" } } },
+          },
+          2,
+        )
+        const body = await readChecks()
+        expect(byId(body.builtinChecks, "usfm-structure")).toMatchObject({ enabled: false, severity: "major", overridden: true })
+        expect(byId(body.builtinChecks, "footnote-quote-mismatch")).toMatchObject({ enabled: false, severity: "major", overridden: true })
+        expect(Object.keys(body.builtinChecksByLane)).toEqual(["es"])
+        const es = body.builtinChecksByLane.es
+        expect(byId(es, "usfm-structure")).toMatchObject({ enabled: true, severity: "minor", overridden: true })
+        // Not named in the lane: falls through to the project-wide entry.
+        expect(byId(es, "footnote-quote-mismatch")).toMatchObject({ enabled: false, overridden: true })
+      })
+
+      it("lists Bible data checks only while the Bible data checks enrichment is on", async () => {
+        await seedSettings({ bibleResourcesEnabled: true }, 1)
+        expect((await readChecks()).builtinChecks.some((row) => row.id === "bkp:V1")).toBe(true)
+
+        await testDb.pg.query(`UPDATE project_settings SET settings = $1 WHERE project_id = 'proj-a'`, [
+          JSON.stringify({ bibleResourcesEnabled: true, bibleEnrichments: { checks: false } }),
+        ])
+        expect((await readChecks()).builtinChecks.some((row) => row.id.startsWith("bkp:"))).toBe(false)
+
+        // Switch unset: derived from the project's Scripture files.
+        await testDb.pg.query(`UPDATE project_settings SET settings = '{}' WHERE project_id = 'proj-a'`)
+        expect((await readChecks()).builtinChecks.some((row) => row.id.startsWith("bkp:"))).toBe(false)
+        await testDb.pg.query(`UPDATE files SET kind = 'usfm' WHERE id = 'file-x'`)
+        expect((await readChecks()).builtinChecks.some((row) => row.id === "bkp:V1")).toBe(true)
+      })
+
+      it("leaves out lanes the caller has no grant for when the wall is on", async () => {
+        await seedSettings(
+          { algorithmicChecksByLane: { fr: { capitalization: { enabled: false } }, es: { capitalization: { enabled: false } } } },
+          4,
+        )
+        await testDb.pg.query(
+          `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+            ('frlane01', 'proj-a', 'target', 'French', 'fr'),
+            ('eslane01', 'proj-a', 'target', 'Spanish', 'es')`,
+        )
+        await testDb.pg.query(
+          `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+           VALUES ('proj-a', 2, 'eslane01', 400)`,
+        )
+        expect(Object.keys((await readChecks(true)).builtinChecksByLane)).toEqual(["es"])
+        expect(Object.keys((await readChecks(false)).builtinChecksByLane).sort()).toEqual(["es", "fr"])
+      })
+    })
+
     it("a project with no settings row reads as {} at version 0", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const res = await handleExternalReadRequest(

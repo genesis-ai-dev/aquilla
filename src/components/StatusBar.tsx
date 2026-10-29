@@ -6,9 +6,21 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate, formatNumber, formatPercent } from "@/lib/i18n/format"
 import { progressPercent } from "@/lib/progress/progress-percent"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
+import { fileProgressView, type FileStats } from "@/lib/progress/file-summary-progress"
 
 interface StatusBarProps {
-  progress: { total: number; translated: number; validated: number }
+  /**
+   * AQU-2111: `recorded` / `audioValidated` are OPTIONAL and undefined means
+   * "this file has no audio figures here" — an older sync-worker, or the live
+   * count before the attachment map lands. The footer draws the audio half
+   * only when it has one, because a fabricated 0 would read as "nothing
+   * recorded" over a file where every line has a take.
+   *
+   * Media redesign: `delivers`, when someone has chosen, decides which of the
+   * figures the footer reports (`fileProgressView`). Text and audio reads the
+   * lines DONE on both halves — `validated` — and what is left of each.
+   */
+  progress: FileStats
   getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>
   projectHealth: number
   staleSourceCount?: number
@@ -27,15 +39,30 @@ export function StatusBar({
 }: StatusBarProps) {
   const { locale, t } = useI18n()
   const { total, translated, validated } = progress
+  // An Audio language's started / done lines ARE its recorded / approved ones.
+  const recorded = progress.recorded ?? (progress.delivers === "audio" ? translated : 0)
+  const audioValidated = progress.audioValidated ?? (progress.delivers === "audio" ? validated : 0)
   const unvalidated = translated - validated
+  const unvalidatedAudio = recorded - audioValidated
+  // AQU-2111: the display rule AQU-2110 settled, in the footer. A file with
+  // recordings and no target text reports its audio instead of "0 translated
+  // (0%)"; a file with both reports text as before and gains the audio
+  // badges; a text-only file is untouched. What the language delivers wins
+  // where someone has chosen (media redesign): Text never draws audio, Audio
+  // reports its recordings, and Text and audio its lines done on both halves.
+  const view = fileProgressView(progress)
+  const bothDone = view === "both" && progress.delivers === "text_and_audio"
+  const audioOnly = view === "audio"
+  const showText = !audioOnly && !bothDone
+  const showAudio = !bothDone && view !== "text" && recorded > 0
   // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
-  const fraction = progressPercent(translated, total) / 100
+  const fraction = progressPercent(bothDone ? validated : audioOnly ? recorded : translated, total) / 100
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each
   // formatted numeric token so its digits/punctuation can't be reordered.
   const totalDisplay = bidiIsolate(formatNumber(total, locale))
-  const translatedDisplay = bidiIsolate(formatNumber(translated, locale))
+  const translatedDisplay = bidiIsolate(formatNumber(audioOnly ? recorded : translated, locale))
   const pctDisplay = bidiIsolate(`(${formatPercent(fraction, locale)})`)
 
   return (
@@ -55,19 +82,38 @@ export function StatusBar({
         </HealthRing>
       </DecayBreakdown>
       <span className="flex items-center gap-2">
-        <span>
-          {t("workspace.statusBar.summary", {
-            total: totalDisplay,
-            translated: translatedDisplay,
-            pct: pctDisplay,
-          })}
+        <span data-testid="status-bar-summary">
+          {bothDone
+            ? t("workspace.statusBar.bothSummary", {
+                total: totalDisplay,
+                done: bidiIsolate(formatNumber(validated, locale)),
+                pct: pctDisplay,
+              })
+            : t(audioOnly ? "workspace.statusBar.audioSummary" : "workspace.statusBar.summary", {
+                total: totalDisplay,
+                translated: translatedDisplay,
+                pct: pctDisplay,
+              })}
         </span>
+        {/* Media redesign: Text and audio says how much of each half is left. */}
+        {bothDone && (progress.needsText ?? 0) > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-text-left">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
+            {t("workspace.statusBar.textLeftBadge", { count: bidiIsolate(formatNumber(progress.needsText ?? 0, locale)) })}
+          </Badge>
+        )}
+        {bothDone && (progress.needsAudio ?? 0) > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-audio-left">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
+            {t("workspace.statusBar.audioLeftBadge", { count: bidiIsolate(formatNumber(progress.needsAudio ?? 0, locale)) })}
+          </Badge>
+        )}
         {/* Grouped like the counts beside them ("1,207 validated", not
             "1207"); the plural form still reads the digits.
             AQU-1764: the words are in the text colour and the colour sits in
             a swatch before them, the same light and dark blue the file's bar
             in the sidebar is drawn in. They were amber and green. */}
-        {unvalidated > 0 && (
+        {showText && unvalidated > 0 && (
           <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated">
             <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
             {t("workspace.statusBar.unvalidatedBadge", {
@@ -75,11 +121,29 @@ export function StatusBar({
             })}
           </Badge>
         )}
-        {validated > 0 && (
+        {showText && validated > 0 && (
           <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated">
             <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textValidated}`} />
             {t("terminology.livingMemory.validatedCount", {
               count: bidiIsolate(formatNumber(validated, locale)),
+            })}
+          </Badge>
+        )}
+        {/* AQU-2111: the audio twins, in the palette's magenta tones — light
+            for recorded but not validated, dark for audio validated. */}
+        {showAudio && unvalidatedAudio > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated-audio">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
+            {t("workspace.statusBar.unvalidatedAudioBadge", {
+              count: bidiIsolate(formatNumber(unvalidatedAudio, locale)),
+            })}
+          </Badge>
+        )}
+        {showAudio && audioValidated > 0 && (
+          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated-audio">
+            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioValidated}`} />
+            {t("workspace.statusBar.audioValidatedBadge", {
+              count: bidiIsolate(formatNumber(audioValidated, locale)),
             })}
           </Badge>
         )}

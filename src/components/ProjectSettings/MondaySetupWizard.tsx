@@ -476,7 +476,7 @@ export function MondaySetupWizard({
     // the server pick its granularity-correct default. A new board ignores the
     // AI's proposal altogether: it was made for another board.
     const proposal = newBoard ? undefined : analysis?.proposal
-    const { itemNameTemplate: template, ...rest } = proposal ?? {
+    const { itemNameTemplate: template, fileSubitems: _proposedSubitems, ...rest } = proposal ?? {
       version: 1 as const,
       itemGranularity: granularity,
       columns: [] as MondayColumnMapping[],
@@ -491,6 +491,9 @@ export function MondaySetupWizard({
           ...rest,
           ...(keepTemplate ? { itemNameTemplate: template } : {}),
           itemGranularity: granularity,
+          // One row for the project lists its files as subitems under it; the
+          // server finds the subitem columns on the first push.
+          ...(granularity === "project" ? { fileSubitems: { columns: [] } } : {}),
           columns: newBoard ? selectedRows([], newSelected, added) : selectedRows(rows, selected, added),
         },
       })

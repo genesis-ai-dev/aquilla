@@ -189,7 +189,6 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
-  allowBulkValidateAiDrafts: false,
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -957,7 +956,9 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
-    expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
+    // The card renders nothing until its workload rows land, so the badge
+    // arrives a render after the gated container does: wait for it.
+    expect(await within(section).findByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
   })
 
   it("a maintainer can change the Team workload floor via the inline advanced toggle", async () => {
@@ -1037,7 +1038,8 @@ describe("OrgOverview Team cards follow both visibility settings (AQU-1771)", ()
 
     renderMemberOverview()
     const section = await screen.findByTestId("section-team-workload")
-    expect(within(section).getByTestId("section-visibility-badge")).toHaveTextContent(/project leads & up/i)
+    // Same as above: the badge lands with the rows, after the container.
+    expect(await within(section).findByTestId("section-visibility-badge")).toHaveTextContent(/project leads & up/i)
   })
 
   it("offers nothing below the member-list setting in the Team workload picker", async () => {
@@ -1169,6 +1171,23 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       </MemoryRouter>,
     )
   }
+
+  // AQU-1488. WHY: a member invited to one project but never to its org read
+  // "Projects 0" in these totals beside a table listing that project: the totals
+  // asked only for member orgs. The org they hold a project in is asked for too
+  // (the server counts only projects they can open).
+  it("asks for the totals of orgs where the caller only holds a project", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      { id: "pm", name: "Marathi EBL", orgId: 503, orgName: "Biblica", role: { level: 400, name: "contributor", source: "override" }, files: [] },
+    ])
+    await renderAllOrgs()
+    const { getPortfolioAggregates } = await import("@/lib/frontier/portfolio")
+    await waitFor(() => expect(vi.mocked(getPortfolioAggregates)).toHaveBeenCalled())
+    const calls = vi.mocked(getPortfolioAggregates).mock.calls
+    expect(calls.at(-1)![1]).toEqual([1, 2, 503])
+    // Only once the shared projects are known, so the tile never counts twice.
+    expect(calls.every(([, ids]) => (ids as number[]).includes(503))).toBe(true)
+  })
 
   it("surfaces the failure in the projects panel instead of a plain empty state", async () => {
     fetchAccessibleProjectsMock.mockRejectedValue(new Error("Failed to fetch"))

@@ -365,14 +365,22 @@ describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
     await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 1, 700, 1)").run()
     await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e-pa', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
     // Source cells across GEN 1, 2, 10 (dup verse in GEN 1) + a target row that
-    // must be excluded by the side filter.
+    // must be excluded by the side filter. Book-header refs (`GEN:h:1`,
+    // `GEN:mt1:1`, and `1CO:h:1` — a book code that itself contains a digit)
+    // must not become a chapter named after the book. A chapter heading
+    // (`GEN 1:s:1`) still counts as GEN 1.
     await env.AQUILLA_PG.prepare(
       `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
         ('pa','f1','c1','source','x','e-pa',1,'GEN 1:1'),
         ('pa','f1','c2','source','x','e-pa',1,'GEN 1:2'),
         ('pa','f1','c3','source','x','e-pa',1,'GEN 2:1'),
         ('pa','f1','c4','source','x','e-pa',1,'GEN 10:1'),
-        ('pa','f1','c5','target','y','e-pa',1,'GEN 1:1')`,
+        ('pa','f1','c5','target','y','e-pa',1,'GEN 1:1'),
+        ('pa','f1','c6','source','x','e-pa',1,'GEN:h:1'),
+        ('pa','f1','c7','source','x','e-pa',1,'GEN:mt1:1'),
+        ('pa','f1','c8','source','x','e-pa',1,'GEN 1:s:1'),
+        ('pa','f1','c9','source','x','e-pa',1,'1CO:h:1'),
+        ('pa','f1','c10','source','x','e-pa',1,'1CO 1:1')`,
     ).run()
 
     const res = await app.request(
@@ -383,7 +391,8 @@ describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { chapters: string[] }
     // Distinct + NATURAL sort: GEN 1, GEN 2, GEN 10 (not lexical 1, 10, 2).
-    expect(body.chapters).toEqual(["GEN 1", "GEN 2", "GEN 10"])
+    // No bare "GEN" or "1CO" from the header lines. 1CO 1 is a real chapter.
+    expect(body.chapters).toEqual(["1CO 1", "GEN 1", "GEN 2", "GEN 10"])
 
     const denied = await app.request(
       "/api/v2/projects/pa/files/f1/chapters",
@@ -391,6 +400,31 @@ describe("GET /api/v2/projects/:projectId/files/:fileId/chapters", () => {
       env,
     )
     expect(denied.status).toBe(403)
+  })
+
+  it("keeps a one-chapter book's bare code, which is its chapter 1", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Titus', 1, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e-pa', 1, 'pa', 'file.create', 'wendi', '{}', 1000, 1000, 1)").run()
+    // Titus verses are "TIT:4" (no chapter number). The header "TIT:h:1" cuts
+    // to the same key. That lone bare code is chapter 1, not front matter.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref) VALUES
+        ('pa','f1','c1','source','x','e-pa',1,'TIT:4'),
+        ('pa','f1','c2','source','x','e-pa',1,'TIT:h:1')`,
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/projects/pa/files/f1/chapters",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { chapters: string[] }
+    expect(body.chapters).toEqual(["TIT"])
   })
 })
 

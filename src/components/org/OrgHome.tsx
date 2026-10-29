@@ -11,7 +11,7 @@ import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-
 import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, portfolioDeliversText, progressPct, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { emptyPortfolioAggregate } from "@/lib/frontier/portfolio-metrics"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
@@ -303,10 +303,12 @@ export function sortProjectsByLens(projects: PortfolioProjectRow[], lens: Projec
     switch (lens) {
       case "recent":
         return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0) || a.name.localeCompare(b.name)
+      // Media redesign slice 1: progress by what each language delivers —
+      // the translated share for a Text project, as before.
       case "least-translated":
-        return translatedPct(a) - translatedPct(b) || a.name.localeCompare(b.name)
+        return progressPct(a) - progressPct(b) || a.name.localeCompare(b.name)
       case "most-progress":
-        return translatedPct(b) - translatedPct(a) || a.name.localeCompare(b.name)
+        return progressPct(b) - progressPct(a) || a.name.localeCompare(b.name)
       case "name":
         return a.name.localeCompare(b.name)
       case "pm": {
@@ -489,13 +491,25 @@ export function ProjectTable({
                   />
                 </span>
 
-                <span
-                  data-testid="project-table-translated-value"
-                  className="justify-self-start text-start font-medium tabular-nums text-foreground"
-                  aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
-                >
-                  {tpct}%
-                </span>
+                {portfolioDeliversText(p) ? (
+                  <span
+                    data-testid="project-table-translated-value"
+                    className="justify-self-start text-start font-medium tabular-nums text-foreground"
+                    aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
+                  >
+                    {tpct}%
+                  </span>
+                ) : (
+                  // Media redesign slice 1: a project whose languages all
+                  // deliver audio has no text to translate.
+                  <span
+                    data-testid="project-table-translated-value"
+                    className="justify-self-start text-start text-muted-foreground"
+                    aria-label={t("org.orgHome.table.noTextToTranslateAria")}
+                  >
+                    —
+                  </span>
+                )}
                 <span
                   data-testid="project-table-validated-value"
                   className="justify-self-start text-start tabular-nums text-muted-foreground"
@@ -524,6 +538,7 @@ export function OrgHome() {
   const orgSummaryColumns = useOrgSummaryColumns()
   const {
     orgs,
+    guestOrgs,
     accessibleProjects,
     accessibleProjectsLoading,
     accessibleProjectsError,
@@ -543,9 +558,19 @@ export function OrgHome() {
   // perfectly good org route if this view is reused.
   const isAllOrgsRoute = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
   const jwt = session?.jwt ?? null
-  const portfolioScopeKey = !jwt || orgLoading
+  // AQU-1488: the totals cover the orgs where the caller only holds a project
+  // (guest orgs) too. A project-only member — invited to one project, never to
+  // its org — read "Projects 0" here beside a table listing that project. The
+  // server counts each project only if the caller can open it, so this adds
+  // exactly the projects they were given. Guest orgs come from the project
+  // directory, so the totals wait for it rather than counting twice.
+  const portfolioOrgIds = useMemo(
+    () => [...new Set([...orgs, ...guestOrgs].map((org) => org.id))].sort((a, b) => a - b),
+    [orgs, guestOrgs],
+  )
+  const portfolioScopeKey = !jwt || orgLoading || accessibleProjectsLoading
     ? null
-    : `all:${orgs.map((org) => org.id).sort((a, b) => a - b).join(",")}`
+    : `all:${portfolioOrgIds.join(",")}`
 
   const [aggregates, setAggregates] = useState<PortfolioAggregates | null>(null)
   // AQU-326: unredeemed invites addressed to the caller's email — without
@@ -593,7 +618,7 @@ export function OrgHome() {
     setError(null)
     // Overview totals come from the summary endpoint. The project table stays
     // on the paged directory below; this must not download every project.
-    getPortfolioAggregates(jwt, orgs.map((org) => org.id))
+    getPortfolioAggregates(jwt, portfolioOrgIds)
       .then((summary) => {
         if (!cancelled) setAggregates(summary)
       })
@@ -609,7 +634,7 @@ export function OrgHome() {
         if (!cancelled) setResolvedPortfolioScopeKey(portfolioScopeKey)
       })
     return () => { cancelled = true }
-  }, [jwt, orgLoading, orgs, portfolioScopeKey])
+  }, [jwt, orgLoading, orgs, portfolioOrgIds, portfolioScopeKey])
 
   // AQU-326: received-invites surface. Org-independent (matched by email).
   useEffect(() => {

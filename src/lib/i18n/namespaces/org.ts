@@ -171,6 +171,9 @@ export const org = defineNamespace({
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
     "org.laneChips.ariaLabel": "{label}: {pct} translated",
+    // Media redesign slice 1: the same chip for a language that delivers audio.
+    "org.laneChips.recordedTooltip": "{label} — {pct} recorded",
+    "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
     "org.orgHome.signedOut.heading": "Sign in to see your workspace",
@@ -197,6 +200,14 @@ export const org = defineNamespace({
     "org.orgHome.dueDate": "Due {date}",
     "org.orgHome.pctTranslated": "{pct}% translated",
     "org.orgHome.pctValidated": "{pct}% validated",
+    "org.orgHome.pctRecorded": "{pct}% recorded",
+    // AQU-2178 / AQU-2179: the two halves of "{pct}% validated", for the rows
+    // that sit under no column headings and so must name their own figures —
+    // the project overview's archived languages, and the org projects table's
+    // expanded per-language rows. A row prints only the halves its language
+    // owes, so neither key ever stands in for a missing figure.
+    "org.orgHome.pctTextValidated": "{pct}% text validated",
+    "org.orgHome.pctAudioValidated": "{pct}% audio validated",
     // AQU-883: the project directory backs shared/guest projects; its failure used to
     // be indistinguishable from an empty list, so it gets its own announced state.
     "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
@@ -274,11 +285,20 @@ export const org = defineNamespace({
     "org.orgHome.table.validatedHeaderLabel": "Validated",
     "org.orgHome.table.validatedHeaderDescription":
       "Validated: percentage of cells marked validated by a reviewer.",
+    // AQU-2178: the project overview's Languages table splits that one heading
+    // in two — a language's validated TEXT under this one, its approved
+    // recordings under org.projectOverview.audioValidated, whose tile on the
+    // same page shows the very same figure. Title case follows those tiles, so
+    // the pair reads alike wherever both are on screen.
+    "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
     "org.orgHome.table.audioHeaderDescription":
       "Audio: percentage of cells with at least one recording attached.",
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
+    // Media redesign slice 1: a project whose languages all deliver audio has
+    // no text to translate; its Translated cell shows a dash with this name.
+    "org.orgHome.table.noTextToTranslateAria": "No text to translate: this project delivers audio",
 
     // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
@@ -407,6 +427,16 @@ export const org = defineNamespace({
     "org.teamDetail.addMemberButton": "Add member",
     "org.teamDetail.removeAriaLabel": "Remove {name}",
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
+    // AQU-2238: direct invite-to-team for someone who is not an org member.
+    "org.teamDetail.outsideOrgLabel": "Invite someone outside the organization",
+    "org.teamDetail.outsideOrgPlaceholder": "Username or email",
+    "org.teamDetail.outsideOrgScopeWithProjects":
+      "Someone outside the organization joins this team only, and reaches its projects: {projects}. They are not added to the organization's member list and see nothing else.",
+    "org.teamDetail.outsideOrgScopeNoProjects":
+      "Someone outside the organization joins this team only. No project is attached to this team yet, so they will see nothing until one is. They are not added to the organization's member list.",
+    "org.teamDetail.outsideOrgRole": "Outside org",
+    "org.teamDetail.outsideOrgRoleTooltip":
+      "Not on this organization's member list. They reach only the projects attached to the teams they are on.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
     "org.teamDetail.couldntBeAddedFallback": "couldn't be added",
     // "Adding…" → common.adding (identical text)
@@ -494,6 +524,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentEdit": "Edited a comment",
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
+    "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -980,6 +1011,7 @@ export const org = defineNamespace({
     "org.assignedToMe.emptyTitle": "You have no open assignments.",
     "org.assignedToMe.loadingLabel": "Loading assignments",
     "org.assignedToMe.cellsProgress": "{done}/{total} cells · {pct}%",
+    "org.assignedToMe.cellsProgressHint": "{done} of the {total} cells in this assignment are done. The count covers only this assignment, not the whole file.",
 
     // -- SectionVisibilityBadge: "who can see this section" affordance --
     "org.sectionVisibilityBadge.floorEveryone": "Everyone can see this",
@@ -1010,6 +1042,8 @@ export const org = defineNamespace({
     "org.workloadRollup.title": "Team workload",
     "org.workloadRollup.removeTooltip": "Remove this assignment",
     "org.workloadRollup.removeAriaLabel": "Remove assignment: {scope} ({user})",
+    "org.workloadRollup.removeConfirmAriaLabel": "Confirm removing assignment: {scope} ({user})",
+    "org.workloadRollup.removeCancelAriaLabel": "Cancel removing assignment: {scope} ({user})",
     "org.workloadRollup.unknownUser": "User {id}",
     "org.workloadRollup.removeErrorGeneric":
       "Can't remove this assignment — it has no resolved cells to route through.",
@@ -1142,6 +1176,13 @@ export const org = defineNamespace({
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
     "org.membersPanel.scopesToggleLabel": "Scopes",
     "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
+    // AQU-2054: a project lead can be limited to lanes, and can grant only
+    // the lanes they hold. Someone who already has every lane stays read-only
+    // for that caller, because changing them would remove other languages.
+    "org.membersPanel.leadEveryLane": "Every lane",
+    "org.membersPanel.leadLaneChangeHint": "This includes languages you don't hold, so it can't be changed here.",
+    "org.membersPanel.grantOnlyYourLanes": "You can grant only the lanes you hold. Lanes you don't hold stay as they are.",
+    "org.membersPanel.cannotGrantEveryLane": "Leave at least one lane. Clearing every lane would give access to every language.",
     "org.membersPanel.lanesLegend": "Lanes",
     "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
@@ -1440,8 +1481,8 @@ export const org = defineNamespace({
     // the row's hidden popover anchor already carries that, and two buttons
     // with one name in a row tell a screen-reader user nothing apart.
     "org.overviewLaneTable.peopleCellAriaLabel": "People on {lane}",
-    "org.overviewLaneTable.sectionDescription":
-      "Progress, people, and actions for each target language on this project.",
+    // AQU-2180: the card's subtitle is gone — no sibling card on the project
+    // overview carries one, so its string went with it.
 
     // -- ProjectOverview: per-project overview page (most already i18n'd) --
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
@@ -1728,6 +1769,25 @@ export const org = defineNamespace({
     "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
     "org.projectOverview.plan.moreAssignees": "{count} more",
 
+    // -- AQU-1969: a Validate assignment's own-approval progress, in words. One
+    // renderer (use-validation-progress.ts) for the plan inspector, the Team
+    // card and the org's Team workload. --
+    "org.validationProgress.validated": "Validated {validated} of {total}",
+    "org.validationProgress.textValidated": "Text validated {validated} of {total}",
+    "org.validationProgress.audioValidated": "Audio validated {validated} of {total}",
+    "org.validationProgress.left": plural({ one: "{count} left", other: "{count} left" }),
+    "org.validationProgress.changedSince": plural({ one: "{count} changed since", other: "{count} changed since" }),
+    "org.validationProgress.waitingOnTranslation": plural({
+      one: "waiting on translation ({count})",
+      other: "waiting on translation ({count})",
+    }),
+    "org.validationProgress.waitingOnRecording": plural({
+      one: "waiting on a recording ({count})",
+      other: "waiting on a recording ({count})",
+    }),
+    "org.validationProgress.kindChip": "Validating",
+    "org.validationProgress.heading": "Validation assignments",
+
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
     // defined above (they were pre-seeded for this exact file); only
@@ -1994,6 +2054,31 @@ export const org = defineNamespace({
         description: "Second line of the project-row deadline tooltip on OrgHome, naming the exact due date.",
         placeholders: { date: "Already-formatted deadline date (e.g. 'Jan 1, 2020')." },
       },
+      "org.orgHome.table.noTextToTranslateAria": {
+        description:
+          "Accessible name of the em dash shown in a project row's Translated cell when every language of the project delivers audio, so there is no text to translate.",
+      },
+      "org.laneChips.recordedTooltip": {
+        description:
+          "Tooltip on a per-lane progress chip for a language that delivers audio: the share of its lines that have a recording. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.laneChips.recordedAriaLabel": {
+        description:
+          "Accessible name for a per-lane progress chip of a language that delivers audio. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.orgHome.pctRecorded": {
+        description:
+          "Accessible name for a language's progress figure when that language delivers audio: the share of its lines that have a recording.",
+        placeholders: { pct: "Whole-number recorded percentage, e.g. 40." },
+      },
       "org.orgHome.pctTranslated": {
         description:
           "Percentage-translated figure on OrgHome — used both as the org-card summary line ('{pct}% translated') and as the accessible name for a project row's translated-percent cell.",
@@ -2003,6 +2088,27 @@ export const org = defineNamespace({
         description:
           "Percentage-validated figure on OrgHome — used both as the org-card summary line ('{pct}% validated') and as the accessible name for a project row's validated-percent cell.",
         placeholders: { pct: "Whole-number validated percentage, e.g. 20." },
+      },
+      "org.orgHome.pctTextValidated": {
+        description:
+          "A language's validated-TEXT figure on the rows that carry no column " +
+          "headings — the project overview's archived languages, and the org projects " +
+          "table's expanded per-language rows. Unlike the Languages table's 'Text " +
+          "Validated' header this one names itself in a short lower-case phrase after " +
+          "the percentage. 'text' distinguishes it from the audio figure beside it " +
+          "(org.orgHome.pctAudioValidated) — the share of the language's lines whose " +
+          "TRANSLATION a reviewer has signed off, not its recordings. Shown only for a " +
+          "language that delivers text.",
+        placeholders: { pct: "Whole-number text-validated percentage, e.g. 20." },
+      },
+      "org.orgHome.pctAudioValidated": {
+        description:
+          "A language's approved-RECORDINGS figure on the rows that carry no column " +
+          "headings, the twin of org.orgHome.pctTextValidated and shown only for a " +
+          "language that owes audio. 'audio' distinguishes it from the text figure " +
+          "beside it — the share of the language's lines whose RECORDING a reviewer has " +
+          "approved, not its translations.",
+        placeholders: { pct: "Whole-number audio-validated percentage, e.g. 20." },
       },
       "org.orgHome.organizationsPanel.countFraction": {
         description:
@@ -2153,6 +2259,11 @@ export const org = defineNamespace({
         description:
           "Accessible name for a 'remove' control on TeamDetail — used both for a staged-member chip's × button and for a team member row's Remove action. {name} is whichever person's username is being removed.",
         placeholders: { name: "Username of the person the control removes — not translated." },
+      },
+      "org.teamDetail.outsideOrgScopeWithProjects": {
+        description:
+          "AQU-2238: scope sentence under the 'invite someone outside the organization' field in the team add-member dialog, naming exactly what the guest will and won't reach (AQU-1030). {projects} is the team's attached projects. The no-project wording is a separate key.",
+        placeholders: { projects: "The team's attached project names, joined as a localized list — project names are not translated." },
       },
       "org.teamDetail.addErrorPrefix": {
         description:
@@ -2773,6 +2884,15 @@ export const org = defineNamespace({
           pct: "Whole-number completion percentage, e.g. 40.",
         },
       },
+      "org.assignedToMe.cellsProgressHint": {
+        description:
+          "Tooltip on the progress caption in the 'Assigned to me' inbox, saying what the " +
+          "count is out of: the cells in that one assignment, not the whole file.",
+        placeholders: {
+          done: "Whole-number count of cells completed in this assignment.",
+          total: "Whole-number count of cells in this assignment's scope.",
+        },
+      },
       "org.orgHome.teamVisibilityRosterFloorHint": {
         description:
           "Note in the org overview's Team workload and Team usage visibility popovers, expanded from a small circled-i button when the options below the member-list setting are greyed out. Explains why (the cards show people by name, so they can't be more open than the member list) and where to lower the member list first. 'Settings → Security' is the org settings page — use its localized name.",
@@ -2876,6 +2996,25 @@ export const org = defineNamespace({
         placeholders: {
           scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
           user: "The assignee's username, or the localized org.workloadRollup.unknownUser fallback.",
+        },
+      },
+      "org.workloadRollup.removeConfirmAriaLabel": {
+        description:
+          "Accessible name for the red Confirm button (common.confirm) that the small × on an assignment row turns " +
+          "into, beside a Cancel button. Clicking it removes the assignment. Starts with the visible word, then says " +
+          "which assignment, so a screen reader says what the click will do.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
+          user: "The assignee's username, or the localized fallback when it isn't known.",
+        },
+      },
+      "org.workloadRollup.removeCancelAriaLabel": {
+        description:
+          "Accessible name for the Cancel button (common.cancel) beside the red Confirm when removing an assignment: " +
+          "it turns both back into the × and removes nothing. Starts with the visible word, then says which assignment.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
+          user: "The assignee's username, or the localized fallback when it isn't known.",
         },
       },
       "org.workloadRollup.unknownUser": {
@@ -3947,6 +4086,59 @@ export const org = defineNamespace({
         description:
           "Overflow chip closing a truncated row of assignee avatars: how many people the row could not fit.",
         placeholders: { count: "Assignees not shown — a number." },
+      },
+      "org.validationProgress.validated": {
+        description:
+          "Head of a validator's progress line (AQU-1969): how many of the lines this person was asked to validate carry THEIR OWN approval of the current wording — not whether someone else approved them. 'Ana · Deuteronomy 1–10 · Validated 34 of 40 · 6 left'. Shown when there are no recordings to judge.",
+        placeholders: {
+          validated: "Lines this person has approved as they read now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.textValidated": {
+        description:
+          "The same head as org.validationProgress.validated, used when the line beneath it reports recordings too, so the written text names itself.",
+        placeholders: {
+          validated: "Lines whose text this person has approved as it reads now — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.audioValidated": {
+        description:
+          "Head of a validator's recordings line: how many lines' recordings carry this person's own approval.",
+        placeholders: {
+          validated: "Lines whose recording this person has approved — a number, already formatted.",
+          total: "Lines theirs to approve — a number, already formatted.",
+        },
+      },
+      "org.validationProgress.left": {
+        description:
+          "Middle term of a validator's progress line: lines ready for them to approve that they have not approved yet. Follows the head after a middle dot.",
+        placeholders: { count: "Lines still to approve — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.changedSince": {
+        description:
+          "Term of a validator's progress line: lines this person HAD approved whose wording (or recording) changed afterwards, so their approval no longer counts. Short for 'changed since they approved'; part of the 'left' count before it.",
+        placeholders: { count: "Lines changed since this person approved them — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnTranslation": {
+        description:
+          "Last term of a validator's text line: lines with no translation yet, so nothing to approve — the translator's backlog, not the validator's. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not translated yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.waitingOnRecording": {
+        description:
+          "Last term of a validator's recordings line: lines nobody has recorded yet, so there is nothing to approve. Lower case: it follows the other terms on the same line.",
+        placeholders: { count: "Lines not recorded yet — a number; it also selects the plural form." },
+      },
+      "org.validationProgress.kindChip": {
+        description:
+          "Small chip beside a person's name in the plan inspector's 'Assigned to' list: this person was given only the validating of these lines, not the translating.",
+        maxLength: 16,
+      },
+      "org.validationProgress.heading": {
+        description:
+          "Small heading over the list of validate-only assignments on the project Team card and the org's Team workload, each line showing how much of their own approving a person has done.",
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

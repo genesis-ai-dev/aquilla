@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { spliceFootnoteText } from "./splice"
+import { insertFootnoteMarkerAtAnchor, spliceFootnoteText } from "./splice"
 import { extractUsfmFootnotes } from "./extract"
 
 describe("spliceFootnoteText", () => {
@@ -106,5 +106,83 @@ describe("spliceFootnoteText", () => {
       const result = spliceFootnoteText(text, 1, "two quoted")
       expect(result).toBe("a \\f + \\fr 1:1 \\ft one\\f* b \\f + \\fr 1:2 \\ft two quoted\\f* c")
     })
+  })
+})
+
+// AQU-2206: the Add Footnote dialog previews the marker right after the anchored
+// phrase, then the row commits the stored text itself because the dialog's text
+// field pulled focus out of the cell and unmounted the editor. That commit used
+// to APPEND the marker, so every footnote added this way landed at the end of
+// the cell and the preview was a lie.
+describe("insertFootnoteMarkerAtAnchor", () => {
+  const MARKER = "\\f + \\fr 1:3 \\ft luz: note\\f*"
+
+  it("splices the marker where the preview showed it, not at the end of the cell", () => {
+    const cell = "Y dijo Dios: Sea la luz; y fue la luz."
+    const result = insertFootnoteMarkerAtAnchor(cell, MARKER, {
+      previewBefore: "Y dijo Dios: Sea la luz",
+    })
+    expect(result).toBe(`Y dijo Dios: Sea la luz${MARKER}; y fue la luz.`)
+  })
+
+  it("reproduces the preview exactly: previewBefore + marker + previewAfter", () => {
+    const previewBefore = "Y dijo Dios: Sea la luz"
+    const previewAfter = "; y fue la luz."
+    const result = insertFootnoteMarkerAtAnchor(previewBefore + previewAfter, MARKER, { previewBefore })
+    expect(result).toBe(`${previewBefore}${MARKER}${previewAfter}`)
+  })
+
+  it("appends when there is no anchor (the row reached by hover alone)", () => {
+    const cell = "Y dijo Dios: Sea la luz."
+    expect(insertFootnoteMarkerAtAnchor(cell, MARKER, null)).toBe(`${cell}${MARKER}`)
+    expect(insertFootnoteMarkerAtAnchor(cell, MARKER, undefined)).toBe(`${cell}${MARKER}`)
+    expect(insertFootnoteMarkerAtAnchor(cell, MARKER, {})).toBe(`${cell}${MARKER}`)
+  })
+
+  it("appends for an end-of-cell anchor, whose preview is the whole cell", () => {
+    const cell = "Y dijo Dios: Sea la luz."
+    const result = insertFootnoteMarkerAtAnchor(cell, MARKER, { previewBefore: cell })
+    expect(result).toBe(`${cell}${MARKER}`)
+  })
+
+  it("inserts at the very start when the anchor sits before the first character", () => {
+    const cell = "Y dijo Dios."
+    expect(insertFootnoteMarkerAtAnchor(cell, MARKER, { previewBefore: "" })).toBe(`${MARKER}${cell}`)
+  })
+
+  it("keeps an existing footnote whole and parseable when adding a second one", () => {
+    const first = "\\f + \\fr 1:3 \\ft first note\\f*"
+    const cell = `Y dijo Dios${first}: Sea la luz; y fue la luz.`
+    const result = insertFootnoteMarkerAtAnchor(cell, MARKER, {
+      previewBefore: `Y dijo Dios${first}: Sea la luz`,
+    })
+    const footnotes = extractUsfmFootnotes(result)
+    expect(footnotes).toHaveLength(2)
+    expect(footnotes[0].text).toBe("first note")
+    expect(footnotes[1].text).toBe("luz: note")
+    // Document order, so the chapter numbering stays 1, 2.
+    expect(footnotes[0].index).toBeLessThan(footnotes[1].index)
+  })
+
+  it("never splices inside an existing \\f...\\f* span — it lands past the note", () => {
+    const first = "\\f + \\fr 1:3 \\ft first note\\f*"
+    const cell = `Dios${first} dijo`
+    // An offset that falls in the middle of the existing marker's raw text.
+    const result = insertFootnoteMarkerAtAnchor(cell, MARKER, {
+      previewBefore: `Dios${first.slice(0, 10)}`,
+    })
+    expect(result).toBe(`Dios${first}${MARKER} dijo`)
+    expect(extractUsfmFootnotes(result)).toHaveLength(2)
+  })
+
+  it("falls back to appending when the cell changed under the open dialog", () => {
+    // A remote edit landed between opening the dialog and pressing Add, so the
+    // previewed prefix no longer describes this text. Appending is wrong by the
+    // old amount; splicing at a stale offset would corrupt the other edit.
+    const cell = "Y dijo Dios: Hubo luz; y fue la luz."
+    const result = insertFootnoteMarkerAtAnchor(cell, MARKER, {
+      previewBefore: "Y dijo Dios: Sea la luz",
+    })
+    expect(result).toBe(`${cell}${MARKER}`)
   })
 })

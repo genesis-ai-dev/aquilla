@@ -53,6 +53,7 @@ import {
   getMyAssignments,
   getProjectAssignmentRoster,
   getProjectUnitAssignees,
+  getProjectValidationAssignments,
   getUnitAssignments,
   resolveTargetLaneId,
 } from "../services/assignments"
@@ -91,6 +92,7 @@ import {
   parseScopeLanes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 import {
   notifySyncWorkerOfMemberRemoval,
   notifySyncWorkerOfMemberRoleChange,
@@ -109,8 +111,8 @@ import { readLaneTag } from "../../../db/shared/lane-ref"
 import { countedFileSql } from "../../../db/shared/counted-files"
 import { readDeclaredLanguages } from "../../../db/shared/file-declared-languages"
 import { loadRosterOrigins, type RosterOrigin } from "../services/roster-origins"
-import { markProjectMondayLinksDirty } from "../../../db/shared/monday-dirty"
-import { pushDirtyLinksAfterResponse } from "../lib/monday/push"
+import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirty"
+import { pushDirtyLinksAfterResponse } from "../lib/integrations/push"
 import { ViewerScope, redactOrgCrumbs } from "../services/access-payload"
 
 const projects = new Hono<AuthHonoEnv>()
@@ -140,8 +142,11 @@ interface FileProjection {
   anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
-  /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
+  /** Sidebar folder. Read from files.meta, or recovered from a Biblica profile on the file or its cells. */
   corpusMarker?: string
+  /** Importer profile stamped on parserVersion, without the @version suffix.
+   *  Re-import uses it to reopen the same importer. */
+  importProfile?: string
   /** AQU-1569: hand-placed position within the file's sidebar group, from
    *  files.meta.sortIndex. Fractional on purpose; absent until someone
    *  reorders that group, which is what keeps an untouched project sorting
@@ -197,9 +202,17 @@ interface FileProjection {
 // check" about corrected episodes) — and both had the same shape: the client
 // mapped a field no route ever produced, and nothing anywhere could notice.
 // A direct test over a seeded row is the thing that notices.
+//
+// `recoverCellProfiles` reads `cells` for files whose meta never recorded an
+// import profile. Only the single-project route asks for it (AQU-2281): the
+// open workspace's sidebar folders and re-import menu are the only readers,
+// and they read GET /api/v2/projects/:id. The list route serves session boot
+// across every accessible project, where even a bounded probe per file is
+// tens of thousands of cell reads.
 export async function loadFilesByProject(
   env: AuthHonoEnv["Bindings"],
   projectIds: string[],
+  options: { recoverCellProfiles?: boolean } = {},
 ): Promise<Map<string, FileProjection[]>> {
   const byProject = new Map<string, FileProjection[]>()
   if (!env.AQUILLA_PG || projectIds.length === 0) return byProject
@@ -235,6 +248,7 @@ export async function loadFilesByProject(
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
     let corpusMarker: string | undefined
+    let importProfile: string | undefined
     let sortIndex: number | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
@@ -273,6 +287,7 @@ export async function loadFilesByProject(
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
+        importProfile = importProfileFrom(m.parserVersion)
         // AQU-1569: only a finite number is a position. A string / NaN /
         // Infinity in the blob reads as "never reordered" rather than being
         // forwarded for the client's comparator to choke on.
@@ -321,6 +336,7 @@ export async function loadFilesByProject(
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(corpusMarker ? { corpusMarker } : {}),
+      ...(importProfile ? { importProfile } : {}),
       // Not a truthiness check: 0 is a perfectly ordinary position (it is what
       // a renumber stamps on the first file), and `...(0 ? …)` would drop it.
       ...(sortIndex !== undefined ? { sortIndex } : {}),
@@ -337,8 +353,62 @@ export async function loadFilesByProject(
     })
     byProject.set(f.project_id, list)
   }
+
+  // Older Biblica imports stamped the profile on every source cell and left
+  // files.meta empty, so the sidebar had no folder and re-import opened the
+  // general upload. One source cell's profile is enough, and only files that
+  // never recorded a parserVersion are looked up.
+  //
+  // AQU-2281: each file reads its first few source cells in index order and
+  // stops there. Asking for "any stamped source cell" instead read every
+  // source cell of every file that has none — nearly all of them — which cost
+  // GET /api/v2/projects 30–90 s. Every imported source cell carries the
+  // stamp, so the first few find it; the margin past one covers a cell added
+  // by hand that sorts ahead of the imported ones.
+  const missingProfile = options.recoverCellProfiles
+    ? [...byProject.values()].flat().filter((file) => !file.importProfile)
+    : []
+  if (missingProfile.length > 0) {
+    const fileIds = missingProfile.map((file) => file.id)
+    const filePlaceholders = fileIds.map(() => "?").join(",")
+    const profileRows = await env.AQUILLA_PG.prepare(
+      `SELECT f.id AS file_id,
+              (SELECT s.profile_id
+                 FROM (SELECT c.metadata->'aquillaImport'->>'profileId' AS profile_id
+                         FROM cells c
+                        WHERE c.project_id = f.project_id
+                          AND c.file_id = f.id
+                          AND c.side = 'source'
+                        ORDER BY c.lane_id, c.cell_id
+                        LIMIT ${CELL_PROFILE_PROBE_ROWS}) s
+                WHERE s.profile_id IS NOT NULL
+                LIMIT 1) AS profile_id
+         FROM files f
+        WHERE f.project_id IN (${placeholders})
+          AND f.id IN (${filePlaceholders})`,
+    )
+      .bind(...projectIds, ...fileIds)
+      .all<{ file_id: string; profile_id: string }>()
+    const profileByFile = new Map<string, string>()
+    for (const row of profileRows.results ?? []) {
+      const id = row.profile_id?.trim()
+      if (id) profileByFile.set(row.file_id, id)
+    }
+    for (const file of missingProfile) {
+      const profile = profileByFile.get(file.id)
+      if (!profile) continue
+      file.importProfile = profile
+      if (!file.corpusMarker) {
+        const folder = BIBLICA_PROFILE_FOLDERS[profile]
+        if (folder) file.corpusMarker = folder
+      }
+    }
+  }
   return byProject
 }
+
+/** Source cells read per file when recovering a legacy import profile. */
+const CELL_PROFILE_PROBE_ROWS = 8
 
 function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
   return value === "ltr" || value === "rtl" ? value : undefined
@@ -349,6 +419,12 @@ const BIBLICA_PROFILE_FOLDERS: Readonly<Record<string, string>> = {
   "builtin:biblica-treasure-hunt": "Treasure Hunt Bible",
   "builtin:biblica-reach4life": "Reach 4 Life",
   "builtin:biblica-ebl": "Equipping Biblical Leaders",
+}
+
+function importProfileFrom(parserVersion: unknown): string | undefined {
+  if (typeof parserVersion !== "string") return undefined
+  const id = parserVersion.split("@")[0]?.trim()
+  return id || undefined
 }
 
 function resolveCorpusMarker(explicit: unknown, parserVersion: unknown): string | undefined {
@@ -807,7 +883,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
 
   if (!row) return c.json({ error: "not found" }, 404)
 
-  const filesByProject = await loadFilesByProject(c.env, [projectId])
+  const filesByProject = await loadFilesByProject(c.env, [projectId], { recoverCellProfiles: true })
   const files = filesByProject.get(projectId) ?? []
 
   // AQU-1559: a link that follows a fixed list of the upstream's files, and how
@@ -1092,7 +1168,7 @@ projects.patch("/:projectId/deadline", authMiddleware, zValidator("json", deadli
   // AQU-1770: a linked Monday board can show the deadline. Mark the link dirty
   // and push it straight after the response, like the settings that move the
   // board's numbers.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, deadlineAt: deadline })
 })
@@ -1196,7 +1272,7 @@ projects.patch("/:projectId/pm", authMiddleware, zValidator("json", pmBody), asy
     .run()
   if (raised) notifyRoleChangeBestEffort(c, projectId, raised)
   // AQU-1770: a linked Monday board can show the project manager.
-  await markProjectMondayLinksDirty(c.env.AQUILLA_PG, [projectId])
+  await markProjectSyncLinksDirty(c.env.AQUILLA_PG, [projectId])
   pushDirtyLinksAfterResponse(c, { projectIds: [projectId] })
   return c.json({ ok: true, pm })
 })
@@ -1237,7 +1313,9 @@ projects.get("/:projectId/assignments/given", authMiddleware, async (c) => {
  * GET /api/v2/projects/:projectId/assignments/all — per-assignee open workload
  * + derived progress for THIS project (the overview's Team card). Returns the
  * same AssigneeWorkload shape as the org workload endpoint so the client can
- * reuse the same rendering logic.
+ * reuse the same rendering logic. AQU-1969: `roster` is translate work only;
+ * `validations` lists each open validate assignment with the assignee's own
+ * approvals, furthest behind first.
  *
  * AQU-1771: gated on the member-progress AND roster floors, like
  * /assignments/unit below — not on a hard Maintainer floor. The Team card shows
@@ -1264,8 +1342,13 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   )
   if (denial) return c.json(denial, 403)
 
-  const roster = await getProjectAssignmentRoster(c.env, projectId)
-  return c.json({ roster })
+  // AQU-1969: translate work stays the per-person roster; each validate
+  // assignment is its own line, with the assignee's own approvals.
+  const [roster, validations] = await Promise.all([
+    getProjectAssignmentRoster(c.env, projectId),
+    getProjectValidationAssignments(c.env, projectId),
+  ])
+  return c.json({ roster, validations })
 })
 
 /**
@@ -2325,6 +2408,14 @@ projects.post(
         403,
       )
     }
+    // AQU-1579: the match above is only a string compare. Refuse before the
+    // invite is claimed so an unverified account cannot spend it.
+    const unverified = await emailBoundInviteUnverified(
+      c.env.AQUILLA_PG,
+      user.id,
+      invite.email,
+    )
+    if (unverified) return c.json(unverified, 403)
 
     // Guard: can't join an archived project via invite.
     const project = await c.env.AQUILLA_PG.prepare(

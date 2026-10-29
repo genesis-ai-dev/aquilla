@@ -208,6 +208,31 @@ describe("POST /api/v2/orgs/portfolio/summary", () => {
     ]))
   })
 
+  // AQU-1488. WHY: a member invited to one project but never to its org read
+  // "Projects 0" on the all-organizations Overview beside a table listing that
+  // project, because only memberships could be named. Naming the org they hold
+  // a project in must count that project, and only that project.
+  it("counts a project-only member's project in its org, and nothing else there", async () => {
+    await seedUser(1, "owner")
+    await seedUser(3, "atul")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Biblica', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pm', 'Marathi EBL', 1, 1), ('pt', 'Tamil EBL', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pm', 3, 400, 1)",
+    ).run()
+
+    const res = await postSummary("atul", { orgIds: [1] })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as SummaryBody
+    expect(body.projectCount).toBe(1)
+    expect(JSON.stringify(body)).not.toContain("Tamil")
+  })
+
   it("treats an empty orgIds array as no orgs and rejects a non-member", async () => {
     await seedUser(1, "wendi")
     await seedUser(9, "outsider")

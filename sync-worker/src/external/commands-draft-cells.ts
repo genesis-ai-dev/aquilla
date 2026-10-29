@@ -1,3 +1,4 @@
+import { fetchIdentity, type IdentityTransport } from './identity-bridge'
 // DraftCells (AQU-1186, parity epic AQU-1181 item 7) — invoke the PROJECT'S
 // OWN copilot over named cells and stage the results as one changeset.
 //
@@ -160,7 +161,7 @@ function toProvenance(v: unknown): AiDraftProvenance | undefined {
   return v as AiDraftProvenance
 }
 
-export interface DraftBridgeEnv {
+export interface DraftBridgeEnv extends IdentityTransport {
   AUTH_WORKER_URL?: string
   SYNC_SECRET_KEY?: string
 }
@@ -198,7 +199,7 @@ export async function requestDrafts(
 
   let res: Response
   try {
-    res = await fetch(`${env.AUTH_WORKER_URL}/api/v1/ai/agent/internal/draft-cells`, {
+    res = await fetchIdentity(env, `${env.AUTH_WORKER_URL}/api/v1/ai/agent/internal/draft-cells`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,

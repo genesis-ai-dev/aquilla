@@ -11,14 +11,61 @@ export const audio = defineNamespace({
     "audio.newVoice.titleEdit": "Edit voice",
     "audio.newVoice.tabTts": "TTS voice",
     "audio.newVoice.tabClone": "Clone voice",
+    "audio.newVoice.tabCharacter": "Characters",
+    "audio.newVoice.tabTrain": "Train voice",
+
+    // TrainVoicePanel — train a custom voice from an organization's own
+    // recordings of a real person. Consent is the organization's responsibility.
+    "audio.train.intro": "A voice trained from a real speaker's recordings. Ready in about 45 minutes.",
+    "audio.train.speakerNameLabel": "Speaker name",
+    "audio.train.speakerNamePlaceholder": "e.g. Maria (narrator)",
+    "audio.train.addRecordings": "Add recordings",
+    "audio.train.addRecordingsAriaLabel": "Add recordings of the speaker",
+    "audio.train.recordingTips": "One speaker, clean speech, any language · 5–60 min · up to 20 MB per file",
+    "audio.train.fileTooLarge": "Over 20 MB",
+    "audio.train.removeRecordingAriaLabel": "Remove {name}",
+    "audio.train.audioMeter": "{minutes} min",
+    "audio.train.tooMuchAudio": "Over {max} min — remove some",
+    "audio.train.consentTitle": "Consent is on your organization",
+    "audio.train.consentBody": "You need the speaker's informed consent, and you must follow the laws that apply to you and to them. We record who confirmed and when.",
+    "audio.train.consentCheckbox": "For my organization, I confirm the speaker consented and this use is lawful.",
+    "audio.train.consentCheckboxAriaLabel": "Confirm the speaker's consent on behalf of your organization",
+    "audio.train.uploading": "Uploading {done} of {total}…",
+    "audio.train.start": "Start training",
+    "audio.train.minimumHint": "{min} min minimum",
+    "audio.train.recommendedHint": "{recommended}+ min sounds best",
+    "audio.train.fullStatement": "Read the full statement",
+    "audio.newVoice.errorCharacterRequired": "Pick a character voice.",
     "audio.newVoice.kindGroupLabel": "Voice kind",
+
+    // CharacterVoicePicker — the Characters tab: pre-built synthetic character
+    // voices a project adds to its cast in one click.
+    "audio.characters.filterGroupAriaLabel": "Filter character voices",
+    "audio.characters.filterFemale": "Female",
+    "audio.characters.filterMale": "Male",
+    "audio.characters.filterYoung": "Young",
+    "audio.characters.filterMiddleAged": "Middle-aged",
+    "audio.characters.filterOld": "Old",
+    "audio.characters.rangeTreble": "Treble",
+    "audio.characters.rangeSoprano": "Soprano",
+    "audio.characters.rangeMezzo": "Mezzo",
+    "audio.characters.rangeAlto": "Alto",
+    "audio.characters.rangeTenor": "Tenor",
+    "audio.characters.rangeBaritone": "Baritone",
+    "audio.characters.rangeBass": "Bass",
+    "audio.characters.noMatches": "No character voices match these filters.",
+    "audio.characters.previewAriaLabel": "Preview {name}",
+    "audio.characters.pauseAriaLabel": "Stop previewing {name}",
+    "audio.characters.addAriaLabel": "Add {name} to the cast",
+    "audio.characters.useAriaLabel": "Use {name}",
+    "audio.characters.currentAriaLabel": "{name} is this voice's character",
+    "audio.characters.inCastAriaLabel": "{name} is already in the cast",
+    "audio.characters.footnote": "Synthetic voices — no real person's voice.",
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.inworldVoiceLabel": "Voice",
     "audio.newVoice.inworldVoiceLoading": "Loading voices…",
-    "audio.newVoice.inworldVoiceUnavailable":
-      "Couldn't load Inworld voices for these languages. Showing the built-in list.",
     "audio.newVoice.inworldCustomVoice": "Designed voice",
     "audio.newVoice.tabPrebuilt": "Prebuilt voice",
     "audio.newVoice.tabDesign": "Voice design",
@@ -203,6 +250,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
+    "audio.recordingModal.editTextTooltip": "Edit this text",
     "audio.recordingModal.notTranslated": "not translated",
     "audio.recordingModal.countingHint": "Recording starts in…",
     "audio.recordingModal.countingGo": "GO",
@@ -397,6 +445,10 @@ export const audio = defineNamespace({
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",
+    "audio.library.characterEngineLabel": "Character",
+    "audio.library.customEngineLabel": "Custom",
+    "audio.library.trainingEngineLabel": "Training",
+    "audio.library.trainingFailedLabel": "Training failed",
 
     // VoiceCloneSection — record/upload the reference clip a cloned voice
     // is re-voiced to match.
@@ -600,6 +652,8 @@ export const audio = defineNamespace({
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
+    "audio.castGutter.addVoice": "Add a voice…",
+    "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
     "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
@@ -649,7 +703,9 @@ export const audio = defineNamespace({
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
     "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
-    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
+    "audio.aiError.seedVcFailedTitle": "Voice conversion failed",
+    "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
+    "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
@@ -693,6 +749,9 @@ export const audio = defineNamespace({
       "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
     "audio.aiError.rateLimitedBody":
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
+    "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
+    "audio.aiError.transcriptionModelUnavailableBody":
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":
@@ -751,6 +810,100 @@ export const audio = defineNamespace({
           "making a voice, as opposed to the TTS voice tab.",
         maxLength: 18,
       },
+      "audio.newVoice.tabCharacter": {
+        description:
+          "Tab label for picking a ready-made character voice from a built-in list, " +
+          "next to the TTS voice and Clone voice tabs.",
+        maxLength: 18,
+      },
+      "audio.newVoice.tabTrain": {
+        description:
+          "Tab label for training a custom voice from recordings of a real person, next to " +
+          "the TTS voice, Clone voice and Characters tabs.",
+        maxLength: 18,
+      },
+      "audio.train.addRecordingsAriaLabel": {
+        description: "Accessible label of the file picker for adding audio recordings of the speaker.",
+      },
+      "audio.train.removeRecordingAriaLabel": {
+        description: "Accessible label of the remove button next to one picked recording.",
+        placeholders: { name: "The recording's file name, e.g. 'session-1.wav'." },
+      },
+      "audio.train.audioMeter": {
+        description: "Total length of the picked recordings, above the progress bar.",
+        placeholders: { minutes: "Total minutes picked so far, one decimal, e.g. '12.5'." },
+      },
+      "audio.train.minimumHint": {
+        description: "Right of the meter while there is not enough audio yet.",
+        placeholders: { min: "Minimum minutes required, e.g. '5'." },
+      },
+      "audio.train.recommendedHint": {
+        description: "Right of the meter once the minimum is met: how much audio gives the best quality.",
+        placeholders: { recommended: "Recommended minutes, e.g. '15'." },
+      },
+      "audio.train.tooMuchAudio": {
+        description: "Shown instead of the meter line when the recordings exceed the maximum.",
+        placeholders: { max: "Maximum minutes allowed, e.g. '60'." },
+      },
+      "audio.train.consentCheckboxAriaLabel": {
+        description:
+          "Accessible label of the consent checkbox. The user confirms, for their organization, " +
+          "that the speaker consented and that the use is lawful. Keep the legal meaning exact.",
+      },
+      "audio.train.uploading": {
+        description: "Start button text while the recordings upload.",
+        placeholders: { done: "Recordings uploaded so far, e.g. '3'.", total: "Recordings in total, e.g. '8'." },
+      },
+      "audio.castGutter.addVoice": { description: "Last row of a line's voice dropdown: opens the New voice dialog to add a voice to the cast." },
+      "audio.castGutter.recordingTooltip": {
+        description: "Tooltip of a line's voice field when its audio is a person's recording and no voice is assigned.",
+        placeholders: { label: "What the field shows, e.g. 'Your recording' or 'Recorded by Ana'." },
+      },
+      "audio.characters.filterGroupAriaLabel": {
+        description:
+          "Accessible group label (not visible text) for the row of filter chips " +
+          "(Female, Male, Young, …) above the list of character voices.",
+      },
+      "audio.characters.filterYoung": {
+        description: "Age filter chip and card label for character voices: children to people in their twenties.",
+      },
+      "audio.characters.filterMiddleAged": {
+        description: "Age filter chip and card label for character voices: people in their thirties to fifties.",
+      },
+      "audio.characters.filterOld": {
+        description: "Age filter chip and card label for character voices: people sixty and older.",
+      },
+      "audio.characters.rangeTreble": { description: "Vocal range (singing term) on a character voice card: a boy's high voice." },
+      "audio.characters.rangeSoprano": { description: "Vocal range (singing term) on a character voice card: the highest female voice." },
+      "audio.characters.rangeMezzo": { description: "Vocal range (singing term, short for mezzo-soprano) on a character voice card." },
+      "audio.characters.rangeAlto": { description: "Vocal range (singing term) on a character voice card: the lowest female voice." },
+      "audio.characters.rangeTenor": { description: "Vocal range (singing term) on a character voice card: the highest male voice." },
+      "audio.characters.rangeBaritone": { description: "Vocal range (singing term) on a character voice card: the middle male voice." },
+      "audio.characters.rangeBass": { description: "Vocal range (singing term) on a character voice card: the lowest male voice." },
+      "audio.characters.previewAriaLabel": {
+        description: "Accessible label of the play button on a character voice card.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.pauseAriaLabel": {
+        description: "Accessible label of the same button while that character's preview is playing.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.addAriaLabel": {
+        description: "Accessible label of the + button on a character card; adds that voice to the project's cast.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.useAriaLabel": {
+        description: "Accessible label of the same button while editing a voice: switches it to this character.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.currentAriaLabel": {
+        description: "Accessible label of the same (disabled) button on the character the edited voice already uses.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
+      "audio.characters.inCastAriaLabel": {
+        description: "Accessible label of the same (disabled) button when that character is already in the cast.",
+        placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
+      },
       "audio.newVoice.kindGroupLabel": {
         description:
           "Accessible group label (not visible text) for the TTS/Clone tab pair, " +
@@ -788,12 +941,6 @@ export const audio = defineNamespace({
         description:
           "Short status shown in the Inworld voice dropdown while the catalog is " +
           "fetched from the hosted TTS worker.",
-      },
-      "audio.newVoice.inworldVoiceUnavailable": {
-        description:
-          "Helper under the Inworld voice dropdown when the live catalog could " +
-          "not be loaded (missing API key, network error, or no voices for the " +
-          "project's languages). The dropdown still lists a small built-in English set.",
       },
       "audio.newVoice.inworldCustomVoice": {
         description:
@@ -1717,6 +1864,12 @@ export const audio = defineNamespace({
           "Small caption above the translated text the user should read aloud into " +
           "the microphone — this is the actual script for the recording.",
       },
+      "audio.recordingModal.editTextTooltip": {
+        description:
+          "Tooltip and screen-reader label on the small pencil beside the 'Read aloud' " +
+          "caption. Clicking it closes the recorder and puts the cursor in this line's " +
+          "translation in the editor, so a mistake in the script can be fixed right away.",
+      },
       "audio.recordingModal.notTranslated": {
         description:
           "Italic placeholder shown instead of the read-aloud script when the line " +
@@ -2452,6 +2605,24 @@ export const audio = defineNamespace({
           "clones (built from a reference clip) rather than plain TTS voices.",
         maxLength: 12,
       },
+      "audio.library.customEngineLabel": {
+        description: "Same slot as audio.library.cloneEngineLabel, for a ready custom voice trained from recordings.",
+        maxLength: 12,
+      },
+      "audio.library.trainingEngineLabel": {
+        description: "Same slot, while a custom voice is still training.",
+        maxLength: 12,
+      },
+      "audio.library.trainingFailedLabel": {
+        description: "Same slot, when training a custom voice failed.",
+        maxLength: 16,
+      },
+      "audio.library.characterEngineLabel": {
+        description:
+          "Same slot as audio.library.cloneEngineLabel, shown for voices picked from " +
+          "the built-in list of ready-made character voices.",
+        maxLength: 12,
+      },
       "audio.clone.title": {
         description:
           "Section heading inside the voice editor's Clone tab, above the " +
@@ -3061,9 +3232,11 @@ export const audio = defineNamespace({
           "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
           "inworldNotConfiguredTitle — Inworld clones skip this step.",
       },
+      "audio.aiError.voiceConvertSlowTitle": { description: "Popover heading when Change voice timed out because the GPU voice service was starting from idle." },
+      "audio.aiError.voiceConvertSlowBody": { description: "Popover body for that timeout: nothing is wrong with the line; retrying usually works quickly." },
       "audio.aiError.seedVcFailedTitle": {
         description:
-          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
+          "Popover heading when voice conversion (Change voice, or a clone voice after TTS) ran but failed.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:
@@ -3126,6 +3299,17 @@ export const audio = defineNamespace({
         description:
           "Popover heading for a 5xx response from the AI provider — framed as " +
           "usually temporary.",
+      },
+      "audio.aiError.transcriptionModelUnavailableTitle": {
+        description:
+          "Popover heading when the hosted speech-to-text model returned a server " +
+          "error for a recording's transcription.",
+      },
+      "audio.aiError.transcriptionModelUnavailableBody": {
+        description:
+          "Popover body for a failed hosted transcription. Names the remedies: retry, " +
+          "pick another model in Preferences, or use on-device transcription. Keep the " +
+          "Preferences → Local models → Transcription path matching the settings labels.",
       },
       "audio.aiError.providerRejectedTitle": {
         description:

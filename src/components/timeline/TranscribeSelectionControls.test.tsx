@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectTooltip, renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { TranscribeSelectionControls } from "./TranscribeSelectionControls"
 
 const props = {
@@ -67,7 +67,7 @@ describe("TranscribeSelectionControls", () => {
   it("disables with a why when the selection has no audio at all", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} selectedCount={2} eligibleCount={0} recordingCount={0} />)
     expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
-    await expectTooltip(
+    await expectDisabledNote(
       screen.getByTestId("tl-transcribe-selection"),
       /None of the selected sections has audio to transcribe/i,
     )
@@ -76,7 +76,7 @@ describe("TranscribeSelectionControls", () => {
   it("disables while another audio batch owns the progress slot", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} busy />)
     expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
-    await expectTooltip(screen.getByTestId("tl-transcribe-selection"), /Another audio batch is running/i)
+    await expectDisabledNote(screen.getByTestId("tl-transcribe-selection"), /Another audio batch is running/i)
   })
 
   it("explains what the run will and will not touch when it is ready", async () => {

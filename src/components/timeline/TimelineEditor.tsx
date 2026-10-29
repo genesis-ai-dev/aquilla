@@ -4201,13 +4201,14 @@ export function TimelineEditor({
             browser reports, so this does NOT say "there is latency" — it says
             the part we cannot measure is still there. Shown only on a path
             slow enough that the reading is untrustworthy, which in practice
-            means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
+            means Bluetooth. Sam, 2026-10-15: a short amber word beside the
             heading (after the timing switch, when there is one), the full
-            message behind its info button — it was a full-width line. */}
+            message behind its info button — it was a full-width line.
+            AQU-2260 (Sam, Oct 29): plain amber text, never a pill. */}
         {outputLatencySec >= HIGH_LATENCY_SEC && (
           <span
             data-testid="tl-output-latency-note"
-            className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+            className="ms-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
           >
             {t("editor.timeline.bluetoothPill")}
             {/* AQU-2260: the same click-open note as every toolbar (i). */}

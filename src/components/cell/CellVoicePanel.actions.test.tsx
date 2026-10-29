@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 const { play } = vi.hoisted(() => ({ play: vi.fn() }))
@@ -185,7 +185,7 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     const standIn = trigger.closest('[data-slot="tooltip-disabled-trigger"]')
     expect(standIn).not.toBeNull()
     expect(standIn).not.toHaveAttribute("disabled")
-    await expectTooltip(
+    await expectDisabledNote(
       standIn as HTMLElement,
       "Mary has no reference clip. Assign a cloned voice to change this take.",
     )
@@ -216,7 +216,7 @@ describe("CellVoicePanel voice actions (AQU-1109)", () => {
     expect(trigger).toBeDisabled()
     const standIn = trigger.closest('[data-slot="tooltip-disabled-trigger"]')
     expect(standIn).not.toBeNull()
-    await expectTooltip(
+    await expectDisabledNote(
       standIn as HTMLElement,
       "Mary has no reference clip. Assign a cloned voice to change this take.",
     )

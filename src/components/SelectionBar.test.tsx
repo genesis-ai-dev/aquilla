@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectTooltip, expectDisabledNote } from "@/test-utils/tooltip"
 import { SelectionBar } from "./SelectionBar"
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -283,7 +283,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "Some selected cells are outside your assigned files or lanes")
+    await expectDisabledNote(btn, "Some selected cells are outside your assigned files or lanes")
     vi.restoreAllMocks()
   })
 
@@ -323,7 +323,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     ])
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "All selected cells are already validated by you")
+    await expectDisabledNote(btn, "All selected cells are already validated by you")
     vi.restoreAllMocks()
   })
 
@@ -355,7 +355,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "All selected cells are already validated by you")
+    await expectDisabledNote(btn, "All selected cells are already validated by you")
     vi.restoreAllMocks()
   })
 
@@ -364,7 +364,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     renderBar(makeProject(ROLE.CONTRIBUTOR), [makeCell({ id: "cell-1", translated: "" })])
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "Selected cells need a translation first")
+    await expectDisabledNote(btn, "Selected cells need a translation first")
     vi.restoreAllMocks()
   })
 })
@@ -785,7 +785,7 @@ describe("SelectionBar — Translate is gated on target.cell.commit (AQU-1459)",
     renderBar(makeProject(ROLE.REVIEWER), UNTRANSLATED)
     const btn = translateButton()
     expect(btn).toBeDisabled()
-    await expectTooltip(btn, "You need contributor role to draft translations")
+    await expectDisabledNote(btn, "You need contributor role to draft translations")
     vi.restoreAllMocks()
   })
 
@@ -908,7 +908,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
       makeCell({ id: "own-2", translated: "coucou", lastEditor: "alice" }),
     ])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    await expectDisabledNote(validateButton(), "You made the latest change to these cells, so someone else must validate them")
     vi.restoreAllMocks()
   })
 
@@ -918,7 +918,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["own-draft"]))
     renderBar(strict(), [makeCell({ id: "own-draft", translated: "auto", aiDrafted: true, lastEditor: "alice" })])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "You made the latest change to these cells, so someone else must validate them")
+    await expectDisabledNote(validateButton(), "You made the latest change to these cells, so someone else must validate them")
     vi.restoreAllMocks()
   })
 
@@ -951,7 +951,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
       makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
     ])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "Your role cannot validate cells in this project.")
+    await expectDisabledNote(validateButton(), "Your role cannot validate cells in this project.")
     fireEvent.click(validateButton())
     expect(emitCellValidate).not.toHaveBeenCalled()
     vi.restoreAllMocks()
@@ -965,7 +965,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
       makeCell({ id: "theirs", translated: "bonjour", lastEditor: "bob" }),
     ])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "Only the people this project names can validate text.")
+    await expectDisabledNote(validateButton(), "Only the people this project names can validate text.")
     vi.restoreAllMocks()
   })
 
@@ -995,7 +995,7 @@ describe("SelectionBar — the project's text validation rules (AQU-1571)", () =
       makeCell({ id: "empty", translated: "", lastEditor: null }),
     ])
     expect(validateButton()).toBeDisabled()
-    await expectTooltip(validateButton(), "Some selected cells have your latest change, so someone else must validate them")
+    await expectDisabledNote(validateButton(), "Some selected cells have your latest change, so someone else must validate them")
     vi.restoreAllMocks()
   })
 })
@@ -1145,7 +1145,7 @@ describe("selection bar — generate voice (AQU-1722)", () => {
       { audioMode: true },
     )
     expect(generateButton()).toBeDisabled()
-    await expectTooltip(generateButton(), /Select at least one translated line/i)
+    await expectDisabledNote(generateButton(), /Select at least one translated line/i)
     vi.restoreAllMocks()
   })
 

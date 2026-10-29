@@ -1593,14 +1593,17 @@ describe("TimelineEditor — audio-first mode", () => {
     await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
   })
 
-  // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
-  // timing switch, its explanation behind an info button — not a full line.
-  it("says Bluetooth in a pill after the timing switch, the full message behind its info button", async () => {
+  // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its
+  // explanation behind an info button — not a full line. AQU-2260 (Oct 29):
+  // plain amber text, not a pill (no border, no fill), the (i) a click note.
+  it("says Bluetooth in plain amber text after the timing switch, the full message behind its (i)", async () => {
     mockOutputLatencySec = 0.178
     try {
       renderAt("dubbing", { onChangeTimingMode: vi.fn() })
       const pill = screen.getByTestId("tl-output-latency-note")
       expect(pill).toHaveTextContent(/^Bluetooth$/)
+      expect(pill.className).not.toMatch(/\bborder\b|\bbg-|rounded-md|px-1\.5/)
+      expect(pill.className).toMatch(/text-amber-700/)
       const switchEl = screen.getByTestId("tl-timing-mode")
       expect(switchEl.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(switchEl.parentElement).toBe(pill.parentElement)
@@ -1612,7 +1615,7 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("shows no Bluetooth pill on a wired or measured output", () => {
+  it("shows no Bluetooth note on a wired or measured output", () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
     expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })

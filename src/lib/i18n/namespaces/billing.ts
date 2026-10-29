@@ -176,7 +176,7 @@ export const billing = defineNamespace({
     "billing.settings.security": "Security",
     "billing.settings.billing": "Billing",
     "billing.settings.providers": "AI provider keys",
-    "billing.settings.peopleProjects": "People & Projects",
+    "billing.settings.peopleProjects": "People & projects",
     "billing.settings.teams": "Teams",
     "billing.settings.archived": "Archived projects",
   },

@@ -98,8 +98,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
     // ── Project creation dialog ──
-    "projectSettings.create.trigger": "New Project",
-    "projectSettings.create.dialogTitle": "Create New Project",
+    "projectSettings.create.trigger": "New project",
+    "projectSettings.create.dialogTitle": "Create new project",
     // AQU-1352: destination picker at the top of the create dialog.
     "projectSettings.create.destinationLabel": "Create in",
     "projectSettings.create.destinationPersonal": "Personal",
@@ -121,7 +121,7 @@ export const projectSettings = defineNamespace({
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
-    "projectSettings.create.namePlaceholder": "My Translation Project",
+    "projectSettings.create.namePlaceholder": "My translation project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
     "projectSettings.create.targetLanguagesLabel": "Language lanes",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
@@ -140,14 +140,14 @@ export const projectSettings = defineNamespace({
       "\"conversational Swahili\"). The language code is filled in from the name, " +
       "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContainedName": "Self-contained (default)",
     "projectSettings.create.shapeSelfContained": plural({
       one: "{name} — this project owns both its source and its target.",
       other: "{name} — this project owns both its source and its targets.",
     }),
     "projectSettings.create.shapeLinkedTargetName": plural({
-      one: "Linked Target",
-      other: "Linked Targets",
+      one: "Linked target",
+      other: "Linked targets",
     }),
     "projectSettings.create.shapeLinkedTarget": plural({
       one:
@@ -176,7 +176,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
-    "projectSettings.create.linkConsumesSourceName": "Its Source",
+    "projectSettings.create.linkConsumesSourceName": "Its source",
     "projectSettings.create.linkConsumesSource": plural({
       one:
         "{name} — sibling-translation case (this project translates the same original text). For " +
@@ -187,7 +187,7 @@ export const projectSettings = defineNamespace({
         "same-org sibling languages, language lanes on the upstream project are the recommended " +
         "shape instead.",
     }),
-    "projectSettings.create.linkConsumesTargetName": "One of its Targets",
+    "projectSettings.create.linkConsumesTargetName": "One of its targets",
     "projectSettings.create.linkConsumesTarget":
       "{name} — chain case (this project translates one of the upstream project's " +
       "targets, e.g. French → Chaluba).",
@@ -243,11 +243,11 @@ export const projectSettings = defineNamespace({
       "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
-    "projectSettings.create.submitCreate": "Create Project",
+    "projectSettings.create.submitCreate": "Create project",
     "projectSettings.create.longRunningNote":
       "This is taking longer than expected. You can close this dialog — the project " +
       "may still finish and show up in your projects list.",
-    "projectSettings.create.submitCreateAndLink": "Create & Link",
+    "projectSettings.create.submitCreateAndLink": "Create & link",
     "projectSettings.create.errorSignInRequired": "You need to be signed in to create a project.",
     "projectSettings.create.errorGeneric": "Failed to create project. Please try again.",
     "projectSettings.create.extraLanguagesWarning":
@@ -484,23 +484,23 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.sourceLink": "Source link",
     "projectSettings.section.upstreamChanges": "Upstream changes",
     "projectSettings.section.dcsUpstream": "Door43 upstream",
-    "projectSettings.section.projectInfo": "Project Info",
+    "projectSettings.section.projectInfo": "Project info",
     "projectSettings.section.languages": "Languages",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
     "projectSettings.section.members": "Team members",
     "projectSettings.section.aiInstructions": "AI drafting",
-    "projectSettings.section.draftContext": "Draft Context",
+    "projectSettings.section.draftContext": "Draft context",
     "projectSettings.section.advancedLlm": "AI model (advanced)",
     "projectSettings.section.voice": "Voice",
     "projectSettings.section.localModels": "On-device AI models",
     "projectSettings.section.decay": "Decay",
     "projectSettings.section.validation": "Validation",
     "projectSettings.section.audioMedia": "Audio loading",
-    "projectSettings.section.gitSync": "Git Sync",
+    "projectSettings.section.gitSync": "Git sync",
     "projectSettings.section.terminology": "Terminology",
-    "projectSettings.section.termbaseSharing": "Term Base Sharing",
-    "projectSettings.section.aiMetrics": "AI Metrics",
+    "projectSettings.section.termbaseSharing": "Term base sharing",
+    "projectSettings.section.aiMetrics": "AI metrics",
     "projectSettings.section.monday": "Monday.com",
     "projectSettings.section.airtable": "Airtable",
     "projectSettings.section.experimental": "Experimental",
@@ -508,8 +508,8 @@ export const projectSettings = defineNamespace({
     // ── Project Info card ──
     "projectSettings.info.nameLabel": "Project name",
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
-    "projectSettings.info.sourceLanguageLabel": "Source Language",
-    "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.sourceLanguageLabel": "Source language",
+    "projectSettings.info.targetLanguageLabel": "Target language",
     "projectSettings.info.smartQuotesLabel": "Smart quotes",
     "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
@@ -631,7 +631,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
     "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
-    "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
+    "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
 
     // ── Voice card ──
@@ -675,9 +675,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.gitSync.intervalNote": "Interval is floored at 1 minute. Sync will only push when there are local changes.",
 
     // ── Terminology card ──
-    "projectSettings.terminology.title": "Terminology Library",
+    "projectSettings.terminology.title": "Terminology library",
     "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
-    "projectSettings.terminology.openButton": "Open Terminology Library",
+    "projectSettings.terminology.openButton": "Open terminology library",
 
     // ── ValidationSettingsSection.tsx ──
     // Card headings: the text and audio rules each get their own card.
@@ -1742,14 +1742,14 @@ export const projectSettings = defineNamespace({
       "projectSettings.create.targetLanguagesLabel": {
         description:
           "Field label above the target-language boxes in the create dialog. " +
-          "Always 'Target Language(s)' — the parenthetical covers one or many " +
-          "lanes without swapping the label as boxes fill.",
+          "Always 'Language lanes' (AQU-2261), however many boxes are filled — " +
+          "each box becomes one language lane.",
       },
       "projectSettings.create.shapeLinkedTargetName": {
         description:
           "Bold name of the linked-target project-shape radio. Inflects with how " +
           "many target-language lanes the user has filled in on this create pass " +
-          "('Linked Target' vs 'Linked Targets'). Count is not shown as a numeral.",
+          "('Linked target' vs 'Linked targets'). Count is not shown as a numeral.",
       },
       "projectSettings.create.additionalTargetPlaceholder": {
         description:

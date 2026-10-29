@@ -24,7 +24,7 @@ export const search = defineNamespace({
   keys: {
     // Mode toggle (dock panel + full-panel mode tabs)
     "search.mode.replace": "Replace",
-    "search.mode.replaceTooltip": "Find & Replace",
+    "search.mode.replaceTooltip": "Find & replace",
     "search.mode.bible": "Bible",
     "search.mode.bibleTooltip": "Bible data",
     "search.mode.passages": "Passages",
@@ -51,8 +51,8 @@ export const search = defineNamespace({
     "search.dock.expandAllAriaLabel": "Expand all results",
     "search.dock.expandAllLabel": "Expand all",
     "search.dock.moreResults": "{count} more — open full panel for all results",
-    "search.dock.replaceHint": "Find & Replace with diff preview lives in the full panel.",
-    "search.dock.openReplace": "Open Find & Replace",
+    "search.dock.replaceHint": "Find & replace with diff preview lives in the full panel.",
+    "search.dock.openReplace": "Open find & replace",
 
     // Dock panel — Bible resources (Aquifer) mode
     "search.bible.backToResults": "Back to results",
@@ -108,7 +108,7 @@ export const search = defineNamespace({
       one: "Replace {count} cell",
       other: "Replace {count} cells",
     }),
-    "search.replace.applyButtonAll": "Replace All",
+    "search.replace.applyButtonAll": "Replace all",
     "search.replace.noSource": "No source text for this cell",
     "search.replace.targetOnlyReason":
       "Replace changes target text only. Each match shows its source so you can check the wording.",
@@ -118,7 +118,7 @@ export const search = defineNamespace({
 
     // Full-panel dialog chrome
     "search.dialog.titlePassages": "Parallel passages",
-    "search.dialog.titleReplace": "Search and Replace",
+    "search.dialog.titleReplace": "Search and replace",
     "search.dialog.scopeFile": "File: {fileName}",
     "search.dialog.scopeCurrentFile": "Current file",
     "search.dialog.scopeEntireProject": "Entire project",
@@ -144,7 +144,7 @@ export const search = defineNamespace({
     "search.dialog.noResultsFor": "No results for",
 
     // Expanded "results as editor" view
-    "search.expanded.header": "Search Results",
+    "search.expanded.header": "Search results",
     "search.expanded.forQuery": "for “{query}”",
     "search.expanded.fileCount": plural({
       one: "{count} file",

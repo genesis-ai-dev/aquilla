@@ -36,7 +36,9 @@ export const bibleData = defineNamespace({
     "bibleData.card.title": "Bible data",
     "bibleData.card.enableLabel": "Enable Bible data",
     "bibleData.card.description":
-      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and unfoldingWord. It powers Verse Resources, Bible search, the agent's Bible lookups and the enrichments below.",
+      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and " +
+      "unfoldingWord. It powers Verse resources, Bible search, the agent's Bible lookups and the " +
+      "enrichments below.",
 
     // ── Enrichment rows (one label + one sentence each) ──
     "bibleData.enrichment.voices.label": "Voices",

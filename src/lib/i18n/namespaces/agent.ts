@@ -25,7 +25,7 @@ import { defineNamespace, plural } from "./types"
 export const agent = defineNamespace({
   keys: {
     // ── Dock panel + dock chat view (AgentDockPanel, AgentDockView) ────────
-    "agent.dock.title": "AI Agent",
+    "agent.dock.title": "AI agent",
     "agent.dock.openInEditorTooltip": "Open in editor tab",
     "agent.dock.openInEditorAriaLabel": "Open agent in editor tab",
     "agent.dock.openInEditorNotice": "The agent is open in an editor tab.",

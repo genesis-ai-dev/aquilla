@@ -372,7 +372,7 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
-    "nav.fileList.jumpToTestament": "Jump to Testament",
+    "nav.fileList.jumpToTestament": "Jump to testament",
 
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",

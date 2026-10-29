@@ -913,7 +913,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       const blank = await screen.findByText("Hello", { exact: false })
       const row = blank.closest("[data-grid-row]")!
       expect(row.querySelector("[data-editor-cell-surface=\"target\"] [data-idml-slot]")).toBeNull()
-      expect(screen.queryByRole("button", { name: "Pass to Style Segments" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Pass to style segments" })).toBeNull()
       unmount()
 
       renderTable(
@@ -928,11 +928,11 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       )
       const target = (await screen.findByText("Bonjour")).closest("[data-editor-cell-surface=\"target\"]")!
       expect(target.querySelector("[data-idml-slot]")).toBeNull()
-      fireEvent.click(screen.getByRole("button", { name: "Pass to Style Segments" }))
+      fireEvent.click(screen.getByRole("button", { name: "Pass to style segments" }))
       expect(onAlignStyles).toHaveBeenCalledWith(expect.objectContaining({ translated: "Bonjour" }))
 
       setVisibleStyleSegments(false)
-      expect(screen.getByRole("button", { name: "Pass to Style Segments" })).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Pass to style segments" })).toBeInTheDocument()
     } finally {
       setVisibleStyleSegments(false)
       resetVisibleStyleSegmentsCacheForTests()

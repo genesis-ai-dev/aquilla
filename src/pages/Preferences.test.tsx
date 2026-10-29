@@ -202,7 +202,7 @@ describe("Preferences", () => {
     expect(document.documentElement.style.fontSize).toBe("14px")
 
     await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
-    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra large" }))
     expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
     expect(document.documentElement.style.fontSize).toBe("20px")
   })

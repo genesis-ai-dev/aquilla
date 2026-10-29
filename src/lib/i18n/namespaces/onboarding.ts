@@ -128,14 +128,14 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
 
     // — WelcomeStep —
-    "onboarding.step.welcome.getStarted": "Get Started",
+    "onboarding.step.welcome.getStarted": "Get started",
 
     // — PrivacyStep —
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
     "onboarding.step.privacy.footer": "You can change this anytime in Preferences. Read our",
-    "onboarding.step.privacy.policyLink": "Privacy Policy",
+    "onboarding.step.privacy.policyLink": "Privacy policy",
 
     // — SignInStep —
     "onboarding.step.signIn.signedInAs": "Signed in as {username}",
@@ -203,7 +203,7 @@ export const onboarding = defineNamespace({
     // — ReadyStep —
     "onboarding.step.ready.heading": "You're all set!",
     "onboarding.step.ready.description": "{projectName} is ready. We'll walk you through setting up AI and inviting collaborators next.",
-    "onboarding.step.ready.startTranslating": "Start Translating",
+    "onboarding.step.ready.startTranslating": "Start translating",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Setup checklist drawer + steps (project workspace, post-onboarding)
@@ -423,7 +423,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",
-    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":

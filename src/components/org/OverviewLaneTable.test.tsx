@@ -178,8 +178,8 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
       }),
     ])
 
-    expect(screen.getByText("Text Validated")).toBeInTheDocument()
-    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
+    expect(screen.getByText("Text validated")).toBeInTheDocument()
+    expect(screen.getByText("Audio validated")).toBeInTheDocument()
     expect(figure("text", "fr")).toBe("30%")
     expect(figure("audio", "fr")).toBe("10%")
   })
@@ -228,7 +228,7 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
 
     // The project owes no audio anywhere, so its only visible change is the
     // heading: no Audio Validated column, and no dash cell under one.
-    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio validated")).not.toBeInTheDocument()
     expect(screen.queryByTestId("overview-lane-audio-validated-de")).not.toBeInTheDocument()
     expect(figure("text", "de")).toBe("50%")
   })
@@ -239,7 +239,7 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
     // card's tile for the same language, so it shows nothing instead.
     renderLanes([metricLane("de", { delivers: "text", totalCells: 10, validatedCells: 5 })])
 
-    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio validated")).not.toBeInTheDocument()
     expect(figure("text", "de")).toBe("50%")
   })
 
@@ -250,7 +250,7 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
       metricLane("cc", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 9, validatedAudioCells: 7 }),
     ])
 
-    fireEvent.click(screen.getByRole("button", { name: /Audio Validated/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Audio validated/ }))
     const order = () =>
       [...document.querySelectorAll<HTMLElement>("[data-testid^='overview-lane-row-']")]
         .map((row) => row.dataset.testid?.replace("overview-lane-row-", "") ?? "")
@@ -258,7 +258,7 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
     // The header sorts highest-first on the first click; either way the two
     // ends are the real figures and "\u2014" sits at the far end of both.
     expect(order()).toEqual(["cc", "bb", "aa"])
-    fireEvent.click(screen.getByRole("button", { name: /Audio Validated/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Audio validated/ }))
     expect(order()).toEqual(["aa", "bb", "cc"])
   })
 
@@ -300,8 +300,8 @@ describe("OverviewLaneTable text columns (AQU-2194)", () => {
       metricLane("sw", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 4 }),
     ])
     expect(screen.queryByText("Translated")).not.toBeInTheDocument()
-    expect(screen.queryByText("Text Validated")).not.toBeInTheDocument()
-    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
+    expect(screen.queryByText("Text validated")).not.toBeInTheDocument()
+    expect(screen.getByText("Audio validated")).toBeInTheDocument()
     expect(figure("audio", "sw")).toBe("40%")
   })
 
@@ -311,7 +311,7 @@ describe("OverviewLaneTable text columns (AQU-2194)", () => {
       metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
     ])
     expect(screen.getByText("Translated")).toBeInTheDocument()
-    expect(screen.getByText("Text Validated")).toBeInTheDocument()
+    expect(screen.getByText("Text validated")).toBeInTheDocument()
   })
 })
 

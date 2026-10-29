@@ -191,7 +191,7 @@ export const workspace = defineNamespace({
     "workspace.metrics.emptyNoCloud.title": "Cloud sync required",
     "workspace.metrics.emptyNoCloud.description":
       "Metrics require a cloud-synced project. Sync this project to see AI post-edit statistics.",
-    "workspace.metrics.cardTitle": "Approved AI Review Effort",
+    "workspace.metrics.cardTitle": "Approved AI review effort",
     "workspace.metrics.cardSubtitle":
       "Edit distance and elapsed time between machine drafts and final approved text.",
     "workspace.metrics.nedScale": "0% = accepted as-is · 100% = completely replaced.",

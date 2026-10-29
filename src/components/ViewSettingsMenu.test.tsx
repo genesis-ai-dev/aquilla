@@ -107,8 +107,8 @@ describe("ViewSettingsMenu popover", () => {
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
     expect(screen.getByText("Target key terms")).toBeTruthy()
-    expect(screen.getByText("Text Direction")).toBeTruthy()
-    expect(screen.getByText("Font Size")).toBeTruthy()
+    expect(screen.getByText("Text direction")).toBeTruthy()
+    expect(screen.getByText("Font size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
@@ -559,7 +559,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
     renderViewSettings()
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-checked")).toBe("false")
     expect(getHealthScoreColorCoding()).toBe(false)
 
@@ -567,7 +567,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
 
     expect(getHealthScoreColorCoding()).toBe(true)
     expect(
-      screen.getByRole("switch", { name: "Health Score Color Coding" }).getAttribute("aria-checked"),
+      screen.getByRole("switch", { name: "Health score color coding" }).getAttribute("aria-checked"),
     ).toBe("true")
   })
 
@@ -576,7 +576,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
     renderViewSettings()
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(toggle)
@@ -589,7 +589,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
 
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-disabled")).toBe("true")
 
     fireEvent.click(toggle)

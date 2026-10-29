@@ -519,7 +519,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // mounts correctly when some of its member sections are conditionally
     // hidden. PageHeader description also mentions "git sync", so match the
     // card title exactly.
-    expect(screen.getByText("Git Sync")).toBeTruthy()
+    expect(screen.getByText("Git sync")).toBeTruthy()
     expect(screen.getByText("Link to a source project")).toBeTruthy()
     expect(screen.queryByText("Source link")).toBeNull()
 

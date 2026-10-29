@@ -42,7 +42,7 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
     // Accessible names come from aria-label; the visible text label is what
     // makes the control explainable to others.
     const searchToggle = screen.getByRole("button", { name: "Search" })
-    const replaceToggle = screen.getByRole("button", { name: "Find & Replace" })
+    const replaceToggle = screen.getByRole("button", { name: "Find & replace" })
     const bibleToggle = screen.getByRole("button", { name: "Bible data" })
 
     expect(searchToggle).toHaveTextContent("Search")
@@ -54,7 +54,7 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
     const onOpenFullPanel = vi.fn()
     render(<SearchDockPanel {...baseProps({ onOpenFullPanel })} />)
 
-    const replaceToggle = screen.getByRole("button", { name: "Find & Replace" })
+    const replaceToggle = screen.getByRole("button", { name: "Find & replace" })
     expect(replaceToggle).toHaveAttribute("aria-pressed", "false")
 
     fireEvent.click(replaceToggle)
@@ -70,7 +70,7 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
     const onOpenFullPanel = vi.fn()
     render(<SearchDockPanel {...baseProps({ onOpenFullPanel })} />)
 
-    fireEvent.click(screen.getByRole("button", { name: "Find & Replace" }))
+    fireEvent.click(screen.getByRole("button", { name: "Find & replace" }))
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "teste" } })
     fireEvent.click(screen.getByRole("button", { name: /open find & replace/i }))
 
@@ -99,7 +99,7 @@ describe("SearchDockPanel — hover only names icon buttons", () => {
   it("the mode toggles have no hover", async () => {
     render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ bibleResourcesEnabled: true })} /></TooltipProvider>)
     await expectNoHover(screen.getByRole("button", { name: "Search" }))
-    await expectNoHover(screen.getByRole("button", { name: "Find & Replace" }))
+    await expectNoHover(screen.getByRole("button", { name: "Find & replace" }))
     await expectNoHover(screen.getByRole("button", { name: "Bible data" }))
   })
 

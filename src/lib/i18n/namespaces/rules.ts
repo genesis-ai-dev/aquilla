@@ -205,7 +205,7 @@ export const rules = defineNamespace({
     "rules.promotion.requested": "Requested ✓",
     "rules.promotion.alreadyRequested": "Already requested",
     "rules.promotion.requestFailed": "Failed — try again",
-    "rules.surface.addRuleButton": "Add Rule",
+    "rules.surface.addRuleButton": "Add rule",
     "rules.surface.createRuleDialog.title": "Create translation rule",
     "rules.surface.createRuleDialog.description": "Create a project translation rule.",
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
@@ -230,8 +230,8 @@ export const rules = defineNamespace({
     }),
     "rules.surface.laneScope.hideOtherLanes": "Hide rules from other language lanes",
     "rules.surface.laneScope.noRulesInLane": "No project rules apply in {lane}.",
-    "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
-    "rules.surface.addOrgRuleButton": "Add Org Rule",
+    "rules.surface.orgRulesCardTitle": "Org rules ({count})",
+    "rules.surface.addOrgRuleButton": "Add org rule",
     // "Read-only" permission badge → common.readOnly (identical text)
     "rules.surface.noOrgRules.title": "No org-level rules yet",
     "rules.surface.noOrgRules.description": "Add one or promote a project rule.",
@@ -248,7 +248,7 @@ export const rules = defineNamespace({
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
     "rules.surface.promoteDialog.promoting": "Promoting…",
-    "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
+    "rules.surface.projectRulesCardTitle": "Project rules ({count})",
     "rules.surface.noProjectRules.title": "No project rules yet",
     "rules.surface.noProjectRules.description":
       "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",

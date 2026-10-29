@@ -167,7 +167,7 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.standardsExample":
       '"Always preserve proper nouns untranslated. Numbers in source must appear as ' +
       'numerals in target."',
-    "terminology.livingMemory.recentExamplesTitle": "Recent Examples",
+    "terminology.livingMemory.recentExamplesTitle": "Recent examples",
     "terminology.livingMemory.recentExamplesDescription":
       "Human-validated source→target pairs the AI uses as in-context examples. These " +
       "are the translations your team has agreed on.",
@@ -510,7 +510,7 @@ export const terminology = defineNamespace({
     }),
 
     // ── ProjectSettings/TermbaseSharingSection.tsx ───────────────────────────
-    "terminology.sharing.title": "Termbase Sharing",
+    "terminology.sharing.title": "Term base sharing",
     "terminology.sharing.notOrgOwnedDescription":
       "Term base sharing is available for org-owned projects only. Move this project " +
       "into an organization to publish or subscribe to shared term bases.",

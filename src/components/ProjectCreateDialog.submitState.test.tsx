@@ -59,7 +59,7 @@ import { createCloudProject } from "@/lib/sync/cloud-projects"
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 
 function fillValidSelfContained() {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Russian BSB" } })
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Russian BSB" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
   fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "Russian" } })
 }
@@ -71,7 +71,7 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
   it("opts create fields out of Chrome contact autocomplete", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
 
     const name = screen.getByLabelText(/^Project name$/i)
     expect(name).toHaveAttribute("autocomplete", "off")
@@ -99,11 +99,11 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
-    const button = screen.getByRole("button", { name: /Create Project/i })
+    const button = screen.getByRole("button", { name: /Create project/i })
     fireEvent.click(button)
 
     await waitFor(() => {
@@ -123,11 +123,11 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     )
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
-    const button = screen.getByRole("button", { name: /Create Project/i })
+    const button = screen.getByRole("button", { name: /Create project/i })
     fireEvent.click(button)
 
     await waitFor(() => {
@@ -150,17 +150,17 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
     mockCreateCloudProject.mockRejectedValueOnce(new Error("network blip"))
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fillValidSelfContained()
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(/network blip/i)
     })
     // Back to the enabled idle state after failure.
-    const retryButton = screen.getByRole("button", { name: /Create Project/i })
+    const retryButton = screen.getByRole("button", { name: /Create project/i })
     expect(retryButton).toBeEnabled()
 
     // A deliberate retry still fires a create.

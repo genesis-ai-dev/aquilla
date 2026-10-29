@@ -155,12 +155,13 @@ export const audio = defineNamespace({
     "audio.newVoice.steeringBestPractices": "Best practices",
     "audio.newVoice.deliveryLabel": "Delivery",
     "audio.newVoice.deliveryHint":
-      "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
+      "How varied the reading is. More stable stays consistent; more creative has a wider emotional " +
+      "range.",
     "audio.newVoice.deliveryNeedsHighest":
       "Delivery is available with Highest audio quality (Inworld TTS 2). Flash ignores this control.",
-    "audio.newVoice.deliveryStable": "More Stable",
+    "audio.newVoice.deliveryStable": "More stable",
     "audio.newVoice.deliveryBalanced": "Balanced",
-    "audio.newVoice.deliveryCreative": "More Creative",
+    "audio.newVoice.deliveryCreative": "More creative",
     "audio.newVoice.talkingSpeedLabel": "Talking speed",
     "audio.newVoice.talkingSpeedHint":
       "How fast the voice speaks. 1.0 is the voice's native speed. Values below 0.8 can sound less natural.",

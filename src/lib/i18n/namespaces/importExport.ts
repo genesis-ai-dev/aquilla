@@ -165,7 +165,7 @@ export const importExport = defineNamespace({
     "importExport.obs.parsingFrames": "Parsing frames…",
     "importExport.obs.uploadingFrames": "Uploading frames: {enqueued} / {total}",
     "importExport.obs.uploadingToProject": "Uploading to project…",
-    "importExport.obs.downloadAndImport": "Download & Import",
+    "importExport.obs.downloadAndImport": "Download & import",
 
     // — SDBH Hebrew lexicon panel —
     "importExport.sdbh.description":
@@ -355,7 +355,7 @@ export const importExport = defineNamespace({
     "importExport.landing.upload.title": "Upload files",
     "importExport.landing.upload.description":
       "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project.",
-    "importExport.landing.ebible.title": "eBible Corpus",
+    "importExport.landing.ebible.title": "eBible corpus",
     "importExport.landing.ebible.hint": "public library",
     "importExport.landing.ebible.description": "Bible translations with open licenses. Import them with no download.",
     "importExport.landing.helloao.title": "Bible API",
@@ -584,8 +584,8 @@ export const importExport = defineNamespace({
     "importExport.upload.importFinalizationLabel": "Import finalization",
     "importExport.upload.cellsProgress": "{count} / {total} cells",
     "importExport.upload.dragDropHint": "Drag & drop files here, or",
-    "importExport.upload.chooseFiles": "Choose Files",
-    "importExport.upload.chooseFolder": "Choose Folder",
+    "importExport.upload.chooseFiles": "Choose files",
+    "importExport.upload.chooseFolder": "Choose folder",
     "importExport.upload.categoryScripture": "Scripture",
     "importExport.upload.categoryTranslation": "Translation",
     "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
@@ -611,7 +611,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titleJsonKeys": "JSON keys",
-    "importExport.dialog.titlePaired": "Paired Translation Import",
+    "importExport.dialog.titlePaired": "Paired translation import",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.pairedNeedsSourceCells":

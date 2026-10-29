@@ -61,7 +61,7 @@ describe("ProjectCard — Inactive badge", () => {
 })
 
 describe("ProjectCard — lifecycle toggle overflow item", () => {
-  it("shows 'Mark as Inactive' for an active project when canToggleLifecycle=true", () => {
+  it("shows 'Mark as inactive' for an active project when canToggleLifecycle=true", () => {
     const onToggle = vi.fn()
     render(
       <ProjectCard
@@ -75,12 +75,12 @@ describe("ProjectCard — lifecycle toggle overflow item", () => {
     const menuBtn = screen.getByLabelText("Project actions")
     fireEvent.click(menuBtn)
     const toggleBtn = screen.getByTestId("toggle-lifecycle-button")
-    expect(toggleBtn.textContent).toContain("Mark as Inactive")
+    expect(toggleBtn.textContent).toContain("Mark as inactive")
     fireEvent.click(toggleBtn)
     expect(onToggle).toHaveBeenCalledOnce()
   })
 
-  it("shows 'Mark as Active' for an inactive project when canToggleLifecycle=true", () => {
+  it("shows 'Mark as active' for an inactive project when canToggleLifecycle=true", () => {
     const onToggle = vi.fn()
     render(
       <ProjectCard
@@ -93,7 +93,7 @@ describe("ProjectCard — lifecycle toggle overflow item", () => {
     const menuBtn = screen.getByLabelText("Project actions")
     fireEvent.click(menuBtn)
     const toggleBtn = screen.getByTestId("toggle-lifecycle-button")
-    expect(toggleBtn.textContent).toContain("Mark as Active")
+    expect(toggleBtn.textContent).toContain("Mark as active")
   })
 
   it("does NOT show lifecycle toggle when canToggleLifecycle is false", () => {

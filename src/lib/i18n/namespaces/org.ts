@@ -280,7 +280,7 @@ export const org = defineNamespace({
     // recordings under org.projectOverview.audioValidated, whose tile on the
     // same page shows the very same figure. Title case follows those tiles, so
     // the pair reads alike wherever both are on screen.
-    "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
+    "org.orgHome.table.textValidatedHeaderLabel": "Text validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
     // Media redesign slice 1: a project whose languages all deliver audio has
@@ -507,8 +507,8 @@ export const org = defineNamespace({
     // "Restore" → common.restore (identical text)
     "org.projectOverview.moreActionsAria": "More actions",
     "org.projectOverview.downloadDeliverable": "Download deliverable",
-    "org.projectOverview.markAsActive": "Mark as Active",
-    "org.projectOverview.markAsInactive": "Mark as Inactive",
+    "org.projectOverview.markAsActive": "Mark as active",
+    "org.projectOverview.markAsInactive": "Mark as inactive",
     "org.projectOverview.archive": "Archive",
     // Project Download UI (Phase 5) — Tauri desktop only.
     "org.projectOverview.makeAvailableOffline": "Make available offline",
@@ -531,12 +531,13 @@ export const org = defineNamespace({
     "org.projectOverview.customizeStatsAria": "Customize stats",
     // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
-    "org.projectOverview.aiDrafted": "AI Drafted",
+    "org.projectOverview.aiDrafted": "AI drafted",
     "org.projectOverview.aiDraftedTooltip":
       "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits.",
     "org.projectOverview.hasAudioTooltip":
-      "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
-    "org.projectOverview.audioValidated": "Audio Validated",
+      "Percentage of cells that have at least one audio recording attached. This is coverage, not " +
+      "validation — see 'Audio validated' for review status.",
+    "org.projectOverview.audioValidated": "Audio validated",
     "org.projectOverview.audioValidatedTooltip":
       "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":

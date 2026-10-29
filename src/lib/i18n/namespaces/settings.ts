@@ -461,7 +461,7 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.description": "Manage this organization. Personal preferences moved to {link}.",
     "settings.orgSettingsIndex.navIdentity": "Identity",
     "settings.orgSettingsIndex.navSecurity": "Security",
-    "settings.orgSettingsIndex.navGroupPeopleProjects": "People & Projects",
+    "settings.orgSettingsIndex.navGroupPeopleProjects": "People & projects",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
     //   org.breadcrumb.organizationFallback already holds the documented exception

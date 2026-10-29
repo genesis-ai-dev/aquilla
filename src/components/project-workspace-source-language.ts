@@ -4,12 +4,12 @@
 // ever an import-time snapshot and is ignored. Project settings are not
 // consulted either: a null `language` answers from the row's name, then its
 // tag, then its code. Callers still pass the settings object so the signature
-// stays stable; `laneLanguage` does not read the keys.
+// stays stable; nothing reads it (AQU-2223).
 //
 // Pure helper, isolated from the heavyweight ProjectWorkspace component so the
 // rule can be unit-tested without a harness.
 
-import { laneLanguage, type LaneLanguageSettings } from "@/lib/lanes/lane-display"
+import { laneLanguage } from "@/lib/lanes/lane-display"
 import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
 
 /**
@@ -24,11 +24,11 @@ import type { LaneLanguageRow } from "@/lib/lanes/lane-language"
 export function resolveActiveSourceLanguage(
   // Retained for signature stability; deliberately not consulted (AQU-848).
   _fileSourceLanguage: string | null | undefined,
-  settings: LaneLanguageSettings | null | undefined,
+  // Retained for signature stability; deliberately not consulted (AQU-2223).
+  _settings: unknown,
   sourceLane?: LaneLanguageRow | null,
 ): string | undefined {
   const resolved = laneLanguage(sourceLane ?? { role: "source", language: null }, {
-    settings,
     role: sourceLane?.role ?? "source",
     legacyTag: sourceLane?.legacyTag ?? null,
   })

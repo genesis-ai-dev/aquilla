@@ -246,7 +246,7 @@ describe("flushNow", () => {
 
   it.each([
     [403, "role too low for target.cell.commit"],
-    [422, 'unknown lane "fr"; register it in settings.targetLanes'],
+    [422, 'unknown lane "fr"; name an existing lane with laneId, or create the lane first'],
     [400, "event missing fileId"],
   ])("keeps a write the server refuses with %i as failed, not dequeued", async (status, reason) => {
     vi.spyOn(console, "warn").mockImplementation(() => {})

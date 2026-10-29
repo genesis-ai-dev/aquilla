@@ -187,7 +187,7 @@ beforeEach(async () => {
     defaultVoiceId: "ph-default",
     voices: [
       { id: "ph-default", name: "MAT 5:3", color: "#475569" },
-      { id: "ph-cloned", name: "MAT 5:4", color: "#475569", referenceAudioId: "clip.wav" },
+      { id: "ph-character", name: "MAT 5:4", color: "#475569", libraryVoiceId: "narrator-hearth" },
     ],
   })
   await seedProject("no-tts", "Never opened the Studio", undefined)

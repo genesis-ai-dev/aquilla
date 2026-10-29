@@ -16,7 +16,7 @@
 //           through checkAiEntitlement (AQU-2065): reserve the text's
 //           characters at the dearest Inworld rate, settle at the model used.
 
-import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
+import { audioObjectKey, isPathSafeId } from "./audio"
 import { listInworldSupportedLanguages } from "./inworld-supported-languages"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 import { runTtsGuard, recordTtsUsage, estimateTtsSecondsFromText } from "./tts-budget"
@@ -25,7 +25,6 @@ import {
   INWORLD_DESIGN_PROMPT_MAX,
   INWORLD_DESIGN_PROMPT_MIN,
   INWORLD_MAX_TEXT_CHARS,
-  cloneInworldVoice,
   designInworldVoice,
   listInworldVoices,
   parseInworldDesignPromptMode,
@@ -38,7 +37,7 @@ import {
 } from "./inworld-tts"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../db/shared/rate-limit"
 import {
-  inworldTtsRawCents, INWORLD_VOICE_CLONE_CENTS, INWORLD_VOICE_PUBLISH_CENTS, MIN_RESERVATION_CENTS,
+  inworldTtsRawCents, INWORLD_VOICE_PUBLISH_CENTS, MIN_RESERVATION_CENTS,
 } from "../../db/shared/audio-price-card"
 import { entitleProjectAiCall, releaseQuietly, settleQuietly } from "./ai-metering"
 
@@ -97,7 +96,7 @@ export interface TtsEnv {
   INWORLD_API_BASE?: string
   /** Override model id when audioQuality is omitted. Default inworld-tts-2 */
   INWORLD_TTS_MODEL?: string
-  /** Stock voice when the request has no voiceId and no clone. Default Dennis. */
+  /** Stock voice when the request has no voiceId. Default Dennis. */
   INWORLD_DEFAULT_VOICE?: string
   /** Per-user daily audio-seconds cap (default 36000 = 10 h while sizing). */
   TTS_USER_DAILY_SECONDS_LIMIT?: string
@@ -140,16 +139,16 @@ function inworldConfig(env: TtsEnv): InworldTtsConfig | null {
   }
 }
 
-function inworldCloneCacheKey(env: TtsEnv, projectId: string, referenceAudioId: string): string {
-  return `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}.inworld.json`
-}
-
 /**
  * POST /api/v1/voice/tts
  *
  * JSON body:
- *   { projectId, fileId, cellId?, text, voiceId?, referenceAudioId?, language?,
+ *   { projectId, fileId, cellId?, text, voiceId?, language?,
  *     speakingRate?, deliveryMode?, audioQuality? }
+ *
+ * AQU-2291: Inworld instant cloning from a reference clip was removed with
+ * short-clip clone voices. A stale client may still send `referenceAudioId`;
+ * it is ignored (not rejected) and the clip is synthesized with `voiceId`.
  *
  * Returns { audioId, durationSeconds } on success.
  * Returns null when the path/method doesn't match (dispatcher falls through).
@@ -190,7 +189,6 @@ export async function handleTtsRequest(
     cellId?: string
     text?: string
     voiceId?: string
-    referenceAudioId?: string
     language?: string
     speakingRate?: unknown
     deliveryMode?: unknown
@@ -202,7 +200,7 @@ export async function handleTtsRequest(
     return new Response("expected JSON body", { status: 400 })
   }
 
-  const { projectId, fileId, text, voiceId, referenceAudioId, language, speakingRate, deliveryMode, audioQuality } = body
+  const { projectId, fileId, text, voiceId, language, speakingRate, deliveryMode, audioQuality } = body
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
   }
@@ -215,10 +213,6 @@ export async function handleTtsRequest(
   // Bound text size — Inworld's sync synthesize endpoint caps at 2000 chars.
   if (text.length > INWORLD_MAX_TEXT_CHARS) {
     return new Response(`text too long (max ${INWORLD_MAX_TEXT_CHARS} chars)`, { status: 400 })
-  }
-  // Sanitize the reference id before it becomes part of an R2 key.
-  if (referenceAudioId !== undefined && !/^[\w.-]+$/.test(referenceAudioId)) {
-    return new Response("invalid referenceAudioId", { status: 400 })
   }
   if (voiceId !== undefined && (voiceId.length > 200 || /[\r\n]/.test(voiceId))) {
     return new Response("invalid voiceId", { status: 400 })
@@ -268,10 +262,10 @@ export async function handleTtsRequest(
   // The one entitlement check (AQU-2065). It runs the platform daily spend
   // ceiling (AQU-1869), which unlike runTtsGuard above is never log-only, then
   // reserves against the org's weekly allowance. The bound is the text's
-  // characters at the dearest Inworld rate, plus a clone when one may run.
+  // characters at the dearest Inworld rate.
   const entitled = await entitleProjectAiCall(db, env, {
     projectId, userId, rail: "tts", provider: "inworld", houseKey: config.apiKey,
-    estimateRawCents: inworldTtsRawCents(text.length) + (referenceAudioId ? INWORLD_VOICE_CLONE_CENTS : 0),
+    estimateRawCents: inworldTtsRawCents(text.length),
     requestId: crypto.randomUUID(),
   })
   if (!entitled.ok) return entitled.response
@@ -282,58 +276,14 @@ export async function handleTtsRequest(
   // Pre-check the ORG's remaining credit (AQU-1872). The per-user window above
   // is volumetric, not monetary: several users batch-narrating a Bible in one
   // org each stay under it while the org's spend runs away. This must come
-  // before every paid Inworld call below — the voice clone as well as the
-  // synthesis — so an exhausted org costs nothing.
+  // before the paid synthesis below, so an exhausted org costs nothing.
   const creditGuard = await runOrgCreditGuard(db, env, orgId, "tts")
   if (!creditGuard.ok) {
     await releaseQuietly(grant, "tts")
     return Response.json(creditGuard.body, { status: creditGuard.status })
   }
 
-  let inworldVoiceId = voiceId?.trim() || undefined
-  let clonedNow = false
-
-  // Optionally resolve a reference clip and clone it once (cached in R2).
-  // A clone always wins over a stock voiceId — that's the zero-shot path.
-  if (referenceAudioId) {
-    const cacheKey = inworldCloneCacheKey(env, projectId, referenceAudioId)
-    let clonedVoiceId: string | undefined
-    const cached = await env.SNAPSHOTS.get(cacheKey)
-    if (cached) {
-      try {
-        const parsed = JSON.parse(await cached.text()) as { voiceId?: string }
-        if (parsed.voiceId) clonedVoiceId = parsed.voiceId
-      } catch {
-        // Corrupt sidecar — re-clone below.
-      }
-    }
-    if (!clonedVoiceId) {
-      const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
-      const refObj = await env.SNAPSHOTS.get(refKey)
-      if (!refObj) {
-        await releaseQuietly(grant, "tts")
-        return new Response("reference audio not found", { status: 404 })
-      }
-      const referenceBytes = await refObj.arrayBuffer()
-      try {
-        clonedVoiceId = await cloneInworldVoice(keyedConfig, {
-          displayName: referenceAudioId,
-          audioBytes: referenceBytes,
-          language,
-        })
-      } catch (err) {
-        // The clone is free on the price card and synthesis never ran.
-        await releaseQuietly(grant, "tts")
-        const message = err instanceof Error ? err.message : String(err)
-        return new Response(message, { status: 502 })
-      }
-      clonedNow = true
-      await env.SNAPSHOTS.put(cacheKey, JSON.stringify({ voiceId: clonedVoiceId }), {
-        httpMetadata: { contentType: "application/json" },
-      })
-    }
-    inworldVoiceId = clonedVoiceId
-  }
+  const inworldVoiceId = voiceId?.trim() || undefined
 
   let wavBytes: ArrayBuffer
   let durationSeconds: number
@@ -379,8 +329,7 @@ export async function handleTtsRequest(
 
   // Inworld bills input characters, so the cost is what we sent, priced at
   // the model that synthesized it (AQU-2065; it was a flat 2¢ estimate).
-  const rawCostCents = inworldTtsRawCents(text.length, resolveInworldModelId(audioQuality, config.modelId)) +
-    (clonedNow ? INWORLD_VOICE_CLONE_CENTS : 0)
+  const rawCostCents = inworldTtsRawCents(text.length, resolveInworldModelId(audioQuality, config.modelId))
   if (grant.recorded) {
     await settleQuietly(grant, rawCostCents, "tts")
   } else {

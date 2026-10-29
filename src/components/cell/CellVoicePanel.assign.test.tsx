@@ -82,7 +82,7 @@ function Harness() {
         username="tester"
         onRecord={() => {}}
         onAfterGenerate={() => setSrv(serverSettings())}
-        onMakeCharacter={() => {}}
+       
       />
     </>
   )

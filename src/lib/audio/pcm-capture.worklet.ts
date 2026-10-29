@@ -48,8 +48,8 @@ class PcmCaptureProcessor extends AudioWorkletProcessor {
   // (~2.7ms) of the GO instant; it also means the take can never contain the
   // countdown's own beeps — they end a second before zero, outside any ring
   // this file is allowed to keep. Without the option the processor emits from
-  // construction, which is what the un-prewarmed fallback path and the
-  // voice-clone recorder still rely on.
+  // construction, which is what the un-prewarmed fallback path still
+  // relies on.
   //
   // PRE-ROLL (same day, round 3): while armed, the newest `preRollFrames` of
   // audio are KEPT in a ring rather than discarded, and the mark releases them

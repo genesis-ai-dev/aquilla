@@ -251,24 +251,33 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.body).toMatch(/not a gemini key/i)
   })
 
-  it("names Seed-VC when clone conversion isn't wired", () => {
-    const result = categorizeAiError("voice convert failed (503): voice conversion not configured")
-    expect(result.category).toBe("seed-vc-not-configured")
-    expect(result.title).toBe("Voice cloning isn't configured")
-    expect(result.body).toMatch(/seed-vc/i)
-  })
-
-  it("reports a conversion failure without naming one engine (AQU-2212)", () => {
-    // Change voice runs on Seed-VC or the voice forge; the copy must fit both.
+  it("names voice conversion, engine-neutrally, when it isn't set up (AQU-2291)", () => {
     for (const raw of [
-      "Voice conversion failed (500): gpu OOM",
-      "Voice cloning (Seed-VC) failed (500): gpu OOM",
+      "voice convert failed (503): voice conversion not configured",
+      errorFromVoiceConvert(503, "voice conversion not configured").message,
     ]) {
       const result = categorizeAiError(raw)
-      expect(result.category).toBe("seed-vc-failed")
-      expect(result.title).toBe("Voice conversion failed")
-      expect(result.body).not.toMatch(/seed-vc/i)
+      expect(result.category).toBe("voice-convert-not-configured")
+      expect(result.title).toBe("Voice conversion isn't set up")
+      expect(result.body).not.toMatch(/seed-vc|clone/i)
     }
+  })
+
+  it("reports a conversion failure without naming one engine (AQU-2212, AQU-2291)", () => {
+    for (const raw of [
+      "Voice conversion failed (500): gpu OOM",
+      errorFromVoiceConvert(500, "gpu OOM").message,
+    ]) {
+      const result = categorizeAiError(raw)
+      expect(result.category).toBe("voice-convert-failed")
+      expect(result.title).toBe("Voice conversion failed")
+      expect(result.body).not.toMatch(/seed-vc|clone/i)
+    }
+  })
+
+  it("files a cold-start timeout under the same voice-convert category", () => {
+    const result = categorizeAiError(errorFromVoiceConvert(504, "upstream did not respond").message)
+    expect(result.category).toBe("voice-convert-failed")
   })
 
   it("explains a convert timeout as a cold start, and says to retry", () => {

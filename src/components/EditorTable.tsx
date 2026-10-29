@@ -663,8 +663,8 @@ function SynthStatusBadge({
       error.category === "sign-in-required" ||
       error.category === "hosted-tts-not-configured" ||
       error.category === "hosted-tts-failed" ||
-      error.category === "seed-vc-not-configured" ||
-      error.category === "seed-vc-failed" ||
+      error.category === "voice-convert-not-configured" ||
+      error.category === "voice-convert-failed" ||
       error.category === "gemini-failed" ||
       error.category === "missing-openrouter-key"
     ) {
@@ -815,10 +815,9 @@ export interface AudioLensContext {
    *  play-queue can resolve a take; the raw cell row alone cannot, which
    *  silently stalls play right after a generate. */
   onPlayCell: (cellId: string, enrichedCell?: CellData) => void
-  /** Open the "make a character from this voice" flow seeded with this cell's take. */
-  onMakeCharacterFromCell: (cellId: string) => void
-  /** AQU-2212: clone this take straight into the cast as `name`. */
-  onCloneTake?: (cell: CellData, audioId: string, name: string) => Promise<void>
+  /** AQU-2291: open New voice on the Train voice tab, seeded with this take.
+   *  Absent for someone who may not add voices — the card then offers none. */
+  onTrainVoiceFromTake?: (cellId: string, audioId: string) => void
   /** AQU-2212: "Add a voice…" from a line's voice dropdown. */
   onAddVoice?: (cellId: string) => void
   /**
@@ -8418,9 +8417,8 @@ function EditorRow({
                 onPress: () => audioPlace.pressCard(cell.id),
                 onPick: (atSeconds: number) => audioPlace.pickOnWaveform(cell.id, atSeconds),
               } : null}
-              onMakeCharacter={() => audioLens.onMakeCharacterFromCell(cell.id)}
-              onCloneTake={audioLens.onCloneTake
-                ? (audioId, name) => audioLens.onCloneTake!(cell, audioId, name)
+              onTrainFromTake={audioLens.onTrainVoiceFromTake
+                ? (audioId) => audioLens.onTrainVoiceFromTake?.(cell.id, audioId)
                 : undefined}
               // AQU-2212: a pick acts on this line once it is accepted.
               voicePicker={audioVoice && (({ takeLabel, onPicked }) => (

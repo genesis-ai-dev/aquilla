@@ -1,10 +1,13 @@
-// Host for the in-cell "Clone voice" entry point (AQU-1001).
+// Host for the in-cell New voice entry points (AQU-1001): "Train a voice from
+// this recording" on a line's take, and "Add a voice…" from a line's voice
+// dropdown. (The file keeps its name from the short-clip "Clone voice" entry
+// point it began as; cloning was removed in AQU-2291.)
 //
 // NewVoiceModal used to live only inside VoiceLibraryPanel, which LeftDock
-// mounts solely while the Voices tab is active. Clicking Clone on a source
-// cell therefore did nothing until the user opened that tab. This host sits
-// at the workspace root so the same modal opens in place, seeded to the
-// line's take, without switching the dock.
+// mounts solely while the Voices tab is active. Clicking a line's entry point
+// therefore did nothing until the user opened that tab. This host sits at the
+// workspace root so the same modal opens in place, seeded to the line's take,
+// without switching the dock.
 
 import { NewVoiceModal } from "./NewVoiceModal"
 import { upsertVoice } from "@/lib/audio/voices"
@@ -18,8 +21,11 @@ import type { Voice } from "@/lib/parsers/types"
 export interface CloneVoiceModalHostProps {
   open: boolean
   onClose: () => void
-  /** Cell whose take is highlighted as the clone source. */
+  /** Line the dialog was opened from. In "train" mode its take is the first
+   *  training recording. */
   seedCellId: string | null
+  /** Which of the seed line's takes ("train" mode). */
+  seedAudioId?: string | null
   tts: ProjectTtsApi
   projectId: string
   fileId?: string | null
@@ -32,8 +38,8 @@ export interface CloneVoiceModalHostProps {
   roleLevel?: number | null
   /** AQU-2041. Same switch as VoiceLibraryPanel. */
   leadsManageVoices?: boolean
-  /** Which tab opens: "clone" (from a take) or "character" (Add a voice…). */
-  initialMode?: "clone" | "character"
+  /** Which tab opens: "train" (from a take) or "character" (Add a voice…). */
+  initialMode?: "train" | "character"
   /** After a NEW voice is saved. */
   onAdded?: (voice: Voice) => void
 }
@@ -42,6 +48,7 @@ export function CloneVoiceModalHost({
   open,
   onClose,
   seedCellId,
+  seedAudioId = null,
   tts,
   projectId,
   fileId,
@@ -52,7 +59,7 @@ export function CloneVoiceModalHost({
   cells,
   roleLevel,
   leadsManageVoices = false,
-  initialMode = "clone",
+  initialMode = "train",
   onAdded,
 }: CloneVoiceModalHostProps) {
   const canEditVoices = canManageVoices(roleLevel, leadsManageVoices)
@@ -88,7 +95,8 @@ export function CloneVoiceModalHost({
       cells={cells}
       onSave={saveVoice}
       initialMode={initialMode}
-      seedCellId={initialMode === "clone" ? seedCellId : null}
+      seedCellId={initialMode === "train" ? seedCellId : null}
+      seedAudioId={initialMode === "train" ? seedAudioId : null}
       existingVoices={tts.allVoices}
     />
   )

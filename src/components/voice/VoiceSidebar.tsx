@@ -2,8 +2,8 @@
 // subtitles often has only ONE voice actor; "Cast" is how that single actor
 // becomes MANY distinct characters. This rail is the calm cast roster
 // (VoiceLibraryPanel). Crafting a voice from the panel's "New voice" button
-// still happens inside that roster's modal. Cloning from a source cell's
-// audio controls is hosted at the workspace root (CloneVoiceModalHost) so
+// still happens inside that roster's modal. Training from a line's take is
+// hosted at the workspace root (CloneVoiceModalHost) so
 // the modal opens in place without the Voices tab having to be mounted.
 
 import { useMemo } from "react"

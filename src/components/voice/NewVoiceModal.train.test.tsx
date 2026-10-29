@@ -6,6 +6,8 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { NewVoiceModal } from "./NewVoiceModal"
+import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import type { CellData } from "@/hooks/useCells"
 import type { Voice } from "@/lib/parsers/types"
 
 vi.mock("@/lib/sync/tts", () => ({
@@ -15,7 +17,6 @@ vi.mock("@/lib/sync/tts", () => ({
   designInworldVoice: vi.fn(),
   publishInworldVoice: vi.fn(),
 }))
-vi.mock("@/components/VoiceCloneSection", () => ({ VoiceCloneSection: () => null }))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
 vi.mock("@/lib/audio/voice-clone", () => ({ buildVoiceReferenceId: vi.fn(), uploadVoiceReference: vi.fn() }))
 vi.mock("@/lib/audio/upload", () => ({
@@ -87,6 +88,30 @@ describe("NewVoiceModal Train voice tab", () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({
       name: "Ana", libraryVoiceId: "c-0123456789abcdef", customVoice: { consentAttestedBy: "dev" },
     })
+  })
+
+  it("opened from a line's take, starts with that take as the first recording (AQU-2291)", async () => {
+    vi.mocked(parseFrontierAudioUrl).mockReturnValue({ audioId: "audio-c1-1-abcd", ext: "webm" })
+    vi.mocked(fetchCellAudio).mockResolvedValue(new Uint8Array([1, 2, 3]))
+    const cell = {
+      id: "c1", fileId: "f1", type: "text", translated: "hola",
+      selectedAudioId: "audio-c1-1-abcd.webm",
+      attachments: { "audio-c1-1-abcd.webm": { url: "frontier-audio://audio-c1-1-abcd.webm", label: "Ana take" } },
+    } as unknown as CellData
+    render(
+      <NewVoiceModal
+        open onClose={vi.fn()} voice={null} provider="inworld" isDefault={false} paletteIndex={0}
+        cells={[cell]} onSave={vi.fn()} projectId="p1" fileId="f1" session={{ jwt: "j", username: "dev", createdAt: "" }}
+        initialMode="train" seedCellId="c1" seedAudioId="audio-c1-1-abcd.webm"
+      />,
+    )
+    expect(screen.getByRole("tab", { name: /Train voice/ }).getAttribute("aria-selected")).toBe("true")
+    expect(await screen.findByText("Ana take.webm")).toBeInTheDocument()
+    expect(fetchCellAudio).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "p1", fileId: "f1", audioId: "audio-c1-1-abcd", ext: "webm",
+    }))
+    // The take counts toward the minimum like any picked file.
+    expect(await screen.findByText("3.0 min")).toBeInTheDocument()
   })
 
   it("editing a trained voice only renames it", () => {

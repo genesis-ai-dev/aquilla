@@ -57,14 +57,12 @@ describe("migrateOmnivoiceVoice", () => {
     expect(migrateOmnivoiceVoice(omnivoiceVoice(), { targetLanguage: "spa" }).language).toBe("es-ES")
   })
 
-  it("keeps an Instant Clone id and reference clip", () => {
+  it("keeps an Instant Clone id", () => {
     const cloned = migrateOmnivoiceVoice(omnivoiceVoice({
       voiceName: "ws__narrator_old",
-      referenceAudioId: "ref1.wav",
       language: "fra",
     }))
     expect(cloned.voiceName).toBe("ws__narrator_old")
-    expect(cloned.referenceAudioId).toBe("ref1.wav")
     expect(cloned.language).toBe("fr-FR")
   })
 
@@ -102,7 +100,7 @@ describe("migrateOmnivoiceTtsSettings", () => {
       voices: [
         { id: "v1", name: "Narrator", language: "eng" },
         { id: "v2", name: "Mary", provider: "gemini", voiceName: "Kore" },
-        omnivoiceVoice({ id: "v3", name: "Clone", language: "French", referenceAudioId: "r.wav" }),
+        omnivoiceVoice({ id: "v3", name: "Mira", language: "French" }),
       ],
     }
     const next = migrateOmnivoiceTtsSettings(settings, { targetLanguage: "fra" })
@@ -114,7 +112,7 @@ describe("migrateOmnivoiceTtsSettings", () => {
     })
     expect(next?.voices?.[1]).toEqual(settings.voices?.[1])
     expect(next?.voices?.[2]).toMatchObject({
-      id: "v3", provider: "inworld", language: "fr-FR", referenceAudioId: "r.wav",
+      id: "v3", provider: "inworld", language: "fr-FR",
     })
   })
 
@@ -138,12 +136,11 @@ describe("omnivoiceMigrationProperties", () => {
       voices: [
         { id: "v1", name: "Narrator", language: "eng" },
         { id: "v2", name: "Mary", provider: "gemini", voiceName: "Kore" },
-        omnivoiceVoice({ id: "v3", name: "Clone", language: "French", referenceAudioId: "r.wav" }),
+        omnivoiceVoice({ id: "v3", name: "Mira", language: "French" }),
       ],
     }, { targetLanguage: "fra" })).toEqual({
       project_provider_migrated: true,
       voice_count: 2,
-      cloned_voice_count: 1,
       from_languages: ["eng", "French"],
       to_languages: ["en-US", "fr-FR"],
     })
@@ -156,7 +153,6 @@ describe("omnivoiceMigrationProperties", () => {
     })).toEqual({
       project_provider_migrated: false,
       voice_count: 0,
-      cloned_voice_count: 0,
       from_languages: [],
       to_languages: [],
     })

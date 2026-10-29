@@ -59,9 +59,8 @@ export function resampleToMono16k(channel: Float32Array, sampleRate: number): Fl
  * AQU-646 timing/trim split: cell TIMING is tiled (each turn extends to the
  * next turn's start; first→0, last→clip end when `totalMs` is known) so
  * playback never skips inter-turn audio. TRIMS stay the tight turn bounds —
- * they feed voice-reference extraction and Whisper, where padding a speaker's
- * window with a neighbor's audio would contaminate clone references and bleed
- * words into the wrong transcript. Gap audio is attributed to the preceding
+ * they feed Whisper and each turn's playback, where padding a speaker's
+ * window with a neighbor's audio would bleed words into the wrong transcript. Gap audio is attributed to the preceding
  * speaker's cell for playback timing only.
  */
 export function turnsToSegments(turns: readonly DiarizationTurn[], totalMs?: number): {

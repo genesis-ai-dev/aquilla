@@ -17,7 +17,9 @@ under /forge/voices/<voice_id>/):
 
 Why this shape (see research_notes/Low resource voice cloning options/): RVC keeps the
 reader's phonetics, timing and pitch contour — the language lives there — and only swaps
-timbre. Every component is commercially licensed, unlike Seed-VC (GPL, archived).
+timbre. Every component is commercially licensed, unlike the Seed-VC service (GPL,
+archived) that this replaced; AQU-2291 removed Seed-VC, so this is the only
+speech-to-speech path.
 
 Custom voices (a real speaker, from the org's own recordings — consent is the org's
 responsibility and is recorded by the sync-worker before anything reaches here):

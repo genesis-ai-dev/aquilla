@@ -1,13 +1,18 @@
 /**
  * Smart Extensions bridge, apiRev 4 — the last built-in editor surfaces an
  * `editor` extension reaches: per-take audio validation, the Audio lens's
- * take (waveform peaks, trim, voice, cloning), source editing and the cell
+ * take (waveform peaks, trim, voice), source editing and the cell
  * menu (scope write:source), the AI surfaces next to a cell (translation-
  * memory examples, contextual autopilot drafts, smart edits), and the source
  * selection toolbar (view / add term, Ask AI). Host computes, frame renders;
- * anything with its own host UI (term popovers, clone dialog, remove
+ * anything with its own host UI (term popovers, remove
  * confirmation, Ask AI chat) opens in the host.
  */
+
+/** What `aquilla.audio.clone` rejects with since short-clip cloning was
+ *  removed (AQU-2291). The method stays so rev4 extensions get a clear answer
+ *  instead of an unknown-method error. */
+export const CLONE_REMOVED_MESSAGE = "Voice cloning was removed — train a voice in the New voice dialog"
 
 /** One take on a line that can be validated (AudioValidationControl). */
 export interface ToolAudioTake {
@@ -49,6 +54,9 @@ export interface ToolVoiceList {
   voices: { id: string; name: string }[]
   /** The line's voice (cast assignment, else the project default). */
   current: Record<string, { id: string; name: string; explicit: boolean }>
+  /** Always false: short-clip voice cloning was removed (AQU-2291). Kept so
+   *  rev4 extensions that read it keep working; a real person's voice is now
+   *  trained in the app's New voice dialog. */
   canClone: boolean
 }
 

@@ -4,10 +4,13 @@
 // start training (~45 min on the voice forge). The cast gets the voice at once,
 // marked "Training" until it is ready for Change voice.
 //
+// Opened from a line's take ("Train a voice from this recording", AQU-2291),
+// that take arrives as the first recording through `seedRecording`.
+//
 // Consent is the organization's responsibility and the panel says so plainly:
 // nothing starts until the maintainer ticks the statement, and the worker keeps
 // that confirmation as an audit record.
-import { useCallback, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { FileAudio, ShieldCheck, Upload, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
@@ -47,6 +50,8 @@ export interface TrainVoicePanelProps {
   fileId?: string | null
   session?: FrontierSession | null
   onStarted: (voice: Voice) => void
+  /** Loads a recording to start the list with (a line's take). Called once. */
+  seedRecording?: () => Promise<File>
 }
 
 const fmt = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`
@@ -70,14 +75,16 @@ export function TrainVoicePanel(props: TrainVoicePanelProps) {
   return <TrainVoiceForm {...props} nameField={nameField} />
 }
 
-function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameField }: TrainVoicePanelProps & { nameField: ReactNode }) {
+function TrainVoiceForm({
+  draft, projectId, fileId, session, onStarted, seedRecording, nameField,
+}: TrainVoicePanelProps & { nameField: ReactNode }) {
   const t = useT()
   const [recordings, setRecordings] = useState<Recording[]>([])
   const [consent, setConsent] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const addFiles = useCallback((files: FileList | null) => {
+  const addFiles = useCallback((files: ArrayLike<File> | null) => {
     if (!files) return
     const added = Array.from(files).slice(0, CUSTOM_VOICE_MAX_CLIPS)
     setRecordings((cur) => [...cur, ...added.map((file) => ({ file, seconds: null }))].slice(0, CUSTOM_VOICE_MAX_CLIPS))
@@ -88,10 +95,24 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
     }
   }, [])
 
+  // The seeded take loads once per mount (the modal remounts per seed). No
+  // cancel on cleanup: under StrictMode the ref keeps the re-run from loading
+  // again, so the first run is the only one that can deliver the file.
+  const [seeding, setSeeding] = useState(Boolean(seedRecording))
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (!seedRecording || seededRef.current) return
+    seededRef.current = true
+    seedRecording()
+      .then((file) => addFiles([file]))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSeeding(false))
+  }, [seedRecording, addFiles])
+
   const totalSeconds = recordings.reduce((sum, r) => sum + (r.seconds ?? 0), 0)
   const minutes = totalSeconds / 60
   const oversized = recordings.filter((r) => r.file.size > CUSTOM_VOICE_MAX_CLIP_BYTES)
-  const probing = recordings.some((r) => r.seconds == null)
+  const probing = seeding || recordings.some((r) => r.seconds == null)
   const enough = minutes >= CUSTOM_VOICE_MIN_MINUTES
   const tooMuch = minutes > CUSTOM_VOICE_MAX_MINUTES
   const name = draft.name.trim()

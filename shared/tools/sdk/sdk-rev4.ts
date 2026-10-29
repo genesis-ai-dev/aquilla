@@ -180,8 +180,6 @@ export const SDK_REV4 = String.raw`
         el("button", { class: "btn-s", type: "button", "aria-label": t("editor.voice.play"), onclick: function (e) { e.stopPropagation(); actions.playAudio(id); } }, [icon("play", "s3"), t("editor.voice.play")]),
         st.editable ? el("button", { class: "rbtn", type: "button", "aria-label": t("editor.audio.record"), title: t("editor.audio.record"), onclick: function (e) { e.stopPropagation(); actions.recordAudio(id); } }, [icon("mic", "s35")]) : null,
         st.editable && S.voices ? voicePicker(id) : null,
-        st.editable && S.voices && S.voices.canClone ? el("button", { class: "rbtn", type: "button", "aria-label": "Make a character from this take", title: "Make a character from this take",
-          onclick: function (e) { e.stopPropagation(); aquilla.audio.clone(S.fileId, id).catch(noop); } }, [icon("copy", "s35")]) : null,
       ]));
     } else if (st.voicing === "busy") {
       card.appendChild(el("span", { class: "k vstatus", role: "status" }, [icon("loader-circle", "s3 spin"), t("editor.voice.generatingAs", { voice: voice })]));

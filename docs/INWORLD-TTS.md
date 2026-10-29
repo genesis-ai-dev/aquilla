@@ -1,6 +1,6 @@
 # Inworld TTS 2 Flash (AQU-1189)
 
-Aquilla's default cloud TTS / zero-shot clone engine is **Inworld TTS 2**
+Aquilla's default cloud TTS engine is **Inworld TTS 2**
 (`inworld-tts-2`). New voices default to Highest quality; Standard selects
 Flash (`inworld-tts-2-flash`).
 
@@ -9,10 +9,8 @@ Flash (`inworld-tts-2-flash`).
 The browser never holds this secret. Only **sync-worker** calls Inworld.
 
 1. Create a **read-write** API key in the [Inworld Portal](https://platform.inworld.ai/)
-   (`inworld workspace add-key`, or Portal → API Keys). Instant Voice Cloning
-   and Voice Design both need write access on `voices`. A read-only key fails
-   clone, design, and publish alike — you do not need a second permission
-   beyond the read-write key already required for cloning.
+   (`inworld workspace add-key`, or Portal → API Keys). Voice Design needs
+   write access on `voices`; a read-only key fails design and publish.
 2. Copy the key **as-is** (do not prefix `Basic ` — the worker adds that).
 
 ### Local `pnpm dev`
@@ -57,7 +55,6 @@ Do **not** put the key in `VITE_*`, the SPA, or auth-worker.
 | Purpose | Method | Path |
 | --- | --- | --- |
 | Synthesize | `POST` | `https://api.inworld.ai/tts/v1/voice` |
-| Instant clone | `POST` | `https://api.inworld.ai/voices/v1/voices:clone` |
 | Voice design | `POST` | `https://api.inworld.ai/voices/v1/voices:design` |
 | Publish designed voice | `POST` | `https://api.inworld.ai/voices/v1/voices/{voiceId}:publish` |
 | List voices | `GET` | `https://api.inworld.ai/voices/v1/voices` |
@@ -93,8 +90,9 @@ the published TTS-2 table. There is no Other / typed-code field on Voice
 design; that stays on Prebuilt when a project lane is not a code Inworld can
 map. Generate posts `POST /api/v1/voice/tts/design`; Create/Save publishes the chosen preview
 via `POST /api/v1/voice/tts/publish`. The published `voiceId` is stored on
-`Voice.voiceName` like a catalog or clone id. The chosen preview clip is
-uploaded project-scoped to R2 (same reference-clip path as clone audio) and
+`Voice.voiceName` like a catalog id. The chosen preview clip is
+uploaded project-scoped to R2 (`/api/v1/voice/reference`, the
+`projects/{id}/voices/` prefix) and
 the object name is stored on `Voice.designPreviewAudioId`. Opening the voice
 later plays that clip, not a new synthesize of the preview script. Voices
 saved before this field existed still fall back to a fresh TTS request.
@@ -128,5 +126,9 @@ Legacy project voices with `provider: "omnivoice"` are rewritten to Inworld
 the first time a project is opened (`useProjectTts`): the stored provider
 becomes `inworld`, leftover language tags (`eng`, `French`, `en`) become
 Inworld BCP-47 (`en-US`, `fr-FR`), and empty catalog names become Dennis.
-Runtime still remaps unread copies so generate uses the hosted Inworld path
-(same clone-from-reference flow).
+Runtime still remaps unread copies so generate uses the hosted Inworld path.
+
+Instant cloning from a short reference clip was removed (AQU-2291). A real
+person's voice is a trained custom voice (`infra/modal/voice_forge.py`, at
+least 5 minutes of recordings) applied with Change voice; `/api/v1/voice/tts`
+ignores a `referenceAudioId` a stale client still sends.

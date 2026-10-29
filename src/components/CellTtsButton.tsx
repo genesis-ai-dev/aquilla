@@ -243,7 +243,7 @@ export function CellTtsButton({
         } else {
           // No attached generated voice — synthesize on demand. With project/
           // file/session context we generate DURABLY (upload + cell.audio.attach,
-          // and for clone voices re-voice the TTS through Seed-VC); otherwise we
+          // and for library voices re-voice the TTS through the voice forge); otherwise we
           // fall back to a transient preview synth.
           setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
           const geminiContext = { sourceLanguage, targetLanguage, original, context, cellLabel }

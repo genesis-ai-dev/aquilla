@@ -1,17 +1,19 @@
-// AQU-1109 "Change voice": re-voice a cell's EXISTING take into a cloned
-// voice's timbre with Seed-VC. Never synthesizes from text — the words, timing
-// and performance of the take are kept; only who it sounds like changes.
+// AQU-1109 "Change voice": re-voice a cell's EXISTING take into a library
+// voice's timbre (voice forge RVC — a character voice or a trained custom
+// voice). Never synthesizes from text — the words, timing and performance of
+// the take are kept; only who it sounds like changes.
 //
 // Mirrors denoise-take: the result is a NEW take in the SAME slot as the take
 // it came from, selected on attach; the source take stays in the strip and is
-// linked from the new one's `referenceAudioId`.
+// linked from the new one's `referenceAudioId` (the take lineage field on the
+// attachment — not a voice clip).
 //
-// The worker names a converted clip `vc-<fingerprint>-q<steps>-audio-<cellId>-…`
+// The worker names a converted clip `vc-<fingerprint>-audio-<cellId>-…`
 // (sync-worker/src/voice-convert.ts `convertedAudioId`). The fingerprint is the
-// reference clip it was made from, and `q` is the diffusion-step count the user
-// picked. A re-run can tell a stale reference, or the same reference at a
-// different quality, from a current one without a schema change. Clips named
-// before quality was recorded (`vc-<fingerprint>-audio-…`) count as Fast.
+// library voice it was made with, so a re-run can tell a take converted into
+// this voice from one converted into another without a schema change. Ids
+// minted by the retired short-clip converter carry a `-q<steps>-` segment after
+// the fingerprint; they still parse as voice-changed takes.
 
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
@@ -25,32 +27,32 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey } from "./tts"
 import { fetchCellAudio, audioIdSeededWith } from "./upload"
-import { convertToCloneVoice } from "./voice-clone"
+import { convertToLibraryVoice } from "./voice-clone"
 
 const VOICE_CHANGED_PREFIX = "vc-"
 
 /**
- * FNV-1a (32-bit) of a reference clip id, as 8 hex chars. Mirrors
+ * FNV-1a (32-bit) of a conversion key, as 8 hex chars. Mirrors
  * `voiceReferenceFingerprint` in sync-worker/src/voice-convert.ts, which stamps
  * it into the converted clip's id. Change both or neither.
  */
-export function voiceReferenceFingerprint(referenceAudioId: string): string {
+export function voiceReferenceFingerprint(key: string): string {
   let h = 0x811c9dc5
-  for (let i = 0; i < referenceAudioId.length; i++) {
-    h ^= referenceAudioId.charCodeAt(i)
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i)
     h = Math.imul(h, 0x01000193) >>> 0
   }
   return h.toString(16).padStart(8, "0")
 }
 
 /**
- * What a voice's conversions are pinned to: a clone voice's reference clip, or a
- * library voice's model id (namespaced). Null when the voice can't convert.
- * Mirrors `libraryVoiceKey` in sync-worker/src/voice-convert.ts.
+ * What a voice's conversions are pinned to: a library voice's model id
+ * (namespaced). Null when the voice can't convert — only character voices and
+ * trained voices have a model. Mirrors `libraryVoiceKey` in
+ * sync-worker/src/voice-convert.ts.
  */
 export function voiceConversionKey(voice: Voice): string | null {
-  if (voice.libraryVoiceId) return `library:${voice.libraryVoiceId}`
-  return voice.referenceAudioId ?? null
+  return voice.libraryVoiceId ? `library:${voice.libraryVoiceId}` : null
 }
 
 /** True when an audioId names a Change voice conversion. */
@@ -58,49 +60,9 @@ export function isVoiceChangedAudioId(audioId: string): boolean {
   return audioId.startsWith(VOICE_CHANGED_PREFIX)
 }
 
-/** True when `audioId` was converted from exactly this reference clip. */
-export function voiceChangedWithReference(audioId: string, referenceAudioId: string): boolean {
-  return audioId.startsWith(`${VOICE_CHANGED_PREFIX}${voiceReferenceFingerprint(referenceAudioId)}-`)
-}
-
-/** What the user picks. The numbers are Seed-VC diffusion steps: 10 is its fast
- *  range, 25 its normal default, 40 the high end of the useful range (50 is the
- *  worker's ceiling). */
-export const CHANGE_VOICE_QUALITIES = ["fast", "standard", "high"] as const
-export type ChangeVoiceQuality = (typeof CHANGE_VOICE_QUALITIES)[number]
-
-export const CHANGE_VOICE_QUALITY_STEPS: Record<ChangeVoiceQuality, number> = {
-  fast: 10,
-  standard: 25,
-  high: 40,
-}
-
-/** Steps assumed for a conversion named before quality was stamped into the id. */
-export const LEGACY_CHANGE_VOICE_STEPS = CHANGE_VOICE_QUALITY_STEPS.fast
-
-/** Diffusion steps recorded in a Change voice id, or null when it isn't one. */
-export function voiceChangedSteps(audioId: string): number | null {
-  const stamped = /^vc-[0-9a-f]{8}-q(\d+)-/.exec(audioId)
-  if (stamped) return Number(stamped[1])
-  if (isVoiceChangedAudioId(audioId)) return LEGACY_CHANGE_VOICE_STEPS
-  return null
-}
-
-/** The quality a converted clip was made at, or null when the id isn't one.
- *  An unusual step count maps to the nearest named quality so the menu can
- *  still show it. */
-export function changeVoiceQualityForSteps(steps: number | null): ChangeVoiceQuality | null {
-  if (steps == null) return null
-  let best: ChangeVoiceQuality = "standard"
-  let dist = Infinity
-  for (const quality of CHANGE_VOICE_QUALITIES) {
-    const d = Math.abs(CHANGE_VOICE_QUALITY_STEPS[quality] - steps)
-    if (d < dist) {
-      dist = d
-      best = quality
-    }
-  }
-  return best
+/** True when `audioId` was converted with exactly this conversion key. */
+export function voiceChangedWithReference(audioId: string, key: string): boolean {
+  return audioId.startsWith(`${VOICE_CHANGED_PREFIX}${voiceReferenceFingerprint(key)}-`)
 }
 
 export interface ChangeVoiceTake {
@@ -153,7 +115,7 @@ export function generateSlotOverVoiceChange(cell: CellData): string | undefined 
 /**
  * Walk back through earlier conversions to the take a person recorded,
  * imported or generated. Re-converting a conversion compounds artifacts, so a
- * re-run after a reference change always starts from the original. Stops at
+ * re-run into another voice always starts from the original. Stops at
  * the last take still present when the chain is broken.
  */
 export function originalTakeId(
@@ -170,26 +132,14 @@ export function originalTakeId(
 }
 
 /** Why Change voice can't run on a cell, or null when it can. */
-export type ChangeVoiceBlocker = "no-take" | "not-cloned" | "up-to-date"
+export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date"
 
-export function changeVoiceBlocker(
-  cell: CellData,
-  voice: Voice,
-  /** When set, a take converted from the current reference at a DIFFERENT step
-   *  count can be converted again. Omitted, any quality of the current
-   *  reference counts as done. */
-  diffusionSteps?: number,
-): ChangeVoiceBlocker | null {
+export function changeVoiceBlocker(cell: CellData, voice: Voice): ChangeVoiceBlocker | null {
   const take = changeVoiceSourceTake(cell)
   if (!take) return "no-take"
   const key = voiceConversionKey(voice)
-  if (!key) return "not-cloned"
-  const sameVoice = take.attachment.voiceId === voice.id
-    && voiceChangedWithReference(take.audioId, key)
-  // Library voices have no quality knob: one RVC pass, so any take is current.
-  const sameQuality = diffusionSteps == null || voice.libraryVoiceId != null
-    || voiceChangedSteps(take.audioId) === diffusionSteps
-  if (sameVoice && sameQuality) return "up-to-date"
+  if (!key) return "not-trained"
+  if (take.attachment.voiceId === voice.id && voiceChangedWithReference(take.audioId, key)) return "up-to-date"
   return null
 }
 
@@ -213,7 +163,6 @@ export interface ChangeVoiceArgs {
   label?: string
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
-  diffusionSteps?: number
 }
 
 export interface ChangeVoiceResult {
@@ -227,20 +176,19 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
   if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
   const take = changeVoiceSourceTake(cell)
   if (!take) throw new Error("This line has no take to change.")
-  if (!voiceConversionKey(voice)) throw new Error(`${voice.name} has no reference clip — clone a voice first.`)
+  if (!voice.libraryVoiceId) {
+    throw new Error(`${voice.name} has no trained voice model yet — Change voice works with character voices and trained voices.`)
+  }
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
   const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
-  const conv = await convertToCloneVoice({
+  const conv = await convertToLibraryVoice({
     projectId,
     fileId: cell.fileId,
     cellId: cell.id,
-    ...(voice.libraryVoiceId
-      ? { libraryVoiceId: voice.libraryVoiceId }
-      : { referenceAudioId: voice.referenceAudioId }),
+    libraryVoiceId: voice.libraryVoiceId,
     sourceAudioId,
-    diffusionSteps: args.diffusionSteps,
     getSyncToken,
   })
 
@@ -284,7 +232,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
 /**
  * `changeVoiceForCell` behind the cell's tts badge — the same status the
  * generate button drives, so the spinner and the error popover (which already
- * knows Seed-VC failures) work unchanged. Returns true on success.
+ * knows voice-conversion failures) work unchanged. Returns true on success.
  */
 export async function changeCellVoice(args: ChangeVoiceArgs): Promise<boolean> {
   const statusKey = ttsStatusKey(args.cell.id)

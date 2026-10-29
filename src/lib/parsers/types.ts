@@ -340,7 +340,7 @@ export interface Voice {
    * Narrator, so it cannot belong to one lane.
    *
    * Stamped once, at the write that first stores the voice (`useProjectTts`'s
-   * `saveTts`), so every mint site — New voice / Clone / voice design, an
+   * `saveTts`), so every mint site — New voice / voice design / training, an
    * import with speaker labels, diarization, "Adopt voices as cast" — lands in
    * the active lane without each one having to know about lanes. An edit never
    * re-stamps: a voice does not move lane because someone renamed it.
@@ -376,13 +376,6 @@ export interface Voice {
   /** Preset voices shipped with the app. Cannot be deleted, only forked. */
   builtIn?: boolean
   /**
-   * Voice-clone reference clip id (object name incl. ext) stored project-scoped
-   * in R2. When set, TTS output is re-voiced into this clip's timbre via Seed-VC
-   * (sync-worker POST /api/v1/voice/convert) before being attached. Absent means
-   * plain TTS, no conversion.
-   */
-  referenceAudioId?: string
-  /**
    * R2 object name (incl. ext) of the Voice Design sample the user picked.
    * The editor plays this clip so it matches the preview, instead of
    * synthesizing the script again. Voices saved before this field existed
@@ -390,16 +383,11 @@ export interface Voice {
    */
   designPreviewAudioId?: string
   /**
-   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
-   * of that take. The Reference audio tab is filled only when `referenceAudioId`
-   * is set *without* this key (a recorded or uploaded clip).
-   */
-  referenceTakeKey?: string
-  /**
    * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
-   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
-   * take into it through the voice forge instead of Seed-VC (sync-worker POST
-   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * i.e. an RVC model trained by infra/modal/voice_forge.py — or a trained custom voice
+   * (`c-<hex>`). The only speech-to-speech path: Change voice re-voices a take into it
+   * through the voice forge (sync-worker POST /api/v1/voice/convert with
+   * `libraryVoiceId`), and Generate re-voices fresh TTS the same way. The take's
    * words, pronunciation, timing and intonation are kept; only the timbre changes.
    */
   libraryVoiceId?: string
@@ -428,8 +416,8 @@ export interface ProjectTtsSettings {
   /**
    * Project's voice library. Empty/absent means: use the built-in presets.
    * In the Voice Studio these are presented as the project's *cast* — each
-   * voice is a character/speaker (a base TTS voice + an optional actor-clone
-   * reference) that lines get assigned to.
+   * voice is a character/speaker (a TTS voice, a ready-made character voice,
+   * or a voice trained from an actor's recordings) that lines get assigned to.
    */
   voices?: Voice[]
   /** Voice id used when a cell doesn't specify one (the narrator/default cast member). */

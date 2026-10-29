@@ -22,10 +22,9 @@ export function inworldTtsRawCents(characters: number, modelId?: string): number
   return characters * rate
 }
 
-/** Instant voice clone and voice publish carry no Inworld charge on the card.
- *  They still pass the entitlement check, so the ceiling and allowance gate
- *  them and each one leaves a row. */
-export const INWORLD_VOICE_CLONE_CENTS = 0
+/** Voice publish carries no Inworld charge on the card. It still passes the
+ *  entitlement check, so the ceiling and allowance gate it and each one
+ *  leaves a row. */
 export const INWORLD_VOICE_PUBLISH_CENTS = 0
 /** The ledger refuses a zero reservation, so a free call reserves this and
  *  settles at its card price. */
@@ -38,10 +37,9 @@ export const MODAL_GPU_CENTS_PER_SEC: Readonly<Record<string, number>> = {
   ...OMNI_GPU_CENTS_PER_SEC,
   'NVIDIA T4': 0.0164,
 }
-/** infra/modal/diarization.py `gpu="T4"`; infra/modal/seed_vc.py runs on L40S. */
+/** infra/modal/diarization.py `gpu="T4"`. */
 export const DIARIZATION_GPU = 'NVIDIA T4'
-export const VOICE_CONVERT_GPU = 'NVIDIA L40S'
-/** infra/modal/voice_forge.py `convert_audio` (library voices, RVC) runs on L4. */
+/** infra/modal/voice_forge.py `convert_audio` (library + custom voices, RVC) runs on L4. */
 export const LIBRARY_VOICE_CONVERT_GPU = 'NVIDIA L4'
 /** infra/modal/voice_forge.py `train` (custom voices from an org's recordings) runs on A10G. */
 export const CUSTOM_VOICE_TRAIN_GPU = 'NVIDIA A10G'

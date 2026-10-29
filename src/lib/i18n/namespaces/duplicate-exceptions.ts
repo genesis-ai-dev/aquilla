@@ -144,7 +144,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -376,12 +376,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   // duplicate can only be resolved on this side. Within projectSettings itself
   // the equivalent same-string duplicates were consolidated onto one shared
   // key instead of excepted — see the namespace file's "AQU-832" comments.
-  "projectSettings.sourceLink.modeClone":
-    "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
-    "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the Voice Studio's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +

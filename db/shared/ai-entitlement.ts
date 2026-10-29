@@ -105,7 +105,7 @@ export interface AiEntitlementDeps {
   reserve?: boolean
   /** The house credential when a provider has one secret per service rather
    *  than one account key (Modal: OMNI_SHARED_SECRET, DIARIZATION_SHARED_SECRET,
-   *  SEED_VC_TOKEN). Replaces the HOUSE_KEY_ENV lookup; never used for BYOK. */
+   *  VOICE_FORGE_TOKEN). Replaces the HOUSE_KEY_ENV lookup; never used for BYOK. */
   houseKey?: string
 }
 

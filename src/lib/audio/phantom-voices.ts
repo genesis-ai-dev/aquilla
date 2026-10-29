@@ -22,7 +22,7 @@ import { parseScriptureReference } from "@/lib/scripture-reference"
 /**
  * The only keys `buildCastAdditions` writes when it mints a cast member from a
  * label: identity plus a palette colour. A voice carrying anything else has
- * been configured by a person (an engine, a stock voice, a clone reference, a
+ * been configured by a person (an engine, a stock voice, a character model, a
  * prompt, an accent …), which is the evidence that it is a real character —
  * whatever its name looks like. Keyed on the absence of configuration rather
  * than a list of "evidence" fields on purpose: a new Voice field then counts as

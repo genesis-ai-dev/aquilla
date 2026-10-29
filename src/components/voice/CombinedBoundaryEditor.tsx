@@ -51,7 +51,6 @@ export interface CombinedBoundaryEditorProps {
   audioId: string
   url: string
   voiceId: string
-  referenceAudioId?: string
   /** The voiced cells, in document order (matches the clip's line order). */
   cells: CellData[]
   session: FrontierSession | null
@@ -62,7 +61,7 @@ export interface CombinedBoundaryEditorProps {
 }
 
 export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
-  const { project, fileId, audioId, url, voiceId, referenceAudioId, cells, username, onClose, onSaved } = props
+  const { project, fileId, audioId, url, voiceId, cells, username, onClose, onSaved } = props
   const t = useT()
   const n = cells.length
 
@@ -173,7 +172,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
           fileId,
           cellId: cell.id,
           audioId,
-          att: cell.attachments?.[audioId] ?? { url, voiceId, referenceAudioId },
+          att: cell.attachments?.[audioId] ?? { url, voiceId },
           selectedAudioId: cell.selectedAudioId,
           trimStartMs: Math.round(start * 1000),
           trimEndMs: Math.round(end * 1000),
@@ -185,7 +184,7 @@ export function CombinedBoundaryEditor(props: CombinedBoundaryEditorProps) {
     } finally {
       setSaving(false)
     }
-  }, [cuts, saving, n, duration, cells, project.id, fileId, audioId, url, voiceId, referenceAudioId, username, pause, onSaved, onClose])
+  }, [cuts, saving, n, duration, cells, project.id, fileId, audioId, url, voiceId, username, pause, onSaved, onClose])
 
 
   return (

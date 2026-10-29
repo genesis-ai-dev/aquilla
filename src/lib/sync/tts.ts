@@ -1,6 +1,6 @@
 // Client lib for the hosted Inworld TTS endpoint (sync-worker).
 //
-// Mirrors voice-clone.ts (convertToCloneVoice): uses syncWorkerHttpOrigin() for
+// Mirrors voice-clone.ts (convertToLibraryVoice): uses syncWorkerHttpOrigin() for
 // the base URL and a sync token (scoped to projectId+fileId) for auth.
 //
 // The returned audioId is a valid cell-audio object in R2 — callers can:
@@ -25,10 +25,9 @@ export interface SynthesizeCellTtsArgs {
   cellId?: string
   /** The text to synthesize. */
   text: string
-  /** Inworld stock voice id (e.g. "Dennis") or a previously cloned voiceId. */
+  /** Inworld stock voice id (e.g. "Dennis"), an Instant Clone id made in
+   *  Inworld, or a published Voice Design id. */
   voiceId?: string
-  /** Reference clip id for voice cloning (from /api/v1/voice/reference/*). */
-  referenceAudioId?: string
   /** BCP-47 language tag. */
   language?: string
   /** Talking speed in [0.5, 1.5]. */
@@ -75,7 +74,6 @@ export async function synthesizeCellTts(
   }
   if (args.cellId !== undefined) body.cellId = args.cellId
   if (args.voiceId !== undefined) body.voiceId = args.voiceId
-  if (args.referenceAudioId !== undefined) body.referenceAudioId = args.referenceAudioId
   if (args.language !== undefined) body.language = args.language
   if (args.speakingRate !== undefined) body.speakingRate = args.speakingRate
   if (args.deliveryMode !== undefined) body.deliveryMode = args.deliveryMode

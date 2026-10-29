@@ -61,7 +61,7 @@ export const API_REV_ADDITIONS: Readonly<Record<number, readonly string[]>> = {
   ],
   4: [
     "audio.takes / audio.validate / audio.unvalidate: per-take audio validation (the audio column)",
-    "audio.take / audio.trim / audio.voices / audio.assignVoice / audio.clone: the Audio lens's take, waveform peaks, trim, voice and cloning (+ audio.changed event)",
+    "audio.take / audio.trim / audio.voices / audio.assignVoice: the Audio lens's take, waveform peaks, trim and voice (+ audio.changed event); audio.clone stays callable but always rejects (cloning removed, AQU-2291)",
     "source.actions / source.commit / source.setHidden / source.insert / source.remove / source.retime: source editing and the cell menu (scope write:source)",
     "ai.examples / ai.contextual / ai.reviewContextual / ai.smartEdits / ai.smartEditFeedback: the AI surfaces beside a cell (+ contextual.changed event)",
     "terms.selection / terms.view / terms.add / agent.ask: the source selection toolbar",

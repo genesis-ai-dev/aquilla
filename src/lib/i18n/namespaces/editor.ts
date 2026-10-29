@@ -684,10 +684,6 @@ export const editor = defineNamespace({
       "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
     "editor.selection.voiceTogetherInworldFailed":
       "Inworld TTS couldn't voice these lines. This is not a Gemini key problem.",
-    "editor.selection.voiceTogetherSeedVcNotConfigured":
-      "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
-    "editor.selection.voiceTogetherSeedVcFailed":
-      "Voice conversion couldn't re-voice these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -994,11 +990,9 @@ export const editor = defineNamespace({
     "editor.timeline.takeMenuReRecord": "Re-record this line",
     "editor.timeline.takeMenuRegenerate": "Regenerate voice",
     // AQU-2026: Change voice per line, from the Media timeline's take menu.
-    // The action and its quality names are the Audio tab's own
+    // The action and its reasons are the Audio tab's own
     // (`editor.voice.changeVoice*`) — the two surfaces must not name the same
-    // thing differently. Only the reason the Audio tab has no equivalent of
-    // is keyed here.
-    "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
+    // thing differently.
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
     "editor.timeline.takeMenuUnapprove": "Remove my approval",
@@ -1802,13 +1796,7 @@ export const editor = defineNamespace({
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.play": "Play this line",
-    "editor.voice.clone": "Clone voice from take",
-    "editor.voice.cloneTitle": "Make a voice from this take",
-    "editor.voice.cloneNamePlaceholder": "Voice name",
-    "editor.voice.cloneNameAriaLabel": "Name for the new voice",
-    "editor.voice.cloneSubmit": "Add to cast",
-    "editor.voice.cloneMoreOptions": "More options",
-    "editor.voice.clonedToast": "{name} is in the cast",
+    "editor.voice.trainFromTake": "Train a voice from this recording",
     "editor.voice.changeTo": "Change to {voice}",
     "editor.voice.workingAs": "Voicing as {voice}…",
     "editor.voice.yourRecording": "Your recording",
@@ -1817,13 +1805,9 @@ export const editor = defineNamespace({
     "editor.voice.generateFromText": "Generate audio from text",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
-    "editor.voice.changeVoiceNeedsClone": "{name} has no reference clip. Assign a cloned voice to change this take.",
+    "editor.voice.changeVoiceNeedsTraining":
+      "{name} has no trained voice model yet — Change voice works with character voices and trained voices.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
-    "editor.voice.changeVoiceQuality": "Quality",
-    "editor.voice.changeVoiceQuality.fast": "Fast",
-    "editor.voice.changeVoiceQuality.standard": "Standard",
-    "editor.voice.changeVoiceQuality.high": "High",
-    "editor.voice.changeVoiceQualityTooltip": "How closely the converted take matches the voice. Higher takes longer.",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
@@ -5578,19 +5562,6 @@ export const editor = defineNamespace({
           "voice engine failed on the selected lines. Says plainly that this is " +
           "not about the Gemini key. Keep 'Inworld TTS' and 'Gemini'.",
       },
-      "editor.selection.voiceTogetherSeedVcNotConfigured": {
-        description:
-          "Body of the 'Voice together' error notice when the chosen clone voice " +
-          "needs the Seed-VC voice-conversion step and this server has none. Keep " +
-          "'Seed-VC' and 'Inworld'; a clone voice is a voice copied from a " +
-          "recording.",
-      },
-      "editor.selection.voiceTogetherSeedVcFailed": {
-        description:
-          "Body of the 'Voice together' error notice when the Seed-VC " +
-          "voice-conversion step failed on the selected lines. Says plainly that " +
-          "this is not about the Gemini key. Keep 'Seed-VC' and 'Gemini'.",
-      },
       "editor.selection.translate": {
         description:
           "Button in the selection toolbar that asks the AI to draft the untranslated " +
@@ -6487,19 +6458,12 @@ export const editor = defineNamespace({
       "editor.timeline.changeVoiceStarted": {
         description:
           "Toast shown when the per-line 'Change voice' starts: the line's existing recording " +
-          "is being converted into the named cloned voice. Nothing is spoken afresh from text.",
+          "is being converted into the named character or trained voice. Nothing is spoken afresh from text.",
         placeholders: { name: "The voice's name, e.g. 'Narrator'." },
       },
       "editor.timeline.changeVoiceDone": {
         description: "Toast shown when the per-line 'Change voice' has finished.",
         placeholders: { name: "The voice's name, e.g. 'Narrator'." },
-      },
-      "editor.timeline.takeMenuChangeVoiceIsReference": {
-        description:
-          "Shown in place of the 'Change voice' item in a take's right-click menu, greyed out: " +
-          "this take is the reference clip some cloned voice was made from, so converting it " +
-          "would change what that voice sounds like. It is left as it is.",
-        maxLength: 40,
       },
       "editor.timeline.takeMenuDeletePiece": {
         description:
@@ -6767,15 +6731,6 @@ export const editor = defineNamespace({
           "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
-      "editor.voice.cloneTitle": { description: "Heading of the small popover that turns a line's audio take into a reusable voice." },
-      "editor.voice.cloneNamePlaceholder": { description: "Placeholder of the name field in that popover." },
-      "editor.voice.cloneNameAriaLabel": { description: "Accessible label of the name field in that popover." },
-      "editor.voice.cloneSubmit": { description: "Button in that popover: creates the voice from the take and adds it to the project's cast. Short." },
-      "editor.voice.cloneMoreOptions": { description: "Link in that popover: opens the full New voice dialog instead." },
-      "editor.voice.clonedToast": {
-        description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
-        placeholders: { name: "The new voice's name, e.g. 'Ana'." },
-      },
       "editor.voice.changeTo": {
         description: "Button beside a line's voice field: re-voices the line's audio into the voice it is cast as.",
         placeholders: { voice: "Voice name, e.g. 'Hearth'." },
@@ -6790,13 +6745,13 @@ export const editor = defineNamespace({
         placeholders: { name: "Username of the person who recorded it." },
       },
       "editor.voice.originalAudio": { description: "Shown in a line's voice field when the audio is the imported original programme audio." },
-      "editor.voice.clone": {
+      "editor.voice.trainFromTake": {
         description:
-          "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
-          "recording into a reusable synthetic voice for the project's cast. " +
-          "'Clone' is the voice-synthesis term for copying a speaker's sound. " +
-          "Keep it a short label, like the English.",
-        maxLength: 24,
+          "Tooltip and accessible name of the graduation-cap button on a line's voice " +
+          "card. It opens the New voice dialog on its Train voice tab with this " +
+          "recording already added, to train a custom voice of the person speaking. " +
+          "'Train' as in training a voice model.",
+        maxLength: 48,
       },
       "editor.voice.generateFromText": {
         description:
@@ -6809,9 +6764,9 @@ export const editor = defineNamespace({
       },
       "editor.voice.changeVoice": {
         description:
-          "Name of the icon on a line that already has a take, and of the button " +
-          "inside the popover it opens. It keeps the recording and makes it sound " +
-          "like the assigned cloned voice. No new speech is generated from text.",
+          "Accessible name of the icon button on a line that already has a take (and of " +
+          "the timeline take-menu item). It keeps the recording and makes it sound " +
+          "like the assigned character or trained voice. No new speech is generated from text.",
         maxLength: 18,
       },
       "editor.voice.changeVoiceTooltip": {
@@ -6822,10 +6777,12 @@ export const editor = defineNamespace({
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
       },
-      "editor.voice.changeVoiceNeedsClone": {
+      "editor.voice.changeVoiceNeedsTraining": {
         description:
-          "Tooltip on the disabled 'Change voice' button when the assigned voice is a " +
-          "stock voice with no reference recording to copy the sound from.",
+          "Tooltip on the disabled 'Change voice' button (and the disabled timeline " +
+          "menu item) when the line's voice is a plain text-to-speech voice. Change " +
+          "voice re-voices an existing take, and only ready-made character voices and " +
+          "voices trained from a real person's recordings can do that.",
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
@@ -6837,32 +6794,6 @@ export const editor = defineNamespace({
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
-      },
-      "editor.voice.changeVoiceQuality": {
-        description:
-          "Accessible name of the quality menu beside Change voice. The options are " +
-          "Fast, Standard and High.",
-        maxLength: 12,
-      },
-      "editor.voice.changeVoiceQuality.fast": {
-        description:
-          "Change voice quality option. The quickest conversion and the roughest match.",
-        maxLength: 10,
-      },
-      "editor.voice.changeVoiceQuality.standard": {
-        description:
-          "Change voice quality option, and the default. Seed-VC's normal setting.",
-        maxLength: 12,
-      },
-      "editor.voice.changeVoiceQuality.high": {
-        description:
-          "Change voice quality option. The closest match, and the slowest.",
-        maxLength: 10,
-      },
-      "editor.voice.changeVoiceQualityTooltip": {
-        description:
-          "Tooltip on the Change voice quality menu. Explains that the choice is a " +
-          "trade of likeness against waiting time.",
       },
       "editor.voice.voicing": {
         description:

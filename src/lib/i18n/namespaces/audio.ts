@@ -5,12 +5,11 @@ export const audio = defineNamespace({
     // Shared across more than one audio surface.
     "audio.narrator": "Narrator",
 
-    // NewVoiceModal — create/edit a voice (TTS engine config, or a cloned
-    // voice built from a reference clip).
+    // NewVoiceModal — create/edit a voice (TTS engine config, a ready-made
+    // character, or a voice trained from a real person's recordings).
     "audio.newVoice.createLabel": "New voice",
     "audio.newVoice.titleEdit": "Edit voice",
     "audio.newVoice.tabTts": "TTS voice",
-    "audio.newVoice.tabClone": "Clone voice",
     "audio.newVoice.tabCharacter": "Characters",
     "audio.newVoice.tabTrain": "Train voice",
 
@@ -171,23 +170,9 @@ export const audio = defineNamespace({
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
     "audio.newVoice.mmsLanguageLabel": "Language",
-    "audio.newVoice.singleVoiceHint":
-      "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
-    "audio.newVoice.referenceLabel": "Reference audio",
-    "audio.newVoice.tabFromLine": "From a line",
-    "audio.newVoice.referenceSourceGroupLabel": "Reference clip source",
-    "audio.newVoice.referenceDescription":
-      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
-    "audio.newVoice.fromLineEmpty":
-      "No line audio yet. Record or generate a take first, or use Reference audio.",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
-    "audio.newVoice.takeGenerated": "AI-generated",
-    "audio.newVoice.liftingTake": "Lifting take…",
-    "audio.newVoice.errorNoProjectContext": "No project context to lift a take.",
-    "audio.newVoice.errorAudioUnavailable": "That audio is no longer available.",
     "audio.newVoice.errorNameRequired": "Name the voice",
-    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice",
     "audio.newVoice.makeNarratorHint":
       "Make this the narrator — used for lines without an explicit speaker.",
     "audio.newVoice.makeNarratorButton": "Make narrator",
@@ -443,34 +428,14 @@ export const audio = defineNamespace({
     "audio.library.setNarrator": "Make narrator",
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
-    "audio.library.cloneEngineLabel": "Clone",
     "audio.library.characterEngineLabel": "Character",
     "audio.library.customEngineLabel": "Custom",
     "audio.library.trainingEngineLabel": "Training",
     "audio.library.trainingFailedLabel": "Training failed",
 
-    // VoiceCloneSection — record/upload the reference clip a cloned voice
-    // is re-voiced to match.
-    "audio.clone.title": "Voice profile (clone)",
-    "audio.clone.activeBadge": "Active",
-    "audio.clone.description":
-      "Record or upload a short reference clip (5–15s of one clear speaker). This voice's generated audio is then re-voiced into that timbre via Seed-VC — so the whole project can speak in a single, consistent voice.",
-    "audio.clone.needsContext":
-      "Open this from a project workspace to record or upload a reference clip.",
-    "audio.clone.removeButton": "Remove clone",
+    // A plain "Replace" button (GenerateOverwriteDialog, onboarding's saved
+    // key). The key name is left from the removed voice-clone section.
     "audio.clone.replaceButton": "Replace",
-    "audio.clone.stopRecordingButton": "Stop ({seconds}s)",
-    "audio.clone.recordButton": "Record reference",
-    "audio.clone.uploadButton": "Upload audio",
-    "audio.clone.dropzoneTitle": "Add a reference clip",
-    "audio.clone.dropzoneHint":
-      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
-    "audio.clone.dropzoneDrop": "Drop to use as the reference",
-    "audio.clone.errorNotAudio": "That file isn't audio. Use a short recording.",
-    "audio.clone.errorNoContext": "No project context for upload.",
-    "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
-    "audio.clone.previewTooltip": "Preview reference clip",
-    "audio.clone.previewFailed": "Preview failed",
 
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
@@ -483,13 +448,9 @@ export const audio = defineNamespace({
       one: "{count} take could not be converted; its cell shows why.",
       other: "{count} takes could not be converted; their cells show why.",
     }),
-    "audio.changeVoice.batchSkippedNotCloned": plural({
-      one: "{count} cell was skipped because its voice has no reference clip.",
-      other: "{count} cells were skipped because their voice has no reference clip.",
-    }),
-    "audio.changeVoice.batchSkippedVoiceReference": plural({
-      one: "{count} cell is left out because its selected take is the reference clip for a voice.",
-      other: "{count} cells are left out because their selected take is the reference clip for a voice.",
+    "audio.changeVoice.batchSkippedNotTrained": plural({
+      one: "{count} cell was skipped because its voice has no trained voice model.",
+      other: "{count} cells were skipped because their voice has no trained voice model.",
     }),
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
@@ -636,10 +597,9 @@ export const audio = defineNamespace({
     // TTS_PROVIDER_INFOS (tts-providers.ts) — one-line explanatory hint per
     // TTS engine, shown as a tooltip on the engine picker card in
     // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
-    // see audio.newVoice.singleVoiceHint's context note — so only the hint
-    // sentence is keyed here.)
+    // it is the engine's brand name — so only the hint sentence is keyed here.)
     "audio.provider.inworldHint":
-      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
     "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
@@ -701,8 +661,8 @@ export const audio = defineNamespace({
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
     "audio.aiError.creditCapTitle": "AI credit allowance used up",
-    "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
-    "audio.aiError.seedVcFailedTitle": "Voice conversion failed",
+    "audio.aiError.voiceConvertNotConfiguredTitle": "Voice conversion isn't set up",
+    "audio.aiError.voiceConvertFailedTitle": "Voice conversion failed",
     "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
     "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -765,10 +725,10 @@ export const audio = defineNamespace({
         "management, and playback for turning a translated project into narrated " +
         "audio. Domain terms translators will not know from the English alone: a " +
         "'take' is one recorded or generated audio attempt for a line (there can be " +
-        "several; the user picks a keeper); a 'voice' is a named TTS configuration or " +
-        "a cloned timbre that reads lines aloud; 'clone' means capturing a short " +
-        "reference clip of a real voice so generated speech is re-voiced to sound " +
-        "like it; a 'boundary' or 'divider' marks where one line ends and the next " +
+        "several; the user picks a keeper); a 'voice' is a named TTS configuration, a " +
+        "ready-made character voice, or a voice trained from a real person's " +
+        "recordings, that reads lines aloud; 'Change voice' re-voices an existing take " +
+        "into a character or trained voice; a 'boundary' or 'divider' marks where one line ends and the next " +
         "begins inside a single combined audio clip that covers several lines at " +
         "once; 'diarization' (mentioned in code comments only, not user-facing here) " +
         "is unrelated to these keys.",
@@ -798,27 +758,21 @@ export const audio = defineNamespace({
       "audio.newVoice.tabTts": {
         description:
           "Tab label for the 'generate speech with a TTS engine' way of making a " +
-          "voice, as opposed to the Clone tab. TTS = text-to-speech; keep as a " +
+          "voice, as opposed to the Characters and Train voice tabs. TTS = text-to-speech; keep as a " +
           "recognizable acronym if the target language commonly does, otherwise spell " +
           "it out briefly.",
-        maxLength: 18,
-      },
-      "audio.newVoice.tabClone": {
-        description:
-          "Tab label for the 'clone a real voice from a reference clip' way of " +
-          "making a voice, as opposed to the TTS voice tab.",
         maxLength: 18,
       },
       "audio.newVoice.tabCharacter": {
         description:
           "Tab label for picking a ready-made character voice from a built-in list, " +
-          "next to the TTS voice and Clone voice tabs.",
+          "next to the TTS voice and Train voice tabs.",
         maxLength: 18,
       },
       "audio.newVoice.tabTrain": {
         description:
           "Tab label for training a custom voice from recordings of a real person, next to " +
-          "the TTS voice, Clone voice and Characters tabs.",
+          "the TTS voice and Characters tabs.",
         maxLength: 18,
       },
       "audio.train.addRecordingsAriaLabel": {
@@ -905,8 +859,8 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.kindGroupLabel": {
         description:
-          "Accessible group label (not visible text) for the TTS/Clone tab pair, " +
-          "read by screen readers to announce what the two tabs are choosing between.",
+          "Accessible group label (not visible text) for the TTS / Characters / Train " +
+          "voice tabs, read by screen readers to announce what the tabs are choosing between.",
       },
       "audio.newVoice.namePlaceholder": {
         description:
@@ -922,11 +876,8 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.engineLabel": {
         description:
-          "Form label above the row of TTS engine choice cards. On the TTS tab " +
-          "this is Inworld, Gemini, and MMS. On the Clone " +
-          "tab it is only the cloud engines that can clone a reference clip " +
-          "(Inworld, Gemini) — on-device engines are omitted, not shown disabled. " +
-          "'Engine' means which speech-synthesis backend generates this voice's audio.",
+          "Form label above the row of TTS engine choice cards (Inworld, Gemini, " +
+          "and MMS). 'Engine' means which speech-synthesis backend generates this voice's audio.",
       },
       "audio.newVoice.inworldVoiceLabel": {
         description:
@@ -1095,18 +1046,18 @@ export const audio = defineNamespace({
       "audio.newVoice.designLanguageHelpAria": {
         description:
           "Accessible name for the info-icon button beside Language on Voice Design " +
-          "and on the Inworld prebuilt/clone language picker.",
+          "and on the Inworld prebuilt-voice language picker.",
       },
       "audio.newVoice.designLanguageSearch": {
         description:
           "Placeholder inside the Inworld Language combobox search field on Voice " +
-          "Design and on the prebuilt/clone tabs. The list is every language Inworld " +
+          "Design and on the prebuilt-voice tab. The list is every language Inworld " +
           "returns from supportedLanguages.",
       },
       "audio.newVoice.designLanguageSearchAria": {
         description:
           "Accessible name for the search field inside the Inworld Language combobox " +
-          "on Voice Design and on the prebuilt/clone tabs.",
+          "on Voice Design and on the prebuilt-voice tab.",
       },
       "audio.newVoice.designAccentLabel": {
         description:
@@ -1122,8 +1073,8 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.catalogAccentHint": {
         description:
-          "Tooltip on the info icon beside Accent on the Inworld prebuilt and clone " +
-          "tabs. Explains that accent is the regional variant used to load matching " +
+          "Tooltip on the info icon beside Accent on the Inworld prebuilt-voice " +
+          "tab. Explains that accent is the regional variant used to load matching " +
           "stock voices, and that Default is the family code without a region.",
       },
       "audio.newVoice.designAccentHelpAria": {
@@ -1265,7 +1216,7 @@ export const audio = defineNamespace({
       "audio.newVoice.inworldLanguageLabel": {
         description:
           "Form label for the Inworld language combobox on the New Voice dialog. " +
-          "Used on Voice Design and on the prebuilt/clone tabs. The list is every " +
+          "Used on Voice Design and on the prebuilt-voice tab. The list is every " +
           "language from Inworld's supportedLanguages catalog, with search.",
       },
       "audio.newVoice.inworldLanguagePlaceholder": {
@@ -1397,10 +1348,8 @@ export const audio = defineNamespace({
       "audio.newVoice.describeLabel": {
         description:
           "Label for a free-text field, shown when the Gemini engine is selected " +
-          "(TTS tab or Clone tab). The user describes in plain words how the voice " +
-          "should sound (tone, age, mood). On a clone this describes the base take " +
-          "that is then re-voiced to match the reference clip — it is not the cloned " +
-          "identity.",
+          "on the TTS tab. The user describes in plain words how the voice " +
+          "should sound (tone, age, mood).",
       },
       "audio.newVoice.describePlaceholder": {
         description:
@@ -1414,53 +1363,10 @@ export const audio = defineNamespace({
           "not which language the app's own interface is in. Distinct from the " +
           "unrelated 'language.label' key, which is the UI-language switcher.",
       },
-      "audio.newVoice.singleVoiceHint": {
-        description:
-          "Explanatory sentence kept for engines that ship a single stock voice. " +
-          "Currently unused in the Inworld picker (which has named voices) but still " +
-          "in the catalog for Clone-tab copy that names the engine.",
-        placeholders: {
-          engine:
-            "The selected TTS engine's proper display name (e.g. 'Inworld TTS'), " +
-            "already resolved in English by the app — a brand name, do not translate " +
-            "the substituted value.",
-        },
-      },
-      "audio.newVoice.referenceLabel": {
-        description:
-          "Tab label (and formerly the field label) for recording or uploading a " +
-          "fresh reference clip on the Clone tab. Paired with audio.newVoice.tabFromLine. " +
-          "'Reference audio' is the short clip the cloned voice will be made to sound like.",
-        maxLength: 22,
-      },
-      "audio.newVoice.tabFromLine": {
-        description:
-          "Tab label on the Clone tab for picking an existing take from a project " +
-          "line as the clone reference, instead of recording or uploading a new clip. " +
-          "Paired with audio.newVoice.referenceLabel.",
-        maxLength: 18,
-      },
-      "audio.newVoice.referenceSourceGroupLabel": {
-        description:
-          "Accessible group label (not visible text) for the Reference audio / From a " +
-          "line tab pair, read by screen readers to announce what the two tabs are " +
-          "choosing between.",
-      },
-      "audio.newVoice.referenceDescription": {
-        description:
-          "Same wording as audio.clone.dropzoneHint. Kept so existing translations " +
-          "do not go missing; the live UI reads dropzoneHint inside the dashed zone.",
-      },
-      "audio.newVoice.fromLineEmpty": {
-        description:
-          "Empty-state copy on the From a line tab when this file has no recorded or " +
-          "generated takes to reuse as a clone reference.",
-      },
       "audio.newVoice.reuseTakeSummary": {
         description:
-          "Unused in the current UI (the Clone tab now uses audio.newVoice.tabFromLine). " +
-          "Kept so existing translations do not go missing. Was the collapsed summary " +
-          "label for reusing a line's audio as the clone reference.",
+          "Unused in the current UI. Kept so existing translations do not go missing. " +
+          "Was the collapsed summary label for reusing a line's audio in the New voice dialog.",
       },
       "audio.newVoice.takeRecorded": {
         description:
@@ -1469,38 +1375,10 @@ export const audio = defineNamespace({
           "not go missing.",
         maxLength: 16,
       },
-      "audio.newVoice.takeGenerated": {
-        description:
-          "Accessible name and tooltip for a sparkle icon on a listed take meaning " +
-          "this clip was produced by AI text-to-speech rather than recorded.",
-        maxLength: 16,
-      },
-      "audio.newVoice.liftingTake": {
-        description:
-          "Accessible name on the in-row spinner shown while a reused take " +
-          "(From a line tab) is being copied into this voice's clone reference. " +
-          "Replaces the checkmark until the copy finishes.",
-      },
-      "audio.newVoice.errorNoProjectContext": {
-        description:
-          "Inline error shown on the Clone tab when reusing a take fails because the " +
-          "dialog has no project to copy audio from (an unexpected state, not a " +
-          "normal user mistake).",
-      },
-      "audio.newVoice.errorAudioUnavailable": {
-        description:
-          "Inline error shown on the Clone tab when the take the user tried to reuse " +
-          "no longer has playable audio behind it (e.g. it was deleted).",
-      },
       "audio.newVoice.errorNameRequired": {
         description:
           "Inline validation error shown when the user tries to save a voice without " +
           "typing a name first.",
-      },
-      "audio.newVoice.errorReferenceRequired": {
-        description:
-          "Inline validation error shown when the user tries to save a Clone-tab " +
-          "voice before attaching a reference clip.",
       },
       "audio.newVoice.makeNarratorHint": {
         description:
@@ -2592,14 +2470,10 @@ export const audio = defineNamespace({
           "Fallback status text on a voice row (instead of audio.library.voicedStats) " +
           "when this voice isn't the narrator and has no lines assigned to it at all.",
       },
-      "audio.library.cloneEngineLabel": {
-        description:
-          "Small label on a voice row naming its engine, shown for voices that are " +
-          "clones (built from a reference clip) rather than plain TTS voices.",
-        maxLength: 12,
-      },
       "audio.library.customEngineLabel": {
-        description: "Same slot as audio.library.cloneEngineLabel, for a ready custom voice trained from recordings.",
+        description:
+          "Small engine label under a voice's name in the Voices panel (where a TTS " +
+          "voice shows its engine, e.g. 'Inworld'), for a ready custom voice trained from recordings.",
         maxLength: 12,
       },
       "audio.library.trainingEngineLabel": {
@@ -2612,105 +2486,15 @@ export const audio = defineNamespace({
       },
       "audio.library.characterEngineLabel": {
         description:
-          "Same slot as audio.library.cloneEngineLabel, shown for voices picked from " +
+          "Same slot as audio.library.customEngineLabel, shown for voices picked from " +
           "the built-in list of ready-made character voices.",
         maxLength: 12,
       },
-      "audio.clone.title": {
-        description:
-          "Section heading inside the voice editor's Clone tab, above the " +
-          "record/upload controls for the reference clip.",
-      },
-      "audio.clone.activeBadge": {
-        description:
-          "Small badge shown beside audio.clone.title once a reference clip has " +
-          "been attached, confirming cloning is set up for this voice.",
-        maxLength: 12,
-      },
-      "audio.clone.description": {
-        description:
-          "Explanatory paragraph under the Clone section heading, describing what a " +
-          "reference clip is for and naming the underlying technology (Seed-VC) that " +
-          "does the re-voicing. 'Seed-VC' is a proper name — do not translate it.",
-      },
-      "audio.clone.needsContext": {
-        description:
-          "Message shown instead of the record/upload controls when this section is " +
-          "opened without an active project/file context to upload into (e.g. a " +
-          "detached preview).",
-      },
-      "audio.clone.removeButton": {
-        description:
-          "Button shown once a reference clip is attached that deletes it, reverting " +
-          "the voice back to plain (non-cloned) TTS.",
-        maxLength: 16,
-      },
       "audio.clone.replaceButton": {
         description:
-          "Button shown once a reference clip is attached that lets the user pick a " +
-          "new audio file to replace it.",
-        maxLength: 16,
-      },
-      "audio.clone.stopRecordingButton": {
-        description:
-          "Button shown while recording a reference clip that stops the capture, " +
-          "with the elapsed time counting up beside the label.",
-        placeholders: {
-          seconds: "Elapsed recording time in seconds, to one decimal place.",
-        },
-      },
-      "audio.clone.recordButton": {
-        description:
-          "Button that starts recording a fresh reference clip from the microphone, " +
-          "shown when no clip is attached yet.",
-        maxLength: 20,
-      },
-      "audio.clone.uploadButton": {
-        description:
-          "Button that opens a file picker to upload an existing audio file as the " +
-          "reference clip, shown when no clip is attached yet.",
-        maxLength: 20,
-      },
-      "audio.clone.dropzoneTitle": {
-        description:
-          "Heading inside the empty dashed dropzone on the Clone tab's Reference " +
-          "audio panel, inviting the user to attach a clip.",
-      },
-      "audio.clone.dropzoneHint": {
-        description:
-          "Subtitle under audio.clone.dropzoneTitle. Tells the user a 5–15 second " +
-          "clip of one speaker is enough, and that we generate a base voice then " +
-          "clone it to match. Record, upload, and drag-and-drop are the zone itself.",
-      },
-      "audio.clone.dropzoneDrop": {
-        description:
-          "Temporary subtitle shown while an audio file is dragged over the " +
-          "reference dropzone, replacing audio.clone.dropzoneHint.",
-      },
-      "audio.clone.errorNotAudio": {
-        description:
-          "Inline error when a dropped or picked file is not audio (e.g. an image " +
-          "or document), telling the user to use a short recording instead.",
-      },
-      "audio.clone.errorNoContext": {
-        description:
-          "Inline error shown if an upload is attempted with no project/file to " +
-          "upload into (an unexpected state, not a normal user mistake).",
-      },
-      "audio.clone.errorTooLarge": {
-        description:
-          "Inline error shown when the chosen reference file exceeds the 8 MB size " +
-          "limit, with guidance that only a short clip is actually needed.",
-      },
-      "audio.clone.previewTooltip": {
-        description:
-          "Tooltip on the small play button next to an attached reference clip, " +
-          "offering to play it back so the user can confirm it's the right audio.",
-      },
-      "audio.clone.previewFailed": {
-        description:
-          "Visible label the preview button switches to if playback of the " +
-          "reference clip fails to load.",
+          "Everyday imperative 'Replace' button: swaps something already set for a new " +
+          "one — existing audio in the Generate overwrite dialog, a saved API key in " +
+          "onboarding. (The key name is historical.)",
         maxLength: 16,
       },
       "audio.bulkProgress.cancelTooltip": {
@@ -2721,8 +2505,8 @@ export const audio = defineNamespace({
       "audio.bulkProgress.changingVoices": {
         description:
           "Label on the bulk-progress banner while 'Change voice of existing audio' " +
-          "runs: existing recordings are being re-voiced into their assigned cloned " +
-          "voices. Sits beside a progress bar, so keep it short.",
+          "runs: existing recordings are being re-voiced into their assigned character " +
+          "or trained voices. Sits beside a progress bar, so keep it short.",
         maxLength: 24,
       },
       "audio.changeVoice.batchDone": {
@@ -2737,18 +2521,12 @@ export const audio = defineNamespace({
           "cell shows its own error badge with the reason.",
         placeholders: { count: "How many conversions failed." },
       },
-      "audio.changeVoice.batchSkippedNotCloned": {
+      "audio.changeVoice.batchSkippedNotTrained": {
         description:
-          "Toast detail after the bulk run: cells assigned a stock voice were left " +
-          "alone, because changing voice needs a cloned voice's reference recording.",
+          "Toast detail after the bulk run (also the confirmation's notice): cells " +
+          "assigned a plain text-to-speech voice were left alone, because Change voice " +
+          "needs a character voice or a voice trained from a person's recordings.",
         placeholders: { count: "How many cells were skipped." },
-      },
-      "audio.changeVoice.batchSkippedVoiceReference": {
-        description:
-          "Its own paragraph in the Change voice confirmation, and a sentence in " +
-          "the toast afterwards. These cells are not converted because a voice in " +
-          "the project is using the selected take as its reference clip.",
-        placeholders: { count: "How many cells were left out for this reason." },
       },
       "audio.bulkProgress.waitingForLimit": {
         description:
@@ -2981,8 +2759,7 @@ export const audio = defineNamespace({
         description:
           "Tooltip on the Inworld TTS engine card in the TTS engine picker (New " +
           "Voice dialog). Hosted Inworld has two models: Standard is TTS 2 Flash " +
-          "(faster) and Highest is TTS 2. No user API key, usage-metered, and it " +
-          "supports cloning from a reference clip.",
+          "(faster) and Highest is TTS 2. No user API key, and usage is metered.",
       },
       "audio.provider.geminiHint": {
         description:
@@ -3219,17 +2996,17 @@ export const audio = defineNamespace({
           "called, so this must not be worded as an engine or Gemini-key fault; " +
           "the body names the org admin who can raise the cap.",
       },
-      "audio.aiError.seedVcNotConfiguredTitle": {
+      "audio.aiError.voiceConvertNotConfiguredTitle": {
         description:
-          "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
-          "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
-          "inworldNotConfiguredTitle — Inworld clones skip this step.",
+          "Popover heading when Change voice (or a character or trained voice after " +
+          "text-to-speech) needs the voice-conversion service and this server has " +
+          "none configured. Distinct from inworldNotConfiguredTitle.",
       },
       "audio.aiError.voiceConvertSlowTitle": { description: "Popover heading when Change voice timed out because the GPU voice service was starting from idle." },
       "audio.aiError.voiceConvertSlowBody": { description: "Popover body for that timeout: nothing is wrong with the line; retrying usually works quickly." },
-      "audio.aiError.seedVcFailedTitle": {
+      "audio.aiError.voiceConvertFailedTitle": {
         description:
-          "Popover heading when voice conversion (Change voice, or a clone voice after TTS) ran but failed.",
+          "Popover heading when voice conversion (Change voice, or a character or trained voice after TTS) ran but failed.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:
@@ -3448,7 +3225,7 @@ export const audio = defineNamespace({
       notes:
         "The Audio lens: left Voices sidebar (select/create/edit/delete voices), " +
         "center editor rows with per-line record/generate controls, and a bottom " +
-        "transport bar for playback. Take chips, record dialog, and clone-reference " +
+        "transport bar for playback. Take chips, record dialog, and New voice " +
         "controls all nest inside this surface's dialogs and panels.",
     },
   ],

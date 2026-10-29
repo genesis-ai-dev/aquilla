@@ -304,6 +304,7 @@ export const TOOL_RUNTIME_SOURCE = String.raw`(function () {
       trim: function (fileId, cellId, audioId, startMs, endMs) { return call("audio.trim", { fileId: fileId, cellId: cellId, audioId: audioId, startMs: Number(startMs), endMs: Number(endMs) }); },
       voices: function (fileId) { return call("audio.voices", { fileId: fileId }); },
       assignVoice: function (fileId, cellId, voiceId) { return call("audio.assignVoice", { fileId: fileId, cellId: cellId, voiceId: voiceId || null }); },
+      // Retired (AQU-2291): the host always rejects it. Kept so rev4 extensions don't break.
       clone: function (fileId, cellId) { return call("audio.clone", { fileId: fileId, cellId: cellId }); },
     },
     storage: {

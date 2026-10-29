@@ -1,4 +1,4 @@
-// Map hosted TTS / clone-conversion HTTP failures onto Error messages that
+// Map hosted TTS / voice-conversion HTTP failures onto Error messages that
 // name the engine that actually failed. The gutter tooltip shows
 // `err.message` raw; categorizeAiError then turns the same strings into a
 // titled popover so Inworld 503s never read as a missing Gemini key.
@@ -11,12 +11,12 @@ export const HOSTED_TTS_NOT_CONFIGURED_BODY =
 export const HOSTED_TTS_FAILED_BODY =
   "Inworld TTS couldn't generate this line. This is not a Gemini key problem."
 
-export const SEED_VC_NOT_CONFIGURED_BODY =
-  "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
+export const VOICE_CONVERT_NOT_CONFIGURED_BODY =
+  "Voice conversion isn't set up on this server, so character and trained voices can't re-voice this line. This is not a Gemini key problem."
 
-// Engine-neutral: Change voice runs on Seed-VC for clone voices and on the
-// voice forge (RVC) for character and custom voices (AQU-2212).
-export const SEED_VC_FAILED_BODY =
+// Engine-neutral: Change voice runs on the voice forge (RVC) for character and
+// trained voices (AQU-2212, AQU-2291).
+export const VOICE_CONVERT_FAILED_BODY =
   "Voice conversion couldn't re-voice this line. This is not a Gemini key problem."
 
 /** The worker gave up waiting: almost always a GPU container starting cold. */
@@ -70,7 +70,7 @@ export function errorFromHostedTts(status: number, body: string): Error {
 export function errorFromVoiceConvert(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /voice conversion not configured/i.test(detail)) {
-    return new Error(SEED_VC_NOT_CONFIGURED_BODY)
+    return new Error(VOICE_CONVERT_NOT_CONFIGURED_BODY)
   }
   if (status === 409 && /still training/i.test(detail)) {
     return new Error("This voice is still training. Training takes about 45 minutes; try again once it shows as ready.")

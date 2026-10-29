@@ -71,10 +71,8 @@ export const INWORLD_TTS_MODEL = "inworld-tts-2-flash"
 export interface TtsProviderInfo {
   id: TtsProvider
   // `title` stays plain, untranslated English by design — it's the engine's
-  // display name (e.g. "Inworld TTS", "Gemini TTS"), and its one consumer
-  // (NewVoiceModal's audio.newVoice.singleVoiceHint placeholder) is documented
-  // to keep it "already resolved in English by the app — a brand name, do not
-  // translate the substituted value." shortTitle is likewise a display name.
+  // display name (e.g. "Inworld TTS", "Gemini TTS"), a brand name that is not
+  // translated. shortTitle is likewise a display name.
   title: string
   shortTitle: string
   /** `hintKey` — see the GEMINI_TTS_VOICES comment above for why this table
@@ -82,8 +80,6 @@ export interface TtsProviderInfo {
   hintKey: MessageKey
   /** Where the engine runs. Drives the Cloud/On-device grouping in the picker. */
   tier: "cloud" | "device"
-  /** Whether a reference recording can clone a target timbre for this engine. */
-  supportsCloning: boolean
   /** Whether the engine exposes named base voices. */
   hasNamedVoices: boolean
   /** A few words of value-prop for the engine card. */
@@ -103,10 +99,9 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     title: "Inworld TTS",
     shortTitle: "Inworld",
     tier: "cloud",
-    supportsCloning: true,
     hasNamedVoices: true,
     badge: "Recommended",
-    blurb: "Hosted Inworld TTS 2 and Flash — multilingual, clone from a reference clip.",
+    blurb: "Hosted Inworld TTS 2 and Flash — multilingual, with Voice Design.",
     hintKey: "audio.provider.inworldHint",
   },
   {
@@ -114,7 +109,6 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     title: "Gemini TTS",
     shortTitle: "Gemini",
     tier: "cloud",
-    supportsCloning: true,
     hasNamedVoices: true,
     requiresGeminiKey: true,
     blurb: "Highest quality, promptable; many languages.",
@@ -126,7 +120,6 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     title: "MMS (multilingual)",
     shortTitle: "MMS",
     tier: "device",
-    supportsCloning: false,
     hasNamedVoices: true,
     localModel: "mms",
     blurb: "Free, on-device; many languages.",

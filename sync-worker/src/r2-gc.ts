@@ -11,9 +11,13 @@
 //                                               never ran) strands them. Every
 //                                               regenerated take strands the one
 //                                               it replaced.
-//   projects/{pid}/voices/{refId}               voice-clone reference clips, plus
-//     projects/{pid}/voices/{refId}.inworld.json the Inworld clone-id cache keyed
-//                                               off the same refId. Nothing has
+//   projects/{pid}/voices/{refId}               project voice clips: voice-design
+//                                               previews, custom-voice training
+//                                               recordings (kept while their
+//                                               consent record names them), and
+//                                               legacy clone clips + their
+//     projects/{pid}/voices/{refId}.inworld.json Inworld clone-id cache (AQU-2291
+//                                               removed both). Nothing else has
 //                                               ever deleted these.
 //   artifacts/{pid}/{artifactId}[/original.ext] uploaded originals preserved for
 //                                               round-trip fidelity; an upload
@@ -52,6 +56,8 @@
 import { r2KeyPrefix, type AudioEnv } from "./audio"
 import {
   classifyKey,
+  CUSTOM_VOICE_CONSENT_RE,
+  customVoiceTrainingRefs,
   loadAudioRefs,
   loadVoiceRefs,
   playedObject,
@@ -153,6 +159,26 @@ async function loadArtifactRefs(db: AquillaDb, projectId: string): Promise<Set<s
     // Both spellings, for the reason in loadAudioRefs.
     refs.add(r.id)
     refs.add(r.id.toLowerCase())
+  }
+  return refs
+}
+
+/** Every recording the project's custom-voice consent records name, or null
+ *  when any record can't be read or parsed (fail closed). */
+async function loadCustomVoiceTrainingRefs(
+  bucket: R2Bucket,
+  voiceObjects: Array<{ key: string }>,
+): Promise<Set<string> | null> {
+  const refs = new Set<string>()
+  for (const { key } of voiceObjects) {
+    if (!CUSTOM_VOICE_CONSENT_RE.test(key)) continue
+    try {
+      const obj = await bucket.get(key)
+      if (!obj) return null
+      for (const ref of customVoiceTrainingRefs(await obj.text())) refs.add(ref)
+    } catch {
+      return null
+    }
   }
   return refs
 }
@@ -307,8 +333,16 @@ export async function sweepOrphanedR2Objects(
       for (const filePrefix of await listPrefixes(env.SNAPSHOTS, `${projectPrefix}files/`)) {
         objects.push(...(await listObjects(env.SNAPSHOTS, `${filePrefix}audio/`)))
       }
-      objects.push(...(await listObjects(env.SNAPSHOTS, `${projectPrefix}voices/`)))
-      collect(objects, (ns) => (ns === "audio" ? audioRefs : ns === "voice" ? voiceRefs : undefined))
+      const voiceObjects = await listObjects(env.SNAPSHOTS, `${projectPrefix}voices/`)
+      objects.push(...voiceObjects)
+      // Custom-voice training recordings are named only by their consent
+      // record. An unreadable record means the voice namespace cannot be
+      // judged for this project, so none of it is swept this run.
+      const trainingRefs = await loadCustomVoiceTrainingRefs(env.SNAPSHOTS, voiceObjects)
+      if (trainingRefs) for (const ref of trainingRefs) voiceRefs.add(ref)
+      else report.errors.push(`project ${projectId}: consent record unreadable; voice clips kept`)
+      const voiceSet = trainingRefs ? voiceRefs : undefined
+      collect(objects, (ns) => (ns === "audio" ? audioRefs : ns === "voice" ? voiceSet : undefined))
       report.projectsScanned++
     } catch (err) {
       report.errors.push(`project ${projectId}: listing failed: ${errText(err)}`)

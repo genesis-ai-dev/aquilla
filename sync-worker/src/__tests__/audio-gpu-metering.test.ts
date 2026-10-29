@@ -17,11 +17,11 @@ import { sign } from "hono/jwt"
 import type { SyncTokenClaims } from "../auth"
 import { handleTtsRequest, type TtsEnv } from "../tts"
 import { handleDiarizationRequest, type DiarizationEnv, DIARIZATION_MAX_GPU_SECONDS } from "../diarization"
-import { handleVoiceConvertRequest, voiceRefObjectKey, type VoiceConvertEnv } from "../voice-convert"
+import { handleVoiceConvertRequest, type VoiceConvertEnv } from "../voice-convert"
 import { bytesToBase64, INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "../inworld-tts"
 import { __resetAiSpendCeilingStateForTests } from "../../../db/shared/ai-spend-ceiling"
 import {
-  DIARIZATION_GPU, inworldTtsRawCents, modalGpuRawCents, VOICE_CONVERT_GPU,
+  DIARIZATION_GPU, inworldTtsRawCents, LIBRARY_VOICE_CONVERT_GPU, modalGpuRawCents,
 } from "../../../db/shared/audio-price-card"
 import { resolveOrgPlan } from "../../../db/shared/org-plan"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
@@ -242,16 +242,15 @@ describe("diarization (#15)", () => {
   })
 })
 
-// ── Voice-convert (Modal Seed-VC, synchronous) ───────────────────────────────
+// ── Voice-convert (Modal voice forge, synchronous) ────────────────────────────
 
 describe("voice-convert (#16)", () => {
   it("shadow: one settled gpu row at the GPU seconds the call took", async () => {
     const env: VoiceConvertEnv = {
       SNAPSHOTS: bucket() as unknown as R2Bucket, SYNC_SECRET_KEY: SECRET,
-      SEED_VC_URL: "https://modal/convert", SEED_VC_TOKEN: "seed-secret",
+      VOICE_FORGE_URL: "https://modal/convert", VOICE_FORGE_TOKEN: "forge-secret",
       AQUILLA_PG: t.db, ENVIRONMENT: "test", BILLING_METER_MODE: "shadow",
     }
-    await env.SNAPSHOTS.put(voiceRefObjectKey(env, "p1", "ref1.wav"), wav(1))
     // The conversion takes 5 s of wall clock.
     const realNow = Date.now.bind(Date)
     let offset = 0
@@ -264,19 +263,19 @@ describe("voice-convert (#16)", () => {
     }) as unknown as typeof fetch
 
     const form = new FormData()
-    form.append("projectId", "p1"); form.append("fileId", "f1"); form.append("referenceAudioId", "ref1.wav")
+    form.append("projectId", "p1"); form.append("fileId", "f1"); form.append("libraryVoiceId", "narrator-hearth")
     form.append("source", new Blob([new Uint8Array([1, 2, 3])], { type: "audio/wav" }), "source")
     const res = (await handleVoiceConvertRequest(new Request("https://w/api/v1/voice/convert", {
       method: "POST", body: form, headers: { Authorization: `Bearer ${await token()}` },
     }), env))!
     expect(res.status).toBe(200)
     // The key the check chose is the one sent to Modal.
-    expect(sentToken).toBe("seed-secret")
+    expect(sentToken).toBe("forge-secret")
 
     const rows = await usageRows()
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ rail: "gpu", mode: "metered", state: "settled" })
-    expect(rawCents(rows[0])).toBeGreaterThanOrEqual(modalGpuRawCents(VOICE_CONVERT_GPU, 5) - 1e-6)
-    expect(rawCents(rows[0])).toBeLessThan(modalGpuRawCents(VOICE_CONVERT_GPU, 6))
+    expect(rawCents(rows[0])).toBeGreaterThanOrEqual(modalGpuRawCents(LIBRARY_VOICE_CONVERT_GPU, 5) - 1e-6)
+    expect(rawCents(rows[0])).toBeLessThan(modalGpuRawCents(LIBRARY_VOICE_CONVERT_GPU, 6))
   })
 })

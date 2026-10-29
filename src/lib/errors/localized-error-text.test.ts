@@ -145,15 +145,15 @@ describe("AQU-510: categorizeAiError bodies are localized", () => {
 
     // (2) The four engine-body constants are LOAD-BEARING MATCH KEYS:
     // tts-engine-error.ts throws them, and the classifier branches on English
-    // substrings of them ("this line uses inworld", "this clone voice needs
-    // seed-vc"). Running them through `t()` would break the matching that
+    // substrings of them ("this line uses inworld", "voice conversion isn't
+    // set up"). Running them through `t()` would break the matching that
     // selects their own branch, so they stay English until the throw sites and
     // the matcher are changed together.
     for (const konst of [
       "HOSTED_TTS_NOT_CONFIGURED_BODY",
       "HOSTED_TTS_FAILED_BODY",
-      "SEED_VC_NOT_CONFIGURED_BODY",
-      "SEED_VC_FAILED_BODY",
+      "VOICE_CONVERT_NOT_CONFIGURED_BODY",
+      "VOICE_CONVERT_FAILED_BODY",
     ]) {
       expect(source).toContain(`body: ${konst}`)
     }

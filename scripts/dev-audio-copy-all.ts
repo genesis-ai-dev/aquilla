@@ -51,10 +51,14 @@ export interface AudioProject {
  * The four sources are the four `db/shared/media-refs.ts` reference queries
  * read per project, lifted to "which projects would those return anything for":
  * live takes, agent-API audio artifacts, queued/running diarization jobs, and
- * voice reference clips in the settings blob. A project missed here is a
- * project that stays silent on dev, so the union is deliberately wider than
- * "has a take" — a project whose only media is a cloned voice clip still needs
- * its bytes.
+ * voices/ clips the settings blob points at: a voice's Inworld voice-design
+ * preview (`designPreviewAudioId`), and a trained custom voice (`customVoice`),
+ * whose training recordings live under voices/ and are listed by its consent
+ * record rather than by any row. A project missed here is a project that stays
+ * silent on dev, so the union is deliberately wider than "has a take" — a
+ * project whose only media is a voice's clips still needs its bytes. (The
+ * short-clip clone `referenceAudioId` is no longer a reason on its own: those
+ * voices were removed in AQU-2291 and now play as plain TTS voices.)
  *
  * Recency comes from `cell_audio.created_ts` (ms, the take's own clock) and
  * falls back to the project's `updated_at`, so a project whose only media is a
@@ -84,7 +88,8 @@ export async function loadAudioProjects(db: AquillaDb): Promise<AudioProject[]> 
                        THEN ps.settings::jsonb -> 'ttsSettings' -> 'voices'
                        ELSE '[]'::jsonb END
                 ) AS v
-          WHERE v->>'referenceAudioId' IS NOT NULL
+          WHERE v->>'designPreviewAudioId' IS NOT NULL
+             OR jsonb_typeof(v -> 'customVoice') = 'object'
        )
        SELECT m.project_id,
               p.name,

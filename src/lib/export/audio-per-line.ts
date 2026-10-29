@@ -31,7 +31,7 @@
 // AQU-1575 adds the other choice: every take re-encoded as 16-bit / 48 kHz /
 // mono WAV, the file a broadcast studio asks for (LOTE's vendor named exactly
 // that). The stored takes are not one format — Inworld writes 24 kHz WAV,
-// Seed-VC 22.05 kHz WAV, Gemini and MMS a compressed webm — so "keep the
+// converted takes 22.05 kHz WAV, Gemini and MMS a compressed webm — so "keep the
 // originals" hands a studio a folder of mixed rates and codecs. The WAV choice
 // decodes through the same path the chapter export uses.
 
@@ -535,7 +535,7 @@ export async function exportAudioPerLine(
         const placeSec = geom?.start ?? clip.startSec
         // AQU-1575: a BWF TimeReference is a count of THIS FILE'S samples, so
         // it is written at the file's own rate. Not every stored WAV is 48 kHz:
-        // Inworld takes are 24 kHz and Seed-VC takes 22.05 kHz, and stamping
+        // Inworld takes are 24 kHz and converted takes 22.05 kHz, and stamping
         // those at 48,000 a second put them into a DAW at about twice their
         // real time.
         const rate = readWavFormat(bytes)?.sampleRate ?? BWF_RATE

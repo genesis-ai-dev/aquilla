@@ -124,8 +124,9 @@ through the global \`aquilla\` object the host injects before your code runs.
     aquilla.audio.validate(fileId, cellId, audioId) / aquilla.audio.unvalidate(fileId, cellId, audioId)   scope write:validation
 - aquilla.audio.take(fileId, cellId) → { audioId, durationMs, trimStartMs, trimEndMs, trimmable, peaks:[0..1], isGenerated, takeVoiceName } | null
     (scope read:cells); aquilla.audio.trim(fileId, cellId, audioId, startMs, endMs) (scope write:audio);
-    aquilla.audio.voices(fileId) → { voices:[{id,name}], current:{[cellId]:{id,name,explicit}}, canClone } (scope read:cells);
-    aquilla.audio.assignVoice(fileId, cellId, voiceId|null) and aquilla.audio.clone(fileId, cellId) (opens the app's voice cloning)   scope write:audio
+    aquilla.audio.voices(fileId) → { voices:[{id,name}], current:{[cellId]:{id,name,explicit}}, canClone:false } (scope read:cells);
+    aquilla.audio.assignVoice(fileId, cellId, voiceId|null)   scope write:audio. aquilla.audio.clone is retired: it always rejects
+    (voice cloning was removed — a real person's voice is trained in the app's New voice dialog); do not offer it.
 - aquilla.source.actions(fileId, cellId) → { edit, timestamps?, hide?, insertAbove?, insertBelow?, remove? } — what the source cell menu
     offers (a string = why it is disabled, null = available, absent = not offered).   scope read:cells
     aquilla.source.commit(fileId, cellId, value, html?), aquilla.source.setHidden(fileId, cellId, hidden), aquilla.source.insert(fileId, cellId,

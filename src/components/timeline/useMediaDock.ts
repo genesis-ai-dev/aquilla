@@ -26,6 +26,9 @@
 // hook owns, and the HOST is moved between the areas' content boxes. A portal
 // whose container changes remounts everything under it; a host that moves
 // keeps it all mounted — the text table keeps its rows, the film keeps playing.
+// Except a YouTube film: it is an iframe, and a browser reloads an iframe that
+// moves. The host announces each move first (DOCK_HOST_MOVING), and the film
+// pane rebuilds that picture where it lands, from where it was.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
@@ -33,6 +36,7 @@ import { usePanelRef } from "react-resizable-panels"
 import {
   canRestore as canRestoreFrom,
   DOCK_AREAS,
+  DOCK_HOST_MOVING,
   DOCK_PANELS,
   dockView,
   enterFullScreen,
@@ -273,7 +277,11 @@ export function useMediaDock(input: UseMediaDockInput) {
       if (!host) continue
       const area = v.areaOf(panel)
       const box = (area && boxesRef.current[area]) || parkingRef.current
-      if (box && host.parentElement !== box) moveKeepingScroll(host, box)
+      if (box && host.parentElement !== box) {
+        // A first placement moves nothing that has loaded; a move does.
+        if (host.parentElement) host.dispatchEvent(new Event(DOCK_HOST_MOVING))
+        moveKeepingScroll(host, box)
+      }
       // The text lens shows the text alone, whatever tab its area has up.
       const shown = stacked ? area !== null && v.activeOf(area) === panel : panel === "text"
       host.style.display = shown ? "" : "none"

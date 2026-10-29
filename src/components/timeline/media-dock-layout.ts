@@ -23,6 +23,11 @@ export const DOCK_AREAS: readonly DockArea[] = ["ll", "lr"]
 export const DOCK_REGIONS: readonly DockRegion[] = ["tl", "ll", "lr"]
 export const DOCK_PANELS: readonly DockPanel[] = ["film", "text"]
 
+/** Dispatched on a panel's host element just before the dock moves it to
+ *  another area, for anything inside that cannot survive a DOM move (an
+ *  iframe reloads: the YouTube picture). */
+export const DOCK_HOST_MOVING = "mediadock:hostmoving"
+
 /** What full screen folded, so restoring can unfold exactly that. "left:<tab>"
  *  is the left panel, with the tab it had open. */
 export type UndoEntry = DockRegion | `left:${string}`

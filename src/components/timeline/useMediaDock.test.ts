@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import { useMemo, useState } from "react"
-import { movePanel, startDockLayout, writeStoredDock } from "./media-dock-layout"
+import { DOCK_HOST_MOVING, movePanel, startDockLayout, writeStoredDock } from "./media-dock-layout"
 import { useMediaDock } from "./useMediaDock"
 import { writeStoredVideoPaneWidth } from "./video-pane-layout"
 
@@ -162,5 +162,28 @@ describe("useMediaDock", () => {
       expect(result.current.dock.view.isOpen("ll")).toBe(false)
       expect(result.current.dock.view.isShowing("text")).toBe(true)
     })
+  })
+
+  // Review finding 4: what the YouTube picture listens for
+  // (MediaVideoPane.test.tsx, "moved to another area by the dock").
+  it("tells the film's host it is about to move, while it still sits where it was", () => {
+    const { result } = setup()
+    const ll = document.createElement("div")
+    const lr = document.createElement("div")
+    document.body.append(ll, lr)
+    act(() => {
+      result.current.dock.boxRefs.ll(ll)
+      result.current.dock.boxRefs.lr(lr)
+    })
+    const film = result.current.dock.hosts.film!
+    expect(film.parentElement).toBe(ll)
+    const seenIn: Array<Element | null> = []
+    film.addEventListener(DOCK_HOST_MOVING, () => seenIn.push(film.parentElement))
+
+    act(() => result.current.dock.move("film", "lr"))
+    expect(film.parentElement).toBe(lr)
+    expect(seenIn).toEqual([ll])
+    ll.remove()
+    lr.remove()
   })
 })

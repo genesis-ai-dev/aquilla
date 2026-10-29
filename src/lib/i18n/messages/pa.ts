@@ -728,7 +728,6 @@ export const pa: Catalog = {
   "editor.view.directionOf": "{side} ਦੀ ਦਿਸ਼ਾ",
   "editor.view.decreaseFontSize": "{side} ਦਾ ਫੌਂਟ ਛੋਟਾ ਕਰੋ",
   "editor.view.increaseFontSize": "{side} ਦਾ ਫੌਂਟ ਵੱਡਾ ਕਰੋ",
-  "editor.view.useAppFontSize": "{side} ਲਈ ਐਪ ਦਾ ਫੌਂਟ ਆਕਾਰ ਵਰਤੋ",
   "editor.view.directionMismatch": "{side} ਨੂੰ {forced} ਉੱਤੇ ਰੱਖਿਆ ਗਿਆ ਹੈ, ਪਰ ਲਿਖਤ {detected} ਲੱਗਦੀ ਹੈ",
   "editor.view.dismissDirectionWarning": "ਦਿਸ਼ਾ ਚੇਤਾਵਨੀ ਖਾਰਜ ਕਰੋ",
   "editor.view.dirLtr": "ਖੱਬੇ-ਤੋਂ-ਸੱਜੇ",

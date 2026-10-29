@@ -650,7 +650,6 @@ export const ru: Catalog = {
   "editor.view.directionOf": "Направление: {side}",
   "editor.view.decreaseFontSize": "Уменьшить размер шрифта: {side}",
   "editor.view.increaseFontSize": "Увеличить размер шрифта: {side}",
-  "editor.view.useAppFontSize": "Использовать размер шрифта приложения для {side}",
   "editor.view.directionMismatch": "Для {side} задано {forced}, но содержимое выглядит как {detected}",
   "editor.view.dismissDirectionWarning": "Скрыть предупреждение о направлении",
   "editor.view.dirLtr": "слева направо",

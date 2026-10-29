@@ -636,7 +636,6 @@ export const fr: Catalog = {
   "editor.view.directionOf": "Sens {side}",
   "editor.view.decreaseFontSize": "Réduire la taille de police {side}",
   "editor.view.increaseFontSize": "Augmenter la taille de police {side}",
-  "editor.view.useAppFontSize": "Utiliser la taille de police de l'application pour {side}",
   "editor.view.directionMismatch": "{side} est forcé en {forced}, mais le contenu semble être {detected}",
   "editor.view.dismissDirectionWarning": "Ignorer l'avertissement de sens",
   "editor.view.dirLtr": "de gauche à droite",

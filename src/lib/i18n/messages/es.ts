@@ -695,7 +695,6 @@ export const es: Catalog = {
   "editor.view.directionOf": "Dirección de {side}",
   "editor.view.decreaseFontSize": "Reducir el tamaño de fuente de {side}",
   "editor.view.increaseFontSize": "Aumentar el tamaño de fuente de {side}",
-  "editor.view.useAppFontSize": "Usar el tamaño de fuente de la aplicación para {side}",
   "editor.view.directionMismatch": "{side} está forzado en {forced}, pero el texto se ve {detected}",
   "editor.view.dismissDirectionWarning": "Descartar aviso de dirección",
   "editor.view.dirLtr": "izquierda a derecha",

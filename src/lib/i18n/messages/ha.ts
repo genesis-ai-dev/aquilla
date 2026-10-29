@@ -728,7 +728,6 @@ export const ha: Catalog = {
   "editor.view.directionOf": "hanyar {side}",
   "editor.view.decreaseFontSize": "Ku rage girman rubutun {side}",
   "editor.view.increaseFontSize": "Ku ƙara girman rubutun {side}",
-  "editor.view.useAppFontSize": "Ku yi amfani da girman rubutun manhaja ga {side}",
   "editor.view.directionMismatch": "{side} an tilasta {forced}, amma abun ciki ya yi kama da {detected}",
   "editor.view.dismissDirectionWarning": "Ku ɓoye gargaɗin hanya",
   "editor.view.dirLtr": "daga hagu zuwa dama",

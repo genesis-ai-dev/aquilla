@@ -728,7 +728,6 @@ export const am: Catalog = {
   "editor.view.directionOf": "የ{side} አቅጣጫ",
   "editor.view.decreaseFontSize": "የ{side} የፊደል መጠን ያሳንሱ",
   "editor.view.increaseFontSize": "የ{side} የፊደል መጠን ይጨምሩ",
-  "editor.view.useAppFontSize": "ለ{side} የመተግበሪያውን የፊደል መጠን ይጠቀሙ",
   "editor.view.directionMismatch": "{side} በግድ {forced} ተደርጓል፣ ነገር ግን ይዘቱ {detected} ይመስላል",
   "editor.view.dismissDirectionWarning": "የአቅጣጫ ማስጠንቀቂያ አጥፉ",
   "editor.view.dirLtr": "ከግራ ወደ ቀኝ",

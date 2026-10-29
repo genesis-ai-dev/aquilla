@@ -639,7 +639,6 @@ export const id: Catalog = {
   "editor.view.directionOf": "Arah {side}",
   "editor.view.decreaseFontSize": "Perkecil ukuran font {side}",
   "editor.view.increaseFontSize": "Perbesar ukuran font {side}",
-  "editor.view.useAppFontSize": "Gunakan ukuran font aplikasi untuk {side}",
   "editor.view.directionMismatch": "{side} dipaksa {forced}, tetapi isinya tampak {detected}",
   "editor.view.dismissDirectionWarning": "Abaikan peringatan arah teks",
   "editor.view.dirLtr": "kiri-ke-kanan",

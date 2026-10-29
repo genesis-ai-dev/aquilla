@@ -728,7 +728,6 @@ export const ur: Catalog = {
   "editor.view.directionOf": "{side} کی سمت",
   "editor.view.decreaseFontSize": "{side} کا فونٹ چھوٹا کریں",
   "editor.view.increaseFontSize": "{side} کا فونٹ بڑا کریں",
-  "editor.view.useAppFontSize": "{side} کے لیے ایپ کا فونٹ سائز استعمال کریں",
   "editor.view.directionMismatch": "{side} زبردستی {forced} ہے، مگر مواد {detected} لگتا ہے",
   "editor.view.dismissDirectionWarning": "سمت کی تنبیہ برخاست کریں",
   "editor.view.dirLtr": "بائیں سے دائیں",

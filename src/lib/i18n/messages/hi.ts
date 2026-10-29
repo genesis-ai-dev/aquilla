@@ -701,7 +701,6 @@ export const hi: Catalog = {
   "editor.view.directionOf": "{side} दिशा",
   "editor.view.decreaseFontSize": "{side} फ़ॉन्ट आकार घटाएँ",
   "editor.view.increaseFontSize": "{side} फ़ॉन्ट आकार बढ़ाएँ",
-  "editor.view.useAppFontSize": "{side} के लिए ऐप फ़ॉन्ट आकार उपयोग करें",
   "editor.view.directionMismatch": "{side} को {forced} बाध्य किया गया है, पर सामग्री {detected} लगती है",
   "editor.view.dismissDirectionWarning": "दिशा चेतावनी खारिज करें",
   "editor.view.dirLtr": "बाएँ-से-दाएँ",

@@ -645,7 +645,6 @@ export const zh_Hans: Catalog = {
   "editor.view.directionOf": "{side}方向",
   "editor.view.decreaseFontSize": "缩小{side}字体",
   "editor.view.increaseFontSize": "放大{side}字体",
-  "editor.view.useAppFontSize": "{side}使用应用字号",
   "editor.view.directionMismatch": "{side}被强制设为{forced}，但内容看起来是{detected}",
   "editor.view.dismissDirectionWarning": "关闭文字方向警告",
   "editor.view.dirLtr": "由左至右",

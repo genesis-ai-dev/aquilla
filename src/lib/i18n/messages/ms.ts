@@ -642,7 +642,6 @@ export const ms: Catalog = {
   "editor.view.directionOf": "Arah {side}",
   "editor.view.decreaseFontSize": "Kecilkan saiz fon {side}",
   "editor.view.increaseFontSize": "Besarkan saiz fon {side}",
-  "editor.view.useAppFontSize": "Gunakan saiz fon aplikasi untuk {side}",
   "editor.view.directionMismatch": "{side} dipaksa {forced}, tapi kandungan nampak {detected}",
   "editor.view.dismissDirectionWarning": "Tutup amaran arah teks",
   "editor.view.dirLtr": "kiri ke kanan",

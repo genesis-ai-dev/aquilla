@@ -645,7 +645,6 @@ export const my: Catalog = {
   "editor.view.directionOf": "{side} ဦးတည်ချက်",
   "editor.view.decreaseFontSize": "{side} စာလုံးအရွယ် လျှော့ရန်",
   "editor.view.increaseFontSize": "{side} စာလုံးအရွယ် တိုးရန်",
-  "editor.view.useAppFontSize": "{side} အတွက် အက်ပ်၏ စာလုံးအရွယ်ကို သုံးရန်",
   "editor.view.directionMismatch": "{side} ကို {forced} အဖြစ်သတ်မှတ်ထားပေမယ့် စာသားက {detected} ဖြစ်နေသည်",
   "editor.view.dismissDirectionWarning": "ဦးတည်ချက် သတိပေးချက်ကို ပိတ်ရန်",
   "editor.view.dirLtr": "ဘယ်မှညာသို့",

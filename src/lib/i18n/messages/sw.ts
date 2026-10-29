@@ -728,7 +728,6 @@ export const sw: Catalog = {
   "editor.view.directionOf": "Mwelekeo wa {side}",
   "editor.view.decreaseFontSize": "Punguza ukubwa wa herufi ya {side}",
   "editor.view.increaseFontSize": "Ongeza ukubwa wa herufi ya {side}",
-  "editor.view.useAppFontSize": "Tumia ukubwa wa herufi wa programu kwa {side}",
   "editor.view.directionMismatch": "Mwelekeo wa {side} umelazimishwa kuwa {forced}, lakini maudhui yanaonekana {detected}",
   "editor.view.dismissDirectionWarning": "Ficha onyo la mwelekeo",
   "editor.view.dirLtr": "kushoto hadi kulia",

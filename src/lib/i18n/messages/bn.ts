@@ -729,7 +729,6 @@ export const bn: Catalog = {
   "editor.view.directionOf": "{side}-এর দিক",
   "editor.view.decreaseFontSize": "{side}-এর ফন্ট ছোট করুন",
   "editor.view.increaseFontSize": "{side}-এর ফন্ট বড় করুন",
-  "editor.view.useAppFontSize": "{side}-এ অ্যাপের ফন্টের আকার ব্যবহার করুন",
   "editor.view.directionMismatch": "{side} জোর করে {forced} করা, কিন্তু কনটেন্ট দেখাচ্ছে {detected}",
   "editor.view.dismissDirectionWarning": "দিকের সতর্কতা সরিয়ে দিন",
   "editor.view.dirLtr": "বাম-থেকে-ডান",

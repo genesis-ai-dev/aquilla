@@ -645,7 +645,6 @@ export const th: Catalog = {
   "editor.view.directionOf": "ทิศทาง{side}",
   "editor.view.decreaseFontSize": "ลดขนาดตัวอักษร{side}",
   "editor.view.increaseFontSize": "เพิ่มขนาดตัวอักษร{side}",
-  "editor.view.useAppFontSize": "ใช้ขนาดตัวอักษรของแอปสำหรับ {side}",
   "editor.view.directionMismatch": "{side}ถูกบังคับเป็น{forced} แต่เนื้อหาดูเป็น{detected}",
   "editor.view.dismissDirectionWarning": "ปิดคำเตือนเรื่องทิศทาง",
   "editor.view.dirLtr": "ซ้ายไปขวา",

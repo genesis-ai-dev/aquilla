@@ -645,7 +645,6 @@ export const ar: Catalog = {
   "editor.view.directionOf": "اتجاه {side}",
   "editor.view.decreaseFontSize": "تصغير خط {side}",
   "editor.view.increaseFontSize": "تكبير خط {side}",
-  "editor.view.useAppFontSize": "استخدام حجم خط التطبيق لـ{side}",
   "editor.view.directionMismatch": "{side} مضبوط على {forced}، لكن المحتوى يبدو {detected}",
   "editor.view.dismissDirectionWarning": "تجاهل تحذير الاتجاه",
   "editor.view.dirLtr": "من اليسار لليمين",

@@ -1,13 +1,10 @@
-// AQU-1462: load the rows and settings an archived-lane refusal needs.
+// AQU-1462: load the lane rows an archived-lane refusal needs. AQU-2223: the
+// rows' `archived_at` is the only record; project settings are not read.
 // Memoized on the request cache so a batch pays for the lane list once.
 
 import { listProjectLanes } from '../../../db/shared/lanes'
 import type { AquillaDb } from '../../../db/shim/postgres'
-import {
-  archivedLaneReason,
-  archivedTagsFromSettings,
-  type ArchiveLaneRow,
-} from '../../../src/lib/lanes/archived-lane'
+import { archivedLaneReason, type ArchiveLaneRow } from '../../../src/lib/lanes/archived-lane'
 import { laneDisplayName } from '../../../src/lib/lanes/lane-display'
 import type { RequestCache } from './request-cache'
 
@@ -105,14 +102,6 @@ export async function refusalForArchivedLane(
   cache: RequestCache,
   visibleLaneIds: ReadonlySet<string> | null = null,
 ): Promise<string | null> {
-  const [settings, lanes] = await Promise.all([
-    cache.writePathSettings(projectId),
-    rowsFor(db, projectId, cache),
-  ])
-  return archivedLaneReason({
-    tag,
-    lanes,
-    archivedTags: archivedTagsFromSettings(settings),
-    visibleLaneIds,
-  })
+  const lanes = await rowsFor(db, projectId, cache)
+  return archivedLaneReason({ tag, lanes, visibleLaneIds })
 }

@@ -6,6 +6,8 @@ import {
   jwtFor,
   openSeededProject,
   readSeededFileEvents,
+  readProjectedCells,
+  readCellHistory,
   seedProjectWithFile,
 } from "../../helpers/seed-project"
 
@@ -230,4 +232,51 @@ test("logout and second-user sign-in survive unavailable private storage", async
     timeout: 30_000,
   })
   await expect(alice.getByText(/couldn't safely finish switching accounts/i)).toHaveCount(0)
+})
+
+// AQU-2240: token minting may stall across a Firefox network transition.
+test("offline edits drain after repeated reconnects with the same author", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { name: "Reconnect regression" })
+  const workspace = await openSeededProject(alice, seeded)
+  const values = ["First offline draft", "Second offline draft", "Final offline draft"]
+  for (const value of values) {
+    await alice.context().setOffline(true)
+    try {
+      await workspace.activateTargetCell(0)
+      await workspace.replaceActiveTargetText(0, value)
+      await workspace.blurEditor()
+      await expect(alice.getByRole("button", { name: /changes queued for server sync/ })).toBeVisible()
+    } finally { await alice.context().setOffline(false) }
+    await expect.poll(async () => {
+      const cells = await readProjectedCells(jwt, seeded, "target")
+      return cells.find((cell) => cell.cellId === seeded.cellIds[0])?.value
+    }, { timeout: 30_000 }).toBe(value)
+  }
+  const history = await readCellHistory(jwt, seeded, seeded.cellIds[0])
+  for (const value of values) {
+    const commits = history.filter((event) => event.kind === "target.cell.commit" && (event.payload as { value?: unknown }).value === value)
+    expect(commits).toHaveLength(1)
+    expect(commits[0].author).toBe("alice")
+  }
+})
+
+// AQU-2239: the server may accept a connection and never answer.
+test("logout clears local access when revocation never responds", async ({ alice }) => {
+  let release!: () => void
+  const held = new Promise<void>((resolve) => { release = resolve })
+  await alice.route("**/api/v2/auth/logout", async (route) => {
+    await held
+    await route.abort().catch(() => {})
+  })
+  try {
+    await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
+    await expect(alice.getByRole("button", { name: "Log in", exact: true })).toBeVisible({ timeout: 30_000 })
+    await alice.reload()
+    await expect(alice.getByText("Sign in to see your workspace")).toBeVisible()
+  } finally {
+    release()
+    await alice.unrouteAll({ behavior: "wait" })
+  }
 })

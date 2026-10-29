@@ -250,6 +250,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
+    "audio.recordingModal.editTextTooltip": "Edit this text",
     "audio.recordingModal.notTranslated": "not translated",
     "audio.recordingModal.countingHint": "Recording starts in…",
     "audio.recordingModal.countingGo": "GO",
@@ -702,7 +703,9 @@ export const audio = defineNamespace({
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
     "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
-    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
+    "audio.aiError.seedVcFailedTitle": "Voice conversion failed",
+    "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
+    "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
@@ -1860,6 +1863,12 @@ export const audio = defineNamespace({
         description:
           "Small caption above the translated text the user should read aloud into " +
           "the microphone — this is the actual script for the recording.",
+      },
+      "audio.recordingModal.editTextTooltip": {
+        description:
+          "Tooltip and screen-reader label on the small pencil beside the 'Read aloud' " +
+          "caption. Clicking it closes the recorder and puts the cursor in this line's " +
+          "translation in the editor, so a mistake in the script can be fixed right away.",
       },
       "audio.recordingModal.notTranslated": {
         description:
@@ -3223,9 +3232,11 @@ export const audio = defineNamespace({
           "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
           "inworldNotConfiguredTitle — Inworld clones skip this step.",
       },
+      "audio.aiError.voiceConvertSlowTitle": { description: "Popover heading when Change voice timed out because the GPU voice service was starting from idle." },
+      "audio.aiError.voiceConvertSlowBody": { description: "Popover body for that timeout: nothing is wrong with the line; retrying usually works quickly." },
       "audio.aiError.seedVcFailedTitle": {
         description:
-          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
+          "Popover heading when voice conversion (Change voice, or a clone voice after TTS) ran but failed.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:

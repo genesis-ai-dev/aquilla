@@ -4,8 +4,8 @@
 // Wire contract (frames, tool schema, proposal shapes — byte-for-byte):
 // docs/superpowers/specs/2026-06-12-translation-agent-implementation-plan.md.
 //
-// One tool ("execute": sql | emit | docs), max 8 tool iterations, 60k token
-// ceiling, Haiku-class default model through the same OpenRouter key +
+// Bounded tool iterations and a 200k token ceiling, using the configured
+// model through the same OpenRouter key +
 // runAiGuard() path as /api/v1/chat/completions. All writes are STAGED
 // proposals — the client applies them through the normal POST /events path.
 
@@ -130,7 +130,9 @@ function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: str
 // backstops a model looping on free tools.
 const MAX_TOOL_ITERATIONS = 12
 const MAX_TOTAL_ROUNDS = 30
-const TOKEN_CEILING = 100_000
+const TOKEN_CEILING = 200_000
+const TURN_LIMIT_MESSAGE =
+  "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent."
 /** code_result summaries are truncated for the UI per the contract. */
 const RESULT_SUMMARY_MAX = 2000
 
@@ -776,11 +778,6 @@ interface LoopArgs {
   resolvedLaneId: string
 }
 
-function parseSettingsObject(raw: unknown): Record<string, unknown> {
-  const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
     const v: unknown = JSON.parse(raw || "{}")
@@ -835,16 +832,14 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings,
-              settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
+      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ settings: unknown; brief_summary: string | null }>()
+      .first<{ brief_summary: string | null }>()
     if (settings) {
-      const parsed = parseSettingsObject(settings.settings)
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
-      languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
+      languages = languagesForLanes(lanes, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
@@ -1000,7 +995,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       }
       if (promptTokens + completionTokens > TOKEN_CEILING) {
         status = "capped"
-        send({ type: "error", message: `Token ceiling reached (${Math.round(TOKEN_CEILING / 1000)}k) — run stopped.` })
+        send({ type: "error", message: TURN_LIMIT_MESSAGE })
         break
       }
       // AQU-AGENT §2 cost cap: halt gracefully BEFORE the next paid model call
@@ -1180,7 +1175,11 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+          if (promptTokens + completionTokens > TOKEN_CEILING) {
+            send({ type: "error", message: TURN_LIMIT_MESSAGE })
+          } else {
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+          }
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).
           for (let cj = ci; cj < toolCalls.length; cj++) {

@@ -88,6 +88,17 @@ export function buildSampleSession() {
     events.fileRemoved({ id: "file3" }),
     events.projectRemoved({ id: "proj2" }),
     events.offlineProjectRemoved({ projectId: "proj2" }),
+
+    events.offlineProjectStatusSet({ projectId: "proj3", status: "ready", syncedAt: at, queueDepth: 0 }),
+    events.projectSynced({ id: "proj3", name: "Luke", orgId: "org1", settings: null, syncedAt: at }),
+    events.fileSynced({ id: "file4", projectId: "proj3", name: "LUK", type: "usfm", sequenceIndex: 0 }),
+    events.cellsSynced({
+      projectId: "proj3",
+      fileId: "file4",
+      rows: [{ ...sourceRow("LUK 1:1", 0), targetLang: "", laneId: null }],
+    }),
+    events.syncCursorSet({ projectId: "proj3", fileId: "file4", serverSeq: 5, projectEpoch: 1 }),
+    events.offlineCopyRemoved({ projectId: "proj3" }),
     events.localCheckpoint({}),
   ]
 }

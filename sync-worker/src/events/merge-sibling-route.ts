@@ -276,8 +276,8 @@ export async function mergeSibling(
   allStmts.push(buildSettleSeqRangeStmt(db, hostProjectId, baseSeq))
   // AQU-1550: every cell row points at a `lanes` record (cells.lane_id is NOT
   // NULL), and the projection above resolves it by tag — so the fold's lane has
-  // to exist before the first cell lands. Nothing else creates it: the identity
-  // route registers the tag in the host's settings only after the fold returns.
+  // to exist before the first cell lands. Nothing else creates it before then:
+  // the identity route creates the record itself only when the fold wrote no rows.
   // The lane statement leads the FIRST batch, so the record and the first rows
   // that use it commit together: a fold that fails before writing anything
   // leaves no empty lane behind, and a re-run finds the record and reuses it.

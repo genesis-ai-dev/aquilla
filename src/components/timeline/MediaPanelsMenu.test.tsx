@@ -15,6 +15,7 @@ function fakeDock(layout: DockLayout, presence: DockPresence = { film: true }, e
     panelsOpen: true,
     setPanelsOpen: vi.fn(),
     show: vi.fn(),
+    hide: vi.fn(),
     fold: vi.fn(),
     restore: vi.fn(),
     resetLayout: vi.fn(),
@@ -88,8 +89,11 @@ describe("MediaPanelsMenu", () => {
     await expectTooltip(text, "Bottom left · a tab behind Film")
     fireEvent.click(text)
     expect(dock.show).toHaveBeenCalledWith("text")
+    // Review, Oct 29: unticking the film used to fold the area the two
+    // share, and the text went with it. Hiding is the dock's (useMediaDock).
     fireEvent.click(screen.getByTestId("panels-row-film"))
-    expect(dock.fold).toHaveBeenCalledWith("ll")
+    expect(dock.hide).toHaveBeenCalledWith("film")
+    expect(dock.fold).not.toHaveBeenCalled()
   })
 
   it("while full screen: one short line, the folded list in its tooltip, and Restore", async () => {

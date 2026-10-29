@@ -79,6 +79,14 @@ describe("the docking model", () => {
       expect(movePanel(layout, "text", "ll").fullUndo).toEqual([])
     })
 
+    // Review, Oct 29: Alt+1 on a full-screen timeline dropped the note, so
+    // Esc no longer restored anything.
+    it("unfolding the region that is already open keeps it", () => {
+      const { layout } = enterFullScreen(startDockLayout(), FILM, "tl", "files")
+      expect(unfoldRegion(layout, "tl")).toBe(layout)
+      expect(layout.fullUndo).toEqual(["ll", "lr", "left:files"])
+    })
+
     it("switching tabs inside the full-screen area keeps it", () => {
       const tabs = movePanel(startDockLayout(), "text", "ll")
       const { layout } = enterFullScreen(tabs, FILM, "ll", null)

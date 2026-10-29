@@ -24,8 +24,6 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
-import { TooltipProvider } from "@/components/ui/tooltip"
-import { expectTooltip } from "@/test-utils/tooltip"
 
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
@@ -323,21 +321,26 @@ describe("ProjectSettings — film and sources (AQU-1758)", () => {
 
   // AQU-1758: on this layout there is no Film button; the film is the first
   // item in the Sources menu in the media view's top bar, and the (i) says so.
-  it("its (i) says the film is the first item in the top bar's Sources menu", async () => {
+  // Sam, Oct 28: an (i) is a button that opens its text in place beneath the
+  // title on a click, and closes it on another — never a hover.
+  it("its (i) opens, on a click, the film being the first item in the top bar's Sources menu", () => {
     currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
-    render(
-      <TooltipProvider delay={0}>
-        <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/audio-media`]}>
-          <Routes>
-            <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
-          </Routes>
-        </MemoryRouter>
-      </TooltipProvider>,
-    )
+    renderSettings()
     const info = box("settings-film-and-sources-info")
-    await expectTooltip(info, "Shows the Sources menu in the media view's top bar.")
-    await expectTooltip(info, "Its first item is the film, for linking a video")
-    expect(screen.getByRole("tooltip")).not.toHaveTextContent(/Film button/)
+    const text = document.getElementById("settings-film-and-sources-explanation") as HTMLElement
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(info).toHaveAttribute("aria-controls", "settings-film-and-sources-explanation")
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text).toHaveTextContent("Shows the Sources menu in the media view's top bar.")
+    expect(text).toHaveTextContent("Its first item is the film, for linking a video")
+    expect(text).not.toHaveTextContent(/Film button/)
+    // Clicking the (i) beside the label never ticks its box.
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
   })
 
   it("saves the choice a maintainer makes", async () => {

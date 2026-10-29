@@ -24,6 +24,7 @@ import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { OfflineLaunchResume } from "@/components/OfflineLaunchResume"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
+import { PersonPrefsSyncMount } from "@/components/PersonPrefsSyncMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
@@ -382,6 +383,7 @@ export default function App() {
       <OfflineShutdownGuard />
       <OfflineLaunchResume />
       <LocalLlmConfigMount />
+      <PersonPrefsSyncMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />

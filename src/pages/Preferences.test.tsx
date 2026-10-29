@@ -111,7 +111,8 @@ describe("Preferences", () => {
   it("translator profile renders one settings row per field", () => {
     renderAt("/preferences/profile")
     expect(screen.getByRole("heading", { name: "Translator profile" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Assistant language")).toBeInTheDocument()
+    // AQU-2263: named for what it does, so it no longer shares a name with the project setting.
+    expect(screen.getByLabelText("The assistant answers me in")).toBeInTheDocument()
     expect(screen.getByLabelText("Age")).toBeInTheDocument()
     expect(screen.getByLabelText("Other relevant information")).toBeInTheDocument()
     expect(screen.queryByText("Profile fields")).not.toBeInTheDocument()

@@ -383,7 +383,8 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.group.account": "Account",
 
     // — Translator profile fields (was PROFILE_TEXT_FIELDS) —
-    "onboarding.preferences.profile.responseLanguage.label": "Assistant language",
+    // AQU-2263: says what it does; "Assistant language" stays the project-wide one.
+    "onboarding.preferences.profile.responseLanguage.label": "The assistant answers me in",
     "onboarding.preferences.profile.responseLanguage.placeholder":
       "e.g. Tagalog — the AI replies in this language",
     "onboarding.preferences.profile.age.label": "Age",

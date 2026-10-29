@@ -523,16 +523,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "shadcn Badge component on a personal API-token row. A lower-case inline " +
     "status word and a capitalized standalone badge take different forms in " +
     "languages that case- or register-mark that distinction.",
-  "onboarding.preferences.profile.responseLanguage.label":
-    "Field label in the personal Translator Profile (Preferences page) for " +
-    "the language the AI assistant should use when replying to THIS person in " +
-    "chat — a device-local, per-person override. projectSettings.ai." +
-    "assistantLanguageLabel is the PROJECT-WIDE default for the same-named " +
-    "setting, shared by everyone on the project, configured in Project " +
-    "Settings' AI card. Same surface word, different scope and different " +
-    "underlying data (personal profile field vs shared project setting) — " +
-    "collapsing them would risk a translator conflating a personal override " +
-    "with a shared team default.",
   "onboarding.preferences.hint.notSet":
     "Standalone Title-Case index-row hint on the Preferences page ('Not set'), " +
     "alongside sibling Title-Case hints 'Personal'/'On-device'/'Sharing on'. " +

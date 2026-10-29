@@ -837,7 +837,6 @@ export const th: Catalog = {
   "editor.timeline.snapToggleAria": "ดูดเข้าหาขอบของคลิปข้างเคียง",
   "editor.timeline.snapOnTooltip": "เปิดการดูดขอบ — ขอบจะดูดเข้าหาคลิปข้างเคียง",
   "editor.timeline.snapOffTooltip": "ปิดการดูดขอบ",
-  "editor.timeline.videoHiddenNote": "วิดีโอที่เชื่อมไว้ถูกซ่อนในมุมมองนี้ — วิดีโอเล่นตามจังหวะของไฟล์บันทึกเสียงต้นฉบับ ซึ่งมุมมองนี้ไม่ได้ยึดตามแล้ว",
   "editor.timeline.outputLatencyNote": "เสียง Bluetooth มาถึงช้ากว่าที่แอปส่งไปเล็กน้อย ตำแหน่งการเล่นถูกชดเชยตามความหน่วงที่วัดได้ แต่มีส่วนที่วัดไม่ได้ — จังหวะละเอียดให้ไว้ใจหูมากกว่าเส้น",
   "editor.timeline.outputDeviceChangedToast": "หยุดเล่นชั่วคราว — อุปกรณ์เสียงเปลี่ยนแล้ว",
   "editor.timeline.colorCyan": "ฟ้าอมเขียว",

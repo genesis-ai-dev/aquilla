@@ -36,11 +36,9 @@ export interface MediaPanelsMenuProps {
   /** The open file's name, for "your teammates keep their own arrangement of …". */
   fileName: string
   kind: MediaFileKind
-  /** A film is linked but Free timing hides it: the Film row says so. */
-  filmHiddenByTiming: boolean
 }
 
-export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: MediaPanelsMenuProps) {
+export function MediaPanelsMenu({ dock, fileName, kind }: MediaPanelsMenuProps) {
   const t = useT()
   const names = usePanelNames()
   const keys = dockKeys()
@@ -50,26 +48,18 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
   const stateWords = (parts: Array<string | null | false>) => parts.filter(Boolean).join(" · ")
 
   const row = (id: DockPanel, n: number) => {
-    let where: string
-    let showing: boolean
-    let toggle: (() => void) | null = null
-    if (id === "film" && filmHiddenByTiming) {
-      showing = false
-      where = t("editor.dock.filmHiddenByTiming")
-    } else {
-      const area = v.areaOf(id)!
-      const active = v.activeOf(area)
-      showing = v.isShowing(id)
-      // Where it sits, and why it is out of sight when it is — never "showing".
-      where = stateWords([
-        names.area(area),
-        !v.isOpen(area)
-          ? t("editor.dock.stateFolded")
-          : active !== id && active && t("editor.dock.stateBehind", { panel: names.panel(active) }),
-        full === area && t("editor.dock.stateFull"),
-      ])
-      toggle = showing ? () => dock.fold(area) : () => dock.show(id)
-    }
+    const area = v.areaOf(id)!
+    const active = v.activeOf(area)
+    const showing = v.isShowing(id)
+    // Where it sits, and why it is out of sight when it is — never "showing".
+    const where = stateWords([
+      names.area(area),
+      !v.isOpen(area)
+        ? t("editor.dock.stateFolded")
+        : active !== id && active && t("editor.dock.stateBehind", { panel: names.panel(active) }),
+      full === area && t("editor.dock.stateFull"),
+    ])
+    const toggle = showing ? () => dock.fold(area) : () => dock.show(id)
     return (
       <AppTooltip key={id} content={where} side="left">
         <button
@@ -77,9 +67,8 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           data-testid={`panels-row-${id}`}
           aria-pressed={showing}
           aria-description={where}
-          disabled={!toggle}
-          onClick={() => toggle?.()}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50 disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
+          onClick={toggle}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50"
         >
           <Check className={cn("size-3.5 shrink-0", !showing && "invisible")} aria-hidden />
           <span className="min-w-0 flex-1 truncate">{names.panel(id)}</span>
@@ -150,7 +139,7 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           {t("editor.dock.panels")}
         </div>
         <div className="flex flex-col">
-          {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
+          {v.present.includes("film") && row("film", 2)}
           {row("text", 3)}
         </div>
         <div className="flex items-center gap-1 border-t border-border pt-1.5">

@@ -1050,7 +1050,6 @@ export const am: Catalog = {
   "editor.history.reasonGone": "የቀየረው ከእንግዲህ የለም።",
   "editor.history.reasonUnavailable": "ይህ እርምጃ ከእንግዲህ ሊቀለበስ አይችልም።",
   "editor.history.reasonFailed": "ሊቀመጥ አልቻለም። እንደገና ይሞክሩ።",
-  "editor.timeline.videoHiddenNote": "የተያያዘው ቪዲዮ እዚህ ተደብቋል — በመጀመሪያው ቀረጻ ጊዜ ይጫወታል፣ ይህ እይታ ከእንግዲህ አይከተለውም።",
   "editor.timeline.bluetoothPillInfo": "ስለ በ Bluetooth ማጫወት",
   "editor.timeline.outputLatencyNote": "የ Bluetooth ድምጽ መተግበሪያው ከላከው ትንሽ ዘግይቶ ይደርሳል። የማጫወቻ ጠቋሚው ለሚለካው መዘግየት ተስተካክሏል፣ ነገር ግን ትንሹ አይለካም — ለጥሩ ጊዜ ጆሮዎን ከመስመሩ ይልቅ ያምኑ።",
   "editor.timeline.outputDeviceChangedToast": "ማጫወት ቆሟል — የድምጽ ውጤቱ ተቀይሯል።",

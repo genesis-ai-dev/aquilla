@@ -57,7 +57,7 @@ import {
   type PlaybackSource,
 } from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { videoSyncAction } from "./video-sync"
+import { VIDEO_END_GUARD_SEC, videoSyncAction } from "./video-sync"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
   forgetStallSample,
@@ -152,6 +152,15 @@ export interface MediaVideoPaneProps {
    *  exactly as Space and the playback bar's button do (the workspace hands
    *  its timeline toggle). Absent means the picture takes no clicks of ours. */
   onPictureClick?: () => void
+  /**
+   * AQU-2253: the file follows its recordings. The film is shown there now,
+   * running on its own clock: the queue's programme is the transport, and the
+   * picture follows the programme's second exactly as it follows a recording's
+   * file second — the playhead's time is the film's time. Unlike that
+   * arrangement it keeps its OWN sound, which plays straight through with the
+   * picture (Sam, Oct 29); the Source audio row's mute silences it.
+   */
+  followsRecordings?: boolean
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -172,6 +181,7 @@ export function MediaVideoPane({
   onVideoDuration,
   onChangeVideo,
   onPictureClick,
+  followsRecordings = false,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -257,7 +267,9 @@ export function MediaVideoPane({
    * film defaults to the recording, which is the arrangement it always had.
    */
   const playbackSource = usePlaybackSource(fileId, src)
-  const slaved = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  // AQU-2253: following the recordings the programme drives, so the picture is
+  // slaved there whether or not a recording exists.
+  const slaved = followsRecordings || recordingDrivesPlayback(recordingCell != null, playbackSource)
   /** The sound menu exists only where there is a choice to make: a YouTube
    *  picture over a file that also carries an uploaded recording. */
   const offerSoundSource = youTube && recordingCell != null
@@ -326,7 +338,12 @@ export function MediaVideoPane({
     if (slaved || standaloneCellId == null) return undefined
     return cells.find((c) => c.id === standaloneCellId)
   }, [cells, queue.cellId, slaved, standaloneCellId])
-  const clockIsFileTime = queueClockIsFileTime(soundingCell)
+  // Is the queue's clock a second of the FILM? A recording's file second is;
+  // following the recordings so is the programme's (AQU-2253), and a take
+  // played on its own per-take clock never is.
+  const clockIsFileTime = followsRecordings
+    ? queue.progress.programmeClock
+    : queueClockIsFileTime(soundingCell)
 
   /**
    * Publish where the picture is, for everything that is not this pane: the
@@ -685,6 +702,20 @@ export function MediaVideoPane({
       return
     }
 
+    if (action.kind === "end") {
+      // AQU-2253: past the film's end the panel holds the last frame.
+      prevTickRef.current = null
+      wantPlayRef.current = false
+      video.pause()
+      try {
+        video.currentTime = action.sec
+        lastSeekAtRef.current = now
+      } catch {
+        /* not seekable yet — the next tick re-issues it */
+      }
+      return
+    }
+
     if (prev?.sec !== tickSec) prevTickRef.current = { sec: tickSec, at: now }
 
     if (action.kind === "seek") {
@@ -730,7 +761,11 @@ export function MediaVideoPane({
     const video = videoRef.current
     if (!video) return
     try {
-      video.currentTime = sec
+      // AQU-2253: a seek past the film's end lands on its last frame, the same
+      // place a playhead running off the end leaves it (see video-sync).
+      video.currentTime = Number.isFinite(video.duration) && video.duration > 0
+        ? Math.min(sec, Math.max(0, video.duration - VIDEO_END_GUARD_SEC))
+        : sec
       lastSeekAtRef.current = Date.now()
       prevTickRef.current = null
       // The clock is about to jump, and a jump BACKWARDS looks exactly like a
@@ -1134,7 +1169,9 @@ export function MediaVideoPane({
           // into the queue store, which reaches the queue's own elements; there
           // are none in this arrangement, so the pane honours the flag directly.
           // (AQU-646, 2026-08-11 / 2026-08-13)
-          muted={slaved || !sourceAudible}
+          // AQU-2253: following the recordings it is slaved AND keeps its own
+          // sound, which plays straight through with the picture.
+          muted={(slaved && !followsRecordings) || !sourceAudible}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it

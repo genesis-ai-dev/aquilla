@@ -1051,7 +1051,6 @@ export const bn: Catalog = {
   "editor.history.reasonGone": "এটি যা বদলেছিল তা আর নেই।",
   "editor.history.reasonUnavailable": "এই ধাপ আর পূর্বাবস্থায় ফেরানো যায় না।",
   "editor.history.reasonFailed": "এটি সংরক্ষণ হয়নি। আবার চেষ্টা করুন।",
-  "editor.timeline.videoHiddenNote": "যুক্ত ভিডিও এখানে লুকানো — এটি মূল রেকর্ডিংয়ের সময়ে চলে, যা এই ভিউ আর অনুসরণ করে না।",
   "editor.timeline.bluetoothPill": "ব্লুটুথ",
   "editor.timeline.bluetoothPillInfo": "ব্লুটুথে চালানো সম্পর্কে",
   "editor.timeline.outputLatencyNote": "ব্লুটুথ অডিও অ্যাপ পাঠানোর একটু পরে পৌঁছায়। মাপা যায় এমন দেরির জন্য প্লেহেড সামঞ্জস্য করা, কিন্তু কিছুটা মাপা যায় না — সূক্ষ্ম সময়ে লাইনের চেয়ে কানকে বিশ্বাস করুন।",

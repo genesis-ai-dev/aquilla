@@ -88,13 +88,24 @@ export interface VideoTransportInput {
  *
  * So this is now the single rule, and ProjectWorkspace's `videoIsTransport`
  * is this function. There is nowhere left for a copy to drift.
+ *
+ * A fourth since AQU-2253: not when the file follows its recordings. The pane
+ * is on screen in both timings, and following the recordings the programme
+ * owns playback and the picture follows it.
  */
 export function videoOwnsFile(
   coreMediaUrl: string | null | undefined,
   anyCellClockIsFileTime: boolean,
   paneOnScreen: boolean,
+  /**
+   * AQU-2253: the file follows its recordings. The film is on screen there
+   * now, but only the queue's programme can play takes laid end to end, so the
+   * programme is the transport and the picture follows its clock: the
+   * playhead's second is the film's second.
+   */
+  followsRecordings = false,
 ): boolean {
-  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime && paneOnScreen
+  return Boolean(coreMediaUrl) && !anyCellClockIsFileTime && paneOnScreen && !followsRecordings
 }
 
 /**

@@ -1050,7 +1050,6 @@ export const pa: Catalog = {
   "editor.history.reasonGone": "ਜੋ ਇਸਨੇ ਬਦਲਿਆ ਸੀ ਹੁਣ ਮੌਜੂਦ ਨਹੀਂ.",
   "editor.history.reasonUnavailable": "ਇਹ ਕਦਮ ਹੁਣ ਅਣਕੀਤਾ ਨਹੀਂ ਹੋ ਸਕਦਾ.",
   "editor.history.reasonFailed": "ਇਹ ਸੰਭਾਲਿਆ ਨਹੀਂ ਜਾ ਸਕਿਆ. ਮੁੜ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
-  "editor.timeline.videoHiddenNote": "ਜੁੜੀ ਵੀਡੀਓ ਇੱਥੇ ਲੁਕੀ ਹੈ — ਇਹ ਮੂਲ ਰਿਕਾਰਡਿੰਗ ਦੇ ਸਮੇਂ ਉੱਤੇ ਚੱਲਦੀ ਹੈ, ਜਿਸ ਨੂੰ ਇਹ ਵਿਊ ਹੁਣ ਨਹੀਂ ਮੰਨਦਾ.",
   "editor.timeline.bluetoothPillInfo": "Bluetooth ਰਾਹੀਂ ਚਲਾਉਣ ਬਾਰੇ",
   "editor.timeline.outputLatencyNote": "Bluetooth ਆਡੀਓ ਐਪ ਦੇ ਭੇਜਣ ਤੋਂ ਇੱਕ ਪਲ ਬਾਅਦ ਪਹੁੰਚਦੀ ਹੈ. ਪਲੇਹੈੱਡ ਉਸ ਦੇਰੀ ਲਈ ਠੀਕ ਕੀਤਾ ਜਾਂਦਾ ਹੈ ਜੋ ਮਾਪੀ ਜਾ ਸਕੇ, ਪਰ ਥੋੜ੍ਹੀ ਨਾ-ਮਾਪਣਯੋਗ ਰਹਿੰਦੀ ਹੈ — ਬਾਰੀਕ ਸਮੇਂ ਲਈ ਲਾਈਨ ਨਾਲੋਂ ਆਪਣੇ ਕੰਨਾਂ ਉੱਤੇ ਭਰੋਸਾ ਕਰੋ.",
   "editor.timeline.outputDeviceChangedToast": "ਪਲੇਬੈਕ ਰੁਕੀ — ਆਡੀਓ ਆਊਟਪੁੱਟ ਬਦਲ ਗਈ.",

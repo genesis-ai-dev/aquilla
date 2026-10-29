@@ -13320,7 +13320,6 @@ export function ProjectWorkspace() {
   const showVideoPane = shouldShowVideoPane({
     timelineStacked,
     coreMediaUrl: activeFile?.coreMediaUrl,
-    timingMode,
   })
   /**
    * Stage 3: re-apply the stored timeline height on a FILE switch.
@@ -13429,8 +13428,9 @@ export function ProjectWorkspace() {
    *
    * A subtitle file timed against footage has no imported source recording, so
    * the play queue's clock means nothing here and the video is the player. The
-   * pane being on screen is part of the test, not just a video being linked: in
-   * Free timing the pane is hidden and the queue owns playback.
+   * pane being on screen is part of the test, not just a video being linked.
+   * Following the recordings (AQU-2253) the pane is on screen but the queue's
+   * programme owns playback, and the picture follows its clock.
    *
    * Round 6: written once. Three places needed this answer and only two had it
    * — the third (an explicit timeline seek) went on cueing the queue, which is
@@ -13443,8 +13443,11 @@ export function ProjectWorkspace() {
         activeFile?.coreMediaUrl,
         recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
         showVideoPane,
+        // AQU-2253: following the recordings the film is on screen and follows
+        // the programme, which only the queue plays.
+        timingMode === "audioFirst",
       ),
-    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane],
+    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane, timingMode],
   )
 
   // AQU-646 round 5: DUBS OVER THE PICTURE.
@@ -13455,8 +13458,8 @@ export function ProjectWorkspace() {
   // parameter, so the picture's clock drives the same overlays, with the same
   // trims, the same pool and the same Target speaker button.
   //
-  // Driving is gated on the pane being on screen: in Free timing there is no
-  // picture to be in sync with, and the queue owns playback there.
+  // Driving is gated on the picture owning the file: following the recordings
+  // the queue's programme plays the takes and the picture follows it.
   const videoDrivesDubs = videoIsTransport
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
@@ -14895,10 +14898,9 @@ export function ProjectWorkspace() {
     // PICTURE is the transport — hand it the press. Gated on the same test the
     // pane uses to decide it is standalone, so a file whose queue can run is
     // untouched.
-    // Gated on the pane being ON SCREEN, not merely on a video being linked.
-    // In Free timing the pane is hidden, so this used to hand the press to a
-    // nonce nothing consumes and Space went dead — the queue owns the transport
-    // there and should get it.
+    // Gated on the picture OWNING the file, not merely on a video being linked.
+    // Following the recordings the queue owns the transport (the picture
+    // follows it, AQU-2253), so the press goes to the queue there.
     if (videoIsTransport) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
       return
@@ -16910,7 +16912,6 @@ export function ProjectWorkspace() {
                               dock={dock}
                               fileName={fileDisplayName(activeFile)}
                               kind={mediaKind}
-                              filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
                             />
                           ),
                         })
@@ -17038,7 +17039,6 @@ export function ProjectWorkspace() {
                     // Board 55: the film's own actions head the Sources menu.
                     film={activeFile?.coreMediaUrl ? {
                       name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
-                      hiddenByTiming: !showVideoPane,
                       showing: dock.view.isShowing("film"),
                       onHide: () => {
                         const area = dock.view.areaOf("film")
@@ -17244,6 +17244,9 @@ export function ProjectWorkspace() {
                   // Sam, Oct 5: a click on a YouTube picture is the
                   // transport's Play/Pause, never YouTube's own.
                   onPictureClick={handleTimelineTogglePlay}
+                  // AQU-2253: following the recordings the film is shown on
+                  // its own clock, following the programme's playhead.
+                  followsRecordings={timingMode === "audioFirst"}
                   sourceDirectionMode={fileMeta.sourceDirectionMode}
                   targetDirectionMode={fileMeta.targetDirectionMode}
                   sourceTextDirection={fileMeta.sourceTextDirection}

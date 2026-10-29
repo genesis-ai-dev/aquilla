@@ -24,7 +24,7 @@ function fakeDock(layout: DockLayout, presence: DockPresence = { film: true }, e
 
 function draw(dock: MediaDock, over: Partial<MediaPanelsMenuProps> = {}) {
   return renderWithTooltips(
-    <MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" filmHiddenByTiming={false} {...over} />,
+    <MediaPanelsMenu dock={dock} fileName="Episode 101" kind="dub" {...over} />,
   )
 }
 
@@ -85,16 +85,9 @@ describe("MediaPanelsMenu", () => {
     expect(dock.restore).toHaveBeenCalled()
   })
 
-  it("leaves the film out on a file without one, and says why under Free timing", async () => {
-    const { rerender } = draw(fakeDock(startDockLayout(), { film: false }), { kind: "scripture", fileName: "Ruth" })
+  it("leaves the film out on a file without one", async () => {
+    draw(fakeDock(startDockLayout(), { film: false }), { kind: "scripture", fileName: "Ruth" })
     expect(screen.queryByTestId("panels-row-film")).toBeNull()
-    rerender(
-      <MediaPanelsMenu dock={fakeDock(startDockLayout(), { film: false })} fileName="Ruth" kind="plain" filmHiddenByTiming />,
-    )
-    const film = screen.getByTestId("panels-row-film")
-    expect(film).toBeDisabled()
-    expect(film).toHaveAttribute("aria-pressed", "false")
-    expect(film).toHaveAttribute("aria-description", "Hidden in Free timing")
   })
 
   it("resets the layout; what Reset does and the keys are behind its (i)", async () => {

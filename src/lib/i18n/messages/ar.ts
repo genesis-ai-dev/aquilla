@@ -837,7 +837,6 @@ export const ar: Catalog = {
   "editor.timeline.snapToggleAria": "الجذب إلى الحواف المجاورة",
   "editor.timeline.snapOnTooltip": "الجذب مفعّل — تلتصق الحواف بالمجاورة",
   "editor.timeline.snapOffTooltip": "الجذب متوقف",
-  "editor.timeline.videoHiddenNote": "الفيديو المرتبط مخفي هنا — فهو يعمل على توقيت التسجيل الصوتي الأصلي، وهذا العرض لم يعد يتبعه.",
   "editor.timeline.outputLatencyNote": "يصل صوت Bluetooth لحظة بعد أن يرسله التطبيق. يُعدَّل مؤشّر التشغيل حسب التأخير الذي يمكن قياسه، لكن جزءًا منه غير قابل للقياس — ثق بأذنيك أكثر من الخط للتوقيت الدقيق.",
   "editor.timeline.outputDeviceChangedToast": "أُوقف التشغيل مؤقتًا — تغيّر مخرج الصوت.",
   "editor.timeline.colorCyan": "سماوي",

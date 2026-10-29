@@ -310,7 +310,7 @@ export interface TimelineEditorProps {
    * (the link dialog, which also clears it) and Hide / Show. Absent: the
    * Sources menu's plain "Film" row, which opens the link dialog.
    */
-  film?: { name: string; hiddenByTiming: boolean; showing: boolean; onHide(): void; onShow(): void }
+  film?: { name: string; showing: boolean; onHide(): void; onShow(): void }
   /**
    * AQU-646: add a line over a stretch of the film that has no cell of its own
    * — the "T" in the Subtitles track, and the mic in the Target audio track
@@ -2323,11 +2323,9 @@ export function TimelineEditor({
           disabled: !canLinkVideo, testId: "top-film-change", onClick: onRequestLinkVideo,
         })
       }
-      items.push(film.hiddenByTiming
-        ? { id: "film-hidden", type: "label", label: t("editor.dock.filmHiddenByTiming") }
-        : film.showing
-          ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
-          : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
+      items.push(film.showing
+        ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
+        : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
       items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
     }
     // AQU-1758 (Sam's decision 7): everything else in Sources is behind the
@@ -4711,20 +4709,6 @@ export function TimelineEditor({
           className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5"
         >
           {topTools}
-        </div>
-      )}
-
-      {/* SUB-53: a video runs on the original recording's clock, so it cannot
-          follow a re-flowed track — say so rather than let it drift silently
-          against the audio. In Original's timing the video renders beside the
-          text table instead (MediaVideoPane), which is why only the note is
-          left here. */}
-      {coreMediaUrl && audioFirst && (
-        <div
-          data-testid="tl-video-hidden-note"
-          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
-        >
-          {t("editor.timeline.videoHiddenNote")}
         </div>
       )}
 

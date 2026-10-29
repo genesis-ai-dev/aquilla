@@ -1703,15 +1703,15 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })
 
-  it("hides a linked video and says why — it runs on the original's timing", () => {
+  it("following the recordings, a linked film is never hidden and no note says it is (AQU-2253)", () => {
     render(
       <TimelineEditor
         fileId="af2" coreMediaUrl="http://v.test/a.mp4" editable cells={verses}
         timingMode="audioFirst" onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.queryByTestId("tl-video")).toBeNull()
-    expect(screen.getByTestId("tl-video-hidden-note")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-video-hidden-note")).toBeNull()
+    expect(screen.queryByText(/linked video is hidden/i)).toBeNull()
   })
 
   it("clicking a verse seeks to it on the ASSEMBLED clock, not the file's", () => {
@@ -5576,7 +5576,7 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
 describe("TimelineEditor — the media view's top bar (board 55, option E)", () => {
   beforeEach(() => { topOwner.value = 1 })
   const drawBar = (over: Record<string, unknown> = {}) => {
-    const film = { name: "a.mp4", hiddenByTiming: false, showing: true, onHide: vi.fn(), onShow: vi.fn() }
+    const film = { name: "a.mp4", showing: true, onHide: vi.fn(), onShow: vi.fn() }
     const onLink = vi.fn()
     renderWithTooltips(
       <>

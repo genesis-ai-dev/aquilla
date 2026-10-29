@@ -1050,7 +1050,6 @@ export const ha: Catalog = {
   "editor.history.reasonGone": "Abin da ya canza ba ya nan kuma.",
   "editor.history.reasonUnavailable": "Ba za a iya warware wannan mataki kuma ba.",
   "editor.history.reasonFailed": "Ba a iya ajiye shi ba. Ku sake gwadawa.",
-  "editor.timeline.videoHiddenNote": "An ɓoye bidiyon da aka haɗa a nan — yana kunnawa a lokacin rikodin asali, wanda wannan kallo ba ya bin sa kuma.",
   "editor.timeline.bluetoothPillInfo": "Game da kunnawa ta Bluetooth",
   "editor.timeline.outputLatencyNote": "Sautin Bluetooth yana isa ɗan lokaci bayan manhaja ta tura shi. An daidaita kan kunnawa da jinkirin da za a iya auna, amma ɗan kaɗan ba za a iya aunawa ba — ku amince da kunnuwanku fiye da layin don daidaiton lokaci.",
   "editor.timeline.outputDeviceChangedToast": "An dakatar da kunnawa — fitowar sauti ta canza.",

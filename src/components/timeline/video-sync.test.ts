@@ -44,6 +44,21 @@ describe("videoSyncAction", () => {
     expect(videoSyncAction(input({ duration: 10, tickSec: 9.9 }))).toEqual({ kind: "pause" })
   })
 
+  it("a playhead that jumps past the film's end puts the picture on its last frame (AQU-2253)", () => {
+    // A book longer than its film: the playhead cut from 0:12 to 0:40 on a
+    // 27-second film. Pausing where it was would leave the panel showing 0:12
+    // while the strip under the playhead has ended. It goes to the end instead,
+    // and stays there.
+    expect(videoSyncAction(input({ duration: 27, tickSec: 40, prevTickSec: 12, videoSec: 12 }))).toEqual({
+      kind: "end",
+      sec: 26.75,
+    })
+    // Already on it: nothing more to do than stay paused.
+    expect(videoSyncAction(input({ duration: 27, tickSec: 41, prevTickSec: 40, videoSec: 26.75 }))).toEqual({
+      kind: "pause",
+    })
+  })
+
   it("does not chase a transient clock during a cross-clip resolve", () => {
     expect(videoSyncAction(input({ kind: "loading", tickSec: 300 }))).toEqual({ kind: "none" })
   })

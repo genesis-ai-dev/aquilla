@@ -1113,8 +1113,6 @@ export const editor = defineNamespace({
     "editor.history.reasonGone": "What it changed no longer exists.",
     "editor.history.reasonUnavailable": "This step can't be undone any more.",
     "editor.history.reasonFailed": "It couldn't be saved. Try again.",
-    "editor.timeline.videoHiddenNote":
-      "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -1292,7 +1290,6 @@ export const editor = defineNamespace({
     "editor.dock.stateFolded": "folded",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
-    "editor.dock.filmHiddenByTiming": "Hidden in Free timing",
     "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
     "editor.dock.fullOn": "Full screen is on",
     "editor.dock.foldedTimeline": "the timeline",
@@ -2908,12 +2905,6 @@ export const editor = defineNamespace({
         description:
           "Lower-case words joined after a place with ' · ' in a Panels menu row's tooltip: " +
           "this panel is full screen, everything else folded.",
-      },
-      "editor.dock.filmHiddenByTiming": {
-        description:
-          "Where the film is, in the Panels menu and the film button's menu, while " +
-          "the file is in Free timing — which hides the film, because the " +
-          "re-flowed audio no longer follows the original footage.",
       },
       "editor.dock.fullOn": {
         description:
@@ -6840,13 +6831,6 @@ export const editor = defineNamespace({
       "editor.history.reasonGone": { description: "Why an undo did not happen: the line, take or track it changed has been deleted since." },
       "editor.history.reasonUnavailable": { description: "Why an undo did not happen: this kind of step can no longer be undone." },
       "editor.history.reasonFailed": { description: "Why an undo did not happen: it could not be saved (for example, a network error)." },
-      "editor.timeline.videoHiddenNote": {
-        description:
-          "Note replacing the linked video player when the file is in free-timing " +
-          "mode. The video can only play on the original recording's clock, and this " +
-          "view no longer lays clips out on that clock, so showing it would drift " +
-          "against the audio. Explains an absence — not an error.",
-      },
       "editor.timeline.bluetoothPill": {
         description:
           "Small amber pill beside the timeline's heading, shown only while the " +

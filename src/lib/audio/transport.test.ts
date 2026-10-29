@@ -70,6 +70,14 @@ describe("videoOwnsFile", () => {
     // queue could have played it perfectly well.
     expect(videoOwnsFile("https://cdn/master.m3u8", false, false)).toBe(false)
   })
+
+  it("following the recordings, the programme owns the file and the picture follows it (AQU-2253)", () => {
+    // The pane is on screen in both timings now, but the takes are laid end to
+    // end and only the queue's programme plays them. The film follows that
+    // clock: the playhead's time is the film's time.
+    expect(videoOwnsFile("https://cdn/master.m3u8", false, true, true)).toBe(false)
+    expect(videoOwnsFile("https://cdn/master.m3u8", false, true, false)).toBe(true)
+  })
 })
 
 describe("selectTransportForFile", () => {

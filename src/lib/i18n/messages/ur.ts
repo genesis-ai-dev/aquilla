@@ -1050,7 +1050,6 @@ export const ur: Catalog = {
   "editor.history.reasonGone": "جسے یہ بدلتا تھا وہ اب موجود نہیں۔",
   "editor.history.reasonUnavailable": "یہ قدم اب کالعدم نہیں ہو سکتا۔",
   "editor.history.reasonFailed": "یہ محفوظ نہیں ہو سکا۔ دوبارہ کوشش کریں۔",
-  "editor.timeline.videoHiddenNote": "منسلک ویڈیو یہاں چھپی ہے — وہ اصل ریکارڈنگ کے وقت پر چلتی ہے، جس کی پیروی یہ منظر اب نہیں کرتا۔",
   "editor.timeline.bluetoothPillInfo": "Bluetooth سے چلانے کے بارے میں",
   "editor.timeline.outputLatencyNote": "Bluetooth آڈیو بھیجنے کے تھوڑی دیر بعد پہنچتی ہے۔ پلے ہیڈ اس تاخیر کے مطابق ہے جو ناپی جا سکتی ہے، مگر کچھ نہیں ناپی جا سکتی — باریک وقت کے لیے لکیر سے زیادہ اپنے کانوں پر بھروسا کریں۔",
   "editor.timeline.outputDeviceChangedToast": "پلے بیک رکی — آڈیو آؤٹ پٹ بدل گیا۔",

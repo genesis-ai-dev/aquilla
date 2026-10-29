@@ -1013,7 +1013,6 @@ export const es: Catalog = {
   "editor.history.reasonGone": "Lo que cambió ya no existe.",
   "editor.history.reasonUnavailable": "Este paso ya no se puede deshacer.",
   "editor.history.reasonFailed": "No se pudo guardar. Inténtalo de nuevo.",
-  "editor.timeline.videoHiddenNote": "El vídeo vinculado está oculto aquí — se reproduce según el tiempo de la grabación original, que esta vista ya no sigue.",
   "editor.timeline.bluetoothPillInfo": "Acerca de la reproducción por Bluetooth",
   "editor.timeline.outputLatencyNote": "El audio por Bluetooth llega un momento después de que la aplicación lo envía. El cursor de reproducción se ajusta al retardo que se puede medir, pero una parte no se puede medir — para el ajuste fino, confía en tus oídos más que en la línea.",
   "editor.timeline.outputDeviceChangedToast": "Reproducción en pausa — cambió la salida de audio.",

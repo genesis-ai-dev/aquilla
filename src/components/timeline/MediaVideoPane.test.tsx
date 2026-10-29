@@ -307,6 +307,50 @@ describe("MediaVideoPane", () => {
     })
   })
 
+  // AQU-2253: following the recordings, the film is shown and runs on the
+  // programme's clock — the playhead's time is the film's time — and it keeps
+  // its own sound, which plays straight through with its picture.
+  describe("following the recordings", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0.5, endTime: 4, attachments: { a1: { url: "blob:x", type: "audio" } } }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 4.6, endTime: 8.8 }),
+    ]
+    const renderFollowing = (props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) =>
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings {...props} />)
+
+    it("follows the programme instead of driving, and keeps the film's own sound", () => {
+      renderFollowing()
+      expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("the Source audio mute silences it", () => {
+      mockAudibility = { source: false, target: true }
+      renderFollowing()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("goes to the programme's second, the same moment as the playhead", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.play = vi.fn(() => Promise.resolve())
+      sounding("s1", { progress: { currentTime: 12.5, duration: 20, rate: 1, volume: 1, programmeClock: true } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(12.5)
+    })
+
+    it("a take played on its own clock leaves the film where it is", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.currentTime = 3
+      sounding("s1", { progress: { currentTime: 1.2, duration: 3.1, rate: 1, volume: 1, programmeClock: false } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(3)
+    })
+  })
+
   it("is a muted picture surface with no competing controls", () => {
     renderPane()
     const video = screen.getByTestId("video-pane-media") as HTMLVideoElement

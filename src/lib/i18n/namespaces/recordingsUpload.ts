@@ -88,7 +88,7 @@ const KEYS = {
     "recordingsUpload.rules.byNumber":
       "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
     "recordingsUpload.rules.range":
-      "“Genesis 1:1-3” or “1-1-3” is one recording for verses 1 to 3, and each of them counts as recorded. A name with a chapter and no verse is one recording for the whole chapter.",
+      "“Genesis 1:1-3” or “1-1-3” is one recording for verses 1 to 3, and each of them counts as recorded. A name with a chapter and no verse is one recording for the whole chapter. A subtitle or film file, whose lines have times, needs one recording per line, so a range isn't uploaded there.",
     "recordingsUpload.rules.parts":
       "A verse in several files, such as “1-1a” and “1-1b”, “part 1” and “part 2”, “_1” and “_2”, or “beginning” and “end”, becomes the pieces of one recording, in that order. You can join them into one recording afterwards.",
     "recordingsUpload.rules.order":
@@ -160,6 +160,7 @@ const KEYS = {
     "recordingsUpload.reason.pastLastLine": "There are more files than lines. This file has {count} lines.",
     "recordingsUpload.reason.beforeFirstLine": "Starting the order earlier left this file before the first line.",
     "recordingsUpload.reason.duplicate": "{other} already goes to {target}.",
+    "recordingsUpload.reason.rangeOnTimedFile": "A timed file needs one recording per line.",
     "recordingsUpload.reason.skipped": "You chose not to upload it.",
     // Progress banner
     "recordingsUpload.banner.uploading": "Uploading recordings",
@@ -199,6 +200,7 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.preview.byOrder": { description: "Small grey text in a preview row: the line was given by the file's place in the folder order.", maxLength: 20 },
   "recordingsUpload.preview.topFolder": { description: "Stands in for a folder name in 'files in {folder}' when the person chose files rather than a folder." },
   "recordingsUpload.banner.stop": { description: "Tooltip and accessible name of the X button on the upload progress banner; stops the upload." },
+  "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
   "recordingsUpload.join.button": { description: "Button on a recording that was uploaded or cut into pieces: makes one new recording of all the pieces, in order.", maxLength: 32 },
 }
 

@@ -92,8 +92,11 @@ export async function loadTargetFile(
   ])
   const targetById = new Map(target.map((row) => [row.cellId, row]))
   const lines: TargetLine[] = []
+  // A subtitle or film file: its lines have times (a cue's start).
+  let timed = false
   for (const row of source) {
     if (row.hidden) continue
+    if (row.startMs != null && !isStructuralCell(row.type)) timed = true
     lines.push({
       cellId: row.cellId,
       ref: row.canonicalRef,
@@ -102,5 +105,5 @@ export async function loadTargetFile(
       hasRecording: cellHasOwnTake(row.cellId, audio?.cells[row.cellId]),
     })
   }
-  return { fileId: file.fileId, name: file.name, bookCode: file.bookCode, lines }
+  return { fileId: file.fileId, name: file.name, bookCode: file.bookCode, lines, timed }
 }

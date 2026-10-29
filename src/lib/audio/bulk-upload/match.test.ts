@@ -357,3 +357,42 @@ describe("matching inside a document, plain text or subtitles", () => {
     ])
   })
 })
+
+// Sam, Oct 29 (question 3): on a file whose lines have times — a subtitle or
+// film file — a range's one recording would sit at the start of every line it
+// covers and overlap itself on the timeline, so a range is refused there.
+describe("ranges on a timed file", () => {
+  const subs: TargetFile = { ...doc("subs", "Episode 1", 12), timed: true }
+  const subsScope: MatchScope = { kind: "file", fileId: "subs" }
+
+  it("a file naming a range of lines is not uploaded, with the reason; one line still is", () => {
+    const files = ["001.mp3", "002-004.mp3", "005.mp3"].map((n) => audio(n))
+    const { assignments, jobs } = run(files, [subs], subsScope)
+    expect(by(assignments, files, "002-004.mp3").reason).toEqual({ code: "rangeOnTimedFile" })
+    expect(by(assignments, files, "001.mp3").cellIds).toEqual(["subs#1"])
+    expect(by(assignments, files, "005.mp3").cellIds).toEqual(["subs#5"])
+    expect(jobs.some((j) => j.kind === "range")).toBe(false)
+  })
+
+  it("on a timed Bible book a verse range and a whole chapter are refused too", () => {
+    const timedGen: TargetFile = { ...book("gen", "GEN", "Genesis", [31, 25, 24]), timed: true }
+    const files = ["Genesis 1-1-3.mp3", "Genesis 3.mp3", "Genesis 1-4.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [timedGen], { kind: "file", fileId: "gen" })
+    expect(by(assignments, files, "Genesis 1-1-3.mp3").reason).toEqual({ code: "rangeOnTimedFile" })
+    expect(by(assignments, files, "Genesis 3.mp3").reason).toEqual({ code: "rangeOnTimedFile" })
+    expect(by(assignments, files, "Genesis 1-4.mp3").cellIds).toEqual(["gen:1:4"])
+  })
+
+  it("a range that is one line of the file (a bridged verse) is still one recording per line", () => {
+    const bridged = book("gen", "GEN", "Genesis", [0])
+    bridged.lines.push({ cellId: "gen:1:1-2", ref: "GEN 1:1-2", text: "1-2", structural: false, hasRecording: false })
+    bridged.lines.push({ cellId: "gen:1:3", ref: "GEN 1:3", text: "3", structural: false, hasRecording: false })
+    const { assignments } = run([audio("Genesis 1-1-2.mp3")], [{ ...bridged, timed: true }], { kind: "file", fileId: "gen" })
+    expect(assignments[0].cellIds).toEqual(["gen:1:1-2"])
+  })
+
+  it("an untimed file still takes ranges", () => {
+    const { assignments } = run([audio("002-004.mp3")], [doc("subs", "Episode 1", 12)], subsScope)
+    expect(assignments[0].cellIds).toEqual(["subs#2", "subs#3", "subs#4"])
+  })
+})

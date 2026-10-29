@@ -214,6 +214,7 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason): string
     case "pastLastLine": return t("recordingsUpload.reason.pastLastLine", { count: reason.count })
     case "beforeFirstLine": return t("recordingsUpload.reason.beforeFirstLine")
     case "duplicate": return t("recordingsUpload.reason.duplicate", { other: reason.other, target: reason.target })
+    case "rangeOnTimedFile": return t("recordingsUpload.reason.rangeOnTimedFile")
     case "skipped": return t("recordingsUpload.reason.skipped")
   }
 }

@@ -61,6 +61,9 @@ export interface TargetFile {
   bookCode: string | null
   /** Every visible line, in the order the editor shows them. */
   lines: TargetLine[]
+  /** Its lines have times: a subtitle or film file. One recording can't cover
+   *  several of its lines (Sam, Oct 29), so a range is refused here. */
+  timed?: boolean
 }
 
 /** A project file as the project-wide upload sees it before its lines load. */
@@ -94,6 +97,7 @@ export type UnmatchedReason =
   | { code: "pastLastLine"; count: number }
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
+  | { code: "rangeOnTimedFile" }
   | { code: "skipped" }
 
 export interface PartInfo {
@@ -546,6 +550,17 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
   }
 }
 
+/**
+ * Sam, Oct 29: on a file whose lines have times (a subtitle or film file), a
+ * name covering several lines is not uploaded. Its one recording would start
+ * at the first line's time and sound over every line after it, so on the
+ * timeline it overlaps itself. A range that is one line of the file (a bridged
+ * verse, "1:1-2") is still one recording for one line, and goes up.
+ */
+function refuseRangeOnTimed<R extends Resolved>(fi: FileIndex, res: R): R | { reason: UnmatchedReason } {
+  return fi.file.timed && "cellIds" in res && res.cellIds.length > 1 ? { reason: { code: "rangeOnTimedFile" } } : res
+}
+
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /** Reasons no choice of line can fix: the file is not a recording at all. */
@@ -627,8 +642,7 @@ export function matchRecordings(
         return { r, res: { reason: { code: "otherBook", book: englishBookName(r.reading.book.code), fileName: bookLabel(fi) } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }
       }
       const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter) : interpretLines(r, nums.get(r.index)!)
-      const res = resolve(fi, interp.wanted, interp.part)
-      return { r, res, interp }
+      return { r, res: refuseRangeOnTimed(fi, resolve(fi, interp.wanted, interp.part)), interp }
     })
 
     // No file in the folder has a number that finds a line: the folder has no

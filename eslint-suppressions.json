@@ -59,11 +59,6 @@
       "count": 7
     }
   },
-  "src/components/MembersPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
   "src/components/MultiProjectInviteDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 8

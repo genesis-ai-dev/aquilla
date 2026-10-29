@@ -323,15 +323,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "context). A lower-case mid-sentence filler and a capitalized standalone " +
     "enum/badge value take different forms in languages that case- or " +
     "register-mark that distinction.",
-  "org.membersPage.addMemberHeading":
-    "Static <h2> SECTION HEADING introducing the add-member area of the " +
-    "per-project Members page — a nominal label naming what's below it. " +
-    "org.teamDetail.addMemberButton is the imperative text of an actual clickable " +
-    "button/menu item that starts the add-member flow. This is the same " +
-    "nominalized-heading-vs-imperative-button split already documented for " +
-    "auth.login.title vs auth.login.submitDefault above: languages that " +
-    "nominalize headings while keeping buttons imperative need both forms even " +
-    "though English spells them identically.",
   "org.membersPage.orgPage.noExpiry":
     "Lower-case inline status caption ('no expiry') standing in for a computed " +
     "relative-time phrase on a pending-invite row, in the same register as its " +
@@ -393,11 +384,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "is the cell-level health badge shown on an individual cell's expansion " +
     "panel. A settings-panel heading and a per-cell status badge naming the same " +
     "feature at two different granularities read as different parts of speech.",
-  "projectSettings.share.tabMembers":
-    "Tab label in the Share dialog switching to the per-project member list. " +
-    "editor.navTitle.members is the breadcrumb/nav title for the standalone " +
-    "Members page. A tab within a dialog and a full page's nav title are " +
-    "different UI roles that happen to share the plain noun 'Members'.",
   "projectSettings.breadcrumbEditor":
     "Breadcrumb trail segment in Project Settings linking back to the workspace " +
     "editor. editor.navTitle.editor is the editor's own nav-title/tab label when " +
@@ -446,11 +432,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.share.copied":
-    "Transient confirmation after copying a minted invite link's URL in the " +
-    "Share dialog. nav.report.copied is the equivalent confirmation for the " +
-    "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
-    "confirmations that happen to share the same short exclamation.",
   "projectSettings.section.bibleResources":
     "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
     "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +

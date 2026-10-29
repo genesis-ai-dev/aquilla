@@ -244,7 +244,6 @@ import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { SharePanel } from "./SharePanel"
 import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
@@ -1294,7 +1293,6 @@ export function ProjectWorkspace() {
     corpusMarker?: string
   } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
@@ -18189,12 +18187,6 @@ export function ProjectWorkspace() {
           leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />
       )}
-      <SharePanel
-        open={shareOpen} onOpenChange={setShareOpen}
-        projectId={projectId!}
-        projectName={project?.name}
-        onSharesChanged={refreshChecklistShares}
-      />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}
       {batchFileModal && project && (

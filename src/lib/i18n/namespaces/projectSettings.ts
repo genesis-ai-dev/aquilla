@@ -291,13 +291,8 @@ export const projectSettings = defineNamespace({
       "Couldn't add the lane. Please try again.",
 
     // ── Share panel ──
-    "projectSettings.share.dialogTitle": "Share Project",
-    "projectSettings.share.tabMembers": "Members",
     "projectSettings.share.tabInviteLink": "Invite link",
-    "projectSettings.share.lockedHintOrg": "Remove from org to revoke",
     "projectSettings.share.lockedHintCreator": "Project creator",
-    "projectSettings.share.emptySuggestionsHint":
-      "All org members already have access to this project.",
     "projectSettings.share.inviteEmailInvalid":
       "Enter a valid email address, or leave blank for an open link.",
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
@@ -310,40 +305,23 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some lanes, use that project's share panel.",
-    "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
-    "projectSettings.share.copied": "Copied!",
-    "projectSettings.share.recipientJoinsAs":
-      "The recipient signs in (or signs up) and is added as {role}.",
     "projectSettings.share.recipientJoinsAsFallbackRole": "a member",
-    "projectSettings.share.singleUseNote":
-      "This link is single-use — once redeemed, click {createAnotherLink} to generate " +
-      "a fresh one for the next person.",
-    "projectSettings.share.revokeBeforeRedeemedNote":
-      "To revoke before it is redeemed, use the Active links list below.",
     "projectSettings.share.createAnotherLinkButton": "Create another link",
     // "Role" field label → common.roleLabel (identical text)
     "projectSettings.share.signInToCreateLink": "Sign in to create an invite link",
-    "projectSettings.share.recipientEmailLabel": "Recipient email",
     // "(optional)" → common.optionalFieldNote (identical text)
     "projectSettings.share.emailPlaceholder": "name@example.com",
-    "projectSettings.share.emailRestrictedNote":
-      "Only an account with this email can redeem this link.",
     "projectSettings.share.openLinkNote":
       "Leave blank for an open link anyone signed in can redeem.",
     "projectSettings.share.linkExpiresLabel": "Link expires",
     "projectSettings.share.expiryOneDay": "1 day",
-    "projectSettings.share.expirySevenDays": "7 days",
-    "projectSettings.share.expiryThirtyDaysDefault": "30 days (default)",
     // "No expiry" → common.noExpiry (identical text)
     // "Creating…" button-busy label → common.creating (identical text)
     "projectSettings.share.createInviteLinkButton": "Create invite link",
-    "projectSettings.share.loadingActiveLinks": "Loading active links…",
-    "projectSettings.share.activeLinksHeading": "Active links",
     "projectSettings.share.openLinkConnector": "open link",
     // "Expires {date}" → common.expiresOn (identical text)
     // "Revoke" button → common.revoke (identical text)
-    "projectSettings.share.revokeLinkAriaLabel": "Revoke this invite link",
 
     // ── Page chrome (nav, groups, save bar, discard dialog) ──
     "projectSettings.pageTitle": "Project settings",
@@ -1127,7 +1105,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
-    "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
     "projectSettings.languages.alreadyExistsError": "This lane already exists.",
     "projectSettings.languages.conflictError": "Someone else updated shared settings. Refresh to reapply your change.",
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
@@ -1907,36 +1884,11 @@ export const projectSettings = defineNamespace({
           projectName: "The upstream project's name (data, not translated).",
         },
       },
-      "projectSettings.share.lockedHintOrg": {
-        description: "Tooltip on a locked (non-editable) role row in the Share dialog's Members tab, for a member whose access comes from org membership.",
-      },
       "projectSettings.share.lockedHintCreator": {
         description: "Tooltip on a locked role row for the project's creator, whose role can't be changed here.",
       },
-      "projectSettings.share.recipientJoinsAs": {
-        description:
-          "Sentence shown after an invite link is minted, naming the role the " +
-          "recipient will hold once they redeem it.",
-        placeholders: {
-          role: "The already-localized role display name (via resolveRoleName), or the projectSettings.share.recipientJoinsAsFallbackRole fallback text if the role option can't be resolved.",
-        },
-      },
-      "projectSettings.share.singleUseNote": {
-        description:
-          "Note explaining an invite link is single-use, naming the button that " +
-          "mints a fresh one for the next recipient.",
-        placeholders: {
-          createAnotherLink: "The rendered projectSettings.share.createAnotherLinkButton label, wrapped in <strong> by the caller — insert exactly as given.",
-        },
-      },
-      "projectSettings.share.recipientEmailLabel": {
-        description: "Field label for the optional recipient-email input on the invite-link form. The '(optional)' qualifier is a separate, smaller-styled span using common.optionalFieldNote.",
-      },
       "projectSettings.share.openLinkConnector": {
         description: "Short connector text on an active-invite-link row shown instead of the recipient's email, when the link has no email restriction (anyone can redeem it).",
-      },
-      "projectSettings.share.revokeLinkAriaLabel": {
-        description: "Accessible name of the trash-icon button that starts the revoke-confirmation flow for one active invite link.",
       },
       "projectSettings.searchAriaLabel": {
         description: "Accessible name of the settings search input, which filters section cards by label/keyword as the user types.",

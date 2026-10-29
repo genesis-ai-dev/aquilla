@@ -708,11 +708,19 @@ auth.post("/logout", authMiddleware, async (c) => {
 // translator who has lost email access, a new admin route is needed. Track
 // separately.
 
+/** AQU-2259: the longest display name PATCH /auth/me accepts, after trimming. */
+const DISPLAY_NAME_MAX_LENGTH = 80
+
 const patchMeSchema = z.object({
   // Only safe, non-identity fields may be updated by the user themselves.
   // Username and password fields are explicitly rejected below even if they
   // somehow pass schema validation, to make the policy unmistakable.
   preferences: z.record(z.string(), z.unknown()).optional(),
+  // AQU-2259: the name shown for this person (onboarding's "What should we
+  // call you?"). Checked in the handler: trimmed, at most
+  // DISPLAY_NAME_MAX_LENGTH, no control characters; empty clears it, so
+  // COALESCE(display_name, username) readers fall back to the username.
+  display_name: z.string().max(1000).optional(),
   // Explicitly reject identity-change fields so a client sending them gets
   // a clear 403 rather than a silent no-op.
   username: z.string().optional(),
@@ -751,7 +759,30 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     )
   }
 
-  // Safe update: preferences only.
+  // AQU-2259: the display name. Validated before anything is written, so a
+  // refused name never half-applies a request that also carries preferences.
+  let displayName: string | null | undefined
+  if (body.display_name !== undefined) {
+    const trimmed = body.display_name.trim()
+    if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
+      return c.json({ error: `display_name must be at most ${DISPLAY_NAME_MAX_LENGTH} characters` }, 400)
+    }
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+      return c.json({ error: "display_name must not contain control characters" }, 400)
+    }
+    displayName = trimmed === "" ? null : trimmed
+  }
+
+  // Safe updates: preferences and the display name.
+  if (displayName !== undefined) {
+    await c.env.AQUILLA_PG.prepare(
+      "UPDATE users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(displayName, user.id)
+      .run()
+    evictUserSessions(user.id)
+  }
   if (body.preferences !== undefined) {
     const preferencesJson = JSON.stringify(body.preferences)
     await c.env.AQUILLA_PG.prepare(
@@ -764,10 +795,10 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
 
   // Re-fetch to return the canonical record.
   const updated = await c.env.AQUILLA_PG.prepare(
-    "SELECT id, username, email, preferences FROM users WHERE id = ?",
+    "SELECT id, username, email, preferences, display_name FROM users WHERE id = ?",
   )
     .bind(user.id)
-    .first<{ id: number; username: string; email: string; preferences: string }>()
+    .first<{ id: number; username: string; email: string; preferences: string; display_name: string | null }>()
 
   if (!updated) return c.json({ error: "user not found" }, 404)
 
@@ -783,6 +814,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     username: updated.username,
     email: updated.email,
     preferences,
+    display_name: updated.display_name ?? null,
   })
 })
 

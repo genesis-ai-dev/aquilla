@@ -26,6 +26,7 @@ import {
 } from "@/lib/onboarding/completion"
 import { createPersonalOrg, listMyOrgs } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjectsResult } from "@/lib/sync/cloud-projects"
+import { updateMyDisplayName } from "@/lib/frontier/auth"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 // i18n-exempt: analytics discriminator, not UI copy. Sent verbatim as the
@@ -186,6 +187,15 @@ export function OnboardingWizard() {
     else markLocalOnboardingComplete()
   }, [authenticatedUsername, session?.username])
 
+  // AQU-2259: "What should we call you?" is the account's display name.
+  // Best-effort: onboarding carries on if the save fails.
+  const saveDisplayName = useCallback((name: string) => {
+    if (!jwt) return
+    void updateMyDisplayName(jwt, name).catch((err: unknown) => {
+      console.warn("[onboarding] saving the display name failed", err)
+    })
+  }, [jwt])
+
   const handleProjectCreated = useCallback((project: ProjectRecord) => {
     setCreatedProject(project)
     next()
@@ -252,6 +262,7 @@ export function OnboardingWizard() {
           <NameStep
             value={displayName}
             onChange={setDisplayName}
+            onSave={saveDisplayName}
             onNext={next}
             onBack={back}
           />

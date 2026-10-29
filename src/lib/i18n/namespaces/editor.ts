@@ -215,8 +215,8 @@ export const editor = defineNamespace({
     // — AQU-1565: a time-ordered file whose media is a LINKED video and whose
     //   rows have not arrived yet. Its captions live on the Media view's
     //   timeline, so none of the attach-media copy above applies.
-    "editor.media.linkedVideoTitle": "Linked to a YouTube video",
-    "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    "editor.media.linkedVideoTitle": "Linked to a film on YouTube",
+    "editor.media.linkedVideoTitleGeneric": "Linked to a film",
     // AQU-1566: shown to everyone below maintainer. Under option b the first
     // captions become this file's rows, and only a maintainer attaches them.
     // Sam's D1 (2026-10-05): one sentence.
@@ -240,12 +240,11 @@ export const editor = defineNamespace({
     // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
     // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The file has to run to the same timing as the video. Its speech becomes " +
-      "this file's rows. The video keeps playing with its own sound; to hear the " +
-      "file instead, pick it from the Sound menu on the video.",
+      "The file has to run to the same timing as the film. Its speech becomes this file's rows. The " +
+      "film keeps playing with its own sound; to hear the file instead, pick it from the Sound menu " +
+      "on the film.",
     "editor.media.linkedVideoUploadHintGeneric":
-      "The file has to run to the same timing as the linked video. Its speech " +
-      "becomes this file's rows.",
+      "The file has to run to the same timing as the linked film. Its speech becomes this file's rows.",
     // AQU-1566 (option b): on such a file the first captions attached become
     // its OWN rows, so a maintainer gets the action in place, and a caption
     // track that is already on the timeline can be turned into the rows.
@@ -253,38 +252,42 @@ export const editor = defineNamespace({
       "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
     // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, but
     // its owner can download both from YouTube Studio, so the card says where.
-    "editor.media.linkedVideoStudioCaptions": "The video's owner can download its captions from YouTube Studio.",
-    "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
+    "editor.media.linkedVideoStudioCaptions":
+      "The film's owner can download its captions from YouTube Studio.",
+    "editor.media.linkedVideoStudioVideo":
+      "The film's owner can download the video file from YouTube Studio.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
     // AQU-1681: a linked video NOT on YouTube can give its own sound. Aquilla
     // fetches it, keeps a copy, and splits it into rows like an upload.
-    "editor.media.linkedVideoUseSoundLink": "make rows from the video's own sound",
-    "editor.media.linkedVideoSoundTitle": "Make rows from the video's own sound",
+    "editor.media.linkedVideoUseSoundLink": "make rows from the film's own sound",
+    "editor.media.linkedVideoSoundTitle": "Make rows from the film's own sound",
     "editor.media.linkedVideoSoundHint":
-      "Aquilla saves a copy of the video's sound with this file, splits it into rows " +
-      "where the speech pauses, and transcribes them. The rows are timed to the video.",
-    "editor.media.linkedVideoSoundReadingTracks": "Reading the video's sound tracks…",
+      "Aquilla saves a copy of the film's sound with this file, splits it into rows where the speech " +
+      "pauses, and transcribes them. The rows are timed to the film.",
+    "editor.media.linkedVideoSoundReadingTracks": "Reading the film's sound tracks…",
     "editor.media.linkedVideoSoundTrackLabel": "Sound track",
     "editor.media.linkedVideoSoundStart": "Make rows",
-    "editor.media.linkedVideoSoundDownloading": "Downloading the video's sound…",
-    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the video's sound… {percent}%",
+    "editor.media.linkedVideoSoundDownloading": "Downloading the film's sound…",
+    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the film's sound… {percent}%",
     "editor.media.linkedVideoSoundSaving": "Saving a copy of the sound…",
     "editor.media.linkedVideoSoundMakingRows": "Making rows…",
     "editor.media.linkedVideoSoundCancelled": "Stopped. Nothing was saved.",
     "editor.media.videoSound.fetchFailed":
-      "Couldn't download the video's sound. Check your connection and try again.",
+      "Couldn't download the film's sound. Check your connection and try again.",
     "editor.media.videoSound.fileUnreadable":
-      "Couldn't download this video. Its server may not let other sites read it.",
-    "editor.media.videoSound.tooLarge": "This video is too large to keep a copy of.",
-    "editor.media.videoSound.empty": "The video's sound came back empty.",
-    "editor.media.videoSound.noSeparateSound": "This video's stream has no separate sound track to read.",
-    "editor.media.videoSound.encrypted": "This video's sound is encrypted, so Aquilla can't read it.",
-    "editor.media.videoSound.unsupportedFormat": "This video's sound is in a streaming format Aquilla can't read yet.",
-    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the video's sound.",
+      "Couldn't download this film. Its server may not let other sites read it.",
+    "editor.media.videoSound.tooLarge": "This film is too large to keep a copy of.",
+    "editor.media.videoSound.empty": "The film's sound came back empty.",
+    "editor.media.videoSound.noSeparateSound":
+      "This film's stream has no separate sound track to read.",
+    "editor.media.videoSound.encrypted": "This film's sound is encrypted, so Aquilla can't read it.",
+    "editor.media.videoSound.unsupportedFormat":
+      "This film's sound is in a streaming format Aquilla can't read yet.",
+    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the film's sound.",
     "editor.media.videoSound.offset":
-      "The video's sound starts {seconds} s away from its picture, so rows made from it " +
-      "would be out of step with the video.",
+      "The film's sound starts {seconds} s away from its picture, so rows made from it would be out " +
+      "of step with the film.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -874,8 +877,8 @@ export const editor = defineNamespace({
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
     "editor.timeline.followPlayhead": "Follow playhead",
-    "editor.timeline.linkVideo": "Link video",
-    "editor.timeline.changeVideo": "Change video",
+    "editor.timeline.linkVideo": "Link film",
+    "editor.timeline.changeVideo": "Change film",
     "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
     "editor.timeline.zoomOut": "Zoom out",
@@ -1146,7 +1149,7 @@ export const editor = defineNamespace({
     // AQU-646: the video pane, the pairing overlay, and the small lane
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
-    "editor.timeline.videoPaneTitle": "Video",
+    "editor.timeline.videoPaneTitle": "Film",
     // AQU-1119: the section heading over the dialogue table, opposite the
     // Video header. It says "Text" and not "Source text" because SOURCE and
     // TARGET are the two columns underneath it — the section holds both, and
@@ -1154,11 +1157,11 @@ export const editor = defineNamespace({
     // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
     // text" / "Target text", which is right, because a track IS one side.
     "editor.timeline.textPaneTitle": "Text",
-    "editor.timeline.videoPaneLinked": "Linked video",
+    "editor.timeline.videoPaneLinked": "Linked film",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
     "editor.timeline.videoPaneBar": "bar",
-    "editor.timeline.videoPaneErrorTitle": "This video could not be loaded",
+    "editor.timeline.videoPaneErrorTitle": "This film could not be loaded",
     // No `videoPaneRetry` or `videoPaneChangeVideo` here: the pane's two
     // buttons reuse `common.retry` and `editor.timeline.changeVideo`. Minting a
     // second key for a word the catalog already carries gives a translator two
@@ -1175,10 +1178,10 @@ export const editor = defineNamespace({
     "editor.timeline.soundSourceTrigger": "Sound: {source}",
     // Sam, Oct 5: the trigger is a text pill naming the choice, not a speaker
     // icon (which read as mute/unmute), and the menu says what it chooses.
-    "editor.timeline.soundSourcePillVideo": "Sound: Video",
+    "editor.timeline.soundSourcePillVideo": "Sound: Film",
     "editor.timeline.soundSourcePillRecording": "Sound: Recording",
     "editor.timeline.soundSourceHeading": "Playback sound",
-    "editor.timeline.soundSourceVideo": "The video's own sound",
+    "editor.timeline.soundSourceVideo": "The film's own sound",
     // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
     "editor.timeline.noCaptionsYet": "No captions yet",
     "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
@@ -1207,16 +1210,19 @@ export const editor = defineNamespace({
     "editor.timeline.addLineHere": "Add a line here",
 
     // The link-video dialog and the chip strip's field labels.
-    "editor.timeline.linkVideoTitleChange": "Change the linked video",
-    "editor.timeline.linkVideoTitleNew": "Link a video",
+    "editor.timeline.linkVideoTitleChange": "Change the linked film",
+    "editor.timeline.linkVideoTitleNew": "Link a film",
     // AQU-2259: it used to say the video always plays muted. It is muted only
     // while the file's uploaded recording is what plays (MediaVideoPane).
     "editor.timeline.linkVideoDescription":
-      "Paste the address of the video this file was dubbed from. It plays beside the text, in step with the timeline. When the file has an uploaded recording, you hear that recording and the video is muted; a YouTube video keeps its own sound until you pick the recording from its Sound menu.",
-    "editor.timeline.linkVideoAddressLabel": "Video address",
+      "Paste the address of the film this file was dubbed from. It plays beside the text, in step " +
+      "with the timeline. When the file has an uploaded recording, you hear that recording and the " +
+      "film is muted; a film on YouTube keeps its own sound until you pick the recording from its " +
+      "Sound menu.",
+    "editor.timeline.linkVideoAddressLabel": "Film address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
-    "editor.timeline.linkVideoClear": "Clear video",
+    "editor.timeline.linkVideoClear": "Clear film",
     "editor.timeline.chipHeadingDialogue": "Dialogue",
     "editor.timeline.chipHeadingSubtitle": "Subtitle",
     "editor.timeline.chipSpeaker": "Speaker",
@@ -1235,8 +1241,8 @@ export const editor = defineNamespace({
     // one icon, and bringing it back. Each pair is one button in two states —
     // the collapse control lives in the section's own header, the expand
     // control IS the rail.
-    "editor.timeline.collapseVideoAria": "Hide the video",
-    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseVideoAria": "Hide the film",
+    "editor.timeline.expandVideoAria": "Show the film",
     "editor.timeline.collapseTimelineAria": "Hide the timeline",
     "editor.timeline.expandTimelineAria": "Show the timeline",
     "editor.timeline.collapseTextAria": "Hide the text",
@@ -1244,8 +1250,8 @@ export const editor = defineNamespace({
     // AQU-1119: the other control beside each body section's chevron. Where
     // the chevron folds ITS OWN section, this one folds the others so this
     // section has the lens to itself — one button in two states.
-    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
-    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the film",
+    "editor.timeline.restoreVideoAria": "Put the film back in its column",
     "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
     "editor.timeline.restoreTextAria": "Put the text back in its column",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",

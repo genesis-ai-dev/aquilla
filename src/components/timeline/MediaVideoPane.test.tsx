@@ -434,10 +434,10 @@ describe("MediaVideoPane", () => {
     expect(onVideoTime).toHaveBeenCalled()
   })
 
-  it("heads its column with a Video label and the linked file's name", () => {
+  it("heads its column with a Film label and the linked file's name", () => {
     renderPane()
     const header = screen.getByTestId("video-pane-header")
-    expect(header).toHaveTextContent("Video")
+    expect(header).toHaveTextContent("Film")
     expect(header).toHaveTextContent("episode.webm")
     // Never the full URL — the pill is a name, not an address.
     expect(header).not.toHaveTextContent("https://")
@@ -508,9 +508,9 @@ describe("MediaVideoPane", () => {
     fireEvent.error(screen.getByTestId("video-pane-media"))
 
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "error")
-    expect(screen.getByText("This video could not be loaded")).toBeInTheDocument()
+    expect(screen.getByText("This film could not be loaded")).toBeInTheDocument()
     expect(screen.getByText("https://cdn/episode.webm")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Change video" }))
+    fireEvent.click(screen.getByRole("button", { name: "Change film" }))
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
   })
 

@@ -18,7 +18,7 @@ describe("MediaSectionRail", () => {
     // Icon-only, so the accessible name IS the label — there is no visible
     // text to fall back on and the tooltip carries the same string.
     for (const [section, name] of [
-      ["video", "Show the video"],
+      ["video", "Show the film"],
       ["timeline", "Show the timeline"],
       ["text", "Show the text"],
     ] as const) {
@@ -63,12 +63,12 @@ describe("MediaSectionRail", () => {
 
   it("runs the section's name down a side rail, like the Bibles edge tab", () => {
     render(
-      <MediaSectionRail section="video" orientation="vertical" label="Video" onExpand={() => {}} />,
+      <MediaSectionRail section="video" orientation="vertical" label="Film" onExpand={() => {}} />,
     )
     const rail = screen.getByTestId("media-rail-video")
-    expect(rail).toHaveTextContent("Video")
+    expect(rail).toHaveTextContent("Film")
     // Still named for the action, not the section — the name is scenery.
-    expect(screen.getByRole("button", { name: "Show the video" })).toBe(rail)
+    expect(screen.getByRole("button", { name: "Show the film" })).toBe(rail)
   })
 
   it("shows only the glyph when no name is passed", () => {
@@ -107,7 +107,7 @@ describe("MediaSectionCollapseButton", () => {
   })
 
   it("carries no text of its own", () => {
-    // The video header's textContent is asserted elsewhere ("Video" plus the
+    // The video header's textContent is asserted elsewhere ("Film" plus the
     // file name and nothing else), and both headers are kept in height
     // lockstep, so this button has to stay wordless.
     render(<MediaSectionCollapseButton section="video" onCollapse={() => {}} />)
@@ -123,13 +123,13 @@ describe("MediaSectionFullscreenButton", () => {
       <MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={() => {}} />,
     )
     const button = screen.getByTestId("media-fullscreen-video")
-    expect(button).toHaveAccessibleName("Fill the lens with the video")
+    expect(button).toHaveAccessibleName("Fill the lens with the film")
     expect(button).toHaveAttribute("aria-pressed", "false")
 
     rerender(
       <MediaSectionFullscreenButton section="video" isFullscreen onToggle={() => {}} />,
     )
-    expect(button).toHaveAccessibleName("Put the video back in its column")
+    expect(button).toHaveAccessibleName("Put the film back in its column")
     expect(button).toHaveAttribute("aria-pressed", "true")
   })
 
@@ -149,7 +149,7 @@ describe("MediaSectionFullscreenButton", () => {
   })
 
   it("carries no text of its own", () => {
-    // It sits in the video header, whose textContent is asserted to be "Video"
+    // It sits in the video header, whose textContent is asserted to be "Film"
     // plus the file name and nothing else.
     render(<MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={() => {}} />)
     expect(screen.getByTestId("media-fullscreen-video")).toHaveTextContent("")
@@ -160,7 +160,7 @@ describe("MediaSectionFullscreenButton", () => {
 // that shows its section's word has no hover; a glyph-only rail keeps its name.
 describe("MediaSectionRail — hover only on the glyph-only rail", () => {
   it("a rail with its section's word shows nothing on hover", async () => {
-    renderWithTooltips(<MediaSectionRail section="video" orientation="vertical" label="Video" onExpand={() => {}} />)
+    renderWithTooltips(<MediaSectionRail section="video" orientation="vertical" label="Film" onExpand={() => {}} />)
     await userEvent.setup().hover(screen.getByTestId("media-rail-video"))
     await act(() => new Promise((r) => setTimeout(r, 30)))
     expect(screen.queryByRole("tooltip")).toBeNull()
@@ -168,6 +168,6 @@ describe("MediaSectionRail — hover only on the glyph-only rail", () => {
 
   it("a glyph-only rail keeps its name on hover", async () => {
     renderWithTooltips(<MediaSectionRail section="video" orientation="vertical" onExpand={() => {}} />)
-    await expectTooltip(screen.getByTestId("media-rail-video"), "Show the video")
+    await expectTooltip(screen.getByTestId("media-rail-video"), "Show the film")
   })
 })

@@ -90,7 +90,7 @@ export class Workspace {
     await dialog.getByLabel("YouTube video link").fill(url)
     await dialog.getByLabel("Video name", { exact: true }).fill(name)
     await dialog.getByRole("button", { name: "Preview import" }).click()
-    await dialog.getByRole("button", { name: "Link video", exact: true }).click()
+    await dialog.getByRole("button", { name: "Link film", exact: true }).click()
     await this.waitForImportSettled()
   }
 

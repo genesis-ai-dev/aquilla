@@ -818,7 +818,7 @@ describe("TimelineEditor", () => {
       />,
     )
     const pill = screen.getByTestId("tl-sound-source-picker")
-    expect(pill).toHaveTextContent(/^Sound: Video$/)
+    expect(pill).toHaveTextContent(/^Sound: Film$/)
     // In the SOURCE row, with its speaker, not the target's...
     let row: HTMLElement | null = pill.parentElement
     while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
@@ -5298,14 +5298,14 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
   })
 
-  it("the dashed Source audio placeholder is the video's own sound, with no raw time range", () => {
+  it("the dashed Source audio placeholder is the film's own sound, with no raw time range", () => {
     setVideoDurationSec(LINKED, 635)
     render(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
         linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
     const lane = screen.getByTestId("tl-source-regions")
-    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The film's own sound")
     expect(lane.textContent).not.toContain("10:35.0")
   })
 
@@ -5316,19 +5316,19 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
         timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
     expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-    expect(screen.queryByText("The video's own sound")).toBeNull()
+    expect(screen.queryByText("The film's own sound")).toBeNull()
   })
 
   // Sam, Oct 5: once a linked video's captions are its rows, its Source audio
   // row stays (tracks.ts), and with no audio cues on it the band is still the
   // video's own sound. Only an empty linked video gets the lane prompt.
-  it("labels the band the video's own sound on any linked video with no audio cues", () => {
+  it("labels the band the film's own sound on any linked video with no audio cues", () => {
     setVideoDurationSec(LINKED, 635)
     render(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
-    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The film's own sound")
     expect(screen.getByTestId("tl-source-regions").textContent).not.toContain("0:00.0–10:35.0")
   })
 

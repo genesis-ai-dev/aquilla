@@ -66,8 +66,8 @@ export const settings = defineNamespace({
       "format it was recorded in. It is also the WAV / COMPRESSED button in the recorder.",
     "settings.preferences.recording.showFilmTitle": "Show the film beside the recorder",
     "settings.preferences.recording.showFilmInfo":
-      "When a line has a film, the recorder shows it on the left. Turn this off to open the " +
-      "narrow recorder instead; its Video button brings the film back.",
+      "When a line has a film, the recorder shows it on the left. Turn this off to open the narrow " +
+      "recorder instead; its Film button brings the film back.",
     "settings.preferences.recording.filmSoundTitle": "Play the film's sound while recording",
     "settings.preferences.recording.filmSoundInfo":
       "Off unless you turn it on. Use it only with headphones: the microphone records without " +

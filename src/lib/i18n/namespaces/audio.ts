@@ -239,8 +239,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
-    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
-    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.muteVideoTooltip": "Mute the film",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the film",
     "audio.recordingModal.videoMutedBadge": "Muted",
     "audio.recordingModal.videoMutedWhileRecording":
       "The scene plays muted while recording so it can't bleed into your take.",
@@ -293,7 +293,7 @@ export const audio = defineNamespace({
     // Keys above with near-identical wording belong to the pre-rebuild layout
     // and are still translated; these are the strings the dialog renders now.
     "audio.recordingModal.collapseFilmAriaLabel": "Hide the film",
-    "audio.recordingModal.collapseFilmButton": "Collapse video",
+    "audio.recordingModal.collapseFilmButton": "Collapse film",
     "audio.recordingModal.expandFilmAriaLabel": "Show the film",
     "audio.recordingModal.prevLineTooltip": "Previous line (⌥←)",
     "audio.recordingModal.nextLineTooltip": "Next line (⌥→)",

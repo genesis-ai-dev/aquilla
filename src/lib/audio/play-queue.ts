@@ -1031,6 +1031,9 @@ function progFinish(): void {
 function progAdvance(): void {
   const next = progNextPlayable(progIndex + 1)
   if (next < 0) {
+    // AQU-2252: a layer running on past the last line is played out first.
+    const slot = progCurrentSlot()
+    if (slot && progEnterTail(slot.startSec + slot.slotLenSec, true, false)) return
     const ctx = activeContext
     progFinish()
     notifyRanOut(ctx)
@@ -1247,10 +1250,20 @@ function progAimLayerTimer(atSec: number): void {
  * line before): the clock is held through it in silence, to its end, so the
  * layer is heard, then playback moves on. The pause-before-a-take machinery,
  * waiting out the whole line.
+ *
+ * AQU-2252 (Sam, Oct 29): …and the rest of a line whose own take or original
+ * is over while a take on another track still sounds in it (`progLineEnded`),
+ * and the stretch after the last line a layer plays out over (`progEnterTail`,
+ * which holds to `endSec` and then finishes instead of moving on).
  */
-function progArmHold(slot: ProgrammeSlot, atSec: number, explicit: boolean): void {
+function progArmHold(
+  slot: ProgrammeSlot,
+  atSec: number,
+  explicit: boolean,
+  endSec = slot.startSec + slot.slotLenSec,
+  then: () => void = progAdvance,
+): void {
   progClearLead()
-  const endSec = slot.startSec + slot.slotLenSec
   const rate = progress.rate || 1
   const startedAt = performance.now()
   const hold: ProgLead = { cellId: slot.cellId, explicit, timer: null, ticker: null }
@@ -1261,9 +1274,83 @@ function progArmHold(slot: ProgrammeSlot, atSec: number, explicit: boolean): voi
   hold.timer = setTimeout(() => {
     if (progLead !== hold) return
     progClearLead()
-    progAdvance()
+    then()
   }, Math.max(0, ((endSec - atSec) / rate) * 1000))
   progLead = hold
+}
+
+/** A rest this short is a clock's rounding, not a stretch worth holding. */
+const HOLD_MIN_SEC = 0.02
+
+/**
+ * AQU-2252 (Sam, Oct 29): the line's own sides — its take on the main track,
+ * its original — are spent at `atSec`. A take on another track that sets
+ * line lengths can be what the line is as long as it is for (Boaz speaking
+ * over the narrator, or a line only Boaz recorded under its original), so
+ * while one still sounds in what is left of the line the rest of it is held,
+ * as the timeline draws it; then on to the next line.
+ */
+function progLineEnded(atSec: number): void {
+  const slot = progCurrentSlot()
+  if (slot && state.kind === "playing") {
+    const endSec = slot.startSec + slot.slotLenSec
+    const at = Math.min(Math.max(atSec, slot.startSec), endSec)
+    if (endSec - at > HOLD_MIN_SEC && progSlotHolds(slot, at)) {
+      // The original's part is over (or it never had one): parked where it
+      // stopped, which is where the next line's begins.
+      progQuiet(currentAudio)
+      setProgress({ currentTime: at })
+      progArmHold(slot, at, false)
+      progLayersSync(at)
+      return
+    }
+  }
+  progAdvance()
+}
+
+/**
+ * AQU-2252 (Sam, Oct 29): a take on a track made a layer that runs on past
+ * the LAST line plays out to its end — the programme is that much longer
+ * (`totalSec`), and this is the stretch after the last line: the clock held
+ * in silence under the layer from `atSec` (never before the last line's end)
+ * to the programme's end, then playback finishes. False when nothing sounds
+ * there, which leaves the caller to finish (or land) as it always did.
+ */
+function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boolean {
+  const prog = programme
+  const lastIndex = (prog?.slots.length ?? 0) - 1
+  const last = prog?.slots[lastIndex]
+  if (!prog || !last) return false
+  const at = Math.max(atSec, last.startSec + last.slotLenSec)
+  if (prog.totalSec - at <= HOLD_MIN_SEC || !progLayers.some((l) => l.endSec - at > HOLD_MIN_SEC)) return false
+  progIndex = lastIndex
+  progStartEndStop()
+  progClearGate()
+  progClearLead()
+  for (const e of [...overlayPool]) if (!e.layer) removeOverlayEntry(e)
+  progQuiet(currentAudio)
+  setProgress({ currentTime: at, duration: prog.totalSec })
+  if (!autoplay) {
+    progCuedExplicit = explicit
+    setState({ kind: "paused", ...progStateCell() })
+    progLayersSync(at)
+    return true
+  }
+  setState({ kind: "playing", ...progStateCell() })
+  progArmHold(last, at, explicit, prog.totalSec, () => {
+    const ctx = activeContext
+    progFinish()
+    notifyRanOut(ctx)
+  })
+  progLayersSync(at)
+  return true
+}
+
+/** AQU-2252: is the transport in the stretch after the last line? */
+function progInTail(): boolean {
+  const slots = programme?.slots ?? []
+  const last = slots[slots.length - 1]
+  return Boolean(last && progIndex === slots.length - 1 && progress.currentTime >= last.startSec + last.slotLenSec - 0.001)
 }
 
 // ── The readiness gate (smooth-playback round) ──────────────────────────────
@@ -1575,7 +1662,7 @@ function progCheckBoundary(): void {
   // The source's window end (live).
   const el = currentAudio
   if (el && slot.sourceWindow && !el.paused && el.currentTime >= slot.sourceWindow.end) {
-    if (progEffectiveClock(slot) === "source") progAdvance()
+    if (progEffectiveClock(slot) === "source") progLineEnded(slot.startSec + slot.sourceLenSec)
     else {
       setProgress({ currentTime: slot.startSec + slot.sourceLenSec })
       progQuiet(el)
@@ -1673,7 +1760,18 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   // declared clock. A re-flow can flip clock to "source" (or null) while the
   // source is already spent/quiet — returning on the clock label alone left
   // the transport in a permanent silent "playing" (the trim/delete stalls).
-  if (slot.clock === "target" || !sourceCanCarry) progAdvance()
+  //
+  // AQU-2252: a take on another track can make the line longer than its own
+  // take, so the original may have more of the line to play — it carries the
+  // rest (its end then decides) — and once neither has, a take on another
+  // track still sounding holds the rest of the line (`progLineEnded`).
+  // Read off the programme, not the element: the two started together, so
+  // the original has more to play only where the line gives it more than the
+  // take — which, before another track could lengthen a line, it never did.
+  const takeEndIntoSec = (slot.targetLeadSec ?? 0) + slot.targetLenSec
+  const sourceHasMore = slot.sourceLenSec - takeEndIntoSec > HOLD_MIN_SEC
+  if (sourceCanCarry && (slot.clock !== "target" || sourceHasMore)) return
+  progLineEnded(slot.startSec + takeEndIntoSec)
 }
 
 /** Keep the programme clock in step with a dub that is clocking its verse.
@@ -1758,7 +1856,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
     if (audio.currentTime >= slot.sourceWindow.end) {
       // FORTIFY: same boundary decision as the 60ms authority (which also
       // covers this — the handler just makes an in-between tick land now).
-      if (progEffectiveClock(slot) === "source") progAdvance()
+      if (progEffectiveClock(slot) === "source") progLineEnded(slot.startSec + slot.sourceLenSec)
       else {
         // Going quiet for the rest of the verse. Stamp the clock at exactly
         // that moment so it can't sit stale until the dub's next tick.
@@ -1793,7 +1891,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   audio.onended = () => {
     if (seq !== currentSeq) return
     const slot = progCurrentSlot()
-    if (slot && progEffectiveClock(slot) === "source") progAdvance()
+    if (slot && progEffectiveClock(slot) === "source") progLineEnded(slot.startSec + slot.sourceLenSec)
   }
   let triedBlobFallback = false
   audio.onerror = () => {
@@ -2051,6 +2149,8 @@ function progSeekTo(sec: number, wantPlay: boolean, explicit = true): void {
   const at = Math.max(0, sec)
   const slot = slotAtProgrammeSec(prog, at)
   if (!slot) {
+    // AQU-2252: past the last line, into a layer that plays on there.
+    if (progEnterTail(at, wantPlay, explicit)) return
     // Past the end — land on the last verse's FINAL moment rather than
     // nowhere. FORTIFY: this used to pass the verse's START, so dragging the
     // scrubber to the far right replayed the whole last verse.
@@ -4089,6 +4189,8 @@ export async function resumeQueue(): Promise<void> {
     }
     const slot = progCurrentSlot()
     if (!slot) return
+    // AQU-2252: paused after the last line, under a layer playing out.
+    if (progInTail() && progEnterTail(progress.currentTime, true, progCuedExplicit)) return
     // AQU-2204: paused inside a take's pause — re-enter, so the rest of the
     // pause is waited out before the take.
     if (slot.targetWindow && (slot.targetLeadSec ?? 0) > progress.currentTime - slot.startSec + 0.001) {
@@ -4224,7 +4326,8 @@ export function skipForward(): void {
 export function skipBack(): void {
   if (!activeContext) return
   if (timingMode === "audioFirst" && progIndex >= 0) {
-    const prev = progPrevPlayable(progIndex - 1)
+    // AQU-2252: from the stretch after the last line, back is the last line.
+    const prev = progPrevPlayable(progInTail() ? progIndex : progIndex - 1)
     if (prev < 0) return
     progLayersPurge() // AQU-2252: a jump
     void progPlaySlot(prev, null, true)

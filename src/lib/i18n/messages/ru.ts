@@ -1250,8 +1250,6 @@ export const ru: Catalog = {
   "editor.row.cellAria": "ячейка {ref}",
   "editor.row.rowFallbackRef": "строка {index}",
   "editor.row.translationAria": "Перевод для {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Выбрано. Потяните вверх или вниз, чтобы расширить диапазон.",
-  "editor.row.selectTooltip": "Выбрать ячейку. Потяните вверх или вниз, чтобы выбрать диапазон.",
   "editor.row.lockedBy": "Заблокировано — {name} редактирует эту ячейку",
   "editor.presence.viewing": "просматривает",
   "editor.presence.editing": "редактирует",

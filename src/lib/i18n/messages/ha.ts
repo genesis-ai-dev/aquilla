@@ -1502,8 +1502,6 @@ export const ha: Catalog = {
   "editor.row.cellAria": "ƙwaya {ref}",
   "editor.row.rowFallbackRef": "jere {index}",
   "editor.row.translationAria": "Fassara ta {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "An zaɓa. Ku ja sama ko ƙasa don faɗaɗa tazara.",
-  "editor.row.selectTooltip": "Ku zaɓi ƙwaya. Ku ja sama ko ƙasa don zaɓar tazara.",
   "editor.row.lockedBy": "An kulle — {name} yana gyara wannan ƙwaya",
   "editor.presence.viewing": "yana kallo",
   "editor.presence.editing": "yana gyara",

@@ -1223,8 +1223,6 @@ export const th: Catalog = {
   "editor.row.cellAria": "เซลล์ {ref}",
   "editor.row.rowFallbackRef": "แถว {index}",
   "editor.row.translationAria": "คำแปลของ {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "เลือกอยู่ ลากขึ้นหรือลงเพื่อขยายช่วงที่เลือก",
-  "editor.row.selectTooltip": "เลือกเซลล์ ลากขึ้นหรือลงเพื่อเลือกเป็นช่วง",
   "editor.row.lockedBy": "ล็อกอยู่ — {name} กำลังแก้ไขเซลล์นี้",
   "editor.presence.viewing": "กำลังดู",
   "editor.presence.editing": "กำลังแก้ไข",

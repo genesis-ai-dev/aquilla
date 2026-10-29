@@ -1463,8 +1463,6 @@ export const hi: Catalog = {
   "editor.row.cellAria": "{ref} कक्ष",
   "editor.row.rowFallbackRef": "पंक्ति {index}",
   "editor.row.translationAria": "{ref} का अनुवाद: {source} — {state}",
-  "editor.row.selectedTooltip": "चुना। सीमा बढ़ाने के लिए ऊपर या नीचे खींचें।",
-  "editor.row.selectTooltip": "कक्ष चुनें। एक सीमा चुनने के लिए ऊपर या नीचे खींचें।",
   "editor.row.lockedBy": "लॉक — {name} यह कक्ष संपादित कर रहे हैं",
   "editor.presence.viewing": "देख रहे हैं",
   "editor.presence.editing": "संपादित कर रहे हैं",

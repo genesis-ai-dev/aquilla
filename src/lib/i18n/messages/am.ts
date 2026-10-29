@@ -1502,8 +1502,6 @@ export const am: Catalog = {
   "editor.row.cellAria": "{ref} ሕዋስ",
   "editor.row.rowFallbackRef": "ረድፍ {index}",
   "editor.row.translationAria": "የ{ref} ትርጉም፦ {source} — {state}",
-  "editor.row.selectedTooltip": "ተመርጧል። ክልሉን ለማራዘም ወደ ላይ ወይም ወደ ታች ይጎትቱ።",
-  "editor.row.selectTooltip": "ሕዋስ ይምረጡ። ክልል ለመምረጥ ወደ ላይ ወይም ወደ ታች ይጎትቱ።",
   "editor.row.lockedBy": "ተቆልፏል — {name} ይህን ሕዋስ እያስተካከሉ ነው",
   "editor.presence.viewing": "በመመልከት",
   "editor.presence.editing": "በማስተካከል",

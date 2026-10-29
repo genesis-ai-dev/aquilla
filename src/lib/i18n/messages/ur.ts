@@ -1502,8 +1502,6 @@ export const ur: Catalog = {
   "editor.row.cellAria": "{ref} خانہ",
   "editor.row.rowFallbackRef": "قطار {index}",
   "editor.row.translationAria": "{ref} کا ترجمہ: {source} — {state}",
-  "editor.row.selectedTooltip": "منتخب۔ رینج بڑھانے کے لیے اوپر یا نیچے گھسیٹیں۔",
-  "editor.row.selectTooltip": "خانہ منتخب کریں۔ رینج کے لیے اوپر یا نیچے گھسیٹیں۔",
   "editor.row.lockedBy": "مقفل — {name} اس خانے میں ترمیم کر رہے ہیں",
   "editor.presence.viewing": "دیکھ رہے",
   "editor.presence.editing": "ترمیم",

@@ -8290,30 +8290,29 @@ function EditorRow({
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
           <div className="flex w-5 shrink-0 flex-col items-center">
             <div className="mb-1 hidden h-4 shrink-0 md:block" aria-hidden />
-            <AppTooltip content={isMultiSelected ? t("editor.row.selectedTooltip") : t("editor.row.selectTooltip")} side="right">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={isMultiSelected}
-                aria-label={isMultiSelected ? t("editor.row.selectedAria") : t("editor.row.selectAria")}
-                onPointerDown={onSelectionPointerDown}
-                onClick={(e) => e.stopPropagation()}
-                className={cn(
-                  "grid h-5 w-5 place-items-center rounded-md border",
-                  "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-                  "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-                  isMultiSelected
-                    ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
-                )}
-              >
-                {isMultiSelected ? (
-                  <Check className="h-3 w-3" strokeWidth={3} />
-                ) : (
-                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                )}
-              </button>
-            </AppTooltip>
+            {/* AQU-2260 third pass: no "drag to select" hover hint here. */}
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={isMultiSelected}
+              aria-label={isMultiSelected ? t("editor.row.selectedAria") : t("editor.row.selectAria")}
+              onPointerDown={onSelectionPointerDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "grid h-5 w-5 place-items-center rounded-md border",
+                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                isMultiSelected
+                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
+              )}
+            >
+              {isMultiSelected ? (
+                <Check className="h-3 w-3" strokeWidth={3} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              )}
+            </button>
           </div>
           {/* Badges + verse number — ms-2 opens space after the select. */}
           <div className="flex min-w-0 flex-col items-center gap-0.5 md:ms-2 md:flex-1 md:flex-row md:items-start">

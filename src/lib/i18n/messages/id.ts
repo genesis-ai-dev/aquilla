@@ -1236,8 +1236,6 @@ export const id: Catalog = {
   "editor.row.cellAria": "Sel {ref}",
   "editor.row.rowFallbackRef": "baris {index}",
   "editor.row.translationAria": "Terjemahan untuk {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Terpilih. Seret ke atas atau ke bawah untuk memperluas rentang.",
-  "editor.row.selectTooltip": "Pilih sel. Seret ke atas atau ke bawah untuk memilih satu rentang.",
   "editor.row.lockedBy": "Terkunci — {name} sedang menyunting sel ini",
   "editor.presence.viewing": "sedang melihat",
   "editor.presence.editing": "sedang mengedit",

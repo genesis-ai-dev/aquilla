@@ -1458,8 +1458,6 @@ export const es: Catalog = {
   "editor.row.cellAria": "Celda {ref}",
   "editor.row.rowFallbackRef": "fila {index}",
   "editor.row.translationAria": "Traducción para {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Seleccionada. Arrastra hacia arriba o hacia abajo para extender el rango.",
-  "editor.row.selectTooltip": "Selecciona la celda. Arrastra hacia arriba o hacia abajo para seleccionar un rango.",
   "editor.row.lockedBy": "Bloqueada — {name} está editando esta celda",
   "editor.presence.viewing": "viendo",
   "editor.presence.editing": "editando",

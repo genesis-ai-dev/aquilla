@@ -1229,8 +1229,6 @@ export const fr: Catalog = {
   "editor.row.cellAria": "Cellule {ref}",
   "editor.row.rowFallbackRef": "ligne {index}",
   "editor.row.translationAria": "Traduction pour {ref} : {source} — {state}",
-  "editor.row.selectedTooltip": "Sélectionné. Faites glisser vers le haut ou le bas pour étendre la plage.",
-  "editor.row.selectTooltip": "Sélectionner la cellule. Faites glisser vers le haut ou le bas pour sélectionner une plage.",
   "editor.row.lockedBy": "Verrouillée — {name} modifie cette cellule",
   "editor.presence.viewing": "consultation",
   "editor.presence.editing": "modification",

@@ -1502,8 +1502,6 @@ export const pa: Catalog = {
   "editor.row.cellAria": "{ref} ਸੈੱਲ",
   "editor.row.rowFallbackRef": "ਕਤਾਰ {index}",
   "editor.row.translationAria": "{ref} ਲਈ ਅਨੁਵਾਦ: {source} — {state}",
-  "editor.row.selectedTooltip": "ਚੁਣਿਆ. ਹੱਦ ਵਧਾਉਣ ਲਈ ਉੱਪਰ ਜਾਂ ਹੇਠਾਂ ਘਸੀਟੋ.",
-  "editor.row.selectTooltip": "ਸੈੱਲ ਚੁਣੋ. ਇੱਕ ਹੱਦ ਚੁਣਨ ਲਈ ਉੱਪਰ ਜਾਂ ਹੇਠਾਂ ਘਸੀਟੋ.",
   "editor.row.lockedBy": "ਲਾਕ — {name} ਇਹ ਸੈੱਲ ਸੋਧ ਰਿਹਾ ਹੈ",
   "editor.presence.viewing": "ਵੇਖ ਰਿਹਾ ਹੈ",
   "editor.presence.editing": "ਸੋਧ ਰਿਹਾ ਹੈ",

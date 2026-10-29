@@ -1504,8 +1504,6 @@ export const bn: Catalog = {
   "editor.row.cellAria": "{ref} সেল",
   "editor.row.rowFallbackRef": "সারি {index}",
   "editor.row.translationAria": "{ref}-এর অনুবাদ: {source} — {state}",
-  "editor.row.selectedTooltip": "নির্বাচিত। পরিসর বাড়াতে ওপর বা নিচে টানুন।",
-  "editor.row.selectTooltip": "সেল নির্বাচন করুন। পরিসর বেছে নিতে ওপর বা নিচে টানুন।",
   "editor.row.lockedBy": "আটকানো — {name} এই সেল সম্পাদনা করছেন",
   "editor.presence.viewing": "দেখছেন",
   "editor.presence.editing": "সম্পাদনা করছেন",

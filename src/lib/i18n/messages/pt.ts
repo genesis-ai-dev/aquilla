@@ -1460,8 +1460,6 @@ export const pt: Catalog = {
   "editor.row.cellAria": "Célula {ref}",
   "editor.row.rowFallbackRef": "linha {index}",
   "editor.row.translationAria": "Tradução para {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Selecionada. Arraste para cima ou para baixo para estender o intervalo.",
-  "editor.row.selectTooltip": "Selecione a célula. Arraste para cima ou para baixo para selecionar um intervalo.",
   "editor.row.lockedBy": "Bloqueada — {name} está editando esta célula",
   "editor.presence.viewing": "vendo",
   "editor.presence.editing": "editando",

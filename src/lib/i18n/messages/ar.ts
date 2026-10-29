@@ -1224,8 +1224,6 @@ export const ar: Catalog = {
   "editor.row.rowFallbackRef": "صف {index}",
   "editor.row.editorAria": "{ref}، {state}",
   "editor.row.translationAria": "الترجمة لـ {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "محدَّدة. اسحب لأعلى أو لأسفل لتوسيع النطاق.",
-  "editor.row.selectTooltip": "تحديد الخلية. اسحب لأعلى أو لأسفل لتحديد نطاق.",
   "editor.row.lockedBy": "مقفلة — {name} يحرّر هذه الخلية",
   "editor.presence.viewing": "يشاهد",
   "editor.presence.editing": "يحرّر",

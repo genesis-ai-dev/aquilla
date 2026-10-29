@@ -1223,8 +1223,6 @@ export const zh_Hans: Catalog = {
   "editor.row.cellAria": "{ref} 单元格",
   "editor.row.rowFallbackRef": "第 {index} 列",
   "editor.row.translationAria": "{ref} 的译文：{source} — {state}",
-  "editor.row.selectedTooltip": "已选取。向上或向下拖动即可延伸范围。",
-  "editor.row.selectTooltip": "选取单元格。向上或向下拖动即可选取一段范围。",
   "editor.row.lockedBy": "已锁定 — {name} 正在编辑此单元格",
   "editor.presence.viewing": "查看中",
   "editor.presence.editing": "编辑中",

@@ -1217,8 +1217,6 @@ export const ms: Catalog = {
   "editor.row.cellAria": "Sel {ref}",
   "editor.row.rowFallbackRef": "baris ke-{index}",
   "editor.row.translationAria": "Terjemahan untuk {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Dipilih. Seret ke atas atau ke bawah untuk meluaskan julat.",
-  "editor.row.selectTooltip": "Pilih sel. Seret ke atas atau ke bawah untuk memilih julat.",
   "editor.row.lockedBy": "Dikunci — {name} sedang menyunting sel ini",
   "editor.presence.viewing": "melihat",
   "editor.presence.editing": "menyunting",

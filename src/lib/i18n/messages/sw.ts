@@ -1495,8 +1495,6 @@ export const sw: Catalog = {
   "editor.row.cellAria": "Seli ya {ref}",
   "editor.row.rowFallbackRef": "mstari {index}",
   "editor.row.translationAria": "Tafsiri ya {ref}: {source} — {state}",
-  "editor.row.selectedTooltip": "Imechaguliwa. Buruta juu au chini ili kupanua masafa.",
-  "editor.row.selectTooltip": "Chagua seli. Buruta juu au chini ili kuchagua masafa.",
   "editor.row.lockedBy": "Imefungwa — {name} anahariri seli hii",
   "editor.presence.viewing": "anatazama",
   "editor.presence.editing": "anahariri",

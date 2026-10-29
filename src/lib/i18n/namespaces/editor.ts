@@ -1960,8 +1960,6 @@ export const editor = defineNamespace({
     "editor.row.rowFallbackRef": "row {index}",
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
-    "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
-    "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
     // AQU-1163: why a target cell will not take your text — shown as the
     // locked cell's tooltip and appended to its accessible name.
     "editor.row.lockedBy": "Locked — {name} is editing this cell",
@@ -7570,17 +7568,6 @@ export const editor = defineNamespace({
         placeholders: {
           name: "Display name of the collaborator holding the edit lease.",
         },
-      },
-      "editor.row.selectedTooltip": {
-        description:
-          "Tooltip on a row's selection checkbox when the row IS selected, " +
-          "explaining the drag gesture that extends the selection to neighbouring " +
-          "rows.",
-      },
-      "editor.row.selectTooltip": {
-        description:
-          "Tooltip on the selection checkbox when the row is NOT selected: what a " +
-          "click does, then what a drag does.",
       },
       "editor.presence.viewing": {
         description:

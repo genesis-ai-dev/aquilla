@@ -1224,8 +1224,6 @@ export const my: Catalog = {
   "editor.row.rowFallbackRef": "အတန်း {index}",
   "editor.row.editorAria": "{ref} ဆဲလ် — {state}",
   "editor.row.translationAria": "{ref} အတွက် ဘာသာပြန်ချက်- {source} — {state}",
-  "editor.row.selectedTooltip": "ရွေးထားသည်။ အပေါ် သို့မဟုတ် အောက်သို့ ဆွဲ၍ ရွေးချယ်မှုကို ချဲ့ပါ။",
-  "editor.row.selectTooltip": "ဆဲလ်ကို ရွေးပါ။ အပေါ် သို့မဟုတ် အောက်သို့ ဆွဲ၍ အစုလိုက် ရွေးပါ။",
   "editor.row.lockedBy": "လော့ခ်ချထားသည် — {name} သည် ဤဆဲလ်ကို တည်းဖြတ်နေသည်",
   "editor.presence.viewing": "ကြည့်နေသည်",
   "editor.presence.editing": "တည်းဖြတ်နေသည်",

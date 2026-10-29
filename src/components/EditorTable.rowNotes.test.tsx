@@ -4,6 +4,7 @@
  *  - a re-import highlight explains itself from an (i) on click,
  *  - a cell another person is editing says so when you click it (the click
  *    that would have opened the editor),
+ *  - the selection square has no "drag to select" hover hint at all.
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
@@ -167,5 +168,16 @@ describe("EditorTable row notes open on click (AQU-2260 third pass)", () => {
     const surface = document.querySelector<HTMLElement>("[data-target-read-view]") as HTMLElement
     fireEvent.click(surface)
     expect(screen.queryByTestId("target-lock-note")).not.toBeInTheDocument()
+  })
+
+  it("gives the selection square no drag-to-select hover hint", async () => {
+    await renderTable()
+    const square = screen.getByRole("checkbox", { name: /Select cell/ })
+    expect(square.closest("[data-slot='tooltip-trigger']")).toBeNull()
+    fireEvent.pointerEnter(square)
+    fireEvent.mouseEnter(square)
+    fireEvent.focus(square)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByText(/Drag up or down/)).not.toBeInTheDocument()
   })
 })

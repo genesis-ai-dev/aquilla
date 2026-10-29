@@ -39,6 +39,11 @@ import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
+  LOCAL_AUTHOR_NAME_SETTING_ID,
+  setLocalAuthorName,
+  useLocalAuthorName,
+} from "@/lib/store/local-author-name"
+import {
   getTranslatorProfile,
   setTranslatorProfile,
   type TranslatorProfile,
@@ -176,6 +181,7 @@ function GeneralSection({
   const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
   const { enabled, setEnabled } = useAnalyticsConsent()
+  const localAuthorName = useLocalAuthorName()
   const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
   const fontSizeItems = FONT_SIZE_SCALES.map((id) => ({ value: id, label: t(FONT_SIZE_LABEL_KEYS[id]) }))
 
@@ -280,6 +286,22 @@ function GeneralSection({
           </Select>
         }
       />
+      {/* AQU-2259: moved here from each project's settings ("User → Username"). */}
+      <div id={LOCAL_AUTHOR_NAME_SETTING_ID}>
+        <SettingsRow
+          label={<label htmlFor="local-author-name">{t("settings.preferences.authorName.label")}</label>}
+          description={t("settings.preferences.authorName.description")}
+          control={
+            <Input
+              id="local-author-name"
+              value={localAuthorName}
+              onChange={(e) => setLocalAuthorName(e.target.value)}
+              placeholder={t("projectSettings.user.usernamePlaceholder")}
+              className="w-44 bg-background"
+            />
+          }
+        />
+      </div>
       <SettingsRow
         label={t("onboarding.privacy.shareUsageData")}
         description={

@@ -4627,8 +4627,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.bible.disabledHint": "這個專案已關閉此功能。此設定一律會被遵循，即使是經文專案也一樣。",
   "projectSettings.import.excludeFrontMatterLabel": "排除 USFM 前置內容",
   "projectSettings.import.excludeFrontMatterDescription": "開啟後，USFM 匯入會捨棄書卷名稱、頁首、目錄、主標題與導論段落。分段標題與詩篇標題仍會匯入。關閉（預設）則會把前置內容匯入為可翻譯的單元格。",
-  "projectSettings.user.usernameLabel": "使用者名稱",
-  "projectSettings.user.usernameDescription": "在翻譯歷程中作為作者名稱使用。",
   "projectSettings.ai.instructionsHelp": "描述這個專案要產出什麼，以及譯文應該讀起來如何 — AI 每次產生譯文時都會使用這段內容。可用 {sourceVar} 與 {targetVar} 作為預留位置。",
   "projectSettings.ai.topKLabel": "檢索的範例數（top_k）",
   "projectSettings.ai.topKDescription": "AI 每次翻譯時要檢索多少則參考範例（1–20）。預設值：{defaultCount}。",

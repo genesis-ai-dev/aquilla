@@ -418,7 +418,6 @@ export const projectSettings = defineNamespace({
     // AI completions batch size → projectSettings.ai.completionBatchSizeLabel
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
-    // username → projectSettings.user.usernameLabel
     "projectSettings.field.decaySettings": "decay settings",
     "projectSettings.field.audioMediaStrategy": "audio media strategy",
     "projectSettings.field.autoSync": "auto-sync",
@@ -521,9 +520,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
-    "projectSettings.user.usernameLabel": "Username",
     "projectSettings.user.usernamePlaceholder": "local",
-    "projectSettings.user.usernameDescription": "Used as author name in translation history.",
 
     // ── AI Instructions card ──
     "projectSettings.ai.instructionsHelp":

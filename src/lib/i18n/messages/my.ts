@@ -4609,8 +4609,6 @@ export const my: Catalog = {
   "projectSettings.bible.disabledHint": "ဤပရောဂျက်အတွက် ပိတ်ထားသည်။ ကျမ်းစာပရောဂျက်ဖြစ်လျှင်ပင် ဤဆက်တင်ကို အမြဲလိုက်နာသည်။",
   "projectSettings.import.excludeFrontMatterLabel": "USFM ရှေ့ပိုင်းအပိုင်း ချန်ထားရန်",
   "projectSettings.import.excludeFrontMatterDescription": "ဖွင့်ထားပါက USFM တင်သွင်းမှုများသည် ကျမ်းအမည်၊ စာမျက်နှာထိပ်ခေါင်းစဉ်၊ မာတိကာ၊ ခေါင်းစဉ်ကြီးနှင့် နိဒါန်းစာပိုဒ်များကို ချန်လှပ်မည်ဖြစ်သည်။ အပိုင်းခေါင်းစဉ်များနှင့် ဆာလံခေါင်းစဉ်များကို ဆက်လက်တင်သွင်းမည်။ ပိတ်ထားပါက (ပုံမှန်) ရှေ့ပိုင်းအပိုင်းကို ဘာသာပြန်နိုင်သော ဆဲလ်များအဖြစ် တင်သွင်းမည်ဖြစ်သည်။",
-  "projectSettings.user.usernameLabel": "အသုံးပြုသူအမည်",
-  "projectSettings.user.usernameDescription": "ဘာသာပြန်မှတ်တမ်းတွင် စာရေးသူအမည်အဖြစ် အသုံးပြုသည်။",
   "projectSettings.ai.instructionsHelp": "ဤပရောဂျက်က မည်သည့်အရာထုတ်လုပ်နေသည်နှင့် ဘာသာပြန်ချက်များ မည်သို့ဖတ်ရမည်ကို ဖော်ပြပါ — AI သည် ၎င်းကို ပြီးမြောက်မှုတိုင်းတွင် အသုံးပြုသည်။ {sourceVar} နှင့် {targetVar} ကို နေရာဗလာအဖြစ် အသုံးပြုပါ။",
   "projectSettings.ai.topKLabel": "ထုတ်ယူရရှိသော ဥပမာများ (top_k)",
   "projectSettings.ai.topKDescription": "AI သည် ဘာသာပြန်တစ်ခုစီအတွက် ရည်ညွှန်းဥပမာ မည်မျှ ထုတ်ယူသည် (1–20)။ ပုံမှန်: {defaultCount}။",

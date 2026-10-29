@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
+import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
+import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
 import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
@@ -229,7 +232,6 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  username: string
   provider: CompletionProvider
   endpoint: string
   apiKey: string
@@ -288,7 +290,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
@@ -771,7 +772,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -855,7 +855,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
     setApiKey(b.apiKey)
@@ -1059,7 +1058,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
       apiKey !== baseline.apiKey ||
@@ -1100,7 +1098,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, username, provider, endpoint, apiKey,
+    baseline, name, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1279,7 +1277,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         localUpdates.name = trimmedName
         changedFieldLabels.push("project title")
       }
-      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
       if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
       if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
@@ -1386,7 +1383,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             },
             labelKey: "editor.history.stepSettings",
             labelParams: { count: Object.keys(sharedUpdates).length },
-          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+          }, id ? { projectId: id, username: authorNameFor(session?.username, project?.username) } : undefined)
         }
         if (out.kind === "conflict") {
           toast.add({
@@ -1429,7 +1426,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
-        username,
         provider,
         endpoint: endpoint.trim(),
         apiKey,
@@ -1504,7 +1500,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, username, provider, endpoint, apiKey,
+    id, baseline, name, provider, endpoint, apiKey,
     model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
@@ -1626,7 +1622,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         }
       : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-user", label: "User", keywords: ["username", "author"] },
+    // AQU-2259: only the "this setting moved" note is left here, until it expires.
+    { id: "section-user", label: "User", keywords: ["username", "author"], visible: settingMovedNotesShowing() },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
@@ -1716,7 +1713,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: `Name, languages, content structure, username, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
+      description: `Name, languages, content structure, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
       icon: SlidersHorizontal,
       hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
@@ -2478,19 +2475,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <div id="section-user">
             <SettingsGroup label={t("projectSettings.section.user")}>
-              <SettingsRow
-                label={<label htmlFor="un">{t("projectSettings.user.usernameLabel")}</label>}
-                description={t("projectSettings.user.usernameDescription")}
-                control={
-                  <Input
-                    id="un"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder={t("projectSettings.user.usernamePlaceholder")}
-                    aria-label={t("projectSettings.user.usernameLabel")}
-                    className="w-40 bg-background"
-                  />
-                }
+              {/* AQU-2259: a person's own setting, so it lives in Preferences now. */}
+              <SettingMovedNote
+                to="/preferences"
+                target={LOCAL_AUTHOR_NAME_SETTING_ID}
+                where={[t("nav.account.preferences"), t("common.general")]}
+                onNavigate={requestNavigate}
               />
             </SettingsGroup>
           </div>

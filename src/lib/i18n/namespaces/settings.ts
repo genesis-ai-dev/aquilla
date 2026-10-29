@@ -24,6 +24,12 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── AQU-2265: the temporary note left where a setting used to live ──
+    "settings.moved.note": "This setting moved to {where}.",
+    "settings.moved.goThere": "Go to it",
+    // ── AQU-2259: the author name for edits made while signed out ──
+    "settings.preferences.authorName.label": "Name when signed out",
+    "settings.preferences.authorName.description": "Used as the author of your edits when you work without signing in.",
     // ── CommentNotificationsSection (preferences → notifications) ── AQU-1193
     "settings.notifications.groupLabel": "Comment email",
     "settings.notifications.commentEmailLabel": "Email me about comments",
@@ -515,6 +521,14 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.moved.note": {
+        description:
+          "A quiet line left for a few weeks where a setting used to be, saying where it lives now. " +
+          "Followed by a 'Go to it' link (settings.moved.goThere).",
+        placeholders: {
+          where: "The setting's new home as a path of already-translated page names joined by ' → ', e.g. 'Preferences → General'.",
+        },
+      },
       "settings.transcription.model.supports": {
         description: "Tick line on a transcription model's row: the model knows the project's language.",
         placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },

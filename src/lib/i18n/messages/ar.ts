@@ -4619,8 +4619,6 @@ export const ar: Catalog = {
   "projectSettings.bible.disabledHint": "معطّل لهذا المشروع. يُراعى هذا دائمًا، حتى في مشاريع النصوص الكتابية.",
   "projectSettings.import.excludeFrontMatterLabel": "استبعاد الصفحات التمهيدية لـ USFM",
   "projectSettings.import.excludeFrontMatterDescription": "عند التفعيل، تُسقط عمليات استيراد USFM اسم السفر، والترويسة المتكررة، وجدول المحتويات، والعنوان الرئيسي، وفقرات المقدمة. أما عناوين الأقسام وعناوين المزامير فتُستورد كالمعتاد. عند الإيقاف (الوضع الافتراضي) تُستورد الصفحات التمهيدية كخلايا قابلة للترجمة.",
-  "projectSettings.user.usernameLabel": "اسم المستخدم",
-  "projectSettings.user.usernameDescription": "يُستخدم كاسم للمؤلف في سجلّ الترجمة.",
   "projectSettings.ai.instructionsHelp": "صِف ما ينتجه هذا المشروع وكيف ينبغي أن تُقرأ الترجمات — يستخدم الذكاء الاصطناعي هذا الوصف في كل إكمال. استخدم {sourceVar} و{targetVar} كعنصرين نائبين.",
   "projectSettings.ai.topKLabel": "الأمثلة المسترجَعة (top_k)",
   "projectSettings.ai.topKDescription": "عدد الأمثلة المرجعية التي يسترجعها الذكاء الاصطناعي لكل ترجمة (1–20). الافتراضي: {defaultCount}.",

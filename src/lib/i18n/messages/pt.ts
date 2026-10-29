@@ -5377,8 +5377,6 @@ export const pt: Catalog = {
   "projectSettings.import.cellUnitDescription": "O que é uma célula ao importar um arquivo do Word, de texto ou Markdown. “Frase” divide parágrafos longos em células mais curtas — adequado para legendas e documentos. “Parágrafo” mantém cada parágrafo inteiro, sem dividir em frases e sem limite de comprimento — adequado para a dublagem, em que uma célula vira um clipe de voz. Os formatos que definem as próprias células (versículos USFM, entradas de legenda) não são afetados.",
   "projectSettings.import.cellUnitOptionSentence": "Frase (dividir parágrafos longos)",
   "projectSettings.import.cellUnitOptionParagraph": "Parágrafo (uma célula por parágrafo)",
-  "projectSettings.user.usernameLabel": "Nome de usuário",
-  "projectSettings.user.usernameDescription": "Usado como nome de autor no histórico de tradução.",
   "projectSettings.ai.instructionsHelp": "Descreva o que este projeto produz e como as traduções devem ser lidas — a IA usa isto em cada completação. Use {sourceVar} e {targetVar} como espaços reservados.",
   "projectSettings.ai.topKLabel": "Exemplos recuperados (top_k)",
   "projectSettings.ai.topKDescription": "Quantos exemplos de referência a IA recupera por tradução (1–20). Padrão: {defaultCount}.",

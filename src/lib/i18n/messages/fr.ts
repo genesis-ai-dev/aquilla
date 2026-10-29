@@ -4679,8 +4679,6 @@ export const fr: Catalog = {
   "projectSettings.bible.disabledHint": "Désactivé pour ce projet. Ceci est toujours respecté, même pour les projets scripturaires.",
   "projectSettings.import.excludeFrontMatterLabel": "Exclure l'en-tête USFM",
   "projectSettings.import.excludeFrontMatterDescription": "Une fois activé, les imports USFM omettent le nom du livre, l'en-tête courant, la table des matières, le titre principal et les paragraphes d'introduction. Les titres de section et les titres de psaumes sont toujours importés. Désactivé (par défaut), l'en-tête est importé comme cellules traduisibles.",
-  "projectSettings.user.usernameLabel": "Nom d'utilisateur",
-  "projectSettings.user.usernameDescription": "Utilisé comme nom d'auteur dans l'historique de traduction.",
   "projectSettings.ai.instructionsHelp": "Décrivez ce que ce projet produit et comment les traductions doivent se lire — l'IA utilise ceci à chaque complétion. Utilisez {sourceVar} et {targetVar} comme espaces réservés.",
   "projectSettings.ai.topKLabel": "Exemples récupérés (top_k)",
   "projectSettings.ai.topKDescription": "Combien d'exemples de référence l'IA récupère par traduction (1 à 20). Par défaut : {defaultCount}.",

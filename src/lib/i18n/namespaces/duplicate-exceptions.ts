@@ -130,13 +130,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "auth.signup.usernameLabel":
-    "Labels the account identifier being chosen at sign-up and sent to the identity " +
-    "server — the name this person will type to sign in from then on. " +
-    "projectSettings.user.usernameLabel labels the local author name recorded " +
-    "against edits in a project's history, a per-device display preference that " +
-    "never authenticates anything. Languages that distinguish a chosen login " +
-    "handle from a displayed personal name need the two separately.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +

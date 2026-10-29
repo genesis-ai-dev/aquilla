@@ -5513,8 +5513,6 @@ export const am: Catalog = {
   "projectSettings.import.cellUnitDescription": "የWord፣ ጽሑፍ ወይም Markdown ፋይል ሲገባ አንድ ሕዋስ ምን እንደሆነ። «ዓረፍተ ነገር» ረጅም አንቀጾችን ወደ አጭር ሕዋሳት ይከፍላል — ለንዑስ ጽሑፍ እና ሰነዶች ትክክል። «አንቀጽ» እያንዳንዱን አንቀጽ ሙሉ ይይዛል፣ ያለ ዓረፍተ ነገር ክፍፍል እና ያለ ርዝመት ገደብ — ለድምጽ መተርጎም ትክክል፣ አንድ ሕዋስ አንድ የድምጽ ቅንጥብ በሚሆንበት። የራሳቸውን ሕዋሳት የሚገልጹ ቅርጸቶች (የUSFM ጥቅሶች፣ የንዑስ ጽሑፍ ምልክቶች) አይነኩም።",
   "projectSettings.import.cellUnitOptionSentence": "ዓረፍተ ነገር (ረጅም አንቀጾችን ይክፈሉ)",
   "projectSettings.import.cellUnitOptionParagraph": "አንቀጽ (በአንድ አንቀጽ አንድ ሕዋስ)",
-  "projectSettings.user.usernameLabel": "የተጠቃሚ ስም",
-  "projectSettings.user.usernameDescription": "በትርጉም ታሪክ ውስጥ እንደ የደራሲ ስም ይጠቅማል።",
   "projectSettings.ai.instructionsHelp": "ይህ ፕሮጀክት ምን እንደሚያዘጋጅ እና ትርጉሞች እንዴት መነበብ እንዳለባቸው ይግለጹ — AI ይህን በእያንዳንዱ ማጠናቀቅ ይጠቀማል። {sourceVar} እና {targetVar}ን እንደ ቦታ ያዢዎች ይጠቀሙ።",
   "projectSettings.ai.topKLabel": "የተመለሱ ምሳሌዎች (top_k)",
   "projectSettings.ai.topKDescription": "AI በአንድ ትርጉም ስንት የማጣቀሻ ምሳሌዎች እንደሚመልስ (1–20)። ነባሪ፦ {defaultCount}።",

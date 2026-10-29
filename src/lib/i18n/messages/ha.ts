@@ -5511,8 +5511,6 @@ export const ha: Catalog = {
   "projectSettings.import.cellUnitDescription": "Abin da ƙwaya ɗaya take lokacin da aka shigo da fayil ɗin Word, rubutu, ko Markdown. “Jumla” tana raba dogayen sakin layi zuwa ƙwayoyi gajere — ya dace da rubutun allo da takardu. “Sakin layi” yana kiyaye kowane sakin layi gaba ɗaya, ba tare da raba jumla ba kuma babu iyakar tsawo — ya dace da muryar fim, inda ƙwaya ɗaya take zama yankin murya ɗaya. Tsarukan da ke ayyana ƙwayoyinsu (ayoyin USFM, alamomin rubutun allo) ba a shafa su ba.",
   "projectSettings.import.cellUnitOptionSentence": "Jumla (raba dogayen sakin layi)",
   "projectSettings.import.cellUnitOptionParagraph": "Sakin layi (ƙwaya ɗaya ga kowane sakin layi)",
-  "projectSettings.user.usernameLabel": "Sunan mai amfani",
-  "projectSettings.user.usernameDescription": "Ana amfani da shi a matsayin sunan marubuci a tarihin fassara.",
   "projectSettings.ai.instructionsHelp": "Ku bayyana abin da wannan aiki yake samarwa da yadda fassarori ya kamata su kasance — AI tana amfani da wannan a kowace cikawa. Ku yi amfani da {sourceVar} da {targetVar} a matsayin wuraren ajiya.",
   "projectSettings.ai.topKLabel": "Misalai da aka ɗauka (top_k)",
   "projectSettings.ai.topKDescription": "Yawan misalan nuni da AI take ɗauka ga kowace fassara (1–20). Na al'ada: {defaultCount}.",

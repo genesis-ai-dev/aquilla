@@ -4592,8 +4592,6 @@ export const ms: Catalog = {
   "projectSettings.bible.disabledHint": "Dimatikan untuk projek ini. Ini sentiasa dihormati, walaupun untuk projek kitab suci.",
   "projectSettings.import.excludeFrontMatterLabel": "Kecualikan bahan pendahuluan USFM",
   "projectSettings.import.excludeFrontMatterDescription": "Apabila dihidupkan, import USFM menggugurkan nama kitab, pengepala berulang, kandungan (TOC), tajuk utama, dan perenggan pengenalan. Tajuk bahagian dan tajuk Mazmur tetap diimport. Dimatikan (lalai) mengimport bahan pendahuluan sebagai sel boleh terjemah.",
-  "projectSettings.user.usernameLabel": "Nama Pengguna",
-  "projectSettings.user.usernameDescription": "Digunakan sebagai nama pengarang dalam sejarah terjemahan.",
   "projectSettings.ai.instructionsHelp": "Terangkan apa yang dihasilkan oleh projek ini dan bagaimana terjemahan patut dibaca — AI menggunakan ini pada setiap penyempurnaan. Guna {sourceVar} dan {targetVar} sebagai ruang letak.",
   "projectSettings.ai.topKLabel": "Contoh diambil (top_k)",
   "projectSettings.ai.topKDescription": "Berapa banyak contoh rujukan yang diambil AI bagi setiap terjemahan (1–20). Lalai: {defaultCount}.",

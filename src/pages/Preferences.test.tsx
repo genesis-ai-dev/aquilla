@@ -235,3 +235,16 @@ describe("PreferencesDialog", () => {
     expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
   })
 })
+
+// AQU-2259: "User → Username" in each project's settings was a person's own
+// setting, so it lives here now. Signed out, edits carry this name.
+describe("Preferences — name when signed out (AQU-2259)", () => {
+  it("is on the General card and remembered on this device", async () => {
+    renderAt("/preferences")
+    const input = await screen.findByLabelText("Name when signed out")
+    expect(input.closest("#pref-author-name")).not.toBeNull()
+    await userEvent.type(input, "Ana")
+    expect(window.localStorage.getItem("aq.local-author-name.v1")).toBe("Ana")
+  })
+})
+

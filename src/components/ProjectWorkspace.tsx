@@ -1,4 +1,5 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
 import { useShowExtensionDataFiles } from "@/lib/tools/show-data-files"
 import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/client"
@@ -1586,7 +1587,10 @@ export function ProjectWorkspace() {
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
-  const currentUsername = frontierSession?.username || project?.username || "local"
+  // AQU-2259: signed out, the name set in Preferences (it used to be a
+  // per-project field in Project settings, which still counts when unset).
+  const localAuthorName = useLocalAuthorName()
+  const currentUsername = authorNameFor(frontierSession?.username, project?.username, localAuthorName)
   // Desktop: lets an offline launch reopen this project (OfflineLaunchResume).
   useRememberLastWorkspace(projectId, frontierSession?.username)
   // Smart Extensions: an installed `editor` extension may replace the

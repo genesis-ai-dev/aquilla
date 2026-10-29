@@ -168,3 +168,23 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
     expect(screen.getByLabelText(/examples retrieved/i)).toBeDisabled()
   })
 })
+
+// AQU-2259: "User → Username" was a person's own setting, so it moved to
+// Preferences; its old place keeps a note pointing there until it expires.
+describe("ProjectSettings — the username moved to Preferences (AQU-2259)", () => {
+  it("leaves a note in the old place instead of the field", async () => {
+    render(
+      <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/general`]}>
+        <Routes>
+          <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(await screen.findByText(/This setting moved to Preferences → General/)).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("local")).toBeNull()
+    expect(screen.getByRole("link", { name: /go to it/i })).toHaveAttribute(
+      "href",
+      "/preferences?highlight=pref-author-name",
+    )
+  })
+})

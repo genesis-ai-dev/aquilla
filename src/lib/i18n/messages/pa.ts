@@ -5504,8 +5504,6 @@ export const pa: Catalog = {
   "projectSettings.import.cellUnitDescription": "ਜਦ Word, ਲਿਖਤ ਜਾਂ Markdown ਫ਼ਾਈਲ ਇੰਪੋਰਟ ਹੁੰਦੀ ਹੈ ਤਾਂ ਇੱਕ ਸੈੱਲ ਕੀ ਹੁੰਦਾ ਹੈ. “ਵਾਕ” ਲੰਬੇ ਪੈਰਿਆਂ ਨੂੰ ਛੋਟੇ ਸੈੱਲਾਂ ਵਿੱਚ ਵੰਡਦਾ ਹੈ — ਉਪਸਿਰਲੇਖਾਂ ਅਤੇ ਦਸਤਾਵੇਜ਼ਾਂ ਲਈ ਠੀਕ. “ਪੈਰਾ” ਹਰ ਪੈਰੇ ਨੂੰ ਸਾਬਤ ਰੱਖਦਾ ਹੈ, ਬਿਨਾਂ ਵਾਕ-ਵੰਡ ਅਤੇ ਬਿਨਾਂ ਲੰਬਾਈ ਹੱਦ — ਡਬਿੰਗ ਲਈ ਠੀਕ, ਜਿੱਥੇ ਇੱਕ ਸੈੱਲ ਇੱਕ ਆਵਾਜ਼ ਕਲਿੱਪ ਬਣਦਾ ਹੈ. ਜੋ ਫਾਰਮੈਟ ਆਪਣੇ ਸੈੱਲ ਖੁਦ ਪਰਿਭਾਸ਼ਿਤ ਕਰਦੇ ਹਨ (USFM ਆਇਤਾਂ, ਉਪਸਿਰਲੇਖ ਕਿਊ) ਉਹ ਪ੍ਰਭਾਵਿਤ ਨਹੀਂ.",
   "projectSettings.import.cellUnitOptionSentence": "ਵਾਕ (ਲੰਬੇ ਪੈਰੇ ਵੰਡੋ)",
   "projectSettings.import.cellUnitOptionParagraph": "ਪੈਰਾ (ਹਰ ਪੈਰੇ ਲਈ ਇੱਕ ਸੈੱਲ)",
-  "projectSettings.user.usernameLabel": "ਵਰਤੋਂਕਾਰ ਨਾਮ",
-  "projectSettings.user.usernameDescription": "ਅਨੁਵਾਦ ਇਤਿਹਾਸ ਵਿੱਚ ਲੇਖਕ ਨਾਮ ਵਜੋਂ ਵਰਤਿਆ ਜਾਂਦਾ ਹੈ.",
   "projectSettings.ai.instructionsHelp": "ਦੱਸੋ ਇਹ ਪ੍ਰੋਜੈਕਟ ਕੀ ਬਣਾ ਰਿਹਾ ਹੈ ਅਤੇ ਅਨੁਵਾਦ ਕਿਵੇਂ ਪੜ੍ਹੇ ਜਾਣ — AI ਇਸਨੂੰ ਹਰ ਪੂਰਨ ਉੱਤੇ ਵਰਤਦਾ ਹੈ. {sourceVar} ਅਤੇ {targetVar} ਨੂੰ ਪਲੇਸਹੋਲਡਰ ਵਜੋਂ ਵਰਤੋ.",
   "projectSettings.ai.topKLabel": "ਮਿਲੇ ਉਦਾਹਰਨ (top_k)",
   "projectSettings.ai.topKDescription": "AI ਪ੍ਰਤੀ ਅਨੁਵਾਦ ਕਿੰਨੇ ਹਵਾਲਾ ਉਦਾਹਰਨ ਲੈਂਦਾ ਹੈ (1–20). ਮੂਲ: {defaultCount}.",

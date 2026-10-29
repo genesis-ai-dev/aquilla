@@ -5500,8 +5500,6 @@ export const ur: Catalog = {
   "projectSettings.import.cellUnitDescription": "Word، متن، یا Markdown فائل درآمد پر ایک خانہ کیا ہے۔ “جملہ” لمبے پیراگراف چھوٹے خانوں میں تقسیم کرتا ہے — سب ٹائٹل اور دستاویزات کے لیے ٹھیک۔ “پیراگراف” ہر پیراگراف پورا رکھتا ہے، بغیر جملہ تقسیم اور بغیر لمبائی حد — ڈبنگ کے لیے ٹھیک، جہاں ایک خانہ ایک آواز کلپ بنتا ہے۔ جو فارمیٹ اپنے خانے خود متعین کریں (USFM آیات، سب ٹائٹل اشارے) نہیں بدلتے۔",
   "projectSettings.import.cellUnitOptionSentence": "جملہ (لمبے پیراگراف تقسیم)",
   "projectSettings.import.cellUnitOptionParagraph": "پیراگراف (فی پیراگراف ایک خانہ)",
-  "projectSettings.user.usernameLabel": "صارف نام",
-  "projectSettings.user.usernameDescription": "ترجمہ تاریخ میں مصنف کے نام کے طور پر استعمال۔",
   "projectSettings.ai.instructionsHelp": "بتائیں یہ منصوبہ کیا بنا رہا ہے اور ترجمے کیسے پڑھیں — اے آئی یہ ہر تکمیل پر استعمال کرتا ہے۔ {sourceVar} اور {targetVar} بطور جگہ دار استعمال کریں۔",
   "projectSettings.ai.topKLabel": "مثالیں لائی گئیں (top_k)",
   "projectSettings.ai.topKDescription": "اے آئی فی ترجمہ کتنی حوالہ مثالیں لاتا ہے (1–20)۔ طے شدہ: {defaultCount}۔",

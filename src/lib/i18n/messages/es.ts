@@ -5371,8 +5371,6 @@ export const es: Catalog = {
   "projectSettings.import.cellUnitDescription": "Qué es una celda al importar un archivo de Word, de texto o Markdown. “Oración” divide los párrafos largos en celdas más cortas — adecuado para subtítulos y documentos. “Párrafo” mantiene cada párrafo entero, sin dividirlo en oraciones y sin límite de longitud — adecuado para el doblaje, donde una celda se convierte en un clip de voz. Los formatos que definen sus propias celdas (versículos USFM, entradas de subtítulo) no se ven afectados.",
   "projectSettings.import.cellUnitOptionSentence": "Oración (dividir párrafos largos)",
   "projectSettings.import.cellUnitOptionParagraph": "Párrafo (una celda por párrafo)",
-  "projectSettings.user.usernameLabel": "Nombre de usuario",
-  "projectSettings.user.usernameDescription": "Se usa como nombre de autor en el historial de traducción.",
   "projectSettings.ai.instructionsHelp": "Describe qué produce este proyecto y cómo deben leerse las traducciones — la IA usa esto en cada completado. Usa {sourceVar} y {targetVar} como marcadores de posición.",
   "projectSettings.ai.topKLabel": "Ejemplos recuperados (top_k)",
   "projectSettings.ai.topKDescription": "Cuántos ejemplos de referencia recupera la IA por traducción (1–20). Predeterminado: {defaultCount}.",

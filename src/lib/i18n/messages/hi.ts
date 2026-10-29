@@ -5399,8 +5399,6 @@ export const hi: Catalog = {
   "projectSettings.import.cellUnitDescription": "Word, पाठ या Markdown फ़ाइल आयात होने पर एक कक्ष क्या है। “वाक्य” लंबे अनुच्छेदों को छोटे कक्षों में बाँटता है — उपशीर्षक और दस्तावेज़ों के लिए सही। “अनुच्छेद” हर अनुच्छेद को पूरा रखता है, बिना वाक्य विभाजन और बिना लंबाई सीमा — डबिंग के लिए सही, जहाँ एक कक्ष एक आवाज़ क्लिप बनता है। अपने कक्ष परिभाषित करने वाले प्रारूप (USFM आयतें, उपशीर्षक संकेत) अप्रभावित हैं।",
   "projectSettings.import.cellUnitOptionSentence": "वाक्य (लंबे अनुच्छेद बाँटें)",
   "projectSettings.import.cellUnitOptionParagraph": "अनुच्छेद (प्रति अनुच्छेद एक कक्ष)",
-  "projectSettings.user.usernameLabel": "उपयोगकर्ता नाम",
-  "projectSettings.user.usernameDescription": "अनुवाद इतिहास में लेखक नाम के रूप में उपयोग।",
   "projectSettings.ai.instructionsHelp": "बताएँ यह परियोजना क्या बना रही है और अनुवाद कैसे पढ़ें — एआई इसे हर पूर्णता पर उपयोग करता है। प्लेसहोल्डर के रूप में {sourceVar} और {targetVar} उपयोग करें।",
   "projectSettings.ai.topKLabel": "प्राप्त उदाहरण (top_k)",
   "projectSettings.ai.topKDescription": "एआई प्रति अनुवाद कितने संदर्भ उदाहरण प्राप्त करे (1–20)। डिफ़ॉल्ट: {defaultCount}।",

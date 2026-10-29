@@ -4745,8 +4745,6 @@ export const ru: Catalog = {
   "projectSettings.bible.disabledHint": "Для этого проекта выключено. Это всегда учитывается, даже для проектов с Писанием.",
   "projectSettings.import.excludeFrontMatterLabel": "Исключать вводную часть USFM",
   "projectSettings.import.excludeFrontMatterDescription": "Если включено, при импорте USFM отбрасываются название книги, колонтитул, содержание, главный заголовок и абзацы введения. Заголовки разделов и названия псалмов по-прежнему импортируются. Если выключено (по умолчанию), вводная часть импортируется как переводимые ячейки.",
-  "projectSettings.user.usernameLabel": "Имя пользователя",
-  "projectSettings.user.usernameDescription": "Используется как имя автора в истории перевода.",
   "projectSettings.ai.instructionsHelp": "Опишите, что производит этот проект и как должны читаться переводы — ИИ использует это при каждом дополнении. Используйте {sourceVar} и {targetVar} как подстановки.",
   "projectSettings.ai.topKLabel": "Число найденных примеров (top_k)",
   "projectSettings.ai.topKDescription": "Сколько примеров-образцов ИИ находит для каждого перевода (1–20). По умолчанию: {defaultCount}.",

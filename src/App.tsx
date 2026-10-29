@@ -1,4 +1,5 @@
 import { CheckingPage } from "@/components/checking/CheckingPage"
+import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -433,6 +434,8 @@ function AppRoutes() {
   return (
     <>
       <BuildJobNotifier />
+      {/* AQU-2265: `?highlight=<id>` scrolls to one setting and flashes it. */}
+      <SettingHighlighter />
       {/* Workspace routes intentionally suspend to this outer boundary: when
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay

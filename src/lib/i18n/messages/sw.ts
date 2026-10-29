@@ -5507,8 +5507,6 @@ export const sw: Catalog = {
   "projectSettings.import.cellUnitDescription": "Seli moja ni nini faili ya Word, maandishi, au Markdown inapoingizwa. “Sentensi” hugawanya vifungu virefu kuwa seli fupi — inafaa kwa manukuu na hati. “Kifungu” huweka kila kifungu kizima, bila kugawanya sentensi na bila kikomo cha urefu — inafaa kwa kuweka sauti, ambapo seli moja huwa kipande kimoja cha sauti. Miundo inayofafanua seli zake (aya za USFM, alama za manukuu) haiathiriwi.",
   "projectSettings.import.cellUnitOptionSentence": "Sentensi (gawanya vifungu virefu)",
   "projectSettings.import.cellUnitOptionParagraph": "Kifungu (seli moja kwa kila kifungu)",
-  "projectSettings.user.usernameLabel": "Jina la mtumiaji",
-  "projectSettings.user.usernameDescription": "Hutumika kama jina la mwandishi katika historia ya tafsiri.",
   "projectSettings.ai.instructionsHelp": "Eleza kile mradi huu unachozalisha na jinsi tafsiri zinavyopaswa kusomeka — AI hutumia hii katika kila ukamilishaji. Tumia {sourceVar} na {targetVar} kama vishikilia nafasi.",
   "projectSettings.ai.topKLabel": "Mifano inayoletwa (top_k)",
   "projectSettings.ai.topKDescription": "Idadi ya mifano ya marejeleo ambayo AI inaleta kwa kila tafsiri (1–20). Chaguo-msingi: {defaultCount}.",

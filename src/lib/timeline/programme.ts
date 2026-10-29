@@ -380,8 +380,9 @@ export function playedProgramme(
 /**
  * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
  * to hear (no original, no take the programme can play) and not hidden. A
- * hidden line is skipped whichever way the setting is (Sam, Oct 29: "A hidden
- * line should always be skipped. Always. No matter what.").
+ * hidden line is skipped whichever way the setting is: following the
+ * recordings the playhead jumps it (Sam, Oct 29). (Following the source under
+ * a film or a recording it is passed through instead — not this layout.)
  */
 export function slotHasNothingToPlay(slot: ProgrammeSlot, hiddenCellIds: ReadonlySet<string>): boolean {
   return !slot.sourceWindow && !slot.targetWindow && !hiddenCellIds.has(slot.cellId)

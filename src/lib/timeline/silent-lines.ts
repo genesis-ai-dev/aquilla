@@ -16,10 +16,14 @@
 // timing, and is left alone. With the setting off the clock runs across them,
 // as it always did.
 //
-// A HIDDEN line is jumped either way (Sam, Oct 29: "A hidden line should
-// always be skipped. Always. No matter what."). With the setting off, the
-// clock runs across an unrecorded line as if it sounded, and jumps only the
-// hidden lines, to the next line it plays.
+// A HIDDEN line is jumped either way. Sam's rule for hidden lines (Oct 29):
+// following the recordings, and on this built-in clock, a hidden line is
+// skipped and the playhead jumps it. Following the source on a file with a
+// film or source audio it is NOT jumped — the film and its own sound play on
+// across it, only its takes stay silent, as skipping it would cut real time
+// out of the show — and there this clock is not the transport, so nothing here
+// runs. With the setting off, the clock runs across an unrecorded line as if
+// it sounded, and jumps only the hidden lines, to the next line it plays.
 //
 // "Something to hear" is exactly what the dub driver would sound on this
 // clock — a take on any target track, not on a hidden line — and the span it

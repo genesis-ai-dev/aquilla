@@ -88,7 +88,8 @@ describe("silentSkipTarget", () => {
     expect(silentSkipTarget(hidden, 2, 6)).toBe(4)
   })
 
-  // AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always."
+  // AQU-2251 (Sam, Oct 29): on the built-in clock a hidden line is skipped,
+  // whichever way the setting is.
   describe("with the setting off", () => {
     // c1 [0,2] recorded; c2 [2,4] hidden; c3 [4,6] not recorded; c4 [7,9] recorded. End 9.
     const offMap = clockSoundMap(
@@ -181,7 +182,8 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     expect(getVirtualClockSec()).toBeCloseTo(3.05, 3)
   })
 
-  // AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always."
+  // AQU-2251 (Sam, Oct 29): on the built-in clock a hidden line is skipped,
+  // whichever way the setting is.
   it("off: the clock still jumps a hidden line, and runs across the unrecorded one after it", () => {
     setSkipSilentLinesPref(false)
     const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)]
@@ -202,6 +204,23 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(7, 3)
+  })
+
+  // AQU-2251 (Sam, Oct 29): following the source on a file with a film or a
+  // source recording, the built-in clock is not the transport, so nothing
+  // jumps — a hidden line there is passed through, whichever way the setting is.
+  it.each([
+    ["on", true],
+    ["off", false],
+  ])("does not jump a hidden line while a film or a recording drives the file (the setting %s)", (_label, on) => {
+    setSkipSilentLinesPref(on)
+    const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6, 2_000)]
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, false))
+    act(() => { virtualClockPlay() })
+    advance(2.05)
+    expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)
+    advance(1)
+    expect(getVirtualClockSec()).toBeCloseTo(3.05, 3)
   })
 
   it("does nothing while the built-in clock is not this file's transport", () => {

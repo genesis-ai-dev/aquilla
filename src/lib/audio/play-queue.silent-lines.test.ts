@@ -295,11 +295,13 @@ describe("following the recordings, with Skip lines with nothing to play OFF", (
   })
 })
 
-// AQU-2251 (Sam, Oct 29): "A hidden line should always be skipped. Always. No
-// matter what." Turning "Skip lines with nothing to play" off plays an
-// unrecorded line through in silence — but never a hidden one. A hidden line
+// AQU-2251 (Sam, Oct 29): following the recordings, a hidden line is skipped —
+// the playhead jumps it. Turning "Skip lines with nothing to play" off plays an
+// unrecorded line through in silence, but never a hidden one. A hidden line
 // keeps its place on the timeline; playback steps over it either way, whether
-// it never had a take or its take is one that never sounds.
+// it never had a take or its take is one that never sounds. (Following the
+// source under a film or a recording, it is passed through instead:
+// play-queue.hidden-lines.test.ts.)
 describe.each([
   ["ON", true],
   ["OFF", false],

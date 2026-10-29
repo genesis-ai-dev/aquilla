@@ -479,8 +479,10 @@ let queueTickAt: ((atSec: number) => void) | null = null
 let timingMode: AudioTimingMode = "dubbing"
 let programme: Programme | null = null
 /** The verses of `programme` that are hidden lines. AQU-2251 (Sam, Oct 29):
- *  "A hidden line should always be skipped" — never played through in
- *  silence, whatever "Skip lines with nothing to play" says. */
+ *  following the recordings a hidden line is skipped — never played through
+ *  in silence, whatever "Skip lines with nothing to play" says. (Following the
+ *  source under a film or a recording it is passed through instead: see
+ *  `progPlaysThroughSilence`.) */
 let progHiddenCellIds: ReadonlySet<string> = new Set()
 /** Index into `programme.slots` — the verse the transport is on. */
 let progIndex = -1
@@ -971,9 +973,20 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * its time on the timeline in silence, the playhead runs across it, and the
  * next line follows. On, the default, it is stepped over as it always was.
  *
- * Never a hidden line (Sam, Oct 29: "A hidden line should always be skipped.
- * Always. No matter what."): with its take taken out it has nothing to hear,
- * and it is stepped over whichever way the setting is.
+ * Never a hidden line: with its take taken out it has nothing to hear, and it
+ * is stepped over whichever way the setting is.
+ *
+ * Hidden lines (Sam, Oct 29). Following the recordings, a hidden line is
+ * skipped: the playhead jumps it, whatever "Skip lines with nothing to play"
+ * says. So is one on the built-in clock (following the source, on a file with
+ * no film and no source audio — lib/timeline/silent-lines). Following the
+ * source on a file with a film or source audio, it is NOT jumped: the film and
+ * its own sound play on across it and only the line's own takes stay silent,
+ * because skipping it would cut real time out of the show. Following the
+ * source, the queue (the recording's clock) and the dub driver (a film's)
+ * already do that: a hidden section keeps its recording (masterAudioForCell),
+ * so Play all, next and previous line and seeks pass through it, and
+ * planTargetOverlay holds back only its take (play-queue.hidden-lines.test.ts).
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
   return slotHasNothingToPlay(slot, progHiddenCellIds) && !getSkipSilentLinesPref()

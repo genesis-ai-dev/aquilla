@@ -45,6 +45,9 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
+    "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
+    "workspace.offline.preparingToastDescription": "This happens once after an update and can take a few minutes. Your offline projects will open when it's done.",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Desktop update prompt (DesktopUpdatePrompt.tsx).
@@ -605,6 +608,24 @@ export const workspace = defineNamespace({
           "stuck. Paired with a 'Restart app' action " +
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
+      },
+      "workspace.offline.preparingToast": {
+        description:
+          "Title of a progress toast in the Tauri desktop app while the on-device " +
+          "copy of the user's offline projects is being rebuilt after an app " +
+          "update (takes minutes on a large project). {percent} is a whole " +
+          "number 0–100 that ticks up; keep the % sign after it. Plain language " +
+          "— no 'worker', 'store', 'database' or 'sync' jargon.",
+        placeholders: {
+          percent: "How far along the rebuild is, a whole number from 0 to 100.",
+        },
+      },
+      "workspace.offline.preparingToastDescription": {
+        description:
+          "Body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast). Reassures the user it's a " +
+          "one-time step after an update and that their downloaded projects " +
+          "open once it finishes. Two short sentences with periods.",
       },
       "workspace.offline.newerDataToast": {
         description:

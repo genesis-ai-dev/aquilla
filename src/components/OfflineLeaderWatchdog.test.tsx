@@ -5,6 +5,7 @@ import type { ReactNode } from "react"
 import { OfflineLeaderWatchdog } from "./OfflineLeaderWatchdog"
 import { Toaster, toast } from "@/components/ui/toast"
 import { __resetLeaderStalledForTests, isLeaderStalled } from "@/lib/offline/leader-watchdog"
+import { __resetOfflineBootProgressForTests, reportOfflineBootStatus } from "@/lib/offline/boot-progress"
 
 type Status = { isSynced: boolean; pendingCount: number; localHead: string; upstreamHead: string }
 
@@ -26,6 +27,7 @@ afterEach(() => {
   toast.close()
   vi.restoreAllMocks()
   __resetLeaderStalledForTests()
+  __resetOfflineBootProgressForTests()
 })
 
 const stuck: Status = { isSynced: false, pendingCount: 4, localHead: "e0.14", upstreamHead: "e0.10" }
@@ -85,7 +87,7 @@ describe("OfflineLeaderWatchdog", () => {
       render(
         <>
           <Toaster />
-          <OfflineLeaderWatchdog bootStallMs={40} restart={restart} />
+          <OfflineLeaderWatchdog bootStallMs={40} bootCheckEveryMs={10} restart={restart} />
         </>,
       )
 
@@ -116,6 +118,40 @@ describe("OfflineLeaderWatchdog", () => {
         </>,
       )
       await waitFor(() => expect(document.querySelector('[data-slot="toast"]')).toBeNull())
+    })
+
+    it("shows rebuild progress instead of a restart prompt while the rebuild moves", async () => {
+      booting()
+      renderBooting()
+      const rehydrate = (done: number) =>
+        reportOfflineBootStatus({ stage: "rehydrating", progress: { done, total: 200 } })
+
+      rehydrate(50)
+      expect(await screen.findByText(/Preparing your offline projects… 25%/)).toBeInTheDocument()
+      // Keep it moving for well past bootStallMs.
+      for (const done of [80, 110, 140, 170]) {
+        await act(() => new Promise((r) => setTimeout(r, 20)))
+        rehydrate(done)
+      }
+      expect(await screen.findByText(/Preparing your offline projects… 85%/)).toBeInTheDocument()
+      expect(screen.queryByText(/taking a while to open/)).toBeNull()
+      expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull()
+    })
+
+    it("falls back to the restart prompt once the rebuild stops moving", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      booting()
+      renderBooting()
+      reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 10, total: 200 } })
+      await screen.findByText(/Preparing your offline projects… 5%/)
+
+      expect(await screen.findByText(/taking a while to open/)).toBeInTheDocument()
+      expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
+
+      // And back to progress if it picks up again.
+      reportOfflineBootStatus({ stage: "rehydrating", progress: { done: 20, total: 200 } })
+      expect(await screen.findByText(/Preparing your offline projects… 10%/)).toBeInTheDocument()
+      await waitFor(() => expect(screen.queryByText(/taking a while to open/)).toBeNull())
     })
 
     it("stays quiet for a boot that finishes in time", async () => {

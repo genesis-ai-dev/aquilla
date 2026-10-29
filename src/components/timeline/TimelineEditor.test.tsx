@@ -5058,6 +5058,29 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     expect(scroll.scrollTop).toBe(28)
   })
 
+  // The menu hands focus back to the row, and then the rename field takes it:
+  // two reveals in a row. The row's rect here moves as the column scrolls,
+  // the way the real one does, so the second must find nothing left to do.
+  it("brings the rename field out from under the header, scrolling once", async () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    const top = () => 10 + (60 - scroll.scrollTop)
+    vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => ({
+      top: top(), bottom: top() + 40, left: 0, right: 240, width: 240, height: 40, x: 0, y: top(),
+      toJSON: () => ({}),
+    } as DOMRect))
+
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText("Rename"))
+    const input = await screen.findByTestId("tl-track-rename-source-audio")
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(scroll.scrollTop).toBe(42)
+  })
+
   it("leaves a focused row alone when the header covers none of it", () => {
     render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
     const scroll = screen.getByTestId("tl-scroll")

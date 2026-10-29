@@ -142,4 +142,25 @@ describe("useMediaDock", () => {
       writes.mockRestore()
     }
   })
+
+  // Review finding 7, as Sources › Hide film already did.
+  describe("hiding a panel", () => {
+    it("one of two tabs: the other shows, and the area they share stays open", () => {
+      writeStoredDock("f1", { ...startDockLayout(), areas: { ll: ["film", "text"], lr: [] }, active: { ll: "film", lr: null } })
+      const { result } = setup()
+      act(() => result.current.dock.hide("film"))
+      expect(result.current.dock.view.isOpen("ll")).toBe(true)
+      expect(result.current.dock.view.isShowing("text")).toBe(true)
+      act(() => result.current.dock.hide("text"))
+      expect(result.current.dock.view.isOpen("ll")).toBe(true)
+      expect(result.current.dock.view.isShowing("film")).toBe(true)
+    })
+
+    it("alone in its area: the area folds", () => {
+      const { result } = setup()
+      act(() => result.current.dock.hide("film"))
+      expect(result.current.dock.view.isOpen("ll")).toBe(false)
+      expect(result.current.dock.view.isShowing("text")).toBe(true)
+    })
+  })
 })

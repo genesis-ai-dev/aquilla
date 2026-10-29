@@ -386,6 +386,23 @@ export function useMediaDock(input: UseMediaDockInput) {
     [commitOpening, layout, presence, textGoingOutOfSight, unfold, view],
   )
 
+  /**
+   * Hide a panel that is showing. A tab beside another panel: that one shows
+   * instead, and the area stays (Sources › Hide film did this first). Alone in
+   * its area: the area folds. Folding a shared area would take the other tab
+   * out of sight with it.
+   */
+  const hide = useCallback(
+    (panel: DockPanel) => {
+      const area = view.areaOf(panel)
+      if (!area || !view.isShowing(panel)) return
+      const other = view.list(area).find((p) => p !== panel)
+      if (other) show(other)
+      else fold(area)
+    },
+    [fold, show, view],
+  )
+
   const move = useCallback(
     (panel: DockPanel, to: DockArea) => {
       const next = movePanel(layout, panel, to)
@@ -699,6 +716,7 @@ export function useMediaDock(input: UseMediaDockInput) {
     fold,
     unfold,
     show,
+    hide,
     move,
     activate,
     toggleFull,

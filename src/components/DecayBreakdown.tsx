@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 interface DecayBreakdownProps {
   /** Scope health 0-100 (1 - mean(decay)). */
   health: number
-  /** Short scope label, e.g. "project health". */
+  /** The card's title, e.g. "Project health". */
   scopeLabel: string
   /** Read current per-cell health only while the breakdown is open. */
   getHealthByCell: () => Array<{ cellId: string; label: string; health: number }>

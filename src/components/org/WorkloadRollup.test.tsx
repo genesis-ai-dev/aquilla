@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { WorkloadRollup } from "./WorkloadRollup"
+import type { OrgWorkloadAssignment } from "@/lib/sync/assignments"
 
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(), unassignAssignment: vi.fn() }))
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -124,6 +125,94 @@ describe("WorkloadRollup", () => {
     await waitFor(() => expect(screen.getByText(/role too low/)).toBeInTheDocument())
     // Row stays — removal failed, nothing was cleared.
     expect(screen.getByText("anna")).toBeInTheDocument()
+  })
+})
+
+// AQU-2294: every row says when the assignment went out and when it is due,
+// using the Projects table's own overdue / due-soon rule so the two surfaces
+// cannot disagree about a date.
+describe("WorkloadRollup dates", () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const row = (over: Partial<OrgWorkloadAssignment>): OrgWorkloadAssignment => ({
+    assignmentId: "a1",
+    projectId: "pa",
+    projectName: "John",
+    fileId: "f1",
+    assigneeUserId: 2,
+    username: "anna",
+    scopeLabel: "Genesis",
+    cellsTotal: 10,
+    cellsDone: 4,
+    deadline: null,
+    ...over,
+  })
+  /** `YYYY-MM-DD`, the shape the server stores a deadline in. */
+  const isoDay = (offsetDays: number) =>
+    new Date(Date.now() + offsetDays * DAY).toISOString().slice(0, 10)
+
+  it("shows the assigned date and the due date, with no chip when the deadline is far off", async () => {
+    mockGetWorkload.mockResolvedValue([
+      row({ createdAt: Date.parse("2026-10-12T09:00:00Z"), deadline: isoDay(21) }),
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    expect(await screen.findByText("Assigned October 12")).toBeInTheDocument()
+    expect(screen.getByText(/^Due /)).toBeInTheDocument()
+    // Three weeks out is neither overdue nor due soon.
+    expect(screen.queryByTestId("workload-deadline-a1")).not.toBeInTheDocument()
+  })
+
+  it("leaves out Due entirely — no placeholder, no chip — when there is no deadline", async () => {
+    mockGetWorkload.mockResolvedValue([
+      row({ createdAt: Date.parse("2026-10-12T09:00:00Z"), deadline: null }),
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    expect(await screen.findByText("Assigned October 12")).toBeInTheDocument()
+    expect(screen.queryByText(/^Due /)).not.toBeInTheDocument()
+    expect(screen.queryByText("—")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workload-deadline-a1")).not.toBeInTheDocument()
+  })
+
+  it("chips a past deadline Overdue and one inside a week Due soon", async () => {
+    mockGetWorkload.mockResolvedValue([
+      row({ assignmentId: "late", deadline: isoDay(-5) }),
+      row({ assignmentId: "soon", username: "bob", assigneeUserId: 3, deadline: isoDay(3) }),
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    expect(await screen.findByTestId("workload-deadline-late")).toHaveTextContent("Overdue")
+    expect(screen.getByTestId("workload-deadline-soon")).toHaveTextContent("Due soon")
+  })
+
+  it("renders the row without an assigned date when the server predates the field", async () => {
+    // The SPA and the workers deploy separately: an older worker omits
+    // createdAt, and the row must still render everything else.
+    mockGetWorkload.mockResolvedValue([row({ deadline: isoDay(-5) })])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    expect(await screen.findByText("anna")).toBeInTheDocument()
+    expect(screen.queryByText(/^Assigned /)).not.toBeInTheDocument()
+    expect(screen.getByTestId("workload-deadline-a1")).toHaveTextContent("Overdue")
+  })
+
+  it("dates validate rows the same way as translate rows", async () => {
+    const counts = (total: number, validated: number, waiting: number, changed: number) =>
+      ({ total, validated, waiting, changed })
+    mockGetWorkload.mockResolvedValue([
+      row({
+        assignmentId: "v1",
+        kind: "validate",
+        createdAt: Date.parse("2026-10-12T09:00:00Z"),
+        deadline: isoDay(-5),
+        validation: { text: counts(10, 4, 0, 0), audio: counts(10, 0, 10, 0) },
+      }),
+    ])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    const group = await screen.findByTestId("workload-validations")
+    expect(group).toHaveTextContent("Assigned October 12")
+    expect(screen.getByTestId("workload-deadline-v1")).toHaveTextContent("Overdue")
   })
 })
 

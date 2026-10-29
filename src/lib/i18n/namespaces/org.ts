@@ -1045,6 +1045,9 @@ export const org = defineNamespace({
     "org.workloadRollup.removeConfirmAriaLabel": "Confirm removing assignment: {scope} ({user})",
     "org.workloadRollup.removeCancelAriaLabel": "Cancel removing assignment: {scope} ({user})",
     "org.workloadRollup.unknownUser": "User {id}",
+    // AQU-2294: the date line under an assignment row's scope label.
+    "org.workloadRollup.assignedLabel": "Assigned",
+    "org.workloadRollup.assignedDate": "Assigned {date}",
     "org.workloadRollup.removeErrorGeneric":
       "Can't remove this assignment — it has no resolved cells to route through.",
 
@@ -2051,7 +2054,8 @@ export const org = defineNamespace({
         placeholders: { date: "Already locale-formatted expiry date string." },
       },
       "org.orgHome.dueDate": {
-        description: "Second line of the project-row deadline tooltip on OrgHome, naming the exact due date.",
+        description:
+          "Capitalised, standalone \"Due <date>\": the second line of the project-row deadline tooltip on OrgHome, and (AQU-2294) the visible due date on an assignment row in the org Overview's team-workload rollup, where it sits beside org.workloadRollup.assignedDate.",
         placeholders: { date: "Already-formatted deadline date (e.g. 'Jan 1, 2020')." },
       },
       "org.orgHome.table.noTextToTranslateAria": {
@@ -3016,6 +3020,15 @@ export const org = defineNamespace({
           scope: "The assignment's scope label (e.g. a book or chapter range) — not translated.",
           user: "The assignee's username, or the localized fallback when it isn't known.",
         },
+      },
+      "org.workloadRollup.assignedLabel": {
+        description:
+          "AQU-2294: hover-detail prefix on the \"Assigned …\" date of an assignment row in the org Overview's team-workload rollup — it reads \"Assigned <full date and time>\". The same word opens the visible org.workloadRollup.assignedDate line, so keep the two consistent.",
+      },
+      "org.workloadRollup.assignedDate": {
+        description:
+          "AQU-2294: visible date line under an assignment row's scope in the org Overview's team-workload rollup, saying when the assignment was handed out. It sits beside the capitalised org.orgHome.dueDate (\"Due {date}\") on the same line, so the two should read as a pair.",
+        placeholders: { date: "A short calendar date, already formatted — e.g. 'October 12'." },
       },
       "org.workloadRollup.unknownUser": {
         description:

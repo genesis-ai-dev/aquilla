@@ -1645,11 +1645,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // index. Its own section id gives it a row in the AI & completion pane AND
     // makes a search for "brief" land on it.
     { id: "section-brief", label: t("autopilot.readiness.brief.label"), keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
-    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "ai instructions"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
+    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
     { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },

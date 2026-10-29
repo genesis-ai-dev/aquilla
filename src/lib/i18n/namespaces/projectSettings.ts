@@ -457,7 +457,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
-    "projectSettings.group.aiLabel": "AI & completion",
+    "projectSettings.group.aiLabel": "AI",
     "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
@@ -496,11 +496,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
     "projectSettings.section.members": "Team members",
-    "projectSettings.section.aiInstructions": "AI Instructions",
+    "projectSettings.section.aiInstructions": "AI drafting",
     "projectSettings.section.draftContext": "Draft Context",
-    "projectSettings.section.advancedLlm": "Advanced LLM",
+    "projectSettings.section.advancedLlm": "AI model (advanced)",
     "projectSettings.section.voice": "Voice",
-    "projectSettings.section.localModels": "Local AI models",
+    "projectSettings.section.localModels": "On-device AI models",
     "projectSettings.section.decay": "Decay",
     "projectSettings.section.validation": "Validation",
     "projectSettings.section.audioMedia": "Audio loading",
@@ -592,7 +592,7 @@ export const projectSettings = defineNamespace({
       "left-context when drafting. 0 disables preceding-context. Default: {defaultCount}.",
 
     // ── Advanced LLM details ──
-    "projectSettings.advancedLlm.summary": "Advanced LLM settings",
+    "projectSettings.advancedLlm.summary": "AI model (advanced)",
     "projectSettings.advancedLlm.frontierDefaultStatus": "Frontier (default)",
     "projectSettings.advancedLlm.customEndpointStatus": "Custom: {endpoint}",
     "projectSettings.advancedLlm.notSet": "not set",
@@ -659,8 +659,8 @@ export const projectSettings = defineNamespace({
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
-      "Whisper transcription and the local voices run in your browser and are shared " +
-      "across every project on this device. Manage downloads in your personal preferences.",
+      "Whisper transcription and the on-device voices run in your browser and are shared across " +
+      "every project on this device. Manage downloads in your personal preferences.",
     "projectSettings.localModels.manageButton": "Manage models",
 
     // ── Harmonization card ──
@@ -1208,7 +1208,7 @@ export const projectSettings = defineNamespace({
       "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
     "projectSettings.voice.studioLabel": "Voice Studio",
-    "projectSettings.localModels.onDeviceLabel": "On-device models",
+    "projectSettings.localModels.onDeviceLabel": "Transcription and voices",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
     "projectSettings.gitSync.minutesAbbrev": "min",
 
@@ -1588,7 +1588,7 @@ export const projectSettings = defineNamespace({
       "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
     "projectSettings.inherit.field.livingMemory": "Living-memory notes",
     "projectSettings.inherit.field.smartQuotes": "Smart quotes",
-    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.field.systemPrompt": "Instructions",
     "projectSettings.inherit.fromUpstream": "from {upstream}",
     "projectSettings.inherit.detach": "Detach",
   },

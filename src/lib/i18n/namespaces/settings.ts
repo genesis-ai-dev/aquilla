@@ -101,7 +101,8 @@ export const settings = defineNamespace({
     "settings.transcription.localDescription":
       "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
     "settings.transcription.capacityExceeded":
-      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or choose " +
+      "Whisper on this device in Preferences → On-device AI models.",
     // ── Omnilingual ASR: hosted model choice, zero-shot warm-up and batches ──
     "settings.transcription.model.legend": "Hosted model",
     "settings.transcription.model.auto": "Automatic",
@@ -327,10 +328,9 @@ export const settings = defineNamespace({
     // this page (deep link, search) won't have seen the nav row's "Offline only" hint.
     "settings.localLlm.groupLabel": "Offline AI provider",
     "settings.localLlm.description":
-      "Used for AI translations only when this device has no connection — unrelated to the " +
-      "on-device voice models under \"Local models.\" Requests are proxied through a small " +
-      "local server on this device, never sent over the network. Defaults match Ollama " +
-      "running locally.",
+      "Used for AI translations only when this device has no connection — unrelated to the on-device " +
+      "voice models under \"On-device AI models.\" Requests are proxied through a small local server " +
+      "on this device, never sent over the network. Defaults match Ollama running locally.",
     "settings.localLlm.testConnection": "Test connection",
     // "Save" button → common.save (identical text)
     "settings.localLlm.detectModels": "Detect models",

@@ -343,7 +343,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // The index is a NavList of groups...
     expect(screen.getByText("General")).toBeTruthy()
     expect(screen.getByText("Members")).toBeTruthy()
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
     // AQU-2261: the pane holding Audio loading and Timeline is "Media".
     expect(screen.getByText("Media")).toBeTruthy()
@@ -360,7 +360,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Lazy (default)")).toBeTruthy()
 
     // ...not the controls themselves. Project Title (General) and AI
-    // Instructions (AI & completion) must NOT both be in the document at once
+    // Instructions (AI) must NOT both be in the document at once
     // on the index — proving this isn't still one long scroll.
     expect(screen.queryByLabelText(/project title/i)).toBeNull()
     expect(screen.queryByLabelText(/username/i)).toBeNull()
@@ -376,7 +376,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // AQU-2259: the username moved to Preferences; a note is left here.
     expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
 
-    // ...but a control that lives in a different group (AI & completion) is
+    // ...but a control that lives in a different group (AI) is
     // NOT rendered at the same time. This is the core "no more one long
     // scroll" assertion — every field used to be simultaneously in the DOM.
     expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
@@ -453,7 +453,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     fireEvent.click(screen.getByRole("link", { name: /^Settings$/i }))
 
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
     expect(screen.queryByLabelText(/project title/i)).toBeNull()
   })
 

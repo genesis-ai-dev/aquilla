@@ -74,7 +74,7 @@ describe("Preferences", () => {
       [/Workspace/, "/preferences/workspace"],
       [/Translator profile/, "/preferences/profile"],
       [/AI provider keys/, "/preferences/provider-keys"],
-      [/Local models/, "/preferences/local-models"],
+      [/On-device AI models/, "/preferences/local-models"],
       [/Usage/, "/preferences/usage"],
     ]
     for (const [name, href] of rows) {

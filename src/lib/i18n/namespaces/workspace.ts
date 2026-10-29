@@ -227,7 +227,7 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.downloadProgressNote":
       "While the model downloads, you'll see a progress percentage on the cell. The page won't reload.",
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
-    "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.enableAllButton": "Enable all on-device AI models",
     "workspace.aiConsent.justThisButton": "Just {model}",
     "workspace.aiConsent.sizeNote":
       "One-time download of about {size} MB — it stays on this device.",

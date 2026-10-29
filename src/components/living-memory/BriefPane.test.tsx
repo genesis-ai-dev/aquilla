@@ -95,7 +95,7 @@ describe("BriefPane — AI provider gate (AQU-1671)", () => {
     expect(arg.type).toBe("warning")
     expect(arg.title).toMatch(/no ai provider configured/i)
     // The message must name where to go, per the issue's acceptance criteria.
-    expect(arg.description).toMatch(/Project Settings → AI & completion/i)
+    expect(arg.description).toMatch(/Project settings → AI → AI model \(advanced\)/i)
   })
 
   it("points at user Settings when a personal device override is the broken provider", async () => {

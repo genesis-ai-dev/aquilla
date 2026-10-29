@@ -369,7 +369,7 @@ export const rules = defineNamespace({
     "rules.importDialog.fileEmpty": "File appears to be empty.",
     "rules.importDialog.extractingRules": "Extracting rules from document…",
     "rules.importDialog.structuring": "Structuring {structured} / {candidates} rules…",
-    "rules.importDialog.tooltipUnconfigured": "Configure LLM in settings first",
+    "rules.importDialog.tooltipUnconfigured": "Set up an AI model in project settings first",
     "rules.importDialog.triggerButton": "Import from doc",
     "rules.importDialog.reviewTitle": plural({
       one: "Review {count} extracted rule",
@@ -382,7 +382,7 @@ export const rules = defineNamespace({
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
     "rules.importDialog.pastePlaceholder": "Paste text here to process it…",
-    "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
+    "rules.importDialog.configureLlmFirst": "Set up an AI model in project settings first.",
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
 

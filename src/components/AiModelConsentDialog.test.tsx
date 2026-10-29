@@ -89,14 +89,14 @@ describe("AiModelConsentDialog", () => {
     )
   })
 
-  it("Enable all local models grants consent and prefetches the pending model first", async () => {
+  it("Enable all on-device AI models grants consent and prefetches the pending model first", async () => {
     renderDialog()
     const granted = requestAiModelConsent(MMS_MODEL)
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /enable all local models/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /enable all on-device AI models/i })).toBeTruthy()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /enable all local models/i }))
+    fireEvent.click(screen.getByRole("button", { name: /enable all on-device AI models/i }))
 
     await expect(granted).resolves.toBe(true)
     await waitFor(() => {
@@ -172,7 +172,7 @@ describe("AiModelConsentDialog", () => {
     expect(dialog.textContent).not.toMatch(/\bscrub\b/i)
     expect(screen.getByRole("button", { name: "Just Whisper" })).toBeTruthy()
     expect(screen.getByRole("button", { name: /cancel/i })).toBeTruthy()
-    expect(screen.getByRole("button", { name: /enable all local models/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /enable all on-device AI models/i })).toBeTruthy()
   })
 
   it("Learn more expands inline and collapses, without a second dialog", async () => {
@@ -189,7 +189,7 @@ describe("AiModelConsentDialog", () => {
     expect(screen.getByText(/click a word in the cell itself/i)).toBeTruthy()
     expect(screen.getByText(/not the transcript preview/i)).toBeTruthy()
     expect(screen.getByLabelText("Alt")).toHaveTextContent("Alt")
-    expect(screen.getByText(/Preferences → Local models/i)).toBeTruthy()
+    expect(screen.getByText(/Preferences → On-device AI models/i)).toBeTruthy()
     expect(screen.getAllByRole("dialog")).toHaveLength(1)
 
     await user.click(learnMore)
@@ -232,7 +232,7 @@ describe("AiModelConsentDialog", () => {
     const learnMore = screen.getByRole("button", { name: /learn more/i })
     await user.click(learnMore)
     expect(screen.getByText(/each language is downloaded the first time you use it/i)).toBeTruthy()
-    expect(screen.getByText(/Preferences → Local models/i)).toBeTruthy()
+    expect(screen.getByText(/Preferences → On-device AI models/i)).toBeTruthy()
   })
 
   it("a catalog locale translates the explanation and Just Whisper", async () => {
@@ -262,12 +262,12 @@ describe("AiModelConsentDialog", () => {
 })
 
 // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "Enable
-// all local models" carries its own words, so it has no hover.
+// all on-device AI models" carries its own words, so it has no hover.
 describe("AiModelConsentDialog — no hover on the text buttons", () => {
-  it("shows nothing on hover over Enable all local models", async () => {
+  it("shows nothing on hover over Enable all on-device AI models", async () => {
     renderDialog()
     void requestAiModelConsent(WHISPER_MODEL)
-    const all = await screen.findByRole("button", { name: /enable all local models/i })
+    const all = await screen.findByRole("button", { name: /enable all on-device AI models/i })
     await userEvent.setup().hover(all)
     await act(() => new Promise((r) => setTimeout(r, 30)))
     expect(screen.queryByRole("tooltip")).toBeNull()

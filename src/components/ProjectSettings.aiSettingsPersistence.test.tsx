@@ -151,7 +151,7 @@ async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
   })
 }
 
-// AQU-501: AI Instructions / Advanced LLM fields live in the "AI & completion"
+// AQU-501: AI drafting / AI model (advanced) fields live in the "AI"
 // sub-menu pane — deep-link straight there via `?section=`.
 function renderSettings() {
   return render(
@@ -205,7 +205,7 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
 
     // The page must still be showing the settings form (no navigation away) —
     // the same route continues to render its section heading.
-    await waitFor(() => expect(screen.getByRole("heading", { name: /ai & completion/i })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole("heading", { name: /^ai$/i })).toBeTruthy())
 
     const status = await screen.findByRole("status")
     expect(status.textContent?.toLowerCase()).toContain("examples retrieved")

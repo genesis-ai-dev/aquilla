@@ -274,7 +274,7 @@ export const onboarding = defineNamespace({
     // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
-      "Local voices for many languages — one language model per download.",
+      "On-device voices for many languages — one language model per download.",
     "onboarding.checklist.aiModels.title": "Configure voice & transcription",
     "onboarding.checklist.aiModels.stepDescription":
       "Gemini TTS is recommended for voice; Whisper transcription runs locally.",
@@ -455,7 +455,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.section.providerKeys.title": "AI provider keys",
     "onboarding.preferences.section.providerKeys.description":
       "Optional personal AI provider override for this device only.",
-    "onboarding.preferences.section.localModels.title": "Local models",
+    "onboarding.preferences.section.localModels.title": "On-device AI models",
     "onboarding.preferences.section.localModels.description":
       "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
     // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure

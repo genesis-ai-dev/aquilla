@@ -668,11 +668,16 @@ export const audio = defineNamespace({
     "audio.consent.whisper.short":
       "After you save a recording, this device transcribes it automatically. The spoken words then light up in the cell as the recording plays. Recordings never leave this device.",
     "audio.consent.whisper.learnMore":
-      "A transcript preview under the cell shows whether the recording matches your text, sounds a little different (you can adopt what was heard), or that you edited after recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove this model later in Preferences → Local models.",
+      "A transcript preview under the cell shows whether the recording matches your text, sounds a " +
+      "little different (you can adopt what was heard), or that you edited after " +
+      "recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to " +
+      "jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove " +
+      "this model later in Preferences → On-device AI models.",
     "audio.consent.mms.short":
       "Reads the cell's text aloud on this device in many languages. Your text isn't sent to any server.",
     "audio.consent.mms.learnMore":
-      "Each language is downloaded the first time you use it. Manage or remove this model later in Preferences → Local models.",
+      "Each language is downloaded the first time you use it. Manage or remove this model later in " +
+      "Preferences → On-device AI models.",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
     // failure category, shown as the popover title (InlineAiError et al.).
@@ -733,7 +738,8 @@ export const audio = defineNamespace({
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
     "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
     "audio.aiError.transcriptionModelUnavailableBody":
-      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → " +
+      "On-device AI models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":

@@ -4685,7 +4685,13 @@ export function TimelineEditor({
               rows did. */}
           <div
             ref={gutterRef}
-            className="relative overflow-hidden bg-muted/20"
+            // `isolate` (AQU-2236): the z-indexes in here rank against EACH
+            // OTHER and nothing else — header 40 over names 30 over rule 20.
+            // Without it they ranked in the workspace's own stacking context,
+            // where 40 is the menus' tier (AppShell's z-scale), and the header
+            // and the names drew over the expanded search results (z-20) that
+            // are meant to cover the editor.
+            className="relative isolate overflow-hidden bg-muted/20"
             onScroll={handleGutterScroll}
           >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
@@ -4693,15 +4699,21 @@ export function TimelineEditor({
                 paints outside the content box, so no row could ever cover its
                 own segment of it, and Sam wants the folder band to run
                 UNBROKEN across both columns. Same pixel (border-box kept the
-                1px inside this cell's width, and so does right-0 w-px), full
-                height including the header strip and the space below the
-                rows, exactly as before — except where a folder row (opaque,
-                z-30) now paints over it. z-20 keeps it above the header's
-                opaque z-10 background, where the old border also showed. */}
+                1px inside this cell's width, and so does end-0 w-px), full
+                height through the space below the rows — except where a
+                folder row (opaque, z-30) paints over it.
+
+                The header covers its top 28px (AQU-2236): the names scroll
+                under the header now, so the header outranks them, and this
+                rule with them. The header draws that stretch of the divider
+                itself, with its own `border-e`. Keep both: raising the rule
+                over the header would raise it over the folder band too, and
+                the header without its border would leave the strip with no
+                divider at all. */}
             <div
               aria-hidden
               data-testid="tl-gutter-rule"
-              className="pointer-events-none absolute inset-y-0 right-0 z-20 w-px bg-border"
+              className="pointer-events-none absolute inset-y-0 end-0 z-20 w-px bg-border"
             />
             {/* The ruler's opposite number. It does NOT translate — the labels
                 below slide under it exactly as the chips slide under the sticky
@@ -4713,8 +4725,14 @@ export function TimelineEditor({
             {/* z-40, above the track names (z-30, raised for the folder band
                 below): they scroll UNDER this header, as the chips slide under
                 the ruler. Above the divider rule too, so the header draws that
-                pixel itself (border-r, on the rule's own column). */}
-            <div className="relative z-40 h-7 border-b border-r border-border bg-background">
+                pixel itself (`border-e`, on the rule's own column).
+
+                LOGICAL SIDES, here and on the rule and the toggle: Arabic and
+                Urdu flip `<html dir>`, the grid puts this column on the RIGHT,
+                and the edge it shares with the lanes is then its left one.
+                `border-e` and `end-0` follow that edge; `border-r` and
+                `right-0` would draw the divider on the column's outer edge. */}
+            <div className="relative z-40 h-7 border-b border-e border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE TOGGLE LIVES HERE, AND ITS POSITIONING IS ABSOLUTE FOR A
                   REASON THAT IS NOT COSMETIC. This spacer is the ruler's
@@ -4747,8 +4765,8 @@ export function TimelineEditor({
                   "absolute inset-y-0 flex items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
                   // Collapsed it is the only thing in the strip, so it takes
                   // the whole strip and is impossible to miss; expanded it
-                  // tucks into the right edge, against the border it moves.
-                  gutterCollapsed ? "inset-x-0" : "right-0 w-7",
+                  // tucks into the lanes' edge, against the border it moves.
+                  gutterCollapsed ? "inset-x-0" : "end-0 w-7",
                 )}
               >
                 {gutterCollapsed ? (

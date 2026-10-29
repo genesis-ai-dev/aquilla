@@ -4945,6 +4945,59 @@ describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in s
   })
 })
 
+// ── AQU-2236: the track names pass UNDER the Tracks header ──────────────────
+//
+// The header sits over the names now (z-40 over their z-30), as the ruler sits
+// over the chips. These pin what that must not cost: the header's layers stay
+// inside the column, the divider sits on the edge the lanes are on in either
+// direction, a drag still shows where it lands, and a focused row never stays
+// hidden under the strip. Paint order and geometry are the browser's, so what
+// is pinned here is the markup that decides them and the scroll the editor
+// writes; happy-dom has no layout, so the rects are stubbed.
+describe("TimelineEditor — the track names pass under the Tracks header (AQU-2236)", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const props = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: rowCells,
+    onRetimeSubtitle: () => {},
+  }
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  /** Found through its toggle: the gutter deliberately carries no testids. */
+  const header = () => screen.getByTestId("tl-gutter-toggle").parentElement as HTMLElement
+  /** The div `handleTrackScroll` transforms; `role="list"` while rows can move. */
+  const inner = () => gutter().querySelector('[role="list"]') as HTMLElement
+
+  // Without `isolate` the column's numbers ranked in the workspace's own
+  // stacking context, where 40 is the menus' tier (AppShell's z-scale): the
+  // header and the names drew over the expanded search results (z-20) that are
+  // meant to cover the editor.
+  it("keeps the header, the names and the divider ranked inside the column", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(gutter().classList).toContain("isolate")
+    expect(header().classList).toContain("z-40")
+    expect(inner().classList).toContain("z-30")
+    expect(screen.getByTestId("tl-gutter-rule").classList).toContain("z-20")
+  })
+
+  // Arabic and Urdu flip `<html dir>`, and the grid with it: the column goes on
+  // the right, and the edge it shares with the lanes is its LEFT one.
+  it("puts the divider, the rule and the toggle on the lanes' edge in either direction", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(header().classList).toContain("border-e")
+    expect(header().classList).not.toContain("border-r")
+    const rule = screen.getByTestId("tl-gutter-rule")
+    expect(rule.classList).toContain("end-0")
+    expect(rule.classList).not.toContain("right-0")
+    const toggle = screen.getByTestId("tl-gutter-toggle")
+    expect(toggle.classList).toContain("end-0")
+    expect(toggle.classList).not.toContain("right-0")
+  })
+})
+
 // ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
 //
 // The workspace decides WHEN these are on offer (a maintainer, a linked video,

@@ -11,7 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { layOutProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -937,22 +937,25 @@ function progRebuild(): void {
   // an unrecorded one at a stand-in length that playback steps over.
   // AQU-2204: following the recordings, every unrecorded line takes its
   // stand-in (layOutProgramme passes the estimator for every file).
-  const { programme: built, lines: dialogue, untimed } = layOutProgramme(ctx.cells)
   // A take whose length was never measured (a generated voice nobody has
   // played yet) has no window the programme can play. On a file with times
   // that is today's rule — the verse is silent — but a file with NO times only
   // reaches the programme through AQU-2204's stand-ins, so there it keeps the
-  // plain line-by-line path it always had rather than going quiet.
-  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
+  // plain line-by-line path it always had rather than going quiet
+  // (`playedProgramme` is null).
+  // Hidden lines keep their place (the timeline draws them there, faded) but
+  // their takes are taken out of what plays: a hidden verse sounds only its
+  // original, and one with no original is skipped.
+  // AQU-2251: the same answer the timeline's ⋯ asks before it offers "Skip
+  // lines with nothing to play", so the row and the playback cannot disagree.
+  const played = playedProgramme(ctx.cells)
+  if (!played) {
     programme = null
     progHiddenCellIds = new Set()
     return
   }
-  // Hidden lines keep their place (the timeline draws them there, faded) but
-  // their takes are taken out of what plays: a hidden verse sounds only its
-  // original, and one with no original is skipped.
-  progHiddenCellIds = new Set(dialogue.filter(isHiddenCell).map((c) => c.id))
-  programme = withoutHiddenTakes(built, progHiddenCellIds)
+  programme = played.programme
+  progHiddenCellIds = played.hiddenCellIds
   setProgress({ duration: programme.totalSec })
 }
 
@@ -973,7 +976,7 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * and it is stepped over whichever way the setting is.
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
-  return !progSlotHasSound(slot) && !progHiddenCellIds.has(slot.cellId) && !getSkipSilentLinesPref()
+  return slotHasNothingToPlay(slot, progHiddenCellIds) && !getSkipSilentLinesPref()
 }
 
 /** The next verse playback goes to, from `from` onward: one with anything to

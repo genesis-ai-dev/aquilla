@@ -585,7 +585,10 @@ describe("TimelineEditor", () => {
     resetSkipSilentLinesPrefCacheForTests()
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies
+        />,
       )
       const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
       expect(item()).toHaveTextContent("Skip lines with nothing to play")
@@ -600,12 +603,38 @@ describe("TimelineEditor", () => {
     }
   })
 
+  // AQU-2251 (Sam, Oct 29): the row is shown only where it can change
+  // something — the workspace works that out from the whole file, under its
+  // timing (lib/timeline/silent-lines `skipSilentLinesCanChange`).
+  it("Skip lines with nothing to play is shown only where the file has a line with nothing to play", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    // The ⋯ is open (its quality row is there), and the row is not in it.
+    expect(inTimelineSettings(() => screen.getByTestId("tl-quality-toggle"))).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-skip-silent-toggle")).toBeNull()
+    expect(screen.queryByText("Skip lines with nothing to play")).toBeNull()
+
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies
+      />,
+    )
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toHaveTextContent(
+      "Skip lines with nothing to play",
+    )
+  })
+
   it("Skip lines with nothing to play reads back off after a reload", () => {
     localStorage.setItem("aq.skip-silent-lines.v1", "off")
     resetSkipSilentLinesPrefCacheForTests()
     try {
       render(
-        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies
+        />,
       )
       const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
       expect(item()).toHaveAttribute("aria-checked", "false")
@@ -1395,8 +1424,6 @@ describe("TimelineEditor — audio-first mode", () => {
     renderAt("audioFirst")
     expect(inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))).toBeInTheDocument()
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
-    // AQU-2251: following the recordings is where skipping lines matters most.
-    expect(screen.getByTestId("tl-skip-silent-toggle")).toBeInTheDocument()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")

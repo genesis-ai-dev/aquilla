@@ -239,7 +239,7 @@ import {
   virtualClockPlay,
   virtualClockSeekFromTimeline,
 } from "@/lib/timeline/virtual-clock"
-import { useSkipSilentLinesOnVirtualClock } from "@/lib/timeline/silent-lines"
+import { skipSilentLinesCanChange, useSkipSilentLinesOnVirtualClock } from "@/lib/timeline/silent-lines"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
@@ -14674,6 +14674,23 @@ export function ProjectWorkspace() {
     setQueueTargetSlots(targetSlots)
   }, [targetSlots])
 
+  // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
+  // is offered only where it can change something. Over the whole file — a
+  // book's every chapter, since Play all carries on into the next — laid out
+  // as the queue plays it, or as the built-in clock does while it drives.
+  const skipSilentLinesApplies = useMemo(
+    () =>
+      skipSilentLinesCanChange({
+        timing: timingMode,
+        runs: timelineScopes.length > 0
+          ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
+          : [timelineLines],
+        clockCells: virtualIsTransport ? dubDriverCells : null,
+        slots: targetSlots,
+      }),
+    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots],
+  )
+
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
   // on-device byte cache with the open file's dub clips (nearest the selection
   // first, budget-aware, abandoned on lens exit). Clip ids are immutable, so
@@ -16975,6 +16992,7 @@ export function ProjectWorkspace() {
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.
                     virtualIsTransport={virtualIsTransport}
+                    skipSilentLinesApplies={skipSilentLinesApplies}
                     editable={!laneWriteFrozen}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}

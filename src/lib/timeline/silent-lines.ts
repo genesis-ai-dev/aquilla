@@ -31,9 +31,11 @@ import type { CellData } from "@/hooks/useCells"
 import { resolveTargetPieces } from "@/lib/audio/track-audio"
 import { getQueueTargetSlots } from "@/lib/audio/play-queue"
 import { isHiddenCell } from "@/lib/cells/hidden"
+import type { AudioTimingMode } from "@/lib/parsers/types"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { targetChipGeom } from "./lane-timing"
-import { isDefaultTrackSlot } from "./track-slots"
+import { playedProgramme, slotHasNothingToPlay } from "./programme"
+import { isDefaultTrackSlot, RECORDING_SLOT } from "./track-slots"
 import {
   useVirtualClockDuration,
   useVirtualClockPlaying,
@@ -122,6 +124,42 @@ export function silentSkipTarget(map: ClockSoundMap, sec: number, endSec: number
   if (!(until - sec >= MIN_JUMP_SEC)) return null
   const skippedLineAhead = skipped.some((l) => l.end > sec && l.start < until)
   return skippedLineAhead ? until : null
+}
+
+/** What decides whether "Skip lines with nothing to play" can change anything on a file. */
+export interface SkipSilentLinesScope {
+  timing: AudioTimingMode
+  /** Following the recordings: the lines the queue lays out and plays, one
+   *  list per run it plays — a book's chapters, or the whole file. */
+  runs: readonly (readonly CellData[])[]
+  /** Following the source: the cells the built-in clock's takes play from,
+   *  while that clock is the file's transport. Null while a film or a source
+   *  recording drives the file — then something is heard under every line. */
+  clockCells: readonly CellData[] | null
+  /** The target tracks that sound (the queue's target slots). */
+  slots: readonly string[]
+}
+
+/**
+ * AQU-2251 (Sam, Oct 29): can the setting change anything on this file, under
+ * its current timing? Only when a line has nothing to play and is not hidden
+ * (a hidden line is skipped either way). Following the recordings, that is a
+ * verse of the programme as the queue plays it with no original and no take;
+ * following the source, a line on the built-in clock with no take. With a
+ * take or original audio on every line, or a film driving the file, there is
+ * nothing to skip, and the timeline's ⋯ leaves the row out.
+ */
+export function skipSilentLinesCanChange(scope: SkipSilentLinesScope): boolean {
+  if (scope.timing === "audioFirst") {
+    return scope.runs.some((cells) => {
+      const played = playedProgramme(cells)
+      return played != null && played.programme.slots.some((slot) => slotHasNothingToPlay(slot, played.hiddenCellIds))
+    })
+  }
+  if (!scope.clockCells) return false
+  // The queue's own fallback: no track listed means the recording track.
+  const slots = scope.slots.length > 0 ? scope.slots : [RECORDING_SLOT]
+  return clockSoundMap(scope.clockCells, slots).silent.length > 0
 }
 
 /**

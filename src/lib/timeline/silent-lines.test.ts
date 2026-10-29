@@ -12,7 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
-import { clockSoundMap, silentSkipTarget, useSkipSilentLinesOnVirtualClock } from "./silent-lines"
+import { clockSoundMap, silentSkipTarget, skipSilentLinesCanChange, useSkipSilentLinesOnVirtualClock } from "./silent-lines"
 import {
   getVirtualClockSec,
   getVirtualClockPlaying,
@@ -209,5 +209,66 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)
+  })
+})
+
+// AQU-2251: the setting's row in the timeline's ⋯ is shown only where it can
+// change something — the open file, under its current timing, has a line with
+// nothing to play that is not hidden (a hidden line is skipped either way).
+describe("skipSilentLinesCanChange", () => {
+  const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
+  /** A section of an imported recording: its original always sounds. */
+  const section = (id: string, start: number, end: number): CellData =>
+    ({
+      id,
+      fileId: "f1",
+      original: "",
+      translated: "",
+      medium: "media",
+      startTime: start,
+      endTime: end,
+      attachments: { [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" } },
+    }) as unknown as CellData
+
+  describe("following the recordings", () => {
+    const followingRecordings = (...runs: CellData[][]) =>
+      skipSilentLinesCanChange({ timing: "audioFirst", runs, clockCells: null, slots: SLOTS })
+
+    it("no: every line has a take", () => {
+      expect(followingRecordings([cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 1_500)])).toBe(false)
+    })
+
+    it("no: every line has its original audio, recorded or not", () => {
+      expect(followingRecordings([section("s1", 0, 3), section("s2", 3, 6)])).toBe(false)
+    })
+
+    it("yes: a line has neither a take nor an original", () => {
+      expect(followingRecordings([cue("c1", 0, 2, 2_000), cue("c2", 2, 4)])).toBe(true)
+    })
+
+    it("no: the only lines with nothing to play are hidden — they are skipped either way", () => {
+      expect(followingRecordings([cue("c1", 0, 2, 2_000), cue("c2", 2, 4, undefined, { hidden: true })])).toBe(false)
+      expect(followingRecordings([cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true })])).toBe(false)
+    })
+
+    it("yes: one chapter of a book is all recorded and another is not", () => {
+      expect(followingRecordings([cue("c1", 0, 2, 2_000)], [cue("c2", 0, 2), cue("c3", 2, 4, 2_000)])).toBe(true)
+    })
+  })
+
+  describe("following the source", () => {
+    it("no: a film or a source recording drives the file, so every line is heard", () => {
+      expect(
+        skipSilentLinesCanChange({ timing: "dubbing", runs: [[cue("c1", 0, 2)]], clockCells: null, slots: SLOTS }),
+      ).toBe(false)
+    })
+
+    it("on the built-in clock: no when every line has a take, yes when one has none", () => {
+      const onClock = (cells: CellData[]) =>
+        skipSilentLinesCanChange({ timing: "dubbing", runs: [cells], clockCells: cells, slots: SLOTS })
+      expect(onClock([cue("c1", 0, 2, 2_000), cue("c2", 3, 5, 2_000)])).toBe(false)
+      expect(onClock([cue("c1", 0, 2, 2_000), cue("c2", 3, 5)])).toBe(true)
+      expect(onClock([cue("c1", 0, 2, 2_000), cue("c2", 3, 5, undefined, { hidden: true })])).toBe(false)
+    })
   })
 })

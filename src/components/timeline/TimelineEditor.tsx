@@ -209,6 +209,14 @@ export interface TimelineEditorProps {
    * question about the file, not about whether it happens to be running.
    */
   virtualIsTransport?: boolean
+  /**
+   * AQU-2251 (Sam, Oct 29): can "Skip lines with nothing to play" change
+   * anything on this file, under its current timing — does it have a line with
+   * nothing to play that is not hidden? The ⋯ offers the row only then. Worked
+   * out by the workspace over the WHOLE file (a book's every chapter, since
+   * Play all carries on into the next), with `skipSilentLinesCanChange`.
+   */
+  skipSilentLinesApplies?: boolean
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
@@ -1191,6 +1199,7 @@ export function TimelineEditor({
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
+  skipSilentLinesApplies = false,
   timingLocked = false,
   onTrimTarget,
   onCutTargets,
@@ -4327,15 +4336,18 @@ export function TimelineEditor({
       {/* AQU-2251 (Sam, Oct 28): on, playback steps over a line with nothing
           to hear (a stand-in nobody has recorded yet); off, it plays the
           line through in silence for its length. The queue and the built-in
-          clock read the same remembered setting. */}
-      <DropdownMenuCheckboxItem
-        checked={skipSilentLines}
-        onCheckedChange={(on) => setSkipSilentLinesPref(on)}
-        data-testid="tl-skip-silent-toggle"
-      >
-        <FastForward />
-        {t("editor.timeline.skipSilentLines")}
-      </DropdownMenuCheckboxItem>
+          clock read the same remembered setting. Oct 29: shown only where it
+          can change something — a line with nothing to play, not hidden. */}
+      {skipSilentLinesApplies && (
+        <DropdownMenuCheckboxItem
+          checked={skipSilentLines}
+          onCheckedChange={(on) => setSkipSilentLinesPref(on)}
+          data-testid="tl-skip-silent-toggle"
+        >
+          <FastForward />
+          {t("editor.timeline.skipSilentLines")}
+        </DropdownMenuCheckboxItem>
+      )}
       {/* SUB-53: nothing to snap to when positions are computed. */}
       {!audioFirst && (
         <DropdownMenuCheckboxItem

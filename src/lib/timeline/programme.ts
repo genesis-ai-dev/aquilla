@@ -27,6 +27,7 @@ import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-a
 import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { standInEstimator } from "./stand-in"
 
 /** A window on some clock, in seconds. */
@@ -358,6 +359,32 @@ export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<s
     return out
   })
   return { ...prog, slots, byCellId }
+}
+
+/**
+ * The programme as the queue PLAYS it (play-queue's `progRebuild`): the
+ * layout, with the hidden lines' takes taken out. Null where a file with no
+ * times has a take whose length was never measured (a generated voice nobody
+ * has played yet): such a file only reaches the programme through AQU-2204's
+ * stand-ins, so it keeps the plain line-by-line path rather than going quiet.
+ */
+export function playedProgramme(
+  cells: readonly CellData[],
+): { programme: Programme; hiddenCellIds: ReadonlySet<string> } | null {
+  const { programme: built, lines, untimed } = layOutProgramme(cells)
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) return null
+  const hiddenCellIds = new Set(lines.filter(isHiddenCell).map((c) => c.id))
+  return { programme: withoutHiddenTakes(built, hiddenCellIds), hiddenCellIds }
+}
+
+/**
+ * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
+ * to hear (no original, no take the programme can play) and not hidden. A
+ * hidden line is skipped whichever way the setting is (Sam, Oct 29: "A hidden
+ * line should always be skipped. Always. No matter what.").
+ */
+export function slotHasNothingToPlay(slot: ProgrammeSlot, hiddenCellIds: ReadonlySet<string>): boolean {
+  return !slot.sourceWindow && !slot.targetWindow && !hiddenCellIds.has(slot.cellId)
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

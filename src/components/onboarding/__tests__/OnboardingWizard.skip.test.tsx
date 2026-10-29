@@ -103,7 +103,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
   createPersonalOrg: vi.fn(async () => ({ id: 1, name: "w", role: { level: 700, name: "owner" } })),
 }))
 let mockProjects: { id: string }[] = []
-vi.mock("@/lib/sync/cloud-projects", () => ({
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true, projects: mockProjects })),
 }))
 

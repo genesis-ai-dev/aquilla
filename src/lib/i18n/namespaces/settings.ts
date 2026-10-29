@@ -346,7 +346,7 @@ export const settings = defineNamespace({
       "Minimum role required to see the member list and member count, on both the org Members page " +
       "and each project's Members tab. Below this role, the member list and count are hidden " +
       "entirely — not shown empty, just absent.",
-    "settings.rosterProgress.progressLabel": "Who can view member progress",
+    "settings.rosterProgress.progressLabel": "Who can see member progress",
     "settings.rosterProgress.progressDescription":
       "Minimum role required to see per-member progress/productivity. Independent of who can see the " +
       "member list — a role can see who's on the team without seeing their progress, or vice versa.",

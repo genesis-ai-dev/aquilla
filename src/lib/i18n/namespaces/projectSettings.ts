@@ -454,7 +454,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI",
-    "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
+    "projectSettings.group.aiDescription": "Brief, instructions, drafting, model, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
     "projectSettings.group.audioMediaLabel": "Media",

@@ -239,7 +239,7 @@ describe("Security settings page", () => {
     expect(screen.getByText("Visibility")).toBeInTheDocument()
     expect(screen.getByText("Permissions")).toBeInTheDocument()
     expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see member progress/i)).toBeDefined()
     expect(screen.getByLabelText(/who can export/i)).toBeDefined()
     expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
     expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
@@ -293,9 +293,9 @@ describe("Security settings page", () => {
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByLabelText(/who can see member progress/i)).toBeDefined())
 
-    await pickSelectOption(/who can view member progress/i, /^owner/i)
+    await pickSelectOption(/who can see member progress/i, /^owner/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()

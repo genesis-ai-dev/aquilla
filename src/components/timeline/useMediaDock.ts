@@ -535,6 +535,11 @@ export function useMediaDock(input: UseMediaDockInput) {
       }
       if (view.isOpen("tl") && view.bodyOpen && (shut("tl") || shut("body"))) {
         repairsRef.current++
+        try {
+          if (panelRefs.tl.current?.isCollapsed()) panelRefs.tl.current?.expand()
+        } catch {
+          /* not laid out yet */
+        }
         safeResize("tl", tlHeight())
       } else if (!view.isOpen("tl") && view.bodyOpen && shut("body")) {
         repairsRef.current++
@@ -544,6 +549,14 @@ export function useMediaDock(input: UseMediaDockInput) {
       for (const r of ["ll", "lr"] as const) {
         if (!view.isOpen(r) || !shut(r)) continue
         repairsRef.current++
+        // A panel the group holds COLLAPSED stays collapsed when its
+        // neighbour is resized (full screen, then a move, left the text so):
+        // it has to be expanded first.
+        try {
+          if (panelRefs[r].current?.isCollapsed()) panelRefs[r].current?.expand()
+        } catch {
+          /* not laid out yet */
+        }
         if (!both) {
           safeResize(r, "100%")
         } else if (filmArea) {

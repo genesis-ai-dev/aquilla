@@ -266,8 +266,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.validationTargetLanguageRequired": "Target language is required",
     "projectSettings.create.validationUpstreamProjectRequired": "Choose an upstream project",
     "projectSettings.create.laneRecommendationHeading": "Same source, new language?",
+    // Sam, Oct 29: a lane is always a "Language lane" in the interface.
     "projectSettings.create.laneRecommendation":
-      "{heading} Add it as a target lane on {projectName} instead — no separate " +
+      "{heading} Add it as a Language lane on {projectName} instead — no separate " +
       "project to keep in sync.",
     // AQU-2259: the dialog showed these as hard-coded English. A lane is a
     // "Language lane" in the interface (Sam, Oct 29).

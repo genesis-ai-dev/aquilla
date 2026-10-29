@@ -56,7 +56,12 @@ export function ExportPermissionsSection({ orgSettings, canEdit }: ExportPermiss
   return (
     <SettingsRow
       label={t("org.exportSettings.whoCanExportLabel")}
-      description={t("org.exportSettings.whoCanExportDescription")}
+      description={t("org.exportSettings.whoCanExportSummary")}
+      info={{
+        label: t("common.aboutAria", { name: t("org.exportSettings.whoCanExportLabel") }),
+        content: t("org.exportSettings.whoCanExportInfo"),
+        testId: "settings-info-export-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

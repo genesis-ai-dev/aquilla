@@ -240,16 +240,44 @@ describe("Security settings page", () => {
     expect(screen.getByText("Permissions")).toBeInTheDocument()
     expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
     expect(screen.getByLabelText(/who can see member progress/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can export/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
-    expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
+    // Each permission's control, by role: its (i) is named "About …" too.
+    expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined()
+    expect(screen.getByRole("combobox", { name: /who can assign work/i })).toBeDefined()
+    expect(screen.getByRole("switch", { name: /allow self-assignment/i })).toBeDefined()
+    expect(screen.getByRole("combobox", { name: /who can manage terminology/i })).toBeDefined()
+  })
+
+  it("shows one short line per permission and keeps the rest behind a click (i) (Sam, Oct 29)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
+    expect(screen.getByText("The lowest role that can export a project's deliverables.")).toBeVisible()
+    const info = screen.getByRole("button", { name: "About Who can export" })
+    const text = screen.getByTestId("settings-info-export-min-role-text")
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(text).toHaveAttribute("aria-hidden", "true")
+    expect(text).toHaveTextContent(/CSV and TSV files are made in the browser/)
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveAttribute("aria-hidden", "false")
+    fireEvent.click(info)
+    expect(text).toHaveAttribute("data-open", "false")
+    for (const name of [
+      "About Who can use Data egress",
+      "About Who can assign work",
+      "About Allow self-assignment",
+      "About Allow language lane coordinators to assign work",
+      "About Who can manage terminology",
+      "About Who can change project languages",
+    ]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "false")
+    }
   })
 
   it("patches export on change without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
 
     await pickSelectOption(/who can export/i, /^contributor$/i)
 
@@ -260,7 +288,7 @@ describe("Security settings page", () => {
 
   it("patches the egress floor on change — an owner opens Data egress to maintainers (AQU-907)", async () => {
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can use data egress/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can use data egress/i })).toBeDefined())
 
     await pickSelectOption(/who can use data egress/i, /^maintainer$/i)
 
@@ -270,7 +298,7 @@ describe("Security settings page", () => {
   it("surfaces a server error when the export save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
 
     await pickSelectOption(/who can export/i, /^contributor$/i)
 

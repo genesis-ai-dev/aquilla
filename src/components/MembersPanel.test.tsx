@@ -15,6 +15,7 @@ import {
   type MembersPanelMember,
   type MembersPanelScopeConfig,
 } from "./MembersPanel"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 // The add-member row mounts UsernameTypeahead, which reaches useAccounts ->
 // useQueryClient; wrap every render in a provider so those hooks resolve.
@@ -362,5 +363,15 @@ describe("MembersPanel search when the roster is hidden", () => {
     expect(field).toHaveAttribute("aria-describedby", "member-search-disabled-reason")
     expect(screen.getByText(reason)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /^add$/i })).toBeDisabled()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the last-active mark says what it measures on a
+// click, never on hover.
+describe("MembersPanel last-active mark", () => {
+  it("says what a stale mark means on click", async () => {
+    const old = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString()
+    renderPanel(<MembersPanel {...baseProps()} callerMaxRole={500} members={[{ ...contributor(), lastActiveAt: old }]} />)
+    await expectClickNote(screen.getByRole("button", { name: /stale/ }), /No recent activity/)
   })
 })

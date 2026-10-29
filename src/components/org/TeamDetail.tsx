@@ -32,7 +32,7 @@ import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -532,19 +532,17 @@ export function TeamDetail() {
           const label = <RoleLabel name={m.roleLevel} />
 
           // Owners change roles via the actions menu dialog — badge is display-only.
-          // Non-owners get a tooltip explaining the org-level lock.
+          // Non-owners get a note explaining the org-level lock, opened by a
+          // click on the role (AQU-2260: never a hover).
           if (isOwner) return label
 
           return (
-            <AppTooltip content={lockedOrgRoleTooltip(m.roleLevel)} className="max-w-xs">
-              <span
-                tabIndex={0}
-                className="inline-flex cursor-help"
-                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
-              >
-                {label}
-              </span>
-            </AppTooltip>
+            <NoteOnClick
+              note={lockedOrgRoleTooltip(m.roleLevel)}
+              label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
+            >
+              {label}
+            </NoteOnClick>
           )
         },
       },

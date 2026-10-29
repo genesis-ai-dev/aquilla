@@ -268,28 +268,23 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <AppTooltip
-        content={
-          isConfigured
-            ? t("rules.importDialog.tooltip")
-            : t("rules.importDialog.tooltipUnconfigured")
-        }
-      >
-        {/* Span wrapper so the tooltip still receives hover when the button is disabled. */}
-        <span className="inline-flex">
-          <DialogTrigger
-            render={
-              <Button
-                variant="outline"
-                disabled={!isConfigured}
-              />
-            }
-          >
+      {/* AQU-2260 (Sam, Oct 29): the labelled trigger says nothing on hover.
+          Greyed out, it says why on click: AppTooltip wraps the disabled
+          button itself (a hand-made span between them would bring the hover
+          back), and with nothing to open it is not a dialog trigger. */}
+      {isConfigured ? (
+        <DialogTrigger render={<Button variant="outline" />}>
+          <Upload className="me-1 h-3.5 w-3.5" />
+          {t("rules.importDialog.triggerButton")}
+        </DialogTrigger>
+      ) : (
+        <AppTooltip content={t("rules.importDialog.tooltipUnconfigured")}>
+          <Button variant="outline" disabled>
             <Upload className="me-1 h-3.5 w-3.5" />
             {t("rules.importDialog.triggerButton")}
-          </DialogTrigger>
-        </span>
-      </AppTooltip>
+          </Button>
+        </AppTooltip>
+      )}
 
       <DialogContent className="max-w-2xl">
         <DialogHeader>

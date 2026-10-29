@@ -43,6 +43,8 @@ export interface SuggestedAction {
   label: string
   onClick: () => void
   disabled?: boolean
+  /** Why the action is greyed out, opened on click of it (AQU-2260: a
+   *  labelled button says nothing on hover, so an enabled one shows none). */
   title?: string
 }
 
@@ -212,21 +214,24 @@ const ScopedChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fun
       <div className={cn("flex flex-col", compact ? "gap-1.5" : "gap-2")}>
         {suggestedActions && suggestedActions.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {suggestedActions.map((action) => (
-              <AppTooltip key={action.label} content={action.title} disabled={!action.title}>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={action.disabled || !isConfigured || isStreaming}
-                  onClick={action.onClick}
-                  className={cn(compact ? "h-6 text-[10px]" : "h-7 text-xs")}
-                >
-                  <Sparkles data-icon="inline-start" />
-                  {action.label}
-                </Button>
-              </AppTooltip>
-            ))}
+            {suggestedActions.map((action) => {
+              const actionDisabled = Boolean(action.disabled || !isConfigured || isStreaming)
+              return (
+                <AppTooltip key={action.label} content={actionDisabled ? action.title : undefined}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={actionDisabled}
+                    onClick={action.onClick}
+                    className={cn(compact ? "h-6 text-[10px]" : "h-7 text-xs")}
+                  >
+                    <Sparkles data-icon="inline-start" />
+                    {action.label}
+                  </Button>
+                </AppTooltip>
+              )
+            })}
           </div>
         )}
         {attachmentBar}
@@ -260,7 +265,7 @@ const ScopedChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fun
             {isStreaming ? (
               <span className="ms-auto flex items-center gap-1">
                 {queueWhileStreaming && (
-                  <AppTooltip content={t("workspace.chatComposer.queueTooltip")}>
+                  <AppTooltip content={t("workspace.chatComposer.queueMessage")}>
                     <InputGroupButton
                       type="button" variant="default" size="icon-sm" onClick={handleSendClick}
                       disabled={isEmpty || draft.isSending || !isConfigured} aria-label={t("workspace.chatComposer.queueMessage")}

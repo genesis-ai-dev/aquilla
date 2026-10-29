@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { PlanInspector } from "./PlanInspector"
 import type { PlanOpenKind, PlanUnit } from "@/lib/plan/plan-status"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { expectTooltip } from "@/test-utils/tooltip"
+import userEvent from "@testing-library/user-event"
 
 // Every test below used to pass getToken={null}, which short-circuits
 // usePlanUnitSections before it fetches — so the whole AQU-1098 breakdown (the
@@ -101,6 +101,15 @@ describe("the title opens the file", () => {
     expect(onOpenUnit).toHaveBeenCalledTimes(1)
   })
 
+  // AQU-2260 (Sam, Oct 29): the title is a labelled button, so it says
+  // nothing on hover.
+  it("shows nothing on hover", async () => {
+    renderInspector(unit(), true, false, null, { onOpenUnit: vi.fn() })
+    await userEvent.setup().hover(screen.getByTestId("plan-inspector-open-file"))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
   it("is plain text when nothing can open it", () => {
     renderInspector(unit())
     expect(screen.queryByTestId("plan-inspector-open-file")).toBeNull()
@@ -181,12 +190,21 @@ describe("marking done", () => {
     await waitFor(() => expect(onPatch).toHaveBeenCalledWith({ fileId: "f1", sectionKey: "", done: false }))
   })
 
-  it("says the mark can be reversed in a tooltip, never as a word beside the button", async () => {
+  it("says the mark can be reversed behind an (i) that opens in place, never on hover, never as a word beside the button", async () => {
     // AQU-1494: "Undoable." printed beside Mark done read as "cannot be
-    // undone" (Joel, 2026-09-29).
+    // undone" (Joel, 2026-09-29). AQU-2260 (Sam, Oct 29): and a labelled
+    // button no longer explains itself on hover, so the reassurance opens
+    // under it on a click of its (i).
     renderInspector(unit())
     expect(screen.queryByText(/undoable/i)).toBeNull()
-    await expectTooltip(screen.getByTestId("plan-mark-done"), "You can unmark this later.")
+    await userEvent.setup().hover(screen.getByTestId("plan-mark-done"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const info = screen.getByRole("button", { name: "About Mark done" })
+    const reveal = document.getElementById(info.getAttribute("aria-controls") ?? "")
+    expect(reveal).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(reveal).toHaveAttribute("data-open", "true")
+    expect(reveal).toHaveTextContent("You can unmark this later.")
   })
 
   it("says beside Unmark what a unit marked done has to do again (AQU-1494)", () => {

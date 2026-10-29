@@ -6,6 +6,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
 import { UserError } from "@/lib/errors/user-error"
 import { fmtShortCalendarDate } from "@/lib/format-date"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 // AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
 // fetchOrgSettings swallows its own failures and returns null, so unmocked it
@@ -529,8 +530,12 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
     // No role-change combobox for maintainer
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
-    // Read-only org-level role label with shadcn tooltip is present
-    expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
+    // Read-only org-level role label. AQU-2260: why it is read-only opens on
+    // click, in a note anchored to it, never on hover.
+    await expectClickNote(
+      screen.getByRole("button", { name: /org-level role: viewer/i }),
+      /can only be changed by an org owner/,
+    )
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
   })

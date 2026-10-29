@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -825,6 +828,30 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     await screen.findByTestId("customize-stat-audio-validated")
     expect(screen.queryByTestId("customize-stat-translated")).not.toBeInTheDocument()
     expect(screen.queryByTestId("customize-stat-validated")).not.toBeInTheDocument()
+  })
+
+  // AQU-2260 (Sam, Oct 29): a stat tile's explanation opens on click of the
+  // (i) by its label, never on hover of the tile.
+  it("explains the audio tiles behind an (i), on click", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    await userEvent.setup().hover(screen.getAllByText("Audio Validated")[0])
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Has audio" }), /at least one audio recording attached/)
+    await expectClickNote(screen.getByRole("button", { name: "About Audio Validated" }), /Of the audio recorded, 25% is validated/)
   })
 
   it("AQU-2116: one target cell of text brings Translated/Validated back", async () => {
@@ -3474,10 +3501,14 @@ describe("imported originals on the overview (AQU-656)", () => {
       fileWith("f2", "Notes.md"),
     ])
 
-    renderOverview()
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
 
     expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
     expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    // AQU-2260: a labelled button, so it says nothing on hover.
+    await userEvent.setup().hover(screen.getByTestId("download-originals-zip"))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
     const original = screen.getByTestId("download-original-file")
     expect(original.tagName).toBe("BUTTON")
     expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")

@@ -35,7 +35,6 @@ import {
 } from "@/lib/plan/plan-status"
 import { UserChip } from "@/components/UserChip"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar, PlanRule } from "./PlanBar"
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PLAN_TONE } from "./plan-tone"
@@ -417,14 +416,13 @@ export const PlanRow = memo(function PlanRow({
       {text}
     </span>
     )
-    // Say where the click goes before it goes there. "9 takes to record" is a
-    // fact; that it is also a way to the first unrecorded take is not obvious
-    // from the words, and the aria-label above is for readers who cannot see
-    // the pointer change (Sam, 2026-09-17). Only an openable node gets one —
-    // "Nothing left" goes nowhere and should not promise to.
-    return openable && openDestination
-      ? <AppTooltip content={openDestination}>{node}</AppTooltip>
-      : node
+    // "9 takes to record" is a fact; that it is also a way to the first
+    // unrecorded take is said by its standing underline and, for a reader who
+    // cannot see that, by the aria-label above. It used to say so on hover as
+    // well (Sam, 2026-09-17); AQU-2260 (Sam, Oct 29) ended that: a labelled
+    // control says nothing on hover, and the row is itself a button, so there
+    // is no room for an (i) inside it.
+    return node
   }
 
   /**

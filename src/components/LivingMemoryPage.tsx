@@ -31,7 +31,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -316,9 +316,10 @@ export function LivingMemoryPage({
 
   const statusAndActions = (
     <>
-      <AppTooltip content={livenessLabel}>
+      {/* AQU-2260: a coloured mark, so its state opens on click, not hover. */}
+      <NoteOnClick note={livenessLabel} label={livenessLabel} className="shrink-0 p-1">
         <span
-          aria-label={livenessLabel}
+          aria-hidden
           className={[
             "h-2 w-2 shrink-0 rounded-full transition-colors",
             livenessState === "offline"
@@ -328,7 +329,7 @@ export function LivingMemoryPage({
                 : "bg-emerald-500",
           ].join(" ")}
         />
-      </AppTooltip>
+      </NoteOnClick>
       {validatedExamplesEnabled ? (
         isLoading ? (
           <Skeleton

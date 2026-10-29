@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
+import { NoteOnClick } from "@/components/ui/info-note";
 import { Checkbox } from "@/components/ui/checkbox";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
@@ -499,9 +500,10 @@ function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefi
   const label = formatRelativeTime(lastActiveAt);
   if (!label) return null;
   const stale = isStale(lastActiveAt);
+  // AQU-2260: what the mark measures opens on click, never on hover.
   return (
-    <AppTooltip
-      content={
+    <NoteOnClick
+      note={
         stale
           ? "No recent activity; consider whether this membership is still needed"
           : "Last project-context activity in this org"
@@ -517,6 +519,6 @@ function LastActiveChip({ lastActiveAt }: { lastActiveAt: string | null | undefi
         {stale ? "stale · " : ""}
         {label}
       </span>
-    </AppTooltip>
+    </NoteOnClick>
   );
 }

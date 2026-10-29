@@ -1,6 +1,8 @@
 import { beforeEach, describe, it, expect, vi } from "vitest"
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { createRef } from "react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer"
 import {
   composerDraftStore, createComposerDraftStore, resetComposerDraftsForTesting, type ComposerDraftScope,
@@ -190,5 +192,35 @@ describe("ChatComposer (TipTap)", () => {
     expect(navigation).toHaveFocus()
     view.rerender(<><button>Selected thread</button><ChatComposer {...props} draftScope={{ ...scope, conversationId: "team-chat" }} isConfigured /></>)
     expect(navigation).toHaveFocus()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a labelled suggestion button says nothing on hover;
+// the icon-only Queue button's hover only names it.
+describe("ChatComposer hovers", () => {
+  it("a suggested action shows nothing on hover, and a greyed one says why on click", async () => {
+    renderWithTooltips(
+      <ChatComposer
+        isStreaming={false}
+        isConfigured
+        onSend={vi.fn()}
+        onStop={vi.fn()}
+        suggestedActions={[
+          { label: "Summarize", onClick: vi.fn(), title: "Summarize the open chapter" },
+          { label: "Check terms", onClick: vi.fn(), disabled: true, title: "Open a file first" },
+        ]}
+      />,
+    )
+    const user = userEvent.setup()
+    await user.hover(screen.getByRole("button", { name: "Summarize" }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectDisabledNote(screen.getByRole("button", { name: "Check terms" }), "Open a file first")
+  })
+
+  it("Queue's label names the button and nothing more", async () => {
+    // With nothing typed the button is greyed, so its label opens on click.
+    renderWithTooltips(<ChatComposer isStreaming isConfigured queueWhileStreaming onSend={vi.fn()} onStop={vi.fn()} />)
+    await expectDisabledNote(screen.getByRole("button", { name: "Queue message" }), /^Queue message$/)
   })
 })

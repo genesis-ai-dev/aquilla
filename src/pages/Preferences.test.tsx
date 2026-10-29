@@ -248,3 +248,27 @@ describe("Preferences — name when signed out (AQU-2259)", () => {
   })
 })
 
+
+// AQU-2264: the recorder's and the timeline's preferences get a page of their
+// own, reached from the General card, like Workspace.
+describe("Preferences — Recording (AQU-2264)", () => {
+  it("has a Recording row on the General card that says where its settings live", () => {
+    renderAt("/preferences")
+    const row = screen.getByRole("link", { name: /^Recording/ })
+    expect(row).toHaveAttribute("href", "/preferences/recording")
+    // Signed in here (useFrontierSession is mocked with a session above).
+    expect(row).toHaveTextContent("Follows you")
+  })
+
+  it("opens the recorder's and the timeline's settings on its own page", () => {
+    renderAt("/preferences/recording")
+    expect(screen.getByRole("heading", { name: "Recording" })).toBeInTheDocument()
+    expect(screen.getByTestId("recording-prefs-scope").closest("p")).toHaveTextContent(
+      "How the recorder and the timeline work for you. They follow you:",
+    )
+    expect(screen.getByRole("tablist", { name: "Countdown" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Countdown beep" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Follow playhead" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Snap to neighboring edges" })).toBeInTheDocument()
+  })
+})

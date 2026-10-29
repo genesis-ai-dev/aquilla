@@ -51,12 +51,11 @@ export function rowLanguage(project: ProjectRecord, row: TranscriptRow, targetLa
   if (row.isSourceSegment) {
     const sourceLane = project.lanes?.find((lane) => lane.role === "source")
     return laneLanguage(sourceLane ?? { role: "source" }, {
-      settings: project,
       role: "source",
       legacyTag: sourceLane?.legacyTag ?? null,
     }) ?? undefined
   }
-  return laneLanguageForTag(targetLang ?? "", project.lanes, project) ?? undefined
+  return laneLanguageForTag(targetLang ?? "", project.lanes) ?? undefined
 }
 
 async function requestCleanup(

@@ -80,7 +80,7 @@ export async function loadProjectDetail(
     ? await visibleTagsForMember(db, viewer.flag, projectId, viewer.userId, role)
     : { visible: null }
   const lanes = lanesVisibleToCaller(
-    laneContextFrom(settings.lanes ?? [], settings.settings, visible),
+    laneContextFrom(settings.lanes ?? [], visible),
   ).map((lane) => ({
     id: lane.id,
     name: lane.name,

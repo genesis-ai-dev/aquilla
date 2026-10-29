@@ -1376,7 +1376,6 @@ function AddAsLaneRecommendation({
       const known = existing
         .map((lane) =>
           laneLanguage(lane, {
-            settings: current?.settings,
             role: "target",
             legacyTag: lane.legacyTag,
           }),

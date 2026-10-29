@@ -670,28 +670,14 @@ export const projectSettings = defineNamespace({
       "Whether chapter headings, section titles and book names count toward " +
       "this project's translation and validation percentages. Leaving them " +
       "out means a book reads 100% once every verse is done.",
-    "projectSettings.structuralCells.inherit": "Organization default",
-    "projectSettings.structuralCells.currentlyCounting":
-      "The organization currently counts them",
-    "projectSettings.structuralCells.currentlyExcluding":
-      "The organization currently leaves them out",
-    "projectSettings.structuralCells.count": "Count them",
-    "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
-    // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
+    // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
       "Whether validating a cell copies its translation into the other cells in " +
       "the same file whose source text is identical. Filled-in cells are left " +
       "unvalidated, and cells someone has already validated are never changed.",
-    "projectSettings.autoPropagateRepetitions.inherit": "Organization default",
-    "projectSettings.autoPropagateRepetitions.currentlyOn":
-      "The organization currently propagates them",
-    "projectSettings.autoPropagateRepetitions.currentlyOff":
-      "The organization currently leaves them alone",
-    "projectSettings.autoPropagateRepetitions.on": "Propagate",
-    "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     // AQU-1768: "(text)", like "Required validators (text)" above it — the

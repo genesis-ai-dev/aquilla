@@ -12,19 +12,21 @@
 // play controls, and that bar mounts this component as it is. Everything it
 // needs arrives as props, and it reaches into nothing.
 //
-// Three states, one shape ("Timing: <choice>" with an (i) beside it; the (i)
-// opens its note on click, AQU-2260):
+// Three states, one shape ("⏱ <choice>", "Timing" on hover — canvas board
+// 55, option E: no "Timing:" label, and no length or (i) in the bar):
 //   - changeable: the choice is a dropdown with the two choices and a line each;
-//   - read-only (below project lead): the choice as plain text, the (i) says who
-//     can change it;
-//   - locked (a file timed to a film): "Follows source" as plain text, the (i)
-//     says the lines are timed to the film.
+//   - read-only (below project lead): the choice as plain text; a click on it
+//     says who can change it (AQU-2260: never on hover);
+//   - locked (a file timed to a film): "Follows source" as plain text; a click
+//     on it says the lines are timed to the film.
 //
 // Board 22 as drawn: the menu opens with "What decides how long each line is",
 // each choice shows how long the file comes out with it, and a last line says
-// muting never moves anything; beside the (i), "16.8 s long" for the current
-// choice. Board 24: a file with nothing to follow (no times, no source audio)
-// greys "Follows source" out with the reason.
+// muting never moves anything. Board 55 moved what the bar's (i) said beside
+// that heading, and the note about stand-in lines (`standInInfo`) to the
+// menu's foot. Board 24: a file with nothing to follow (no times, no source
+// audio) greys "Follows source" out with the reason.
+import { useId, type ReactNode } from "react"
 import { ChevronDown, Timer } from "lucide-react"
 import {
   DropdownMenu,
@@ -34,7 +36,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { InfoNote } from "@/components/ui/info-note"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -68,6 +72,11 @@ export interface TimingModeControlProps {
   sourceUnavailable?: boolean
   /** How long the file comes out with each choice, in seconds (null = none). */
   lengths?: Partial<Record<AudioTimingMode, number | null>>
+  /** "bar": sized like the media view's top bar buttons (28 px, 0.8 rem). */
+  size?: "default" | "bar"
+  /** Why some lines show no times (the timeline has stand-in lines): an (i)
+   *  at the foot of the menu. */
+  standInInfo?: string
   className?: string
 }
 
@@ -79,21 +88,37 @@ function formatFileLength(t: TFunction, sec: number): string {
   return t("editor.timeline.timingLengthHours", { hours: Math.floor(whole / 3600), minutes: Math.floor((whole % 3600) / 60) })
 }
 
-/** The control's (i): a click opens its explanation in a small note beside it,
- *  and a second click or a click outside closes it (AQU-2260; it was a hover,
- *  Sam, Oct 25). The header itself stays short. Exported for the timeline's
- *  one (i) about stand-in lines. */
-export function TimingInfoButton({ label, text, testId }: { label: string; text: string; testId: string }) {
+/** A line of the Timing menu with its (i). The (i) opens its explanation in
+ *  place, under the line, and a second click shuts it: an (i) is a click,
+ *  never a hover (Sam, Oct 28), and a menu has room for the text where it is.
+ *  The line stays short until someone asks (Sam, Oct 25). */
+function TimingMenuInfoLine({ children, label, text, testId, lineTestId, className }: {
+  children: ReactNode
+  label: string
+  text: string
+  testId: string
+  lineTestId?: string
+  className?: string
+}) {
+  const [open, toggle] = useInfoOpen()
+  const id = useId()
   return (
-    <InfoNote label={label} testId={testId}>
-      {text}
-    </InfoNote>
+    <div className={className}>
+      <div data-testid={lineTestId} className="flex items-center gap-1">
+        {children}
+        <InfoToggle open={open} onToggle={toggle} label={label} controls={id} testId={testId} />
+      </div>
+      <InfoReveal open={open} id={id} testId={`${testId}-text`} className="font-normal leading-snug">
+        {text}
+      </InfoReveal>
+    </div>
   )
 }
 
 export function TimingModeControl({
-  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, className,
+  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, size = "default", standInInfo, className,
 }: TimingModeControlProps) {
+  const bar = size === "bar"
   const t = useT()
   // A film-timed file is shown as following its source whatever reaches here,
   // and a file with nothing to follow as following its recordings: the
@@ -112,31 +137,40 @@ export function TimingModeControl({
     const sec = lengths?.[m]
     return sec != null && Number.isFinite(sec) && sec > 0 ? formatFileLength(t, sec) : null
   }
-  const shownLength = lengthOf(shown)
 
   return (
     <div
       data-testid="tl-timing-mode"
       data-mode={shown}
       data-locked={filmTimed ? "film" : changeable ? undefined : "role"}
-      className={cn("inline-flex shrink-0 items-center gap-1 text-[11px]", className)}
+      className={cn("inline-flex shrink-0 items-center gap-1", bar ? "text-[0.8rem]" : "text-[11px]", className)}
     >
       {changeable ? (
         <DropdownMenu>
-          <DropdownMenuTrigger
-            data-testid="tl-timing-mode-trigger"
-            aria-label={t("editor.timeline.timingMenuAria", { mode: name })}
-            className="inline-flex h-6 items-center gap-1 rounded-md border border-border bg-background px-2 text-foreground/80 hover:bg-muted aria-expanded:bg-muted"
-          >
-            <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-            <span className="text-muted-foreground">{t("editor.timeline.timingLabel")}</span>
-            <span className="font-medium text-sky-700 dark:text-sky-300">{name}</span>
-            <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-          </DropdownMenuTrigger>
+          <AppTooltip content={t("editor.timeline.timingTip")}>
+            <DropdownMenuTrigger
+              data-testid="tl-timing-mode-trigger"
+              aria-label={t("editor.timeline.timingMenuAria", { mode: name })}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-border bg-background text-foreground/80 hover:bg-muted aria-expanded:bg-muted",
+                bar ? "h-7 px-2.5" : "h-6 px-2",
+              )}
+            >
+              <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <span className="font-medium text-sky-700 dark:text-sky-300">{name}</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
+            </DropdownMenuTrigger>
+          </AppTooltip>
           <DropdownMenuContent align="start" className="w-80 min-w-80">
-            <div data-testid="tl-timing-menu-heading" className="px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
+            <TimingMenuInfoLine
+              lineTestId="tl-timing-menu-heading"
+              label={t("editor.timeline.timingInfoAria")}
+              text={infoText}
+              testId="tl-timing-mode-info"
+              className="px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground"
+            >
               {t("editor.timeline.timingMenuHeading")}
-            </div>
+            </TimingMenuInfoLine>
             <DropdownMenuRadioGroup
               value={shown}
               onValueChange={(next) => {
@@ -177,23 +211,39 @@ export function TimingModeControl({
             <div data-testid="tl-timing-menu-mute-note" className="px-2 pt-1 pb-1.5 text-[11px] leading-snug text-muted-foreground">
               {t("editor.timeline.timingMenuMuteNote")}
             </div>
+            {standInInfo && (
+              <TimingMenuInfoLine
+                label={t("editor.timeline.standInInfoAria")}
+                text={standInInfo}
+                testId="tl-stand-in-info"
+                className="px-2 pb-1.5 text-[11px] leading-snug text-muted-foreground"
+              >
+                {t("editor.timeline.standInInfoAria")}
+              </TimingMenuInfoLine>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <span
-          data-testid={`tl-timing-mode-${shown}`}
-          className="inline-flex h-6 items-center gap-1 px-1 text-foreground/70"
+        // Read-only: the choice as plain text. What the menu's (i) would say
+        // — who can change it, or that the film sets the timing — opens in a
+        // small note on a click of the text and shuts on a second click.
+        // AQU-2260 (Sam, Oct 29): nothing explains itself on hover, and a
+        // short label that explains itself is its own button; board 55,
+        // option E keeps the bar free of (i)s, so the text is that button.
+        <NoteOnClick
+          note={`${infoText}${standInInfo ? ` ${standInInfo}` : ""}`}
+          testId="tl-timing-mode-reason"
+          align="start"
+          className="px-1 text-foreground/70"
         >
-          <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          <span className="text-muted-foreground">{t("editor.timeline.timingLabel")}</span>
-          <span className="font-medium">{name}</span>
-        </span>
-      )}
-      <TimingInfoButton label={t("editor.timeline.timingInfoAria")} text={infoText} testId="tl-timing-mode-info" />
-      {shownLength && (
-        <span data-testid="tl-timing-length" className="whitespace-nowrap tabular-nums text-muted-foreground">
-          {t("editor.timeline.timingLengthLong", { length: shownLength })}
-        </span>
+          <span
+            data-testid={`tl-timing-mode-${shown}`}
+            className={cn("inline-flex items-center gap-1", bar ? "h-7" : "h-6")}
+          >
+            <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            <span className="font-medium">{name}</span>
+          </span>
+        </NoteOnClick>
       )}
     </div>
   )

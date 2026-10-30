@@ -4,8 +4,12 @@ import type { OverflowMenuItem } from "@/components/OverflowMenu"
  *  Height is `py-2` plus the `h-8` segmented control. Start inset is `ps-4`
  *  so a 16px leading icon has the same air on the left as above it; end
  *  inset stays `pe-2` so trailing icon buttons sit closer to the edge. */
+// 40 px, as the media view's top bar (h-10), with its 32 px controls at the
+// same height, so the view switch does not move between views (Sam, Oct 28:
+// "make the height and shape of the header consistent"). min-h, not h: the
+// Agent row may wrap when narrow.
 export const EDITOR_SURFACE_TOOLBAR_CLASS =
-  "relative flex min-w-0 shrink-0 items-center gap-2 border-b border-border bg-background/90 py-2 ps-4 pe-2 backdrop-blur-xl"
+  "relative flex min-h-10 min-w-0 shrink-0 items-center gap-2 border-b border-border bg-background/90 py-[3px] ps-4 pe-2 backdrop-blur-xl"
 
 /** Square outline ⋯ matching the mode switch height on both surfaces. */
 export const EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS = "size-8 p-0 bg-card shadow-xs"

@@ -31,6 +31,8 @@ export interface TrackFields {
   color?: string | null
   sourceTrackId?: string | null
   contentFileId?: string | null
+  /** AQU-2252: false = a layer; null = the default (sets its lines' lengths). */
+  setsLineLengths?: boolean | null
 }
 
 /** `before` null = the track did not exist (it was added); `after` null = deleted. */
@@ -48,7 +50,9 @@ export interface TrackStepContext {
   removeTakes(takes: readonly TrackTake[]): Promise<void>
 }
 
-const FIELDS: ReadonlyArray<keyof TrackFields> = ["kind", "name", "order", "groupId", "color", "sourceTrackId", "contentFileId"]
+const FIELDS: ReadonlyArray<keyof TrackFields> = [
+  "kind", "name", "order", "groupId", "color", "sourceTrackId", "contentFileId", "setsLineLengths",
+]
 
 function matches(current: TrackFields | null, expected: TrackFields | null): boolean {
   if (expected === null) return current === null
@@ -115,6 +119,7 @@ export function trackFieldsOf(
     color?: string | null
     sourceTrackId?: string | null
     contentFileId?: string | null
+    setsLineLengths?: boolean
   },
   keys?: ReadonlyArray<keyof TrackFields>,
 ): TrackFields {
@@ -126,6 +131,8 @@ export function trackFieldsOf(
     color: track.color ?? null,
     sourceTrackId: track.sourceTrackId ?? null,
     contentFileId: track.contentFileId ?? null,
+    // Only `false` is ever stored; the default reads as nothing stored.
+    setsLineLengths: track.setsLineLengths === false ? false : null,
   }
   if (!keys) return all
   const picked: TrackFields = {}

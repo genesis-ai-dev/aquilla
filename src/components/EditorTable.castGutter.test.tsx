@@ -10,14 +10,19 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { EditorTable, type AudioLensContext } from "./EditorTable"
+import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
+// AQU-1758: what the table asked the probe for, render by render.
+const micProbe = vi.hoisted(() => ({ asked: [] as boolean[] }))
 vi.mock("@/hooks/useMicPermission", () => ({
-  useMicPermission: () => ({ micDenied: true }),
+  useMicPermission: (enabled = true) => {
+    micProbe.asked.push(enabled)
+    return { micDenied: true }
+  },
 }))
 
 // happy-dom has no layout engine — render every row (same stand-in as the
@@ -130,25 +135,8 @@ function makeStore(): CellStore {
   return store
 }
 
-function audioLens(): AudioLensContext {
-  return {
-    voices: TTS.voices ?? [],
-    settings: TTS,
-    defaultVoiceId: "v-narr",
-    project,
-    projectId: project.id,
-    session: null,
-    username: "tester",
-    onAssignCast: () => {},
-    onAfterGenerate: () => {},
-    onPlayCell: () => {},
-    onMakeCharacterFromCell: () => {},
-  }
-}
-
 function renderTable(opts: {
   castGutter?: boolean
-  audioLens?: AudioLensContext | null
   actions?: Partial<EditorActionsContextValue>
 } = {}) {
   const qc = new QueryClient()
@@ -173,7 +161,6 @@ function renderTable(opts: {
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
           castGutter={opts.castGutter ?? true}
-          audioLens={opts.audioLens}
           ttsSettings={TTS}
         />
       </EditorActionsProvider>
@@ -248,13 +235,62 @@ describe("EditorTable — character gutter", () => {
     expect(opts).toEqual({ scope: "line" })
   })
 
-  it("the Audio view offers the voice dropdown on a heading, and not on a section break", async () => {
-    renderTable({ castGutter: false, audioLens: audioLens() })
-    await screen.findByText("The Creation")
-    expect(within(rowEl("cell-section")).getByTestId("voice-field")).toBeInTheDocument()
-    expect(within(rowEl("cell-plain")).getByTestId("voice-field")).toBeInTheDocument()
-    expect(within(rowEl("cell-heading")).queryByTestId("voice-field")).toBeNull()
-    expect(within(rowEl("cell-heading")).queryByTestId("voice-card-empty")).toBeNull()
+  // AQU-2212 (the Audio view card's rule, AQU-1758): a pick ACTS on the line,
+  // but only once the assignment was accepted.
+  it("hands an accepted pick on to act on the line, and a refused one nowhere", async () => {
+    const onLineVoicePicked = vi.fn()
+    const { unmount } = renderTable({ actions: { onAssignCastVoice: () => true, onLineVoicePicked } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByRole("button", { name: /John/ }))
+    expect(onLineVoicePicked).toHaveBeenCalledTimes(1)
+    expect(onLineVoicePicked.mock.calls[0][0].id).toBe("cell-plain")
+    expect(onLineVoicePicked.mock.calls[0][1]).toBe("v-john")
+    unmount()
+    onLineVoicePicked.mockClear()
+    renderTable({ actions: { onAssignCastVoice: () => false, onLineVoicePicked } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByRole("button", { name: /John/ }))
+    expect(onLineVoicePicked).not.toHaveBeenCalled()
+  })
+
+  it("ends the line's voice dropdown with Add a voice…, for that line (AQU-2212)", async () => {
+    const onAddVoiceForLine = vi.fn()
+    renderTable({ actions: { onAssignCastVoice: () => true, onAddVoiceForLine } })
+    await screen.findByText("Mary's line")
+    fireEvent.click(within(rowEl("cell-plain")).getByTestId("gutter-voice"))
+    fireEvent.click(await screen.findByTestId("gutter-voice-add"))
+    expect(onAddVoiceForLine).toHaveBeenCalledWith("cell-plain")
+  })
+
+  // AQU-1758: the mic permission probe ran when the Audio view mounted. It
+  // runs in Media now (where the recorder opens from the rows and the
+  // timeline), and only for someone who may record.
+  it("probes the microphone in Media, and not in Text", async () => {
+    micProbe.asked.length = 0
+    const { unmount } = renderTable()
+    await screen.findByText("Mary's line")
+    expect(micProbe.asked.length).toBeGreaterThan(0)
+    expect(micProbe.asked.every(Boolean)).toBe(true)
+    unmount()
+    micProbe.asked.length = 0
+    renderTable({ castGutter: false })
+    await screen.findByText("Mary's line")
+    expect(micProbe.asked.length).toBeGreaterThan(0)
+    expect(micProbe.asked.some(Boolean)).toBe(false)
+  })
+
+  // AQU-1758: the Audio view, which put a voice card where the source text
+  // is, is gone. Under the timeline every row shows its source, as in Text.
+  it("shows every row's source text, and no voice cards, under the timeline", async () => {
+    renderTable()
+    await screen.findByText("Mary's line")
+    expect(within(rowEl("cell-section")).getAllByText("The Creation").length).toBeGreaterThan(0)
+    expect(within(rowEl("cell-plain")).getByText("an uncast line")).toBeInTheDocument()
+    expect(within(rowEl("cell-heading")).getByText("Section title")).toBeInTheDocument()
+    expect(screen.queryAllByTestId("voice-field")).toHaveLength(0)
+    expect(screen.queryAllByTestId("voice-card-empty")).toHaveLength(0)
   })
 
   it("the scope choice rides along in the gutter popover", async () => {

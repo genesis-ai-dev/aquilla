@@ -182,6 +182,23 @@ describe('cell-field commands — validation', () => {
     expect(badId.ok).toBe(false)
   })
 
+  it('AQU-2252: setsLineLengths makes an added track a layer, as the handler allows; only a boolean or null', () => {
+    const layer = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: false } },
+    ])
+    expect(layer.ok).toBe(true)
+    if (!layer.ok) throw new Error('unreachable')
+    expect(layer.commands[0]).toMatchObject({ patch: { setsLineLengths: false } })
+    const cleared = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: null } },
+    ])
+    expect(cleared.ok).toBe(true)
+    const junk = validateCommands([
+      { kind: 'SetTrackOverride', fileId: FILE, trackId: 't1', patch: { setsLineLengths: 'no' } },
+    ])
+    expect(junk.ok).toBe(false)
+  })
+
   it('normalizes SetSource + SetTranscription on one cell into ONE source event', () => {
     const cmds: CellFieldCommand[] = [
       { kind: 'SetSource', fileId: FILE, cellId: 'cell-1', value: 'fixed' },

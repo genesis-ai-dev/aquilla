@@ -31,6 +31,7 @@ import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { characterKey } from "@/lib/export/audio-by-character"
 import { defaultTrackTakeId, isSilencedForExport } from "@/lib/export/audio-validation-scope"
+import { bookLineParts } from "@/lib/export/book-line-parts"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 
@@ -177,6 +178,47 @@ interface ResolvedClip {
   clipKey: string
   voice: Voice
   trimmed: boolean
+  /**
+   * AQU-1758 (Sam, Oct 29): on a book, the line as playback lays it out — a
+   * pause someone dragged open before the take as silence, then each piece of
+   * a cut take with the silence between them. Only for the modes that join
+   * takes end to end; absent when the line is just its take.
+   */
+  parts?: LinePart[]
+}
+
+type LinePart = { silenceSamples: number } | { piece: ResolvedClip }
+
+/**
+ * AQU-1758: a book's line as playback lays it out, as parts of `clip` — or
+ * null when the line is just its take (or its layout is not known), and the
+ * take is joined as it always was.
+ */
+function linePartsFor(clip: ResolvedClip): LinePart[] | null {
+  const layout = bookLineParts(clip.cell, clip.attachedId)
+  if (!layout || (layout.length === 1 && layout[0].kind === "take")) return null
+  const parts: LinePart[] = []
+  for (const part of layout) {
+    if (part.kind === "silence") {
+      parts.push({ silenceSamples: Math.round((part.ms / 1000) * TARGET_RATE) })
+      continue
+    }
+    const attachment = clip.cell.attachments?.[part.attachmentId]
+    const parsed = attachment?.url ? parseFrontierAudioUrl(attachment.url) : null
+    if (!attachment || !parsed) return null
+    parts.push({
+      piece: {
+        ...clip,
+        attachment,
+        attachedId: part.attachmentId,
+        audioId: parsed.audioId,
+        ext: parsed.ext,
+        clipKey: `${parsed.audioId}.${parsed.ext}`,
+        trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
+      },
+    })
+  }
+  return parts
 }
 
 export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<AudioAssemblyResult> {
@@ -211,7 +253,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       skipped.push({ cellId: cell.id, reason: "unsupported audio URL (legacy clip)" })
       return
     }
-    resolved.push({
+    const clip: ResolvedClip = {
       cell,
       docIndex,
       attachment,
@@ -221,11 +263,21 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       clipKey: `${parsed.audioId}.${parsed.ext}`,
       voice: resolveCastVoice(args.settings, cell, cell.ttsSettings?.voiceId),
       trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
-    })
+    }
+    // AQU-1758: the modes that join takes end to end lay a book's line out as
+    // playback does. Separate clips are one file per take, as before.
+    const parts = args.mode === "separate-clips" ? null : linePartsFor(clip)
+    resolved.push(parts ? { ...clip, parts } : clip)
   })
 
+  // Every use of a clip is counted, so the decode cache drops it after its last
+  // (AQU-1862) — each piece of a cut take is a use of its recording.
   const shareCount = new Map<string, number>()
-  for (const c of resolved) shareCount.set(c.clipKey, (shareCount.get(c.clipKey) ?? 0) + 1)
+  for (const c of resolved) {
+    for (const use of c.parts ? c.parts.flatMap((p) => ("piece" in p ? [p.piece] : [])) : [c]) {
+      shareCount.set(use.clipKey, (shareCount.get(use.clipKey) ?? 0) + 1)
+    }
+  }
 
   const total = resolved.length
   let done = 0
@@ -333,6 +385,37 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
     return { data, samples: quantised.length }
   }
 
+  /** A line's audio as one PCM16 part: a book's line laid out as playback lays
+   *  it out (its silences, then its pieces), else its take alone. Every piece
+   *  is read, so each releases its share of the cache; null when one fails. */
+  const linePartFor = async (clip: ResolvedClip): Promise<{ data: Blob; samples: number } | null> => {
+    if (!clip.parts) return pcm16PartFor(clip)
+    const blobs: Blob[] = []
+    let samples = 0
+    let readable = true
+    for (const part of clip.parts) {
+      if ("silenceSamples" in part) {
+        pushSilence(blobs, part.silenceSamples)
+        samples += part.silenceSamples
+        continue
+      }
+      const audio = await pcm16PartFor(part.piece)
+      if (!audio) {
+        readable = false
+        continue
+      }
+      if (isSilencedForExport(part.piece.attachment)) {
+        // AQU-965: a piece withdrawn for want of validation is silence of its
+        // own length, so the rest of the line stays where it was.
+        pushSilence(blobs, audio.samples)
+      } else {
+        blobs.push(audio.data)
+      }
+      samples += audio.samples
+    }
+    return readable ? { data: new Blob(blobs), samples } : null
+  }
+
   const failReason = (err: unknown): string =>
     `audio failed: ${err instanceof Error ? err.message : String(err)}`
 
@@ -383,7 +466,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
     for (const clip of resolved) {
       throwIfAborted()
       try {
-        const part = await pcm16PartFor(clip)
+        const part = await linePartFor(clip)
         if (part) parts.push(part.data)
       } catch (err) {
         skipped.push({ cellId: clip.cell.id, reason: failReason(err) })
@@ -406,7 +489,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
   for (const clip of resolved) {
     throwIfAborted()
     try {
-      const part = await pcm16PartFor(clip)
+      const part = await linePartFor(clip)
       if (part) {
         if (!voiceById.has(clip.voice.id)) {
           voiceById.set(clip.voice.id, clip.voice)

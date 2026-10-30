@@ -298,9 +298,34 @@ describe("buildProgramme — a split take", () => {
     expect(slot.slotLenSec).toBeCloseTo(2.5)
     expect(slot.targetWindow).toEqual({ start: 0, end: 2.5 })
     expect(slot.targetPieces).toEqual([
-      { audioId: TAKE, start: 0.2, end: 1.5 },
-      { audioId: PIECE, start: 2.5, end: 3.7 },
+      { audioId: TAKE, start: 0.2, end: 1.5, atSec: 0 },
+      { audioId: PIECE, start: 2.5, end: 3.7, atSec: 1.3 },
     ])
+  })
+
+  // AQU-1758 (Sam's decision 3): a gap someone dragged open between two
+  // pieces is deliberate silence inside the line — drawn, joined and played.
+  it("keeps a gap dragged open between two pieces as silence inside the line", () => {
+    const cell = split(4000)
+    // The second piece moved 0.7 s along (its clip's start 0.7 s after the
+    // line's): 2 s into the line, 0.7 s after the first ends.
+    ;(cell.attachments![PIECE] as { targetOffsetMs?: number }).targetOffsetMs = 700
+    const [slot] = buildProgramme([cell]).slots
+    expect(slot.targetPieces!.map((p) => [p.atSec, p.gapBeforeSec])).toEqual([[0, undefined], [2, expect.closeTo(0.7, 5)]])
+    expect(slot.targetLenSec).toBeCloseTo(3.2)
+    expect(slot.slotLenSec).toBeCloseTo(3.2)
+    expect(slot.targetWindow).toEqual({ start: 0, end: expect.closeTo(3.2, 5) })
+  })
+
+  it("never lets a piece sit over the one before it: it is pushed along", () => {
+    const cell = split(4000)
+    // The first piece moved 1 s in; the second, never moved, follows it.
+    ;(cell.attachments![TAKE] as { targetOffsetMs?: number }).targetOffsetMs = 1000
+    const [slot] = buildProgramme([cell]).slots
+    expect(slot.targetLeadSec).toBeCloseTo(1)
+    expect(slot.targetPieces!.map((p) => p.atSec)).toEqual([1, expect.closeTo(2.3, 5)])
+    expect(slot.targetPieces![1].gapBeforeSec).toBeUndefined()
+    expect(slot.slotLenSec).toBeCloseTo(3.5)
   })
 
   it("falls back to the first piece while a piece's length is unknown", () => {
@@ -466,7 +491,8 @@ describe("moving a take inside its line (AQU-2215)", () => {
       expect(canCarryTargetLead(cells[0], slotOf(cells, "v1"))).toBe(false)
     })
 
-    it("a split take cannot — its pieces sit end to end from the line's start", () => {
+    // AQU-1758 (Sam's decision 3): each piece can be dragged.
+    it("a split take can — each piece carries its own place", () => {
       const TAKE = "audio-a-1700000000-take.wav"
       const PIECE = "audio-a-1700000500-piece.wav"
       const cells = [
@@ -481,15 +507,44 @@ describe("moving a take inside its line (AQU-2215)", () => {
       ]
       const slot = slotOf(cells, "a")
       expect(slot.targetPieces).toBeDefined()
-      expect(canCarryTargetLead(cells[0], slot)).toBe(false)
+      expect(canCarryTargetLead(cells[0], slot)).toBe(true)
     })
 
-    it("a line with no times of its own cannot — there is nothing to measure from", () => {
+    // AQU-1758 (Sam's decision 3): every Bible verse — the pause is measured
+    // from the start of its slot, and stored on the take.
+    it("a line with no times of its own can — its pause is measured from its slot", () => {
       const takeId = "audio-u-1700000000-take.webm"
       const cell = {
         id: "u", fileId: "f1", original: "", translated: "", medium: "text",
         selectedAudioId: takeId,
         attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_000 } },
+      } as unknown as CellData
+      const prog = buildProgramme([cell], { standInLenSec: () => 2 })
+      expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(true)
+    })
+
+    it("a line with no times plays the pause stored on its take", () => {
+      const takeId = "audio-u-1700000000-take.webm"
+      const cell = {
+        id: "u", fileId: "f1", original: "", translated: "", medium: "text",
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 3_000, targetOffsetMs: 1_500 } },
+      } as unknown as CellData
+      const next = { ...cell, id: "w", selectedAudioId: takeId, attachments: { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000 } } } as unknown as CellData
+      const prog = buildProgramme([cell, next], { standInLenSec: () => 2 })
+      const slot = prog.byCellId.get("u")!
+      expect(slot.targetLeadSec).toBeCloseTo(1.5)
+      expect(slot.slotLenSec).toBeCloseTo(4.5)
+      // The line after it moves along by the pause.
+      expect(prog.byCellId.get("w")!.startSec).toBeCloseTo(4.5)
+    })
+
+    it("a take of unknown length still cannot", () => {
+      const takeId = "audio-u-1700000000-take.webm"
+      const cell = {
+        id: "u", fileId: "f1", original: "Some words to read", translated: "", medium: "text",
+        selectedAudioId: takeId,
+        attachments: { [takeId]: { type: "audio", url: "frontier-audio://take" } },
       } as unknown as CellData
       const prog = buildProgramme([cell], { standInLenSec: () => 2 })
       expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(false)

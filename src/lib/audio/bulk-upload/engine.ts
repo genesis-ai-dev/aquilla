@@ -58,6 +58,9 @@ export interface BulkFailure {
   code: BulkFailureCode
   /** The underlying message, for the details line. */
   message: string
+  /** How many of the run's files this failure kept from landing: a verse in
+   *  parts is several files in one failure. */
+  files: number
 }
 
 export interface BulkUploadState {
@@ -101,6 +104,14 @@ let abort: AbortController | null = null
 /** What the last run was asked to do, so "Try again" can redo its failures. */
 let lastRequest: BulkUploadRequest | null = null
 let failedJobs: UploadJob[] = []
+
+/** Where a range or a verse in parts got to before it failed, so "Try again"
+ *  carries on from there instead of uploading and attaching it all again —
+ *  which gave every line that had landed a second take. */
+interface RangeProgress { kind: "range"; result: AudioUploadResult; durationMs: number | undefined; attached: number }
+interface PiecesProgress { kind: "pieces"; result: AudioUploadResult; lengthsMs: number[]; rootAttached: boolean; lastPiece: string; cuts: number }
+type JobProgress = RangeProgress | PiecesProgress
+const progressOf = new WeakMap<UploadJob, JobProgress>()
 
 function emit() {
   for (const l of listeners) l()
@@ -284,14 +295,27 @@ async function uploadOne(ctx: RunContext, fileId: string, cellId: string, file: 
   scheduleNotify(ctx, fileId)
 }
 
+/** A range or a verse in parts that failed after some of it landed. */
+class Unfinished extends Error {
+  readonly cause: unknown
+  readonly progress: JobProgress
+  constructor(cause: unknown, progress: JobProgress) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.cause = cause
+    this.progress = progress
+  }
+}
+
 /** One file over several lines: one object, a take of it on every line. */
-async function uploadRange(ctx: RunContext, fileId: string, cellIds: readonly string[], file: File): Promise<void> {
+async function uploadRange(ctx: RunContext, fileId: string, cellIds: readonly string[], file: File, from?: RangeProgress): Promise<void> {
   const ext = extFromFile(file)
-  const result = await uploadWithRetry(ctx, { fileId, audioId: buildAudioId(cellIds[0]), ext, blob: file })
+  const result = from?.result ?? await uploadWithRetry(ctx, { fileId, audioId: buildAudioId(cellIds[0]), ext, blob: file })
   markProjectHasAudioDataSoon(ctx.req.projectId)
-  const durationMs = await probeDurationMsSafe(file)
+  const durationMs = from ? from.durationMs : await probeDurationMsSafe(file)
   for (const [i, cellId] of cellIds.entries()) {
-    await attachUploadedTake({
+    if (from && i < from.attached) continue
+    try {
+      await attachUploadedTake({
       ...attachFields(ctx),
       fileId,
       cellId,
@@ -301,13 +325,16 @@ async function uploadRange(ctx: RunContext, fileId: string, cellIds: readonly st
       url: result.url,
       mimeType: file.type || undefined,
       durationMs,
-    })
+      })
+    } catch (e) {
+      throw new Unfinished(e, { kind: "range", result, durationMs, attached: i })
+    }
   }
   scheduleNotify(ctx, fileId)
 }
 
-/** The parts of one verse: joined in order, uploaded once, cut at the joins. */
-async function uploadPieces(ctx: RunContext, fileId: string, cellId: string, files: readonly File[]): Promise<void> {
+/** The parts of one verse joined in order: their lengths, and the WAV. */
+async function joinParts(files: readonly File[]): Promise<{ lengthsMs: number[]; joined: Blob }> {
   const { decodeToMono48k, concatPcm, TARGET_RATE } = await import("@/lib/audio/decode-mono")
   const { encodeWavPcm16 } = await import("@/lib/audio/wav-encode")
   const pcm: Float32Array[] = []
@@ -322,38 +349,57 @@ async function uploadPieces(ctx: RunContext, fileId: string, cellId: string, fil
   if (lengthsMs.some((ms) => ms < CUT_MIN_PIECE_MS + 20)) {
     throw new JobError("tooShort", "a part is shorter than a piece may be")
   }
-  const joined = encodeWavPcm16(concatPcm(pcm), TARGET_RATE)
-  const result = await uploadWithRetry(ctx, { fileId, audioId: buildAudioId(cellId), ext: "wav", blob: joined })
+  return { lengthsMs, joined: encodeWavPcm16(concatPcm(pcm), TARGET_RATE) }
+}
+
+/** The parts of one verse: joined in order, uploaded once, cut at the joins. */
+async function uploadPieces(ctx: RunContext, fileId: string, cellId: string, files: readonly File[], from?: PiecesProgress): Promise<void> {
+  let result: AudioUploadResult
+  let lengthsMs: number[]
+  if (from) {
+    ({ result, lengthsMs } = from)
+  } else {
+    const parts = await joinParts(files)
+    lengthsMs = parts.lengthsMs
+    result = await uploadWithRetry(ctx, { fileId, audioId: buildAudioId(cellId), ext: "wav", blob: parts.joined })
+  }
   markProjectHasAudioDataSoon(ctx.req.projectId)
   const rootId = `${result.audioId}.${result.ext}`
-  const totalMs = Math.round(lengthsMs.reduce((a, b) => a + b, 0))
-  await attachUploadedTake({
-    ...attachFields(ctx),
-    fileId,
-    cellId,
-    audioId: rootId,
-    url: result.url,
-    mimeType: "audio/wav",
-    durationMs: totalMs,
-  })
-  // Cut the last piece at each join in turn: the root keeps the first part,
-  // and each cut's new piece is the rest, cut again at the next join.
-  let lastPiece = rootId
-  let at = 0
-  for (const ms of lengthsMs.slice(0, -1)) {
-    at += ms
-    const newAudioId = newPieceAudioId(cellId, rootId)
-    await emitCellAudioCut({
-      projectId: ctx.req.projectId,
-      fileId,
-      cellId,
-      audioId: lastPiece,
-      atMs: Math.round(at),
-      newAudioId,
-      ...(ctx.req.targetLang ? { targetLang: ctx.req.targetLang } : {}),
-      author: ctx.req.username,
-    })
-    lastPiece = newAudioId
+  const progress: PiecesProgress = from ?? { kind: "pieces", result, lengthsMs, rootAttached: false, lastPiece: rootId, cuts: 0 }
+  try {
+    if (!progress.rootAttached) {
+      await attachUploadedTake({
+        ...attachFields(ctx),
+        fileId,
+        cellId,
+        audioId: rootId,
+        url: result.url,
+        mimeType: "audio/wav",
+        durationMs: Math.round(lengthsMs.reduce((a, b) => a + b, 0)),
+      })
+      progress.rootAttached = true
+    }
+    // Cut the last piece at each join in turn: the root keeps the first part,
+    // and each cut's new piece is the rest, cut again at the next join.
+    const joins = lengthsMs.slice(0, -1)
+    for (let k = progress.cuts; k < joins.length; k++) {
+      const at = joins.slice(0, k + 1).reduce((a, b) => a + b, 0)
+      const newAudioId = newPieceAudioId(cellId, rootId)
+      await emitCellAudioCut({
+        projectId: ctx.req.projectId,
+        fileId,
+        cellId,
+        audioId: progress.lastPiece,
+        atMs: Math.round(at),
+        newAudioId,
+        ...(ctx.req.targetLang ? { targetLang: ctx.req.targetLang } : {}),
+        author: ctx.req.username,
+      })
+      progress.lastPiece = newAudioId
+      progress.cuts = k + 1
+    }
+  } catch (e) {
+    throw new Unfinished(e, progress)
   }
   scheduleNotify(ctx, fileId)
 }
@@ -389,10 +435,14 @@ async function runJob(ctx: RunContext, job: UploadJob): Promise<void> {
         }
       }
       return
-    case "range":
-      return uploadRange(ctx, job.fileId, job.cellIds, files[0])
-    case "pieces":
-      return uploadPieces(ctx, job.fileId, job.cellId, files)
+    case "range": {
+      const from = progressOf.get(job)
+      return uploadRange(ctx, job.fileId, job.cellIds, files[0], from?.kind === "range" ? from : undefined)
+    }
+    case "pieces": {
+      const from = progressOf.get(job)
+      return uploadPieces(ctx, job.fileId, job.cellId, files, from?.kind === "pieces" ? from : undefined)
+    }
   }
 }
 
@@ -436,6 +486,11 @@ export async function startBulkUpload(req: BulkUploadRequest): Promise<void> {
     notifyTimers: new Map(),
   }
   if (typeof window !== "undefined") window.addEventListener("beforeunload", onBeforeUnload)
+  // How the preview named a job's line. Never lets a failure to name one stop
+  // the run.
+  const label = (job: UploadJob) => {
+    try { return req.targetLabel(job) } catch { return "" }
+  }
 
   let next = 0
   const queue = [...req.jobs]
@@ -448,7 +503,7 @@ export async function startBulkUpload(req: BulkUploadRequest): Promise<void> {
         patch({
           done: (state?.done ?? 0) + filesIn(job),
           ...(job.kind === "single" && job.files.length > 1
-            ? { takes: [...(state?.takes ?? []), { target: req.targetLabel(job), count: job.files.length }] }
+            ? { takes: [...(state?.takes ?? []), { target: label(job), count: job.files.length }] }
             : {}),
         })
       } catch (e) {
@@ -458,33 +513,38 @@ export async function startBulkUpload(req: BulkUploadRequest): Promise<void> {
           patch({ done: (state?.done ?? 0) + landed, notStarted: (state?.notStarted ?? 0) + remaining.length })
           return
         }
-        const err = classify(e instanceof PartlyDone ? e.cause : e)
-        const rest: UploadJob = landed > 0 ? { ...job, files: remaining } as UploadJob : job
+        const err = classify(e instanceof PartlyDone || e instanceof Unfinished ? e.cause : e)
+        const rest: UploadJob = landed > 0 ? { ...job, files: remaining } as UploadJob : { ...job }
+        if (e instanceof Unfinished) progressOf.set(rest, e.progress)
         failedJobs.push(rest)
         const first = rest.files[0]
         if (landed > 0) patch({ done: (state?.done ?? 0) + landed })
         patch({
           failed: [
             ...(state?.failed ?? []),
-            { index: first, name: req.files[first]?.name ?? "", target: req.targetLabel(rest), code: err.code, message: err.message },
+            { index: first, name: req.files[first]?.name ?? "", target: label(rest), code: err.code, message: err.message, files: remaining.length },
           ],
         })
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(BULK_CONCURRENCY, queue.length) }, () => worker()))
-
-  const unstarted = queue.slice(next).reduce((n, job) => n + filesIn(job), 0)
-  for (const timer of ctx.notifyTimers.values()) clearTimeout(timer)
-  for (const fileId of ctx.touched) notifyAudioAttachmentsChanged(fileId)
-  if (typeof window !== "undefined") window.removeEventListener("beforeunload", onBeforeUnload)
-  abort = null
-  patch({
-    notStarted: (state?.notStarted ?? 0) + unstarted,
-    finished: true,
-    finishedAt: Date.now(),
-    waitingForConnection: false,
-  })
+  try {
+    await Promise.all(Array.from({ length: Math.min(BULK_CONCURRENCY, queue.length) }, () => worker()))
+  } finally {
+    // Whatever happened, the run is over: the banner, Confirm and the
+    // leave-page prompt all read `finished`.
+    const unstarted = queue.slice(next).reduce((n, job) => n + filesIn(job), 0)
+    for (const timer of ctx.notifyTimers.values()) clearTimeout(timer)
+    for (const fileId of ctx.touched) notifyAudioAttachmentsChanged(fileId)
+    if (typeof window !== "undefined") window.removeEventListener("beforeunload", onBeforeUnload)
+    abort = null
+    patch({
+      notStarted: (state?.notStarted ?? 0) + unstarted,
+      finished: true,
+      finishedAt: Date.now(),
+      waitingForConnection: false,
+    })
+  }
   // A clean run needs no summary once it is done.
   if (state && state.failed.length === 0 && !state.cancelled) {
     const doneState = state

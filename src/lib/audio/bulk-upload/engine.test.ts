@@ -4,6 +4,8 @@ const uploads: Array<{ fileId: string; audioId: string; ext: string; size: numbe
 const attaches: Array<Record<string, unknown>> = []
 const cuts: Array<Record<string, unknown>> = []
 let uploadFailures: Array<Error> = []
+let attachFailures: Array<Error | undefined> = []
+let cutFailures: Array<Error | undefined> = []
 
 vi.mock("@/lib/audio/upload", async (orig) => {
   const real = await orig<typeof import("@/lib/audio/upload")>()
@@ -18,8 +20,18 @@ vi.mock("@/lib/audio/upload", async (orig) => {
   }
 })
 vi.mock("@/lib/sync/events-emit", () => ({
-  emitCellAudioAttach: vi.fn(async (input: Record<string, unknown>) => { attaches.push(input); return `ev-${attaches.length}` }),
-  emitCellAudioCut: vi.fn(async (input: Record<string, unknown>) => { cuts.push(input); return `cut-${cuts.length}` }),
+  emitCellAudioAttach: vi.fn(async (input: Record<string, unknown>) => {
+    const fail = attachFailures.shift()
+    if (fail) throw fail
+    attaches.push(input)
+    return `ev-${attaches.length}`
+  }),
+  emitCellAudioCut: vi.fn(async (input: Record<string, unknown>) => {
+    const fail = cutFailures.shift()
+    if (fail) throw fail
+    cuts.push(input)
+    return `cut-${cuts.length}`
+  }),
 }))
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 2403.6) }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
@@ -44,6 +56,7 @@ import {
   __resetBulkUploadForTests,
   cancelBulkUpload,
   getBulkUploadState,
+  isBulkUploadRunning,
   retryFailedBulkUploads,
   startBulkUpload,
   type BulkUploadRequest,
@@ -65,6 +78,8 @@ beforeEach(() => {
   attaches.length = 0
   cuts.length = 0
   uploadFailures = []
+  attachFailures = []
+  cutFailures = []
   __resetBulkUploadForTests()
 })
 afterEach(() => vi.useRealTimers())
@@ -150,7 +165,7 @@ describe("bulk upload engine", () => {
     uploadFailures = [new Error("audio upload failed (403): forbidden")]
     await startBulkUpload(request([{ kind: "single", fileId: "f1", cellId: "c1", files: [0] }], [file("two.wav")], { targetLabel: () => "Genesis 1:2" }))
     expect(getBulkUploadState()?.failed).toEqual([
-      { index: 0, name: "two.wav", target: "Genesis 1:2", code: "refused", message: "audio upload failed (403): forbidden" },
+      { index: 0, name: "two.wav", target: "Genesis 1:2", code: "refused", message: "audio upload failed (403): forbidden", files: 1 },
     ])
     // "Try them again" runs only the failures.
     await retryFailedBulkUploads()
@@ -184,5 +199,47 @@ describe("bulk upload engine", () => {
     online.mockRestore()
     expect(uploads).toHaveLength(0)
     expect(getBulkUploadState()).toMatchObject({ cancelled: true, finished: true, done: 0, notStarted: 10 })
+  })
+
+  // The Oct 29 review: a range or a verse in parts that failed part-way was
+  // tried again whole, so the lines that had landed got a second take.
+  it("a range that failed part-way carries on from the line it stopped at when tried again", async () => {
+    attachFailures = [undefined, new Error("outbox write failed")]
+    await startBulkUpload(request([{ kind: "range", fileId: "f1", cellIds: ["c1", "c2", "c3"], files: [0] }], [file("Genesis 1-1-3.wav")]))
+    expect(attaches.map((a) => a.cellId)).toEqual(["c1"])
+    expect(getBulkUploadState()?.failed).toHaveLength(1)
+    await retryFailedBulkUploads()
+    expect(uploads).toHaveLength(1)
+    expect(attaches.map((a) => a.cellId)).toEqual(["c1", "c2", "c3"])
+    expect(new Set(attaches.map((a) => a.url)).size).toBe(1)
+    expect(getBulkUploadState()).toMatchObject({ done: 1, failed: [] })
+  })
+
+  it("a verse in parts that failed at a cut carries on cutting, without uploading or attaching again", async () => {
+    cutFailures = [undefined, new Error("outbox write failed")]
+    await startBulkUpload(request([{ kind: "pieces", fileId: "f1", cellId: "c1", files: [0, 1, 2] }], [file("a.wav", 300), file("b.wav", 500), file("c.wav", 400)]))
+    expect(cuts.map((c) => c.atMs)).toEqual([300])
+    expect(getBulkUploadState()).toMatchObject({ done: 0, failed: [{ files: 3 }] })
+    await retryFailedBulkUploads()
+    expect(uploads).toHaveLength(1)
+    expect(attaches).toHaveLength(1)
+    expect(cuts.map((c) => c.atMs)).toEqual([300, 800])
+    expect(cuts[1].audioId).toBe(cuts[0].newAudioId)
+    expect(getBulkUploadState()).toMatchObject({ done: 3, failed: [] })
+  })
+
+  it("a failure counts every file it kept from landing", async () => {
+    uploadFailures = [new Error("audio upload failed (403): quota")]
+    await startBulkUpload(request([{ kind: "pieces", fileId: "f1", cellId: "c1", files: [0, 1] }], [file("a.wav", 300), file("b.wav", 500)]))
+    expect(getBulkUploadState()?.failed.map((f) => f.files)).toEqual([2])
+  })
+
+  it("an unexpected error ends the run instead of leaving it running", async () => {
+    uploadFailures = [new Error("audio upload failed (403): forbidden")]
+    await startBulkUpload(request([{ kind: "single", fileId: "f1", cellId: "c1", files: [0] }], [file("one.wav")], {
+      targetLabel: () => { throw new Error("label lookup broke") },
+    }))
+    expect(getBulkUploadState()).toMatchObject({ finished: true })
+    expect(isBulkUploadRunning()).toBe(false)
   })
 })

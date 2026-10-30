@@ -379,8 +379,9 @@ export function RecordingsReview({
         const labelOf = new Map(assignments.map((a) => [a.index, a.read ?? ""]))
         try {
           // Not awaited: the engine runs on after the dialog closes, and its
-          // banner reports the result.
-          void startBulkUpload({
+          // banner reports the result. It finishes its run whatever happens,
+          // so nothing is left for a rejection to tell anyone.
+          startBulkUpload({
             projectId,
             session,
             username,
@@ -388,7 +389,7 @@ export function RecordingsReview({
             jobs,
             files: chosen.map((c) => c.file),
             targetLabel: (job: UploadJob) => labelOf.get(job.files[0]) ?? "",
-          })
+          }).catch(() => {})
           onStarted()
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e))

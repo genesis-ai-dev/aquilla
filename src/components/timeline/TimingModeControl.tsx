@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -223,18 +224,24 @@ export function TimingModeControl({
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        // Read-only: the choice as plain text; what the menu's (i) would say
-        // is its hover text.
-        <AppTooltip content={`${t("editor.timeline.timingTip")} · ${infoText}${standInInfo ? ` ${standInInfo}` : ""}`}>
+        // Read-only: the choice as plain text. What the menu's (i) would say
+        // opens on a click of it, in a small note, and shuts on a second
+        // click (AQU-2260: it was its hover text). Still no (i) in the bar.
+        <NoteOnClick
+          note={`${infoText}${standInInfo ? ` ${standInInfo}` : ""}`}
+          label={`${t("editor.timeline.timingTip")}: ${name}`}
+          side="bottom"
+          align="start"
+          className="rounded-md"
+        >
           <span
             data-testid={`tl-timing-mode-${shown}`}
-            tabIndex={0}
             className={cn("inline-flex items-center gap-1 px-1 text-foreground/70", bar ? "h-7" : "h-6")}
           >
             <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <span className="font-medium">{name}</span>
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )}
     </div>
   )

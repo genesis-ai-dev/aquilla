@@ -2,11 +2,15 @@
 // "Organization default (on) / Set for this project" menu as every other
 // organization default on Project settings, beside a switch that shows the
 // value in force and can be flipped straight away.
+// AQU-2260 (Sam, Oct 29): no hovers on these rows. The organization's answer
+// is the menu's own text, always there; locked, why sits beneath the row as one
+// more line — and says nothing when the card above already said it.
 import { describe, expect, it, vi } from "vitest"
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { renderWithTooltips } from "@/test-utils/tooltip"
+import { SettingsGroup } from "@/components/ui/page"
 import { StructuralCellsProjectSection } from "./StructuralCellsProjectSection"
 import { RepetitionPropagationProjectSection } from "./RepetitionPropagationProjectSection"
 
@@ -25,6 +29,8 @@ describe("StructuralCellsProjectSection", () => {
     expect(headingsSource()).toHaveTextContent("Organization default (off)")
     expect(isOn(headingsSwitch())).toBe(false)
     expect(isDisabled(headingsSwitch())).toBe(false)
+    // Unlocked: no lock line.
+    expect(screen.queryByText(LOCK)).toBeNull()
   })
 
   it("flipping the switch while it follows the organization sets it for this project in one step", async () => {
@@ -52,13 +58,28 @@ describe("StructuralCellsProjectSection", () => {
     expect(onPatch).toHaveBeenCalledExactlyOnceWith({ countStructuralCells: true })
   })
 
-  it("locked: neither the menu nor the switch can be changed", () => {
+  it("locked: neither the menu nor the switch can be changed, and why is on the page, never on hover", async () => {
     const onPatch = vi.fn(async () => ({ kind: "ok" }))
     renderWithTooltips(
       <StructuralCellsProjectSection value={undefined} orgDefault disabled disabledTooltip={LOCK} onPatch={onPatch} />,
     )
     expect(isDisabled(headingsSwitch())).toBe(true)
     expect(isDisabled(headingsSource())).toBe(true)
+    expect(screen.getByText(LOCK)).toBeVisible()
+    expect(headingsSource()).toHaveTextContent("Organization default (on)")
+    await userEvent.hover(headingsSwitch())
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("says nothing of its own inside a card whose heading already gives the same reason", () => {
+    const onPatch = vi.fn(async () => ({ kind: "ok" }))
+    renderWithTooltips(
+      <SettingsGroup label="Text" locked={LOCK}>
+        <StructuralCellsProjectSection value={undefined} orgDefault disabled disabledTooltip={LOCK} onPatch={onPatch} />
+      </SettingsGroup>,
+    )
+    expect(screen.getAllByText(LOCK)).toHaveLength(1)
+    expect(screen.getByTestId("settings-group-locked")).toHaveTextContent(LOCK)
   })
 
   it("says why when the save is refused", async () => {
@@ -91,11 +112,14 @@ describe("RepetitionPropagationProjectSection", () => {
     expect(onPatch).toHaveBeenCalledExactlyOnceWith({ autoPropagateRepetitions: undefined })
   })
 
-  it("locked: the switch cannot be flipped", () => {
+  it("locked: the switch cannot be flipped, and why is on the page, never on hover", async () => {
     const onPatch = vi.fn(async () => ({ kind: "ok" }))
     renderWithTooltips(
       <RepetitionPropagationProjectSection value={undefined} orgDefault={false} disabled disabledTooltip={LOCK} onPatch={onPatch} />,
     )
     expect(isDisabled(repeatSwitch())).toBe(true)
+    expect(screen.getByText(LOCK)).toBeVisible()
+    await userEvent.hover(repeatSwitch())
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

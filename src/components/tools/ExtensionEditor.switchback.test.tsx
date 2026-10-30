@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ToolSummary } from "@/lib/tools/tools-api"
 import { editorChoiceKey } from "@/lib/tools/editor-choice"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 /**
  * Daniel, 2026-10-12 / 10-14: the Smart Extension editor is the default; ANY
@@ -87,6 +88,16 @@ describe("Smart Extension editor default, with the original one pick away", () =
     expect(screen.getByTestId("selected")).toHaveTextContent("standard")
     await openMenu()
     expect(screen.getAllByRole("menuitemradio")[0]).toHaveTextContent("Your default")
+  })
+
+  // AQU-2260 (Sam, Oct 29): why it failed opens on a click of the notice,
+  // never on a hover title.
+  it("gives the failure's reason on click of the fallback notice", async () => {
+    render(<Harness />)
+    act(() => screen.getByRole("button", { name: "simulate load failure" }).click())
+    const notice = screen.getByTestId("extension-editor-fallback")
+    expect(notice.querySelector("[title]")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: /couldn't load/ }), "blank")
   })
 
   it("falls back to the original editor when the extension fails to load, and says so", async () => {

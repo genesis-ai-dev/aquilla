@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 
 // ── Entry form (used in add dialog + inline edit) ───────────────────────────
@@ -62,7 +62,7 @@ function EntryForm({ initialText = "", onSave, onCancel }: EntryFormProps) {
   )
 }
 
-// ── Role-lock icon with tooltip ────────────────────────────────────────────
+// ── Role-lock icon with its note ───────────────────────────────────────────
 
 /** Which floor a locked control is actually gated on. */
 export type LockedRole = "maintainer" | "projectLead" | "contributor"
@@ -89,22 +89,12 @@ export function RoleLockTooltip({
     reason === "offline"
       ? t("terminology.livingMemory.offlineTooltip")
       : t(ROLE_TOOLTIP_KEY[requiredRole])
+  // AQU-2260 (Sam, Oct 29): who may edit opens on a click of the lock, never
+  // on hover.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={message}
-            className="inline-flex items-center text-muted-foreground/50"
-          />
-        }
-      >
-        <Lock className="h-3 w-3" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent side="left" className="max-w-[200px] text-xs">
-        {message}
-      </TooltipContent>
-    </Tooltip>
+    <NoteOnClick note={message} label={message} side="left" className="text-muted-foreground/50 hover:text-muted-foreground">
+      <Lock className="h-3 w-3" aria-hidden="true" />
+    </NoteOnClick>
   )
 }
 

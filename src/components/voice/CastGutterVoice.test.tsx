@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips } from "@/test-utils/tooltip"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CastGutterVoice } from "./CastGutterVoice"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -205,5 +205,12 @@ describe("CastGutterVoice", () => {
     expect(el.tagName).not.toBe("BUTTON")
     fireEvent.click(el)
     expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
+})
+
+describe("CastGutterVoice — the gutter avatar keeps its name on hover (AQU-2260)", () => {
+  it("names the voice and who it voices", async () => {
+    ui(<CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />)
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary")
   })
 })

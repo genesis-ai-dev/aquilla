@@ -231,6 +231,8 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n
       return reason.lengthMs != null
         ? t("recordingsUpload.reason.chapterOrVerseLength", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses), length: len(reason.lengthMs) })
         : t("recordingsUpload.reason.chapterOrVerse", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses) })
+    case "bookVerseDisagree": return t("recordingsUpload.reason.bookVerseDisagree", { verse: reason.verse, count: fmt(reason.count), ref: reason.ref })
+    case "noSuchBookVerse": return t("recordingsUpload.reason.noSuchBookVerse", { book: reason.book, verses: fmt(reason.verses), count: fmt(reason.count) })
     case "skipped": return t("recordingsUpload.reason.skipped")
   }
 }

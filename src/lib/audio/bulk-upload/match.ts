@@ -10,7 +10,10 @@
 //      "001_001" is chapter 1 verse 1; in any other file "012", "line 12" or
 //      "part_003" is that line, counted from the top. A number alone in a
 //      Bible book ("012") is a chapter or a verse by how many such files the
-//      folder holds (LONE_NUMBER_TOLERANCE).
+//      folder holds (LONE_NUMBER_TOLERANCE). A number marked as a line in a
+//      Bible book ("MAT_1_LN619") is the verse's place counted from the
+//      book's first verse, by the book's own numbering; a verse number beside
+//      it must agree, or the file is listed with both.
 //   3. "Genesis 1:1-3" or "1-1-3" is one recording for verses 1 to 3; a name
 //      with a chapter and no verse is one recording for the whole chapter.
 //   4. A verse in several files ("1-1a", "1-1 part 2", "1-1_2", "beginning",
@@ -106,6 +109,8 @@ export type UnmatchedReason =
   | { code: "duplicate"; target: string; other: string }
   | { code: "rangeOnTimedFile" }
   | { code: "chapterOrVerse"; count: number; book: string; chapters: number; verses: number; lengthMs?: number }
+  | { code: "bookVerseDisagree"; count: number; verse: number; ref: string }
+  | { code: "noSuchBookVerse"; count: number; verses: number; book: string }
   | { code: "skipped" }
 
 export interface PartInfo {
@@ -320,6 +325,7 @@ type Wanted =
   | { kind: "verseRange"; chapter: number; verse: number; toChapter: number; toVerse: number }
   | { kind: "chapter"; chapter: number }
   | { kind: "line"; line: number }
+  | { kind: "bookVerse"; count: number; verse?: number }
   | { kind: "lineRange"; line: number; toLine: number }
   | { kind: "none" }
   | { kind: "error"; reason: UnmatchedReason }
@@ -487,7 +493,15 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
     ...base,
     ...(markedPart ? { part: partOf(reading, markedPart) } : extra ? { part: partOf(reading, extra) } : letter ? { part: letterPart(letter) } : reading.partWord ? { part: partOf(reading) } : {}),
   })
-  if (lineMark && !chapterMark && !verseMark) return withPart({ kind: "line", line: lineMark.value })
+  if (lineMark && !chapterMark && !verseMark) {
+    // ETEN, Oct 29: "MAT_1_LN619" — in a Bible book a line number is the
+    // verse's place counted from the book's first verse, and a plain number
+    // beside it is the verse within its chapter, which must agree.
+    if (r.folderChapter == null && plain.length <= 1) {
+      return withPart({ kind: "bookVerse", count: lineMark.value, ...(plain[0] ? { verse: plain[0].value } : {}) })
+    }
+    return withPart({ kind: "line", line: lineMark.value })
+  }
 
   let chapter = chapterMark?.value ?? r.folderChapter?.chapter
   let rest = plain
@@ -574,6 +588,11 @@ interface FileIndex {
   /** "1:4" and "1:4a" → the line holding that verse. */
   verses: Map<string, TargetLine>
   chapters: Map<number, TargetLine[]>
+  /** Each chapter's last verse number, in chapter order: how a verse's place
+   *  in the book ("LN619") becomes its chapter and verse. The numbering, not
+   *  the lines, so a bridged line or a verse the project leaves out (17:21)
+   *  moves nothing after it. */
+  chapterLengths: [chapter: number, verses: number][]
   /** Position of each line in `content`. */
   position: Map<string, number>
 }
@@ -598,12 +617,18 @@ function indexFile(file: TargetFile): FileIndex {
     list.push(line)
     chapters.set(chapter, list)
   }
+  const lastVerse = new Map<number, number>()
+  for (const key of verses.keys()) {
+    const m = /^(\d+):(\d+)$/.exec(key)
+    if (m) lastVerse.set(Number(m[1]), Math.max(lastVerse.get(Number(m[1])) ?? 0, Number(m[2])))
+  }
   return {
     file,
     bible: file.bookCode != null || (content.length > 0 && verseLines * 2 >= content.length),
     content,
     verses,
     chapters,
+    chapterLengths: [...lastVerse].sort((a, b) => a[0] - b[0]),
     position: new Map(content.map((l, i) => [l.cellId, i])),
   }
 }
@@ -618,6 +643,16 @@ function refLabel(fi: FileIndex, chapter: number, verse: number | string): strin
 
 type Resolved = { cellIds: string[]; read: string } | { reason: UnmatchedReason }
 
+/**
+ * A verse's file landing on a bridged line ("MAT 19:1-2") is that line's piece
+ * for the verse, so verses 1 and 2 join in order rather than becoming two
+ * takes of the whole line.
+ */
+function bridgedPart(line: TargetLine, verse: number): PartInfo | undefined {
+  const m = line.ref ? VERSE_REF.exec(line.ref) : null
+  return m && m[5] && Number(m[5]) > Number(m[3]) ? { rank: verse, label: String(verse) } : undefined
+}
+
 function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Resolved & { part?: PartInfo } {
   switch (wanted.kind) {
     case "verse": {
@@ -631,8 +666,24 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       }
       const line = fi.verses.get(`${wanted.chapter}:${wanted.verse}`)
       if (!line) return { reason: { code: "noSuchVerse", ref: refLabel(fi, wanted.chapter, wanted.verse) } }
-      const letterAsPart = wanted.letter && !part ? letterPart(wanted.letter) : part
+      const letterAsPart = wanted.letter && !part ? letterPart(wanted.letter) : part ?? bridgedPart(line, wanted.verse)
       return { cellIds: [line.cellId], read: refLabel(fi, wanted.chapter, wanted.verse), ...(letterAsPart ? { part: letterAsPart } : {}) }
+    }
+    case "bookVerse": {
+      let left = wanted.count
+      let at: { chapter: number; verse: number } | null = null
+      for (const [chapter, count] of fi.chapterLengths) {
+        if (left <= count) { at = { chapter, verse: left }; break }
+        left -= count
+      }
+      if (!at || wanted.count < 1) {
+        const verses = fi.chapterLengths.reduce((sum, [, count]) => sum + count, 0)
+        return { reason: { code: "noSuchBookVerse", count: wanted.count, verses, book: bookLabel(fi) } }
+      }
+      if (wanted.verse != null && wanted.verse !== at.verse) {
+        return { reason: { code: "bookVerseDisagree", count: wanted.count, verse: wanted.verse, ref: refLabel(fi, at.chapter, at.verse) } }
+      }
+      return resolve(fi, { kind: "verse", chapter: at.chapter, verse: at.verse }, part)
     }
     case "verseRange": {
       const from = fi.verses.get(`${wanted.chapter}:${wanted.verse}`)

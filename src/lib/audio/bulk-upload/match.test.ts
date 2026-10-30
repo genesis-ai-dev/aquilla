@@ -647,3 +647,55 @@ describe("ranges on a timed file", () => {
     expect(assignments[0].cellIds).toEqual(["subs#2", "subs#3", "subs#4"])
   })
 })
+
+// ETEN, Oct 29: an audio Bible folder named "MAT_1_LN619.ogg" … "MAT_32_LN760.ogg"
+// (Matthew 19:1–22:32). The names never say the chapter: the first number is
+// the verse within its chapter, and LN is the verse's place counted from
+// Matthew 1:1 (chapters 1–18 hold 618 verses, so LN619 is 19:1).
+describe("a verse's place in the book (ETEN's LN)", () => {
+  const MAT = [25, 23, 17, 25, 48, 34, 29, 34, 38, 42, 30, 50, 58, 36, 39, 28, 27, 35, 30, 34, 46, 46, 39, 51, 46, 75, 66, 20]
+  const names = ["MAT_1_LN619.ogg", "MAT_2_LN620.ogg", "MAT_3_LN621.ogg", "MAT_30_LN648.ogg", "MAT_1_LN649.ogg", "MAT_46_LN728.ogg", "MAT_32_LN760.ogg"]
+  const want = ["mat:19:1", "mat:19:2", "mat:19:3", "mat:19:30", "mat:20:1", "mat:21:46", "mat:22:32"]
+  const scope = { kind: "file", fileId: "mat" } as const
+  const cells = (assignments: Assignment[]) => assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)
+
+  it("lands each file on its verse, in any scope", () => {
+    const files = names.map((n) => audio(`Files/${n}`))
+    expect(cells(run(files, [book("mat", "MAT", "Matthew", MAT)], scope).assignments)).toEqual(want)
+    const project = run(files, [book("mat", "MAT", "Matthew", MAT)], { kind: "project" })
+    expect(cells(project.assignments)).toEqual(want)
+    expect(by(project.assignments, files, "MAT_1_LN619.ogg").read).toBe("Matthew 19:1")
+  })
+
+  it("counts verses, not lines: an introduction line before 1:1 moves nothing", () => {
+    const mat = book("mat", "MAT", "Matthew", MAT)
+    mat.lines.splice(1, 0, { cellId: "mat-intro", ref: null, text: "About this book", structural: false, hasRecording: false })
+    expect(cells(run(names.map((n) => audio(`Files/${n}`)), [mat], scope).assignments)).toEqual(want)
+  })
+
+  it("a verse the project leaves out (17:21) still counts, as the numbering does", () => {
+    const mat = book("mat", "MAT", "Matthew", MAT)
+    mat.lines = mat.lines.filter((l) => l.cellId !== "mat:17:21")
+    expect(cells(run(names.map((n) => audio(`Files/${n}`)), [mat], scope).assignments)).toEqual(want)
+  })
+
+  it("two verses of a bridged line become its pieces, in verse order", () => {
+    const mat = book("mat", "MAT", "Matthew", MAT)
+    const at = mat.lines.findIndex((l) => l.cellId === "mat:19:1")
+    mat.lines.splice(at, 2, { cellId: "mat:19:1-2", ref: "MAT 19:1-2", text: "1-2", structural: false, hasRecording: false })
+    const files = names.slice(0, 3).map((n) => audio(`Files/${n}`))
+    const { assignments, jobs } = run(files, [mat], scope)
+    expect(cells(assignments)).toEqual(["mat:19:1-2", "mat:19:1-2", "mat:19:3"])
+    expect(jobs).toContainEqual({ kind: "pieces", fileId: "mat", cellId: "mat:19:1-2", files: [0, 1] })
+  })
+
+  it("asks when the verse in the name and its place in the book disagree", () => {
+    const { assignments } = run([audio("Files/MAT_5_LN619.ogg")], [book("mat", "MAT", "Matthew", MAT)], scope)
+    expect(assignments[0].reason).toEqual({ code: "bookVerseDisagree", count: 619, verse: 5, ref: "Matthew 19:1" })
+  })
+
+  it("a place past the book's last verse is a reason", () => {
+    const { assignments } = run([audio("Files/MAT_1_LN2000.ogg")], [book("mat", "MAT", "Matthew", MAT)], scope)
+    expect(assignments[0].reason).toEqual({ code: "noSuchBookVerse", count: 2000, verses: 1071, book: "Matthew" })
+  })
+})

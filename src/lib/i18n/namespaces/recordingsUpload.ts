@@ -91,7 +91,7 @@ const KEYS = {
     "recordingsUpload.rules.byName":
       "By name: a name with a book, chapter and verse goes to that verse, such as “Genesis 1-1”, “Gen 1.1”, “1Sam_3_4”, “GEN_001_001” or the project's own name for the book. When the name has no book, the folder's name is used.",
     "recordingsUpload.rules.byNumber":
-      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. A number alone, such as “012”, is a chapter when a folder holds about as many of them as the book has chapters, and a verse when it holds about as many as the book has verses. When neither fits, their length decides: recordings of about a minute or more are chapters, and about half a minute or less are verses. Otherwise those files are listed, not guessed. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
+      "By number: inside one file, numbers are enough. In a Bible book, “1-1” or “001_001” is chapter 1, verse 1. A number alone, such as “012”, is a chapter when a folder holds about as many of them as the book has chapters, and a verse when it holds about as many as the book has verses. When neither fits, their length decides: recordings of about a minute or more are chapters, and about half a minute or less are verses. Otherwise those files are listed, not guessed. A number marked as a line, such as “LN619” in “MAT_1_LN619”, is the verse's place counted from the start of the book (Matthew 19:1), and a verse number beside it must agree. In any other file, “012”, “line 12” or “part_003” is that line, counted from the top.",
     "recordingsUpload.rules.range":
       "“Genesis 1:1-3” or “1-1-3” is one recording for verses 1 to 3, and each of them counts as recorded. A name with a chapter and no verse is one recording for the whole chapter. A subtitle or film file, whose lines have times, needs one recording per line, so a range isn't uploaded there.",
     "recordingsUpload.rules.parts":
@@ -196,6 +196,8 @@ const KEYS = {
       one: "Can't tell whether this number is a chapter or a verse. {count} file here is named with a number alone, {book} has {chapters} chapters and {verses} verses, and it runs {length}, which could be either.",
       other: "Can't tell whether these numbers are chapters or verses. {count} files here are named with a number alone, {book} has {chapters} chapters and {verses} verses, and they run about {length} each, which could be either.",
     }),
+    "recordingsUpload.reason.bookVerseDisagree": "Its name says verse {verse}, but verse number {count}, counted from the start of the book, is {ref}.",
+    "recordingsUpload.reason.noSuchBookVerse": "{book} has {verses} verses in this project, so there is no verse number {count}.",
     "recordingsUpload.reason.skipped": "You chose not to upload it.",
     // Progress banner
     "recordingsUpload.banner.uploading": "Uploading recordings",
@@ -236,6 +238,8 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.preview.topFolder": { description: "Stands in for a folder name in 'files in {folder}' when the person chose files rather than a folder." },
   "recordingsUpload.banner.stop": { description: "Tooltip and accessible name of the X button on the upload progress banner; stops the upload." },
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
+  "recordingsUpload.reason.bookVerseDisagree": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN619' in 'MAT_1_LN619') and a verse number within the chapter, and the two point to different verses. {count} is the place in the book, {verse} the verse number in the name, {ref} the verse the place points to (such as 'Matthew 19:1'). A full sentence." },
+  "recordingsUpload.reason.noSuchBookVerse": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN2000'), and the book has fewer verses than that in this project. A full sentence." },
   "recordingsUpload.reason.chapterOrVerse": { description: "Why a recording named with a number alone (such as '012') is not uploaded into a Bible book: the number could be a chapter or a verse, and how many such files there are is close to neither the book's number of chapters nor its number of verses (or close to both). Shown beside each of those files. Full sentences." },
   "recordingsUpload.preview.takeOf": { description: "Small grey text in a preview row: this file is one of several recordings for the same line, each uploaded as its own take; n is its place in the upload order.", maxLength: 24 },
   "recordingsUpload.preview.plays": { description: "Small grey text in a preview row, after 'take 2 of 2': of the takes this upload gives the line, this file's is the one that will play.", maxLength: 28 },

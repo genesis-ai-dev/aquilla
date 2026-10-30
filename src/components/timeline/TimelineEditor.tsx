@@ -95,6 +95,7 @@ import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-r
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
+import type { TakePlace } from "@/lib/timeline/take-place"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
 import { CORNER_ICON_BTN, PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
 import {
@@ -252,8 +253,10 @@ export interface TimelineEditorProps {
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other.
+   *  AQU-2267: `place` is what to store — the take's place in both timings
+   *  after the move, each held by its own timing's limits. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -708,6 +711,22 @@ const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
  * item, exactly as before; a cut take is its pieces, numbered in clip order so
  * each chip has a stable test id ("…-p2") beside the first's unchanged one.
  */
+/**
+ * The file's lanes as `mode` lays them out. AQU-2204: following its
+ * recordings, a file with NO times at all (an audio Bible book) lays its lines
+ * out in order — each at its recording's length, or a dashed stand-in from its
+ * text — instead of parking them all in the Untimed strip. The same rule as the
+ * transport's (programmeLines). AQU-2267: a function, so the other timing's
+ * layout (a move's second place) is built from the same lines.
+ */
+function timelineLanes(cells: readonly CellData[], mode: AudioTimingMode) {
+  const lanes = deriveLanes(cells)
+  if (mode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
+    return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
+  }
+  return { ...lanes, standInLines: false }
+}
+
 function piecesAsItems(cell: CellData, pieces: readonly TargetAudioRef[]): TargetAudioItem[] {
   return pieces.map((p, i) => ({
     cell,
@@ -2144,17 +2163,9 @@ export function TimelineEditor({
     )
   }
 
-  // AQU-2204: following its recordings, a file with NO times at all (an audio
-  // Bible book) lays its lines out in order — each at its recording's length,
-  // or a dashed stand-in from its text — instead of parking them all in the
-  // Untimed strip. The same rule as the transport's (programmeLines).
-  const { subtitle, dialogue, untimed } = useMemo(() => {
-    const lanes = deriveLanes(cells)
-    if (timingMode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
-      return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
-    }
-    return { ...lanes, standInLines: false }
-  }, [cells, timingMode])
+  // AQU-2204: following its recordings, a book with no times lays its lines
+  // out in order (see `timelineLanes`).
+  const { subtitle, dialogue, untimed } = useMemo(() => timelineLanes(cells, timingMode), [cells, timingMode])
   const independentTextCells = useMemo(
     () => Object.values(textTrackCells ?? {}).flat(),
     [textTrackCells],
@@ -2220,6 +2231,26 @@ export function TimelineEditor({
       ),
     [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, programmeTracks],
   )
+  // AQU-2267 (Sam, Oct 29): the OTHER timing, laid out the same way. A move
+  // moves a take by the same distance in both timings, each held by its own
+  // limits, so the lanes need the other timing's layout to say where the take
+  // lands there (lib/timeline/take-place). Built from the same lines, tracks
+  // and stand-ins that timing lays the file out from when it is chosen.
+  // Only a drop reads it, so it is built then: built on every change, a long
+  // subtitle film followed by its source laid every line out a second time,
+  // with stand-ins, on each edit.
+  const getOtherLayout = useCallback((): TimelineLayout => {
+    const other: AudioTimingMode = timingMode === "audioFirst" ? "dubbing" : "audioFirst"
+    const lanes = timelineLanes(cells, other)
+    const lines = lanes.dialogue.length > 0 ? lanes.dialogue : lanes.subtitle
+    return buildTimelineLayout(
+      other,
+      cells,
+      lines,
+      subtitleFileWithFootage ? videoDurationSec : null,
+      { standInLenSec: standInEstimator(lines), ...programmeTracks },
+    )
+  }, [timingMode, cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
   // ask "is there a stretch of film here with no line on it": the pencil in the
@@ -4259,6 +4290,7 @@ export function TimelineEditor({
             key={track.id}
             items={targetItems}
             layout={layout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
@@ -4341,6 +4373,7 @@ export function TimelineEditor({
             key={track.id}
             items={own.items}
             layout={layout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}

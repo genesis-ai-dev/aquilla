@@ -286,7 +286,8 @@ import { editStepHandlers } from "@/lib/history/edit-steps"
 import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
-import { takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
+import { takeStepHandlers, type CutRecord, type StoredTakePlace } from "@/lib/history/take-steps"
+import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
@@ -334,7 +335,7 @@ import {
   type RowActionReason,
 } from "@/lib/cell-editing-gate"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import {
   buildLinkedTakes,
@@ -3898,10 +3899,15 @@ export function ProjectWorkspace() {
 
   // Round 6: move a section's dub chip. Round 7: applied optimistically first.
   // Round 8: stored RELATIVE to the cell (target_offset_ms) so the take travels
-  // with its line — the callers still hand an absolute anchor, and this is the
-  // one place that converts.
+  // with its line.
+  //
+  // AQU-2267 (Sam, Oct 29): a take has a place in each timing — following the
+  // source (`targetOffsetMs`) and following the recordings
+  // (`recordingsOffsetMs`) — and a move states both, in one event, so it is
+  // one write and one undo step, and every device sees both.
   const applyTakePlace = useCallback(
-    async (cellId: string, audioId: string, targetOffsetMs: number | null) => {
+    async (cellId: string, audioId: string, place: StoredTakePlace) => {
+      const { targetOffsetMs, recordingsOffsetMs } = place
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
@@ -3936,6 +3942,7 @@ export function ProjectWorkspace() {
         cellId,
         audioId,
         targetOffsetMs,
+        recordingsOffsetMs,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
@@ -3946,6 +3953,7 @@ export function ProjectWorkspace() {
         injectOptimisticAudioPlace(takeFileId, cellId, {
           ...attachmentOutFrom(audioId, att, slot),
           targetOffsetMs,
+          recordingsOffsetMs,
         }, placeP)
       } else if (takeFileId !== activeFileId) {
         // A cue cell is not in this file's store, so the store's optimistic
@@ -3961,23 +3969,31 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
   )
   const handleRetimeTarget = useCallback(
-    async (cellId: string, anchorSec: number, audioId: string) => {
+    async (cellId: string, _anchorSec: number, audioId: string, after: TakePlace) => {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
-      // targetOffsetMsFor carries the old "never before file zero" floor into
-      // the offset domain; enforced here, at the single persistence point.
-      const targetOffsetMs = targetOffsetMsFor(owner.cell, anchorSec)
-      // AQU-1767: a step, so Undo can move it back. `null` before is a real
-      // value ("never placed by hand"), and undoing to it clears the placement.
-      const was = owner.cell.attachments?.[audioId]?.targetOffsetMs ?? null
+      // AQU-2267: the timeline hands the take's place in BOTH timings
+      // (lib/timeline/take-place), each already held by its timing's limits —
+      // the "never before file zero" floor included (targetOffsetMsFor).
+      // AQU-1767: a step, so Undo can move it back — both places, one step.
+      // `null` before is a real value ("never placed by hand" there), and
+      // undoing to it clears that place.
+      const att = owner.cell.attachments?.[audioId]
       recordStep({
         kind: "take.place",
-        data: { cellId, audioId, before: was, after: targetOffsetMs },
+        data: {
+          cellId,
+          audioId,
+          before: att?.targetOffsetMs ?? null,
+          after: after.targetOffsetMs,
+          recordingsBefore: att?.recordingsOffsetMs ?? null,
+          recordingsAfter: after.recordingsOffsetMs,
+        },
         labelKey: "editor.history.stepMove",
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
       })
-      await applyTakePlace(cellId, audioId, targetOffsetMs)
+      await applyTakePlace(cellId, audioId, after)
     },
     [applyTakePlace, activeFileId],
   )
@@ -4126,6 +4142,7 @@ export function ProjectWorkspace() {
             trimEndMs: cur.att.trimEndMs ?? null,
             label: cur.att.label ?? null,
             targetOffsetMs: cur.att.targetOffsetMs ?? null,
+            recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })
@@ -14661,7 +14678,7 @@ export function ProjectWorkspace() {
           return owner.cell.attachments?.[id]?.pieceOf ?? id
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
-        applyPlace: (cellId, audioId, offset) => applyTakePlace(cellId, audioId, offset),
+        applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
         uncut: applyTakeUncut,
         newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),

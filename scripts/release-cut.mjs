@@ -33,11 +33,14 @@ export function buildReleaseBranch({ branch, base, prs, cwd }) {
     try {
       run(args)
       picked.push(pr)
-    } catch {
+    } catch (error) {
+      // A conflict leaves a pick in progress to abort. Anything else (no git
+      // identity, a bad sha) is the cut's own failure and must not be filed
+      // as the PR's conflict: fail loud, the workflow reports it.
       try {
         run(["cherry-pick", "--abort"])
       } catch {
-        // Nothing to abort: the pick failed before it started.
+        throw error
       }
       conflicts.push({ ...pr, why: "pick conflict" })
     }

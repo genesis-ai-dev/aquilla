@@ -87,6 +87,10 @@ describe("buildReleaseBranch against a scratch repo", () => {
   beforeEach(() => {
     root = mkdtempSync(path.join(tmpdir(), "aquilla-release-cut-"))
     git("init", "-q", "-b", "dev")
+    // buildReleaseBranch runs plain git, so the pick's commit needs an
+    // identity in the repo itself (a CI runner has none configured).
+    git("config", "user.email", "t@t")
+    git("config", "user.name", "t")
     write("README.md", "base\n")
     git("add", "-A")
     git("commit", "-qm", "base")

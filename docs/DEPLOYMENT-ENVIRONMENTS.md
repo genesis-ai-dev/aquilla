@@ -343,8 +343,9 @@ closed on a pending migration, and nothing publishes until it passes.
 
 ## Deployment ownership
 
-Live Aquilla deployments run through the guarded commands above and nothing
-else: no Cloudflare Git integration deploys live traffic. Since 2026-10-30
+Live Aquilla deployments require an explicit human/operator action or one of
+the two gated workflows below, and run through the guarded commands above and
+nothing else: no Cloudflare Git integration deploys live traffic. Since 2026-10-30
 (`docs/RELEASE-RISK-GATES.md`) two workflows may run those same commands
 without a person, each only while its repository variable is `on`:
 `release-deploy.yml` (`HOURLY_RELEASE`) deploys the verified release branch

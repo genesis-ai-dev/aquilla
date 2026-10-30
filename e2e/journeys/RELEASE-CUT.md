@@ -90,9 +90,9 @@ waits an hour. The webhook accepts `push` events for
 [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 
 The HEAD Jev tests is not always the cut's HEAD: a person may pick a fix
-onto the branch. Jev and `release-verify` run again on that push. Only a
-result for the branch's current HEAD counts. A comment on an older commit
-does not decide the deploy.
+onto the branch. Jev and `release-verify` run again on that push.
+Only a result for the branch's current HEAD counts. A comment on an older
+commit does not decide the deploy.
 
 - **FAIL** (a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`)
   means that HEAD does not deploy. A new commit on the branch starts Jev again.

@@ -412,8 +412,17 @@ const MAX_OVERLAYS_PER_TRACK = 3
  */
 let targetSlots: readonly string[] = [RECORDING_SLOT]
 
+const sameSlots = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((s, i) => s === b[i])
+
 export function setQueueTargetSlots(slots: readonly string[]): void {
-  targetSlots = slots.length > 0 ? slots : [RECORDING_SLOT]
+  const next = slots.length > 0 ? slots : [RECORDING_SLOT]
+  const same = sameSlots(next, targetSlots)
+  targetSlots = next
+  // AQU-2252: following the recordings the added tracks are laid into the
+  // programme, so a track gone or back (an undone deletion, whose cells can
+  // land before its track) re-flows one that is playing — as a change to
+  // which tracks are layers does.
+  if (!same && timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)
 }
 
 export function getQueueTargetSlots(): readonly string[] {
@@ -430,7 +439,7 @@ export function getQueueTargetSlots(): readonly string[] {
 let layerTrackSlots: readonly string[] = []
 
 export function setQueueLayerTrackSlots(slots: readonly string[]): void {
-  const same = slots.length === layerTrackSlots.length && slots.every((s, i) => s === layerTrackSlots[i])
+  const same = sameSlots(slots, layerTrackSlots)
   layerTrackSlots = [...slots]
   if (same) return
   if (timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)

@@ -296,6 +296,17 @@ describe("following the recordings, every track's takes set their lines' lengths
     setQueueLayerTrackSlots([])
     expect(getQueueProgress().duration).toBeCloseTo(1.3, 5)
   })
+
+  it("a track that comes back while it plays (an undone deletion) is laid in at once", async () => {
+    // The cells carrying Track 1's takes can land before the tracks do.
+    setQueueTargetSlots(["recording"])
+    const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().duration).toBeCloseTo(1.0, 5)
+    setQueueTargetSlots(["recording", TRACK])
+    expect(getQueueProgress().duration).toBeCloseTo(1.3, 5)
+  })
 })
 
 describe("a layer past the last line plays out to its end (AQU-2252, Oct 29)", () => {

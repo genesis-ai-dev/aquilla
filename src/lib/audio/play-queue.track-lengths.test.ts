@@ -404,3 +404,41 @@ describe("following the source, nothing changes (AQU-2252)", () => {
     expect(await run(true)).toEqual(plain)
   })
 })
+
+describe("a line's own take that stops short, under another track's take (AQU-2252)", () => {
+  // b2: a 2 s main take and a 2.5 s Track 1 take → b2 lasts 2.5 s (0.4–2.9).
+  const book = () => [line("b1", 400), line("b2", 2000, { durationMs: 2500, targetOffsetMs: 0 }), line("b3", 400)]
+
+  it("a take that fails partway holds the line from where it stopped, not from where it was meant to end", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(0.5)
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.9, 5)
+    el("b2")!.onerror?.() // an expired stream token, half a second in
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(el("b2-track")!.paused).toBe(false)
+    // Not 2.4 s, the end of the 2 s the take was meant to play: the playhead
+    // stays with Boaz's take, which is still at 0.5 s.
+    expect(getQueueProgress().currentTime).toBeLessThan(1)
+  })
+
+  it("a take whose clip runs out before its measured length holds the line from where it ran out", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(1.2)
+    el("b2")!.onended?.()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.6, 1)
+  })
+
+  it("a take that plays to its end still holds from its end", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(2.0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2.4, 1)
+  })
+})

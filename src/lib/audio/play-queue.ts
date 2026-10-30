@@ -391,6 +391,10 @@ interface OverlayEntry {
    * dub" skips layers (`progMainEntry`).
    */
   layer?: { startSec: number }
+  /** AQU-2252: where on its clip it was when it was let go — so a line's own
+   *  take that stopped short of its window (an error, a clip shorter than its
+   *  measured length) says where its sound really ended. */
+  lastClipSec?: number
 }
 
 const overlayPool: OverlayEntry[] = []
@@ -537,6 +541,7 @@ function removeOverlayEntry(entry: OverlayEntry): void {
   }
   const el = entry.element
   if (el) {
+    entry.lastClipSec = el.currentTime
     el.onended = null
     el.onerror = null
     el.ontimeupdate = null
@@ -1771,7 +1776,23 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   const takeEndIntoSec = (slot.targetLeadSec ?? 0) + slot.targetLenSec
   const sourceHasMore = slot.sourceLenSec - takeEndIntoSec > HOLD_MIN_SEC
   if (sourceCanCarry && (slot.clock !== "target" || sourceHasMore)) return
-  progLineEnded(slot.startSec + takeEndIntoSec)
+  progLineEnded(progTakeStoppedAt(slot, entry, slot.startSec + takeEndIntoSec))
+}
+
+/**
+ * AQU-2252: where on the programme clock a line's own take stopped sounding —
+ * its planned end, or short of it when it failed or its clip ran out early.
+ * Holding the rest of the line from the planned end would jump the playhead
+ * ahead of the takes still sounding on other tracks, and the hold would then
+ * end, and cut them off, before they did. Never behind the clock already
+ * shown: an element can reset its position on an error.
+ */
+function progTakeStoppedAt(slot: ProgrammeSlot, entry: OverlayEntry, plannedEndSec: number): number {
+  const win = slot.targetWindow
+  const heardSec = win && entry.lastClipSec != null
+    ? slot.startSec + (slot.targetLeadSec ?? 0) + (entry.lastClipSec - win.start)
+    : -Infinity
+  return Math.min(plannedEndSec, Math.max(heardSec, progress.currentTime))
 }
 
 /** Keep the programme clock in step with a dub that is clocking its verse.

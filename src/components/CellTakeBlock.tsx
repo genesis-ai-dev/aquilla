@@ -23,7 +23,7 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -60,11 +60,15 @@ import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
+import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
-import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
+import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { joinTakePieces } from "@/lib/audio/join-pieces"
+import { audioIdSeededWith } from "@/lib/audio/upload"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -141,6 +145,18 @@ export interface CellTakeBlockProps {
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
   takesHistory?: ReadonlyMap<string, RecordingTextDrift>
+  /**
+   * AQU-1758: "Make a character from this voice" — opens the New voice
+   * dialog, cloning, seeded with this take's line. Absent hides it.
+   */
+  onMakeCharacter?: () => void
+  /**
+   * AQU-1758 / AQU-2212: …in one step — name it, Add to cast — with
+   * `onMakeCharacter` as its More options (CloneFromTakeButton).
+   */
+  onCloneTake?: (name: string) => Promise<void>
+  /** The name that clone suggests (who recorded the take). */
+  cloneSuggestedName?: string
 }
 
 type BadgeProps = React.ComponentProps<typeof CellTranscribeBadge>
@@ -204,6 +220,9 @@ function CellTakeBlockView({
   trackFileId,
   pieces,
   takesHistory,
+  onMakeCharacter,
+  onCloneTake,
+  cloneSuggestedName,
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -299,6 +318,44 @@ function CellTakeBlockView({
     await onCommitted?.(owner.id)
     notifyAudioAttachmentsChanged(owner.fileId)
   }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted, split])
+
+  // AQU-981: "Join into one recording" — a split take (cut, or uploaded in
+  // parts) becomes one new take of its pieces, in order; the pieces stay.
+  const [joining, setJoining] = useState(false)
+  const [joinError, setJoinError] = useState<string | null>(null)
+  const handleJoin = useCallback(async () => {
+    if (!split) return
+    setJoining(true)
+    setJoinError(null)
+    let failed: string | null = null
+    // Sam, Oct 29: the joined take is "Take N", numbered as the recorder
+    // numbers a new take — over this track's takes, a take in pieces counting
+    // once, the source clip (seeded with the file's id) and removed takes left
+    // out.
+    const slot = split[0].slot
+    const ownSlots = new Set(slotsForTrack(trackIdForSlot(slot)))
+    const trackTakes = Object.entries(owner.attachments ?? {})
+      .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
+      .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
+    try {
+      await joinTakePieces({
+        session,
+        projectId: project.id,
+        fileId: owner.fileId,
+        cellId: owner.id,
+        pieces: split,
+        slot,
+        label: nextTakeLabel(trackTakes),
+        ...(targetLang ? { targetLang } : {}),
+        username,
+      })
+    } catch (e) {
+      failed = toUserFacingError(e).message
+    }
+    setJoining(false)
+    if (failed) setJoinError(failed)
+    else await onCommitted?.(owner.id)
+  }, [split, session, project.id, owner.fileId, owner.id, owner.attachments, targetLang, username, onCommitted])
 
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line
@@ -549,6 +606,21 @@ function CellTakeBlockView({
           </span>
         )}
         <span className="ms-auto flex items-center gap-1.5">
+          {split && !isGenerated && (
+            <AppTooltip content={t("recordingsUpload.join.tooltip")}>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-testid="cell-take-join"
+                onClick={() => void handleJoin()}
+                disabled={!editable || joining}
+              >
+                <Combine className="h-3 w-3" />
+                {joining ? t("recordingsUpload.join.joining") : t("recordingsUpload.join.button")}
+              </Button>
+            </AppTooltip>
+          )}
           {!readOnlyTranscript && !isSection && selectedAudioId && attachment && (
             <DenoiseButton
               projectId={project.id}
@@ -576,6 +648,33 @@ function CellTakeBlockView({
               editable={editable}
               targetLang={targetLang}
             />
+          )}
+          {/* AQU-1758: the Audio view's voice card turned a take into a
+              character; this take does now (the timeline's take menu too),
+              in one step where it can (AQU-2212), the dialog under More
+              options. */}
+          {!isSection && selectedAudioId && attachment && onMakeCharacter && onCloneTake && editable && (
+            <CloneFromTakeButton
+              suggestedName={cloneSuggestedName}
+              onClone={onCloneTake}
+              onMoreOptions={onMakeCharacter}
+            />
+          )}
+          {!isSection && selectedAudioId && attachment && onMakeCharacter && !(onCloneTake && editable) && (
+            <AppTooltip content={t("editor.timeline.takeMenuMakeCharacter")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="cell-take-make-character"
+                aria-label={t("editor.timeline.takeMenuMakeCharacter")}
+                disabled={!editable}
+                onClick={onMakeCharacter}
+                className="rounded-md text-muted-foreground/60 hover:bg-background hover:text-foreground"
+              >
+                <CopyPlus className="h-3.5 w-3.5" />
+              </Button>
+            </AppTooltip>
           )}
           {/* The one way into the recorder from here: it records, uploads
               and generates, and switches takes too. Its words name it: no
@@ -609,6 +708,11 @@ function CellTakeBlockView({
           )}
         </span>
       </div>
+      {joinError && (
+        <p role="alert" data-testid="cell-take-join-error" className="text-[11px] text-destructive">
+          {t("recordingsUpload.join.failed", { message: joinError })}
+        </p>
+      )}
       {/* The take, drawn as its timeline chip (AQU-1217). Play from its
           corner; trim right here. No mic on it: New take, above, is the way
           into the recorder. */}

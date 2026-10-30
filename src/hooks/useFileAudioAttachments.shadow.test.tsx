@@ -958,3 +958,71 @@ describe("non-claiming optimistic paint (duration measure backfill)", () => {
     expect(painted?.durationMs).toBe(3210)
   })
 })
+
+// AQU-2267: a move states the take's place in both timings, and the overlay
+// holds both until the server carries both. A move following the recordings
+// that the source's limits hold where it was (say, at the line's start) changes
+// only the recordings place — a read still carrying the old one must not
+// confirm it, or the chip springs back while the save is on its way.
+describe("optimistic overlay — a take's place in both timings (AQU-2267)", () => {
+  it("a move's overlay is NOT confirmed by a read still carrying the old place following the recordings", async () => {
+    const atSource = { ...LONG, targetOffsetMs: -1000 }
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: atSource }, selectedAudioId: LONG.audioId }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-move")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...atSource, recordingsOffsetMs: 200 }, "evt-move"))
+    delivered("evt-move")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.attachments[LONG.audioId]?.recordingsOffsetMs).toBe(200)
+  })
+
+  it("…and IS confirmed once the server carries both places", async () => {
+    const moved = { ...LONG, targetOffsetMs: -800, recordingsOffsetMs: 200 }
+    fetchMock.mockResolvedValue(cells({ attachments: { [LONG.audioId]: moved }, selectedAudioId: LONG.audioId }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    delivered("evt-move2")
+    act(() => injectOptimisticAudioPlace("f1", "c1", moved, "evt-move2"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const att = entryOf(result)?.attachments[LONG.audioId]
+    expect([att?.targetOffsetMs, att?.recordingsOffsetMs]).toEqual([-800, 200])
+  })
+
+  it("a second move onto a still-saving take overlays both places, not just the first", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+    queued("evt-a")
+    queued("evt-b")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: -800, recordingsOffsetMs: 200 }, "evt-a"))
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: -600, recordingsOffsetMs: 400 }, "evt-b"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    const att = entryOf(result)?.attachments[LONG.audioId]
+    expect([att?.targetOffsetMs, att?.recordingsOffsetMs]).toEqual([-600, 400])
+  })
+})
+
+describe("mergeCellsWithAudio — a take's place in both timings (AQU-2267)", () => {
+  it("carries the place following the recordings onto the cell, zero included", () => {
+    const base = { id: "c1", fileId: "f1", original: "", translated: "" } as unknown as CellData
+    const entry = (rec: number | null): CellAudioEntry => ({
+      attachments: { [LONG.audioId]: { ...LONG, targetOffsetMs: -1000, recordingsOffsetMs: rec } },
+      selectedAudioId: LONG.audioId,
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    })
+    const [moved] = mergeCellsWithAudio([base], new Map([["c1", entry(0)]]))
+    expect(moved.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBe(0)
+    const [never] = mergeCellsWithAudio([base], new Map([["c1", entry(null)]]))
+    expect(never.attachments?.[LONG.audioId]?.recordingsOffsetMs).toBeUndefined()
+    expect(never.attachments?.[LONG.audioId]?.targetOffsetMs).toBe(-1000)
+  })
+})

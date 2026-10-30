@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { fileDisplayName } from "@/lib/file-display-name"
-import { ChevronRight, MoreHorizontal, Sparkles, AudioWaveform } from "lucide-react"
+import { ChevronRight, MoreHorizontal, Sparkles } from "lucide-react"
 import type { FileReference } from "@/lib/parsers/types"
-import { fileHasSections, fileOrderedBy } from "@/lib/parsers/types"
+import { fileHasSections } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { NoteOnClick } from "@/components/ui/info-note"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -62,6 +61,8 @@ interface FileRowProps {
   onSegmentation?: () => void
   /** Opens the single-file re-import dialog. */
   onReimport?: () => void
+  /** AQU-981: opens "Upload recordings" for this file. */
+  onUploadRecordings?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
   onApplySuggestion?: () => void
@@ -74,7 +75,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onReimport, onDelete,
+    onMove, onExport, onDownloadOriginal, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
     onApplySuggestion, unassigned = false, reorder,
   } = props
   const t = useT()
@@ -118,11 +119,8 @@ export function FileRow(props: FileRowProps) {
   const showText = view !== "audio"
   const showAudio = view !== "text" && (audioLanguage || bothLanguage || (progress?.recorded ?? 0) > 0)
   const canExpand = props.expandable ?? fileHasSections(file)
-  // Timeline-segment-model: a file is either time-true (timeline spine) or
-  // sequence-true (intrinsic order). Sequence is the default, so only the
-  // exceptional timeline files carry a marker — repeating an icon on every
-  // row says nothing.
-  const isTimeOrdered = fileOrderedBy(file) === "time"
+  // AQU-1758 (Sam): no marker for a timed file any more — every file opens on
+  // the timeline in Media, so "they're all media files".
   // AQU-1937: an extension's display label is what the row shows; the hover
   // keeps the stored (imported) name reachable.
   const shownName = fileDisplayName(file)
@@ -150,6 +148,7 @@ export function FileRow(props: FileRowProps) {
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onReimport={onReimport}
+      onUploadRecordings={onUploadRecordings}
       onDelete={onDelete}
       reorder={reorder}
     />
@@ -214,25 +213,6 @@ export function FileRow(props: FileRowProps) {
               as "not assigned to you" reads as a closed door. */}
           {unassigned && (
             <span className="sr-only">{t("nav.fileRow.notAssignedToYou")}</span>
-          )}
-          {/* What the mark means opens on a click of it, never a hover
-              (AQU-2260). Its click and keys are its own: they never open the
-              file the row belongs to. */}
-          {isTimeOrdered && (
-            <span
-              className="inline-flex shrink-0"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => e.stopPropagation()}
-            >
-              <NoteOnClick
-                note={t("nav.fileRow.timelineOrderedTooltip")}
-                label={t("nav.fileRow.timelineOrderedFile")}
-                side="right"
-                className="shrink-0 text-muted-foreground/70"
-              >
-                <AudioWaveform className="h-3.5 w-3.5" aria-hidden="true" />
-              </NoteOnClick>
-            </span>
           )}
           <div className="flex-1 min-w-0">
             {editing ? (

@@ -297,3 +297,59 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     expect("timingLocked" in sent && sent.timingLocked === undefined).toBe(true)
   })
 })
+
+// AQU-1758 (Sam's decision 7): the Sources menu in the media view's top bar,
+// the film first in it, behind one setting beside track editing. Unset, a project of
+// books and documents hides them and any other shows them.
+describe("ProjectSettings — film and sources (AQU-1758)", () => {
+  const bookFiles = [{ id: "f1", name: "Ruth", type: "usfm", orderedBy: "sequence" }]
+  const filmFiles = [{ id: "f2", name: "Episode 1.vtt", type: "vtt", orderedBy: "time" }]
+
+  it("reads OFF on a book project that never chose", () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(false)
+    expect(box("settings-film-and-sources-info")).toHaveAttribute("aria-label", "About the film and sources tools")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("reads ON on any other project that never chose", () => {
+    currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+  })
+
+  // AQU-1758: on this layout there is no Film button; the film is the first
+  // item in the Sources menu in the media view's top bar, and the (i) says so.
+  // Sam, Oct 28: an (i) is a button that opens its text in place beneath the
+  // title on a click, and closes it on another — never a hover.
+  it("its (i) opens, on a click, the film being the first item in the top bar's Sources menu", () => {
+    currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    const info = box("settings-film-and-sources-info")
+    const text = document.getElementById("settings-film-and-sources-explanation") as HTMLElement
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(info).toHaveAttribute("aria-controls", "settings-film-and-sources-explanation")
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text).toHaveTextContent("Shows the Sources menu in the media view's top bar.")
+    expect(text).toHaveTextContent("Its first item is the film, for linking a video")
+    expect(text).not.toHaveTextContent(/Film button/)
+    // Clicking the (i) beside the label never ticks its box.
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
+  })
+
+  it("saves the choice a maintainer makes", async () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    fireEvent.click(box("settings-film-and-sources"))
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).filmAndSources).toBe(true)
+  })
+})

@@ -851,8 +851,15 @@ export interface CellAudioPlaceInput {
   audioId: string
   /** Offset in ms from the LINE's own start. Negative is legal (a take that
    *  leads its line), `0` is a real placement, and `null` clears it back to the
-   *  line's start. */
+   *  line's start. Its place FOLLOWING THE SOURCE. */
   targetOffsetMs: number | null
+  /**
+   * AQU-2267: its place FOLLOWING THE RECORDINGS, measured the same way from
+   * its line's start in that layout. Required, so every writer states it: a
+   * move adds the same distance to both places. `null` = no place of its own
+   * there, and that timing reads `targetOffsetMs`.
+   */
+  recordingsOffsetMs: number | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
   /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
@@ -885,7 +892,12 @@ export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<st
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs, ...targetLaneFields(input) },
+    payload: {
+      audioId: input.audioId,
+      targetOffsetMs: input.targetOffsetMs,
+      recordingsOffsetMs: input.recordingsOffsetMs,
+      ...targetLaneFields(input),
+    },
     clientTs: input.clientTs,
   })
   return eventId
@@ -1227,6 +1239,11 @@ export interface FileTrackSetInput {
      *  creation; the server refuses it on a reserved (derived) track id. */
     sourceTrackId?: string | null
     contentFileId?: string | null
+    /** AQU-2252 (Sam, Oct 29): false makes an added track a LAYER — its takes
+     *  set no line's length while the file follows its recordings; null clears
+     *  it back to the default (every track sets them). The server refuses it
+     *  on a reserved (derived) track id. */
+    setsLineLengths?: boolean | null
   } | null
   author: string
   clientTs?: number

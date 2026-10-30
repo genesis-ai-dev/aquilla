@@ -24,6 +24,7 @@ const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "settings.project",
   "film.link",
   "cue.link",
+  "cue.links",
   "cast.assign",
   "lines.fromRecording",
   "file.importRecording",

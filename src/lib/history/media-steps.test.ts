@@ -89,6 +89,46 @@ describe("cue.link", () => {
   })
 })
 
+// Review, Oct 29: "Re-pair cues" can change hundreds of pairings. Undoing it
+// is one write, not one per pairing, and the pairings come back as they were:
+// the matcher's own stay the matcher's, and nothing it removed turns into a
+// pinned hand pairing or a hand rejection.
+describe("cue.links (re-pairing the cues)", () => {
+  const repair = {
+    links: [
+      { textCellId: "sub1", cueCellId: "heard1", linked: true, origin: "auto" as const, confidence: 0.9 },
+      { textCellId: "sub2", cueCellId: "heard2", linked: false, origin: "manual" as const, confidence: null },
+    ],
+  }
+
+  it("is undone and redone in one write each, keeping each pairing's origin", async () => {
+    const state = { links: new Set(["sub1|heard1"]) }
+    const { ctx, handlers } = ctxFor(state)
+    expect(await handlers["cue.links"].undo(repair)).toEqual({ kind: "done" })
+    expect(ctx.writeCueLinks).toHaveBeenCalledTimes(1)
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: false, origin: "auto", confidence: null },
+      { textCellId: "sub2", cueCellId: "heard2", linked: true, origin: "manual", confidence: null },
+    ])
+    expect([...state.links]).toEqual(["sub2|heard2"])
+    expect(await handlers["cue.links"].redo(repair)).toEqual({ kind: "done" })
+    expect(ctx.writeCueLinks).toHaveBeenCalledTimes(2)
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: true, origin: "auto", confidence: 0.9 },
+      { textCellId: "sub2", cueCellId: "heard2", linked: false, origin: "auto", confidence: null },
+    ])
+  })
+
+  it("leaves a pairing someone changed since, and still takes back the rest", async () => {
+    const state = { links: new Set(["sub1|heard1", "sub2|heard2"]) }
+    const { ctx, handlers } = ctxFor(state)
+    expect(await handlers["cue.links"].undo(repair)).toEqual({ kind: "done", partial: { skipped: 1 } })
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: false, origin: "auto", confidence: null },
+    ])
+  })
+})
+
 describe("cast.assign", () => {
   it("puts the old character back on both sides of a decision, and the decision record too", async () => {
     const state = {

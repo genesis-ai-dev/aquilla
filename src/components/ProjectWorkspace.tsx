@@ -276,7 +276,7 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
@@ -4606,10 +4606,12 @@ export function ProjectWorkspace() {
    * same door.
    */
   const writeCueLinks = useCallback(
-    async (changes: ReadonlyArray<{ textCellId: string; cueCellId: string; linked: boolean }>): Promise<boolean> => {
+    async (changes: ReadonlyArray<CueLinkWrite>): Promise<boolean> => {
       if (!project?.id || !activeFileId || !audioCueSibling) return false
-      for (const { textCellId, cueCellId, linked } of changes) {
-        setCueLinkLocally(textCellId, cueCellId, linked)
+      // Painted all at once, in one render, then queued one by one: undoing a
+      // re-pair writes hundreds (review, Oct 29).
+      for (const { textCellId, cueCellId, linked } of changes) setCueLinkLocally(textCellId, cueCellId, linked)
+      for (const [i, { textCellId, cueCellId, linked, origin, confidence }] of changes.entries()) {
         try {
           await emitCellLinkSet({
             projectId: project.id,
@@ -4618,13 +4620,14 @@ export function ProjectWorkspace() {
             toFileId: audioCueSibling.id,
             toCellId: cueCellId,
             linked,
-            origin: "manual",
+            origin: origin ?? "manual",
+            ...(confidence != null ? { confidence } : {}),
             author: currentUsername,
           })
         } catch (e) {
           console.warn("[cue-links] toggle failed", e)
           // Put the paint back where the server still has it.
-          setCueLinkLocally(textCellId, cueCellId, !linked)
+          for (const c of changes.slice(i)) setCueLinkLocally(c.textCellId, c.cueCellId, !c.linked)
           toast.add({ type: "error", title: "Couldn't save that pairing." })
           return false
         }
@@ -12426,19 +12429,33 @@ export function ProjectWorkspace() {
       }
       const changed = diff.link.length + diff.unlink.length
       if (changed > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      // Decision 11: one Undo step for the whole re-pair.
-      recordGroup(
-        { labelKey: "editor.history.stepRepairCues", fileId: activeFile.id, fileName: activeFileNameRef.current },
-        [
-          ...diff.link.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true })),
-          ...diff.unlink.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: false })),
-        ].map((data) => ({
-          kind: "cue.link",
-          data,
-          labelKey: data.linked ? "editor.history.stepLinkCue" : "editor.history.stepUnlinkCue",
+      // Decision 11: one Undo step for the whole re-pair, written back in
+      // one batch. A pairing it removed keeps who made it (a person's stays
+      // pinned) and its score, so it comes back as it was.
+      if (changed > 0) {
+        const was = new Map(cueLinkRows.map((r) => [`${r.fromCellId} ${r.toCellId}`, r]))
+        recordStep<CueLinksData>({
+          kind: "cue.links",
+          data: {
+            links: [
+              ...diff.link.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true, origin: "auto" as const, confidence: l.confidence })),
+              ...diff.unlink.map((l) => {
+                const row = was.get(`${l.textCellId} ${l.cueCellId}`)
+                return {
+                  textCellId: l.textCellId,
+                  cueCellId: l.cueCellId,
+                  linked: false,
+                  origin: row?.origin === "manual" ? ("manual" as const) : ("auto" as const),
+                  confidence: row?.confidence ?? null,
+                }
+              }),
+            ],
+          },
+          labelKey: "editor.history.stepRepairCues",
           fileId: activeFile.id,
-        })),
-      )
+          fileName: activeFileNameRef.current,
+        })
+      }
       refreshCueLinks()
       toast.add({ type: "success", title: changed === 0
           ? "The pairings came out the same."
@@ -12450,7 +12467,7 @@ export function ProjectWorkspace() {
       setCueLinksPending(false)
     }
   }, [
-    project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
+    project?.id, activeFile, audioCueSibling, audioCues, cueLinks, cueLinkRows, currentUsername,
     getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 

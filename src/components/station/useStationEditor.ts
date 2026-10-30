@@ -23,7 +23,7 @@ import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
-import { StationPreview } from "@/lib/station/preview"
+import { previewCanMix, StationPreview } from "@/lib/station/preview"
 import { mixWhole, renderSegments, type PcmSource } from "@/lib/station/render"
 import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
@@ -211,12 +211,18 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     if (!pcm) return
     const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
     if (ops.length === 0 && flat) {
-      preview.setSamples(pcm.data, pcm.rate)
+      preview.setLevel(null)
+      preview.setSamples(pcm.data, pcm.rate, { mix: previewCanMix() })
       return
     }
     const id = setTimeout(() => {
       const whole = ops.length === 0 ? pcm.data : renderSegments(placed, lookup, pcm.rate)
-      preview.setSamples(mixWhole(whole, pcm.rate, clip), pcm.rate)
+      // The mixer applies the volume and fades (and guards the peak); with no
+      // AudioContext they are baked into the samples instead.
+      if (previewCanMix()) {
+        preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+        preview.setSamples(whole, pcm.rate, { mix: true })
+      } else preview.setSamples(mixWhole(whole, pcm.rate, clip), pcm.rate)
     }, 150)
     return () => clearTimeout(id)
   }, [pcm, ops, placed, lookup, preview, clip])

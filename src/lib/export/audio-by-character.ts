@@ -24,6 +24,7 @@
 // The orchestrator takes an injected decode/fetch so tests can supply fakes;
 // production wires real Web Audio + sync-worker fetch.
 
+import { applyClipLevelPcm, guardPeak, levelFields } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 import { resolvePcmWindow } from "@/lib/audio/pcm-window"
 import type { CellData } from "@/hooks/useCells"
@@ -63,6 +64,10 @@ export interface CharacterClip {
    */
   trimStartMs?: number | null
   trimEndMs?: number | null
+  /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
 }
 
 export interface CharacterGroup {
@@ -259,7 +264,7 @@ export function groupAudioByCharacter(
       }
       continue
     }
-    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec, trimStartMs, trimEndMs })
+    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec, trimStartMs, trimEndMs, ...levelFields(attachment) })
   }
   return order.map((k) => byKey.get(k)!)
 }
@@ -403,9 +408,11 @@ export function placeClips(
     const n = Math.min(clip.pcm.length, total - offset)
     for (let i = 0; i < n; i += 1) {
       const at = offset + i
-      const sample = track[at] + quantisePcm16(clip.pcm[i])
-      // Saturating add: two loud takes over one another must not wrap round to
-      // the opposite sign, which is heard as a click rather than as loudness.
+      // AQU-2327: summed in float and through a peak guard rather than a hard
+      // clip — raised takes overlap loud more often than recorded ones did.
+      // (Two loud takes must still never wrap round to the opposite sign.)
+      const sum = track[at] / 32768 + clip.pcm[i]
+      const sample = quantisePcm16(guardPeak(sum))
       track[at] = sample > 32767 ? 32767 : sample < -32768 ? -32768 : sample
     }
   }
@@ -522,7 +529,9 @@ export async function exportAudioByCharacter(
             trimStartMs: clip.trimStartMs,
             trimEndMs: clip.trimEndMs,
           })
-          const audible = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+          const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+          // AQU-2327: its volume and fades, as the timeline plays them.
+          const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
           placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec })
         }
       } catch (err) {

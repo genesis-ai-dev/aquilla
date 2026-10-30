@@ -13,7 +13,15 @@
 // The element's clock IS the edited recording's clock, so a selection plays
 // by seeking to its start and stopping at its end.
 
+import { mixElement, mixerInput, type ClipLevel } from "@/lib/audio/mixer"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
+
+/** Can the Station play through the app's mixer here (an AudioContext)? Then
+ *  the clip's volume and fades are the mixer's, with its peak guard; without
+ *  one they are baked into the preview's samples. */
+export function previewCanMix(): boolean {
+  return mixerInput() != null
+}
 
 export interface PreviewCallbacks {
   /** Where it is, while it plays (recording seconds). */
@@ -28,6 +36,8 @@ export class StationPreview {
   private raf: number | null = null
   private stopAt = Infinity
   private loopFrom: number | null = null
+  private level: ClipLevel | null = null
+  private mixed = false
   private cb: PreviewCallbacks
 
   constructor(cb: PreviewCallbacks = {}) {
@@ -47,7 +57,7 @@ export class StationPreview {
   }
 
   /** The samples to play from now on. Keeps the position if it was playing. */
-  setSamples(samples: Float32Array, rate: number): void {
+  setSamples(samples: Float32Array, rate: number, opts: { mix?: boolean } = {}): void {
     const el = this.element()
     if (!el) return
     const wasAt = el.currentTime
@@ -58,6 +68,8 @@ export class StationPreview {
     this.url = next
     el.src = next
     if (prev) URL.revokeObjectURL(prev)
+    // Through the app's one mixer (AQU-2327): the clip's level and the peak guard.
+    if (opts.mix) this.mixed = mixElement(el, "station", this.level)
     if (wasPlaying) {
       el.currentTime = wasAt
       void el.play().catch(() => this.finish())
@@ -86,6 +98,12 @@ export class StationPreview {
     }
     if (el.readyState >= 1) start()
     else el.addEventListener("loadedmetadata", start, { once: true })
+  }
+
+  /** The clip's volume and fades, applied by the mixer (see `previewCanMix`). */
+  setLevel(level: ClipLevel | null): void {
+    this.level = level
+    if (this.mixed && this.el) mixElement(this.el, "station", level)
   }
 
   setRate(rate: number): void {

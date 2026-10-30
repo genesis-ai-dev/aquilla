@@ -46,7 +46,7 @@ export const STATION_PICKS = {
  * (the playback mixer, slice 8). With "together", the Station shows its volume
  * line and fade corners only once this is true.
  */
-export const MIXER_READY = false
+export const MIXER_READY = true
 
 /** The Station shows its volume and fade controls (items 21–22). */
 export const levelsShown = (): boolean => STATION_PICKS.levelsRelease === "stationFirst" || MIXER_READY

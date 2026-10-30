@@ -85,7 +85,7 @@ const KEYS = {
     "recordingsUpload.pick.dragDrop": "Drag recordings or a folder here, or",
     "recordingsUpload.pick.language": "They go into {language}, the language you're working in.",
     "recordingsUpload.pick.languageDefault": "They go into the language you're working in.",
-    "recordingsUpload.pick.formats": "WAV, MP3, M4A, OGG, FLAC and other audio files.",
+    "recordingsUpload.pick.formats": "WAV, MP3, M4A, OGG, FLAC and other audio files a browser can play.",
     // The matching rule, behind the (i)
     "recordingsUpload.rules.label": "How each recording finds its line",
     "recordingsUpload.rules.byName":

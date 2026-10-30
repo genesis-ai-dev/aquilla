@@ -108,13 +108,13 @@ describe("AiSetupDialog", () => {
   })
 
   // AQU-2259: the provider is the team's setting now.
-  it("moves the whole project back to Frontier through the shared settings", async () => {
+  it("moves the whole project back to Aquilla through the shared settings", async () => {
     renderDialog(makeProject({
       completionSettings: {
         provider: "custom", endpoint: "https://openrouter.ai/api/v1", model: "x/y", maxTokens: 16384, temperature: 0.3,
       } as ProjectRecord["completionSettings"],
     }))
-    fireEvent.click(screen.getByRole("button", { name: /Frontier AI/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Aquilla AI/i }))
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(patchSettings).toHaveBeenCalled())
     expect(patchSettings).toHaveBeenCalledWith({

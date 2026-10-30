@@ -1,7 +1,7 @@
 import { Wifi, WifiOff } from "lucide-react"
 import { useConnectivity } from "@/lib/offline/connectivity"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
@@ -20,8 +20,9 @@ export function ConnectivityStatusChip() {
     ? t("workspace.offline.connectivityTooltipOnline")
     : t("workspace.offline.connectivityTooltipOffline")
 
+  // AQU-2260: a status chip says what it means on click, never on hover.
   return (
-    <AppTooltip content={tooltip} side="top">
+    <NoteOnClick note={tooltip} side="top">
       <span
         data-testid="connectivity-status-chip"
         data-online={online}
@@ -34,6 +35,6 @@ export function ConnectivityStatusChip() {
         {online ? <Wifi className="size-3" aria-hidden /> : <WifiOff className="size-3" aria-hidden />}
         {label}
       </span>
-    </AppTooltip>
+    </NoteOnClick>
   )
 }

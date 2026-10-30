@@ -499,7 +499,6 @@ export const settings = defineNamespace({
     "settings.monday.connectedAsOnRow": "Connected as {username} on {date}",
     "settings.monday.disconnectButton": "Disconnect",
     "settings.monday.openMondayButton": "Open Monday.com",
-    "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
       "boards and push translation progress automatically.",
@@ -580,6 +579,12 @@ export const settings = defineNamespace({
     // "Delete '{name}'?" confirm-dialog title → org.teamDetail.deleteConfirmTitle (identical text)
     // "This removes the team and all its grants." → org.teamDetail.deleteConfirmBody (identical text)
     // "Cancel" → common.cancel (identical text)
+
+    // AQU-2260: why a setting is locked, said once where you will see it.
+    "settings.locked.section": "Only {role} can change these settings.",
+    "settings.locked.control": "Only {role} can change this.",
+    "settings.locked.page": "Only {role} can change {section}.",
+    "settings.locked.viewOnly": "View only",
   },
   context: {
     _context: {
@@ -592,6 +597,39 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.locked.section": {
+        description:
+          "One line at the top of a settings card the reader cannot change, saying who can. " +
+          "Shown once for the whole card, instead of a note on every greyed-out control in it. " +
+          "A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+        },
+      },
+      "settings.locked.control": {
+        description:
+          "One short line beneath a single greyed-out setting the reader cannot change, saying " +
+          "who can. 'this' is that one setting. A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+        },
+      },
+      "settings.locked.page": {
+        description:
+          "One line at the top of an organization settings page the reader can open but not " +
+          "change, e.g. 'Only Owners can change Security.' The page stays readable, so people " +
+          "can see how things are set and ask for a change. A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Owners' or 'Maintainers'.",
+          section: "The settings page's own title, already translated, e.g. 'Security'.",
+        },
+      },
+      "settings.locked.viewOnly": {
+        description:
+          "Short note beside a page's name in the organization settings list, for a page the " +
+          "reader can open and read but not change. Two words if possible.",
+        maxLength: 16,
+      },
       "settings.preferences.recording.followsYou": {
         description:
           "Second sentence of the Preferences → Recording page's description, shown when signed " +

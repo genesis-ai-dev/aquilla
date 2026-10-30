@@ -68,7 +68,8 @@ test("agent drafts the open file; workbench accept-all lands in the editor; undo
   // Undo lives on the workbench receipt (the dock renders ProposalCard, not
   // ProposalReceipt). Re-open the same session and compensate from there.
   await agent.openFullScreenWorkbench()
-  const undo = alice.getByRole("button", { name: /Undo applied/ })
+  // exact: the (i) beside it is "About Undo applied" (AQU-2260).
+  const undo = alice.getByRole("button", { name: "Undo applied", exact: true })
   await expect(undo).toBeVisible({ timeout: 10_000 })
   await undo.click()
   await expect(alice.getByText(/\d+ undone/)).toBeVisible({ timeout: 15_000 })

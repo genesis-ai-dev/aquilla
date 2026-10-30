@@ -29,7 +29,7 @@
 
 import { History, MessageSquarePlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import type { AgentSessionSummary } from "@/lib/agent/session-history"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -105,23 +105,29 @@ export function AgentChatOptions({
   if (labelled) {
     return (
       <div className="flex items-center gap-1">
-        {/* The caveat stays attached to the action, now as the button's own
-            tooltip: nothing about this surface is destructive, so it informs
-            rather than warns, and the copy is the same sentence the menu item
-            carries on compact surfaces. */}
-        <AppTooltip content={t("agent.chatOptions.newChatDescription")}>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            onClick={onNewChat}
-            data-testid="agent-new-chat"
-          >
-            <MessageSquarePlus data-icon="inline-start" />
-            {t("agent.chatOptions.newChat")}
-          </Button>
-        </AppTooltip>
+        {/* The caveat stays attached to the action: nothing about this
+            surface is destructive, so it informs rather than warns, and the
+            copy is the same sentence the menu item carries on compact
+            surfaces. AQU-2260 (Sam, Oct 29): a labelled button does not
+            explain itself on hover, so the caveat is an (i) beside it that
+            opens on click. */}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={disabled}
+          onClick={onNewChat}
+          data-testid="agent-new-chat"
+        >
+          <MessageSquarePlus data-icon="inline-start" />
+          {t("agent.chatOptions.newChat")}
+        </Button>
+        <InfoNote
+          label={t("common.aboutAria", { name: t("agent.chatOptions.newChat") })}
+          testId="agent-new-chat-info"
+        >
+          {t("agent.chatOptions.newChatDescription")}
+        </InfoNote>
         {/* New chat has left the menu, so the menu IS the chat list — it says
             so on its face, and the in-menu heading would only repeat it. */}
         <OverflowMenu

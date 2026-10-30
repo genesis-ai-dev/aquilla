@@ -121,7 +121,7 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
   }
 
   return (
-    <SettingsGroup label={t("bibleData.profile.title")} description={t("bibleData.profile.description")}>
+    <SettingsGroup label={t("bibleData.profile.title")} description={t("bibleData.profile.description")} locked={canEdit ? null : disabledTooltip}>
       <SettingsRow
         block
         label={t("bibleData.profile.quoteMarks.label")}

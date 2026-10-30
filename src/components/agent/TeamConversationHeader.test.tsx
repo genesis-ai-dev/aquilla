@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { render, screen, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import type { ContextualRunRecord } from "@/lib/contextual/transport"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { TeamConversationHeader, type TeamConversationHeaderProps } from "./TeamConversationHeader"
 
 function runRecord(overrides: Partial<ContextualRunRecord> = {}): ContextualRunRecord {
@@ -51,7 +52,14 @@ describe("TeamConversationHeader attention", () => {
       "href", "/project/p1/agent?conversation=run%3Arun-1&view=review",
     )
     expect(screen.getByRole("link", { name: "Review 3 drafts" })).toHaveClass("bg-primary")
-    expect(screen.getByText("Needs review")).toHaveAttribute("title", "Agent: Idle")
+    // AQU-2260: the agent's own state is a note the status opens on click,
+    // not a hover title.
+    expect(screen.getByText("Needs review")).not.toHaveAttribute("title")
+  })
+
+  it("says the agent's state on click of the status, never on hover", async () => {
+    renderWithTooltips(header({ run: runRecord() }))
+    await expectClickNote(screen.getByRole("button", { name: "Needs review" }), "Agent: Idle")
   })
 
   it.each([0, undefined])("does not invent pending work for a zero or missing count (%s)", (proposedDrafts) => {

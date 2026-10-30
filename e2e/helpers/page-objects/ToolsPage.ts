@@ -165,7 +165,8 @@ export class ToolsPage {
   }
 
   async revertSince(activity: Locator): Promise<void> {
-    await activity.getByRole("button", { name: "Undo these changes" }).click()
+    // exact: the (i) beside it is "About Undo these changes" (AQU-2260).
+    await activity.getByRole("button", { name: "Undo these changes", exact: true }).click()
     await activity.getByRole("button", { name: "Confirm" }).click()
   }
 }

@@ -3,6 +3,8 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPage } from "./MembersPage"
 
 // AQU-1277: OrgProvider loads the project directory via
@@ -499,5 +501,36 @@ describe("MembersPage — Teams-style roster table", () => {
       screen.getByText(/cannot see or open projects until they are added to a specific project or team/i),
     ).toBeInTheDocument()
     expect(screen.getByText(/only maintainer and owner can see every project/i)).toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a pending invite's kind (an email it was sent to, or
+// an open link) says what it means on a click, never on hover.
+describe("MembersPage pending invites", () => {
+  it("says what a targeted invite and an open link mean, on click", async () => {
+    const invite = (over: Record<string, unknown>) => ({
+      token: "t", projectId: "p1", projectName: "John", role: { level: 400, name: "contributor" },
+      createdBy: { userId: 1, username: "joel" }, createdAt: "2026-10-01T00:00:00Z", expiresAt: null, ...over,
+    })
+    vi.mocked(useOrgInvites).mockReturnValue({
+      invites: [invite({ token: "a", email: "anna@example.org" }), invite({ token: "b", email: null })],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(async () => {}),
+      revoke: vi.fn(async () => false),
+    } as unknown as ReturnType<typeof useOrgInvites>)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
+          <OrgProvider>
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+            </Routes>
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
   })
 })

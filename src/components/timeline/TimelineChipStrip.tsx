@@ -20,7 +20,7 @@
 import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -210,8 +210,10 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             ].filter((part): part is string => part !== null)
             return (
               <Pill>
-                <AppTooltip
-                  content={
+                {/* Where it differs opens on a click of it, never a hover
+                    (AQU-2260). */}
+                <NoteOnClick
+                  note={
                     parts.length > 0
                       ? t("workspace.chipStrip.durationDiffTooltipWithDetail", { detail: parts.join(" · ") })
                       : t("workspace.chipStrip.durationDiffTooltip")
@@ -220,7 +222,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
                   <span data-testid="tl-detail-diff" className="font-mono tabular-nums">
                     {t("workspace.chipStrip.diffLabel")} {signedSec(chipStats.durationDiffSec)}
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               </Pill>
             )
           })()}
@@ -232,23 +234,27 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
           chipStats.headOverlapSec != null &&
           chipStats.tailOverlapSec != null && (
             <>
+              {/* Which neighbour it runs over opens on a click of the pill,
+                  never a hover (AQU-2260). */}
               <Pill>
-                <span
-                  data-testid="tl-detail-overlap-start"
-                  title={t("workspace.chipStrip.startOverlapTooltip")}
-                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-                >
-                  {t("workspace.chipStrip.startOverlapValue", { sec: chipStats.headOverlapSec.toFixed(1) })}
-                </span>
+                <NoteOnClick note={t("workspace.chipStrip.startOverlapTooltip")}>
+                  <span
+                    data-testid="tl-detail-overlap-start"
+                    className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                  >
+                    {t("workspace.chipStrip.startOverlapValue", { sec: chipStats.headOverlapSec.toFixed(1) })}
+                  </span>
+                </NoteOnClick>
               </Pill>
               <Pill>
-                <span
-                  data-testid="tl-detail-overlap-end"
-                  title={t("workspace.chipStrip.endOverlapTooltip")}
-                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-                >
-                  {t("workspace.chipStrip.endOverlapValue", { sec: chipStats.tailOverlapSec.toFixed(1) })}
-                </span>
+                <NoteOnClick note={t("workspace.chipStrip.endOverlapTooltip")}>
+                  <span
+                    data-testid="tl-detail-overlap-end"
+                    className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                  >
+                    {t("workspace.chipStrip.endOverlapValue", { sec: chipStats.tailOverlapSec.toFixed(1) })}
+                  </span>
+                </NoteOnClick>
               </Pill>
             </>
           )}
@@ -256,15 +262,16 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
         {chipStats?.kind === "dubbing" &&
           (chipStats.headOverlapSec == null) !== (chipStats.tailOverlapSec == null) && (
             <Pill>
-              <span
-                data-testid="tl-detail-overlap"
-                title={t("workspace.chipStrip.eitherOverlapTooltip")}
-                className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-              >
-                {t("workspace.chipStrip.overlapValue", {
-                  sec: (chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1),
-                })}
-              </span>
+              <NoteOnClick note={t("workspace.chipStrip.eitherOverlapTooltip")}>
+                <span
+                  data-testid="tl-detail-overlap"
+                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                >
+                  {t("workspace.chipStrip.overlapValue", {
+                    sec: (chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1),
+                  })}
+                </span>
+              </NoteOnClick>
             </Pill>
           )}
         {audioMissing && (

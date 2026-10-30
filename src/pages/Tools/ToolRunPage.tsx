@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { CopyList, PermissionsList } from "@/components/tools/ExtensionDialogs"
 import { ToolActivityPanel } from "@/components/tools/ToolActivityPanel"
 import { ToolFrame } from "@/components/tools/ToolFrame"
@@ -114,22 +114,34 @@ export function ToolRunPage() {
                 <h1 className="truncate text-sm font-semibold">{tool.name}</h1>
                 <ExtensionMarker />
                 <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{t("extensions.version", { version: tool.currentVersion })}</span>
+                {/* AQU-2260 (Sam, Oct 29): these marks say what they stand for
+                    on click, never on hover. */}
                 {tool.firstParty && (
-                  <AppTooltip content={t("extensions.firstParty.badge")}>
-                    <span data-testid="first-party-badge" aria-label={t("extensions.firstParty.badge")} className="inline-flex">
-                      <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                    </span>
-                  </AppTooltip>
+                  <NoteOnClick
+                    note={t("extensions.firstParty.badge")}
+                    label={t("extensions.firstParty.badge")}
+                    testId="first-party-badge"
+                  >
+                    <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                  </NoteOnClick>
                 )}
                 {builtFrom && (
-                  <AppTooltip content={t("extensions.detail.builtFrom", { request: builtFrom })}>
-                    <span tabIndex={0} aria-label={t("extensions.detail.builtFrom", { request: builtFrom })} className="inline-flex text-muted-foreground" data-testid="built-from">
-                      <Quote className="size-3.5" aria-hidden />
-                    </span>
-                  </AppTooltip>
+                  <NoteOnClick
+                    note={t("extensions.detail.builtFrom", { request: builtFrom })}
+                    label={t("extensions.detail.builtFrom", { request: builtFrom })}
+                    testId="built-from"
+                    className="text-muted-foreground"
+                  >
+                    <Quote className="size-3.5" aria-hidden />
+                  </NoteOnClick>
                 )}
               </div>
-              <p className="truncate text-xs text-muted-foreground" title={tool.description}>{t(MOUNT_LABEL[primaryMount(tool.manifest.mounts)])}</p>
+              {/* Where it lives; its description opens on a click of it. */}
+              <p className="truncate text-xs text-muted-foreground">
+                <NoteOnClick note={tool.description} align="start" className="max-w-full">
+                  <span className="truncate">{t(MOUNT_LABEL[primaryMount(tool.manifest.mounts)])}</span>
+                </NoteOnClick>
+              </p>
             </div>
             <TabsList className="order-last w-full sm:order-none sm:ms-auto sm:w-fit" aria-label={tool.name}>
               {tabs.map((x) => (

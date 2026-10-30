@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
@@ -65,7 +65,8 @@ describe("TimelineTimingRow", () => {
     expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: −1.4s")
   })
 
-  it("the Diff hover breaks the difference into its start and end halves", async () => {
+  // AQU-2260 (Sam, Oct 29): on a click of the pill, never a hover.
+  it("the Diff note breaks the difference into its start and end halves", async () => {
     renderWithTooltips(
       <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
@@ -76,7 +77,7 @@ describe("TimelineTimingRow", () => {
         }}
       />,
     )
-    await expectTooltip(screen.getByTestId("tl-detail-diff"), /Start: −0\.6s · End: −0\.8s/)
+    await expectClickNote(screen.getByTestId("tl-detail-diff"), /Start: −0\.6s · End: −0\.8s/)
   })
 
   it("a negative Diff is INFORMATIONAL — labeled, never red (2026-08-06)", () => {
@@ -108,6 +109,8 @@ describe("TimelineTimingRow", () => {
     const overlap = screen.getByTestId("tl-detail-overlap")
     expect(overlap).toHaveTextContent("Overlap: −1.8s")
     expect(overlap.className).toContain("text-red-600")
+    // AQU-2260: which neighbour it runs over opens on a click, never a hover.
+    expect(overlap).not.toHaveAttribute("title")
     // …and the informational Diff stays neutral beside it.
     expect(screen.getByTestId("tl-detail-diff").className).not.toContain("text-red")
     // One side only → no labeled pills.
@@ -148,6 +151,8 @@ describe("TimelineTimingRow", () => {
     expect(end).toHaveTextContent("End overlap: −1.1s")
     expect(start.className).toContain("text-red-600")
     expect(end.className).toContain("text-red-600")
+    expect(start).not.toHaveAttribute("title")
+    expect(end).not.toHaveAttribute("title")
     // The undifferentiated pill must NOT also render.
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
   })
@@ -313,5 +318,37 @@ describe("MediaTextHeader", () => {
     // Same node across a selection change — the table portals into it, and a
     // remount would tear that portal down.
     expect(screen.getByTestId("tl-strip-nav")).toBe(slot)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): an overlap pill says which neighbour it runs over on
+// a click of it.
+describe("TimelineTimingRow — overlap pills explain themselves on a click", () => {
+  it("the single pill says it sounds over a neighbour", async () => {
+    renderWithTooltips(
+      <TimelineTimingRow
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{
+          kind: "dubbing", startSec: 9, endSec: 14, durationSec: 5,
+          startDiffSec: -1, endDiffSec: 1, durationDiffSec: 0,
+          headOverlapSec: 1.8, tailOverlapSec: null,
+        }}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-detail-overlap"), "neighbouring verse")
+  })
+
+  it("the start and end pills each name their neighbour", async () => {
+    renderWithTooltips(
+      <TimelineTimingRow
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{
+          kind: "dubbing", startSec: 9.3, endSec: 16.1, durationSec: 6.8,
+          startDiffSec: -0.7, endDiffSec: -1.1, durationDiffSec: -1.8,
+          headOverlapSec: 0.7, tailOverlapSec: 1.1,
+        }}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-detail-overlap-start"), "PREVIOUS verse")
   })
 })

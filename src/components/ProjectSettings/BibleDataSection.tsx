@@ -88,7 +88,7 @@ export function BibleDataSection({
 
   return (
     <>
-      <SettingsGroup label={t(experimentOn ? "bibleData.card.title" : "projectSettings.section.bibleResources")}>
+      <SettingsGroup label={t(experimentOn ? "bibleData.card.title" : "projectSettings.section.bibleResources")} locked={canEdit ? null : lockedTooltip}>
         <SettingsRow
           label={<label htmlFor="bible-resources-enabled">{t(enableLabelKey)}</label>}
           description={

@@ -203,6 +203,7 @@ export function OrgSettingsMonday() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES.monday}
+      page="monday"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.monday}
     >
       {returnNotice?.kind === "connected" && (
@@ -303,11 +304,7 @@ export function OrgSettingsMonday() {
                   )}
                 </div>
               </div>
-              {!canManage && (
-                <p className="text-xs text-muted-foreground">
-                  {t("settings.monday.manageRestrictedNotice")}
-                </p>
-              )}
+              {/* AQU-2260: who can manage it is said once, at the page's top. */}
             </>
           ) : (
             <>

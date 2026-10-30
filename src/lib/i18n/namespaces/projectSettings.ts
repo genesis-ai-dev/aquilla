@@ -1163,8 +1163,6 @@ export const projectSettings = defineNamespace({
       "Hidden from the language switcher. Their work is kept; restore one to make it " +
       "active again.",
     "projectSettings.languages.archivedHintAriaLabel": "About archived languages",
-    "projectSettings.languages.viewOnly": "View only",
-    "projectSettings.languages.viewOnlyAriaLabel": "Why you can't change languages",
     "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
@@ -1767,7 +1765,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.create.languageHintAriaLabel": {
-        description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
+        description: "Accessible name of the small (i) button beside a source/target language field. A click opens an explanation in place under the label.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
@@ -2143,37 +2141,32 @@ export const projectSettings = defineNamespace({
       "projectSettings.languages.targetLanguagesHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Target languages heading. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.codeHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside a language's Code field, explaining that the code comes from the language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.deliversHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Delivers column heading and the add form's Delivers field. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.addNameHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Name field of the Add a language form. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archiveHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages inside the confirmation shown before archiving a language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archivedHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
-      },
-      "projectSettings.languages.viewOnlyAriaLabel": {
-        description:
-          "Accessible name of a small (i) icon on Project settings → Languages beside \"View only\", shown to people who may not change the project's languages; the tooltip says which role can. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.changeSourceAriaLabel": {
         description:

@@ -162,6 +162,17 @@ describe("AdminInvitesSection", () => {
       await user.click(await screen.findByRole("option", { name }))
     }
 
+    // AQU-2260 (Sam, Oct 29, option 2B): every project on the platform is a
+    // choice here, so the list gets a search box.
+    it("the Project list has a search box that narrows it", async () => {
+      const user = await openMintDialog()
+      await user.click(screen.getByLabelText("Project"))
+      const search = await screen.findByRole("combobox", { name: "Search the list" })
+      await user.type(search, "2")
+      expect(await screen.findByRole("option", { name: "Project 2" })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "Project 1" })).not.toBeInTheDocument()
+    })
+
     it("(a) mint: submit is enabled only with a project, a user and a 4-12 digit PIN", async () => {
       const user = await openMintDialog()
       const submit = screen.getByRole("button", { name: "Create link" })

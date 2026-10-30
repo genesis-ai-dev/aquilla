@@ -11,7 +11,7 @@
 
 import { AlertTriangle, ArrowRight, Check, PenLine, Undo2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentProposal } from "@/lib/agent/protocol"
 
@@ -53,8 +53,10 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
   const settled = counts.pending === 0
   const undoable = counts.accepted + counts.edited > 0
 
+  // AQU-2260: what Undo does is an (i) beside it, opened on click; the
+  // labelled button no longer explains itself on hover.
   const undoButton = undoable && onUndo && (
-    <AppTooltip content={t("agent.receipt.undoTooltip")}>
+    <span className="inline-flex w-fit items-center gap-0.5">
       <button
         type="button"
         onClick={onUndo}
@@ -63,7 +65,14 @@ export function ProposalReceipt({ proposal, counts, onReview, onUndo }: Proposal
         <Undo2 className="h-3 w-3" />
         {t("agent.receipt.undoApplied")}
       </button>
-    </AppTooltip>
+      <InfoNote
+        label={t("common.aboutAria", { name: t("agent.receipt.undoApplied") })}
+        iconClassName="h-3 w-3"
+        testId="proposal-receipt-undo-info"
+      >
+        {t("agent.receipt.undoTooltip")}
+      </InfoNote>
+    </span>
   )
 
   // Every row decided: the card has done its job, so it steps out of the way

@@ -138,36 +138,36 @@ export function AgentDockPanel({
               variant="outline"
               size="sm"
               className="h-6 text-[11px]"
-              title={t("workspace.agentDockPanel.summarizeBookTitle", {
-                book: bibleSummary.bookName,
-              })}
               onClick={() => onSummaryPrompt(bookSummaryPrompt(bibleSummary.bookName!))}
             >
               {/* i18n-exempt existing untranslated quick-action labels (AQU-320) */}
               Summarize book
             </Button>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-6 text-[11px]"
-            disabled={!bibleSummary.chapterRef}
-            title={
+          {/* AQU-2260: labelled, so no hover. Greyed out, it says why on click. */}
+          <AppTooltip
+            content={
               bibleSummary.chapterRef
-                ? // i18n-exempt pre-existing untranslated quick-action title (AQU-320)
-                  `Summarize ${bibleSummary.chapterRef} using vetted Bible resources`
-                : // i18n-exempt pre-existing untranslated quick-action title (AQU-320)
+                ? undefined
+                : // i18n-exempt pre-existing untranslated quick-action reason (AQU-320)
                   "Focus a verse to summarize its chapter"
             }
-            onClick={() =>
-              bibleSummary.chapterRef
-              && onSummaryPrompt(chapterSummaryPrompt(bibleSummary.chapterRef))
-            }
           >
-            {/* i18n-exempt existing untranslated quick-action labels (AQU-320) */}
-            Summarize chapter
-          </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 text-[11px]"
+              disabled={!bibleSummary.chapterRef}
+              onClick={() =>
+                bibleSummary.chapterRef
+                && onSummaryPrompt(chapterSummaryPrompt(bibleSummary.chapterRef))
+              }
+            >
+              {/* i18n-exempt existing untranslated quick-action labels (AQU-320) */}
+              Summarize chapter
+            </Button>
+          </AppTooltip>
         </div>
       )}
 

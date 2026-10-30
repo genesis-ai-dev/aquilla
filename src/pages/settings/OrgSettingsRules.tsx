@@ -26,6 +26,7 @@ export function OrgSettingsRules() {
   return (
     <OrgSettingsDetailPage
       title={t("rules.orgSettings.title")}
+      page="rules"
       description={t("rules.orgSettings.description")}
     >
       {activeOrgId != null ? (

@@ -15,6 +15,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectDisabledNote } from "@/test-utils/tooltip"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { MAX_INPUT_BYTES } from "@/lib/rules/rule-extractor"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
@@ -243,5 +245,25 @@ describe("RuleImportDialog — AQU-196", () => {
         check: { type: "target-forbids", targetPattern: "foo" },
       }),
     )
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the labelled trigger says nothing on hover; greyed
+// out (no AI set up), it says why on click.
+describe("RuleImportDialog trigger", () => {
+  it("shows nothing on hover when the AI is set up", async () => {
+    renderWithTooltips(<RuleImportDialog completionSettings={SETTINGS} onAdd={vi.fn()} projectId="p1" />)
+    await userEvent.setup().hover(screen.getByRole("button", { name: /import from doc/i }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("says why it is greyed out, on click, when no AI is set up", async () => {
+    renderWithTooltips(
+      <RuleImportDialog completionSettings={{ ...SETTINGS, endpoint: "", model: "" }} onAdd={vi.fn()} projectId="p1" />,
+    )
+    const trigger = screen.getByRole("button", { name: /import from doc/i })
+    expect(trigger).toBeDisabled()
+    await expectDisabledNote(trigger, "Configure LLM in settings first")
   })
 })

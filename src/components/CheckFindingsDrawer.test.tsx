@@ -10,7 +10,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import {
   CheckFindingsDrawer,
   checkScopeSummary,
@@ -268,5 +270,32 @@ describe("findingCellLabel", () => {
   it("falls back to the id only when the cell is unknown or untimed", () => {
     expect(findingCellLabel(undefined, "uuid-1")).toBe("uuid-1")
     expect(findingCellLabel(mk({ context: "GEN 1:1" }), "uuid-2")).toBe("uuid-2")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A
+// finding's card shows what it is and is the way to it, so it has no hover.
+describe("CheckFindingsDrawer — a finding's card has no hover", () => {
+  it("shows nothing on hover over a finding's card", async () => {
+    const cells = [makeCell("c2", "MAT 1:16", "Masihi")]
+    const result: CheckRunResult = {
+      ...baseResult,
+      termFindings: [{
+        conceptId: "k1", sourceTerm: "Χριστός", approvedRenderings: ["Kristo"],
+        totalOccurrences: 2, consistentCount: 1,
+        renderingUsage: [{ rendering: "Kristo", cellIds: ["c1"] }],
+        flaggedCells: [{ cellId: "c2", cellLabel: "MAT 1:16" }],
+      }],
+      totalFindingCount: 1,
+    }
+    render(
+      <TooltipProvider delay={0}>
+        <CheckFindingsDrawer result={result} running={false} cells={cells}
+          onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}} />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(screen.getByText("MAT 1:16"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

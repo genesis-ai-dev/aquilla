@@ -165,49 +165,44 @@ export function SearchDockPanel({
           ParallelPassagesPanel already uses. `flex-wrap` keeps the row from
           overflowing at the dock's minimum width. */}
       <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5">
-        <AppTooltip content={t("search.mode.searchTooltip")}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            aria-label={t("nav.search")}
-            aria-pressed={mode === "search"}
-            onClick={() => setMode("search")}
-            className={mode === "search" ? "bg-accent text-foreground" : undefined}
-          >
-            <Search className="h-3 w-3" />
-            {t("nav.search")}
-          </Button>
-        </AppTooltip>
-        <AppTooltip content={t("search.mode.replaceTooltip")}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            aria-label={t("search.mode.replaceTooltip")}
-            aria-pressed={mode === "replace"}
-            onClick={() => setMode("replace")}
-            className={mode === "replace" ? "bg-accent text-foreground" : undefined}
-          >
-            <Replace className="h-3 w-3" />
-            {t("search.mode.replace")}
-          </Button>
-        </AppTooltip>
+        {/* The mode toggles carry their own words: no hover (AQU-2260). */}
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          aria-label={t("nav.search")}
+          aria-pressed={mode === "search"}
+          onClick={() => setMode("search")}
+          className={mode === "search" ? "bg-accent text-foreground" : undefined}
+        >
+          <Search className="h-3 w-3" />
+          {t("nav.search")}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          aria-label={t("search.mode.replaceTooltip")}
+          aria-pressed={mode === "replace"}
+          onClick={() => setMode("replace")}
+          className={mode === "replace" ? "bg-accent text-foreground" : undefined}
+        >
+          <Replace className="h-3 w-3" />
+          {t("search.mode.replace")}
+        </Button>
         {bibleResourcesEnabled && (
-          <AppTooltip content={t("search.mode.bibleTooltip")}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              aria-label={t("search.mode.bibleTooltip")}
-              aria-pressed={mode === "bible"}
-              onClick={() => setMode("bible")}
-              className={mode === "bible" ? "bg-accent text-foreground" : undefined}
-            >
-              <Book className="h-3 w-3" />
-              {t("search.mode.bible")}
-            </Button>
-          </AppTooltip>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            aria-label={t("search.mode.bibleTooltip")}
+            aria-pressed={mode === "bible"}
+            onClick={() => setMode("bible")}
+            className={mode === "bible" ? "bg-accent text-foreground" : undefined}
+          >
+            <Book className="h-3 w-3" />
+            {t("search.mode.bible")}
+          </Button>
         )}
 
         {/* Scope toggle — only meaningful for project text search */}
@@ -319,17 +314,16 @@ export function SearchDockPanel({
                       count: results.length,
                     })}
                   </span>
-                  <AppTooltip content={t("search.dock.expandAllTooltip")}>
-                    <button
-                      type="button"
-                      aria-label={t("search.dock.expandAllAriaLabel")}
-                      onClick={() => onExpandResults(query)}
-                      className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <Maximize2 className="h-2.5 w-2.5" />
-                      {t("search.dock.expandAllLabel")}
-                    </button>
-                  </AppTooltip>
+                  {/* Its words name it: no hover (AQU-2260). */}
+                  <button
+                    type="button"
+                    aria-label={t("search.dock.expandAllAriaLabel")}
+                    onClick={() => onExpandResults(query)}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <Maximize2 className="h-2.5 w-2.5" />
+                    {t("search.dock.expandAllLabel")}
+                  </button>
                 </div>
               )}
               {results.slice(0, 50).map((r) => (

@@ -865,6 +865,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                 />
               )}
               <div className="ms-auto flex items-center gap-2">
+                {/* Why it is greyed out opens on a click on it (AQU-2260). */}
                 <AppTooltip
                   content={
                     (isReadOnly as boolean)
@@ -873,9 +874,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                         ? t("search.replace.notWiredTooltip")
                         : ""
                   }
-                  className="max-w-xs"
                 >
-                  <span className="inline-flex">
                     <Button
                       type="button"
                       disabled={
@@ -893,7 +892,6 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
                           ? t("search.replace.applyButtonCount", { count: replaceDraft.selectedDiffs.length })
                           : t("search.replace.applyButtonAll")}
                     </Button>
-                  </span>
                 </AppTooltip>
               </div>
             </div>

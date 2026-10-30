@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { WorkspaceHeaderActions } from "./WorkspaceHeaderActions"
 
 describe("WorkspaceHeaderActions", () => {
@@ -48,6 +49,19 @@ describe("WorkspaceHeaderActions", () => {
       expect(importBtn).toBeDisabled()
       fireEvent.click(importBtn)
       expect(onImport).not.toHaveBeenCalled()
+    })
+
+    // AQU-2260 (Sam, Oct 29): the reason opens on click of the greyed button,
+    // never on hover.
+    it("says why Import is greyed out, on click", async () => {
+      render(
+        <WorkspaceHeaderActions
+          onImport={vi.fn()}
+          menuItems={[]}
+          importDisabledReason="Viewers cannot perform this action — you need at least Project lead access."
+        />,
+      )
+      await expectDisabledNote(screen.getByRole("button", { name: /^Import$/i }), /you need at least Project lead access/)
     })
 
     it("leaves Import enabled when no denial reason is given", () => {

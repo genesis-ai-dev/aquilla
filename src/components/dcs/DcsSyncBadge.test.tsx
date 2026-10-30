@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { DcsSyncBadge } from "./DcsSyncBadge"
 import type { DcsCursor } from "@/lib/dcs/types"
 
@@ -42,5 +43,22 @@ describe("DcsSyncBadge", () => {
     render(<DcsSyncBadge cursor={CURSOR} onClick={onClick} />)
     fireEvent.click(screen.getByTestId("dcs-sync-badge"))
     expect(onClick).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the pin's explanation opens on click, never on
+// hover. As a button (jump to settings) the badge keeps its click, so the
+// explanation is an (i) beside it; as a plain badge, the badge opens it.
+describe("DcsSyncBadge explanation", () => {
+  it("as a plain badge, opens what the link manages on click", async () => {
+    renderWithTooltips(<DcsSyncBadge cursor={CURSOR} />)
+    await expectClickNote(screen.getByTestId("dcs-sync-badge"), /Source cells are managed by this link/)
+  })
+
+  it("as a settings button, keeps the click and puts the explanation in an (i) beside it", async () => {
+    const onClick = vi.fn()
+    renderWithTooltips(<DcsSyncBadge cursor={CURSOR} onClick={onClick} />)
+    await expectClickNote(screen.getByRole("button", { name: "About unfoldingWord/en_ult" }), /unfoldingWord\/en_ult/)
+    expect(onClick).not.toHaveBeenCalled()
   })
 })

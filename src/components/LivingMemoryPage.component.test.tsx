@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { LivingMemoryPage } from "./LivingMemoryPage"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
@@ -509,5 +510,14 @@ describe("LivingMemoryPage — knowledge pane", () => {
     expect(
       screen.queryByRole("button", { name: /Upload document/i }),
     ).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the coloured liveness dot is a mark, not a button,
+// so what it means opens on click, never on hover.
+describe("LivingMemoryPage — liveness dot", () => {
+  it("says the memory's state on click", async () => {
+    renderPage()
+    await expectClickNote(screen.getByRole("button", { name: "Live" }), "Live")
   })
 })

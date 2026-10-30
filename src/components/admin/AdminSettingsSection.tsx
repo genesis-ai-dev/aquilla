@@ -6,14 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Section } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
 import { AdminSectionSkeleton } from "./shared"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { ModelListEditor, type ModelListValue } from "./ModelListEditor"
 import { AbResultsPanel } from "./AbResultsPanel"
 import {
@@ -176,33 +169,20 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <FieldLabel htmlFor="admin-ab-challenger">Challenger model</FieldLabel>
-              <Select
-                items={[
+              {/* AQU-2260: every model the endpoint offers, so a search box. */}
+              <SearchSelect
+                id="admin-ab-challenger"
+                className="w-full"
+                options={[
                   { value: "", label: "— choose a model —" },
                   ...modelList.models
                     .filter((m) => m !== modelList.chatModel)
                     .map((m) => ({ value: m, label: m })),
                 ]}
                 value={abChallenger}
-                onValueChange={(v) => setAbChallenger(v ?? "")}
+                onValueChange={setAbChallenger}
                 disabled={!abEnabled}
-              >
-                <SelectTrigger id="admin-ab-challenger" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">— choose a model —</SelectItem>
-                    {modelList.models
-                      .filter((m) => m !== modelList.chatModel)
-                      .map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+              />
               <p className="text-xs text-muted-foreground">
                 Competes against the default chat model ({modelList.chatModel || "unset"}).
               </p>

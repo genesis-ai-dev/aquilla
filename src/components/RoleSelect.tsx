@@ -102,7 +102,6 @@ export function RoleSelect({
       </SelectTrigger>
       <SelectContent
         align="start"
-        alignItemWithTrigger={false}
         className={cn("min-w-72 max-w-96", contentClassName)}
       >
         <SelectGroup>

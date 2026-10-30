@@ -390,11 +390,14 @@ export function RecordingVideoSurface({
           // line starts on, the affordance itself.
           onError={() => setFailed(true)}
         />
+        {/* The hover only names it (AQU-2260). Why it matters is said where
+            it is seen: the amber warning on the picture while it is audible,
+            and "headphones only" in the unmute name. */}
         <AppTooltip
           content={
             audible
-              ? t("audio.recordingModal.filmAudibleTooltip")
-              : t("audio.recordingModal.filmMutedTooltip")
+              ? t("audio.recordingModal.filmMuteAriaLabel")
+              : t("audio.recordingModal.filmUnmuteAriaLabel")
           }
         >
           <Button

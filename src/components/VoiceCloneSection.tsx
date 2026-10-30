@@ -8,7 +8,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { FileAudio, Mic, Pause, Play, Square, Trash2, Upload } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -348,8 +347,8 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
     }
   }, [state, projectId, fileId, referenceAudioId, session, cleanup])
 
+  // Its word names it: no hover (AQU-2260).
   return (
-    <AppTooltip content={t("audio.clone.previewTooltip")}>
       <Button
         type="button"
         variant="outline"
@@ -365,6 +364,5 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       )}
       {state === "error" ? t("audio.clone.previewFailed") : t("common.preview")}
     </Button>
-    </AppTooltip>
   )
 }

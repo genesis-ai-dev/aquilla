@@ -2,7 +2,7 @@
 // "regenerate" counterpart to re-recording, right where recording lives.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -95,7 +95,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
 
@@ -629,7 +629,9 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
     expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Synthesizing")
   })
 
-  it("keeps the verbatim server text reachable on hover", async () => {
+  // AQU-2260: behind the (i) at the end of the reason line, on a click. The
+  // button itself has no hover.
+  it("keeps the verbatim server text reachable behind the reason line's (i)", async () => {
     setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
     renderWithTooltips(
       <AudioRecordingModal
@@ -637,7 +639,9 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
         username="sam" onActiveCellChange={() => {}} onClose={() => {}}
       />,
     )
-    await expectTooltip(screen.getByTestId("rec-generate-tts"), /TTS not configured/i)
+    const line = screen.getByTestId("rec-tts-error")
+    const info = within(line).getByRole("button", { name: "About TTS failed" })
+    await expectClickNote(info, /TTS not configured/i)
   })
 })
 

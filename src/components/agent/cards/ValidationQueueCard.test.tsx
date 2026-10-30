@@ -16,6 +16,7 @@ vi.mock("@/lib/agent/apply", async (importOriginal) => ({
   applyStagedEvent: (ev: StagedEvent, ctx: ApplyContext) => applyStagedEvent(ev, ctx),
 }))
 
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { ValidationQueueCard } from "./ValidationQueueCard"
 
 const proposal: AgentProposal = {
@@ -101,10 +102,12 @@ describe("ValidationQueueCard", () => {
     expect(new Set(labels).size).toBe(cellIds.length)
   })
 
-  it("disables Validate below the role floor", () => {
+  it("disables Validate below the role floor", async () => {
     render(<ValidationQueueCard proposal={proposal} applyContext={ctx} canValidate={false} />)
     for (const btn of screen.getAllByRole("button", { name: /^Validate / })) {
       expect(btn).toBeDisabled()
     }
+    // AQU-2260: why opens on a click of the greyed button, never on hover.
+    await expectDisabledNote(screen.getAllByRole("button", { name: /^Validate / })[0], "Your role can't validate in this project")
   })
 })

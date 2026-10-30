@@ -34,7 +34,6 @@ import {
 } from "@/lib/audio/change-voice"
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
@@ -1069,8 +1068,8 @@ function TargetAudioChip({
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
   // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
-  // much of this chip double-sounds — not just prose. Native `title` can't be
-  // styled, hence AppTooltip. Secondary notes keep their SUB-48 wording.
+  // much of this chip double-sounds — not just prose. Secondary notes keep
+  // their SUB-48 wording. They are the take's details in its right-click menu.
   const tipLines: ReactNode[] = []
   if (overflow === "overlap") {
     if (tailTrespass) {
@@ -1140,7 +1139,18 @@ function TargetAudioChip({
       <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
-  const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
+  // AQU-2260 (Sam, Oct 29, third pass): what a take is — its kind and length,
+  // an overlap, a missing or unsaved clip, why it is drawn short — sits at the
+  // top of its right-click menu as plain lines. Hover shows nothing: a click on
+  // the chip moves the playhead, so it cannot open a note.
+  const takeDetails = (
+    <div
+      data-testid={`tl-take-details-${testKey}`}
+      className="flex flex-col gap-0.5 px-2 py-1.5 text-xs text-muted-foreground"
+    >
+      {tipLines}
+    </div>
+  )
 
   const chipButton = (
     <button
@@ -1474,7 +1484,7 @@ function TargetAudioChip({
               </span>
             ) : null}
             {/* AQU-1758: the take's voice when it is not the line's, lighter;
-                the sentence is in the tooltip. */}
+                the sentence is in the take's right-click details (AQU-2260). */}
             {!voicingAs && barShowsVoice && (
               <span
                 data-testid={`tl-target-${testKey}-take-voice`}
@@ -1484,9 +1494,12 @@ function TargetAudioChip({
               </span>
             )}
           </span>
+          {/* AQU-2260: no hover; the glyph is named for a screen reader, and
+              what it means is in the take's right-click menu. */}
           {showLeftGlyph && (
             <span
-              title={
+              role="img"
+              aria-label={
                 leftGlyph === "missing"
                   ? MISSING_AUDIO_MESSAGE
                   : leftGlyph === "syncFailed"
@@ -1692,15 +1705,19 @@ function TargetAudioChip({
     </button>
   )
   if (!hasMenu) {
+    // Nothing to do with the take here, so its menu holds only what it is.
     return (
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        {chipButton}
-      </AppTooltip>
+      <ContextMenu>
+        <ContextMenuTrigger render={chipButton} />
+        <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+          {takeDetails}
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
   // AQU-1767 (Sam, 2026-10-14): a right-click on a take offers what can be
-  // done with it. The menu's root sits outside the tooltip and its trigger
-  // renders the chip itself, so the tooltip and the menu share one element.
+  // done with it, under what it is (AQU-2260). The trigger renders the chip
+  // itself.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
   // AQU-2026: the per-line Change voice. The state is read off the line, not
@@ -1743,10 +1760,10 @@ function TargetAudioChip({
         setMenuSplitAtMs(at?.ok ? at.atMs : null)
       }}
     >
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        <ContextMenuTrigger render={chipButton} />
-      </AppTooltip>
+      <ContextMenuTrigger render={chipButton} />
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {takeDetails}
+        <ContextMenuSeparator />
         {/* AQU-2212: the line's voice and this take part ways — the one click
             that brings them back together, first (the Audio view's card put
             it beside the voice field). */}

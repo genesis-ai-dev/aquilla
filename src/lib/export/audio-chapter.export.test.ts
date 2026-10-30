@@ -214,3 +214,58 @@ describe("exportAudioByChapter", () => {
     expect(await pcmFromWav(result.blob)).toHaveLength(1)
   })
 })
+
+// AQU-1758 (Sam, Oct 29): on a book, a pause someone dragged open — before a
+// verse's take, or between two pieces of a cut take — plays as silence in the
+// app, so the chapter puts it in as silence and sounds like playback. Every
+// piece of a cut take is in it, not just the first.
+describe("exportAudioByChapter — a book's dragged-open pauses", () => {
+  const MS = TARGET_RATE / 1000 // samples per millisecond
+  const take = (id: string, ref: string, attachments: Record<string, unknown>) =>
+    cell({ id, group: ref, selectedAudioId: Object.keys(attachments)[0], attachments: attachments as CellData["attachments"] })
+
+  it("puts the pause before a verse's take in as silence", async () => {
+    const result = await exportAudioByChapter({
+      cells: [
+        take("v1", "RUT 1:1", { "audio-v1-1700000000-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, targetOffsetMs: 50 } }),
+        withTake("v2", "RUT 1:2"),
+      ],
+      projectId: "p1",
+      fetchBytes: async ({ audioId }) => new TextEncoder().encode(audioId),
+      decode: async (bytes) =>
+        new TextDecoder().decode(bytes) === "audio-v1-1700000000-take" ? new Float32Array(100 * MS).fill(0.5) : new Float32Array([0.25]),
+    })
+    const samples = await pcmFromWav(result.blob)
+    expect(samples).toHaveLength(50 * MS + 100 * MS + 1)
+    expect(samples.slice(0, 50 * MS).every((s) => s === 0)).toBe(true)
+    expect(samples[50 * MS]).toBe(quantisePcm16(0.5))
+    expect(samples.at(-1)).toBe(quantisePcm16(0.25))
+  })
+
+  it("puts every piece of a cut take in, with the silence dragged open between them", async () => {
+    // One recording, 100 ms. Piece 1 is its 0–40 ms on the line's start;
+    // piece 2 is its 60–100 ms, moved 60 ms along from the first piece's end
+    // (to 100 ms): 60 ms of silence between.
+    const recording = new Float32Array(100 * MS)
+    recording.fill(0.5, 0, 50 * MS)
+    recording.fill(-0.5, 50 * MS)
+    const result = await exportAudioByChapter({
+      cells: [
+        take("v1", "RUT 1:1", {
+          "audio-v1-1700000000-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, trimEndMs: 40 },
+          "audio-v1-1700000001-take": { url: "frontier-audio://audio-v1-1700000000-take.wav", type: "audio", durationMs: 100, trimStartMs: 60, pieceOf: "audio-v1-1700000000-take", targetOffsetMs: 60 },
+        }),
+      ],
+      projectId: "p1",
+      fetchBytes: async ({ audioId }) => new TextEncoder().encode(audioId),
+      decode: async () => recording,
+    })
+    const samples = await pcmFromWav(result.blob)
+    expect(samples).toHaveLength(40 * MS + 60 * MS + 40 * MS)
+    expect(samples[0]).toBe(quantisePcm16(0.5))
+    expect(samples.slice(40 * MS, 100 * MS).every((s) => s === 0)).toBe(true)
+    expect(samples[100 * MS]).toBe(quantisePcm16(-0.5))
+    expect(samples.at(-1)).toBe(quantisePcm16(-0.5))
+  })
+})
+

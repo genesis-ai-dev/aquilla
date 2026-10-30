@@ -11,6 +11,26 @@
 // so permission is confirmed (or the error surfaced) before the 3-2-1 sequence
 // begins. This prevents counting down into a failed recording. (AQU-155)
 
+/**
+ * AQU-1758 (Sam: the browser's microphone pop-up appears only when the
+ * recording window opens, "in every scenario ever"): the microphone's
+ * permission, READ and never asked for. The Permissions API alone: "denied"
+ * when the person has blocked it, "granted" when they have allowed it, and
+ * "prompt" for anything else, including a browser that cannot say. It never
+ * calls getUserMedia, so it never shows the pop-up. Everything outside the
+ * recording window uses this; `probeMicPermission` below is the recording
+ * window's own, as it opens.
+ */
+export async function queryMicPermission(): Promise<"granted" | "denied" | "prompt"> {
+  if (typeof navigator === "undefined" || !navigator.permissions) return "prompt"
+  try {
+    const status = await navigator.permissions.query({ name: "microphone" as PermissionName })
+    return status.state === "granted" || status.state === "denied" ? status.state : "prompt"
+  } catch {
+    return "prompt"
+  }
+}
+
 export async function probeMicPermission(): Promise<"granted" | "denied" | "prompt"> {
   // Permissions API path — does not trigger a browser prompt on its own.
   if (typeof navigator !== "undefined" && navigator.permissions) {

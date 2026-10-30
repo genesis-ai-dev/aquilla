@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
@@ -240,54 +240,20 @@ describe("MediaTextHeader", () => {
     expect(screen.getByText("on")).toBeInTheDocument()
   })
 
-  it("labels the section, and keeps labelling it with nothing selected", () => {
-    const { rerender } = render(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-    // A subtitle chip renames it; an empty selection falls back to the section
-    // name rather than blinking the label out of existence.
-    rerender(<MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
-    rerender(<MediaTextHeader cell={null} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+  // Media redesign, layout: the row lost its heading and its layout controls.
+  // The Text panel's strip above names the panel and carries Full screen,
+  // Fold and ⋯; this row says only what the current line says about itself.
+  it("has no heading and no layout controls of its own", () => {
+    render(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
+    const row = screen.getByTestId("tl-dialogue-header")
+    expect(row).not.toHaveTextContent("Dialogue")
+    expect(row).not.toHaveTextContent("Subtitle")
+    expect(row.querySelector("button")).toBeNull()
   })
 
-  // AQU-646 round 8: in the VTT-plus-footage workflow every cell is a text
-  // cell, so the derived label read "Subtitle" and changed under you as you
-  // clicked around. Sam asked for it to stay "Dialogue" for now — in BOTH
-  // states, since with a chip selected and with none it is the same heading.
-  it("a pinned label overrides the derived one, in both states", () => {
-    const { rerender } = render(
-      <MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} headingLabel="Dialogue" />,
-    )
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-    rerender(<MediaTextHeader cell={null} headingLabel="Dialogue" />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-  })
-
-  it("offers a collapse control only when the workspace hands it one", () => {
-    // AQU-1119. Every optional control in this area works this way: no handler
-    // means no button, not a disabled one — outside the media lens there is
-    // nothing to collapse into, and a control the reader cannot act on is
-    // worse than none. It is also what keeps every other caller of this
-    // header rendering exactly what it rendered before.
-    const { rerender } = render(<MediaTextHeader cell={null} />)
-    expect(screen.queryByTestId("media-collapse-text")).toBeNull()
-
-    const onCollapse = vi.fn()
-    rerender(<MediaTextHeader cell={null} onCollapse={onCollapse} />)
-    const button = screen.getByRole("button", { name: "Hide the text" })
-    expect(button).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("pinning the label does NOT bring back the Camera pill for a text cell", () => {
-    // The label became its own value precisely so it could stop being derived
-    // from `isDialogue`, which still (correctly) gates this pill.
-    render(
-      <MediaTextHeader
-        cell={cell({ medium: "text", startTime: 1, endTime: 3, cameraState: "on" })}
-        headingLabel="Dialogue"
-      />,
-    )
+  it("keeps the Camera pill hidden for a text cell", () => {
+    // `isDialogue` still (correctly) gates this pill.
+    render(<MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3, cameraState: "on" })} />)
     expect(screen.queryByText("on")).toBeNull()
   })
 
@@ -333,7 +299,6 @@ describe("MediaTextHeader", () => {
 
     it("names nobody for an unlinked cue rather than guessing", () => {
       render(<MediaTextHeader cell={cueCell} castName={null} cameraState={null} />)
-      expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
       expect(screen.queryByText(/Speaker/)).toBeNull()
       expect(screen.queryByText(/Camera/)).toBeNull()
     })

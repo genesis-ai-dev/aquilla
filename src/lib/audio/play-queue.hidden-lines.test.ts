@@ -14,7 +14,12 @@ vi.mock("./bytes-cache", () => ({
 }))
 
 import {
+  getQueueProgress,
+  getQueueState,
   hasAnyPlayableAudio,
+  seekQueueToTime,
+  skipBack,
+  skipForward,
   planUpcomingDubs,
   setExternalDubsPlaying,
   setQueueAudibility,
@@ -27,6 +32,7 @@ import {
   type PlayContext,
 } from "./play-queue"
 import type { CellData } from "@/hooks/useCells"
+import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 
 class FakeAudio {
   static instances: FakeAudio[] = []
@@ -137,6 +143,80 @@ describe("under an imported recording (Original's timing)", () => {
     master!.tick(5.01)
     await settle()
     expect(players("take-s2")[0]?.paused).toBe(false)
+  })
+})
+
+// AQU-2251 (Sam, Oct 29): following the source, on a file with a film or a
+// source recording, a hidden line is passed through, not jumped — skipping it
+// would cut real time out of the show. The recording plays on across it, the
+// playhead runs over it, and only its own take stays silent. "Skip lines with
+// nothing to play" changes none of this.
+describe.each([
+  ["on", true],
+  ["off", false],
+])("following the source, a hidden section of an imported recording is passed through (the setting %s)", (_label, on) => {
+  // s1 [0,5), s2 [5,10) hidden, s3 [10,15): one recording under all three.
+  const sections = () => [line("s1", 0, 5, { source: true }), hidden(line("s2", 5, 10, { source: true })), line("s3", 10, 15, { source: true })]
+  const master = () => FakeAudio.instances.find((a) => a.src === CLIP)!
+
+  beforeEach(() => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    setSkipSilentLinesPref(on)
+  })
+  afterEach(() => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+  })
+
+  it("Play all runs the recording across it: the playhead is on it, the take is silent, the next line follows", async () => {
+    startQueue(ctxFor(sections()), 0)
+    await settle()
+    const clip = master()
+    clip.tick(5.01)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s2" })
+    // The same recording, not moved: nothing jumped.
+    expect(master()).toBe(clip)
+    expect(clip.currentTime).toBe(5.01)
+    expect(clip.paused).toBe(false)
+    expect(players("take-s2")).toHaveLength(0)
+    clip.tick(7.5)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s2" })
+    expect(clip.currentTime).toBe(7.5)
+    clip.tick(10.01)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s3" })
+    expect(players("take-s3")[0]?.paused).toBe(false)
+  })
+
+  it("next line lands on it, and previous line lands on it", async () => {
+    startQueue(ctxFor(sections()), 0)
+    await settle()
+    skipForward()
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "s2" })
+    expect(master().currentTime).toBe(5)
+    expect(players("take-s2")).toHaveLength(0)
+    skipForward()
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "s3" })
+    skipBack()
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "s2" })
+    expect(master().currentTime).toBe(5)
+  })
+
+  it("a seek into it stays there", async () => {
+    startQueue(ctxFor(sections()), 0)
+    await settle()
+    seekQueueToTime(7)
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "s2" })
+    expect(master().currentTime).toBe(7)
+    expect(getQueueProgress().currentTime).toBe(7)
+    expect(players("take-s2")).toHaveLength(0)
   })
 })
 

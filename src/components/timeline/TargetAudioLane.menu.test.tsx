@@ -1,11 +1,13 @@
 // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
 import { CHANGE_VOICE_QUALITIES, type ChangeVoiceQuality } from "@/lib/audio/change-voice"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
 const TAKE = "audio-c1-1700000000-take.wav"
@@ -339,5 +341,212 @@ describe("TargetAudioLane — a hidden line's take menu", () => {
     rightClick("tl-target-c1", 80)
     expect(await screen.findByTestId("tl-take-menu-rename")).toBeInTheDocument()
     expect(screen.queryByTestId("tl-take-menu-rerecord")).toBeNull()
+  })
+})
+
+// AQU-1758: the Audio view's voice card turned a take into a character, and
+// named a take's voice when it was not the line's. The timeline does both now.
+const GEN = "audio-c1-1700000900-gen.wav"
+const generatedTake = () =>
+  cell({ [GEN]: { type: "audio", url: "frontier-audio://gen", slot: "generatedVoice", durationMs: 4000, voiceId: "v-narrator" } })
+
+describe("TargetAudioLane — make a character from a take (AQU-1758)", () => {
+  it("offers it on a take's menu, and hands over the take's line", async () => {
+    const makeCharacter = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        takeMenu={menuActions({ makeCharacter })}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    const item = await screen.findByTestId("tl-take-menu-make-character")
+    expect(item.textContent).toBe("Make a character from this voice")
+    fireEvent.click(item)
+    expect(makeCharacter).toHaveBeenCalledWith("c1")
+  })
+
+  it("leaves it out for someone who may not make voices", async () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        takeMenu={menuActions()}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    await screen.findByTestId("tl-take-menu-rerecord")
+    expect(screen.queryByTestId("tl-take-menu-make-character")).toBeNull()
+  })
+})
+
+describe("TargetAudioLane — a take's voice on its clip (AQU-1758)", () => {
+  it("names the take's voice when it is not the line's, with the reason in its right-click details (AQU-2260)", async () => {
+    renderWithTooltips(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: generatedTake(), kind: "generated", audioId: GEN }]}
+        takeVoiceFor={() => ({ takeVoiceName: "Narrator", lineVoiceName: "Naomi" })}
+      />,
+    )
+    expect(screen.getByTestId("tl-target-c1-take-voice")).toHaveTextContent("Narrator")
+    // AQU-2260: hovering the clip shows nothing; the sentence is at the top
+    // of its right-click menu, among the take's details.
+    await userEvent.setup().hover(screen.getByTestId("tl-target-c1"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.contextMenu(screen.getByTestId("tl-target-c1"), { button: 2 })
+    expect((await screen.findByTestId("tl-take-details-c1")).textContent)
+      .toContain("This take was voiced by Narrator. The line’s voice is now Naomi.")
+  })
+
+  it("says the voice was removed when it is no longer in the project", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: generatedTake(), kind: "generated", audioId: GEN }]}
+        takeVoiceFor={() => ({ takeVoiceName: null, lineVoiceName: "Naomi" })}
+      />,
+    )
+    expect(screen.getByTestId("tl-target-c1-take-voice")).toHaveTextContent("Removed voice")
+  })
+
+  it("names nothing when the take's voice is the line's", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: generatedTake(), kind: "generated", audioId: GEN }]}
+        takeVoiceFor={() => null}
+      />,
+    )
+    expect(screen.queryByTestId("tl-target-c1-take-voice")).toBeNull()
+  })
+})
+
+// AQU-1758 (Sam, decision 4): a ⋯ in the take's top-right corner, on hover,
+// opens the same menu as a right-click.
+describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
+  it("opens the take's menu, the same items as a right-click", async () => {
+    const makeCharacter = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        onOpenRecording={vi.fn()}
+        takeMenu={menuActions({ makeCharacter })}
+      />,
+    )
+    const more = screen.getByTestId("tl-target-c1-more")
+    expect(more).toHaveAttribute("aria-label", "More actions")
+    // To the right of the record button: the mic makes room for it.
+    expect(screen.getByTestId("tl-target-c1-record").className).toContain("right-[1.625rem]")
+    fireEvent.click(more)
+    for (const id of ["split", "rerecord", "regenerate", "make-character", "vote", "rename", "delete"]) {
+      expect(await screen.findByTestId(`tl-take-menu-${id}`), id).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByTestId("tl-take-menu-make-character"))
+    expect(makeCharacter).toHaveBeenCalledWith("c1")
+  })
+
+  it("splits at the playhead from there, when the playhead is on the take", async () => {
+    const onCutTarget = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={onCutTarget}
+        takeMenu={menuActions()}
+        getPlayheadSec={() => 11.5}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-c1-more"))
+    const split = await screen.findByTestId("tl-take-menu-split")
+    expect(split.textContent).toBe("Split at the playhead")
+    fireEvent.click(split)
+    const [cellId, audioId, atMs] = onCutTarget.mock.calls[0]
+    expect([cellId, audioId]).toEqual(["c1", TAKE])
+    expect(atMs).toBeCloseTo(1500)
+  })
+
+  it("cannot split from there when the playhead is off the take", async () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        takeMenu={menuActions()}
+        getPlayheadSec={() => 40}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-target-c1-more"))
+    expect(await screen.findByTestId("tl-take-menu-split")).toHaveAttribute("data-disabled")
+  })
+
+  it("gives a narrow take the same button", () => {
+    const narrow = cell({ [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 300 } })
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: narrow, kind: "take", audioId: TAKE }]}
+        onOpenRecording={vi.fn()}
+        takeMenu={menuActions()}
+      />,
+    )
+    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there.
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+    expect(screen.getByTestId("tl-target-c1-more").className).toContain("h-4 w-4")
+  })
+
+  it("is not there for someone who cannot change the take", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        editable={false}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        takeMenu={menuActions()}
+      />,
+    )
+    expect(screen.queryByTestId("tl-target-c1-more")).toBeNull()
+  })
+})
+
+// AQU-1758 (Sam's decision 3): following the recordings, a gap someone
+// dragged open between two pieces of a take is deliberate silence. It is
+// drawn as nothing at all — plain timeline (Sam, Oct 28) — but it still
+// counts in the line's length and plays as silence.
+describe("TargetAudioLane — the silence inside a split take (AQU-1758)", () => {
+  it("draws nothing in the gap between two pieces, and the line keeps it", async () => {
+    const SPLIT_TAKE = "audio-c1-1700000000-take.wav"
+    const SPLIT_PIECE = "audio-c1-1700000500-piece.wav"
+    const c = {
+      id: "c1", fileId: "f1", original: "", translated: "", medium: "text",
+      selectedAudioId: SPLIT_TAKE,
+      attachments: {
+        [SPLIT_TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", durationMs: 4000, trimStartMs: 200, trimEndMs: 1500 },
+        [SPLIT_PIECE]: { type: "audio", url: "frontier-audio://t", slot: "recording", pieceOf: SPLIT_TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700,
+          // Moved 0.7 s along from the end of the first piece.
+          targetOffsetMs: 700 },
+      },
+    } as unknown as CellData
+    const { buildTimelineLayout } = await import("@/lib/timeline/layout")
+    const layout = buildTimelineLayout("audioFirst", [c], [c], null, { standInLenSec: () => 2 })
+    renderWithTooltips(
+      <TargetAudioLane
+        {...base}
+        layout={layout}
+        items={[
+          { cell: c, kind: "take", audioId: SPLIT_TAKE, pieceIndex: 0, pieceCount: 2 },
+          { cell: c, kind: "take", audioId: SPLIT_PIECE, pieceIndex: 1, pieceCount: 2 },
+        ]}
+      />,
+    )
+    // No band, no words.
+    expect(screen.queryByTestId(`tl-target-gap-${SPLIT_PIECE}`)).toBeNull()
+    expect(screen.queryByRole("img", { name: /pause/i })).toBeNull()
+    // The silence is still the line's: 1.3 s, then 0.7 s of nothing, then the
+    // 1.2 s piece — 3.2 s in all, the second piece starting at 2.0 s (80 px).
+    expect(layout.programme?.byCellId.get("c1")?.slotLenSec).toBeCloseTo(3.2, 5)
+    expect(screen.getByTestId("tl-target-c1-p2").style.left).toBe("80px")
   })
 })

@@ -700,7 +700,20 @@ export interface EventPayloads {
    */
   'cell.audio.place': {
     audioId: string
+    /** Its place FOLLOWING THE SOURCE (`cell_audio.target_offset_ms`). */
     targetOffsetMs: number | null
+    /**
+     * AQU-2267: its place FOLLOWING THE RECORDINGS, measured the same way from
+     * its line's start in that layout (`cell_audio.recordings_offset_ms`). A
+     * move adds the same distance to both numbers, each held by its own
+     * timing's limits, and states both here — so one event, one undo step.
+     *
+     * `null` and ABSENT mean the same thing: no place of its own there, so the
+     * recordings timing reads `targetOffsetMs` as it always has. Absent is what
+     * an older client sends, and the one place it gave is then the take's
+     * place in both timings, exactly as before this field existed.
+     */
+    recordingsOffsetMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -1178,6 +1191,9 @@ export interface EventPayloads {
       color?: string | null
       sourceTrackId?: string | null
       contentFileId?: string | null
+      /** AQU-2252: false makes an added track a layer (its takes set no line's
+       *  length while the file follows its recordings); null clears it. */
+      setsLineLengths?: boolean | null
     } | null
   }
 

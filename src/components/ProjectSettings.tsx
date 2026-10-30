@@ -17,6 +17,7 @@ import {
   Users,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -156,6 +157,7 @@ import type { CellEditingTier } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -268,6 +270,8 @@ interface SavedSettings {
   cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
+  /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
+  filmAndSources: boolean | null
   timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -328,6 +332,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
@@ -744,10 +749,12 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    cellEditingFloor, allowTrackEditing, timingLocked, harmonize_min_role: harmonizeMinRole,
+    cellEditingFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
     bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   } = live
+  // Sam, Oct 28: an (i) opens its explanation beneath the setting's title.
+  const [filmInfoOpen, toggleFilmInfo] = useInfoOpen()
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
   // shows while the project follows the organization, and where "Set for this
@@ -1006,12 +1013,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "ai instructions"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
     { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },
-    { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
+    { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
     { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so
     // the words a user searches for them by have to reach it.
@@ -2348,14 +2356,12 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 />
               </SettingsRow>
               <SettingsRow
-                label={t("projectSettings.voice.studioLabel")}
-                description={t("projectSettings.voice.libraryNote")}
+                label={t("common.voices")}
+                description={t("projectSettings.voice.voicesNote")}
                 control={
-                  <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                    requestNavigate(`/project/${id}/editor`)
-                  }}>
-                    {t("projectSettings.voice.openStudioButton")}
+                  // AQU-1758: Media, with the Voices tab open (the /voice route).
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)}>
+                    {t("projectSettings.voice.openVoicesButton")}
                   </Button>
                 }
               />
@@ -2569,6 +2575,35 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                   disabled={!canChangeShared}
                   onChange={(inherit) => setShared("allowTrackEditing", inherit ? undefined : effectiveAllowTrackEditing)}
                 />
+              </div>
+              {/* AQU-1758 (Sam's decision 7): the media view's dubbing tools —
+                  the Film button and the timeline's Sources menu — together.
+                  Unset, a project of books and documents hides them and any
+                  other shows them. Not a permission: nothing on the server
+                  reads it. The long explanation sits behind the (i). */}
+              <div className="flex flex-wrap items-start gap-2">
+                <Checkbox
+                  id="film-and-sources"
+                  data-testid="settings-film-and-sources"
+                  checked={filmAndSourcesShown(filmAndSources, project?.files)}
+                  disabled={!canChangeShared}
+                  onCheckedChange={(checked) => setShared("filmAndSources", checked)}
+                />
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="film-and-sources">{t("projectSettings.timeline.filmAndSourcesLabel")}</label>
+                    <InfoToggle
+                      open={filmInfoOpen}
+                      onToggle={toggleFilmInfo}
+                      label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                      controls="settings-film-and-sources-explanation"
+                      testId="settings-film-and-sources-info"
+                    />
+                  </span>
+                  <InfoReveal open={filmInfoOpen} id="settings-film-and-sources-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
+                  </InfoReveal>
+                </span>
               </div>
             </CardContent>
           </Card>

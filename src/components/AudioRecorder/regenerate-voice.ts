@@ -36,6 +36,9 @@ export interface RegenerateVoiceArgs {
   text?: string
   /** Whose cast voice says them, when it is not the cell's own assignment. */
   voiceCellId?: string | null
+  /** AQU-2212: say them in THIS voice — a pick that acts before the cast
+   *  settings catch up. Absent: the cast voice, as above. */
+  voiceId?: string
   surface: TelemetrySurface
 }
 
@@ -74,6 +77,7 @@ async function regenerate(args: RegenerateVoiceArgs): Promise<boolean> {
     // Both undefined off a cue file: the cell's own text and assignment.
     text: args.text,
     voiceCellId: args.voiceCellId ?? undefined,
+    ...(args.voiceId ? { voiceId: args.voiceId } : {}),
     // The voice lands on the track asked for, not always on the default row's
     // generated-voice slot.
     slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,

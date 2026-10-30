@@ -48,6 +48,7 @@ import {
   patchPersonPreferences,
   type PersonPreferences,
 } from "./person-prefs-api"
+import { registerPersonPrefsReset } from "./person-prefs-reset"
 
 export type PersonPrefValue = string | number | boolean
 
@@ -499,3 +500,8 @@ export function resetPersonPrefsSyncForTests(): void {
   lastReadAt = 0
   readGeneration += 1
 }
+
+// src/test-setup.ts resets this module between tests through the seam, so it
+// does not import person-prefs (and frontier/auth, orgs, elevation under it)
+// before a test file's vi.mock() calls run. See person-prefs-reset.ts.
+registerPersonPrefsReset(resetPersonPrefsSyncForTests)

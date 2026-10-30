@@ -4,7 +4,8 @@ import { AlertCircle, Users, CheckCircle2 } from "lucide-react"
 import { orgHomePath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import {
   acceptOrgInvite,
   previewOrgInvite,
@@ -44,9 +45,9 @@ function roleLineKey(hasInviter: boolean, hasEmail: boolean): MessageKey {
 
 function JoinOrgShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md">{children}</Card>
-    </div>
+    <AuthPage>
+      <AuthPanel>{children}</AuthPanel>
+    </AuthPage>
   )
 }
 
@@ -166,7 +167,7 @@ function OrgInvitation({ token }: { token?: string }) {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> {t("auth.join.invalidInviteLink")}
           </CardTitle>
         </CardHeader>
@@ -181,7 +182,7 @@ function OrgInvitation({ token }: { token?: string }) {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> {t("org.joinOrgPage.cantJoinTitle")}
           </CardTitle>
         </CardHeader>
@@ -197,7 +198,7 @@ function OrgInvitation({ token }: { token?: string }) {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <CheckCircle2 className="size-5 text-green-600" /> {t("org.joinOrgPage.youreInTitle")}
           </CardTitle>
         </CardHeader>
@@ -254,7 +255,7 @@ function OrgInvitation({ token }: { token?: string }) {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <Users className="size-5" />{" "}
             {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
           </CardTitle>
@@ -277,7 +278,7 @@ function OrgInvitation({ token }: { token?: string }) {
   return (
     <JoinOrgShell>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
           <Users className="size-5" />{" "}
           {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
         </CardTitle>

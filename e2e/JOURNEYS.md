@@ -130,7 +130,7 @@ accept, import-and-edit, …) stay hermetic per-test.
 | Surface | Spec |
 | --- | --- |
 | Comments page empty / filters / sort / search / back-nav / resolved | `e2e/specs/editor/comments-page.smoke.spec.ts` |
-| Onboarding wizard steps | `e2e/specs/projects/onboarding.smoke.spec.ts` |
+| Short signup: welcome, privacy choice, account (AQU-2300) | `e2e/specs/projects/onboarding.smoke.spec.ts` |
 | Formatting bubble + shortcuts + loss warning | `e2e/specs/editor/formatting.smoke.spec.ts` |
 | Search toolbar + replace + scope | `e2e/specs/editor/search.smoke.spec.ts` |
 | Rules create / edit / delete / org / dialogs | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
@@ -244,6 +244,11 @@ UI chrome that used to be one smoke file per click is covered under
   RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Recovery's single validation message and return-to-sign-in are covered in RTL
+  (`FrontierForgotPasswordForm.test.tsx`, AQU-2300). The old eight-step wizard was shortened to welcome, privacy choice and signup;
+  anonymous Skip for now was retired; `Signup.test.tsx` covers direct signup,
+  hydration, safe destinations and billing continuation. Preferences and in-app
+  workspace/project creation replace the removed setup steps.
   Organization invitation preview gating (unavailable links, retryable failures,
   pending/stale requests, signed-in/out states) is covered in RTL by
   `JoinOrgPage.test.tsx` (AQU-2297). Membership acceptance and reopening a used

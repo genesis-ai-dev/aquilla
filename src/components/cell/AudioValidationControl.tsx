@@ -8,6 +8,7 @@ import { NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
+import { ValidatedOnLine } from "./ValidatedOnLine"
 
 /**
  * AQU-490: one line's audio validation, as the five surfaces all draw it.
@@ -31,6 +32,12 @@ export interface AudioValidationTake {
   slot: string
   validatorCount: number
   validators: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (ms). Optional:
+   * a take built by hand (an unrecorded heard line, a test fixture) has none,
+   * and a name with no stamp simply gets no date line.
+   */
+  validatorDecidedTs?: Record<string, number>
   /** TTS rather than a person. Never auto-validated; can still be validated by hand. */
   isGenerated: boolean
   /**
@@ -116,7 +123,9 @@ export function AudioValidationControl({
    * would snap the two that had arrived back to their old state while the
    * third was still in flight.
    */
-  const [pending, setPending] = useState<Record<string, { value: boolean; atRequest: boolean }>>({})
+  const [pending, setPending] = useState<
+    Record<string, { value: boolean; atRequest: boolean; at: number }>
+  >({})
 
   // Retire a guess the moment the server's answer for that take has MOVED
   // from what it was when we asked. Leaving it in the map — which is what
@@ -141,12 +150,19 @@ export function AudioValidationControl({
     const guess = pending[take.audioId]
     const has = take.validators.includes(currentUsername)
     if (!guess || guess.atRequest !== has || guess.value === has) return take
+    // AQU-2296: the optimistic row carries the click's own clock, so your name
+    // never appears for a beat with a blank date line beside it. The server's
+    // `decided_ts` replaces it as soon as the read lands.
+    const stamps = { ...(take.validatorDecidedTs ?? {}) }
+    if (guess.value) stamps[currentUsername] = guess.at
+    else delete stamps[currentUsername]
     return {
       ...take,
       validators: guess.value
         ? [...take.validators, currentUsername]
         : take.validators.filter((name) => name !== currentUsername),
       validatorCount: Math.max(0, take.validatorCount + (guess.value ? 1 : -1)),
+      validatorDecidedTs: stamps,
     }
   }), [takes, pending, currentUsername])
 
@@ -184,7 +200,10 @@ export function AudioValidationControl({
     const atRequest = takes
       .find((take) => take.audioId === audioId)
       ?.validators.includes(currentUsername) ?? false
-    setPending((current) => ({ ...current, [audioId]: { value: validated, atRequest } }))
+    setPending((current) => ({
+      ...current,
+      [audioId]: { value: validated, atRequest, at: Date.now() },
+    }))
     void Promise.resolve(onValidationChange(audioId, validated))
       .then((accepted) => {
         if (accepted === false) {
@@ -444,9 +463,15 @@ export function AudioValidationControl({
             const mine = take.validators.includes(currentUsername)
             const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
             return (
-              <li key={take.audioId} className="rounded px-1 py-1 text-xs">
+              // AQU-2296: NO padding of its own. It used to carry `px-1 py-1`
+              // on top of the `px-1 py-0.5` on each name below, so the audio
+              // list sat lower than the text list and its names were indented
+              // a step further — two popovers meant to be read side by side
+              // that did not line up. The padding now lives where the text
+              // list keeps it: on the rows themselves.
+              <li key={take.audioId} className="rounded text-xs">
                 {displayed.length > 1 && (
-                  <div className="mb-0.5 flex items-center gap-1 font-medium">
+                  <div className="mb-0.5 flex items-center gap-1 px-1 font-medium">
                     <span className="truncate">{trackLabel(take)}</span>
                     {short > 0 && (
                       <span className="ms-auto shrink-0 text-[10px] font-normal text-muted-foreground">
@@ -456,18 +481,24 @@ export function AudioValidationControl({
                   </div>
                 )}
                 {take.unrecorded ? (
-                  <div data-testid="audio-validation-unrecorded" className="text-muted-foreground">
+                  <div data-testid="audio-validation-unrecorded" className="px-1 py-1 text-muted-foreground">
                     {t("editor.audioValidation.notRecorded")}
                   </div>
                 ) : take.validators.length === 0 ? (
-                  <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
+                  <div className="px-1 py-1 text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul>
                     {take.validators.map((validator) => (
-                      <li key={validator} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
-                        <span className="truncate">
-                          {validator}
-                          {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                      <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 hover:bg-muted/50">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">
+                            {validator}
+                            {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                          </span>
+                          {/* AQU-2296: when they validated this TAKE, on a
+                              second muted line — the same row shape the text
+                              list uses, so the two popovers read alike. */}
+                          <ValidatedOnLine value={take.validatorDecidedTs?.[validator]} />
                         </span>
                         {/* Withdrawing is NOT gated on `canValidate`. That
                             flag is false for a take you recorded yourself on

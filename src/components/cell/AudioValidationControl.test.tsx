@@ -12,7 +12,9 @@ import {
   AudioValidationControl,
   type AudioValidationTake,
 } from "./AudioValidationControl"
+import { TargetValidationControl } from "./TargetValidationControl"
 import { lineState, takeState } from "./audio-validation-state"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
@@ -615,5 +617,105 @@ describe("AudioValidationControl — a part of the line not yet recorded", () =>
     await user.click(listInfo())
     const list = await screen.findByText("“and some milk too.”")
     expect(within(list.closest("li")!).getByTestId("audio-validation-unrecorded")).toHaveTextContent("Not recorded yet")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2296: the date under each name, and the spacing the two lists share.
+//
+// "Text validated by" and "Audio validated by" open from checks that sit side
+// by side on the same line, and a reader opens one straight after the other.
+// They were built as twins but drifted: each audio name sat inside TWO padded
+// rows (one for the take, one for the name) where text had one, so the audio
+// list started lower and its names were indented a step further.
+// ---------------------------------------------------------------------------
+
+const validatorRow = (list: HTMLElement, name: string) =>
+  within(list).getByText(new RegExp(`^${name}`)).closest("li")!
+
+/** The classes that decide where a row sits — what the two lists must share. */
+const boxClasses = (el: Element) =>
+  [...el.classList].filter((c) => /^-?(p|m)[xytrbles]?-/.test(c)).sort().join(" ")
+
+describe("the date under each validator", () => {
+  it("dates each name from that person's vote on THAT take, and leaves an unknown one bare", async () => {
+    const boVoted = Date.now() - 3 * 24 * 60 * 60 * 1000
+    draw([
+      take({
+        audioId: "a",
+        validatorCount: 2,
+        validators: ["bo", "cy"],
+        validatorDecidedTs: { bo: boVoted },
+      }),
+    ], { validationRequirement: 2, readOnly: true })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+
+    expect(validatorRow(list, "bo")).toHaveTextContent(fmtShortCalendarDate(boVoted))
+    // No stamp for cy: the name alone, never a blank line or "Invalid Date".
+    expect(validatorRow(list, "cy").textContent).toBe("cy")
+  })
+
+  it("keeps each take's own dates when a line has several", async () => {
+    const onFirst = Date.now() - 10 * 24 * 60 * 60 * 1000
+    const onSecond = Date.now() - 2 * 24 * 60 * 60 * 1000
+    draw([
+      take({ audioId: "a", label: "Take 1", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: onFirst } }),
+      take({ audioId: "b", slot: "track-2", label: "Take 2", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: onSecond } }),
+    ], { validationRequirement: 1, readOnly: true })
+    await userEvent.click(button()!)
+    const list = await screen.findByRole("dialog")
+
+    const [first, second] = within(list).getAllByText(/^bo/).map((el) => el.closest("li")!)
+    expect(first).toHaveTextContent(fmtShortCalendarDate(onFirst))
+    expect(second).toHaveTextContent(fmtShortCalendarDate(onSecond))
+    // The sub-headings still name their takes above their own lists.
+    expect(within(list).getByText("Take 1")).toBeInTheDocument()
+    expect(within(list).getByText("Take 2")).toBeInTheDocument()
+  })
+
+  it("dates my own row from the click, before the server has answered", async () => {
+    draw([take({ audioId: "a" })])
+    await userEvent.click(button()!)   // the press is the VOTE
+    await userEvent.click(button()!)   // now it opens the list
+    const list = await screen.findByRole("dialog")
+    expect(validatorRow(list, "ana")).toHaveTextContent(fmtShortCalendarDate(Date.now()))
+  })
+})
+
+describe("the two validated-by lists are spaced alike", () => {
+  it("indents and spaces a name exactly as the text list does", async () => {
+    draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: Date.now() } })], {
+      validationRequirement: 1,
+      readOnly: true,
+    })
+    await userEvent.click(button()!)
+    const audioList = await screen.findByRole("dialog")
+    const audioRow = validatorRow(audioList, "bo")
+    // The take wrapper the row sits in must add nothing of its own: its own
+    // padding on top of the row's is what pushed the audio names down and in.
+    expect(boxClasses(audioRow.parentElement!.closest("li")!)).toBe("")
+
+    render(
+      <I18nProvider>
+        <TargetValidationControl
+          cellRef="GEN 1:1"
+          hasContent
+          validationStatus="others"
+          activeValidators={["bo"]}
+          validatorDecidedTs={{ bo: Date.now() }}
+          validationHistory={[]}
+          currentUsername="ana"
+          validationRequirement={1}
+          canValidate
+          canValidateThisCell={false}
+          onValidationChange={vi.fn()}
+        />
+      </I18nProvider>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: /Validated by others/ }))
+    const textList = (await screen.findAllByRole("dialog")).find((el) => el !== audioList)!
+
+    expect(boxClasses(audioRow)).toBe(boxClasses(validatorRow(textList, "bo")))
   })
 })

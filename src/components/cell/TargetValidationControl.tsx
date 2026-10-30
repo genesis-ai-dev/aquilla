@@ -10,12 +10,18 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import type { TextValidationBlock } from "@/lib/review/text-validation-policy"
 import { nextValidatorsListState } from "./validators-list-state"
+import { ValidatedOnLine } from "./ValidatedOnLine"
 
 interface TargetValidationControlProps {
   cellRef: string
   hasContent: boolean
   validationStatus: ValidationStatus
   activeValidators: string[]
+  /**
+   * AQU-2296: username → when that person validated the cell's current head
+   * (server clock, ms). A name missing from it gets no date line.
+   */
+  validatorDecidedTs?: Record<string, number>
   validationHistory: EditValidationSummary[]
   currentUsername: string
   validationRequirement: number
@@ -112,6 +118,7 @@ export function TargetValidationControl({
   hasContent,
   validationStatus,
   activeValidators,
+  validatorDecidedTs,
   validationHistory,
   currentUsername,
   validationRequirement,
@@ -133,6 +140,9 @@ export function TargetValidationControl({
   const [pendingValidation, setPendingValidation] = useState<{
     value: boolean
     authoritativeAtRequest: boolean
+    /** AQU-2296: the click's own clock, so your row carries today's date the
+     *  instant it appears rather than after the read lands. */
+    at: number
   } | null>(null)
   const authoritativeSelfValidated = activeValidators.includes(currentUsername)
   useEffect(() => {
@@ -155,6 +165,17 @@ export function TargetValidationControl({
     }
     return activeValidators.filter((validator) => validator !== currentUsername)
   }, [activeValidators, currentUsername, optimisticSelfValidation])
+  // AQU-2296: the same optimism, applied to the dates. The server's
+  // `decided_ts` wins the moment the audit-stats read lands.
+  const displayedDecidedTs = useMemo(() => {
+    const stamps: Record<string, number> = { ...(validatorDecidedTs ?? {}) }
+    if (optimisticSelfValidation === true && pendingValidation) {
+      stamps[currentUsername] = validatorDecidedTs?.[currentUsername] ?? pendingValidation.at
+    } else if (optimisticSelfValidation === false) {
+      delete stamps[currentUsername]
+    }
+    return stamps
+  }, [currentUsername, optimisticSelfValidation, pendingValidation, validatorDecidedTs])
 
   const state = optimisticSelfValidation === true
     ? displayedValidators.length >= validationRequirement ? "full-self" : "self"
@@ -186,7 +207,11 @@ export function TargetValidationControl({
   const blockedNote = canValidateThisCell || isSelfValidated ? null : tooltip
 
   const changeValidation = (validated: boolean) => {
-    setPendingValidation({ value: validated, authoritativeAtRequest: authoritativeSelfValidated })
+    setPendingValidation({
+      value: validated,
+      authoritativeAtRequest: authoritativeSelfValidated,
+      at: Date.now(),
+    })
     void Promise.resolve(onValidationChange(validated)).then((accepted) => {
       if (accepted === false) setPendingValidation(null)
     }).catch(() => setPendingValidation(null))
@@ -308,8 +333,13 @@ export function TargetValidationControl({
                   {displayedValidators.length === 0 ? (
                     <li className="px-1 py-1 text-xs text-muted-foreground">{t("editor.validation.noActiveValidators")}</li>
                   ) : displayedValidators.map((validator) => (
-                    <li key={validator} className="flex items-center justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
-                      <span className="truncate">{validator}{validator === currentUsername ? " (you)" : ""}</span>
+                    <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{validator}{validator === currentUsername ? " (you)" : ""}</span>
+                        {/* AQU-2296: when they validated THIS cell, on a second
+                            muted line — the audio list's twin. */}
+                        <ValidatedOnLine value={displayedDecidedTs[validator]} />
+                      </span>
                       {validator === currentUsername && canValidate && (
                         <AppTooltip content={t("editor.validation.removeYours")}>
                           <button

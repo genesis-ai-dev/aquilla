@@ -720,6 +720,10 @@ interface LaneLabelReorder {
   dropEdge: "top" | "bottom" | null
   /** Drawn short and inset, meaning "inside the folder above". */
   dropIndent?: boolean
+  /** Where in the row the line is drawn instead, in px from its top, when its
+   *  edge is out of sight — scrolled up under the header or past the column's
+   *  foot (AQU-2236). Null while the edge itself can be seen. */
+  dropTopPx?: number | null
   onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
@@ -727,6 +731,9 @@ interface LaneLabelReorder {
 /** How far the lane prompt keeps from the visible left edge, and from the end
  *  of a lane long enough to hold it. */
 const LANE_PROMPT_INSET_PX = 10
+
+/** The track drop line's thickness (`h-0.5`), for holding it inside the view. */
+const DROP_LINE_PX = 2
 
 /**
  * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
@@ -971,11 +978,12 @@ function LaneLabel({
           data-testid="tl-track-drop-line"
           className={cn(
             "pointer-events-none absolute z-20 h-0.5 bg-sky-500",
-            reorder.dropEdge === "top" ? "top-0" : "bottom-0",
+            reorder.dropTopPx == null && (reorder.dropEdge === "top" ? "top-0" : "bottom-0"),
             // The indent matches the one a member row is drawn with, so the
             // line lands exactly where the row it promises will.
             reorder.dropIndent ? "left-3.5 right-0" : "inset-x-0",
           )}
+          style={reorder.dropTopPx == null ? undefined : { top: `${reorder.dropTopPx}px` }}
         />
       )}
       {/* The indent is on the CONTENT, not the row, so the drop line and the
@@ -1699,6 +1707,11 @@ export function TimelineEditor({
      *  the rest of the gesture — unlike `target`, which goes back to null
      *  over the row's own slot — so what it switches on cannot flicker. */
     moved: boolean
+    /** The stretch of the column that can be seen, in the same content frame
+     *  as `rowBounds`: from the header's foot to the column's. Measured with
+     *  the target, on every move, so the line is held inside it (AQU-2236).
+     *  Null when there is no layout to measure. */
+    view: { top: number; bottom: number } | null
   } | null>(null)
   const clock = useTimelineClock()
   const chipStripSlot = useUiSlot("media-chip-strip")
@@ -3220,7 +3233,15 @@ export function TimelineEditor({
     }
     const restoreUserSelect = document.body.style.userSelect
     document.body.style.userSelect = "none"
-    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false })
+    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false, view: null })
+    // AQU-2236: what the column shows, below the header. Read on every move,
+    // like the target it is drawn for, because the list can scroll mid-drag.
+    const visible = () => {
+      const header = gutterHeaderRef.current?.getBoundingClientRect()
+      const column = gutterRef.current?.getBoundingClientRect()
+      if (!header || !column || column.bottom <= header.bottom) return null
+      return { top: gutterContentY(header.bottom), bottom: gutterContentY(column.bottom) }
+    }
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
@@ -3236,7 +3257,8 @@ export function TimelineEditor({
         trackDragMovedRef.current = true
       }
       const target = moved ? resolve(ev) : null
-      setTrackDrag((d) => (d ? { ...d, dy, target, moved } : d))
+      const view = moved ? visible() : null
+      setTrackDrag((d) => (d ? { ...d, dy, target, moved, view } : d))
     }
     const stop = () => {
       window.removeEventListener("pointermove", onMove)
@@ -3332,11 +3354,30 @@ export function TimelineEditor({
    * exactly what `top` inside the track content div means. If either height
    * ever changes without the other, the line will be off by the difference.
    */
-  const dropLineContentY =
+  const dropEdgeContentY =
     trackDrag && dropRow
       ? dropRow.edge === "top"
         ? trackDrag.rowBounds[dropRow.rowIndex]?.top
         : trackDrag.rowBounds[dropRow.rowIndex]?.bottom
+      : null
+  /**
+   * …held where it can be seen (AQU-2236). Near the top of a scrolled list the
+   * edge a drop lands on can be scrolled up past the header, out of the column,
+   * and the line drawn there showed nowhere — so the top row, the drop people
+   * reach for most up there, had no readout at all. The line stops just under
+   * the header instead, and just above the column's foot at the other end. The
+   * drop itself is unchanged: the line only ever moves to the edge of the view
+   * the real boundary lies beyond.
+   */
+  const dropLineContentY =
+    dropEdgeContentY == null || !trackDrag?.view
+      ? dropEdgeContentY
+      : Math.min(Math.max(dropEdgeContentY, trackDrag.view.top), trackDrag.view.bottom - DROP_LINE_PX)
+  /** The gutter half's place inside its row, or null where the row's own edge
+   *  is in sight and the line sits on it as it always has. */
+  const dropTopInRowPx =
+    dropRow && dropLineContentY != null && dropLineContentY !== dropEdgeContentY
+      ? dropLineContentY - (trackDrag?.rowBounds[dropRow.rowIndex]?.top ?? 0)
       : null
 
   // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
@@ -5102,6 +5143,7 @@ export function TimelineEditor({
                             // outcomes of one gesture are distinguishable
                             // before the pointer is let go.
                             dropIndent: Boolean(dropRow?.indent),
+                            dropTopPx: dropRow?.rowIndex === index ? dropTopInRowPx : null,
                             onPointerDown: (e) => beginTrackDrag(index, e),
                             onKeyDown: (e) => onTrackLabelKeyDown(index, e),
                           }

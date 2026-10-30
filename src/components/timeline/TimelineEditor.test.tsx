@@ -5043,6 +5043,66 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     expect(inner().classList).toContain("z-30")
   })
 
+  // The browser pass on the demo: dragging a track to the top of a scrolled
+  // list drew the line on the top row's upper edge, which was scrolled up out
+  // of the column, so the drop that matters most up there showed no line at
+  // all. The line is the whole readout of a drag, so it stays where it can be
+  // seen: just under the header, or just above the column's foot.
+  describe("the drop line stays in sight", () => {
+    /** Three 40px rows under the 28px header, the column scrolled up 30px:
+     *  the top row's upper edge is 2px above the column. */
+    const setUp = (gutterHeight: number) => {
+      render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+      const scroll = screen.getByTestId("tl-scroll")
+      scroll.scrollTop = 30
+      fireEvent.scroll(scroll)
+      stubRect(gutter(), 0, gutterHeight)
+      stubRect(header(), 0, 28)
+      rows().forEach((row, i) => stubRect(row, 28 + i * 40 - 30, 40))
+    }
+    /** Where the gutter half is drawn, in px from the column's top. */
+    const gutterLineTop = () => {
+      const line = screen.getByTestId("tl-track-drop-line")
+      const rowTop = line.closest("[data-tl-track-row]")!.getBoundingClientRect().top
+      const own = line.style.top ? parseFloat(line.style.top) : line.classList.contains("bottom-0") ? 38 : 0
+      return rowTop + own
+    }
+    const laneLineTop = () => screen.getByTestId("tl-track-drop-line-lane").style.top
+
+    it("at the top of the list, just under the header, in both columns", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[2], { button: 0, pointerId: 1, clientX: 8, clientY: 98 })
+      // Up into the header band, over the top row's upper half.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 5 })
+      expect(gutterLineTop()).toBe(28)
+      // Content pixels: the header's 28 plus the 30 scrolled.
+      expect(laneLineTop()).toBe("58px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 5 })
+    })
+
+    it("past the last row below the column's foot, just above the foot", () => {
+      // A 100px column shows rows 0 and 1 and the top of row 2; row 2's lower
+      // edge, 118px down, is below the foot.
+      setUp(100)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 130 })
+      expect(gutterLineTop()).toBe(98)
+      expect(laneLineTop()).toBe("128px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 130 })
+    })
+
+    it("leaves a line that is already in sight where it is", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      // Into row 1's lower half: the line goes on the boundary between rows 1
+      // and 2, 78px down — in sight, so drawn on the row's own edge as before.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
+      expect(screen.getByTestId("tl-track-drop-line").style.top).toBe("")
+      expect(laneLineTop()).toBe("108px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 70 })
+    })
+  })
+
   // The browser counts the strip under the header as on screen, so focusing a
   // row there scrolls nothing — and it could not scroll the gutter up anyway,
   // which is held at 0. The track column, which owns the offset, has to.

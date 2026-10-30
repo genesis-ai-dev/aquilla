@@ -1091,6 +1091,23 @@ export function newestStepAt(): number | null {
   return top ? (recordedHere.get(top.id) ?? top.at) : null
 }
 
+/**
+ * Whether the step Undo would take back next touches something `match` names
+ * — for a group, any of its parts. The Station's own Undo button (AQU-2327,
+ * Q4) only undoes a change to the recording it has open, and is greyed when
+ * the newest step is somewhere else.
+ */
+export function newestStepMatches(match: (kind: string, data: unknown) => boolean): boolean {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const top = s?.undo[s.undo.length - 1]
+  if (!top) return false
+  if (top.kind === GROUP_KIND) {
+    const parts = (top.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []
+    return parts.length > 0 && parts.every((p) => match(p.kind, p.data))
+  }
+  return match(top.kind, top.data)
+}
+
 /** The signed-in person the active scope belongs to. */
 export function historyUser(): string | null {
   return activeUser

@@ -23,7 +23,9 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { AudioWaveform, Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { openInStation, useStationAvailable } from "@/lib/station/target"
+import { STATION_PICKS } from "@/lib/station/picks"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -226,6 +228,8 @@ function CellTakeBlockView({
 }: CellTakeBlockProps & { controller: UseCellAudioResult }) {
   const { t, locale } = useI18n()
   const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  // AQU-2327: the Station's way in from here shows while the Station exists.
+  const stationHere = useStationAvailable() && STATION_PICKS.wayIn.recordingTabButton
 
   const selectedAudioId = audioId ?? owner.selectedAudioId ?? undefined
   const attachment = selectedAudioId ? owner.attachments?.[selectedAudioId] : undefined
@@ -618,6 +622,22 @@ function CellTakeBlockView({
               >
                 <Combine className="h-3 w-3" />
                 {joining ? t("recordingsUpload.join.joining") : t("recordingsUpload.join.button")}
+              </Button>
+            </AppTooltip>
+          )}
+          {/* AQU-2327 (Q1): open the take that plays in the Station, beside Remove noise. */}
+          {stationHere && !isSection && selectedAudioId && attachment && (
+            <AppTooltip content={t("editor.station.editIn")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                data-testid="cell-take-station"
+                aria-label={t("editor.station.editIn")}
+                onClick={() => openInStation({ fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId }, { show: true })}
+                className="rounded-md text-muted-foreground hover:text-foreground"
+              >
+                <AudioWaveform className="h-3.5 w-3.5" />
               </Button>
             </AppTooltip>
           )}

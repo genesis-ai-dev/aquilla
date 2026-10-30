@@ -1278,6 +1278,88 @@ export const editor = defineNamespace({
     // media view's panels — the timeline, the Film and the Text — their 24 px
     // strips with Full screen, Fold and ⋯, the one 40 px top bar, its status
     // ring, and the Panels menu that brings back whatever is folded.
+    // AQU-2327: the Station, the media view's audio editing panel.
+    "editor.station.title": "Station",
+    "editor.station.editIn": "Edit in the Station",
+    "editor.station.empty": "Pick a recording on the timeline, or choose Edit in the Station from a take’s ⋯ menu.",
+    "editor.station.loading": "Loading the recording…",
+    "editor.station.loadFailed": "This recording couldn’t be loaded.",
+    "editor.station.gone": "This recording is no longer here.",
+    "editor.station.nameOnLine": "{take} · {line}",
+    "editor.station.lineNumber": "line {n}",
+    "editor.station.placedOn": "Placed on {line}",
+    "editor.station.placedOnTwo": "Placed on {a} and {b} · open on {open}",
+    "editor.station.waiting": "Waiting",
+    "editor.station.waitingCount": "Waiting · {done} of {need}",
+    "editor.station.approved": "Approved",
+    "editor.station.version": "Version {n}",
+    "editor.station.approve": "Approve",
+    "editor.station.approveTip": "Approve the clip on {line} (A)",
+    "editor.station.approveTakeTip": "Approve the take (A)",
+    "editor.station.undoTip": "Undo ({keys})",
+    "editor.station.nothingToUndo": "Nothing to undo",
+    "editor.station.undoElsewhere": "Your last change was elsewhere. Use Undo in the top bar.",
+    "editor.station.laneTip": "Drag across the recording to select a part; click to place the cursor",
+    "editor.station.startFlag": "Start {time}",
+    "editor.station.endFlag": "End {time}",
+    "editor.station.dragStart": "Drag to trim the start",
+    "editor.station.dragEnd": "Drag to trim the end",
+    "editor.station.insertFlag": "Insert {time}",
+    "editor.station.keepThis": "Keep this",
+    "editor.station.keepTip": "Keep only this part (K)",
+    "editor.station.deleteThis": "Delete this",
+    "editor.station.deleteTip": "Delete this part (⌫)",
+    "editor.station.insertHere": "Insert audio here",
+    "editor.station.insertTip": "Insert audio here (I)",
+    "editor.station.selRange": "{a}–{b} · {len}",
+    "editor.station.selAt": "at {time}",
+    "editor.station.play": "Play (Space)",
+    "editor.station.playSelection": "Play the selection (Space)",
+    "editor.station.pause": "Pause (Space)",
+    "editor.station.speedTip": "Playback speed",
+    "editor.station.timeOf": "{at} / {len}",
+    "editor.station.start": "Start",
+    "editor.station.end": "End",
+    "editor.station.typeStartTip": "Click to type the start time, to 0.01 s",
+    "editor.station.typeEndTip": "Click to type the end time, to 0.01 s",
+    "editor.station.typeHelp": "Type a time to 0.01 s · Return sets it · Esc cancels",
+    "editor.station.set": "Set",
+    "editor.station.badTime": "Type a time like 0:01.25 or 1.25.",
+    "editor.station.zoomIn": "Zoom in (=)",
+    "editor.station.zoomOut": "Zoom out (−)",
+    "editor.station.scroll": "Scroll the waveform",
+    "editor.station.hintCalm": "Drag across the waveform to select a part. Drag its edges to trim. Space plays.",
+    "editor.station.history": "History",
+    "editor.station.hideHistory": "Hide the history",
+    "editor.station.historyNothing": "Nothing yet",
+    "editor.station.historyTitle": "History",
+    "editor.station.historyFootnote": "Trims, fades and volume are kept on the clip and never change the recording.",
+    "editor.station.historyFailed": "The history couldn’t be loaded.",
+    "editor.station.historyWho": "{row} · {who}, {when}",
+    "editor.station.hRecorded": "Recorded",
+    "editor.station.hVersionSaved": "Version {n} saved",
+    "editor.station.hTrimmed": "Trimmed: Start {a}, End {b}",
+    "editor.station.hApproved": "Approved",
+    "editor.station.hUnapproved": "Approval withdrawn",
+    "editor.station.hRenamed": "Renamed to “{name}”",
+    "editor.station.hMoved": "Moved on the timeline",
+    "editor.station.hSplit": "Split at {time}",
+    "editor.station.hChosen": "Chosen to play",
+    "editor.station.hDeleted": "Deleted",
+    "editor.station.placedOnMany": plural(
+      {
+        one: "Placed on {count} line · open on {open}",
+        other: "Placed on {count} lines · open on {open}",
+      },
+      "count",
+    ),
+    "editor.station.historyEntries": plural(
+      {
+        one: "{count} entry",
+        other: "{count} entries",
+      },
+      "count",
+    ),
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -2789,6 +2871,287 @@ export const editor = defineNamespace({
           "timeline's track-name column shows every track's full name; " +
           "unticked, it narrows to a strip of icons and gives the space to the " +
           "tracks. Affects every row at once.",
+      },
+      "editor.station.title": {
+        description: "Name of the media view's audio editing panel, where one recording is trimmed, cut, approved and saved as a new version. On its tab, in the Panels menu and in menus.",
+      },
+      "editor.station.editIn": {
+        description: "Menu item and button on a recording (a take) that opens it in the Station, the media view's audio editing panel.",
+      },
+      "editor.station.empty": {
+        description: "One quiet line in the empty Station panel, saying how to open a recording in it.",
+      },
+      "editor.station.loading": {
+        description: "Shown in the Station while a recording's audio is fetched and decoded.",
+      },
+      "editor.station.loadFailed": {
+        description: "Shown in the Station when a recording's audio cannot be fetched or decoded.",
+      },
+      "editor.station.gone": {
+        description: "Shown in the Station when the recording it had open was deleted or moved.",
+      },
+      "editor.station.nameOnLine": {
+        description: "The Station's heading: the recording's name, then the line it was opened on.",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          line: "The line, e.g. 'line 331' or a verse reference.",
+        },
+      },
+      "editor.station.lineNumber": {
+        description: "How a numbered line is named in the Station's heading, e.g. 'line 331'. Lowercase, as it follows a middle dot.",
+        placeholders: {
+          n: "The line's number.",
+        },
+      },
+      "editor.station.placedOn": {
+        description: "Under the Station's heading: the line this recording is used on.",
+        placeholders: {
+          line: "The line, e.g. 'line 331'.",
+        },
+      },
+      "editor.station.placedOnTwo": {
+        description: "Under the Station's heading: the recording is used on two lines; which one the Station opened it on.",
+        placeholders: {
+          a: "The first line.",
+          b: "The second line.",
+          open: "The line the Station opened it on.",
+        },
+      },
+      "editor.station.waiting": {
+        description: "A recording's approval state in the Station's heading: not approved yet. Follows a clock symbol.",
+      },
+      "editor.station.waitingCount": {
+        description: "A recording's approval state when a project needs more than one approval: how many it has of how many.",
+        placeholders: {
+          done: "Approvals so far.",
+          need: "Approvals the project needs.",
+        },
+      },
+      "editor.station.approved": {
+        description: "A recording's approval state in the Station's heading: approved. Follows a check mark.",
+      },
+      "editor.station.version": {
+        description: "In the Station's heading, which saved version of the recording this is (the first edit saved is version 2).",
+        placeholders: {
+          n: "The version number.",
+        },
+      },
+      "editor.station.approve": {
+        description: "Button in the Station's heading that approves the open recording.",
+      },
+      "editor.station.approveTip": {
+        description: "Tooltip of the Station's Approve button; A is its keyboard shortcut.",
+        placeholders: {
+          line: "The line the recording is open on.",
+        },
+      },
+      "editor.station.approveTakeTip": {
+        description: "Tooltip of the Station's Approve button on one piece of a split take, which approves the whole take.",
+      },
+      "editor.station.undoTip": {
+        description: "Tooltip of the Station's Undo button.",
+        placeholders: {
+          keys: "The shortcut, e.g. ⌘Z.",
+        },
+      },
+      "editor.station.nothingToUndo": {
+        description: "Tooltip of the Station's Undo button when there is nothing to undo.",
+      },
+      "editor.station.undoElsewhere": {
+        description: "Tooltip of the Station's greyed Undo button when your newest change was not to the recording open in the Station.",
+      },
+      "editor.station.laneTip": {
+        description: "Tooltip and screen-reader name of the Station's waveform.",
+      },
+      "editor.station.startFlag": {
+        description: "Label on the flag marking where the kept part of a recording starts; dragged to trim.",
+        placeholders: {
+          time: "A time like 0:00.00.",
+        },
+      },
+      "editor.station.endFlag": {
+        description: "Label on the flag marking where the kept part of a recording ends; dragged to trim.",
+        placeholders: {
+          time: "A time like 0:04.20.",
+        },
+      },
+      "editor.station.dragStart": {
+        description: "Screen-reader name and tooltip of the Start flag.",
+      },
+      "editor.station.dragEnd": {
+        description: "Screen-reader name and tooltip of the End flag.",
+      },
+      "editor.station.insertFlag": {
+        description: "Label on the flag marking the cursor, where inserted audio goes.",
+        placeholders: {
+          time: "A time like 0:02.05.",
+        },
+      },
+      "editor.station.keepThis": {
+        description: "Button over a selected part of a recording: keep only that part (a trim).",
+      },
+      "editor.station.keepTip": {
+        description: "Tooltip of Keep this; K is its shortcut.",
+      },
+      "editor.station.deleteThis": {
+        description: "Button over a selected part of a recording: delete it, closing the gap.",
+      },
+      "editor.station.deleteTip": {
+        description: "Tooltip of Delete this; ⌫ is its shortcut.",
+      },
+      "editor.station.insertHere": {
+        description: "Button at the cursor or selection: opens the choice of audio to insert there.",
+      },
+      "editor.station.insertTip": {
+        description: "Tooltip of Insert audio here; I is its shortcut.",
+      },
+      "editor.station.selRange": {
+        description: "Readout beside the selection's buttons: where it starts and ends, and its length.",
+        placeholders: {
+          a: "Start time.",
+          b: "End time.",
+          len: "Length, e.g. '0.90 s'.",
+        },
+      },
+      "editor.station.selAt": {
+        description: "Readout beside the cursor's Insert button: where the cursor is.",
+        placeholders: {
+          time: "A time like 0:02.05.",
+        },
+      },
+      "editor.station.play": {
+        description: "Tooltip of the Station's Play button.",
+      },
+      "editor.station.playSelection": {
+        description: "Tooltip of the Station's Play button while a part is selected.",
+      },
+      "editor.station.pause": {
+        description: "Tooltip of the Station's Pause button.",
+      },
+      "editor.station.speedTip": {
+        description: "Tooltip of the Station's speed menu (0.5× to 2×).",
+      },
+      "editor.station.timeOf": {
+        description: "The Station's running time: where playback is inside the kept part, and the kept part's length.",
+        placeholders: {
+          at: "Current time.",
+          len: "Length of the kept part.",
+        },
+      },
+      "editor.station.start": {
+        description: "Label before the kept part's start time in the Station; click to type it.",
+      },
+      "editor.station.end": {
+        description: "Label before the kept part's end time in the Station; click to type it.",
+      },
+      "editor.station.typeStartTip": {
+        description: "Tooltip of the Start time field.",
+      },
+      "editor.station.typeEndTip": {
+        description: "Tooltip of the End time field.",
+      },
+      "editor.station.typeHelp": {
+        description: "Help line shown while a start or end time is being typed.",
+      },
+      "editor.station.set": {
+        description: "Button that applies a typed start or end time.",
+      },
+      "editor.station.badTime": {
+        description: "Message when what was typed is not a time.",
+      },
+      "editor.station.zoomIn": {
+        description: "Screen-reader name and tooltip of the Station's zoom-in button.",
+      },
+      "editor.station.zoomOut": {
+        description: "Screen-reader name and tooltip of the Station's zoom-out button.",
+      },
+      "editor.station.scroll": {
+        description: "Screen-reader name of the slider that scrolls the zoomed waveform.",
+      },
+      "editor.station.hintCalm": {
+        description: "One quiet line under the Station's controls, shown when nothing is selected.",
+      },
+      "editor.station.history": {
+        description: "Item in the Station's ⋯ menu that shows the open recording's history.",
+      },
+      "editor.station.hideHistory": {
+        description: "The same item while the history is showing.",
+      },
+      "editor.station.historyNothing": {
+        description: "Grey line under the History item when the recording has no history yet.",
+      },
+      "editor.station.historyTitle": {
+        description: "Small uppercase heading of the history box in the Station.",
+      },
+      "editor.station.historyFootnote": {
+        description: "Footnote of the Station's history box.",
+      },
+      "editor.station.historyFailed": {
+        description: "Shown in the history box when the server's history cannot be read.",
+      },
+      "editor.station.historyWho": {
+        description: "One history row with who made the change and when.",
+        placeholders: {
+          row: "What happened.",
+          who: "The person's name.",
+          when: "When, e.g. '2:14 pm' or 'Oct 28, 2:14 pm'.",
+        },
+      },
+      "editor.station.hRecorded": {
+        description: "History row: the recording was made or added.",
+      },
+      "editor.station.hVersionSaved": {
+        description: "History row: an edited version of the recording was saved.",
+        placeholders: {
+          n: "The version number.",
+        },
+      },
+      "editor.station.hTrimmed": {
+        description: "History row: the kept part was changed.",
+        placeholders: {
+          a: "Start time.",
+          b: "End time.",
+        },
+      },
+      "editor.station.hApproved": {
+        description: "History row: someone approved the recording.",
+      },
+      "editor.station.hUnapproved": {
+        description: "History row: someone withdrew their approval.",
+      },
+      "editor.station.hRenamed": {
+        description: "History row: the recording was renamed.",
+        placeholders: {
+          name: "The new name.",
+        },
+      },
+      "editor.station.hMoved": {
+        description: "History row: the recording was moved along the timeline.",
+      },
+      "editor.station.hSplit": {
+        description: "History row: the recording was split in two.",
+        placeholders: {
+          time: "Where it was split.",
+        },
+      },
+      "editor.station.hChosen": {
+        description: "History row: this recording was chosen as the one that plays on its line.",
+      },
+      "editor.station.hDeleted": {
+        description: "History row: the recording was deleted.",
+      },
+      "editor.station.placedOnMany": {
+        description: "Under the Station's heading: the recording is used on several lines; which one the Station opened it on.",
+        placeholders: {
+          count: "How many lines.",
+          open: "The line the Station opened it on.",
+        },
+      },
+      "editor.station.historyEntries": {
+        description: "Grey line under the History item: how many rows the history has.",
+        placeholders: {
+          count: "Number of rows.",
+        },
       },
       "editor.dock.film": {
         description:

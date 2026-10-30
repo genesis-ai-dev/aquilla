@@ -499,6 +499,12 @@ import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
 import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
+import { StationPanel } from "@/components/station/StationPanel"
+import type { StationHost } from "@/components/station/station-host"
+import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
+import { STATION_PICKS } from "@/lib/station/picks"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { regionControls } from "@/components/timeline/MediaPanelChrome"
@@ -12813,6 +12819,49 @@ export function ProjectWorkspace() {
     },
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
+  // AQU-2327: what the Station needs — the same reads and writes the timeline
+  // uses, so a trim or a vote in the Station is the timeline's own.
+  const stationHost = useMemo<StationHost | null>(() => {
+    if (!project) return null
+    const lineName = (cellId: string) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      const label = owner?.cell.cellLabel?.trim()
+      if (label && /^\d+$/.test(label)) return t("editor.station.lineNumber", { n: label })
+      if (label) return label
+      const index = getActiveCells().findIndex((c) => c.id === cellId)
+      return index >= 0 ? t("editor.station.lineNumber", { n: index + 1 }) : ""
+    }
+    return {
+      project,
+      username: currentUsername,
+      editable: canPerform("cell.audio.trim", project.syncRole?.level ?? null),
+      getSyncToken: audioSyncTokenFetcherForSession(frontierSession ?? null),
+      readTake: (cellId, audioId) => {
+        const r = readTake(cellId, audioId)
+        return r ? { fileId: r.owner.fileId, cell: r.owner.cell, att: r.att } : null
+      },
+      lineName,
+      trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      voteState: timelineVoteState,
+      vote: handleVoteTimelineTake,
+      trim: handleTrimTarget,
+      approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
+      pauseOtherPlayback: () => pauseAllTransports(),
+      reportHistory,
+    }
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, reportHistory, t])
+  // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
+  // and — while the Station's tab shows — follow the take you click.
+  const handleEditInStation = useCallback((cellId: string, audioId: string) => {
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
+  }, [])
+  const stationShowingRef = useRef(false)
+  const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
+    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
+  }, [])
   const handleRegenerateTimelineVoice = useCallback(
     async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
       if (!project || !frontierSession) return
@@ -13806,6 +13855,19 @@ export function ProjectWorkspace() {
       }
     },
   })
+
+  // AQU-2327: a way in asked to show the Station — bring its tab forward.
+  const dockShow = dock.show
+  useEffect(() => onStationShowRequest(() => dockShow("station")), [dockShow])
+  // Read by the timeline's take click (Q1: the Station follows it while it shows).
+  const stationShowing = timelineStacked && dock.view.isShowing("station")
+  useEffect(() => {
+    stationShowingRef.current = stationShowing
+  }, [stationShowing])
+  useEffect(() => {
+    setStationAvailable(timelineStacked)
+    return () => setStationAvailable(false)
+  }, [timelineStacked])
 
   const anyCellClockIsFileTime = useMemo(
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
@@ -17727,6 +17789,8 @@ export function ProjectWorkspace() {
                     onRemoveTake={handleRemoveTimelineTake}
                     onVoteTake={handleVoteTimelineTake}
                     voteStateFor={timelineVoteState}
+                    onEditInStation={STATION_PICKS.wayIn.takeMenuItem ? handleEditInStation : undefined}
+                    onTakeChosen={handleTakeChosen}
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
@@ -18168,6 +18232,10 @@ export function ProjectWorkspace() {
               </>,
                     dock.hosts.text,
                   )
+                : null}
+              {/* AQU-2327: the Station, once — a tab beside Lines (the text). */}
+              {dock.hosts.station && timelineStacked
+                ? createPortal(<StationPanel host={stationHost} visible={dock.view.isShowing("station")} />, dock.hosts.station)
                 : null}
               </ForecastProvider>
               </EditorActionsProvider>

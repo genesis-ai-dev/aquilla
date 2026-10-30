@@ -68,6 +68,7 @@ vi.mock("youtube-video-element", () => {
 })
 
 import { MediaVideoPane, readCaptionPlacement, readSubtitleMode } from "./MediaVideoPane"
+import { DOCK_HOST_MOVING } from "./media-dock-layout"
 import { __resetPlaybackSourceForTests, playbackSourceKey } from "@/lib/audio/playback-source"
 import {
   getVideoBuffering,
@@ -434,13 +435,12 @@ describe("MediaVideoPane", () => {
     expect(onVideoTime).toHaveBeenCalled()
   })
 
-  it("heads its column with a Video label and the linked file's name", () => {
+  it("has no header row: the panel's strip names it, the top bar names the film", () => {
+    // Media redesign, layout: the Film panel's 24 px strip carries its name
+    // and controls, and the film's name is on the top bar's Film button.
     renderPane()
-    const header = screen.getByTestId("video-pane-header")
-    expect(header).toHaveTextContent("Video")
-    expect(header).toHaveTextContent("episode.webm")
-    // Never the full URL — the pill is a name, not an address.
-    expect(header).not.toHaveTextContent("https://")
+    expect(screen.queryByTestId("video-pane-header")).toBeNull()
+    expect(screen.getByTestId("tl-video-pane")).not.toHaveTextContent("episode.webm")
   })
 
   it("keeps the caption controls on the picture, revealed while playback starts", () => {
@@ -1097,6 +1097,70 @@ describe("a YouTube link", () => {
   it("a direct media file still uses <video>", () => {
     renderPane({ src: "https://cdn/episode.mp4" })
     expect(screen.getByTestId("video-pane-media").tagName.toLowerCase()).toBe("video")
+  })
+
+  // Review, Oct 29: the dock moves the film between areas by moving the
+  // element it is drawn into, and a browser reloads an iframe that moves —
+  // the YouTube picture came back at 0:00, stopped, its player cut off from
+  // the transport. (happy-dom reloads nothing, so the dock's notice stands in
+  // for the move; useMediaDock.test.ts shows the dock sends it.)
+  describe("moved to another area by the dock", () => {
+    type Media = HTMLElement & { currentTime: number; paused: boolean; readyState: number; play(): Promise<void> }
+    function inDockHost(props: Partial<React.ComponentProps<typeof MediaVideoPane>>) {
+      const host = document.createElement("div")
+      host.dataset.mediaPanel = "film"
+      document.body.appendChild(host)
+      const draw = (over: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => (
+        <MediaVideoPane src={YT} fileId="f1" cells={[]} {...props} {...over} />
+      )
+      const view = render(draw(), { container: host })
+      return { host, rerender: (over: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => view.rerender(draw(over)) }
+    }
+
+    it("is rebuilt where it lands, back at its place, and plays on", () => {
+      const onVideoPlaying = vi.fn()
+      const { host, rerender } = inDockHost({ onVideoPlaying })
+      const media = screen.getByTestId("video-pane-media") as Media
+      media.readyState = 4
+      const play = vi.spyOn(media, "play")
+      rerender({ onVideoPlaying, togglePlay: { nonce: 1 } })
+      expect(play).toHaveBeenCalled()
+      media.paused = false
+      media.currentTime = 80
+      act(() => { media.dispatchEvent(new Event("play")) })
+      expect(onVideoPlaying).toHaveBeenLastCalledWith(true)
+
+      act(() => { host.dispatchEvent(new Event(DOCK_HOST_MOVING)) })
+      const fresh = screen.getByTestId("video-pane-media") as Media
+      expect(fresh).not.toBe(media)
+      expect(fresh.tagName.toLowerCase()).toBe("youtube-video")
+      // Not playing until the new player is.
+      expect(onVideoPlaying).toHaveBeenLastCalledWith(false)
+      const freshPlay = vi.spyOn(fresh, "play")
+      act(() => { fresh.dispatchEvent(new Event("loadedmetadata")) })
+      expect(fresh.currentTime).toBe(80)
+      expect(freshPlay).toHaveBeenCalled()
+    })
+
+    it("stays stopped where it was when it was stopped", () => {
+      const { host } = inDockHost({})
+      const media = screen.getByTestId("video-pane-media") as Media
+      media.currentTime = 42
+      act(() => { host.dispatchEvent(new Event(DOCK_HOST_MOVING)) })
+      const fresh = screen.getByTestId("video-pane-media") as Media
+      expect(fresh).not.toBe(media)
+      const freshPlay = vi.spyOn(fresh, "play")
+      act(() => { fresh.dispatchEvent(new Event("loadedmetadata")) })
+      expect(fresh.currentTime).toBe(42)
+      expect(freshPlay).not.toHaveBeenCalled()
+    })
+
+    it("leaves a plain <video> alone: it moves without reloading", () => {
+      const { host } = inDockHost({ src: "https://cdn/episode.mp4" })
+      const media = screen.getByTestId("video-pane-media")
+      act(() => { host.dispatchEvent(new Event(DOCK_HOST_MOVING)) })
+      expect(screen.getByTestId("video-pane-media")).toBe(media)
+    })
   })
 })
 

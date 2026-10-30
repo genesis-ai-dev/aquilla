@@ -54,10 +54,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "renamed the other.",
   "importExport.dialog.audioSectionTitle":
     "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
-    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
-    "a mode you switch into — and its own context pins it as shared by every " +
-    "entry point that toggles that lens so the name can never drift. Reusing it " +
-    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "user is about to download. nav.lens.audio is a bare 'Audio' heading on " +
+    "other surfaces (a project-table column, a side of the character check). " +
+    "Reusing it here would tie a file-format label to those headings, and a later edit " +
     "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
@@ -91,7 +90,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "audio.newVoice.inworldVoiceLabel":
     "Field label for the Inworld stock-voice dropdown in the New voice modal — " +
     "which catalog voice this engine should speak with. editor.navTitle.voice is " +
-    "the editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "the label of the editor's Voice route naming a workspace mode. A form-field " +
     "label and a navigation tab are different UI roles that happen to share the " +
     "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.inworldLanguageLabel":
@@ -219,8 +218,8 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
     "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
-    "Standalone tab label of the header Text/Audio segmented lens switch — a " +
-    "primary navigation control read on its own, alongside its sibling 'Text'. " +
+    "A standalone heading — the Audio column of the organization's project table " +
+    "and the Audio side of the character check — read on its own. " +
     "nav.outbox.previewAudio is a one-word fallback preview for an audio-attach " +
     "event row deep in the outbox diagnostics popover, standing in for a missing " +
     "text body among noun-phrase siblings like 'edit {id}'. A standalone control " +
@@ -370,7 +369,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
     "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the Voice Studio's engine picker. A project-linking term of art and an " +
+    "the voice library's engine picker. A project-linking term of art and an " +
     "audio-engine brand-ish label that happen to share the English word 'Clone'.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
@@ -401,7 +400,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "settings. A page naming itself vs a link naming its destination.",
   "projectSettings.section.voice":
     "Card heading for this project's Voice/TTS API-key configuration. " +
-    "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +
+    "editor.navTitle.voice is the label of the editor's Voice route. A settings " +
     "card and a workspace lens switch that happen to share the word 'Voice'.",
   "projectSettings.sourceLink.modeLive":
     "Badge naming the AD-9 link-mode ('Live' vs 'Clone') on a linked project's " +

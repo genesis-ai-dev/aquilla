@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import {
   shouldShowVideoPane,
+  clearStoredVideoPaneWidth,
   readStoredVideoPaneWidth,
   writeStoredVideoPaneWidth,
   VIDEO_PANE_DEFAULT_WIDTH,
@@ -33,19 +34,46 @@ describe("shouldShowVideoPane", () => {
 })
 
 describe("video pane width", () => {
-  beforeEach(() => localStorage.removeItem("aquilla:video-pane-width"))
+  beforeEach(() => localStorage.clear())
 
-  it("round-trips a width", () => {
-    writeStoredVideoPaneWidth(340)
-    expect(readStoredVideoPaneWidth()).toBe(340)
+  it("round-trips a width per file", () => {
+    writeStoredVideoPaneWidth("f1", 340)
+    expect(readStoredVideoPaneWidth("f1")).toBe(340)
+    // Media redesign, layout: each file keeps its own arrangement.
+    expect(readStoredVideoPaneWidth("f2")).toBe(VIDEO_PANE_DEFAULT_WIDTH)
+  })
+
+  it("starts a file with no width of its own from the width its kind starts at", () => {
+    expect(readStoredVideoPaneWidth("f1", 480)).toBe(480)
+  })
+
+  // Review, Oct 29: the width was one shared key before it was per file, and
+  // a width someone had dragged to must survive the change.
+  it("gives a file with no width of its own the width every file shared before", () => {
+    localStorage.setItem("aquilla:video-pane-width", "600")
+    expect(readStoredVideoPaneWidth("f1", 480)).toBe(600)
+    // A file's own width wins, and the shared one is never written again.
+    writeStoredVideoPaneWidth("f1", 340)
+    expect(readStoredVideoPaneWidth("f1", 480)).toBe(340)
+    expect(readStoredVideoPaneWidth("f2", 480)).toBe(600)
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBe("600")
   })
 
   it("falls back to the default when unset or nonsense", () => {
-    expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
-    localStorage.setItem("aquilla:video-pane-width", "not-a-number")
-    expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
+    expect(readStoredVideoPaneWidth("f1")).toBe(VIDEO_PANE_DEFAULT_WIDTH)
+    localStorage.setItem("aquilla:video-pane-width:f1", "not-a-number")
+    expect(readStoredVideoPaneWidth("f1")).toBe(VIDEO_PANE_DEFAULT_WIDTH)
     // A stored width below the floor would render a pane too narrow to read.
-    localStorage.setItem("aquilla:video-pane-width", String(VIDEO_PANE_MIN_WIDTH - 50))
-    expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
+    localStorage.setItem("aquilla:video-pane-width:f1", String(VIDEO_PANE_MIN_WIDTH - 50))
+    expect(readStoredVideoPaneWidth("f1")).toBe(VIDEO_PANE_DEFAULT_WIDTH)
+  })
+
+  it("forgets a file's width on Reset layout, back to its kind's start — not to the old shared width", () => {
+    localStorage.setItem("aquilla:video-pane-width", "600")
+    writeStoredVideoPaneWidth("f1", 500)
+    clearStoredVideoPaneWidth("f1")
+    expect(readStoredVideoPaneWidth("f1", 480)).toBe(480)
+    // Only that file: the others keep the shared width until they are reset.
+    expect(readStoredVideoPaneWidth("f2", 480)).toBe(600)
   })
 })

@@ -61,3 +61,39 @@ describe("denoiseSplitTake", () => {
     expect(places).toEqual([expect.objectContaining({ audioId: attaches[1].audioId, targetOffsetMs: 900 })])
   })
 })
+
+// AQU-2267: a piece keeps its place in BOTH timings when it is cleaned — its
+// place following the recordings is stated beside its place following the
+// source, so neither timing sees it move.
+describe("denoiseSplitTake — a piece's place in both timings (AQU-2267)", () => {
+  it("re-places each moved piece in both timings, and paints both while it saves", async () => {
+    emitted.events = []
+    await denoiseSplitTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "sam",
+      session: { jwt: "j", username: "sam", createdAt: "" },
+      pieces: [
+        piece("audio-c1-1.webm", { trimEndMs: 1500, label: "Take 1 · 1", targetOffsetMs: -800, recordingsOffsetMs: 200 }),
+        piece("audio-c1-2.webm", { trimStartMs: 1500, label: "Take 1 · 2", pieceOf: "audio-c1-1.webm", targetOffsetMs: 900, recordingsOffsetMs: 1900 }),
+      ],
+    })
+    const places = emitted.events.filter((e) => e.kind === "place").map((e) => e.input)
+    expect(places).toEqual([
+      expect.objectContaining({ targetOffsetMs: -800, recordingsOffsetMs: 200 }),
+      expect.objectContaining({ targetOffsetMs: 900, recordingsOffsetMs: 1900 }),
+    ])
+  })
+
+  it("a piece placed only following the recordings is re-placed too", async () => {
+    emitted.events = []
+    await denoiseSplitTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "sam",
+      session: { jwt: "j", username: "sam", createdAt: "" },
+      pieces: [
+        piece("audio-c1-1.webm", { trimEndMs: 1500, label: "Take 1 · 1" }),
+        piece("audio-c1-2.webm", { trimStartMs: 1500, pieceOf: "audio-c1-1.webm", recordingsOffsetMs: 300 }),
+      ],
+    })
+    const places = emitted.events.filter((e) => e.kind === "place").map((e) => e.input)
+    expect(places).toEqual([expect.objectContaining({ targetOffsetMs: null, recordingsOffsetMs: 300 })])
+  })
+})

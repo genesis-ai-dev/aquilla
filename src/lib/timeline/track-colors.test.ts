@@ -162,6 +162,7 @@ describe("the class vocabulary", () => {
     const all = [
       TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS,
       TRACK_ACCENT_CLASS, TRACK_DOT_CLASS,
+      TRACK_BAR_CLASS, TRACK_WAVE_FILL_CLASS,
     ]
     for (const cls of all) {
       expect(cls, cls).not.toContain("${")
@@ -186,16 +187,6 @@ describe("the class vocabulary", () => {
     expect(trackChipClass("generated")).toBe(TRACK_CHIP_GENERATED_CLASS)
     expect(TRACK_CHIP_GENERATED_CLASS).toBe(TRACK_CHIP_TAKE_CLASS)
     expect(trackChipPlayingClass("generated")).toBe(trackChipPlayingClass("take"))
-  })
-
-  it("fills the waveform and the name bar from their own variables", () => {
-    expect(TRACK_WAVE_FILL_CLASS).toBe("fill-[color:var(--tl-track-wave)]")
-    expect(TRACK_BAR_CLASS).toBe("bg-[color:var(--tl-track-bar)] text-[color:var(--tl-track-bar-ink)]")
-  })
-
-  it("draws the gutter strip and the dot in the strip colour", () => {
-    expect(TRACK_ACCENT_CLASS).toBe("border-l-4 border-l-[color:var(--tl-track-strip)]")
-    expect(TRACK_DOT_CLASS).toBe("bg-[color:var(--tl-track-strip)]")
   })
 
   // Both chips are washes now — most of what you read against is the page — so

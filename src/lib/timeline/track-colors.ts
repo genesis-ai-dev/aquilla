@@ -44,7 +44,7 @@
 // has had. What syncs between clients is a token; what a token looks like is
 // decided here, by whichever build happens to be drawing.
 
-import { hexToOklch, oklchCss, playLineColorCss, stripColorCss, waveColorCss } from "./track-oklch"
+import { WAVE_C, hexToOklch, oklchCss, playLineColorCss, stripColorCss, waveColorCss } from "./track-oklch"
 
 /** One selectable hue. Just an identity and a colour now — no class recipes. */
 export interface TrackHue {
@@ -331,7 +331,7 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
     // at 34%).
     "--tl-track-bar": barColorFor(stripColorFor(hex)),
     "--tl-track-bar-ink": barInkFor(hex),
-    "--tl-track-wave": waveColorCss(hex),
+    "--tl-track-wave": waveColorFor(hex),
     "--tl-track-line": playLineColorCss(hex),
     "--tl-track-strip": stripColorFor(hex),
   }
@@ -375,6 +375,16 @@ export const WAVE_LOOK = {
  */
 function stripColorFor(hex: string): string {
   return PALETTE_HEXES.has(hex) ? stripColorCss(hex) : hex
+}
+
+/**
+ * A track's waveform: for the six palette hues, Sam's chroma 0.14; any other
+ * colour (the source rows', a hex the briefly shipped picker wrote) is never
+ * made MORE saturated than it is. A grey has no hue to raise, so lifting its
+ * chroma painted it in whatever hue its rounding pointed at.
+ */
+function waveColorFor(hex: string): string {
+  return waveColorCss(hex, PALETTE_HEXES.has(hex) ? WAVE_C : Math.min(WAVE_C, hexToOklch(hex).c))
 }
 
 /** The name bar: a strip colour at 90% opacity (Sam, Oct 28). */

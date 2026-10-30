@@ -92,12 +92,12 @@ export const WAVE_C = 0.14
 export const LINE_KL = 0.731
 export const LINE_KC = 0.617
 
-/** A track's waveform colour: its track's lightness less WAVE_DARKER, chroma
- *  0.14 capped at P3, in its hue. */
-export function waveColorCss(hex: string): string {
+/** A track's waveform colour: its track's lightness less WAVE_DARKER (never
+ *  under 0), chroma `cap` (0.14) capped at P3, in its hue. */
+export function waveColorCss(hex: string, cap: number = WAVE_C): string {
   const { l, h } = hexToOklch(hex)
-  const L = Math.round((l - WAVE_DARKER) * 1000) / 1000
-  return oklchCss(L, maxP3Chroma(L, h, WAVE_C), h)
+  const L = Math.max(0, Math.round((l - WAVE_DARKER) * 1000) / 1000)
+  return oklchCss(L, maxP3Chroma(L, h, cap), h)
 }
 
 /** A track's strip and dot: the waveform's chroma at the track's own lightness. */

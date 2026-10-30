@@ -444,6 +444,22 @@ describe("the waveform look", () => {
     expect(trackHueVarsFor("source-audio", null)["--tl-track-strip"]).toBe("#0e9bd6")
   })
 
+  // A colour from outside the palette (a source row's, a hex the briefly
+  // shipped picker wrote) is never made more saturated than it is: a grey has
+  // no hue, so raising its chroma painted it in whatever hue its rounding
+  // pointed at — an olive waveform on a grey take.
+  it("never makes a colour from outside the palette more saturated than it is", () => {
+    const C = (css: string) => Number(/oklch\([\d.]+ ([\d.]+)/.exec(css)![1])
+    expect(C(trackHueVars("808080")["--tl-track-wave"])).toBe(0)
+    expect(C(trackHueVarsFor("source-subtitles", null)["--tl-track-wave"])).toBeLessThanOrEqual(0.025)
+    // The source audio's own blue is already that saturated: unchanged.
+    expect(trackHueVarsFor("source-audio", null)["--tl-track-wave"]).toBe("oklch(0.484 0.135 235.1)")
+  })
+
+  it("never writes a negative lightness for a near-black colour", () => {
+    expect(trackHueVars("000000")["--tl-track-wave"]).toMatch(/^oklch\(0\.000 /)
+  })
+
   it("draws the play line in the track darkened with its hue held", () => {
     // oklch(from <track> calc(l * 0.731) calc(c * 0.617) h)
     expect(trackHueVars("green")["--tl-track-line"]).toBe("oklch(0.524 0.100 156.9)")

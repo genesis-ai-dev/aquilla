@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "projects": [
+    {
+      "slug": "synthetic-genesis",
+      "projectId": "replay-synthetic-1",
+      "source": "synthetic",
+      "file": "genesis-sample.json",
+      "sha256": "a1d85c478e5b0c8975486cc2ff259f0d55797b1556b9846d4b72a83f8563b122",
+      "events": 20,
+      "maxSeq": 20,
+      "capturedAt": "2026-10-30T00:00:00.000Z"
+    }
+  ]
+}

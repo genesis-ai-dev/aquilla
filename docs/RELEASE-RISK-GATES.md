@@ -131,9 +131,35 @@ merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
 production tip does not carry (by `(cherry picked from commit …)`
 provenance or PR number), classifies each by the files its merge touched,
 and reads its walk verdict and the `release:approved` label from GitHub.
-A PR is *held* when its paths hold or its walk is not `PASS`/`none`; the
-label clears both. Held PRs are skipped, not a wall: the plan is the ready
-PRs in dev order plus the held list with a reason each.
+A PR is *held* when a holding area it touches has no green gate (below)
+or its walk is not `PASS`/`none`; the label clears both. Held PRs are
+skipped, not a wall: the plan is the ready PRs in dev order plus the held
+list with a reason each.
+
+**Gates: how a high-risk area becomes low-risk by test.** A gate is a
+required check on the PR's head sha, named in `release-risk.mjs`
+`AREA_GATES`, that proves the area's forbidden outcome did not happen for
+that change. The planner reads the newest run of each gate check off the
+head sha; `success` takes that area off the PR's holding list. Built
+today:
+
+- **`events` → `replay-gate`** (`risk-label.yml`, only for PRs touching
+  the events area). The corpus of real projects (`sync-worker/replay-corpus/`,
+  event logs plus lanes, chain claims and seq counters, fetched from the
+  private snapshots bucket) and the committed synthetic corpus each seed a
+  fresh in-process Postgres (PGlite), replay through the production
+  rebuild endpoint from genesis, and every projection table is hashed
+  (`cells`, `cell_validators`, `files`, `file_section_progress`, comments,
+  audio, glosses, links, morph, concepts, waivers, attachments,
+  backtranslations). The hashes must equal `golden.json`. A corpus that
+  failed to fetch fails the job (`REPLAY_CORPUS_REQUIRED=1`), so a missing
+  corpus never passes as green. The job also fails when `golden.json`
+  changed in the PR: an intentional projection change is exactly the case
+  that goes to a person, and the golden's diff is what they review before
+  adding `release:approved`. A gate passing does not excuse a failed walk,
+  and a PR's other holding areas (a migration beside the events change)
+  still hold.
+- **`auth` → permission matrix**: not built (open items).
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
 `git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
@@ -173,7 +199,8 @@ self-heal through `chunk-reload.ts` as before.
    and a run summary saying it is off the hourly line.
 2. It merges to dev like any other (ci.yml, walk, review agent).
 3. Every hourly cut skips it and lists it under **Held, not in this
-   release** with the reason.
+   release** with the reason. An events-only PR whose `replay-gate` check
+   is green is not held at all: it never reaches this list.
 4. Manual QA as today (the dev deploy carries it). When satisfied, a
    person adds `release:approved` to the PR.
 5. The next cut picks it. If the manual QA finds a problem, the fix is a
@@ -184,20 +211,16 @@ nothing, and `release:approved` is the one label the planner reads.
 
 ## 5. Open items
 
-- **Replay gate for `events` PRs** (meeting: "replay ~20 real projects and
-  compare the final state"). The replay exists: `POST
-  /admin/projects/:id/rebuild-projection?fullReplay=1` on sync-worker
-  wipes and replays in one transaction, bounded memory, snapshot-seeded by
-  default. What is missing is a harness that runs the candidate build's
-  replay against a fixed corpus (a dev-branch Neon snapshot of ~20
-  projects) and diffs the projection rows against the baseline build's,
-  as a required check on `risk:events` PRs. A diff would show as
-  *intentional* only by a person's say-so, which is why it stays a human
-  review and not an automatic hold-lift. Needs: a corpus branch on Neon,
-  a way to run both builds (a preview sync-worker per branch already
-  exists), and a row-hash diff per `(file, cell, side, lane)`. Until it
-  exists, `events` PRs hold on paths alone, which is stricter than the
-  target state, not looser.
+- **Replay corpus: real projects.** The gate runs (section 3) but the
+  corpus holds one synthetic project. Someone with production read
+  access captures ~20 real projects (`node scripts/replay-corpus.mjs
+  export --url … --project …`, then `upload`, then
+  `UPDATE_REPLAY_GOLDEN=1`; `sync-worker/replay-corpus/README.md`).
+  Pick projects clients work in daily, a few thousand to ~50k events each:
+  PGlite replays a Bible-scale log too slowly for a PR check. Until real
+  projects are in, the gate proves the harness and the chain rules it
+  pins, not production shapes. The `fetch` step in `risk-label.yml` needs
+  `CLOUDFLARE_API_TOKEN` with R2 read on `aquilla-snapshots`.
 - **Permission matrix for `auth` PRs** (meeting: "send requests to the
   auth API and record what it does"). Candidates to grow into the
   table-driven gate: `auth-worker/src/__tests__/access-attacks-parity`,

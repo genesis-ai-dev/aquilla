@@ -77,6 +77,23 @@ export function classifyFiles(files) {
   return { areas: sorted, pathHolds: sorted.some((area) => HOLDING_AREAS.has(area)) }
 }
 
+// A gate is a required check on the PR's head sha that proves the area's
+// forbidden outcome did not happen for that change. Green, the area stops
+// holding and the PR rides the hourly line like any other; this is how a
+// high-risk area becomes low-risk by test rather than by a person. The
+// check's name is what release-plan-walk.mjs reads off the check-runs API.
+//   events → replay-gate (risk-label.yml): the corpus of real projects replays
+//            to the committed golden projection (sync-worker/replay-corpus).
+//            The job also fails when golden.json changes in the PR, so an
+//            intentional projection change still goes to a person.
+export const AREA_GATES = { events: "replay-gate" }
+
+// The areas of `areas` that still hold once the gates in `passedGates` (area
+// names) are taken off the list.
+export function holdingAreas(areas, passedGates = []) {
+  return areas.filter((area) => HOLDING_AREAS.has(area) && !passedGates.includes(area))
+}
+
 export const RISK_LABEL_PREFIX = "risk:"
 export const APPROVED_LABEL = "release:approved"
 

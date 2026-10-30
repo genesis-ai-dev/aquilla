@@ -1,0 +1,60 @@
+{
+  "synthetic-genesis": {
+    "cells": {
+      "rows": 9,
+      "sha256": "d0da453fc361c0e9656b6b7d166d4be44efb2d0b005cb0e7033eeb757c5047a1"
+    },
+    "cell_validators": {
+      "rows": 2,
+      "sha256": "44937095e95c93883abd44e4a152f1d54dd2e3cf0dc2a394e1d8e16b41c1b8d8"
+    },
+    "cell_waivers": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "files": {
+      "rows": 1,
+      "sha256": "27ea7515cc04f69a99aad1da675f3426563a6e7f3ff334002e9eb66e81b8fb85"
+    },
+    "file_section_progress": {
+      "rows": 3,
+      "sha256": "e4082c28a63faa60ef788109f5b1802f516177ea82b043ec18be59919687b709"
+    },
+    "cell_audio": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cell_audio_validators": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cell_attachments": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "comments": {
+      "rows": 2,
+      "sha256": "5bb72f185c5ea6b02df5f6882f675ad7959c1eed9d2471a893afd78b7e8ef72f"
+    },
+    "cell_backtranslations": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cell_glosses": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cell_links": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cell_word_morph": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "concepts": {
+      "rows": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  }
+}

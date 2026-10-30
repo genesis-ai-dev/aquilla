@@ -2,7 +2,7 @@
 // Kept apart from release-plan.mjs on purpose: this is the only part of the
 // planner that calls the GitHub API, so a lookup bug can't hide inside the
 // slicing logic, and the slicing logic stays testable with no network.
-import { APPROVED_LABEL } from "./release-risk.mjs"
+import { APPROVED_LABEL, AREA_GATES } from "./release-risk.mjs"
 
 const REPO = "genesis-ai-dev/aquilla"
 
@@ -77,7 +77,7 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
   const associated = await githubApi(`/commits/${mergeSha}/pulls`, opts)
   const candidates = Array.isArray(associated) ? associated : []
   const pr = candidates.find((candidate) => candidate.merge_commit_sha === mergeSha) ?? candidates[0]
-  if (!pr?.number || !pr.head?.sha) return { walk: "unknown", approved: false }
+  if (!pr?.number || !pr.head?.sha) return { walk: "unknown", approved: false, gates: [] }
   const labels = Array.isArray(pr.labels) ? pr.labels.map((label) => label?.name) : []
   const approved = labels.includes(APPROVED_LABEL)
 
@@ -86,7 +86,29 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
     const parsed = parseWalkComment(comment.body)
     if (parsed && parsed.prNumber === pr.number && pr.head.sha.startsWith(parsed.sha)) latest = parsed
   }
-  return { walk: latest ? normalizeVerdict(latest.verdict) : "unknown", approved }
+  const gates = await passedGates(pr.head.sha, opts)
+  return { walk: latest ? normalizeVerdict(latest.verdict) : "unknown", approved, gates }
+}
+
+// The areas whose gate check (release-risk.mjs AREA_GATES) concluded
+// `success` on the PR's head sha. The check-runs API lists newest first, so
+// the first run seen per name is the one that counts; a re-run that failed
+// after an earlier pass does not pass. Read from the head sha, never the
+// merge commit: the gate ran on the PR, and that is the code that merged.
+export async function passedGates(headSha, opts) {
+  const names = new Map(Object.entries(AREA_GATES).map(([area, name]) => [name, area]))
+  const latest = new Map()
+  for (let page = 1; page <= 5; page++) {
+    const body = await githubApi(`/commits/${headSha}/check-runs?per_page=100&page=${page}`, opts)
+    const runs = Array.isArray(body?.check_runs) ? body.check_runs : []
+    for (const run of runs) {
+      if (names.has(run?.name) && !latest.has(run.name)) latest.set(run.name, run.conclusion)
+    }
+    if (runs.length < 100) break
+  }
+  const passed = []
+  for (const [name, area] of names) if (latest.get(name) === "success") passed.push(area)
+  return passed
 }
 
 export async function lookupWalk(options) {
@@ -101,8 +123,8 @@ export async function lookupWalk(options) {
 export async function fillWalks(prs, opts) {
   return Promise.all(prs.map(async (pr) => {
     try {
-      const { walk, approved } = await lookupPr({ ...opts, mergeSha: pr.sha })
-      return { ...pr, walk: pr.walk === "none" ? "none" : walk, approved }
+      const { walk, approved, gates } = await lookupPr({ ...opts, mergeSha: pr.sha })
+      return { ...pr, walk: pr.walk === "none" ? "none" : walk, approved, gates }
     } catch {
       return pr
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { APPROVED_LABEL, AREAS, HOLDING_AREAS, classifyFiles, riskLabelsFor } from "./release-risk.mjs"
+import { APPROVED_LABEL, AREAS, AREA_GATES, HOLDING_AREAS, classifyFiles, holdingAreas, riskLabelsFor } from "./release-risk.mjs"
 
 // A misclassified file in one of these areas would put a change that can
 // corrupt the event log, drop an offline edit, or leak another org's data
@@ -93,5 +93,20 @@ describe("labels", () => {
   it("names one risk label per area and the approval label the planner reads", () => {
     expect(riskLabelsFor(["events", "auth"])).toEqual(["risk:events", "risk:auth"])
     expect(APPROVED_LABEL).toBe("release:approved")
+  })
+})
+
+describe("holdingAreas", () => {
+  it("lists only holding areas, minus those with a passed gate", () => {
+    expect(holdingAreas(["events", "export", "migration"])).toEqual(["events", "migration"])
+    expect(holdingAreas(["events", "export", "migration"], ["events"])).toEqual(["migration"])
+    expect(holdingAreas(["sync"], ["events"])).toEqual([])
+  })
+
+  it("names a check for every gated area, and gates only holding areas", () => {
+    for (const [area, check] of Object.entries(AREA_GATES)) {
+      expect(HOLDING_AREAS.has(area)).toBe(true)
+      expect(check).toMatch(/^[a-z-]+$/)
+    }
   })
 })

@@ -5,6 +5,7 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   classifyFiles,
+  holdReason,
   isDocsOrTestOnly,
   planRelease,
   prHolds,
@@ -124,17 +125,29 @@ describe("planRelease", () => {
 })
 
 describe("prHolds", () => {
-  it("holds on a path match regardless of walk", () => {
-    expect(prHolds({ pathHolds: true, walk: "PASS" })).toBe(true)
+  it("holds on a holding area regardless of walk", () => {
+    expect(prHolds({ areas: ["auth"], walk: "PASS" })).toBe(true)
   })
 
-  it("does not hold on a clean walk with no path match", () => {
-    expect(prHolds({ pathHolds: false, walk: "PASS" })).toBe(false)
-    expect(prHolds({ pathHolds: false, walk: "none" })).toBe(false)
+  it("does not hold on a clean walk with only noted areas", () => {
+    expect(prHolds({ areas: ["export", "sync"], walk: "PASS" })).toBe(false)
+    expect(prHolds({ areas: [], walk: "none" })).toBe(false)
   })
 
   it("never holds an approved PR: the label is the manual path's sign-off", () => {
-    expect(prHolds({ pathHolds: true, walk: "fail", approved: true })).toBe(false)
+    expect(prHolds({ areas: ["auth"], walk: "fail", approved: true })).toBe(false)
+  })
+
+  // The point of a gate: an events PR whose replay-gate check passed is
+  // low-risk by test, not by a person, and rides the hourly line.
+  it("does not hold an events PR whose replay gate passed, but still holds its other areas", () => {
+    expect(prHolds({ areas: ["events"], walk: "PASS", gates: ["events"] })).toBe(false)
+    expect(prHolds({ areas: ["events", "migration"], walk: "PASS", gates: ["events"] })).toBe(true)
+    expect(holdReason({ areas: ["events", "migration"], walk: "PASS", gates: ["events"] })).toBe("touches migration")
+  })
+
+  it("a passed gate does not excuse a failed walk", () => {
+    expect(prHolds({ areas: ["events"], walk: "fail", gates: ["events"] })).toBe(true)
   })
 })
 
@@ -181,9 +194,9 @@ describe("scripts-only PR that is also infra", () => {
   it("holds on the infra path whatever the walk says", () => {
     const files = ["scripts/tag-release.sh"]
     expect(isDocsOrTestOnly(files)).toBe(false)
-    const { pathHolds } = classifyFiles(files)
+    const { areas, pathHolds } = classifyFiles(files)
     expect(pathHolds).toBe(true)
-    expect(prHolds({ pathHolds, walk: "PASS" })).toBe(true)
+    expect(prHolds({ areas, walk: "PASS" })).toBe(true)
   })
 })
 

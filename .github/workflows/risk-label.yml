@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  checks: read
 
 concurrency:
   group: risk-label-${{ github.event.pull_request.number }}
@@ -25,6 +26,8 @@ concurrency:
 jobs:
   label:
     runs-on: ubuntu-latest
+    outputs:
+      areas: ${{ steps.label.outputs.areas }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -45,3 +48,45 @@ jobs:
         run: |
           echo "### Off the hourly line until a person approves" >> "$GITHUB_STEP_SUMMARY"
           echo "Areas: $AREAS. After manual QA, add the \`release:approved\` label." >> "$GITHUB_STEP_SUMMARY"
+
+  # The events gate (docs/RELEASE-RISK-GATES.md "Replay gate"). Runs only for a
+  # PR that touches the events area, on the PR's own head: the corpus of real
+  # projects (fetched from R2) plus the synthetic ones replay through this
+  # build's rebuild to the committed golden projection. Green here lifts the
+  # `events` hold in scripts/release-plan.mjs (AREA_GATES), so the job's name
+  # is the check name the planner reads. The job also fails when golden.json
+  # changed in the PR: a projection change on purpose still goes to a person.
+  replay-gate:
+    needs: label
+    if: contains(needs.label.outputs.areas, 'events')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sync-worker/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: sync-worker
+      - name: Fetch the real-project corpora from R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
+        run: node scripts/replay-corpus.mjs fetch
+      - name: Replay every corpus against this build
+        env:
+          REPLAY_CORPUS_REQUIRED: "1"
+        run: pnpm exec vitest run src/__tests__/replay-corpus.test.ts
+        working-directory: sync-worker
+      - name: A changed golden means the projection changed on purpose; a person reviews it
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git diff --quiet "$BASE_SHA" HEAD -- sync-worker/replay-corpus/golden.json; then
+            echo "::error file=sync-worker/replay-corpus/golden.json::golden.json changed in this PR: the replay gate stays red so the hold stays on. Review the golden diff and add release:approved." 
+            exit 1
+          fi

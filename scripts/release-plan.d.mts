@@ -26,13 +26,15 @@ export interface UnreleasedPr extends FileClassification {
   behindFloor?: boolean
   /** True when the PR carries the `release:approved` label (a person's sign-off). */
   approved?: boolean
+  /** Areas whose gate check (release-risk.mjs AREA_GATES) passed on the PR's head. */
+  gates?: string[]
 }
 
-/** Off the automatic line: paths hold or the walk is unproven, unless a person approved it. */
-export function prHolds(pr: Pick<UnreleasedPr, "pathHolds" | "walk" | "approved">): boolean
+/** Off the automatic line: an ungated holding area or an unproven walk, unless a person approved it. */
+export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates">): boolean
 
 /** Why a held PR is held, for the notes: "touches <areas>" or "walk <verdict>". */
-export function holdReason(pr: Pick<UnreleasedPr, "pathHolds" | "walk" | "areas">): string
+export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates">): string
 
 // A PR whose diff touches only docs, only test/journey files, or only
 // allowlisted tooling scripts (release-plan*, qa/, smart-test*, e2e-*) has no

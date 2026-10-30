@@ -83,12 +83,14 @@ interface FakeComment {
 function fakeGitHub({
   associatedPrs = [],
   comments = [],
-}: { associatedPrs?: AssociatedPr[]; comments?: FakeComment[] } = {}) {
+  checkRuns = [],
+}: { associatedPrs?: AssociatedPr[]; comments?: FakeComment[]; checkRuns?: Array<{ name: string; conclusion: string | null }> } = {}) {
   const calls: string[] = []
   const fetchImpl = async (url: string) => {
     calls.push(url)
     if (url.includes("/pulls")) return { ok: true, json: async () => associatedPrs }
     if (url.includes("/comments")) return { ok: true, json: async () => comments }
+    if (url.includes("/check-runs")) return { ok: true, json: async () => ({ check_runs: checkRuns }) }
     return { ok: false, status: 404, json: async () => null }
   }
   return { fetchImpl, calls }
@@ -181,7 +183,7 @@ describe("lookupPr", () => {
       associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "risk:auth" }, { name: "release:approved" }] }],
       comments: [{ body: walkComment(771, HEAD_SHA, "FAIL") }],
     })
-    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "fail", approved: true })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "fail", approved: true, gates: [] })
     expect(calls.filter((url) => url.includes("/pulls"))).toHaveLength(1)
   })
 
@@ -189,8 +191,34 @@ describe("lookupPr", () => {
     const { fetchImpl } = fakeGitHub({
       associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "risk:auth" }] }],
     })
-    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "unknown", approved: false })
-    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl: fakeGitHub().fetchImpl })).toEqual({ walk: "unknown", approved: false })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "unknown", approved: false, gates: [] })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl: fakeGitHub().fetchImpl })).toEqual({ walk: "unknown", approved: false, gates: [] })
+  })
+
+  // The replay gate runs on the PR head; a green run there is what lets an
+  // events PR skip the person. Newest run per name wins, so a later failed
+  // re-run cancels an earlier pass, and any other check name is ignored.
+  it("reads passed gate areas off the head sha's check runs, newest run per name", async () => {
+    const { fetchImpl, calls } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "risk:events" }] }],
+      checkRuns: [
+        { name: "release-verify", conclusion: "success" },
+        { name: "replay-gate", conclusion: "success" },
+        { name: "replay-gate", conclusion: "failure" },
+      ],
+    })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "unknown", approved: false, gates: ["events"] })
+    expect(calls.find((url) => url.includes("/check-runs"))).toContain(`/commits/${HEAD_SHA}/check-runs`)
+  })
+
+  it("does not pass a gate whose newest run failed or is still running", async () => {
+    for (const conclusion of ["failure", null]) {
+      const { fetchImpl } = fakeGitHub({
+        associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+        checkRuns: [{ name: "replay-gate", conclusion }, { name: "replay-gate", conclusion: "success" }],
+      })
+      expect((await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).gates).toEqual([])
+    }
   })
 })
 
@@ -200,7 +228,7 @@ describe("fillWalks", () => {
       associatedPrs: [{ number: 2, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "release:approved" }] }],
     })
     const filled = await fillWalks([{ number: 2, sha: MERGE_SHA, walk: "none" }], { token: "t", fetchImpl })
-    expect(filled[0]).toEqual({ number: 2, sha: MERGE_SHA, walk: "none", approved: true })
+    expect(filled[0]).toEqual({ number: 2, sha: MERGE_SHA, walk: "none", approved: true, gates: [] })
   })
 
   it("leaves none and already-resolved PRs untouched, and fills unknown ones", async () => {

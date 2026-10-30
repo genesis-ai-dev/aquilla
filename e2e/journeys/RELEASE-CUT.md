@@ -52,7 +52,9 @@ The workflow pushes no branch and posts no comment, and the run says why:
   never falls back to another sha; run it again once the cause is fixed.
 
 **Not a hard stop:** a held PR. Held PRs are skipped by the cut, listed in
-the notes with why, and wait for a person's `release:approved` label. A
+the notes with why, and wait for a person's `release:approved` label (or,
+for an area with a gate such as `events` → `replay-gate`, for that check to
+go green on the PR head; see `docs/RELEASE-RISK-GATES.md`). A
 pick that conflicts is aborted and joins the held list as `pick conflict`;
 the cut goes on with the rest.
 

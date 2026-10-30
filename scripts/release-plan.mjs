@@ -16,24 +16,27 @@ export function isReleaseBranch(name) {
 // Which outcomes a PR's files could cause, and whether that keeps it off
 // the automatic line, is decided in release-risk.mjs (the labeler reads the
 // same table). Re-exported so the plan's consumers have one import.
-import { classifyFiles } from "./release-risk.mjs"
+import { classifyFiles, holdingAreas } from "./release-risk.mjs"
 
 export { classifyFiles }
 
-// A PR is off the automatic line when its paths hold (release-risk.mjs) or
-// its walk is not proven: FAIL, FLAKY and BLOCKED all mean the bot could
-// not prove the outcome, and `unknown` (no matching walk comment yet)
-// holds too. The `release:approved` label is a person's sign-off after the
-// manual QA path, and clears both: once a person has signed, the line
-// picks the PR like any other.
+// A PR is off the automatic line when a holding area it touches has no
+// green gate (release-risk.mjs AREA_GATES; `gates` is the list of areas
+// whose gate check passed on the PR's head, from release-plan-walk.mjs),
+// or its walk is not proven: FAIL, FLAKY and BLOCKED all mean the bot
+// could not prove the outcome, and `unknown` (no matching walk comment
+// yet) holds too. The `release:approved` label is a person's sign-off
+// after the manual QA path, and clears both: once a person has signed,
+// the line picks the PR like any other.
 export function prHolds(pr) {
   if (pr.approved) return false
-  return pr.pathHolds || (pr.walk !== "PASS" && pr.walk !== "none")
+  return holdingAreas(pr.areas ?? [], pr.gates).length > 0 || (pr.walk !== "PASS" && pr.walk !== "none")
 }
 
 // Why a held PR is held, for the release notes and the PR comment.
 export function holdReason(pr) {
-  if (pr.pathHolds) return `touches ${pr.areas.join(", ")}`
+  const areas = holdingAreas(pr.areas ?? [], pr.gates)
+  if (areas.length) return `touches ${areas.join(", ")}`
   return `walk ${pr.walk}`
 }
 

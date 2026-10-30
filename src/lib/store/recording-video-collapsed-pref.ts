@@ -18,66 +18,29 @@
  * reads as "show the film" — the default the feature was built for.
  *
  * Key schema: `aq.recording-video-collapsed.v1` (value `"on"`; absent = expanded).
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
+import { recorderFilmCollapsedPref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
-const STORAGE_KEY = "aq.recording-video-collapsed.v1"
-
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: boolean | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): boolean {
-  if (typeof localStorage === "undefined") return false
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "on"
-  } catch {
-    return false
-  }
-}
-
-function peek(): boolean {
-  if (cached === undefined) cached = read()
-  return cached
-}
-
-/** True when the recorder should hide the film and show the narrow column. */
 export function getRecordingVideoCollapsed(): boolean {
-  return peek()
+  return recorderFilmCollapsedPref.get()
 }
 
 export function setRecordingVideoCollapsed(collapsed: boolean): void {
-  cached = collapsed
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (collapsed) localStorage.setItem(STORAGE_KEY, "on")
-      else localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
+  recorderFilmCollapsedPref.set(collapsed)
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
-}
-
-/** Reactive read of the collapse preference. */
+/** Reactive read of the collapsed-layout preference. */
 export function useRecordingVideoCollapsed(): boolean {
-  return useSyncExternalStore(subscribe, peek, () => false)
+  return usePersonPref(recorderFilmCollapsedPref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingVideoCollapsedCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

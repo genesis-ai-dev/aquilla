@@ -30,6 +30,53 @@ export const settings = defineNamespace({
     // ── AQU-2259: the author name for edits made while signed out ──
     "settings.preferences.authorName.label": "Name when signed out",
     "settings.preferences.authorName.description": "Used as the author of your edits when you work without signing in.",
+    // ── AQU-2264: Preferences → Recording (RecordingPreferencesSection) ──
+    // Title "Recording" → editor.expansion.recording; "Timeline" →
+    // editor.timeline.title; the recorder rows' names and the countdown speeds →
+    // audio.recordingModal.*; "Follow playhead" → editor.timeline.followPlayhead;
+    // "Snap to neighboring edges" → editor.timeline.snapToggleAria (identical text).
+    "settings.preferences.recording.description": "How the recorder and the timeline work for you.",
+    "settings.preferences.recording.followsYou":
+      "They follow you: change one here, in the recorder or on the timeline, and it changes on " +
+      "every device where you're signed in.",
+    "settings.preferences.recording.thisDeviceOnly":
+      "You're not signed in, so they're kept on this device only.",
+    "settings.preferences.recording.hint.followsYou": "Follows you",
+    "settings.preferences.recording.hint.thisDevice": "This device only",
+    "settings.preferences.recording.recorderGroup": "Recorder",
+    "settings.preferences.recording.countdownInfo":
+      "Before each take the recorder counts 3, 2, 1, so you can get ready. Fast, Normal and Slow " +
+      "give each number half a second, one second or a second and a half. Off starts recording " +
+      "as soon as you press Record.",
+    "settings.preferences.recording.beepInfo":
+      "A short beep on each number of the countdown, so you can keep your eyes on the line. With " +
+      "the countdown off there is nothing to beep, so it waits until the countdown is back.",
+    "settings.preferences.recording.moveOnInfo":
+      "When on, saving a recording takes you to the next line, and on the last line closes the " +
+      "recorder. A file you upload stays on its line either way.",
+    "settings.preferences.recording.takesDrawerInfo":
+      "When on, the line's takes are listed under the recorder, as many as fit, and the arrow " +
+      "beside Takes brings up the rest. When off, only the Takes bar shows.",
+    "settings.preferences.recording.formatTitle": "Recording format",
+    "settings.preferences.recording.formatWav": "WAV",
+    "settings.preferences.recording.formatCompressed": "Compressed",
+    "settings.preferences.recording.formatInfo":
+      "WAV keeps full quality, at about three times the file size, and a take can run to 15 " +
+      "minutes. Compressed files are much smaller and can run to 30 minutes. A take keeps the " +
+      "format it was recorded in. It is also the WAV / COMPRESSED button in the recorder.",
+    "settings.preferences.recording.showFilmTitle": "Show the film beside the recorder",
+    "settings.preferences.recording.showFilmInfo":
+      "When a line has a film, the recorder shows it on the left. Turn this off to open the " +
+      "narrow recorder instead; its Video button brings the film back.",
+    "settings.preferences.recording.filmSoundTitle": "Play the film's sound while recording",
+    "settings.preferences.recording.filmSoundInfo":
+      "Off unless you turn it on. Use it only with headphones: the microphone records without " +
+      "echo cancellation, so on speakers the film's sound goes into your take.",
+    "settings.preferences.recording.followInfo":
+      "While playing, the timeline scrolls to keep the playhead in view. If you scroll away by " +
+      "hand, it lets go until you press play again.",
+    "settings.preferences.recording.snapInfo":
+      "When you drag a take or a line, or one of its edges, it snaps to the edges next to it.",
     // ── CommentNotificationsSection (preferences → notifications) ── AQU-1193
     "settings.notifications.groupLabel": "Comment email",
     "settings.notifications.commentEmailLabel": "Email me about comments",
@@ -521,6 +568,47 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.preferences.recording.followsYou": {
+        description:
+          "Second sentence of the Preferences → Recording page's description, shown when signed " +
+          "in. 'They' are the recorder's and the timeline's settings on that page. 'Device' is a " +
+          "computer, tablet or phone.",
+      },
+      "settings.preferences.recording.thisDeviceOnly": {
+        description:
+          "Second sentence of the Preferences → Recording page's description, shown when not " +
+          "signed in. 'They' are the recorder's and the timeline's settings on that page.",
+      },
+      "settings.preferences.recording.hint.followsYou": {
+        description:
+          "Short grey hint at the right of the Recording row in Preferences, when signed in: " +
+          "these settings go with the person to every device.",
+        maxLength: 24,
+      },
+      "settings.preferences.recording.hint.thisDevice": {
+        description:
+          "Short grey hint at the right of the Recording row in Preferences, when not signed in: " +
+          "these settings are kept on this computer only.",
+        maxLength: 24,
+      },
+      "settings.preferences.recording.recorderGroup": {
+        description:
+          "Heading over the recorder's settings in Preferences → Recording. 'Recorder' is the " +
+          "window that records a line with the microphone. A noun.",
+      },
+      "settings.preferences.recording.formatWav": {
+        description: "A choice of recording format: WAV audio files. Usually kept as 'WAV'.",
+        maxLength: 12,
+      },
+      "settings.preferences.recording.formatCompressed": {
+        description: "A choice of recording format: smaller, compressed audio files. An adjective.",
+        maxLength: 16,
+      },
+      "settings.preferences.recording.formatInfo": {
+        description:
+          "Opens under 'Recording format' when its (i) is clicked. 'WAV / COMPRESSED' names the " +
+          "button in the recorder that shows the same setting; keep it as it is shown there.",
+      },
       "settings.moved.note": {
         description:
           "A quiet line left for a few weeks where a setting used to be, saying where it lives now. " +

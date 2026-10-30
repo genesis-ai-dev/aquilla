@@ -11,6 +11,11 @@
 // the gaps, do not report mixed takes, do not change the other two exports.
 // Decode + concat + WAV — the same primitives the character export already
 // uses, minus the timeline placement.
+//
+// AQU-1758 (Sam, Oct 29): the silence that IS in a book's playback stays in.
+// A pause someone dragged open before a verse's take, or between two pieces
+// of a cut take, plays as silence in the app, so it goes in as silence here,
+// and every piece of a cut take is stitched in (book-line-parts.ts).
 
 import JSZip from "jszip"
 
@@ -24,6 +29,7 @@ import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
 import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
+import { bookLineParts } from "./book-line-parts"
 
 export interface ChapterClip {
   cellId: string
@@ -53,7 +59,20 @@ export interface ChapterClip {
   /** The withdrawn take's own length, when the attachment knows it — the gap
    *  is written from this without fetching anything. */
   durationMs?: number | null
+  /**
+   * AQU-1758 (Sam, Oct 29): on a book, the line as playback lays it out — the
+   * silence of a pause someone dragged open before the take, then each piece
+   * of a cut take with the silence dragged open between them. Absent when the
+   * line is just its take (the fields above).
+   */
+  parts?: ChapterClipPart[]
 }
+
+/** One part of a book's line: silence, or a take (or a piece of one) with its
+ *  own trims and its own validation. */
+export type ChapterClipPart =
+  | { kind: "silence"; ms: number }
+  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs">)
 
 export interface GroupAudioByChapterOptions {
   /**
@@ -280,6 +299,7 @@ export function groupAudioByChapter(
       ...(isSilencedForExport(attachment)
         ? { silenced: true, durationMs: attachment.durationMs ?? null }
         : {}),
+      ...bookPartsFor(cell, audioId),
     })
   })
 
@@ -291,6 +311,34 @@ export function groupAudioByChapter(
     if (a.book && b.book && a.book !== b.book) return a.book.localeCompare(b.book)
     return chapterSortValue(a) - chapterSortValue(b)
   })
+}
+
+/**
+ * AQU-1758: a book's line as playback lays it out, when that is more than its
+ * take alone — a pause before it, or a cut take's pieces. Each piece keeps its
+ * own trims and its own validation (a withdrawn piece is a gap of its length).
+ */
+function bookPartsFor(cell: CellData, audioId: string): { parts: ChapterClipPart[] } | Record<string, never> {
+  const layout = bookLineParts(cell, audioId)
+  if (!layout || (layout.length === 1 && layout[0].kind === "take")) return {}
+  const parts: ChapterClipPart[] = []
+  for (const part of layout) {
+    if (part.kind === "silence") {
+      parts.push(part)
+      continue
+    }
+    const att = cell.attachments?.[part.attachmentId]
+    if (!att?.url) return {}
+    parts.push({
+      kind: "take",
+      audioId: part.attachmentId,
+      url: att.url,
+      trimStartMs: att.trimStartMs ?? null,
+      trimEndMs: att.trimEndMs ?? null,
+      ...(isSilencedForExport(att) ? { silenced: true, durationMs: att.durationMs ?? null } : {}),
+    })
+  }
+  return { parts }
 }
 
 /** Cheap read of who would be in the zip, before any fetch/decode. */
@@ -378,76 +426,94 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
   let skipped = 0
   let silenced = 0
 
+  /**
+   * One take's audio (or one piece's), its trims applied — or, withdrawn, a
+   * gap of the length it would have sounded. Null when it cannot be read; the
+   * caller skips the line.
+   */
+  const takeSamples = async (
+    cell: CellData,
+    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs">,
+  ): Promise<{ samples: Float32Array; silenced: boolean } | null> => {
+    // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
+    // around it stay where the reader heard them. Written straight from the
+    // attachment's duration where it has one — the common case, and it costs
+    // no fetch of audio that is not going to ship. Where it has none the
+    // clip falls through to the decode below and the gap is sized from the
+    // samples, which is slower but exact.
+    const gap = take.silenced ? silencedGapSamples(take, TARGET_RATE) : null
+    if (gap != null) return { samples: new Float32Array(gap), silenced: true }
+    const parsed = parseFrontierAudioUrl(take.url)
+    if (!parsed) return null
+    const clipKey = `${parsed.audioId}.${parsed.ext}`
+    let pcmPromise = pcmByClip.get(clipKey)
+    if (!pcmPromise) {
+      pcmPromise = (async () => {
+        const generated = take.audioId === cell.selectedGeneratedVoiceAudioId
+        let bytes: Uint8Array | null = null
+        if (generated && parsed.ext === "webm") {
+          bytes = await args
+            .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
+            .catch(() => null)
+        }
+        if (bytes == null || bytes.length === 0) {
+          bytes = await args.fetchBytes({
+            projectId: args.projectId,
+            fileId: cell.fileId,
+            audioId: parsed.audioId,
+            ext: parsed.ext,
+          })
+        }
+        return bytes.length > 0 ? await args.decode(bytes) : null
+      })()
+      pcmByClip.set(clipKey, pcmPromise)
+    }
+    try {
+      const pcm = await pcmPromise
+      if (!pcm) return null
+      const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
+        trimStartMs: take.trimStartMs,
+        trimEndMs: take.trimEndMs,
+      })
+      const slice = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+      // Withdrawn, and its length was not known up front — so it was decoded
+      // only to measure. The samples are discarded; the gap they sized ships.
+      return take.silenced
+        ? { samples: new Float32Array(slice.length), silenced: true }
+        : { samples: slice, silenced: false }
+    } catch (err) {
+      console.warn(`[audio-chapter] skipping clip ${take.audioId} (${take.cellId}):`, err)
+      return null
+    }
+  }
+
   for (const group of groups) {
     const pcmClips: Float32Array[] = []
     for (const clip of group.clips) {
       const cell = cellById.get(clip.cellId)!
-      // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
-      // around it stay where the reader heard them. Written straight from the
-      // attachment's duration where it has one — the common case, and it costs
-      // no fetch of audio that is not going to ship. Where it has none the
-      // clip falls through to the decode below and the gap is sized from the
-      // samples, which is slower but exact.
-      const gap = clip.silenced ? silencedGapSamples(clip, TARGET_RATE) : null
-      if (gap != null) {
-        pcmClips.push(new Float32Array(gap))
-        silenced += 1
-        done += 1
-        args.onProgress?.(done, totalClips)
-        continue
-      }
-      const parsed = parseFrontierAudioUrl(clip.url)
-      if (!parsed) {
-        skipped += 1
-        done += 1
-        args.onProgress?.(done, totalClips)
-        continue
-      }
-      const clipKey = `${parsed.audioId}.${parsed.ext}`
-      let pcmPromise = pcmByClip.get(clipKey)
-      if (!pcmPromise) {
-        pcmPromise = (async () => {
-          const generated = clip.audioId === cell.selectedGeneratedVoiceAudioId
-          let bytes: Uint8Array | null = null
-          if (generated && parsed.ext === "webm") {
-            bytes = await args
-              .fetchBytes({ projectId: args.projectId, fileId: cell.fileId, audioId: parsed.audioId, ext: "wav" })
-              .catch(() => null)
-          }
-          if (bytes == null || bytes.length === 0) {
-            bytes = await args.fetchBytes({
-              projectId: args.projectId,
-              fileId: cell.fileId,
-              audioId: parsed.audioId,
-              ext: parsed.ext,
-            })
-          }
-          return bytes.length > 0 ? await args.decode(bytes) : null
-        })()
-        pcmByClip.set(clipKey, pcmPromise)
-      }
-      try {
-        const pcm = await pcmPromise
-        if (!pcm) {
-          skipped += 1
-        } else {
-          const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
-            trimStartMs: clip.trimStartMs,
-            trimEndMs: clip.trimEndMs,
-          })
-          const slice = win.isFull ? pcm : pcm.subarray(win.start, win.end)
-          if (clip.silenced) {
-            // Withdrawn, and its length was not known up front — so it was
-            // decoded only to measure. The samples are discarded; the gap they
-            // sized is what ships.
-            pcmClips.push(new Float32Array(slice.length))
-            silenced += 1
-          } else {
-            pcmClips.push(slice)
-          }
+      // AQU-1758: a book's line as playback lays it out — the pause before the
+      // take and between a cut take's pieces as silence, every piece in it.
+      const parts: ChapterClipPart[] = clip.parts ?? [{ kind: "take", ...clip }]
+      const line: Float32Array[] = []
+      let lineSilenced = 0
+      let readable = true
+      for (const part of parts) {
+        if (part.kind === "silence") {
+          line.push(new Float32Array(Math.round((part.ms / 1000) * TARGET_RATE)))
+          continue
         }
-      } catch (err) {
-        console.warn(`[audio-chapter] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
+        const take = await takeSamples(cell, { ...part, cellId: clip.cellId })
+        if (!take) {
+          readable = false
+          break
+        }
+        line.push(take.samples)
+        if (take.silenced) lineSilenced += 1
+      }
+      if (readable) {
+        pcmClips.push(...line)
+        silenced += lineSilenced
+      } else {
         skipped += 1
       }
       done += 1

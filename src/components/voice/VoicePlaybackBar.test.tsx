@@ -63,8 +63,16 @@ vi.mock("@/hooks/useFileAudioAttachments", async (importActual) => {
   }
 })
 
+// Counts the bar's own programme layouts (AQU-1758), laying out as ever.
+vi.mock("@/lib/timeline/programme", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/programme")>()
+  return { ...actual, layOutProgramme: vi.fn(actual.layOutProgramme) }
+})
+
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
-import { startQueue, setQueueRate } from "@/lib/audio/play-queue"
+import { startQueue, setQueueRate, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
+import { layOutProgramme } from "@/lib/timeline/programme"
+import { TimingModeControl } from "@/components/timeline/TimingModeControl"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -290,5 +298,95 @@ describe("VoicePlaybackBar — the chosen sound", () => {
       <VoicePlaybackBar cells={[media]} projectId="p" session={null} settings={undefined} coreMediaUrl="https://cdn/ep.m3u8" videoPaneOnScreen />,
     )
     expect(transportArgs.last?.playbackSource).toBe("recording")
+  })
+})
+
+// Media redesign, layout (Sam, Oct 27): the media view's transport is a thin
+// strip along its bottom — the time, previous · play · next, speed, volume,
+// and nothing else.
+describe("VoicePlaybackBar — the media view's strip", () => {
+  it("is 32 px with the time at the left, the three transport buttons, then speed and volume", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const strip = screen.getByTestId("media-play-strip")
+    expect(strip.className).toContain("h-8")
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
+    const centre = screen.getByTestId("top-transport")
+    expect(Array.from(centre.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Previous line",
+      "Play all",
+      "Next line",
+    ])
+    expect(screen.getByTestId("transport-speed")).toBeInTheDocument()
+    expect(screen.getByTestId("transport-volume")).toBeInTheDocument()
+    // No "now playing" line, no scrubber, no status.
+    expect(screen.queryByRole("slider", { name: "Seek" })).toBeNull()
+    expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
+  })
+
+  it("drops the time first on a narrow view (a container query), never the buttons", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)
+    expect(screen.getByTestId("transport-play").className).not.toContain("hidden")
+  })
+})
+
+// AQU-1758, from the removal's own screenshots: before anything played, a
+// book's strip read "0:00 / 0:00"; while Ruth 1 played it read "1:16 / 1:27"
+// beside a Timing control saying "1 min 28 s long". Both are the same number —
+// the chapter laid out end to end, 87.94 s — and the strip floored it.
+describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
+  const take = (id: string, ms: number): CellData => {
+    const audioId = `audio-${id}-1700000000-take.wav`
+    return cell({
+      id, cellLabel: id, translated: "",
+      selectedAudioId: audioId,
+      attachments: { [audioId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
+    } as Partial<CellData>)
+  }
+  // A book: no times, two recorded verses, 87.94 s laid end to end.
+  const BOOK = [take("v1", 43_700), take("v2", 44_240)]
+  const strip = () => (
+    <VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} freeTiming />
+  )
+  beforeEach(() => {
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("shows the book's laid-out length before anything plays", () => {
+    expect(layOutProgramme(BOOK).programme.totalSec).toBeCloseTo(87.94, 2)
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("states that length as the Timing menu does, while it plays too", async () => {
+    // Board 55: the length is in the Timing menu, beside each choice.
+    render(<TimingModeControl mode="audioFirst" onChange={() => {}} sourceUnavailable lengths={{ audioFirst: 87.94 }} />)
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("1 min 28 s")
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 79.46, playing: true, duration: 87.94 }))
+    render(strip())
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("1:19 / 1:28")
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+  })
+
+  // The timeline and the play queue each lay the same lines out already; the
+  // strip's own layout is only for the length before play.
+  it("lays nothing out while it plays: the queue gives the length then", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: "v1", currentTime: 10, playing: true, duration: 87.94 }))
+    vi.mocked(layOutProgramme).mockClear()
+    const { rerender } = render(strip())
+    // A generate lands on a line mid-play.
+    rerender(<VoicePlaybackBar variant="strip" cells={[...BOOK]} projectId="p" session={null} settings={undefined} freeTiming />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:10 / 1:28")
+    expect(layOutProgramme).not.toHaveBeenCalled()
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 }))
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("keeps a file that follows its source as it was before play", () => {
+    render(<VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
   })
 })

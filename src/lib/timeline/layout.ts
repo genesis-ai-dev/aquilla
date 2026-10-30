@@ -17,6 +17,7 @@ import {
   canCarryTargetLead,
   fileSpanToProgrammeSpan,
   leadSecForMove,
+  pieceLeadSecForMove,
   type BuildProgrammeOptions,
   type Programme,
   type ProgrammeSlot,
@@ -124,6 +125,17 @@ function audioFirstLayout(
   const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
 
+  /** Which piece of the line's split take starts `trimStartSec` into the
+   *  recording, or -1 (a take never split). A piece is known by where it
+   *  starts in the recording; pieces never share audio, so no two start in
+   *  the same place. */
+  const pieceIndexOf = (slot: ProgrammeSlot, trimStartSec: number): number =>
+    slot.targetPieces ? slot.targetPieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+  const trimStartOf = (att: Att): number =>
+    att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
+      ? att.trimStartMs / 1000
+      : 0
+
   /**
    * The dub chip, re-expressed against the programme clock. The trim maths in
    * TargetAudioLane works off `anchor` (where the clip's sample zero sits), so
@@ -134,10 +146,7 @@ function audioFirstLayout(
   const geomFor = (cell: CellData, att: Att): TargetChipGeom | null => {
     const slot = slotOf(cell)
     if (!slot) return null
-    const trimStartSec =
-      att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
-        ? att.trimStartMs / 1000
-        : 0
+    const trimStartSec = trimStartOf(att)
     const durationSec =
       att?.durationMs != null && Number.isFinite(att.durationMs) && att.durationMs > 0
         ? att.durationMs / 1000
@@ -160,16 +169,14 @@ function audioFirstLayout(
         usingFallback: true,
       }
     }
-    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit end to end in
-    // the line's slot, in the order they come in the recording — the way its
-    // joined copy plays them. A piece is known by where it starts in the
-    // recording; pieces never share audio, so no two start in the same place.
+    // AQU-1767 (Sam, 2026-10-15): a split take's pieces sit in the line's
+    // slot in the order they come in the recording — the way its joined copy
+    // plays them. AQU-1758: each where it was placed (`atSec`), the gaps
+    // between them silence.
     const pieces = slot.targetPieces
-    const at = pieces ? pieces.findIndex((p) => Math.abs(p.start - trimStartSec) < 1e-6) : -1
+    const at = pieceIndexOf(slot, trimStartSec)
     if (pieces && at >= 0) {
-      let offset = 0
-      for (let i = 0; i < at; i++) offset += pieces[i].end - pieces[i].start
-      const start = slot.startSec + offset
+      const start = slot.startSec + pieces[at].atSec
       return {
         anchor: start - trimStartSec,
         start,
@@ -236,12 +243,15 @@ function audioFirstLayout(
     // back as a file-clock anchor whose offset IS that pause. The line grows
     // to hold it on the next build, which is what carries the later lines
     // along; nothing about the programme clock is ever stored.
-    retimeAnchorSec: (cell, _att, audibleStartSec) => {
+    retimeAnchorSec: (cell, att, audibleStartSec) => {
       const slot = slotOf(cell)
       if (!slot || !canCarryTargetLead(cell, slot)) return null
-      // `canCarryTargetLead` is what makes this cast safe: it is true only for
-      // a line with a real span, so `startTime` is a finite number.
-      return (cell.startTime as number) + leadSecForMove(slot, audibleStartSec)
+      // AQU-1758: a line with no times of its own stores the pause from its
+      // slot's start (a line start of 0), on the take — or on the piece, for
+      // a split take, each piece in the one place both timings read it from.
+      const lineStart = typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
+      const at = pieceIndexOf(slot, trimStartOf(att))
+      return lineStart + (at >= 0 ? pieceLeadSecForMove(slot, at, audibleStartSec) : leadSecForMove(slot, audibleStartSec))
     },
   }
 }

@@ -11,8 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { buildProgramme, programmeLines, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
-import { standInEstimator } from "@/lib/timeline/stand-in"
+import { layOutProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -153,11 +152,13 @@ export function __setQueuePlaybackForTests(next: {
   cellId: string | null
   currentTime: number
   playing: boolean
+  /** The run's length; left as it was when absent. */
+  duration?: number
 }): void {
   state = next.playing && next.cellId
     ? { kind: "playing", cellIndex: 0, cellId: next.cellId }
     : IDLE
-  progress = { ...progress, currentTime: next.currentTime }
+  progress = { ...progress, currentTime: next.currentTime, ...(next.duration != null ? { duration: next.duration } : {}) }
   notify()
   notifyProgress()
 }
@@ -811,7 +812,7 @@ function progTargetFor(cell: CellData): TargetAudioRef | null {
 
 /** Which pieces a slot's joined clip holds, for matching a prefetched one. */
 function progJoinKey(slot: ProgrammeSlot): string {
-  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}`).join("|") ?? ""
+  return slot.targetPieces?.map((p) => `${p.audioId}@${p.start}-${p.end}+${p.gapBeforeSec ?? 0}`).join("|") ?? ""
 }
 
 /**
@@ -821,7 +822,7 @@ function progJoinKey(slot: ProgrammeSlot): string {
  */
 async function resolveJoinedSrc(
   url: string,
-  pieces: readonly { start: number; end: number }[],
+  pieces: readonly { start: number; end: number; gapBeforeSec?: number }[],
   projectId: string,
   fileId: string,
   session: FrontierSession,
@@ -928,9 +929,9 @@ function progRebuild(): void {
   // (programmeLines). AQU-1704: a video-less subtitle import's cues are the
   // verses. AQU-2204: a file with no times at all lays its lines out in order,
   // an unrecorded one at a stand-in length that playback steps over.
-  const { lines: dialogue, untimed } = programmeLines(ctx.cells)
-  // AQU-2204: following the recordings, every unrecorded line takes its stand-in.
-  const built = buildProgramme(dialogue, { standInLenSec: standInEstimator(dialogue) })
+  // AQU-2204: following the recordings, every unrecorded line takes its
+  // stand-in (layOutProgramme passes the estimator for every file).
+  const { programme: built, lines: dialogue, untimed } = layOutProgramme(ctx.cells)
   // A take whose length was never measured (a generated voice nobody has
   // played yet) has no window the programme can play. On a file with times
   // that is today's rule — the verse is silent — but a file with NO times only
@@ -986,7 +987,9 @@ function progFinish(): void {
 function progAdvance(): void {
   const next = progNextPlayable(progIndex + 1)
   if (next < 0) {
+    const ctx = activeContext
     progFinish()
+    notifyRanOut(ctx)
     return
   }
   void progPlaySlot(next, null, true, false, /* seamless */ true)
@@ -1774,6 +1777,26 @@ export function setQueueTimingMode(mode: AudioTimingMode): void {
 
 export function getQueueTimingMode(): AudioTimingMode {
   return timingMode
+}
+
+// ── AQU-1758: playback that ran off the end of its lines ────────────────────
+//
+// Not a stop and not a pause: the last line played out and there was nothing
+// after it. A book's timeline holds one chapter, and so does the run it
+// starts, so this is where the workspace carries Play all on into the next
+// chapter. Listeners are told after the queue has gone idle, so starting a new
+// run from one is safe.
+const ranOutListeners = new Set<(ctx: PlayContext) => void>()
+
+/** Hear when a run plays to the end of its lines. Returns the unsubscribe. */
+export function onQueueRanOut(listener: (ctx: PlayContext) => void): () => void {
+  ranOutListeners.add(listener)
+  return () => { ranOutListeners.delete(listener) }
+}
+
+function notifyRanOut(ctx: PlayContext | null): void {
+  if (!ctx) return
+  for (const listener of [...ranOutListeners]) listener(ctx)
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -3321,8 +3344,10 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     audio.onpause = null // don't let the pause handler flash a "paused" state
     audio.pause()
     if (plan.kind === "stop") {
+      const ctx = activeContext
       setState(IDLE)
       disposeCurrent()
+      notifyRanOut(ctx)
       return
     }
     void playAt(plan.index)

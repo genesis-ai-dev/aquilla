@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { InfoNote } from "@/components/ui/info-note"
 
 /** Circled-i next to a field label. A click opens `content` in a small note
@@ -7,7 +8,7 @@ export function VoiceInfoTip({
   content,
   label,
 }: {
-  content: string
+  content: ReactNode
   label: string
 }) {
   return (

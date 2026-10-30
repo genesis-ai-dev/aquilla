@@ -3,6 +3,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event"
 import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
+import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
 import { selectQueueForFile } from "@/lib/audio/queue-scope"
@@ -13,6 +14,20 @@ import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
+
+/**
+ * Media redesign, layout: the timeline's settings (snap, follow, original
+ * quality, track names, zoom, row height) live in its corner ⋯, directly
+ * (Sam, Oct 27: no submenu). Finds the control, opening the menu if need be.
+ */
+function inTimelineSettings<T>(find: () => T): T {
+  try {
+    return find()
+  } catch {
+    fireEvent.click(screen.getByTestId("dock-more-tl"))
+    return find()
+  }
+}
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -116,20 +131,6 @@ function armLinking() {
   fireEvent.click(screen.getByText("Check links"))
 }
 
-
-// AQU-2260 (Sam, Oct 29): a toolbar (i) opens a small note on CLICK and shuts
-// it on a second click or a click outside. Hovering it shows nothing.
-async function expectInfoNote(button: HTMLElement, text: RegExp) {
-  await userEvent.setup().hover(button)
-  expect(screen.queryByRole("tooltip")).toBeNull()
-  fireEvent.click(button)
-  const note = await screen.findByTestId(`${button.dataset.testid}-note`)
-  expect(note).toHaveTextContent(text)
-  expect(button).toHaveAttribute("aria-expanded", "true")
-  fireEvent.click(button)
-  await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "false"))
-}
-
 describe("TimelineEditor", () => {
   // The timeline is the innermost shortcut claimant unless a test says otherwise.
   beforeEach(() => { topOwner.value = 1 })
@@ -175,7 +176,7 @@ describe("TimelineEditor", () => {
       />,
     )
     const before = parseFloat(screen.getByTestId("tl-card-d1").style.width)
-    fireEvent.click(screen.getByLabelText("Zoom in"))
+    fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
     const after = parseFloat(screen.getByTestId("tl-card-d1").style.width)
     expect(after).toBeGreaterThan(before)
   })
@@ -572,10 +573,10 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    const btn = screen.getByTestId("tl-snap-toggle")
-    expect(btn).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(btn)
-    expect(btn).toHaveAttribute("aria-pressed", "false")
+    const item = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
+    expect(item()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(item())
+    expect(item()).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
     localStorage.removeItem("aquilla:timelineSnap")
   })
@@ -584,10 +585,11 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    const btn = screen.getByLabelText("Follow playhead")
-    expect(btn).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(btn)
-    expect(btn).toHaveAttribute("aria-pressed", "false")
+    const item = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
+    expect(item()).toHaveTextContent("Follow playhead")
+    expect(item()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(item())
+    expect(item()).toHaveAttribute("aria-checked", "false")
   })
 
   // AQU-2264: Follow playhead was a plain useState(true): back on after every
@@ -599,34 +601,38 @@ describe("TimelineEditor", () => {
     resetPersonPrefCachesForTests()
   }
   afterEach(forgetTimelinePrefs)
+  // Media redesign, layout: Follow playhead and Snap are checkbox rows in the
+  // timeline's corner ⋯ (aria-checked), so each read opens the menu if need be.
+  const followItem = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
+  const snapItem = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
 
   it("remembers Follow playhead turned off, through a reload", () => {
     const { unmount } = render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    fireEvent.click(screen.getByLabelText("Follow playhead"))
-    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(followItem())
+    expect(followItem()).toHaveAttribute("aria-checked", "false")
     unmount()
     resetPersonPrefCachesForTests() // a reload
     render(
       <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+    expect(followItem()).toHaveAttribute("aria-checked", "false")
   })
 
   it("keeps Follow playhead off when playback starts, and on again once turned on", () => {
     const view = render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    fireEvent.click(screen.getByLabelText("Follow playhead"))
+    fireEvent.click(followItem())
     mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
     try {
       view.rerender(
         <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
       )
-      expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
-      fireEvent.click(screen.getByLabelText("Follow playhead"))
-      expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "true")
+      expect(followItem()).toHaveAttribute("aria-checked", "false")
+      fireEvent.click(followItem())
+      expect(followItem()).toHaveAttribute("aria-checked", "true")
     } finally {
       mockQueueState = { kind: "idle" }
     }
@@ -636,13 +642,13 @@ describe("TimelineEditor", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByTestId("tl-snap-toggle")).toHaveAttribute("aria-pressed", "true")
+    expect(snapItem()).toHaveAttribute("aria-checked", "true")
     act(() => {
       timelineSnapPref.set(false)
       timelineFollowPlayheadPref.set(false)
     })
-    expect(screen.getByTestId("tl-snap-toggle")).toHaveAttribute("aria-pressed", "false")
-    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+    expect(snapItem()).toHaveAttribute("aria-checked", "false")
+    expect(followItem()).toHaveAttribute("aria-checked", "false")
   })
 
   // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
@@ -1406,28 +1412,34 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle, and below project lead shows the timing as plain text with its (i) (AQU-2204)", async () => {
+  it("hides the snap toggle, and below project lead shows the timing as plain text, who can change it on a click (AQU-2204, board 55, AQU-2260)", async () => {
     // Without `onChangeTimingMode` (below the project-lead floor) the choice
     // renders as plain text — same testids, so browser passes read the mode
-    // identically either way — and the (i) says who can change it.
+    // identically either way — and a click on it says who can change it
+    // (AQU-2260: never on hover).
     renderAt("audioFirst")
+    expect(inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))).toBeInTheDocument()
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")
     expect(label.tagName).toBe("SPAN")
-    expect(label).toHaveTextContent("Timing:Follows recordings")
+    // Board 55, option E: no "Timing:" label, and no (i) in the bar.
+    expect(label).toHaveTextContent(/^Follows recordings$/)
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    expect(screen.queryByTestId("tl-timing-mode-info")).toBeNull()
     // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
+    await expectClickNote(screen.getByTestId("tl-timing-mode-reason"), /Only a project lead or above can change/)
   })
 
   it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
     const onChange = vi.fn()
     renderAt("audioFirst", { onChangeTimingMode: onChange })
     const trigger = screen.getByTestId("tl-timing-mode-trigger")
-    expect(trigger).toHaveTextContent("Timing:Follows recordings")
+    // Board 55, option E: the choice and a chevron; "Timing" is its hover text.
+    expect(trigger).toHaveTextContent(/^Follows recordings$/)
+    await expectTooltip(trigger, /^Timing$/)
     fireEvent.click(trigger)
     const active = await screen.findByTestId("tl-timing-mode-audioFirst")
     const other = screen.getByTestId("tl-timing-mode-dubbing")
@@ -1451,10 +1463,25 @@ describe("TimelineEditor — audio-first mode", () => {
 
   it("the menu as drawn on board 22: a heading, each choice's file length and the muting line (AQU-2204)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
-    // Beside the (i): how long the file is with the current choice.
-    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("16.0 s long")
+    // Board 55: no length in the bar — the menu gives each choice's.
+    expect(screen.queryByTestId("tl-timing-length")).toBeNull()
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
-    expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
+    const heading = await screen.findByTestId("tl-timing-menu-heading")
+    expect(heading).toHaveTextContent("What decides how long each line is")
+    // What the bar's (i) said is beside the heading now. It opens in place,
+    // under the heading, on a click, and shuts on a second one; hovering opens
+    // nothing (Sam, Oct 28: an (i) is a click, never a hover).
+    const info = within(heading).getByTestId("tl-timing-mode-info")
+    const infoText = screen.getByTestId("tl-timing-mode-info-text")
+    expect(infoText).toHaveAttribute("data-open", "false")
+    expect(infoText).toHaveTextContent(/Switching changes no recordings and no times/)
+    await userEvent.setup().hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(info)
+    expect(infoText).toHaveAttribute("data-open", "true")
+    expect(screen.getByTestId("tl-timing-menu-heading")).toBeInTheDocument()
+    fireEvent.click(info)
+    expect(infoText).toHaveAttribute("data-open", "false")
     expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
     // Following the recordings each verse is as long as its take: 11 + 4.
     expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
@@ -1476,7 +1503,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+  it("following the recordings, a pause someone left before a take is plain timeline, and the line keeps it (AQU-2204)", () => {
     const takeId = "audio-p1-1700000000-take.webm"
     const placed = cell({
       id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
@@ -1491,117 +1518,15 @@ describe("TimelineEditor — audio-first mode", () => {
         onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
       />,
     )
-    const gap = screen.getByTestId("tl-target-lead-p1")
-    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
-    // The take starts where the pause ends.
-    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
-  })
-
-  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
-  // what it is on a click of it.
-  it("the pause before a take says what it is on a click, not a hover", async () => {
-    const takeId = "audio-p1-1700000000-take.webm"
-    const placed = cell({
-      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-      attachments: {
-        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
-        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-      },
-    } as unknown as Partial<CellData>)
-    renderWithTooltips(
-      <TimelineEditor
-        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
-        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
-      />,
-    )
-    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
-  })
-
-  // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
-  // move a recorded take around in the timeline." Following the recordings a
-  // take is NOT locked to the front of its line — dragging it right leaves a
-  // pause before it, dragging it left shortens that pause back to none. What
-  // is stored is the pause, measured from the line's own start, never the
-  // programme second the chip was dropped on.
-  describe("following the recordings, a take still moves inside its line (AQU-2215)", () => {
-    const takeId = "audio-p1-1700000000-take.webm"
-    const placedCell = (offsetMs?: number) =>
-      cell({
-        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-        attachments: {
-          [takeId]: {
-            type: "audio", url: "frontier-audio://take", durationMs: 2_000,
-            ...(offsetMs != null ? { targetOffsetMs: offsetMs } : {}),
-          },
-          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-        },
-      } as unknown as Partial<CellData>)
-
-    const renderOne = (offsetMs: number | undefined, onRetimeTarget: () => void) =>
-      renderWithTooltips(
-        <TimelineEditor
-          fileId="pz" coreMediaUrl={null} editable cells={[placedCell(offsetMs)]} timingMode="audioFirst"
-          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
-        />,
-      )
-
-    /** The chip's own px/s, so the drag does not depend on the default zoom. */
-    const chipPxPerSec = (chip: Element) => px(chip, "width") / 2
-
-    it("dragging the take right stores the pause it leaves before its line", () => {
-      const onRetimeTarget = vi.fn()
-      renderOne(undefined, onRetimeTarget)
-      const chip = screen.getByTestId("tl-target-p1")
-      const perSec = chipPxPerSec(chip)
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 400 + perSec })
-      fireEvent.pointerUp(window, { clientX: 400 + perSec })
-      // Dragged 1 s right on a line starting at file second 0 → a 1 s pause,
-      // so the anchor stored is 1. Before this, the handler was withheld
-      // entirely in this mode and the chip could not be dragged at all.
-      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
-      const [cellId, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
-      expect(cellId).toBe("p1")
-      expect(anchorSec).toBeCloseTo(1, 2)
-    })
-
-    it("dragging it back past the line's start shortens the pause to none, never below", () => {
-      const onRetimeTarget = vi.fn()
-      // Starts with a 1.5 s pause already.
-      renderOne(1_500, onRetimeTarget)
-      const chip = screen.getByTestId("tl-target-p1")
-      const perSec = chipPxPerSec(chip)
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 400 - perSec * 5 })
-      fireEvent.pointerUp(window, { clientX: 400 - perSec * 5 })
-      const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
-      // The line's own start — a take never begins before the line it performs.
-      expect(anchorSec).toBeCloseTo(0, 2)
-    })
-
-    it("a take of unknown length stays locked — there is no pause it could hold", () => {
-      const onRetimeTarget = vi.fn()
-      const vague = cell({
-        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-        attachments: {
-          [takeId]: { type: "audio", url: "frontier-audio://take" },
-          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-        },
-      } as unknown as Partial<CellData>)
-      renderWithTooltips(
-        <TimelineEditor
-          fileId="pz" coreMediaUrl={null} editable cells={[vague]} timingMode="audioFirst"
-          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
-        />,
-      )
-      const chip = screen.getByTestId("tl-target-p1")
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 500 })
-      fireEvent.pointerUp(window, { clientX: 500 })
-      // A placement the programme would not read back must not be stored: the
-      // chip would simply spring straight back to the front of its line.
-      expect(onRetimeTarget).not.toHaveBeenCalled()
-    })
+    // Sam, Oct 28: the silence is drawn as nothing — no band, no words.
+    expect(screen.queryByTestId("tl-target-lead-p1")).toBeNull()
+    expect(screen.queryByRole("img", { name: /pause/i })).toBeNull()
+    // …but it is still the line's: the 2 s take starts half a second in, and
+    // the line is 2.5 s long (its text card spans pause and take).
+    const take = screen.getByTestId("tl-target-p1")
+    const perSec = px(take, "width") / 2
+    expect(px(take, "left")).toBeCloseTo(0.5 * perSec, 0)
+    expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
   })
 
   it("picking a choice closes the menu (AQU-2204)", async () => {
@@ -1611,7 +1536,7 @@ describe("TimelineEditor — audio-first mode", () => {
     await waitFor(() => expect(screen.queryByTestId("tl-timing-mode-audioFirst")).toBeNull())
   })
 
-  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", () => {
+  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", async () => {
     const book = [
       cell({ id: "b1", medium: "text", original: "In the days when the judges ruled, there was a famine in the land." }),
       cell({ id: "b2", medium: "text", original: "Short." }),
@@ -1628,8 +1553,12 @@ describe("TimelineEditor — audio-first mode", () => {
     // The longer verse takes longer to read, so it takes more room; the short
     // one is held at the 1.5 s floor.
     expect(px(c1, "width")).toBeGreaterThan(px(c2, "width") * 2)
-    // ONE (i) explains the dashed lines; nothing is parked in the Untimed strip.
-    expect(screen.getByTestId("tl-stand-in-info")).toBeInTheDocument()
+    // ONE explanation of the dashed lines — with the Timing control since
+    // board 55 (a click on its text here, below project lead; the menu's foot
+    // for a lead), not an (i) in the bar, and never on hover (AQU-2260).
+    // Nothing is parked in the Untimed strip.
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+    await expectClickNote(screen.getByTestId("tl-timing-mode-reason"), /at a stand-in length worked out from its text/)
     expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
   })
 
@@ -1662,14 +1591,14 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
   })
 
-  it("a file timed to a film only follows its source: plain text and an (i), even for a lead (AQU-2204)", async () => {
+  it("a file timed to a film only follows its source: plain text, why on a click, even for a lead (AQU-2204, AQU-2260)", async () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
     const control = screen.getByTestId("tl-timing-mode")
     expect(control).toHaveAttribute("data-mode", "dubbing")
     expect(control).toHaveAttribute("data-locked", "film")
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
-    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
-    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
+    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent(/^Follows source$/)
+    await expectClickNote(screen.getByTestId("tl-timing-mode-reason"), /timed to the film, so it always follows its source/)
   })
 
   // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its
@@ -1722,7 +1651,7 @@ describe("TimelineEditor — audio-first mode", () => {
     const { container } = renderAt("dubbing")
     const v2 = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v2"]')!
     expect(px(v2, "left")).toBeCloseTo(px(container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!, "width"), 5)
-    expect(screen.getByTestId("tl-snap-toggle")).toBeInTheDocument()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))).toBeInTheDocument()
   })
 })
 
@@ -3483,8 +3412,10 @@ describe("TimelineEditor — pairing in progress", () => {
     )
 
   it("says it is pairing rather than offering to", () => {
+    // The Check square carries a spinner while pairing runs (its name is in
+    // its tooltip since the media redesign put it in the 40 px top bar).
     renderPairing({ cueLinksPending: true })
-    expect(screen.getByTestId("tl-check-menu")).toHaveTextContent("Check")
+    expect(within(screen.getByTestId("tl-check-menu")).getByRole("status")).toBeInTheDocument()
   })
 
   it("goes back to offering once the pairings have landed", () => {
@@ -3625,6 +3556,27 @@ describe("who may use the Check tools", () => {
     )
     expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
   })
+
+})
+
+// AQU-1758 (Sam's decision 7): Sources sits behind the project's "film and
+// sources" setting, off by default for a project of books and documents.
+describe("the Sources menu follows the project's film and sources setting", () => {
+  const props = {
+    cells: [{ id: "s1", fileId: "f1", original: "One", translated: "", startTime: 0, endTime: 2 }] as unknown as CellData[],
+    fileId: "f1", coreMediaUrl: null, editable: true, onRetimeSubtitle: () => {},
+    onRequestImportCharacters: () => {}, canImportCharacters: true,
+  }
+
+  it("shows it when the setting is on", () => {
+    render(<TimelineEditor {...props} showSources />)
+    expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
+  })
+
+  it("hides it when the setting is off", () => {
+    render(<TimelineEditor {...props} showSources={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).not.toBeInTheDocument()
+  })
 })
 
 // ── Sources is project setup (Sam, 2026-08-18) ───────────────────────────
@@ -3683,40 +3635,20 @@ describe("the Sources menu disappears when nothing in it is yours", () => {
 // sibling are "Audio cues" a few inches away. These cells are the subtitles,
 // so they say so.
 
-describe("the heading over the text column", () => {
-  const editor = (extra: Record<string, unknown>) => (
-    <TimelineEditor
-      fileId="heading" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} {...extra}
-    />
-  )
-
-  // AQU-1119 made this one word, unconditionally. It used to borrow the track
-  // gutter's own label — "Source text" — which was right while it named a
-  // column and wrong the moment it named the whole collapsible SECTION: source
-  // and target are the two columns inside it, so the gutter's word mislabels
-  // half of what it now sits over. The gutter's rows are untouched.
-
-  it("says Text with no video linked", () => {
-    render(editor({ coreMediaUrl: null }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
-  })
-
-  it("says Text with a video linked too", () => {
-    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
-  })
-
-  it("no longer borrows the gutter's column name", () => {
-    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
+describe("the text panel's row has no heading of its own", () => {
+  // Media redesign, layout: the Text panel's strip names it ("Text") and
+  // carries its controls, so the context row under it says only what the
+  // current line says about itself — and nothing at all for no selection.
+  it("names nothing, with or without a video", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="heading" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Text")
+    rerender(
+      <TimelineEditor fileId="heading" coreMediaUrl="https://example.test/master.m3u8" editable cells={[]} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Text")
     expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Source text")
-  })
-
-  it("says the same thing on every kind of project, not just a subtitle import", () => {
-    // It used to depend on how the file was imported, which meant an
-    // audio-first project fell through to a per-cell derivation and the
-    // heading changed as you clicked around.
-    render(editor({}))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
   })
 })
 
@@ -3761,6 +3693,20 @@ describe("the project timing lock", () => {
       />,
     )
     expect(grips("s1").length).toBeGreaterThan(0)
+  })
+
+  it("never draws them on a book or document's text, unlocked or not (AQU-1758)", () => {
+    // A book opens on the timeline since the Audio view went. Dragging a verse
+    // would give it a time, and quietly start timing the book.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+        sequenceOrdered
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
   })
 
   it("takes them away when it is locked — with no film linked, Sam's case", () => {
@@ -3943,7 +3889,9 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
   const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
   const names = () =>
     Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
-  const toggle = () => screen.getByTestId("tl-gutter-toggle")
+  // Media redesign, layout: the « » in the corner became "Show the track
+  // names" in the timeline's settings (no chevrons in the layout any more).
+  const toggle = () => inTimelineSettings(() => screen.getByTestId("tl-gutter-toggle"))
 
   // `onReorderTrack` throughout, because that is the gate on `data-tl-track-row`
   // — a viewer's rows carry no attribute at all, and asserting over them would
@@ -4019,14 +3967,23 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
     expect(gutter().querySelectorAll("[data-tl-track-row]").length).toBe(before)
   })
 
-  it("puts its button outside the layout, where the ruler's height is set", () => {
+  it("puts the corner's controls outside the layout, where the ruler's height is set", () => {
     // The gutter's header and the ruler beside it are both h-7, and that shared
     // height IS the vertical coordinate frame every drop line and lift offset
-    // is measured in. A button in the normal flow would grow the header and put
-    // all of them out by its height.
+    // is measured in. Controls in the normal flow would grow the header and put
+    // all of them out by their height.
     render(editor())
-    expect(toggle().className).toContain("absolute")
-    expect((toggle().parentElement as HTMLElement).className).toContain("h-7")
+    const corner = screen.getByTestId("tl-corner")
+    expect(corner.className).toContain("absolute")
+    expect((corner.parentElement as HTMLElement).className).toContain("h-7")
+    expect(corner).toHaveTextContent("Tracks")
+  })
+
+  it("is a setting, ticked while the names show", () => {
+    render(editor())
+    expect(toggle()).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(toggle())
+    expect(toggle()).toHaveAttribute("aria-checked", "false")
   })
 
   it("remembers the choice against the file it was made on", () => {
@@ -5042,6 +4999,271 @@ describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in s
   })
 })
 
+// ── AQU-2236: the track names pass UNDER the Tracks header ──────────────────
+//
+// The header sits over the names now (z-40 over their z-30), as the ruler sits
+// over the chips. These pin what that must not cost: the header's layers stay
+// inside the column, the divider sits on the edge the lanes are on in either
+// direction, a drag still shows where it lands, and a focused row never stays
+// hidden under the strip. Paint order and geometry are the browser's, so what
+// is pinned here is the markup that decides them and the scroll the editor
+// writes; happy-dom has no layout, so the rects are stubbed.
+describe("TimelineEditor — the track names pass under the Tracks header (AQU-2236)", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const props = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: rowCells,
+    onRetimeSubtitle: () => {},
+  }
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  /** Found through its corner cell: the gutter deliberately carries no testids.
+   *  (The layout took the « » toggle out of the header; it is a setting now.) */
+  const header = () => screen.getByTestId("tl-corner").parentElement as HTMLElement
+  /** The div `handleTrackScroll` transforms; `role="list"` while rows can move. */
+  const inner = () => gutter().querySelector('[role="list"]') as HTMLElement
+  const rows = () => Array.from(gutter().querySelectorAll<HTMLElement>("[data-tl-track-row]"))
+  const stubRect = (el: Element, top: number, height: number) =>
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      top, bottom: top + height, left: 0, right: 240, width: 240, height, x: 0, y: top,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+  // Without `isolate` the column's numbers ranked in the workspace's own
+  // stacking context, where 40 is the menus' tier (AppShell's z-scale): the
+  // header and the names drew over the expanded search results (z-20) that are
+  // meant to cover the editor.
+  it("keeps the header, the names and the divider ranked inside the column", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(gutter().classList).toContain("isolate")
+    expect(header().classList).toContain("z-40")
+    expect(inner().classList).toContain("z-30")
+    expect(screen.getByTestId("tl-gutter-rule").classList).toContain("z-20")
+  })
+
+  // Arabic and Urdu flip `<html dir>`, and the grid with it: the column goes on
+  // the right, and the edge it shares with the lanes is its LEFT one.
+  it("puts the divider and the rule on the lanes' edge in either direction", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(header().classList).toContain("border-e")
+    expect(header().classList).not.toContain("border-r")
+    const rule = screen.getByTestId("tl-gutter-rule")
+    expect(rule.classList).toContain("end-0")
+    expect(rule.classList).not.toContain("right-0")
+  })
+
+  // The lane half of the drop line already crosses the ruler (z-30 over its
+  // z-20). Mid-drag the names must cross the header too, the way a dragged
+  // chip's lane crosses the ruler, or near the top the gutter half of the line
+  // and the row in the air vanish under the header while the lane half shows.
+  it("lifts the names over the header while a row is dragged, and only then", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const raised = () => inner().classList.contains("z-50")
+    fireEvent.pointerDown(rows()[1], { button: 0, pointerId: 1, clientX: 8, clientY: 50 })
+    // A press is not a drag: under the 3px threshold nothing should pop.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 52 })
+    expect(raised()).toBe(false)
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 10 })
+    expect(raised()).toBe(true)
+    // Back over its own slot it is still a drag, and must not flicker.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(true)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(false)
+    expect(inner().classList).toContain("z-30")
+  })
+
+  // The browser pass on the demo: dragging a track to the top of a scrolled
+  // list drew the line on the top row's upper edge, which was scrolled up out
+  // of the column, so the drop that matters most up there showed no line at
+  // all. The line is the whole readout of a drag, so it stays where it can be
+  // seen: just under the header, or just above the column's foot.
+  describe("the drop line stays in sight", () => {
+    /** Three 40px rows under the 28px header, the column scrolled up 30px:
+     *  the top row's upper edge is 2px above the column. */
+    const setUp = (gutterHeight: number) => {
+      render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+      const scroll = screen.getByTestId("tl-scroll")
+      scroll.scrollTop = 30
+      fireEvent.scroll(scroll)
+      stubRect(gutter(), 0, gutterHeight)
+      stubRect(header(), 0, 28)
+      rows().forEach((row, i) => stubRect(row, 28 + i * 40 - 30, 40))
+    }
+    /** Where the gutter half is drawn, in px from the column's top. */
+    const gutterLineTop = () => {
+      const line = screen.getByTestId("tl-track-drop-line")
+      const rowTop = line.closest("[data-tl-track-row]")!.getBoundingClientRect().top
+      const own = line.style.top ? parseFloat(line.style.top) : line.classList.contains("bottom-0") ? 38 : 0
+      return rowTop + own
+    }
+    const laneLineTop = () => screen.getByTestId("tl-track-drop-line-lane").style.top
+
+    it("at the top of the list, just under the header, in both columns", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[2], { button: 0, pointerId: 1, clientX: 8, clientY: 98 })
+      // Up into the header band, over the top row's upper half.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 5 })
+      expect(gutterLineTop()).toBe(28)
+      // Content pixels: the header's 28 plus the 30 scrolled.
+      expect(laneLineTop()).toBe("58px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 5 })
+    })
+
+    it("past the last row below the column's foot, just above the foot", () => {
+      // A 100px column shows rows 0 and 1 and the top of row 2; row 2's lower
+      // edge, 118px down, is below the foot.
+      setUp(100)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 130 })
+      expect(gutterLineTop()).toBe(98)
+      expect(laneLineTop()).toBe("128px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 130 })
+    })
+
+    it("leaves a line that is already in sight where it is", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      // Into row 1's lower half: the line goes on the boundary between rows 1
+      // and 2, 78px down — in sight, so drawn on the row's own edge as before.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
+      expect(screen.getByTestId("tl-track-drop-line").style.top).toBe("")
+      expect(laneLineTop()).toBe("108px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 70 })
+    })
+  })
+
+  // The browser counts the strip under the header as on screen, so focusing a
+  // row there scrolls nothing — and it could not scroll the gutter up anyway,
+  // which is held at 0. The track column, which owns the offset, has to.
+  it("scrolls a row that takes focus under the header back out from under it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 10, 40) // 18px of it under the header
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(42)
+    // The names follow at once, so a second look in the same frame (the
+    // browser's own, or the next reveal) sees where the row really is.
+    expect(inner().style.transform).toBe("translateY(-42px)")
+  })
+
+  it("reveals the whole row when a control inside it takes focus", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, -4, 40)
+    const menu = within(row).getByTestId("tl-track-menu-source-audio")
+    // The ⋯ itself would be clear of the header; the row's top edge is not.
+    stubRect(menu, 8, 20)
+
+    act(() => menu.focus())
+    expect(scroll.scrollTop).toBe(28)
+  })
+
+  // The menu hands focus back to the row, and then the rename field takes it:
+  // two reveals in a row. The row's rect here moves as the column scrolls,
+  // the way the real one does, so the second must find nothing left to do.
+  it("brings the rename field out from under the header, scrolling once", async () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    const top = () => 10 + (60 - scroll.scrollTop)
+    vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => ({
+      top: top(), bottom: top() + 40, left: 0, right: 240, width: 240, height: 40, x: 0, y: top(),
+      toJSON: () => ({}),
+    } as DOMRect))
+
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText("Rename"))
+    const input = await screen.findByTestId("tl-track-rename-source-audio")
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(scroll.scrollTop).toBe(42)
+  })
+
+  it("leaves a focused row alone when the header covers none of it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 28, 40)
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+  })
+
+  // A keyboard move keeps the row's focus (React moves the DOM node, or its
+  // neighbour), so no focus event comes to reveal it where it lands.
+  it("brings a row moved up with Alt+ArrowUp back out from under the header", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 30, 40)
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+
+    fireEvent.keyDown(row, { key: "ArrowUp", altKey: true })
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    expect(trackId).toBe("source-audio")
+    // The workspace lands the move; the row is one place up, partly under the header.
+    stubRect(row, -10, 40)
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[0]).toBe(row)
+    expect(document.activeElement).toBe(row)
+    expect(scroll.scrollTop).toBe(22)
+  })
+
+  it("brings a row moved down with Alt+ArrowDown back up from below the fold", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    stubRect(gutter(), 0, 120)
+    const row = rows()[1]
+    stubRect(row, 60, 40)
+    act(() => row.focus())
+
+    fireEvent.keyDown(row, { key: "ArrowDown", altKey: true })
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    stubRect(row, 100, 40) // 20px of it past the column's bottom edge
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[2]).toBe(row)
+    expect(scroll.scrollTop).toBe(80)
+  })
+})
+
 // ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
 //
 // The workspace decides WHEN these are on offer (a maintainer, a linked video,
@@ -5231,10 +5453,13 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
           linkedVideoEmpty={{ captionTrackCount: 0 }} />,
       )
       const column = screen.getByTestId("tl-scroll")
-      const laneWidthPx = () => parseFloat((column.firstElementChild as HTMLElement).style.width)
+      const canvas = screen.getByTestId("tl-canvas")
+      const laneWidthPx = () => parseFloat(canvas.dataset.filePx ?? "")
       // The walk's file: an empty Free timing timeline is about two seconds,
-      // far shorter than the view, so the column cannot scroll at all.
+      // far shorter than the view, so the column cannot scroll at all — and
+      // its ground still runs to the view's edge (Sam, Oct 28).
       expect(laneWidthPx()).toBeLessThan(200)
+      expect(canvas.style.width).toBe("900px")
 
       const check = (zoomStep: number) => {
         const where = `after ${zoomStep} zoom-in(s)`
@@ -5257,9 +5482,10 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
       check(0)
       for (let i = 1; i <= 3; i++) {
         const before = laneWidthPx()
-        fireEvent.click(screen.getByLabelText("Zoom in"))
+        fireEvent.click(inTimelineSettings(() => screen.getByLabelText("Zoom in")))
         flush()
         expect(laneWidthPx()).toBeGreaterThan(before)
+        expect(canvas.style.width).toBe(`${Math.max(900, laneWidthPx())}px`)
         check(i)
       }
       fireEvent.click(within(screen.getByTestId("tl-linked-video-lane-prompt")).getByRole("button", { name: "Attach captions" }))
@@ -5544,14 +5770,140 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
   })
 })
 
+// Canvas board 55, option E (Sam, Oct 28): the media view's top bar in two
+// groups. Left: Sources (an icon, the film first in it), Timing (no label, no
+// length, no (i)), a thin divider, Check, then History. Add track is the + in
+// the timeline's corner; undo, redo and the blade live in the corner's ⋯.
+describe("TimelineEditor — the media view's top bar (board 55, option E)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+  const drawBar = (over: Record<string, unknown> = {}) => {
+    const film = { name: "a.mp4", hiddenByTiming: false, showing: true, onHide: vi.fn(), onShow: vi.fn() }
+    const onLink = vi.fn()
+    renderWithTooltips(
+      <>
+        <MediaTopBar afterTools={<span data-testid="history-stub" />} trailing={<span data-testid="trailing-stub" />} />
+        <TimelineEditor
+          fileId="f1" coreMediaUrl="https://cdn.test/a.mp4" editable timingMode="dubbing"
+          cells={[cell({ id: "d1", medium: "media", startTime: 0, endTime: 2, original: "Hello" })]}
+          onRetimeSubtitle={() => {}} onChangeTimingMode={vi.fn()}
+          onRequestLinkVideo={onLink} canLinkVideo film={film}
+          onRequestImportAudioVtt={vi.fn()} canImportAudioVtt
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+          trackEditing={{ onAdd: vi.fn(() => "t"), onLeaveFolder: vi.fn(), onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(() => "f"), onDelete: vi.fn() }}
+          onHistoryResult={vi.fn()} onCutTargets={vi.fn()}
+          {...over}
+        />
+      </>,
+    )
+    return { film, onLink }
+  }
+
+  it("lays the left side out as Sources, Timing, a divider, then History — nothing else", async () => {
+    drawBar()
+    const bar = screen.getByTestId("media-top-bar")
+    await waitFor(() => expect(within(bar).getByTestId("tl-sources-menu")).toBeInTheDocument())
+    const ids = [...bar.querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"))
+    const at = (id: string) => ids.indexOf(id)
+    for (const id of ["tl-sources-menu", "tl-timing-mode", "tl-tools-divider", "history-stub", "trailing-stub"]) {
+      expect(at(id), id).toBeGreaterThanOrEqual(0)
+    }
+    expect(at("tl-sources-menu")).toBeLessThan(at("tl-timing-mode"))
+    expect(at("tl-timing-mode")).toBeLessThan(at("tl-tools-divider"))
+    expect(at("tl-tools-divider")).toBeLessThan(at("history-stub"))
+    // Timing has no label, no length and no (i) in the bar.
+    expect(bar.textContent).not.toMatch(/Timing:|long/)
+    expect(within(bar).queryByTestId("tl-timing-length")).toBeNull()
+    expect(within(bar).queryByTestId("tl-timing-mode-info")).toBeNull()
+    // Add track and the editing tools are not in the bar…
+    for (const id of ["tl-add-track", "tl-undo", "tl-redo", "tl-blade-toggle", "top-film"]) {
+      expect(within(bar).queryByTestId(id), id).toBeNull()
+    }
+    // …Add track is the + in the timeline's corner, undo in its ⋯.
+    expect(within(screen.getByTestId("tl-corner")).getByTestId("tl-add-track")).toBeInTheDocument()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
+  })
+
+  it("draws Sources as its icon alone, 'Film and sources' on hover, the film first in its menu", async () => {
+    const { film, onLink } = drawBar()
+    const sources = await screen.findByTestId("tl-sources-menu")
+    expect(sources.textContent).toBe("")
+    expect(sources.querySelectorAll("svg")).toHaveLength(1)
+    await expectTooltip(sources, /^Film and sources$/)
+    fireEvent.click(sources)
+    const menu = await screen.findByRole("menu")
+    const text = menu.textContent ?? ""
+    // The film (its name, Change, Fold), then the other sources.
+    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Audio cues"].map((word) => text.indexOf(word))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    fireEvent.click(within(menu).getByTestId("top-film-hide"))
+    expect(film.onHide).toHaveBeenCalled()
+    fireEvent.click(sources)
+    fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
+    expect(onLink).toHaveBeenCalled()
+  })
+
+  // AQU-1758 (Sam, Oct 29): with "Show the film and sources tools" off, a file
+  // that already has a film keeps it within reach: Sources still shows on it,
+  // holding its film and nothing else.
+  it("with the film and sources setting off, a file with a film keeps Sources, with its film in it and nothing else", async () => {
+    const { film, onLink } = drawBar({ showSources: false })
+    const sources = await screen.findByTestId("tl-sources-menu")
+    fireEvent.click(sources)
+    const menu = await screen.findByRole("menu")
+    const text = menu.textContent ?? ""
+    expect(text).toContain("a.mp4")
+    expect(within(menu).getByTestId("top-film-change")).toBeInTheDocument()
+    expect(within(menu).getByTestId("top-film-hide")).toBeInTheDocument()
+    // The other sources, and their heading, stay behind the setting.
+    expect(text).not.toMatch(/Audio cues/)
+    expect(text).not.toMatch(/^Sources|Sources$/m)
+    fireEvent.click(within(menu).getByTestId("top-film-hide"))
+    expect(film.onHide).toHaveBeenCalled()
+    fireEvent.click(sources)
+    fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
+    expect(onLink).toHaveBeenCalled()
+  })
+
+  it("with the setting off, a file without a film has no Sources at all, as before", async () => {
+    drawBar({ showSources: false, coreMediaUrl: null, film: undefined })
+    await waitFor(() => expect(screen.getByTestId("tl-timing-mode")).toBeInTheDocument())
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
+  })
+
+  it("puts the note about stand-in lines at the foot of the Timing menu", async () => {
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="bk" coreMediaUrl={null} editable timingMode="audioFirst" onChangeTimingMode={vi.fn()}
+        cells={[cell({ id: "b1", medium: "text", original: "In the days when the judges ruled." })]}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    // It opens in place, under its line, on a click, not on a hover.
+    const standIn = await screen.findByTestId("tl-stand-in-info")
+    const standInText = screen.getByTestId("tl-stand-in-info-text")
+    expect(standInText).toHaveAttribute("data-open", "false")
+    await userEvent.setup().hover(standIn)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(standIn)
+    expect(standInText).toHaveAttribute("data-open", "true")
+    expect(standInText).toHaveTextContent(/at a stand-in length worked out from its text/)
+  })
+})
 // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
 describe("TimelineEditor — the toolbar's hovers only name its icons", () => {
-  it("the quality toggle's hover names it, without the explanation", async () => {
-    renderWithTooltips(
+  // Media redesign, layout: the quality toggle is a row of the timeline's
+  // corner ⋯, so its words name it and nothing explains it on hover (no title).
+  it("the quality row's words name it, with no explaining hover", () => {
+    render(
       <TimelineEditor fileId="q1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]} onRetimeSubtitle={() => {}} />,
     )
-    await expectTooltip(screen.getByTestId("tl-quality-toggle"), "Play generated voices at original quality")
-    expect(screen.getByRole("tooltip").textContent).not.toMatch(/Toggle for|larger downloads/)
+    const item = inTimelineSettings(() => screen.getByTestId("tl-quality-toggle"))
+    expect(item).toHaveTextContent("Play generated voices at original quality")
+    expect(item).not.toHaveAttribute("title")
+    expect(item.textContent).not.toMatch(/Toggle for|larger downloads/)
   })
 
   it("Measure now has no hover; what it does is behind its (i)", async () => {

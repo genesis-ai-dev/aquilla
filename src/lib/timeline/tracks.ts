@@ -214,6 +214,13 @@ export interface TrackDerivationContext {
    *  the Source-audio row has the video's own sound to stand for even with no
    *  cues. Absent reads as false. */
   hasLinkedVideoSound?: boolean
+  /** AQU-1758: the file is in reading order — a Bible book, a document —
+   *  rather than timed. Absent reads as false. */
+  sequenceOrdered?: boolean
+  /** AQU-1758: some line of the file has a source recording of its own (an
+   *  attached source clip), so a book or document has source audio to draw.
+   *  Absent reads as false. */
+  hasSourceAudio?: boolean
 }
 
 /** Own-key check rather than `in`, because these strings arrive from remote
@@ -291,8 +298,21 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // these numbers are never compared against anything but each other. That
   // invisibility is the guarantee the whole renumber hangs on; it is the
   // highest-blast-radius part of the change and tracks.test.ts pins it twice.
-  if (!context || context.hasMediaCells || !context.isSubtitleImport) {
+  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered)) {
     return [trackRow("source-subtitles"), trackRow("source-audio"), trackRow("target-audio")]
+  }
+  // AQU-1758: a book or document opens on the timeline since the Audio view
+  // went. With no source audio there is nothing for a Source-audio row to
+  // hold, and an empty one reads as "the source is silent", so it is left
+  // out, the same rule as a subtitle file's below.
+  if (!context.isSubtitleImport) {
+    return [
+      trackRow("source-subtitles"),
+      ...(context.hasAudioCues || context.hasLinkedVideoSound || context.hasSourceAudio
+        ? [trackRow("source-audio")]
+        : []),
+      trackRow("target-audio"),
+    ]
   }
 
   return [

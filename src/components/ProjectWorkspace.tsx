@@ -6,7 +6,8 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -111,7 +112,7 @@ import {
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
 import { completionBatchSizeFor, workspaceActions, getVisibleActions } from "@/lib/workspace-actions/registry"
 import type { WorkspaceAction } from "@/lib/workspace-actions/types"
-import type { FileReference } from "@/lib/parsers/types"
+import type { FileReference, Voice } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
@@ -190,10 +191,10 @@ import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope,
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
-import { StatusBar } from "./StatusBar"
+import { StatusBar, statusBarFigure } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
-import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
+import { EditorTable, type BacktranslationActionSource } from "./EditorTable"
 import type { ExampleOrigin } from "./ExamplePanel"
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
@@ -213,10 +214,16 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+import {
+  chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  timelineChaptersOf, type TimelineChapter,
+} from "@/lib/timeline/sequence-timeline"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
+import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
-import { useAudioViewPlace } from "@/hooks/useAudioViewPlace"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { recordingDrivesPlayback, switchPlaybackSource, usePlaybackSource, type PlaybackSource } from "@/lib/audio/playback-source"
@@ -342,8 +349,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { DEFAULT_TARGET_TRACK_ID, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
-import { fileTrackColor } from "@/lib/timeline/take-colors"
+import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -353,6 +359,7 @@ import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
 import { canManageVoices } from "@/lib/audio/voice-permission"
+import { takeVoiceNote } from "@/lib/audio/take-voice"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
 import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
@@ -374,9 +381,13 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
 import { resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
+import { cloneNameSuggestion, lineChangeQuality, lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
+import { whileVoicingAs } from "@/lib/audio/voicing-as"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -403,7 +414,7 @@ import { AgentWorkbench } from "./agent/AgentWorkbench"
 import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
-import { FileChapterToolbar } from "./FileChapterToolbar"
+import { FileChapterToolbar, type FileChapterToolbarProps } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -461,12 +472,9 @@ import type { MediaTextSource } from "@/lib/import/media-cues"
 import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
-// AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
-// several of them depend on which sections are collapsed, and the stored sizes
-// are written by `useMediaSectionCollapse` at the end of a gesture. What is
-// left here is reading them for `defaultSize`.
-import { shouldShowVideoPane, readStoredVideoPaneWidth } from "./timeline/video-pane-layout"
-import { readStoredTimelinePaneHeight } from "./timeline/timeline-pane-layout"
+// Media redesign, layout: the panels' constraints, sizes, folds and full
+// screen all come from `useMediaDock`; the gate for the film stays here.
+import { shouldShowVideoPane } from "./timeline/video-pane-layout"
 import {
   getVideoClockPlaying,
   setVideoClockSec,
@@ -477,14 +485,19 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { MediaSectionRail } from "@/components/timeline/MediaSectionRail"
-import { useMediaSectionCollapse } from "@/components/timeline/useMediaSectionCollapse"
+import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
+import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
+import { useMediaDock } from "@/components/timeline/useMediaDock"
+import { MediaDockBody } from "@/components/timeline/MediaDockBody"
+import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
+import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
+import { regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
-import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
+import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -669,6 +682,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 let _lastImportWrite: Promise<ProjectRecord | undefined> = Promise.resolve(undefined)
 const EMPTY_STATUS_PROGRESS = { total: 0, translated: 0, validated: 0 }
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
 
@@ -1555,11 +1569,11 @@ export function ProjectWorkspace() {
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode
-  // surfaces the Cast studio in the Voices dock tab (VoiceSidebar) and
-  // replaces each cell's SOURCE column with that line's voice controls
-  // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
-  // workspace root, not inside the dock.
+  // Text vs Media lens — the same table over the same cells; Media stacks the
+  // timeline over it and surfaces the Cast studio in the Voices dock tab
+  // (VoiceSidebar). (The stored value for Media is "audio", from when a
+  // book's Media lens was the Audio view — AQU-1758.) Cloning from a cell
+  // opens NewVoiceModal at the workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
   // page where the Gemini API key can be set. The old implementation called
@@ -2534,15 +2548,29 @@ export function ProjectWorkspace() {
     [project?.lanes, t],
   )
   // 2026-08-07: on a TIME-ORDERED file the Media lens stacks the timeline over
-  // the plain text table — audioLens (the per-row voice-panel mode) applies
-  // only to sequence-ordered voice-over files now. With it null, useCellIds
-  // serves the full time-sorted list (text mode) under the timeline.
+  // the plain text table. AQU-1758 (Oct 27): so does every other file — the
+  // Audio view, which replaced a book's source column with per-line voice
+  // cards, is gone. A book or document lays its lines out from its recordings,
+  // one chapter at a time, with dashed stand-ins for lines not yet recorded.
   const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
-  /** Media lens on a time-ordered file = the timeline STACKED over the always-
-   *  rendered text table (one EditorTable instance across both lenses — the
-   *  imperative ref, selection singleton, and presence claims stay single). */
-  const timelineStacked = lens === "audio" && activeFileTimeOrdered
+  // Smart Extensions (apiRev 2 + 3): an `editor` extension mounted for the
+  // active file draws the file itself. (Declared here, ahead of the lens
+  // gates below, which read it.)
+  const extensionEditorActive = Boolean(
+    activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
+  )
+  // AQU-1758: except a book or document an extension editor draws — the
+  // first-party extension editor keeps its own Audio lens (apiRev 4), and the
+  // bottom bar it has always had (below).
+  const activeFileOnTimeline = Boolean(activeFileForLens) && (activeFileTimeOrdered || !extensionEditorActive)
+  // AQU-1758 (Sam's decision 7): the Film button and the timeline's Sources
+  // menu, together, by the project's setting (unset: off for books).
+  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files)
+  /** Media lens = the timeline STACKED over the always-rendered text table
+   *  (one EditorTable instance across both lenses — the imperative ref,
+   *  selection singleton, and presence claims stay single). */
+  const timelineStacked = lens === "audio" && activeFileOnTimeline
   // 2026-08-07 (wire b): a text-table row click points the timeline at that
   // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
   // identity-stable (mirror ref) because it rides in editorActionsValue.
@@ -2554,88 +2582,18 @@ export function ProjectWorkspace() {
   // cell rail's "Play from this cue". The row-click path (EditorActionsContext
   // types this as a one-argument call) can never set it, so a row click keeps
   // its cue-only contract by construction rather than by convention.
+  // AQU-1758: set below, once a book's chapters are known — a row of another
+  // chapter brings its chapter onto the timeline with it.
+  const showChapterOfCellRef = useRef<(cellId: string) => void>(() => {})
   const handleMediaRowActivate = useCallback((cellId: string, opts?: { play?: boolean }) => {
     if (!timelineStackedRef.current) return
+    showChapterOfCellRef.current(cellId)
     activateNonceRef.current += 1
     setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current, play: opts?.play === true })
     // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
   }, [])
-  // AQU-1642 follow-up: the Audio view's one place to play from. Its context —
-  // the file's cells with their takes — is written by a layout effect below,
-  // once they exist; the place only reads it at press time.
-  const { place: audioViewPlace, contextRef: audioViewContextRef } = useAudioViewPlace(activeFileId ?? null)
-  const audioLens = useMemo<AudioLensContext | null>(
-    () =>
-      lens === "audio" && audioProject && !activeFileTimeOrdered
-        ? {
-            voices: tts.voices,
-            settings: tts.laneSettings,
-            defaultVoiceId: tts.defaultVoiceId,
-            project: audioProject,
-            projectId: audioProject.id,
-            session: frontierSession ?? null,
-            username: currentUsername,
-            onAssignCast: (cellId, voiceId) => tts.assignCells([cellId], voiceId),
-            onAfterGenerate: refresh,
-            // Play just this one line through the shared play-queue: hand it a
-            // single-cell snapshot so it doesn't walk on to the next line.
-            // Prefer the audio-enriched cell from the table — the raw `cells`
-            // row never carries selectedGeneratedVoiceAudioId/attachments, so
-            // pickPlayableAudio would find nothing and play would go silently
-            // IDLE right after a generate.
-            onPlayCell: (cellId, enrichedCell) => {
-              if (!frontierSession?.jwt) return
-              const cell = enrichedCell ?? cellStore.getCellView(cellId)
-              if (!cell) return
-              startQueue(
-                // snapshot: the bar's keep-cells-fresh effect must not swap
-                // the full file in — this is "play just this line", full stop.
-                { cells: [cell], projectId: audioProject.id, session: frontierSession, snapshot: true },
-                0,
-              )
-            },
-            // Turn this line's take into a reusable Cast character.
-            onMakeCharacterFromCell: (cellId) => {
-              setMakeCharacterSeedCellId(cellId)
-              setMakeCharacterMode("clone")
-              setMakeCharacterOpen(true)
-            },
-            // AQU-2212: Clone voice from take, without the dialog.
-            onCloneTake: async (cell, audioId, name) => {
-              const level = project?.syncRole?.level ?? null
-              if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
-                throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
-              }
-              const voice = await cloneVoiceFromTake({
-                projectId: audioProject.id, cell, audioId, name,
-                provider: resolveTtsProvider(tts.settings),
-                // A clone rides Inworld or Gemini, which take no target language.
-                paletteIndex: tts.allVoices.length,
-                session: frontierSession ?? null,
-              })
-              const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
-              await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
-              toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
-            },
-            // "Add a voice…" opens New voice on the ready-made characters; the
-            // voice it adds is cast on the line it was opened from.
-            onAddVoice: (cellId) => {
-              setMakeCharacterSeedCellId(cellId)
-              setMakeCharacterMode("character")
-              setMakeCharacterOpen(true)
-            },
-            place: audioViewPlace,
-          }
-        : null,
-    [
-      lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
-      tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
-      tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
-    ],
-  )
-
   // Media redesign slice 2: in a language that counts its recordings, a line
   // is unfinished until it is done by what the language delivers; on a dubbing
   // file a subtitle line no heard line performs is never a stop. The performed
@@ -2924,15 +2882,15 @@ export function ProjectWorkspace() {
   const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
-  // control greys "Follows source" out. Only a time-ordered file has the
-  // timeline (and so the control); a sequence-ordered book opens in the Audio
-  // view and keeps today's playback.
+  // control greys "Follows source" out. AQU-1758: every file has the timeline
+  // (and so the control) since the Audio view went, so a book with no
+  // reading of its source follows its recordings.
   const timingNothingToFollow = useMemo(
     () =>
-      activeFileTimeOrdered &&
+      activeFileOnTimeline &&
       Boolean(activeFileId) &&
       hasNothingToFollow(readAtVersion(cellStoreVersion, getActiveCells).filter((c) => c.fileId === activeFileId)),
-    [activeFileTimeOrdered, activeFileId, cellStoreVersion, getActiveCells],
+    [activeFileOnTimeline, activeFileId, cellStoreVersion, getActiveCells],
   )
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
@@ -8026,7 +7984,8 @@ export function ProjectWorkspace() {
   // through this so no path skips the trace. Self-no-ops when the lens isn't
   // changing, the file isn't time-ordered, or there's nothing to trace.
   const switchLens = useCallback((next: EditorLens) => {
-    const timeOrdered = Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    // AQU-1758: every file the timeline draws traces across the switch.
+    const timeOrdered = Boolean(activeFile) && activeFileOnTimeline
     // AQU-646's trace belongs to the TEXT ↔ MEDIA pair alone: those two lenses
     // share the mounted table, and the timeline whose selection it carries only
     // exists in Media. AQU-2153: a switch through Transcribe is not that pair —
@@ -8072,10 +8031,10 @@ export function ProjectWorkspace() {
       }
     }
     setLens(next)
-  }, [lens, setLens, activeFile, activeFileId, cellStore, viewScrollMemory])
+  }, [lens, setLens, activeFile, activeFileId, activeFileOnTimeline, cellStore, viewScrollMemory])
 
-  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
-  // and surfaces the Voices dock tab (where the voice controls now live).
+  // ISSUE-3 fix: /project/:id/voice deep-link opens Media on mount, and
+  // surfaces the Voices dock tab (where the voice controls live).
   // Declared after switchLens so it calls the live callback rather than one
   // captured before it exists (react-hooks/immutability).
   useEffect(() => {
@@ -9877,6 +9836,60 @@ export function ProjectWorkspace() {
       `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
     )
   }, [navigate, projectId])
+  // AQU-1758: "Make a character from this voice" — the Audio view's voice
+  // card had it; a take's menu on the timeline and its Recording tab do now.
+  // Offered to someone who may make voices: the dialog would refuse the rest.
+  const mayMakeCharacter = canManageVoices(
+    project?.syncRole?.level ?? null, project?.projectLeadsManageVoices === true, activeLaneId != null,
+  )
+  const handleMakeCharacter = useCallback((cellId: string) => {
+    setMakeCharacterSeedCellId(cellId)
+    setMakeCharacterMode("clone")
+    setMakeCharacterOpen(true)
+  }, [])
+  const makeCharacter = mayMakeCharacter ? handleMakeCharacter : undefined
+  // AQU-1758 / AQU-2212: what the Audio view's voice card did to a line, now
+  // done from where its jobs went — a pick in Media's table acts on the line,
+  // the line's Recording tab and its take's menu offer "Change to …" /
+  // "Generate · …", and the take clones in one step. The work is defined far
+  // below, beside the timeline's Regenerate and Change voice it runs through;
+  // these stay identity-stable for the editor's context.
+  const lineVoiceRef = useRef<{
+    picked: (cell: CellData, voiceId: string) => void
+    pending: (cellId: string) => { action: LineVoiceAction; voiceName: string } | null
+    apply: (cellId: string) => void
+    clone: (cellId: string, audioId: string, name: string) => Promise<void>
+    cloneName: (cellId: string) => string
+  } | null>(null)
+  // Whether a pick can read the text: the engine has to be reachable.
+  const browserOnline = useOnline()
+  const backendReachable = useConnectivity()
+  const handleLineVoicePicked = useCallback(
+    (cell: CellData, voiceId: string) => lineVoiceRef.current?.picked(cell, voiceId),
+    [],
+  )
+  const handleApplyLineVoice = useCallback((cellId: string) => lineVoiceRef.current?.apply(cellId), [])
+  const handleLineVoicePending = useCallback((cellId: string) => lineVoiceRef.current?.pending(cellId) ?? null, [])
+  const handleCloneTake = useCallback(
+    (cellId: string, audioId: string, name: string) => lineVoiceRef.current?.clone(cellId, audioId, name) ?? Promise.resolve(),
+    [],
+  )
+  const cloneTake = mayMakeCharacter ? handleCloneTake : undefined
+  const handleCloneNameFor = useCallback((cellId: string) => lineVoiceRef.current?.cloneName(cellId) ?? "", [])
+  // AQU-2212: "Add a voice…" at the end of a line's voice dropdown opens New
+  // voice on the ready-made characters; the voice it adds is cast on that line.
+  const handleAddVoiceForLine = useCallback((cellId: string) => {
+    setMakeCharacterSeedCellId(cellId)
+    setMakeCharacterMode("character")
+    setMakeCharacterOpen(true)
+  }, [])
+  const addVoiceForLine = mayMakeCharacter ? handleAddVoiceForLine : undefined
+  // AQU-1758: a take's voice, when it is not the line's, named on its clip.
+  const timelineTakeVoice = useCallback(
+    (cell: CellData, audioId: string) => takeVoiceNote(cell, audioId, tts.laneSettings),
+    [tts.laneSettings],
+  )
+
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
@@ -9888,6 +9901,12 @@ export function ProjectWorkspace() {
     onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
+    onMakeCharacter: makeCharacter, // AQU-1758: the Recording tab's take
+    onCloneTake: cloneTake, // AQU-1758 / AQU-2212: …in one step
+    onLineVoicePicked: handleLineVoicePicked, // AQU-2212: a pick acts on the line
+    onApplyLineVoice: handleApplyLineVoice, // AQU-2212: "Change to …" / "Generate · …"
+    allTtsSettings: tts.settings, // AQU-2037: …never over a take a voice was cloned from
+    onAddVoiceForLine: addVoiceForLine, // AQU-2212: "Add a voice…"
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
@@ -9915,7 +9934,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, makeCharacter, cloneTake, handleLineVoicePicked, handleApplyLineVoice, tts.settings, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -12098,7 +12117,8 @@ export function ProjectWorkspace() {
   const timelineEditorVisible =
     cellAreaState.kind === "ready" &&
     lens === "audio" &&
-    Boolean(activeFile && fileOrderedBy(activeFile) === "time")
+    Boolean(activeFile) &&
+    activeFileOnTimeline
   // Per-file audio attachments for the Media timeline's missing-clip badge.
   // Timeline cells carry no attachments, so the badge probe resolves the
   // selected clip's take from this read. Gated on timeline visibility so no
@@ -12508,7 +12528,7 @@ export function ProjectWorkspace() {
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
   const handleRegenerateTimelineVoice = useCallback(
-    async (cellId: string, slot: string) => {
+    async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
@@ -12521,7 +12541,11 @@ export function ProjectWorkspace() {
         return
       }
       toast.add({ type: "info", title: t("editor.timeline.regenerateStarted") })
-      const ok = await regenerateVoiceTake({
+      // AQU-2212: a pick reads in the voice picked, before the cast settings
+      // catch up; otherwise the line's own cast voice. Named while it runs.
+      const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
+        ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
+      const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
         project,
         cell: owner.cell,
         entry: timelineAudioByCellId.get(cellId),
@@ -12532,21 +12556,22 @@ export function ProjectWorkspace() {
         laneTag: activeLane || null,
         text,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
-      }).catch(() => false)
+        ...(opts?.voiceId ? { voiceId: opts.voiceId } : {}),
+      }).catch(() => false))
       toast.add(ok
         ? { type: "success", title: t("editor.timeline.regenerateDone") }
         : { type: "error", title: t("editor.timeline.regenerateFailed") })
     },
-    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, t],
+    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
   /**
    * AQU-2026: Change voice for ONE line, from the Media timeline's take menu.
    *
-   * The per-line control shipped on the Audio tab's voice card, and a
-   * time-ordered file has no voice cards — `audioLens` is null there and the
-   * lens draws the timeline instead — so on video and subtitle files the only
-   * Change voice was the whole-file one. Dubbing is where cloned voices are
+   * The per-line control shipped on the Audio view's voice card, and a
+   * time-ordered file had no voice cards — the lens drew the timeline instead
+   * — so on video and subtitle files the only Change voice was the whole-file
+   * one. (AQU-1758: no file has voice cards now; this menu is the one.) Dubbing is where cloned voices are
    * used most, so that is exactly backwards.
    *
    * Both halves read the line the same way the Audio tab does: its cast voice
@@ -12589,18 +12614,20 @@ export function ProjectWorkspace() {
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, quality: ChangeVoiceQuality) => {
+    async (cellId: string, quality: ChangeVoiceQuality, opts?: { voice?: Voice }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
       const { cell } = owner
-      const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
+      // AQU-2212: a pick re-voices into the voice picked, before the cast
+      // settings catch up; otherwise into the line's own cast voice.
+      const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
       if (takeUsedByVoice(cell, tts.settings) || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
       toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
-      const ok = await changeCellVoice({
+      const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
         cell,
         voice,
@@ -12608,7 +12635,7 @@ export function ProjectWorkspace() {
         author: currentUsername,
         diffusionSteps,
         ...(activeLane ? { targetLang: activeLane } : {}),
-      })
+      }))
       if (ok) {
         toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
         revalidateCells?.()
@@ -12626,6 +12653,82 @@ export function ProjectWorkspace() {
     },
     [project, frontierSession, tts.settings, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
+  // AQU-1758 / AQU-2212: the Audio view card's rules (lib/audio/line-voice),
+  // run through the timeline's own Regenerate and Change voice so every way of
+  // voicing a line names its take, swaps it in and says "Voicing as …" alike.
+  // A line's take may be changed wherever the timeline is editable (the lane
+  // isn't frozen) — the same gate its take menu has. Assigned on every
+  // render, like the resolver below.
+  const lineVoiceGenerateReady = (cell: CellData): boolean =>
+    activeLaneDelivers !== "audio" && Boolean(cell.translated?.trim()) && cell.type !== "paratext" &&
+    browserOnline && backendReachable !== false
+  const lineVoiceBusy = (cellId: string): boolean => {
+    const status = getTtsStatus(ttsStatusKey(cellId))
+    return status.kind === "loading" || status.kind === "synthesizing"
+  }
+  const runLineVoice = (cellId: string, action: LineVoiceAction, voice: Voice, cell: CellData): void => {
+    if (action === "change") void handleChangeTimelineVoice(cellId, lineChangeQuality(cell), { voice })
+    else void handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, { voiceId: voice.id })
+  }
+  lineVoiceRef.current = {
+    // A pick in Media's table: assigned already (refused picks never get
+    // here); now it acts on THIS line, whatever scope the pick reached.
+    picked: (row, voiceId) => {
+      const cell = resolveTakeCellRef.current(row.id)?.cell ?? row
+      const voice = findVoice(tts.laneSettings, voiceId)
+      if (!voice || laneWriteFrozen || lineVoiceBusy(cell.id)) return
+      const action = lineVoiceActionFor(cell, voice, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+      })
+      if (action) runLineVoice(cell.id, action, voice, cell)
+    },
+    pending: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return null
+      const found = lineVoicePending(tts.laneSettings, cell, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+        canEdit: !laneWriteFrozen,
+        busy: lineVoiceBusy(cellId),
+      })
+      return found ? { action: found.action, voiceName: found.voice.name } : null
+    },
+    apply: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return
+      const found = lineVoicePending(tts.laneSettings, cell, {
+        generateReady: lineVoiceGenerateReady(cell),
+        takeIsReference: takeUsedByVoice(cell, tts.settings),
+        canEdit: !laneWriteFrozen,
+        busy: lineVoiceBusy(cellId),
+      })
+      if (found) runLineVoice(cellId, found.action, found.voice, cell)
+    },
+    cloneName: (cellId) => {
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      return cell ? cloneNameSuggestion(cell, currentUsername) : ""
+    },
+    // AQU-2212: Clone voice from take, without the dialog.
+    clone: async (cellId, audioId, name) => {
+      const level = project?.syncRole?.level ?? null
+      if (!project || !canManageVoices(level, project.projectLeadsManageVoices === true, activeLaneId != null)) {
+        throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
+      }
+      const cell = resolveTakeCellRef.current(cellId)?.cell
+      if (!cell) return
+      const voice = await cloneVoiceFromTake({
+        projectId: project.id, cell, audioId, name,
+        provider: resolveTtsProvider(tts.settings),
+        // A clone rides Inworld or Gemini, which take no target language.
+        paletteIndex: tts.allVoices.length,
+        session: frontierSession ?? null,
+      })
+      const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+      await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+      toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+    },
+  }
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
   // memoised version would hand the handlers a stale set after every import.
@@ -12693,17 +12796,12 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
-  // AQU-1642 follow-up: what the Audio view's cards and ⋯ Play open the run
-  // with — the same lines, takes and "moved to this line" as the bar's Play.
-  // Written after every commit (no deps) so a press reads this render's cells;
-  // a layout effect, not a render-time write, because the hook's return value
-  // is frozen to react-hooks/immutability and the ref is never read in render.
-  useLayoutEffect(() => {
-    audioViewContextRef.current = project
-      ? { cells: audioMergedCells, projectId: project.id, session: frontierSession ?? null, onActiveCell: handleBarActiveCell }
-      : null
-  })
-
+  // AQU-1758: what the New voice dialog can clone from — a dubbing file's
+  // takes live on its audio cues, and the timeline's take menu seeds it with one.
+  const cloneVoiceCells = useMemo(
+    () => (audioCueCells && audioCueCells.length > 0 ? [...audioMergedCells, ...audioCueCells] : audioMergedCells),
+    [audioMergedCells, audioCueCells],
+  )
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the
@@ -13041,8 +13139,12 @@ export function ProjectWorkspace() {
       // Source audio row for the video's own sound. Not in Free timing, where
       // the video is hidden and silent.
       hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
+      // AQU-1758: a book or document, and whether it has a source recording
+      // of its own.
+      sequenceOrdered: !activeFileTimeOrdered,
+      hasSourceAudio: audioMergedCells.some((c) => sourceClipAudioForCell(c) != null),
     }),
-    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode, activeFileTimeOrdered],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no
@@ -13373,42 +13475,47 @@ export function ProjectWorkspace() {
     })
   }, [t])
 
-  // AQU-1119: which media-lens sections are collapsed, per file, plus the
-  // panel handles and the constraint rows that follow from it.
-  const mediaSections = useMediaSectionCollapse({
+  // Media redesign, layout: the arrangement this file STARTS from, by its
+  // kind — a dubbing episode opens with the picture large, a subtitles file
+  // with the text large, a scripture book with the timeline tall. Only a
+  // fallback: each person's own arrangement of a file wins, and Reset layout
+  // comes back here.
+  const mediaKind = useMemo(
+    () =>
+      mediaFileKind({
+        hasVideo: Boolean(activeFile?.coreMediaUrl),
+        isSubtitleFile,
+        hasAudioCues: audioCueSibling !== null,
+        isScripture:
+          ["usfm", "ebible", "helloao"].includes(activeFile?.type ?? "") || Boolean(activeFile?.corpusMarker),
+      }),
+    [activeFile?.coreMediaUrl, activeFile?.type, activeFile?.corpusMarker, isSubtitleFile, audioCueSibling],
+  )
+  const mediaStart = useMemo(() => startingLayout(mediaKind), [mediaKind])
+  // Media redesign, layout (canvas board 23): the timeline across the top, the
+  // film and the text in the two areas below it, each foldable to nothing,
+  // movable, and able to take the whole view — per person, per file.
+  const dockLeft = useMemo(
+    () => ({ tab: dockTab, isRail: lgUp, setTab: (tab: string | null) => setDockTab(tab as typeof dockTab) }),
+    [dockTab, lgUp, setDockTab],
+  )
+  const dock = useMediaDock({
     fileId: activeFileId,
     timelineStacked,
-    hasVideo: Boolean(activeFile?.coreMediaUrl),
-    // The rows stay mounted behind the rail — frozen and clipped, not
-    // unmounted — so a cell being edited would keep focus and keep taking
-    // keystrokes out of sight. Blurring runs the editor's real path: TipTap
-    // commits the text, and the row releases its collaboration lease.
-    onBeforeCollapseText: () => {
+    filmPresent: showVideoPane && Boolean(activeFile?.coreMediaUrl),
+    start: mediaStart,
+    left: dockLeft,
+    // A hidden text panel stays mounted (frozen, or a tab behind the film), so
+    // a cell being edited would keep focus and keep taking keystrokes out of
+    // sight. Blurring runs the editor's real path: TipTap commits the text,
+    // and the row releases its collaboration lease.
+    onBeforeHideText: () => {
       const active = document.activeElement
-      if (active instanceof HTMLElement && active.closest("[data-media-section='text']")) {
+      if (active instanceof HTMLElement && active.closest("[data-media-panel='text']")) {
         active.blur()
       }
     },
   })
-  const timelinePanelRef = mediaSections.panelRefs.timeline
-  useEffect(() => {
-    // `timelineStacked` is a dependency, not just a guard, and it is the whole
-    // fix for a bug this effect shipped with (AQU-1119): in the text lens the
-    // timeline panel is not rendered, so the ref is null and the resize is
-    // skipped. Without the dep the effect never re-ran on the way back, and the
-    // panel does not re-read `defaultSize` either — the group restores the
-    // layout it cached against the same panel ids. So a lens round-trip left
-    // the PREVIOUS file's height on screen, and the per-file height Sam asked
-    // for silently stopped being per file the moment anyone visited the text
-    // lens.
-    if (!activeFileId || !timelineStacked) return
-    // `restoreStoredSize` skips a collapsed section — a height restored under
-    // its rail is exactly the desync the pin exists to prevent — and tolerates
-    // the first commit, where the group has not laid out yet and `resize`
-    // would throw rather than no-op.
-    mediaSections.restoreStoredSize("timeline")
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
-  }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
   const anyCellClockIsFileTime = useMemo(
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
@@ -13589,6 +13696,105 @@ export function ProjectWorkspace() {
   const playingCueCellId = fileTransport.running
     ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
     : null
+
+  // ── AQU-1758: a book or document on the timeline, one chapter at a time ──
+  //
+  // A book's timeline shows ONE CHAPTER at a time: the one the table and its
+  // chapter picker are on, or, while playback is on a line of this file, that
+  // line's chapter. A file with no chapters shows WHOLE, however long (Sam,
+  // Oct 28: the long-file parts are dropped — the timeline draws only the
+  // clips in view, so length costs nothing). The timeline, the bottom strip's
+  // Play all and every timeline seek share ONE list of lines
+  // (`timelineCells`), so the programme they each lay out is the same one. On
+  // a book, headings follow "Count headings as translatable content" and
+  // hidden lines stay off unless recorded (lib/timeline/sequence-timeline.ts).
+  const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
+  const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
+  // The lines a book's timeline may draw at all, before any chapter.
+  const timelineLines = useMemo(
+    () => (sequenceTimeline ? sequenceTimelineCells(audioMergedCells, null, countStructuralCells) : audioMergedCells),
+    [sequenceTimeline, audioMergedCells, countStructuralCells],
+  )
+  const timelineScopes = useMemo<readonly TimelineChapter[]>(() => {
+    if (!sequenceTimeline) return EMPTY_TIMELINE_CHAPTERS
+    const chapters = timelineChaptersOf(readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex()))
+    return chapters.length > 0 ? chapters : EMPTY_TIMELINE_CHAPTERS
+  }, [sequenceTimeline, cellStore, cellStoreVersion])
+  const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
+  const timelineChapter = useMemo(
+    () => timelineScopes.length > 0
+      ? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: queueCellOnFile })
+      : null,
+    [timelineScopes, chosenScopeKey, queueCellOnFile],
+  )
+  const timelineCells = useMemo(
+    () => scopeCells(timelineLines, timelineChapter),
+    [timelineLines, timelineChapter],
+  )
+  // The bottom strip reads its own audio and merges it in; it gets the same
+  // lines by id.
+  const timelineBarCells = useMemo(() => {
+    if (timelineCells === audioMergedCells) return legacyCells
+    const ids = new Set(timelineCells.map((c) => c.id))
+    return legacyCells.filter((c) => ids.has(c.id))
+  }, [audioMergedCells, legacyCells, timelineCells])
+  // A book's chapter comes from the table: the chapter on screen, as it
+  // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
+  // a paused Play all resumes where it was, and the timeline stays on its
+  // chapter until it ends (lib/timeline/chapter-pick). A pick in the chapter
+  // picker and a row of another chapter clicked are what end a paused one.
+  const handleTableChapterChange = useCallback((key: string | null) => {
+    setChosenScopeKey(key)
+  }, [])
+  const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
+  // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
+  // it and keeps playing, from its first line, in either timing. Picking one
+  // while playback is paused ends that playback, as before. Either way the
+  // timeline shows the chapter picked (lib/timeline/chapter-pick).
+  const queueChapterKeyRef = useRef(queueChapterKey)
+  queueChapterKeyRef.current = queueChapterKey
+  const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
+  chapterPickRunRef.current = { projectId: project?.id, session: frontierSession }
+  // The file's chapters and lines, for the chapter pick below and for Play
+  // all's run into the next chapter. Declared before both read it: the React
+  // Compiler only treats it as a ref when it sees the useRef first.
+  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
+  const handleChapterPicked = useCallback((key: string): boolean => {
+    setChosenScopeKey(key)
+    const run = chapterRunRef.current
+    const plan = planChapterPick({
+      chapters: run?.chapters ?? [],
+      lines: run?.cells ?? [],
+      pickedKey: key,
+      playingKey: queueChapterKeyRef.current,
+      queueKind: getQueueState().kind,
+    })
+    return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
+  }, [])
+  // Play all carries on into the next chapter: when a run of this file's
+  // chapter plays out, the next chapter with anything to play starts.
+  useLayoutEffect(() => {
+    chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
+    showChapterOfCellRef.current = (cellId) => {
+      const chapter = chapterOfCell(timelineScopes, cellId)
+      if (!chapter) return
+      setChosenScopeKey(chapter.key)
+      // Paused on another chapter: end it, so the timeline shows this row's.
+      if (rowEndsPlayback({ rowKey: chapter.key, playingKey: queueChapterKeyRef.current, queueKind: getQueueState().kind })) stopQueue()
+    }
+  })
+  useEffect(() => onQueueRanOut((ctx) => {
+    const run = chapterRunRef.current
+    if (!run || ctx.snapshot) return
+    const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
+    if (!played) return
+    const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
+    const next = nextPlayableChapter(run.chapters, played.key, (chapter) => hasAnyPlayableAudio(linesOf(chapter)))
+    if (!next) return
+    setChosenScopeKey(next.key)
+    // After the queue's own bookkeeping for the run that ended.
+    queueMicrotask(() => startQueue({ ...ctx, cells: linesOf(next) }, 0))
+  }), [])
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -14750,20 +14956,22 @@ export function ProjectWorkspace() {
     if (videoIsTransport) return
     if (!project?.id) return
     const qs = getQueueState()
+    // AQU-1758: the timeline's own lines — on a book, its chapter — so the
+    // seconds it hands over mean the same thing to the queue.
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      audioMergedCells.some((c) => c.id === qs.cellId)
+      timelineCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       seekQueueToTime(sec)
       return
     }
     if (!frontierSession?.jwt) return // cueing needs a session to mint audio tokens
     startQueueAtTime(
-      { cells: audioMergedCells, projectId: project.id, session: frontierSession },
+      { cells: timelineCells, projectId: project.id, session: frontierSession },
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
+  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue
@@ -14811,7 +15019,7 @@ export function ProjectWorkspace() {
     const qs = getQueueState()
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      audioMergedCells.some((c) => c.id === qs.cellId)
+      timelineCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       // "loading" counts as playing for the toggle: Space during a readiness
       // gate cancels the pending start rather than futilely resuming it.
@@ -14826,12 +15034,12 @@ export function ProjectWorkspace() {
     // one (AQU-666), and mark that explicit so a missing clip is surfaced
     // there rather than skipped past (AQU-660).
     const from = timelineSelectedCellId
-      ? audioMergedCells.findIndex((c) => c.id === timelineSelectedCellId)
+      ? timelineCells.findIndex((c) => c.id === timelineSelectedCellId)
       : -1
-    const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
+    const ctx = { cells: timelineCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
+  }, [project?.id, timelineCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -15147,9 +15355,6 @@ export function ProjectWorkspace() {
   // shared cell store, commit/validate/repetition path, AI drafting,
   // back-translation, rules/health signals, presence drafts, the recorder and
   // the bulk selection bar. Memoized so the frame only hears about real changes.
-  const extensionEditorActive = Boolean(
-    activeFileId && !extensionEditorChoice.pending && extensionEditorChoice.selected !== STANDARD_EDITOR,
-  )
   // Footnote tray (apiRev 4): the extension editor reports its visible rows
   // (editor.visible); the host feeds the same tray the built-in table does.
   const extensionVisibleIds = useEditorViewportVisibleCellIds(extensionEditorActive && footnoteViewMode === "tray")
@@ -15921,6 +16126,42 @@ export function ProjectWorkspace() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  // The connection and save state: who else is here, Live, Synced. The
+  // footer's left half — and, in the media view, which has no footer, part of
+  // the status ring's popover and the top of the Panels menu.
+  const mediaStatusSync = (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <PeerPresence
+        store={presenceStore}
+        onJumpToPeer={handleJumpToPresencePeer}
+        resolveCellLabel={resolvePresenceCellLabel}
+      />
+      <SyncStatusIndicator status={fileSyncStatus} />
+      <OutboxSyncIndicator
+        pendingCount={Math.max(0, outboxPending - outboxFailed)}
+        failureStreak={outboxFailures}
+        failedCount={outboxFailed}
+        // SUB-9: all-status feed so quarantined refusals render in
+        // the inspector (with reason + Retry/Discard) instead of
+        // the popover claiming "all caught up" beside a failed pill.
+        records={outboxInspectorRecords}
+        onRetryNow={outboxFlushNow}
+        projectId={project?.id}
+      />
+    </div>
+  )
+  // The file's counts, as the footer shows them, for the status ring.
+  const mediaStatusStats = (
+    <StatusBar
+      className="p-0"
+      progress={editorStatusBarProgress}
+      getHealthByCell={getStatusBarHealth}
+      projectHealth={projectHealth}
+      staleSourceCount={staleCellIds.size}
+      onJumpToCell={jumpToCellId}
+    />
+  )
+
   const fileChapterToolbar = activeFileId ? (
     <FileChapterToolbar
       historyControl={<HistoryPanel onResult={reportHistory} />}
@@ -15930,7 +16171,6 @@ export function ProjectWorkspace() {
         if (l === "audio") selectDockTab("voices")
       }}
       onAgentSelect={() => openAgentTab("editor")}
-      timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
       checkResult={checkResult}
@@ -16390,7 +16630,6 @@ export function ProjectWorkspace() {
                   audioMode={lens === "audio"}
                   audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
-                  mediaLayer={!!audioLens}
                   onVoiceTogether={async (sel) => {
                     if (!activeFileId || !project) return
                     const result = await generateCombinedVoice({
@@ -16683,7 +16922,6 @@ export function ProjectWorkspace() {
             onChooseFile={chooseFileInSidebar}
             editorMode={{
               lens,
-              timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
               onLensChange: (next) => {
                 switchLens(next)
                 if (next === "audio") selectDockTab("voices")
@@ -16760,10 +16998,44 @@ export function ProjectWorkspace() {
                 canControl={currentRoleLevel >= ROLE.CONTRIBUTOR}
               />
             )}
-            {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background/90 p-2 backdrop-blur-xl">
-                {fileChapterToolbar}
-              </div>
+            {timelineStacked && activeFile && project ? (
+              // Media redesign, layout: ONE 40 px bar for the whole view, in
+              // two groups (canvas board 55, option E). Left: the timeline's
+              // tools (Sources with the film first, Timing, a divider, Check),
+              // then History. Right: the status ring, the views, Panels, ⋯.
+              // The transport is the thin strip along the bottom of the view.
+              <MediaTopBar
+                afterTools={<HistoryPanel onResult={reportHistory} />}
+                trailing={
+                  <>
+                    <MediaStatusRing
+                      {...statusBarFigure(editorStatusBarProgress)}
+                      syncStatus={fileSyncStatus}
+                      fileName={fileDisplayName(activeFile)}
+                      projectId={project.id}
+                      pending={Math.max(0, outboxPending - outboxFailed)}
+                      closeWhen={dock.panelsOpen}
+                    >
+                      {mediaStatusSync}
+                      {showFileStats ? mediaStatusStats : null}
+                    </MediaStatusRing>
+                    {fileChapterToolbar && isValidElement<FileChapterToolbarProps>(fileChapterToolbar)
+                      ? cloneElement(fileChapterToolbar, {
+                          // History sits on the left of this bar.
+                          historyControl: undefined,
+                          beforeMenu: (
+                            <MediaPanelsMenu
+                              dock={dock}
+                              fileName={fileDisplayName(activeFile)}
+                              kind={mediaKind}
+                              filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
+                            />
+                          ),
+                        })
+                      : null}
+                  </>
+                }
+              />
             ) : null}
             <div className="min-h-0 flex-1">
               {/* 2026-08-07: ONE EditorTable across both lenses; the media lens
@@ -16786,6 +17058,13 @@ export function ProjectWorkspace() {
                   tree, so toggling the lens never remounts it and loses its
                   virtualization state (and the separator stays a direct DOM
                   child of its Group, which the library requires). */}
+              {/* Media redesign, layout (canvas board 23): the timeline across
+                  the top, then the row of areas — Bottom left and Bottom right,
+                  each holding the film or the text as a tab — any of which can
+                  fold to nothing or take the whole view. The film and the text
+                  render ONCE, below, through portals into hosts that the dock
+                  moves between the areas: the table keeps one mount across the
+                  lenses and across moves, as it has since 2026-08-07. */}
               <ResizablePanelGroup
                 // Named rather than left to useId: the library resolves a
                 // group by scanning ids and returns the first match, so two
@@ -16794,59 +17073,44 @@ export function ProjectWorkspace() {
                 id="media-lens-rows"
                 orientation="vertical"
                 className="min-h-0"
-                // AQU-1119: fires once per gesture, at pointer-up. A drag that
-                // shut a section is heard here, after the group has settled.
-                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
+                // Fires once per gesture, at pointer-up: a drag that shut a
+                // region is heard here, after the group has settled.
+                onLayoutChanged={(_layout, meta) => dock.noteLayoutSettled(meta)}
               >
               {timelineStacked && activeFile ? (
                 <>
                   <ResizablePanel
                     id="media-timeline"
-                    panelRef={timelinePanelRef}
-                    defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
-                    {...mediaSections.constraints.timeline}
-                    groupResizeBehavior="preserve-pixel-size"
-                    // The rail is positioned against this box.
-                    className="relative"
-                    // AQU-1119: a collapsed panel clips rather than reflows.
-                    // The library's own content box is `overflow: auto` and
-                    // spreads this after it, so without `hidden` the frozen
-                    // content would SCROLL inside the rail instead of being
-                    // hidden behind it.
-                    style={mediaSections.showsRail("timeline") ? { overflow: "hidden" } : undefined}
-                    // Records only. The remembered height is written once the
-                    // gesture ENDS (the group's onLayoutChanged), so a drag that
-                    // finishes collapsed never overwrites it on the way past
-                    // the floor.
-                    onResize={(size) => mediaSections.noteResize("timeline", size.inPixels)}
+                    panelRef={dock.panelRefs.tl}
+                    defaultSize={dock.defaults.tlHeight}
+                    {...dock.constraints.tl}
+                    // Folded, it clips rather than reflows (see MediaDockBody).
+                    style={!dock.view.isOpen("tl") ? { overflow: "hidden" } : undefined}
+                    // Records only; the height is remembered at pointer-up.
+                    onResize={(size) => dock.noteResize("tl", size.inPixels)}
                   >
                   {/* Rendered unconditionally, and only its inline style
-                      changes: adding or removing this wrapper on collapse
-                      would remount TimelineEditor, taking the portaled text
-                      header with it and resetting the per-file prefs guard,
+                      changes: adding or removing this wrapper on a fold would
+                      remount TimelineEditor, taking the portaled tools and
+                      text row with it and resetting the per-file prefs guard,
                       the viewport measurement and the follow state. Frozen at
-                      its last real size so nothing inside ever learns it got
-                      small. */}
+                      its last real size so nothing inside learns it got small. */}
                   <div
-                    ref={mediaSections.registerContent("timeline")}
-                    data-media-section="timeline"
+                    ref={dock.timelineContentBoxRef}
+                    data-media-region="tl"
                     className="flex h-full min-h-0 w-full min-w-0 flex-col"
                     style={
-                      mediaSections.isCollapsed("timeline") && mediaSections.frozen.timeline
-                        ? {
-                            minWidth: mediaSections.frozen.timeline.width,
-                            minHeight: mediaSections.frozen.timeline.height,
-                          }
+                      !dock.view.isOpen("tl") && dock.frozen.tl
+                        ? { minWidth: dock.frozen.tl.width, minHeight: dock.frozen.tl.height }
                         : undefined
                     }
-                    inert={mediaSections.isCollapsed("timeline") || undefined}
+                    inert={!dock.view.isOpen("tl") || undefined}
                   >
                   <TimelineEditor
-                    cells={audioMergedCells}
+                    cells={timelineCells}
+                    // AQU-1758: a book's text has no times to drag it to.
+                    sequenceOrdered={!activeFileTimeOrdered}
+                    showSources={filmAndSourcesOn}
                     initialSelectedCellId={mediaTraceCellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
                     onChipActivated={jumpToCellIdFollowing}
@@ -16874,6 +17138,13 @@ export function ProjectWorkspace() {
                     onRegenerateVoice={handleRegenerateTimelineVoice}
                     onChangeVoice={handleChangeTimelineVoice}
                     changeVoiceStateFor={timelineChangeVoiceState}
+                    // AQU-1758: what the Audio view's voice card did for a take.
+                    onMakeCharacter={makeCharacter}
+                    onCloneTake={cloneTake}
+                    cloneNameFor={handleCloneNameFor}
+                    lineVoiceFor={handleLineVoicePending}
+                    onApplyLineVoice={handleApplyLineVoice}
+                    takeVoiceFor={timelineTakeVoice}
                     onRenameTake={handleRenameTimelineTake}
                     onRemoveTake={handleRemoveTimelineTake}
                     onVoteTake={handleVoteTimelineTake}
@@ -16881,6 +17152,16 @@ export function ProjectWorkspace() {
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
+                    // Board 55: the film's own actions head the Sources menu.
+                    film={activeFile?.coreMediaUrl ? {
+                      name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
+                      hiddenByTiming: !showVideoPane,
+                      showing: dock.view.isShowing("film"),
+                      // A tab beside the text: the text shows instead. Alone
+                      // in its area: the area folds.
+                      onHide: () => dock.hide("film"),
+                      onShow: () => dock.show("film"),
+                    } : undefined}
                     onAddLine={handleAddLine}
                     // Through the confirmation, like the table's control —
                     // the two surfaces must not differ about what removing
@@ -16968,28 +17249,9 @@ export function ProjectWorkspace() {
                     // maintainer cannot change it here either.
                     timingFilmTimed={timingFilmTimed}
                     timingSourceUnavailable={timingNothingToFollow}
-                    // AQU-1119: the timeline's own collapse control, and the
-                    // text section's — the latter because TimelineEditor owns
-                    // the header it portals into the table column's slot.
-                    onCollapseSection={() => mediaSections.collapse("timeline")}
-                    onCollapseTextSection={
-                      // Withheld on a file with no linked video: the table is
-                      // then the only thing in its row, and a flex row with
-                      // nothing in it is the one arrangement the layout cannot
-                      // hold.
-                      activeFile.coreMediaUrl ? () => mediaSections.collapse("text") : undefined
-                    }
-                    // Full screen has its own gate. The text may take the
-                    // lens on a file with no film — folding the timeline is
-                    // all that takes — where collapsing it cannot.
-                    onToggleTextFullscreen={
-                      mediaSections.isFullscreen("text")
-                        ? () => mediaSections.exitFullscreen("text")
-                        : mediaSections.canFullscreen("text")
-                          ? () => mediaSections.enterFullscreen("text")
-                          : undefined
-                    }
-                    isTextFullscreen={mediaSections.isFullscreen("text")}
+                    // Media redesign, layout: Full screen, Fold and the ⋯, in
+                    // the timeline's corner cell beside "Tracks".
+                    layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
@@ -17048,164 +17310,69 @@ export function ProjectWorkspace() {
                     linkingModeRequest={linkingModeRequest}
                   />
                   </div>
-                  {mediaSections.showsRail("timeline") && (
-                    <MediaSectionRail
-                      section="timeline"
-                      orientation="horizontal"
-                      // The one rail wide enough to keep its name. Its tools go
-                      // with its body — every one of them acts on tracks that
-                      // are no longer on screen — and the rail painting over
-                      // the toolbar is what takes them away.
-                      label={t("editor.timeline.title")}
-                      preview={mediaSections.isPreviewingRail("timeline")}
-                      onExpand={() => mediaSections.expand("timeline")}
-                    />
-                  )}
                   </ResizablePanel>
                   {/* A pinned panel cannot be dragged, so the handle beside it
-                      must stop claiming it can: disabled drops its tab stop
-                      and its key handling rather than announcing a slider that
-                      will not move. */}
+                      stops claiming it can, and goes invisible. */}
                   <ResizableHandle
                     withHandle
-                    disabled={mediaSections.separatorDisabled("timeline-body")}
-                  />
-                </>
-              ) : null}
-              {/* `minSize` is the only thing keeping the dialogue table usable
-                  now that the timeline above it has a height control — and it
-                  is the mechanism behind an existing browser pass's floor check
-                  (browser-verify-media-table-sync.mjs asserts the table clears
-                  80px on a 1280x700 window). */}
-              <ResizablePanel id="media-body" {...mediaSections.constraints.body}>
-              {/* AQU-646: in the media lens a linked video docks to the LEFT of
-                  the table, under the chip strip. Dragging the divider shut is
-                  how you hide it; the table carries a pixel floor so a narrow
-                  window collapses the picture rather than crushing the text. */}
-              <ResizablePanelGroup
-                id="media-lens-body"
-                orientation="horizontal"
-                className="min-h-0 flex-1"
-                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
-              >
-              {showVideoPane && activeFile?.coreMediaUrl ? (
-                <>
-                  <ResizablePanel
-                    id="media-video"
-                    panelRef={mediaSections.panelRefs.video}
-                    defaultSize={readStoredVideoPaneWidth()}
-                    // 2026-08-08 (Sam): the divider travels well past half —
-                    // the table's own pixel floor is what protects legibility.
-                    // AQU-1119 moved the rest of these here: the pane is
-                    // collapsible while OPEN so dragging it shut still works,
-                    // and pinned to the rail once closed so only the rail's
-                    // button can reopen it.
-                    {...mediaSections.constraints.video}
-                    groupResizeBehavior="preserve-pixel-size"
-                    className="relative"
-                    style={mediaSections.showsRail("video") ? { overflow: "hidden" } : undefined}
-                    // Records only; the width is remembered at pointer-up, and
-                    // only if the gesture ended with the picture open — a drag
-                    // that ends in the rail used to write 220 on its way past
-                    // the floor, so the rail reopened the picture at its bare
-                    // minimum instead of where the reader had left it.
-                    onResize={(size) => mediaSections.noteResize("video", size.inPixels)}
-                  >
-                    <div
-                      ref={mediaSections.registerContent("video")}
-                      data-media-section="video"
-                      className="flex h-full min-h-0 w-full min-w-0 flex-col"
-                      style={
-                        mediaSections.isCollapsed("video") && mediaSections.frozen.video
-                          ? {
-                              minWidth: mediaSections.frozen.video.width,
-                              minHeight: mediaSections.frozen.video.height,
-                            }
-                          : undefined
-                      }
-                      inert={mediaSections.isCollapsed("video") || undefined}
-                    >
-                    <MediaVideoPane
-                      key={activeFile.id}
-                      src={activeFile.coreMediaUrl}
-                      projectId={project.id}
-                      session={frontierSession}
-                      // AQU-646 stage 2: the pane's header now carries the
-                      // film's mute button, and audibility is stored per file.
-                      fileId={activeFile.id}
-                      cells={audioMergedCells}
-                      seekSec={videoSeek}
-                      togglePlay={videoToggle}
-                      suspended={recordingCellId !== null}
-                      onVideoTime={setVideoClockSec}
-                      onVideoPlaying={setVideoClockPlaying}
-                      onVideoDuration={setVideoDurationSec}
-                      onChangeVideo={() => setLinkVideoOpen(true)}
-                      // Sam, Oct 5: a click on a YouTube picture is the
-                      // transport's Play/Pause, never YouTube's own.
-                      onPictureClick={handleTimelineTogglePlay}
-                      sourceDirectionMode={fileMeta.sourceDirectionMode}
-                      targetDirectionMode={fileMeta.targetDirectionMode}
-                      sourceTextDirection={fileMeta.sourceTextDirection}
-                      targetTextDirection={fileMeta.targetTextDirection}
-                      onCollapse={
-                        timelineStacked ? () => mediaSections.collapse("video") : undefined
-                      }
-                      onToggleFullscreen={
-                        mediaSections.isFullscreen("video")
-                          ? () => mediaSections.exitFullscreen("video")
-                          : mediaSections.canFullscreen("video")
-                            ? () => mediaSections.enterFullscreen("video")
-                            : undefined
-                      }
-                      isFullscreen={mediaSections.isFullscreen("video")}
-                    />
-                    </div>
-                    {mediaSections.showsRail("video") && (
-                      <MediaSectionRail
-                        section="video"
-                        orientation="vertical"
-                        label={t("editor.timeline.videoPaneTitle")}
-                      preview={mediaSections.isPreviewingRail("video")}
-                        onExpand={() => mediaSections.expand("video")}
-                      />
-                    )}
-                  </ResizablePanel>
-                  <ResizableHandle
-                    withHandle
-                    disabled={mediaSections.separatorDisabled("video-table")}
+                    disabled={dock.separatorDisabled("tl-body")}
+                    className={dock.separatorDisabled("tl-body") ? "invisible" : undefined}
                   />
                 </>
               ) : null}
               <ResizablePanel
-                id="media-table"
-                panelRef={mediaSections.panelRefs.text}
-                {...mediaSections.constraints.table}
-                className="relative"
-                style={mediaSections.showsRail("text") ? { overflow: "hidden" } : undefined}
-                onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
+                id="media-body"
+                panelRef={dock.bodyRef}
+                {...(timelineStacked ? dock.constraints.body : {})}
+                // The timeline's full screen folds this whole row; clipped,
+                // like any folded panel.
+                style={timelineStacked && !dock.view.bodyOpen ? { overflow: "hidden" } : undefined}
+                className={timelineStacked && dock.view.isOpen("tl") ? "border-t border-border" : undefined}
               >
-              <div
-                ref={mediaSections.registerContent("text")}
-                data-media-section="text"
-                className="flex h-full min-h-0 min-w-0 flex-col"
-                style={
-                  mediaSections.isCollapsed("text") && mediaSections.frozen.text
-                    ? {
-                        minWidth: mediaSections.frozen.text.width,
-                        minHeight: mediaSections.frozen.text.height,
-                      }
-                    : undefined
-                }
-                inert={mediaSections.isCollapsed("text") || undefined}
-              >
-              {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
-                  TimelineEditor portals it here, and the video column carries
-                  its own "Video" header at the same height. */}
+                <MediaDockBody dock={dock} stacked={timelineStacked} />
+              </ResizablePanel>
+              </ResizablePanelGroup>
+              {/* Where a host waits while its area is not on screen. */}
+              <div ref={dock.parkingBoxRef} hidden />
+              {/* The film, once: the dock moves its host into its area. */}
+              {dock.hosts.film && timelineStacked && showVideoPane && activeFile?.coreMediaUrl
+                ? createPortal(
+                <MediaVideoPane
+                  key={activeFile.id}
+                  src={activeFile.coreMediaUrl}
+                  projectId={project.id}
+                  session={frontierSession}
+                  // AQU-646 stage 2: the pane's header now carries the
+                  // film's mute button, and audibility is stored per file.
+                  fileId={activeFile.id}
+                  cells={audioMergedCells}
+                  seekSec={videoSeek}
+                  togglePlay={videoToggle}
+                  suspended={recordingCellId !== null}
+                  onVideoTime={setVideoClockSec}
+                  onVideoPlaying={setVideoClockPlaying}
+                  onVideoDuration={setVideoDurationSec}
+                  onChangeVideo={() => setLinkVideoOpen(true)}
+                  // Sam, Oct 5: a click on a YouTube picture is the
+                  // transport's Play/Pause, never YouTube's own.
+                  onPictureClick={handleTimelineTogglePlay}
+                  sourceDirectionMode={fileMeta.sourceDirectionMode}
+                  targetDirectionMode={fileMeta.targetDirectionMode}
+                  sourceTextDirection={fileMeta.sourceTextDirection}
+                  targetTextDirection={fileMeta.targetTextDirection}
+                />
+                    ,
+                    dock.hosts.film,
+                  )
+                : null}
+              {/* The text, once — EditorTable keeps this one mount in both
+                  lenses and wherever its panel sits. */}
+              {dock.hosts.text
+                ? createPortal(
+              <>
+              {/* The text panel's context row (speaker, camera, transcribe,
+                  the chapter navigator): TimelineEditor portals it here, under
+                  the panel's strip. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
               {lens === "transcribe" && activeFileId && project ? (
@@ -17213,7 +17380,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -17341,10 +17509,9 @@ export function ProjectWorkspace() {
             getStatisticalBt={getStatisticalBt}
             onAlignmentSeedChange={handleAlignmentSeedChange}
             onSeekToCue={isSubtitleFile && timelineStacked ? handleCueSeek : undefined}
-            // AQU-1642: in the Audio view too — the line the bottom bar is
-            // playing is marked. Its card's controls reach the run through
-            // the Audio view's place (`audioLens.place`), not through here.
-            playingCueCellId={(isSubtitleFile && timelineStacked) || audioLens ? playingCueCellId : null}
+            // AQU-1642 / AQU-1758: on a book or document too — the line the
+            // bottom strip is playing is marked.
+            playingCueCellId={timelineStacked && (isSubtitleFile || !activeFileTimeOrdered) ? playingCueCellId : null}
             onPauseCue={pauseAllTransports}
             sourceLineEditing={sourceLineEditing}
             lineNumbersEnabled={fileMeta.lineNumbersEnabled}
@@ -17355,17 +17522,6 @@ export function ProjectWorkspace() {
             targetTextDirection={fileMeta.targetTextDirection}
             isAnonymous={!frontierSession}
             onJumpToCell={jumpToCellId}
-            audioLens={audioLens}
-            // Sam, 2026-09-26: the Audio view's colour IS the file's dub-track
-            // colour, the timeline's own value — one colour per file, the same
-            // for everyone. A maintainer may change it whatever the track-
-            // editing setting says (track-editing-authority.ts).
-            audioTrackColor={audioLens ? fileTrackColor(project?.files, activeFileId, DEFAULT_TARGET_TRACK_ID) : undefined}
-            onSetAudioTrackColor={
-              audioLens && canReorderTracks
-                ? (hueId) => handleSetTrackColor([{ trackId: DEFAULT_TARGET_TRACK_ID, color: hueId }])
-                : undefined
-            }
             castGutter={timelineStacked}
             ttsSettings={tts.laneSettings}
             orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}
@@ -17410,39 +17566,54 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setEditorViewportTrackedCellRef}
-            // AQU-1119: the rows stay mounted behind the rail, frozen at their
-            // last real size — so without this they would keep reporting
-            // themselves as "on screen" and translate-as-read would queue work
-            // for lines nobody can see. Undefined short-circuits the whole
-            // reporter, and its cleanup emits an empty set on the way in.
+            // AQU-1119: a hidden text panel stays mounted — folded and frozen
+            // at its last real size, or a tab behind the film — so without
+            // this the rows would keep reporting themselves as "on screen" and
+            // translate-as-read would queue work for lines nobody can see.
+            // Undefined short-circuits the whole reporter, and its cleanup
+            // emits an empty set on the way in.
             onVisibleCellIdsChange={
-              mediaSections.isCollapsed("text") ? undefined : handleVisibleCellIdsChange
+              timelineStacked && !dock.view.isShowing("text") ? undefined : handleVisibleCellIdsChange
             }
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            // AQU-1758: a book's timeline shows the chapter the table is on.
+            onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
+            onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
           />
               )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
-              </div>
-              {mediaSections.showsRail("text") && (
-                <MediaSectionRail
-                  section="text"
-                  orientation="vertical"
-                  label={t("editor.timeline.textPaneTitle")}
-                  preview={mediaSections.isPreviewingRail("text")}
-                  onExpand={() => mediaSections.expand("text")}
-                />
-              )}
-              </ResizablePanel>
-              </ResizablePanelGroup>
-              </ResizablePanel>
-              </ResizablePanelGroup>
+              </>,
+                    dock.hosts.text,
+                  )
+                : null}
               </ForecastProvider>
               </EditorActionsProvider>
             </div>
+            {timelineStacked && activeFile && project ? (
+              // Sam, Oct 27: the playback controls back at the bottom, in a
+              // very narrow footprint — a 32 px strip across the view, outside
+              // the panels, so no fold or full screen ever hides it.
+              <VoicePlaybackBar
+                variant="strip"
+                // AQU-1758: on a book, the chapter on the timeline.
+                cells={timelineBarCells}
+                projectId={project.id}
+                session={frontierSession ?? null}
+                settings={tts.laneSettings}
+                onActiveCell={handleBarActiveCell}
+                startCellId={timelineSelectedCellId}
+                coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                videoPaneOnScreen={showVideoPane}
+                timelineDurationSec={timelineDurationSec}
+                virtualSoundingCellId={virtualSoundingCellId}
+                freeTiming={timingMode === "audioFirst"}
+                lane={activeLane}
+              />
+            ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
             {footnoteViewMode === "tray" && (
               <FootnotesTray
@@ -17715,33 +17886,18 @@ export function ProjectWorkspace() {
           (() => {
             // Audio playback chrome belongs to the open file — hide it on
             // overlay surfaces (Terminology / Agent / …) even if the audio
-            // lens is still selected from a prior editor visit.
+            // lens is still selected from a prior editor visit. AQU-1758: the
+            // media view has its own strip, so this bar is only for a book an
+            // extension editor draws in its own Audio lens.
             const showAudioToolbar =
               lens === "audio" && centerSurface === "editor" && !!project
+            // Media redesign, layout: the media view has no footer. Its
+            // transport is in its top bar and its status in the ring there.
+            if (timelineStacked && centerSurface === "editor") return null
             const syncStatus = (
               <WorkspaceStatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                left={
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence
-                      store={presenceStore}
-                      onJumpToPeer={handleJumpToPresencePeer}
-                      resolveCellLabel={resolvePresenceCellLabel}
-                    />
-                    <SyncStatusIndicator status={fileSyncStatus} />
-                    <OutboxSyncIndicator
-                      pendingCount={Math.max(0, outboxPending - outboxFailed)}
-                      failureStreak={outboxFailures}
-                      failedCount={outboxFailed}
-                      // SUB-9: all-status feed so quarantined refusals render in
-                      // the inspector (with reason + Retry/Discard) instead of
-                      // the popover claiming "all caught up" beside a failed pill.
-                      records={outboxInspectorRecords}
-                      onRetryNow={outboxFlushNow}
-                      projectId={project?.id}
-                    />
-                  </div>
-                }
+                left={mediaStatusSync}
               />
             )
             const fileStats = showFileStats ? (
@@ -17765,9 +17921,7 @@ export function ProjectWorkspace() {
                   // bar names the voice the sounding line speaks with HERE.
                   settings={tts.laneSettings}
                   onActiveCell={handleBarActiveCell}
-                  // AQU-1642 follow-up: in the Audio view, Play starts from the
-                  // verse last selected or stopped.
-                  startCellId={audioLens ? audioViewPlace.startCellId : timelineSelectedCellId}
+                  startCellId={timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
                   // AQU-646 stage 3h: what the bar reads on a file with timings
@@ -17948,7 +18102,7 @@ export function ProjectWorkspace() {
             })
             setRecordingCellId(null)
             if (!rowId) return
-            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            if (timelineStacked && !dock.view.isShowing("text")) dock.show("text")
             // A frame later: during this click the recorder is still open, and
             // its focus trap would take the caret straight back.
             requestAnimationFrame(() => {
@@ -18248,7 +18402,9 @@ export function ProjectWorkspace() {
           // AQU-1978: the live lanes' languages, from the lane rows — not the
           // retired `targetLanes` / `archivedLanes` keys (see VoiceSidebar).
           targetLanes={liveLaneLanguages}
-          cells={audioMergedCells}
+          // AQU-1758: a dubbing file's takes live on its audio cues, and the
+          // timeline's take menu seeds the dialog with one of those.
+          cells={cloneVoiceCells}
           roleLevel={project.syncRole?.level ?? null}
           leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />

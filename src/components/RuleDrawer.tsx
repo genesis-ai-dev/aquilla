@@ -165,22 +165,22 @@ export function RuleDrawer({
       </div>
 
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        <AppTooltip content={fixAllBlockedReason ?? t("rules.drawer.tryToFixAllTooltip")}>
-          <span className="inline-flex">
-            <Button
-              size="sm"
-              disabled={fixAllDisabled}
-              onClick={() => void proposeForAll(
-                infractionCells.map(({ cell }) => cell!),
-                passingCells,
-              )}
-            >
-              {busy === "all"
-                ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" />
-                : <Wand2 className="me-1 h-3.5 w-3.5" />}
-              {busy === "all" ? t("rules.drawer.proposingFix") : t("rules.surface.tryToFixAllButton")}
-            </Button>
-          </span>
+        {/* Its words name it, so no hover; why it is greyed out opens on a
+            click on it (AQU-2260). */}
+        <AppTooltip content={fixAllBlockedReason}>
+          <Button
+            size="sm"
+            disabled={fixAllDisabled}
+            onClick={() => void proposeForAll(
+              infractionCells.map(({ cell }) => cell!),
+              passingCells,
+            )}
+          >
+            {busy === "all"
+              ? <Loader2 className="me-1 h-3.5 w-3.5 animate-spin" />
+              : <Wand2 className="me-1 h-3.5 w-3.5" />}
+            {busy === "all" ? t("rules.drawer.proposingFix") : t("rules.surface.tryToFixAllButton")}
+          </Button>
         </AppTooltip>
         <Button variant="ghost" size="sm" onClick={onAmendRule}>{t("rules.drawer.amendRuleButton")}</Button>
       </div>
@@ -219,20 +219,18 @@ export function RuleDrawer({
                     <div className="truncate font-medium">{cell!.translated.slice(0, 60)}...</div>
                   </button>
                   <AppTooltip content={fixBlockedReason ?? t("rules.drawer.fixCellTooltip")}>
-                    <span className="inline-flex">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-1"
-                        disabled={fixBlockedReason != null || busy != null}
-                        aria-label={t("rules.drawer.fixCellAriaLabel")}
-                        onClick={() => void proposeForCell(cell!)}
-                      >
-                        {busy === infraction.cellId
-                          ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : <Sparkles className="h-3 w-3" />}
-                      </Button>
-                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1"
+                      disabled={fixBlockedReason != null || busy != null}
+                      aria-label={t("rules.drawer.fixCellAriaLabel")}
+                      onClick={() => void proposeForCell(cell!)}
+                    >
+                      {busy === infraction.cellId
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <Sparkles className="h-3 w-3" />}
+                    </Button>
                   </AppTooltip>
                 </li>
               ))}

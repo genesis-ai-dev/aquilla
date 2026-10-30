@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react"
 import { CheckCircle2, Sparkles, Download } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge, badgeVariants } from "@/components/ui/badge"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import {
   clearTranscribeStatus,
@@ -63,24 +63,27 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
   if (flashedDone) {
     const secs = (flashedDone.durationMs / 1000).toFixed(1)
     const words = t("terminology.candidates.ngramLength", { count: flashedDone.wordCount })
-    const tooltip = onJumpToTranscript
-      ? t("workspace.transcribeBadge.doneTooltipClickable", { words, secs })
-      : t("workspace.transcribeBadge.doneTooltip", { words, secs })
-    return (
-      <AppTooltip content={tooltip}>
-        <button
-          type="button"
-          onClick={onJumpToTranscript}
-          className={cn(
-            badgeVariants({ variant: "secondary" }),
-            PILL,
-            "text-emerald-700 dark:text-emerald-400",
-          )}
-        >
-          <CheckCircle2 className="h-2.5 w-2.5" />
-          <span className="tabular-nums">{flashedDone.wordCount}w</span>
+    const said = t("workspace.transcribeBadge.doneTooltip", { words, secs })
+    const pill = (
+      <>
+        <CheckCircle2 className="h-2.5 w-2.5" />
+        <span className="tabular-nums">{flashedDone.wordCount}w</span>
+      </>
+    )
+    const pillClass = cn(badgeVariants({ variant: "secondary" }), PILL, "text-emerald-700 dark:text-emerald-400")
+    // AQU-2260: never a hover. With a transcript to show, a click goes there
+    // (its name says what it did); without one, a click says what it did.
+    if (onJumpToTranscript) {
+      return (
+        <button type="button" onClick={onJumpToTranscript} aria-label={said} className={pillClass}>
+          {pill}
         </button>
-      </AppTooltip>
+      )
+    }
+    return (
+      <NoteOnClick note={said} className={pillClass}>
+        {pill}
+      </NoteOnClick>
     )
   }
 
@@ -89,7 +92,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
   if (status.kind === "loading") {
     const pct = status.total > 0 ? Math.round((status.loaded / status.total) * 100) : null
     return (
-      <AppTooltip content={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}>
+      <NoteOnClick note={pct != null ? `Downloading transcription model (${pct}%)…` : "Loading transcription model…"}>
         <Badge
           variant="secondary"
           className={cn(PILL, "text-amber-700 dark:text-amber-300")}
@@ -97,29 +100,28 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
           {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
           {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>{t("workspace.transcribeBadge.loadShort")}</span>}
         </Badge>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
 
   if (status.kind === "transcribing" && status.waiting === "model") {
     return (
-      <AppTooltip content={t("workspace.transcribeBadge.waitingForModelTooltip")}>
+      <NoteOnClick note={t("workspace.transcribeBadge.waitingForModelTooltip")}>
         <Badge variant="secondary" className={cn(PILL, "text-amber-700 dark:text-amber-300")}>
           <Spinner className="size-2.5" />
           <span>{t("workspace.transcribeBadge.waitingForModelPill")}</span>
         </Badge>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
 
   if (status.kind === "transcribing") {
     return (
-      <AppTooltip content={t("workspace.transcribeBadge.transcribingTooltip")}>
-        <Badge variant="secondary" className={cn(PILL, "text-primary")}>
-          <Sparkles className="h-2.5 w-2.5 animate-pulse" />
-          <span>{t("workspace.transcribeBadge.transcribingPill")}</span>
-        </Badge>
-      </AppTooltip>
+      // Its words say it all ("Transcribing audio…" only restated them).
+      <Badge variant="secondary" className={cn(PILL, "text-primary")}>
+        <Sparkles className="h-2.5 w-2.5 animate-pulse" />
+        <span>{t("workspace.transcribeBadge.transcribingPill")}</span>
+      </Badge>
     )
   }
 

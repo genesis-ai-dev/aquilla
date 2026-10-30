@@ -34,7 +34,8 @@ import {
 } from "@/lib/audio/change-voice"
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
@@ -910,8 +911,8 @@ function TargetAudioChip({
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
   // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
-  // much of this chip double-sounds — not just prose. Native `title` can't be
-  // styled, hence AppTooltip. Secondary notes keep their SUB-48 wording.
+  // much of this chip double-sounds — not just prose. Secondary notes keep
+  // their SUB-48 wording. They are the take's details in its right-click menu.
   const tipLines: ReactNode[] = []
   if (overflow === "overlap") {
     if (tailTrespass) {
@@ -971,7 +972,18 @@ function TargetAudioChip({
       <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
-  const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
+  // AQU-2260 (Sam, Oct 29, third pass): what a take is — its kind and length,
+  // an overlap, a missing or unsaved clip, why it is drawn short — sits at the
+  // top of its right-click menu as plain lines. Hover shows nothing: a click on
+  // the chip moves the playhead, so it cannot open a note.
+  const takeDetails = (
+    <div
+      data-testid={`tl-take-details-${testKey}`}
+      className="flex flex-col gap-0.5 px-2 py-1.5 text-xs text-muted-foreground"
+    >
+      {tipLines}
+    </div>
+  )
 
   const chipButton = (
     <button
@@ -1223,9 +1235,12 @@ function TargetAudioChip({
           AQU-924 sync-failed badge (never reached the server; needs a retry) >
           loading spinner (the readiness gate is parked on this verse) >
           SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
+      {/* AQU-2260: no hover; the glyph is named for a screen reader, and
+          what it means is in the take's right-click menu. */}
       {showLeftGlyph && (
         <span
-          title={
+          role="img"
+          aria-label={
             leftGlyph === "missing"
               ? MISSING_AUDIO_MESSAGE
               : leftGlyph === "syncFailed"
@@ -1389,15 +1404,19 @@ function TargetAudioChip({
     </button>
   )
   if (!hasMenu) {
+    // Nothing to do with the take here, so its menu holds only what it is.
     return (
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        {chipButton}
-      </AppTooltip>
+      <ContextMenu>
+        <ContextMenuTrigger render={chipButton} />
+        <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+          {takeDetails}
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
   // AQU-1767 (Sam, 2026-10-14): a right-click on a take offers what can be
-  // done with it. The menu's root sits outside the tooltip and its trigger
-  // renders the chip itself, so the tooltip and the menu share one element.
+  // done with it, under what it is (AQU-2260). The trigger renders the chip
+  // itself.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
   // AQU-2026: the per-line Change voice. The state is read off the line, not
@@ -1431,10 +1450,10 @@ function TargetAudioChip({
         setMenuSplitAtMs(at?.ok ? at.atMs : null)
       }}
     >
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        <ContextMenuTrigger render={chipButton} />
-      </AppTooltip>
+      <ContextMenuTrigger render={chipButton} />
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {takeDetails}
+        <ContextMenuSeparator />
         {canSplit && (
           <ContextMenuItem
             data-testid="tl-take-menu-split"
@@ -1833,16 +1852,27 @@ export function TargetAudioLane({
           </div>
         )
       })}
+      {/* What the pause is opens on a click of it, never a hover (AQU-2260).
+          The press stops here, so it never seeks the lane under it. */}
       {leadGaps.map(({ cellId, leftPx, widthPx }) => (
-        <AppTooltip key={`lead-${cellId}`} content={t("editor.timeline.takeLeadPause")}>
-          <div
-            role="img"
-            aria-label={t("editor.timeline.takeLeadPause")}
-            data-testid={`tl-target-lead-${cellId}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
+        <Popover key={`lead-${cellId}`}>
+          <PopoverTrigger
+            nativeButton={false}
+            render={
+              <div
+                aria-label={t("editor.timeline.takeLeadPause")}
+                data-testid={`tl-target-lead-${cellId}`}
+                style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer border border-border/60 bg-muted/50`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              />
+            }
           />
-        </AppTooltip>
+          <PopoverContent sideOffset={6} className={NOTE_CONTENT_CLASS}>
+            {t("editor.timeline.takeLeadPause")}
+          </PopoverContent>
+        </Popover>
       ))}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div

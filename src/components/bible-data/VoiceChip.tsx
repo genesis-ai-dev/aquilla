@@ -8,8 +8,10 @@
 // AQU-1692: a "?" after a speaker the data is unsure of, and a warning sign
 // when a speech in the verse has a disputed boundary.
 //
-// Hover opens the details popover, and so does keyboard focus: hover is never
-// the only way in. Focus stays on the chip, and Tab moves into the popover.
+// A click opens the details popover (Enter or Space from the keyboard). It
+// used to open on hover and on keyboard focus; AQU-2260 (Oct 29) ended that:
+// nothing opens on hover, and a card that opened as focus passed over it
+// floated over the rows the same way.
 
 import { Fragment } from "react"
 import { AlertTriangle } from "lucide-react"
@@ -21,7 +23,6 @@ import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
 import { VoiceDetails } from "./VoiceDetails"
 import type { CellVoiceView } from "./voices-context"
-import { useHoverFocusPopover } from "./use-hover-focus-popover"
 import { narratorKey } from "./voice-text"
 
 interface VoiceChipProps {
@@ -32,8 +33,6 @@ interface VoiceChipProps {
 export function VoiceChip({ view, className }: VoiceChipProps) {
   const t = useT()
   const fmt = useFormat()
-  // AQU-1689: the hover-or-focus behavior is shared with Who's Who's mention words.
-  const popover = useHoverFocusPopover()
   const { context, voices, chip } = view
   if (!chip) return null
 
@@ -59,11 +58,8 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
   })
 
   return (
-    <Popover open={popover.open} onOpenChange={popover.onOpenChange}>
+    <Popover>
       <PopoverTrigger
-        openOnHover
-        delay={300}
-        closeDelay={150}
         data-testid="voice-chip"
         data-voice-approximate={voices.approximate ? "true" : undefined}
         data-voice-disputed={chip.disputed ? "true" : undefined}
@@ -74,7 +70,6 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
           "hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           className,
         )}
-        {...popover.triggerProps}
       >
         {voices.approximate && (
           <span aria-hidden="true" className="me-0.5">
@@ -118,8 +113,8 @@ export function VoiceChip({ view, className }: VoiceChipProps) {
         ))}
         {chip.more > 0 && <span className="ms-1">{t("bibleData.voices.more", { count: chip.more })}</span>}
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="start" className="w-80" {...popover.contentProps}>
-        <VoiceDetails id={popover.contentId} view={view} nameOf={nameOf} />
+      <PopoverContent side="bottom" align="start" className="w-80">
+        <VoiceDetails view={view} nameOf={nameOf} />
       </PopoverContent>
     </Popover>
   )

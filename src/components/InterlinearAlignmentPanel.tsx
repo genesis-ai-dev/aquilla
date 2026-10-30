@@ -27,9 +27,10 @@
  */
 
 import { useMemo } from "react"
-import { Check, X, HelpCircle } from "lucide-react"
+import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   alignCell,
@@ -164,8 +165,9 @@ function AlignmentRow({
       </AppTooltip>
 
       {/* Confidence pill — only for a link the model currently proposes */}
+      {/* What the number is opens on a click of it, never a hover (AQU-2260). */}
       {modelled && (
-        <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
+        <NoteOnClick note={t("importExport.preview.confidencePercent", { percent: pct })} className="shrink-0">
           <span
             className={cn(
               "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
@@ -176,17 +178,16 @@ function AlignmentRow({
           >
             {pct}%
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )}
 
       {/* Action buttons — only when not already decided */}
       {!confirmed && !invalidated && editable && (
         <>
-          {/* AQU-240: tooltip/aria-label explains that confirming teaches the glosser */}
-          <AppTooltip
-            content={t("workspace.alignment.confirmTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
-            className="max-w-xs"
-          >
+          {/* AQU-240: the aria-label explains that confirming teaches the
+              glosser. AQU-2260: the hover only names it; the section's (i)
+              says what ✓ and ✕ do. */}
+          <AppTooltip content={t("common.confirm")}>
             <Button
               type="button"
               variant="ghost"
@@ -198,11 +199,9 @@ function AlignmentRow({
               <Check />
             </Button>
           </AppTooltip>
-          {/* AQU-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
-          <AppTooltip
-            content={t("workspace.alignment.rejectTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
-            className="max-w-xs"
-          >
+          {/* AQU-240: the aria-label explains that invalidating penalizes
+              incorrect suggestions; the hover only names it (AQU-2260). */}
+          <AppTooltip content={t("agent.reject")}>
             <Button
               type="button"
               variant="ghost"
@@ -220,19 +219,17 @@ function AlignmentRow({
           controls say so rather than accepting a click they will drop.
           Disabled-with-a-reason, per 09-design-and-ux "Never disable silently". */}
       {!confirmed && !invalidated && !editable && (
-        <AppTooltip content={t("workspace.alignment.contributorRequired")} className="max-w-xs">
-          <span className="inline-flex shrink-0">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              disabled
-              aria-label={t("workspace.alignment.contributorRequired")}
-              className="shrink-0 text-muted-foreground"
-            >
-              <Check />
-            </Button>
-          </span>
+        <AppTooltip content={t("workspace.alignment.contributorRequired")} disabledTriggerClassName="shrink-0">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            disabled
+            aria-label={t("workspace.alignment.contributorRequired")}
+            className="shrink-0 text-muted-foreground"
+          >
+            <Check />
+          </Button>
         </AppTooltip>
       )}
       {confirmed && (
@@ -286,16 +283,16 @@ function OriginalWordRow({ word }: { word: OriginalWordAlignment }) {
             </span>
             {/* i18n-exempt "lemma" is an AlignmentBasis tag, not copy */}
             {word.basis === "lemma" && (
-              <AppTooltip
-                content={t("workspace.alignment.originalViaLemmaTooltip", {
+              <NoteOnClick
+                note={t("workspace.alignment.originalViaLemmaTooltip", {
                   lemma: word.lemma ?? word.surface,
                 })}
-                className="max-w-xs"
+                className="ml-1.5"
               >
-                <span className="ml-1.5 rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
+                <span className="rounded-md bg-amber-500/15 px-1.5 py-px text-[9px] font-medium text-amber-700 dark:text-amber-400">
                   {t("workspace.alignment.originalViaLemma")}
                 </span>
-              </AppTooltip>
+              </NoteOnClick>
             )}
           </>
         ) : (
@@ -325,11 +322,13 @@ function OriginalLanguageSection({ words }: { words: OriginalWordAlignment[] }) 
         <span className="text-[11px] text-muted-foreground/60">
           {t("workspace.alignment.originalSub")}
         </span>
-        <AppTooltip content={t("workspace.alignment.originalHelpTooltip")} className="max-w-xs">
-          <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-            <HelpCircle className="h-3 w-3" />
-          </span>
-        </AppTooltip>
+        <InfoNote
+          label={t("common.aboutAria", { name: t("workspace.alignment.originalHeading") })}
+          className="text-muted-foreground/60"
+          iconClassName="h-3 w-3"
+        >
+          {t("workspace.alignment.originalHelpTooltip")}
+        </InfoNote>
       </div>
       <div className="flex flex-col gap-0.5">
         {words.map((word) => (
@@ -472,14 +471,13 @@ export function InterlinearAlignmentPanel({
           <span className="text-xs font-medium text-muted-foreground">
             {t("editor.bt.alignment")}
           </span>
-          <AppTooltip
-            content={t("workspace.alignment.helpTooltipShort")}
-            className="max-w-xs"
+          <InfoNote
+            label={t("common.aboutAria", { name: t("editor.bt.alignment") })}
+            className="text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           >
-            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-              <HelpCircle className="h-3 w-3" />
-            </span>
-          </AppTooltip>
+            {t("workspace.alignment.helpTooltipShort")}
+          </InfoNote>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
           {t("workspace.alignment.insufficientData")}
@@ -510,14 +508,13 @@ export function InterlinearAlignmentPanel({
           <span className="text-xs font-medium text-muted-foreground">
             {t("editor.bt.alignment")}
           </span>
-          <AppTooltip
-            content={t("workspace.alignment.helpTooltipFull")}
-            className="max-w-xs"
+          <InfoNote
+            label={t("common.aboutAria", { name: t("editor.bt.alignment") })}
+            className="text-muted-foreground/60"
+            iconClassName="h-3 w-3"
           >
-            <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
-              <HelpCircle className="h-3 w-3" />
-            </span>
-          </AppTooltip>
+            {t("workspace.alignment.helpTooltipFull")}
+          </InfoNote>
         </div>
       )}
 

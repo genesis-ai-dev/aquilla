@@ -118,3 +118,42 @@ describe("OverflowMenu headings", () => {
     expect(onClick).toHaveBeenCalledOnce()
   })
 })
+
+// AQU-2260 (Sam, Oct 29): a menu item's (i) — what it does, or why it is
+// greyed out — opens its text in place under the item on CLICK, and shuts on a
+// second click. It never activates the item, and hovering shows nothing.
+describe("OverflowMenu item (i)", () => {
+  async function openMenu(items: OverflowMenuItem[]) {
+    render(<OverflowMenu ariaLabel="File options" items={items} />)
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+  }
+
+  it("opens an item's description in place, without running the item", async () => {
+    const onClick = vi.fn()
+    await openMenu([{ id: "draft", label: "Draft as you read", description: "Drafts each line as you reach it.", onClick, testId: "draft" }])
+    const info = screen.getByRole("button", { name: "About Draft as you read" })
+    await userEvent.hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const text = document.getElementById(info.getAttribute("aria-controls")!)!
+    expect(text).toHaveAttribute("data-open", "false")
+    await userEvent.click(info)
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveTextContent("Drafts each line as you reach it.")
+    expect(onClick).not.toHaveBeenCalled()
+    await userEvent.click(info)
+    expect(text).toHaveAttribute("data-open", "false")
+    // The item still names itself plainly, and describes itself to a reader.
+    expect(screen.getByRole("menuitem", { name: "Draft as you read" })).toHaveAccessibleDescription("Drafts each line as you reach it.")
+  })
+
+  it("says why a greyed-out item is off behind its (i), not on hover", async () => {
+    await openMenu([{ id: "captions", label: "Attach captions", disabled: true, disabledReason: "Track editing is off for this project.", testId: "captions" }])
+    const item = screen.getByRole("menuitem", { name: "Attach captions" })
+    expect(item).toHaveAttribute("aria-disabled", "true")
+    await userEvent.hover(item)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const info = screen.getByRole("button", { name: "About Attach captions" })
+    await userEvent.click(info)
+    expect(document.getElementById(info.getAttribute("aria-controls")!)).toHaveTextContent("Track editing is off for this project.")
+  })
+})

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getOrCreateMyOrg, fetchOrgRoster, addOrgMember, addOrgMembers, removeOrgMember,
+  getMyOrg, fetchOrgRoster, addOrgMember, addOrgMembers, removeOrgMember,
   listOrgMemberProjects, type MyOrg, type OrgMember, type OrgMemberProject,
 } from "@/lib/frontier/orgs";
 import type { MemberGrantResult } from "@/lib/frontier/members";
@@ -13,7 +13,9 @@ import { useFrontierSession } from "./useFrontierSession";
  *   - session-loading: account hydration in flight (no JWT yet)
  *   - loading:        JWT present, /orgs/me fetch in flight
  *   - error:          fetch finished with an error
- *   - success:        fetch finished with data
+ *   - success:        fetch finished; `org` is null when the caller owns no
+ *                     personal workspace (AQU-2259: the read no longer
+ *                     creates one)
  *
  * Distinguishing session-loading from org-loading matters for the UX —
  * "Waiting for session…" is a different message than "Loading members…",
@@ -25,7 +27,7 @@ export type OrgState =
   | { kind: "session-loading" }
   | { kind: "loading" }
   | { kind: "error"; error: string }
-  | { kind: "success"; org: MyOrg };
+  | { kind: "success"; org: MyOrg | null };
 
 export interface UseOrg {
   state: OrgState;
@@ -64,7 +66,7 @@ export function useOrg(): UseOrg {
     }
     if (aliveRef.current) setState({ kind: "loading" });
     try {
-      const org = await getOrCreateMyOrg(jwt);
+      const org = await getMyOrg(jwt);
       if (aliveRef.current) setState({ kind: "success", org });
     } catch (e) {
       if (aliveRef.current) {

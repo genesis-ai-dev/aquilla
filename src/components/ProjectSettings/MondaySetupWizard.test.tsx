@@ -156,6 +156,26 @@ describe("step 1: which board", () => {
   })
 })
 
+// AQU-2260 (Sam, Oct 29, option 2B): an account can hold hundreds of boards,
+// so the board list gets a search box that also matches the workspace.
+describe("step 1: the board list is searchable", () => {
+  it("narrows the boards to those whose name or workspace contains what is typed", async () => {
+    mocked.fetchMondayBoards.mockResolvedValue([
+      { id: "b1", name: "Translation Tracker", workspace: null },
+      { id: "b2", name: "Other board", workspace: { id: "w9", name: "Biblica" } },
+      { id: "b3", name: "Sprint planning", workspace: null },
+    ])
+    renderWizard()
+    await toBoard()
+    fireEvent.click(screen.getByRole("button", { name: /^change$/i }))
+    fireEvent.click(await screen.findByRole("combobox", { name: /monday board/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "biblica" } })
+    expect(await screen.findByRole("option", { name: /Other board/ })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /Sprint planning/ })).toBeNull()
+  })
+})
+
 describe("step 2: what the board shows", () => {
   it("ticks the recommended columns and what's on the board; Aquilla ID is ticked and locked", async () => {
     renderWizard()

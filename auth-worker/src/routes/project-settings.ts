@@ -114,6 +114,7 @@ import { markProjectSyncLinksDirty } from "../../../db/shared/progress-sync-dirt
 import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
+import { DRAFTING_SETTINGS_KEY } from "../../../db/shared/drafting-settings"
 import {
   includesRetiredLaneSettings,
   preserveRetiredLaneSettings,
@@ -624,6 +625,17 @@ projectSettings.on(
         if (JSON.stringify(before) !== JSON.stringify(rawVoiceOverrides)) {
           return c.json({ error: problem }, 400)
         }
+      }
+    }
+
+    // AQU-2259: the team's AI drafting settings. Typed fields only, and never
+    // an AI key: every member reads this blob. Same rule as the two above —
+    // a malformed value already stored rides along unchanged.
+    const rawDrafting = (body.settings as Record<string, unknown>)[DRAFTING_SETTINGS_KEY]
+    if (rawDrafting !== undefined) {
+      const problem = validateSettingsKeyValue(DRAFTING_SETTINGS_KEY, rawDrafting)
+      if (problem && JSON.stringify(stored.settings[DRAFTING_SETTINGS_KEY]) !== JSON.stringify(rawDrafting)) {
+        return c.json({ error: problem }, 400)
       }
     }
 

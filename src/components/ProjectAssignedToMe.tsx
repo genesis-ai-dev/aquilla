@@ -14,7 +14,6 @@ import { AssignmentLaneBadge } from "@/components/AssignmentLaneBadge"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
@@ -111,66 +110,69 @@ export function ProjectAssignedToMe({
             assignments.map((a) => {
               const pct = progressPercent(a.cellsDone, a.cellsTotal)
               return (
-                <AppTooltip
+                // AQU-2260 (Sam, Oct 29): the row says nothing on hover. The
+                // assigner's note, which only the hover used to carry, is
+                // printed in the row.
+                <button
                   key={a.assignmentId}
-                  content={
-                    a.note
-                      ? t("workspace.assignedToMe.jumpToWithNoteTooltip", { scope: a.scopeLabel, note: a.note })
-                      : t("workspace.assignedToMe.jumpToTooltip", { scope: a.scopeLabel })
-                  }
+                  type="button"
+                  onClick={() => handleRowClick(a)}
+                  className={cn(
+                    "group w-full rounded px-2 py-1.5 text-start transition-colors hover:bg-muted/60",
+                    !onJumpToAssignment && "cursor-default",
+                  )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => handleRowClick(a)}
-                    className={cn(
-                      "group w-full rounded px-2 py-1.5 text-start transition-colors hover:bg-muted/60",
-                      !onJumpToAssignment && "cursor-default",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
-                        <AssignmentLaneBadge
-                          targetLang={a.targetLang}
-                          defaultLaneLabel={defaultLaneLabel}
-                          fallbackLabel={t("org.projectOverview.laneDefaultFallback")}
-                          className="h-4 px-1 text-[9px] leading-none"
-                        />
-                        {/* AQU-1969: a validate assignment's done count is
-                            this person's own approvals; say which kind it is. */}
-                        {a.kind === "validate" && (
-                          <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
-                            {t("org.validationProgress.kindChip")}
-                          </Badge>
-                        )}
-                      </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
-                    </div>
-                    {/* Progress bar. AQU-1764: done cells are VALIDATED
-                        cells — the shared palette's text-validated blue. */}
-                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
-                      <div
-                        className={`h-full rounded-full transition-[width] ${PROGRESS_BG.textValidated}`}
-                        style={{ width: `${pct}%` }}
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span className="truncate text-xs font-medium leading-tight">{a.scopeLabel}</span>
+                      <AssignmentLaneBadge
+                        targetLang={a.targetLang}
+                        defaultLaneLabel={defaultLaneLabel}
+                        fallbackLabel={t("org.projectOverview.laneDefaultFallback")}
+                        className="h-4 px-1 text-[9px] leading-none"
                       />
-                    </div>
-                    <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      {t("workspace.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal })}
-                      {a.deadline ? (
-                        <>
-                          {" · "}
-                          <DateTooltip
-                            value={a.deadline}
-                            label={t("org.assignedToMe.dueColumnLabel")}
-                            variant="deadline"
-                          >
-                            {`${t("org.assignedToMe.dueColumnLabel")} ${fmtDeadlineDate(a.deadline)}`}
-                          </DateTooltip>
-                        </>
-                      ) : null}
+                      {/* AQU-1969: a validate assignment's done count is
+                          this person's own approvals; say which kind it is. */}
+                      {a.kind === "validate" && (
+                        <Badge variant="outline" className="h-4 shrink-0 px-1 text-[9px] leading-none">
+                          {t("org.validationProgress.kindChip")}
+                        </Badge>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{pct}%</span>
+                  </div>
+                  {/* Progress bar. AQU-1764: done cells are VALIDATED
+                      cells — the shared palette's text-validated blue. */}
+                  <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full rounded-full transition-[width] ${PROGRESS_BG.textValidated}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {t("workspace.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal })}
+                    {a.deadline ? (
+                      <>
+                        {" · "}
+                        <DateTooltip
+                          value={a.deadline}
+                          label={t("org.assignedToMe.dueColumnLabel")}
+                          variant="deadline"
+                        >
+                          {`${t("org.assignedToMe.dueColumnLabel")} ${fmtDeadlineDate(a.deadline)}`}
+                        </DateTooltip>
+                      </>
+                    ) : null}
+                  </p>
+                  {a.note ? (
+                    <p
+                      className="mt-0.5 whitespace-pre-wrap break-words text-[10px] text-muted-foreground"
+                      data-testid={`assigned-note-${a.assignmentId}`}
+                    >
+                      {a.note}
                     </p>
-                  </button>
-                </AppTooltip>
+                  ) : null}
+                </button>
               )
             })
           )}

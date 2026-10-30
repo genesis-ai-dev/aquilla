@@ -1216,7 +1216,9 @@ export class Workspace {
   /** The per-cell validation toggle. `aria-pressed="true"` means the current
    * user is one of the cell's active validators. */
   validationToggle(index: number): Locator {
-    return this.cellRow(index).getByRole("button", { name: /Validate|Validated/i }).first()
+    // Scoped to the validation column: since AQU-2260 the health ribbon is a
+    // button too ("100% assurance · human validated") and comes first in the row.
+    return this.cellRow(index).getByTestId("validation-gutter").getByRole("button", { name: /Validate|Validated/i }).first()
   }
 
   /** Assert the current user has validated this cell (green self-validated). */
@@ -1277,7 +1279,7 @@ export class Workspace {
     // opacity: 0 when not hovered/focused, which makes them invisible to
     // Playwright's toBeVisible() check).
     await row.hover()
-    const validationButton = row.getByRole("button", { name: /Validate|Validated/i }).first()
+    const validationButton = row.getByTestId("validation-gutter").getByRole("button", { name: /Validate|Validated/i }).first()
     await expect(validationButton).toBeVisible({ timeout: 10_000 })
     // After validation, the validation button reports the current user's
     // validation through aria-pressed. This is a server-round-trip

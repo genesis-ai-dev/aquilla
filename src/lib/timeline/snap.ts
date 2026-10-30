@@ -68,22 +68,8 @@ export function snapSpan(
   }
 }
 
-// ── Preference (GLOBAL, not per file — snapping is an editing-mode choice) ──
-
-const SNAP_KEY = "aquilla:timelineSnap"
-
-export function loadSnapEnabled(): boolean {
-  try {
-    return localStorage.getItem(SNAP_KEY) !== "off"
-  } catch {
-    return true
-  }
-}
-
-export function saveSnapEnabled(on: boolean): void {
-  try {
-    localStorage.setItem(SNAP_KEY, on ? "on" : "off")
-  } catch {
-    /* private mode — just won't persist */
-  }
-}
+// ── Preference ──
+// Whether snapping is on is GLOBAL, not per file — it is an editing-mode
+// choice — and follows the person across devices: `timelineSnapPref` in
+// `src/lib/prefs/person-pref-list.ts` (AQU-2264). Its device key is still
+// `aquilla:timelineSnap`, "on" / "off".

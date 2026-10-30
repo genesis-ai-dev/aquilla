@@ -36,7 +36,6 @@ export const org = defineNamespace({
     "org.access.inspector.grantedBy": "by {name}",
     "org.access.inspector.manageAccess": "Manage access",
     "org.access.inspector.open": "Show access for {name}",
-    "org.access.inspector.thisProject": "this project",
     "org.access.inspector.loading": "Loading access…",
     "org.access.inspector.loadError": "Couldn't load this person's access.",
     "org.access.inspector.forbidden": "You can't see this person's access.",
@@ -45,9 +44,6 @@ export const org = defineNamespace({
     "org.access.scope.project": "project",
     "org.access.scope.lane": "lane",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
-    "org.roster.stillHasAccess": "They will still have {role} access through {path}.",
-    "org.roster.removeThere": "Remove at {path}",
-    "org.roster.countBreakdown": "({direct} direct · {inherited} inherited)",
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
     "org.access.page.treeView": "By scope",
@@ -180,7 +176,6 @@ export const org = defineNamespace({
     "org.orgHome.signedOut.description":
       "Your session has ended or you are not signed in. Sign in to access your projects and translation data.",
     "org.orgHome.loadingDashboard": "Loading dashboard",
-    "org.orgHome.selectOrgToCreateProject": "Select an organization to create a project",
 
     "org.orgHome.pendingInvitations.heading": "Pending invitations",
     "org.orgHome.pendingInvitations.invitedByAs": "Invited by {username} as",
@@ -213,7 +208,6 @@ export const org = defineNamespace({
     "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
     "org.orgHome.projectDirectoryError.description":
       "Projects shared with you and guest organizations may be missing from this view.",
-    "org.orgHome.noProjectsYet": "No projects yet.",
     // AQU-882: the all-organizations route's own org-list load failure —
     // distinct from projectDirectoryError above, which is the accessible-
     // projects/guest-org feed.
@@ -232,8 +226,6 @@ export const org = defineNamespace({
     "org.orgHome.organizationsPanel.noMatchingOrganizations": "No matching organizations.",
     "org.orgHome.organizationsPanel.projectCount": plural({ one: "{count} project", other: "{count} projects" }),
 
-    "org.orgHome.projectsPanel.filterPlaceholder": "Filter projects…",
-    "org.orgHome.projectsPanel.filterAria": "Filter projects by name",
     "org.orgHome.projectsPanel.clearFilterAria": "Clear project filter",
     "org.orgHome.projectsPanel.statusLabel": "Status",
     "org.orgHome.projectsPanel.statusFilterAria": "Project status filter",
@@ -265,12 +257,8 @@ export const org = defineNamespace({
     "org.orgHome.teamVisibilityRosterFloorHint":
       "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
 
-    "org.orgHome.lens.recentLabel": "Recently updated",
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
-    "org.orgHome.lens.recentEmpty": "No recently updated projects yet.",
     "org.orgHome.lens.attentionDescription": "Highest-priority projects by deadline, activity, and progress",
-    "org.orgHome.lens.attentionEmpty": "No projects need attention yet.",
-    "org.orgHome.lens.leastTranslatedLabel": "Least translated",
     "org.orgHome.lens.leastTranslatedDescription": "Projects with the lowest translation progress",
     "org.orgHome.lens.mostProgressLabel": "Most progress",
     "org.orgHome.lens.mostProgressDescription": "Projects with the highest translation progress",
@@ -280,11 +268,7 @@ export const org = defineNamespace({
     // "Org" column heading → common.org (identical text)
     "org.orgHome.table.languageHeader": "Language",
     "org.orgHome.table.translatedHeaderLabel": "Translated",
-    "org.orgHome.table.translatedHeaderDescription":
-      "Translated: percentage of cells with target-language content filled in.",
     "org.orgHome.table.validatedHeaderLabel": "Validated",
-    "org.orgHome.table.validatedHeaderDescription":
-      "Validated: percentage of cells marked validated by a reviewer.",
     // AQU-2178: the project overview's Languages table splits that one heading
     // in two — a language's validated TEXT under this one, its approved
     // recordings under org.projectOverview.audioValidated, whose tile on the
@@ -292,9 +276,6 @@ export const org = defineNamespace({
     // the pair reads alike wherever both are on screen.
     "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
-    "org.orgHome.table.audioHeaderDescription":
-      "Audio: percentage of cells with at least one recording attached.",
-    "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
     // Media redesign slice 1: a project whose languages all deliver audio has
     // no text to translate; its Translated cell shows a dash with this name.
@@ -316,31 +297,10 @@ export const org = defineNamespace({
     // "Project creator" tooltip → projectSettings.share.lockedHintCreator (identical text; see
     // org.membersPage.sourceProjectCreator's duplicate-exceptions.ts entry for the lowercase
     // badge-fragment sibling that stays distinct)
-    "org.membersPage.removeDirectAccessTooltip":
-      "Removes {username}'s direct project access. Access via org, team, or creator status is unaffected.",
     "org.membersPage.remove": "Remove",
-    "org.membersPage.revokeAllTooltip":
-      "Review every access path this member holds (direct, org, team), then revoke with typed confirmation.",
-    "org.membersPage.revokeAll": "Revoke all",
     "org.membersPage.rosterHiddenTitle": "Roster hidden",
-    "org.membersPage.rosterHiddenBody":
-      "This organization has restricted who can view the member list. Ask an owner or maintainer if you need access.",
-    "org.membersPage.currentMembersHeading": "Current members",
-    "org.membersPage.rosterHint":
-      "Everyone who has access to this project. Each row shows how they got it — direct invite, org membership, or team.",
-    "org.membersPage.noMembersYet": "No members yet.",
-    "org.membersPage.noDirectMembers": "No one has been added directly to this project yet.",
-    "org.membersPage.orgAccessHeading": "Organization members with access",
-    "org.membersPage.orgAccessSummary": plural({
-      one: "{count} person has access through their organization role — they were not added to this project directly. Remove them from the org to revoke.",
-      other: "{count} people have access through their organization role — they were not added to this project directly. Remove them from the org to revoke.",
-    }),
-    "org.membersPage.addMemberHeading": "Add member",
     "org.membersPage.allOrgMembersAdded": "All org members are already on this project.",
     "org.membersPage.addMembersAction": "add members to this project",
-    "org.membersPage.removeMemberTitle": "Remove member",
-    "org.membersPage.removeMemberDescription":
-      "Remove {username}'s direct {role} access to this project? Any access via org, team, or creator status is unaffected — use \"Revoke all\" to review every path.",
     "org.membersPage.accessRevokedTitle": "Access revoked",
     "org.membersPage.directGrantRemoved": "Direct grant for {username} has been removed.",
     "org.membersPage.noDirectGrantToRemove": "{username} had no direct grant to remove.",
@@ -599,8 +559,6 @@ export const org = defineNamespace({
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
     "org.projectOverview.downloadOriginals": "Download all originals",
-    "org.projectOverview.downloadOriginalsTooltip":
-      "Download every original imported source file as a zip",
     "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.importedOriginalsHeading": "Imported originals",
     "org.projectOverview.importedOriginalsListAria": "Imported original files",
@@ -755,20 +713,12 @@ export const org = defineNamespace({
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
-    "org.addLanguagePopover.triggerAriaLabel": "Add a target language lane",
-    "org.addLanguagePopover.heading": "Add a target language",
-    "org.addLanguagePopover.description":
-      "Registers a new lane on this project. Manage or remove lanes in project settings.",
-    "org.addLanguagePopover.loadingLanguages": "Loading languages…",
     // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    "org.addLanguagePopover.inputAriaLabel": "New target language",
     // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
     // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
     // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
     // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
-    "org.addLanguagePopover.loadError": "Couldn't load this project's languages. Try again.",
     "org.addLanguagePopover.conflictError": "Languages changed elsewhere. Reloaded — try adding again.",
-    "org.addLanguagePopover.forbiddenError": "You don't have permission to add languages to this project.",
     // generic save-failed error → projectSettings.languages.savingFailedGeneric (identical text)
 
     // -- CreditsPanel: org credits/usage panel --
@@ -923,17 +873,6 @@ export const org = defineNamespace({
 
     // -- ProjectsList: org-wide "all projects" list --
     "org.projectsList.signedOutTitle": "Sign in to see your projects",
-    "org.projectsList.signedOutBody":
-      "Your session has ended or you are not signed in. Sign in to access your projects.",
-    "org.projectsList.unreachableBanner": "Can't reach the server — project list unavailable.",
-    "org.projectsList.noFilterMatch": "No projects match your filter.",
-    "org.projectsList.noOrgProjectsYet": "No projects in this org yet.",
-    "org.projectsList.noOrgLabel": "No org",
-    "org.projectsList.externalOrgLabel": "External org",
-    "org.projectsList.sharedWithYouDescription": "Projects from organizations outside the current scope.",
-    "org.projectsList.shownOfTotal": "{visible} shown of {total}",
-    "org.projectsList.lensGroupAriaLabel": "Project list view",
-    "org.projectsList.viewLabel": "View",
     "org.projectsList.loadingLabel": "Loading projects",
 
     // -- OrgProjectsDataTable: org projects data table --
@@ -1168,15 +1107,9 @@ export const org = defineNamespace({
     "org.membersPanel.sourceViaGroup": "via group",
     // "creator" badge → org.memberAccessPanel.creatorGrantLabel (identical text)
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
-    "org.membersPanel.scopesToggleLabel": "Scopes",
-    "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
     // AQU-2054: a project lead can be limited to lanes, and can grant only
     // the lanes they hold. Someone who already has every lane stays read-only
     // for that caller, because changing them would remove other languages.
-    "org.membersPanel.leadEveryLane": "Every lane",
-    "org.membersPanel.leadLaneChangeHint": "This includes languages you don't hold, so it can't be changed here.",
-    "org.membersPanel.grantOnlyYourLanes": "You can grant only the lanes you hold. Lanes you don't hold stay as they are.",
-    "org.membersPanel.cannotGrantEveryLane": "Leave at least one lane. Clearing every lane would give access to every language.",
     "org.membersPanel.lanesLegend": "Lanes",
     "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
@@ -1543,7 +1476,6 @@ export const org = defineNamespace({
     "org.projectOverview.plan.previousUnit": "Previous unit",
     "org.projectOverview.plan.openFile": "Open {fileName} in editor",
     "org.projectOverview.plan.nextUnit": "Next unit",
-    "org.projectOverview.plan.openInEditor": "Open in the editor",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
@@ -1881,18 +1813,6 @@ export const org = defineNamespace({
         description: "Tooltip on a disabled role control for an inherited grant.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
       },
-      "org.roster.stillHasAccess": {
-        description: "Remove-member dialog: after removing the direct project grant, the person keeps access through a team or org grant.",
-        placeholders: { role: "Localized role label, e.g. \"Project lead\".", path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
-      },
-      "org.roster.removeThere": {
-        description: "Link in the remove-member dialog to the team or org page where the surviving grant can be removed.",
-        placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › BSB\"; never translated." },
-      },
-      "org.roster.countBreakdown": {
-        description: "Suffix after the project members heading splitting the total into direct and inherited members.",
-        placeholders: { direct: "Number of members with a grant on this project.", inherited: "Number of members whose access comes from a team or org." },
-      },
       "org.access.inherited.link": {
         description: "Link beside a disabled inherited role control; goes to the scope where the grant lives.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
@@ -2124,10 +2044,6 @@ export const org = defineNamespace({
         description:
           "Accessible name for the search input that filters the all-orgs organization list by name. The visible placeholder for the same field ends in an ellipsis; this accessible name must not.",
       },
-      "org.orgHome.projectsPanel.filterAria": {
-        description:
-          "Accessible name for the search input that filters the project list by name (and, on the all-orgs view, PM username). The visible placeholder for the same field ends in an ellipsis; this accessible name must not.",
-      },
       "org.orgHome.projectsPanel.clearFilterAria": {
         description: "Accessible name for the small × button that clears the project-list search field.",
       },
@@ -2152,10 +2068,6 @@ export const org = defineNamespace({
       "org.orgHome.projectsPanel.sortAria": {
         description: "Accessible name for the wrapper around the 'Sort by' label and project-lens select on OrgHome.",
       },
-      "org.orgHome.table.sourceTargetLanguageAria": {
-        description:
-          "Accessible name for the source→target language pair shown beneath a project's name in the project table row.",
-      },
       "org.orgHome.table.audioPctAria": {
         description: "Accessible name for a project row's 'has audio' percent cell in the project table.",
         placeholders: { pct: "Whole-number audio-coverage percentage, e.g. 50." },
@@ -2173,23 +2085,6 @@ export const org = defineNamespace({
       "org.guestOrgHome.emptyTitle": {
         description: "Empty-state title on the guest-org projects page when no projects in the guest org are shared with the caller.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
-      },
-      "org.membersPage.removeDirectAccessTooltip": {
-        description:
-          "Tooltip on a member row's Remove button, explaining exactly what removing a direct grant does and doesn't affect.",
-        placeholders: { username: "The member's username — not translated." },
-      },
-      "org.membersPage.orgAccessSummary": {
-        description:
-          "Summary line above the org-access-only member section, explaining why these people aren't listed as direct project members.",
-        placeholders: { count: "Number of members who hold access only via their organization role." },
-      },
-      "org.membersPage.removeMemberDescription": {
-        description: "Confirmation-dialog body when removing a member's direct project grant.",
-        placeholders: {
-          username: "The member's username — not translated.",
-          role: "The member's current role display name (e.g. 'Maintainer'), already localized.",
-        },
       },
       "org.membersPage.directGrantRemoved": {
         description:
@@ -2444,10 +2339,6 @@ export const org = defineNamespace({
         description:
           "Button on the project-overview imported-originals card that downloads every stored original as a zip. Distinct from Download CSV, which is the plan progress table.",
       },
-      "org.projectOverview.downloadOriginalsTooltip": {
-        description:
-          "Tooltip on Download all originals explaining that the zip contains the raw imported source files, not a translation-injected export.",
-      },
       "org.projectOverview.importedOriginalsHeading": {
         description:
           "Heading of the project-overview card that lists imported source files a PM can download as originals. Distinct from the Plan board, which is progress, not assets.",
@@ -2641,14 +2532,6 @@ export const org = defineNamespace({
         description:
           "Error shown under the Data-egress permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
-      "org.addLanguagePopover.triggerAriaLabel": {
-        description:
-          "Accessible name for the icon-only '+ Language' trigger button on an OrgHome project row that opens the add-language popover.",
-      },
-      "org.addLanguagePopover.inputAriaLabel": {
-        description:
-          "Accessible name for the language-tag text input inside the add-language popover (no visible form label, just a placeholder example).",
-      },
       "org.setupChecklist.dismissAriaLabel": {
         description:
           "Accessible name for the small × button that permanently dismisses the org-setup checklist for this org.",
@@ -2765,22 +2648,6 @@ export const org = defineNamespace({
           "shared DataTableRowActionsButton convention distinct in wording from " +
           "org.orgProjectsDataTable.moreActionsAriaLabel's 'More actions for' tables.",
         placeholders: { name: "The row's subject — a username, project name, or lane label — not translated." },
-      },
-      "org.projectsList.shownOfTotal": {
-        description:
-          "Subheading under the projects list heading when a filter or lens narrows the visible rows, showing how many of the total are currently shown.",
-        placeholders: {
-          visible: "Count of projects currently visible after filtering/the active lens.",
-          total: "Total count of projects in scope before filtering.",
-        },
-      },
-      "org.projectsList.lensGroupAriaLabel": {
-        description:
-          "Accessible name for the row of lens buttons (Recently updated / Needs attention / Overdue / Least translated) above the all-orgs projects list.",
-      },
-      "org.projectsList.viewLabel": {
-        description:
-          "Label preceding the lens picker (Recently updated / Needs attention / Overdue / Least translated) above the all-orgs projects list.",
       },
       "org.orgProjectsDataTable.actionsColumnSrOnly": {
         description:
@@ -3551,10 +3418,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.nextUnit": {
         description: "Tooltip on the down arrow that steps to the next unit.",
         maxLength: 20,
-      },
-      "org.projectOverview.plan.openInEditor": {
-        description: "Tooltip on the detail panel's title and on a chapter card's title; each opens what it names in the editor.",
-        maxLength: 30,
       },
       "org.projectOverview.plan.targetDate": {
         description: "Label for the date a manager plans this unit to be finished by.",

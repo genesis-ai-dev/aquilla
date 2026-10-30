@@ -22,36 +22,16 @@
  * partially-written localStorage reads as the format the client asked for.
  *
  * Key schema: `aq.recording-format.v1` (value `"webm"`; absent means WAV).
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
-
-const STORAGE_KEY = "aq.recording-format.v1"
+import { recorderFormatPref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
 export type RecordingFormat = "wav" | "webm"
-
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: RecordingFormat | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): RecordingFormat {
-  if (typeof localStorage === "undefined") return "wav"
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "webm" ? "webm" : "wav"
-  } catch {
-    return "wav"
-  }
-}
-
-function peek(): RecordingFormat {
-  if (cached === undefined) cached = read()
-  return cached
-}
 
 /**
  * The format the next take should be captured in (plain read for non-React
@@ -59,35 +39,19 @@ function peek(): RecordingFormat {
  * mid-take flip cannot change bytes already captured.
  */
 export function getRecordingFormatPref(): RecordingFormat {
-  return peek()
+  return recorderFormatPref.get()
 }
 
 export function setRecordingFormatPref(format: RecordingFormat): void {
-  cached = format
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (format === "webm") localStorage.setItem(STORAGE_KEY, "webm")
-      else localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
+  recorderFormatPref.set(format)
 }
 
 /** Reactive read of the capture-format preference. */
 export function useRecordingFormatPref(): RecordingFormat {
-  return useSyncExternalStore(subscribe, peek, () => "wav" as const)
+  return usePersonPref(recorderFormatPref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingFormatPrefCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

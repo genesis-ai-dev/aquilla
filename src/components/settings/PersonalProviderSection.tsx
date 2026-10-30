@@ -131,10 +131,11 @@ export function PersonalProviderSection() {
             <p className="text-sm font-medium text-foreground">
               {t("settings.personalProvider.advancedToggleLabel")}
             </p>
-            <p className="text-xs text-muted-foreground">
+            {/* AQU-2263: which key is in use, in the words every key field uses. */}
+            <p className="text-xs text-muted-foreground" data-testid="prefs-key-in-use">
               {hasOverride
-                ? "Active — default for projects without their own API key."
-                : "Optional. Most users should leave this off and use Aquilla."}
+                ? t("settings.keyInUse.prefsActive")
+                : t("settings.keyInUse.prefsNone", { name: t("projectSettings.advancedLlm.providerFrontierName") })}
             </p>
           </div>
         </CollapsibleTrigger>

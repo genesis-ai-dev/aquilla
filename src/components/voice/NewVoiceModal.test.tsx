@@ -9,7 +9,7 @@
 
 import { afterEach, describe, it, expect, vi } from "vitest"
 import { useState } from "react"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NewVoiceModal } from "./NewVoiceModal"
 import { expectTooltip } from "@/test-utils/tooltip"
@@ -890,7 +890,9 @@ describe("NewVoiceModal narrator control", () => {
     const makeNarrator = screen.getByRole("button", { name: "Make narrator" })
     expect(makeNarrator.textContent).not.toContain("Make narrator")
     expect(makeNarrator.querySelector("svg")?.getAttribute("class")).toContain("fill-current")
-    await expectTooltip(makeNarrator, "Make this the narrator")
+    // AQU-2260 (Sam, Oct 29): the hover only names the button.
+    await expectTooltip(makeNarrator, "Make narrator")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("used for lines without an explicit speaker")
     fireEvent.click(makeNarrator)
     expect(onMakeDefault).toHaveBeenCalledTimes(1)
 
@@ -903,5 +905,20 @@ describe("NewVoiceModal narrator control", () => {
     await expectTooltip(narrator, "Narrator")
     fireEvent.click(narrator)
     expect(onMakeDefault).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. An engine
+// card shows its name, what it is and its catch in words, so it has no hover.
+describe("NewVoiceModal — the engine cards have no hover", () => {
+  it("shows nothing on hover over an engine card", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <NewVoiceModal open onClose={vi.fn()} voice={null} provider="inworld" isDefault={false} paletteIndex={0} cells={[]} onSave={vi.fn()} />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(engineCard(/Gemini/))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

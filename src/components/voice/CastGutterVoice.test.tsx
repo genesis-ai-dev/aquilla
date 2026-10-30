@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
-import { screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips } from "@/test-utils/tooltip"
+import { act, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CastGutterVoice } from "./CastGutterVoice"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -209,6 +210,27 @@ describe("CastGutterVoice", () => {
       expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
     })
 
+    // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+    // field shows its voice in words, so it has no hover; the gutter's
+    // wordless avatar keeps its name.
+    it("has no hover, editable or read-only", async () => {
+      ui(
+        <CastGutterVoice variant="field" voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+      )
+      await userEvent.setup().hover(screen.getByTestId("voice-field"))
+      await act(() => new Promise((r) => setTimeout(r, 30)))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+    })
+
+    it("read-only, has no hover either", async () => {
+      ui(
+        <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,
+      )
+      await userEvent.setup().hover(screen.getByTestId("voice-field"))
+      await act(() => new Promise((r) => setTimeout(r, 30)))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+    })
+
     it("read-only, names the voice with no picker", () => {
       ui(
         <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,
@@ -229,5 +251,12 @@ describe("CastGutterVoice", () => {
     expect(el.tagName).not.toBe("BUTTON")
     fireEvent.click(el)
     expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
+})
+
+describe("CastGutterVoice — the gutter avatar keeps its name on hover (AQU-2260)", () => {
+  it("names the voice and who it voices", async () => {
+    ui(<CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />)
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary")
   })
 })

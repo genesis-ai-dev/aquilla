@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { FlaskConical } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { primaryMount } from "@/lib/tools/builder-model"
 import { createBridgeHost } from "@/lib/tools/host-bridge"
@@ -86,8 +86,9 @@ export function ExtensionPreview({ source, manifest }: { source: string; manifes
       data-testid="extension-preview"
     >
       <figcaption className="absolute start-3 top-3">
-        <AppTooltip content={t("extensions.candidate.previewHint")}>
-          <span tabIndex={0} className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background/90 px-2.5 text-xs font-medium text-foreground/80 backdrop-blur-sm">
+        {/* AQU-2260: what the preview runs against opens on click, not hover. */}
+        <NoteOnClick note={t("extensions.candidate.previewHint")} align="start" className="rounded-full">
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-background/90 px-2.5 text-xs font-medium text-foreground/80 backdrop-blur-sm">
             <span className="relative flex size-1.5" aria-hidden>
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60 motion-reduce:animate-none" />
               <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
@@ -95,7 +96,7 @@ export function ExtensionPreview({ source, manifest }: { source: string; manifes
             {t("extensions.candidate.preview")}
             <FlaskConical className="size-3 text-muted-foreground" aria-hidden />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </figcaption>
       {mount === "panel" ? (
         <div className="flex gap-3">

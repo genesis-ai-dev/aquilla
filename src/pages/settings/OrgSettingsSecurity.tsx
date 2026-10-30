@@ -21,6 +21,7 @@ export function OrgSettingsSecurity() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES.security}
+      page="security"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.security}
     >
       <RosterProgressSection orgSettings={orgSettings} canEdit={canEdit} orgId={activeOrgId} />

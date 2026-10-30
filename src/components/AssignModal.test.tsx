@@ -815,6 +815,17 @@ describe("lane select (AQU-538)", () => {
     expect(mockCreate.mock.calls[0][0].targetLang).toBe("Spanish")
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): the people list grows with the team,
+  // so "Assign to" gets a search box.
+  it("the Assign to list has a search box that narrows it to matching people", async () => {
+    render(<AssignModal {...BASE_PROPS} />)
+    fireEvent.click(screen.getByRole("combobox", { name: /assign to/i }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "bo" } })
+    expect(await screen.findByRole("option", { name: /bob/ })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /anna/ })).toBeNull()
+  })
+
   it("offers a coordinator only members who can do the work (Contributor and up)", async () => {
     const withViewer = [
       ...BASE_PROPS.members,

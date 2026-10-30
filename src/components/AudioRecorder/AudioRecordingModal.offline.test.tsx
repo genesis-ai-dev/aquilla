@@ -4,7 +4,9 @@
 // saves after reconnect.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { expectClickNote, expectDisabledNote, renderWithTooltips } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -219,5 +221,96 @@ describe("AudioRecordingModal — offline gate", () => {
     expect(probeMic).not.toHaveBeenCalled()
     fireEvent.keyDown(okButton, { key: "Escape" })
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. Record,
+// Save, Upload, Generate and the format switch carry their own words, so they
+// have no hover; why one is greyed out opens on a click.
+describe("AudioRecordingModal — reasons open on click, text buttons have no hover", () => {
+  beforeEach(() => {
+    onlineState.value = true
+    recorderState.value = { kind: "idle" }
+    attachmentsState.byCellId = new Map()
+    localStorage.clear()
+  })
+
+  const modal = () => (
+    <AudioRecordingModal
+      open project={project} cells={[cell]} activeCellId="c1" username="sam"
+      onActiveCellChange={() => {}} onClose={() => {}}
+    />
+  )
+
+  async function expectNoHover(el: Element) {
+    await userEvent.setup().hover(el)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  }
+
+  it("offline: Record, Generate and Upload say they are offline on a click", async () => {
+    onlineState.value = false
+    renderWithTooltips(modal())
+    await expectDisabledNote(screen.getByTestId("rec-start"), OFFLINE_RE)
+    await expectDisabledNote(screen.getByTestId("rec-generate-tts"), OFFLINE_RE)
+    await expectDisabledNote(screen.getByTestId("rec-upload"), OFFLINE_RE)
+  })
+
+  it("offline in preview: Save says it is offline on a click", async () => {
+    onlineState.value = false
+    recorderState.value = {
+      kind: "stopped", blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm", ext: "webm", durationSec: 2,
+    }
+    renderWithTooltips(modal())
+    await expectDisabledNote(screen.getByTestId("rec-save"), OFFLINE_RE)
+  })
+
+  it("online: Record, Generate, Upload and the format switch show nothing on hover", async () => {
+    renderWithTooltips(modal())
+    await expectNoHover(screen.getByTestId("rec-start"))
+    await expectNoHover(screen.getByTestId("rec-generate-tts"))
+    await expectNoHover(screen.getByTestId("rec-upload"))
+    await expectNoHover(screen.getByTestId("rec-format"))
+  })
+
+  it("online in preview: Save shows nothing on hover", async () => {
+    recorderState.value = {
+      kind: "stopped", blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm", ext: "webm", durationSec: 2,
+    }
+    renderWithTooltips(modal())
+    await expectNoHover(screen.getByTestId("rec-save"))
+  })
+
+  it("says what the recording format costs behind its (i)", async () => {
+    renderWithTooltips(modal())
+    await expectClickNote(
+      screen.getByRole("button", { name: "About Format" }),
+      /three times the file size|much smaller files/,
+    )
+  })
+
+  it("a very short window says so on a click on the counter, not a hover", async () => {
+    renderWithTooltips(
+      <AudioRecordingModal
+        open project={project} cells={[{ ...cell, endTime: 0.3 } as CellData]} activeCellId="c1" username="sam"
+        onActiveCellChange={() => {}} onClose={() => {}}
+      />,
+    )
+    const counter = screen.getByTestId("recorder-window")
+    expect(counter).toHaveTextContent("very short")
+    expect(counter).not.toHaveAttribute("title")
+    await expectClickNote(counter, "barely room")
+  })
+
+  it("with a take in hand, the locked format says why on a click", async () => {
+    recorderState.value = {
+      kind: "stopped", blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm", ext: "webm", durationSec: 2,
+    }
+    renderWithTooltips(modal())
+    await expectDisabledNote(screen.getByTestId("rec-format"), "already captured")
+    expect(screen.queryByRole("button", { name: "About Format" })).toBeNull()
   })
 })

@@ -59,11 +59,16 @@ describe("StatusBar health breakdown", () => {
     expect(await screen.findByRole("button", { name: /New lane.*5%/ })).toBeDisabled()
   })
 
-  it("opens from hover and handles an empty scope", async () => {
+  // AQU-2260 (Oct 29, fourth pass): a click opens it, never hover.
+  it("opens on a click, not on hover, and handles an empty scope", async () => {
     const { container } = render(<StatusBar cells={[]} healthMap={new Map()} projectHealth={100} />)
     fireEvent.pointerEnter(trigger(container), { pointerType: "mouse" })
     fireEvent.mouseEnter(trigger(container))
     fireEvent.mouseMove(trigger(container))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.queryByText("project health")).toBeNull()
+    expect(screen.getByRole("button", { name: "Project health: 100%" })).toBe(trigger(container))
+    fireEvent.click(trigger(container))
     expect(await screen.findByText("project health")).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Genesis/ })).toBeNull()
   })

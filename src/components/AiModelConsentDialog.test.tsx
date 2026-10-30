@@ -262,3 +262,16 @@ describe("AiModelConsentDialog", () => {
     expect(screen.queryByLabelText("Alt")).toBeNull()
   })
 })
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "Enable
+// all local models" carries its own words, so it has no hover.
+describe("AiModelConsentDialog — no hover on the text buttons", () => {
+  it("shows nothing on hover over Enable all local models", async () => {
+    renderDialog()
+    void requestAiModelConsent(WHISPER_MODEL)
+    const all = await screen.findByRole("button", { name: /enable all local models/i })
+    await userEvent.setup().hover(all)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+})

@@ -4,7 +4,8 @@
 // affordances (progress meter, etc.) that row happens to render.
 
 import { describe, it, expect, vi } from "vitest"
-import { render, within, fireEvent } from "@testing-library/react"
+import { render, within, fireEvent, screen } from "@testing-library/react"
+import { expectClickNote, expectTooltip } from "@/test-utils/tooltip"
 import { FileRow } from "./FileRow"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
@@ -332,5 +333,23 @@ describe("FileRow progress in a language that counts its recordings", () => {
     const slot = getByTestId("file-row-progress-slot")
     expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
     expect(slot.getAttribute("title")).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("FileRow — hover only names; marks explain on click", () => {
+  it("the timeline-ordered mark says what it means on a click, without opening the file", async () => {
+    const onSelect = vi.fn()
+    const { getByLabelText } = renderRow({ file: makeFile({ orderedBy: "time" }), onSelect })
+    const mark = getByLabelText("Timeline-ordered file")
+    await expectClickNote(mark, "timecodes are the spine")
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("the rename suggestion's hover only names it", async () => {
+    renderRow({ hasSuggestion: true, onApplySuggestion: vi.fn() })
+    const sparkle = screen.getByRole("button", { name: "Apply rename suggestion" })
+    await expectTooltip(sparkle, "Apply rename suggestion")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("cleaner name")
   })
 })

@@ -10,8 +10,8 @@
  * three-dot entry at all.
  */
 
+import { Lock } from "lucide-react"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
@@ -68,20 +68,28 @@ export function ImportIntentChoice({
               className={cn(
                 "flex items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
                 disabled
-                  ? "cursor-not-allowed opacity-55"
+                  ? "cursor-not-allowed"
                   : selected
                     ? "cursor-pointer border-primary bg-primary/5"
                     : "cursor-pointer hover:bg-muted/50",
               )}
             >
-              <RadioGroupItem value={card.id} disabled={disabled} className="mt-0.5 shrink-0" aria-label={card.title} />
+              <RadioGroupItem value={card.id} disabled={disabled} className={cn("mt-0.5 shrink-0", disabled && "opacity-55")} aria-label={card.title} />
               <span className="flex min-w-0 flex-col gap-0.5">
-                <span className="text-sm font-medium leading-tight">{card.title}</span>
-                <span className="text-xs leading-relaxed text-muted-foreground">{card.description}</span>
+                <span className={cn("text-sm font-medium leading-tight", disabled && "opacity-55")}>{card.title}</span>
+                <span className={cn("text-xs leading-relaxed text-muted-foreground", disabled && "opacity-55")}>{card.description}</span>
+                {/* Why it is greyed out, in one short line in the card, never a
+                    hover (AQU-2260, the locked-control line). */}
+                {disabled && (
+                  <span data-slot="locked-note" className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+                    <Lock className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0">{card.disabledReason}</span>
+                  </span>
+                )}
               </span>
             </label>
           )
-          return disabled ? <AppTooltip key={card.id} content={card.disabledReason}>{label}</AppTooltip> : label
+          return label
         })}
       </RadioGroup>
     </div>

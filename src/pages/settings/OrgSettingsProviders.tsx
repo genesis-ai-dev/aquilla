@@ -15,6 +15,7 @@ export function OrgSettingsProviders() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES.providers}
+      page="providers"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.providers}
     >
       <OrgProviderSection orgSettings={orgSettings} />

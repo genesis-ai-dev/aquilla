@@ -13,7 +13,9 @@
 // been asked for, and while a finished take is under review.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -147,6 +149,25 @@ describe("AudioRecordingModal — the film", () => {
     // The modal itself is up — otherwise this would pass for the wrong reason.
     expect(screen.getByTestId("rec-start")).toBeInTheDocument()
     expect(screen.queryByTestId("rec-video")).not.toBeInTheDocument()
+  })
+
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. These
+  // two carry their own words ("Collapse video", "Film").
+  it("the film's hide and show buttons have no hover", async () => {
+    const user = userEvent.setup()
+    renderWithTooltips(modal(projectWithFilm))
+    const collapse = screen.getByTestId("rec-collapse-video")
+    await user.hover(collapse)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(collapse)
+    const expand = screen.getByTestId("rec-expand-video")
+    await user.hover(expand)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    // The choice is a device-wide preference: put the film back for the rest.
+    fireEvent.click(expand)
+    expect(screen.getByTestId("rec-collapse-video")).toBeInTheDocument()
   })
 
   it("the picture is MUTED by default, and the toggle flips it", () => {
@@ -382,6 +403,22 @@ describe("AudioRecordingModal — the countdown preference", () => {
     fireEvent.click(screen.getByTestId("rec-settings"))
     expect(screen.getByTestId("rec-countdown")).toHaveAttribute("data-speed", "off")
     expect(screen.getByRole("tab", { name: "Off" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  // AQU-2264: the beep was the one recorder setting nothing remembered — it
+  // came back on with every reload, and in every other project.
+  it("remembers the countdown beep after the recorder closes and the page reloads", () => {
+    const { unmount } = render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByTestId("rec-beep"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
+    unmount()
+
+    resetRecordingCountdownCacheForTests() // a reload
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
   })
 
   // AQU-1210 (Sam, 25 Sep): the count has a speed. Fast is half a second a

@@ -1,12 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
-import { Check, CheckCheck, Mic, Trash2 } from "lucide-react"
+import { Check, CheckCheck, Info, Mic, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
+import { NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { lineState } from "./audio-validation-state"
+import { ValidatedOnLine } from "./ValidatedOnLine"
 
 /**
  * AQU-490: one line's audio validation, as the five surfaces all draw it.
@@ -30,6 +32,12 @@ export interface AudioValidationTake {
   slot: string
   validatorCount: number
   validators: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (ms). Optional:
+   * a take built by hand (an unrecorded heard line, a test fixture) has none,
+   * and a name with no stamp simply gets no date line.
+   */
+  validatorDecidedTs?: Record<string, number>
   /** TTS rather than a person. Never auto-validated; can still be validated by hand. */
   isGenerated: boolean
   /**
@@ -102,6 +110,7 @@ export function AudioValidationControl({
   // list, and while it remembers one it ignores hover, so the check stopped
   // opening the list on hover after "Remove your validation".
   const listActionsRef = useRef<PopoverPrimitive.Root.Actions | null>(null)
+  const listInfoRef = useRef<HTMLButtonElement | null>(null)
   /**
    * audioId → the vote we asked for, plus what the server said at the moment
    * we asked.
@@ -114,7 +123,9 @@ export function AudioValidationControl({
    * would snap the two that had arrived back to their old state while the
    * third was still in flight.
    */
-  const [pending, setPending] = useState<Record<string, { value: boolean; atRequest: boolean }>>({})
+  const [pending, setPending] = useState<
+    Record<string, { value: boolean; atRequest: boolean; at: number }>
+  >({})
 
   // Retire a guess the moment the server's answer for that take has MOVED
   // from what it was when we asked. Leaving it in the map — which is what
@@ -139,12 +150,19 @@ export function AudioValidationControl({
     const guess = pending[take.audioId]
     const has = take.validators.includes(currentUsername)
     if (!guess || guess.atRequest !== has || guess.value === has) return take
+    // AQU-2296: the optimistic row carries the click's own clock, so your name
+    // never appears for a beat with a blank date line beside it. The server's
+    // `decided_ts` replaces it as soon as the read lands.
+    const stamps = { ...(take.validatorDecidedTs ?? {}) }
+    if (guess.value) stamps[currentUsername] = guess.at
+    else delete stamps[currentUsername]
     return {
       ...take,
       validators: guess.value
         ? [...take.validators, currentUsername]
         : take.validators.filter((name) => name !== currentUsername),
       validatorCount: Math.max(0, take.validatorCount + (guess.value ? 1 : -1)),
+      validatorDecidedTs: stamps,
     }
   }), [takes, pending, currentUsername])
 
@@ -182,7 +200,10 @@ export function AudioValidationControl({
     const atRequest = takes
       .find((take) => take.audioId === audioId)
       ?.validators.includes(currentUsername) ?? false
-    setPending((current) => ({ ...current, [audioId]: { value: validated, atRequest } }))
+    setPending((current) => ({
+      ...current,
+      [audioId]: { value: validated, atRequest, at: Date.now() },
+    }))
     void Promise.resolve(onValidationChange(audioId, validated))
       .then((accepted) => {
         if (accepted === false) {
@@ -370,19 +391,20 @@ export function AudioValidationControl({
   // every line said "No audio to validate" for seconds, then changed its
   // mind). The app's skeleton pulse holds the slot: no click, no tab stop,
   // and a hover that says what it is waiting for.
+  // AQU-2260 (Sam, Oct 29): what it waits for opens on a click, never a hover.
   if (checking && variant === "gutter") {
     return (
       <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip key="checking" content={t("editor.audioValidation.checkingTooltip")}>
+        <NoteOnClick key="checking" note={t("editor.audioValidation.checkingTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="audio-validation-checking"
             aria-label={t("editor.audioValidation.ariaChecking", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center"
+            className="flex h-6 w-6 items-center justify-center"
           >
             <Skeleton className="size-3.5 rounded-full" />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </div>
     )
   }
@@ -391,22 +413,29 @@ export function AudioValidationControl({
     if (variant === "inline") return null
     return (
       <div data-testid="audio-validation-gutter" className="audio-check flex w-6 shrink-0 items-start pt-1">
-        <AppTooltip key="unavailable" content={t("editor.audioValidation.noAudioTooltip")}>
+        <NoteOnClick key="unavailable" note={t("editor.audioValidation.noAudioTooltip")} side="right" tabStop={false} align="start">
           <span
             role="img"
             data-testid="audio-validation-unavailable"
             aria-label={t("editor.audioValidation.ariaNoAudio", { ref: cellRef })}
-            className="flex h-6 w-6 cursor-default items-center justify-center text-muted-foreground/30 opacity-40"
+            className="flex h-6 w-6 items-center justify-center text-muted-foreground/30 opacity-40"
           >
             <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       </div>
     )
   }
 
   const body = (
-    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void }) => {
+    <Popover open={popoverOpen} actionsRef={listActionsRef} onOpenChange={(next: boolean, details: { reason: string; cancel(): void; event?: Event }) => {
+      // A press on the (i) is its own toggle; the list's outside-press close
+      // must not race it, or a second click would shut and reopen it.
+      const target = details.event?.target
+      if (!next && target instanceof Node && listInfoRef.current?.contains(target)) {
+        details.cancel()
+        return
+      }
       if (!next) { setPopoverOpen(false); return }
       // A press on a line the viewer can still act on is the VOTE, not the
       // popover — the same bargain the text control strikes. Once there is
@@ -417,12 +446,10 @@ export function AudioValidationControl({
       }
       setPopoverOpen(true)
     }}>
-      <PopoverTrigger
-        openOnHover
-        delay={400}
-        closeDelay={100}
-        render={renderButton(clickable ? validateAll : undefined)}
-      />
+      {/* AQU-2260 (Oct 29, third pass): the list opens on a click, never on
+          hover — on the check itself where a press does not vote, and on
+          the (i) under it where it does. */}
+      <PopoverTrigger render={renderButton(clickable ? validateAll : undefined)} />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
         {/* "Audio validated by", the twin of the text list's "Text validated
             by" (Sam, 2026-09-23) — both name their half, since the two sit side
@@ -436,9 +463,15 @@ export function AudioValidationControl({
             const mine = take.validators.includes(currentUsername)
             const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
             return (
-              <li key={take.audioId} className="rounded px-1 py-1 text-xs">
+              // AQU-2296: NO padding of its own. It used to carry `px-1 py-1`
+              // on top of the `px-1 py-0.5` on each name below, so the audio
+              // list sat lower than the text list and its names were indented
+              // a step further — two popovers meant to be read side by side
+              // that did not line up. The padding now lives where the text
+              // list keeps it: on the rows themselves.
+              <li key={take.audioId} className="rounded text-xs">
                 {displayed.length > 1 && (
-                  <div className="mb-0.5 flex items-center gap-1 font-medium">
+                  <div className="mb-0.5 flex items-center gap-1 px-1 font-medium">
                     <span className="truncate">{trackLabel(take)}</span>
                     {short > 0 && (
                       <span className="ms-auto shrink-0 text-[10px] font-normal text-muted-foreground">
@@ -448,18 +481,24 @@ export function AudioValidationControl({
                   </div>
                 )}
                 {take.unrecorded ? (
-                  <div data-testid="audio-validation-unrecorded" className="text-muted-foreground">
+                  <div data-testid="audio-validation-unrecorded" className="px-1 py-1 text-muted-foreground">
                     {t("editor.audioValidation.notRecorded")}
                   </div>
                 ) : take.validators.length === 0 ? (
-                  <div className="text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
+                  <div className="px-1 py-1 text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
                 ) : (
-                  <ul className="space-y-0.5">
+                  <ul>
                     {take.validators.map((validator) => (
-                      <li key={validator} className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
-                        <span className="truncate">
-                          {validator}
-                          {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                      <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 hover:bg-muted/50">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">
+                            {validator}
+                            {validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}
+                          </span>
+                          {/* AQU-2296: when they validated this TAKE, on a
+                              second muted line — the same row shape the text
+                              list uses, so the two popovers read alike. */}
+                          <ValidatedOnLine value={take.validatorDecidedTs?.[validator]} />
                         </span>
                         {/* Withdrawing is NOT gated on `canValidate`. That
                             flag is false for a take you recorded yourself on
@@ -528,16 +567,52 @@ export function AudioValidationControl({
   // the span that has just been thrown away. The real button then never opened
   // its tooltip on hover (found in the browser, 2026-09-23: the button had no
   // mouseenter listener at all). A key makes each shape mount its own.
+  //
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. So the
+  // hover is kept only where a click validates ("Audio not validated — click
+  // to validate"); why a click would NOT opens on that click, in a small note
+  // anchored to the check, and shuts on a second one.
+  const listInfo = hasVoterInfo && clickable ? (
+    <button
+      ref={listInfoRef}
+      type="button"
+      data-testid="audio-validation-list-info"
+      aria-label={t("common.aboutAria", { name: t("editor.audioValidation.validatedBy") })}
+      aria-expanded={popoverOpen}
+      onClick={(e) => {
+        e.stopPropagation()
+        setPopoverOpen((o) => !o)
+      }}
+      className="inline-flex rounded-sm p-0.5 text-muted-foreground/70 hover:text-foreground"
+    >
+      <Info className="h-3 w-3" aria-hidden="true" />
+    </button>
+  ) : null
   const wrapped = hasVoterInfo
-    ? <Fragment key="list">{body}</Fragment>
-    : (
-        <AppTooltip key="tooltip" content={tooltip}>
-          {renderButton(clickable ? validateAll : undefined)}
-        </AppTooltip>
-      )
+    ? <Fragment key="list">{body}{listInfo}</Fragment>
+    : clickable
+      ? (
+          <AppTooltip key="tooltip" content={tooltip}>
+            {renderButton(validateAll)}
+          </AppTooltip>
+        )
+      : (
+          <Popover key="reason">
+            <PopoverTrigger render={renderButton(undefined)} />
+            <PopoverContent
+              side="right"
+              align="start"
+              sideOffset={6}
+              data-slot="disabled-reason-note"
+              className={NOTE_CONTENT_CLASS}
+            >
+              {tooltip}
+            </PopoverContent>
+          </Popover>
+        )
   if (variant === "inline") return wrapped
   return (
-    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 items-start pt-1">
+    <div data-testid="audio-validation-gutter" className="audio-check flex shrink-0 flex-col items-center pt-1">
       {wrapped}
     </div>
   )

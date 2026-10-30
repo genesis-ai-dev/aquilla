@@ -175,7 +175,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.timing.set": ROLE.PROJECT_LEAD,
   // Track structure IS file structure: a rename or reorder relayouts the
   // timeline for everyone who opens the file, so it sits with file.timing.set
-  // rather than with the contributor-level file.rename / file.video.set.
+  // rather than with file.rename (contributor) and file.video.set (project lead).
   "file.track.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar

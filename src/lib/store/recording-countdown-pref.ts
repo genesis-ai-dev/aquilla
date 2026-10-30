@@ -22,11 +22,14 @@
  *
  * Key schema: `aq.recording-countdown.v1` — `"off"`, `"fast"` or `"slow"`;
  * absent (or anything else) means Normal.
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
-
-const STORAGE_KEY = "aq.recording-countdown.v1"
+import { recorderCountdownBeepPref, recorderCountdownPref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
 export type CountdownSpeed = "off" | "fast" | "normal" | "slow"
 
@@ -44,58 +47,40 @@ export function countdownStepMs(speed: CountdownSpeed): number | null {
   return speed === "off" ? null : COUNTDOWN_STEP_MS[speed]
 }
 
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: CountdownSpeed | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): CountdownSpeed {
-  if (typeof localStorage === "undefined") return "normal"
-  try {
-    const v = localStorage.getItem(STORAGE_KEY)
-    return v === "off" || v === "fast" || v === "slow" ? v : "normal"
-  } catch {
-    return "normal"
-  }
-}
-
-function peek(): CountdownSpeed {
-  if (cached === undefined) cached = read()
-  return cached
-}
-
 export function getRecordingCountdownSpeed(): CountdownSpeed {
-  return peek()
+  return recorderCountdownPref.get()
 }
 
 export function setRecordingCountdownSpeed(speed: CountdownSpeed): void {
-  cached = speed
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (speed === "normal") localStorage.removeItem(STORAGE_KEY)
-      else localStorage.setItem(STORAGE_KEY, speed)
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
+  recorderCountdownPref.set(speed)
 }
 
 /** Reactive read of the countdown preference. */
 export function useRecordingCountdownSpeed(): CountdownSpeed {
-  return useSyncExternalStore(subscribe, peek, () => "normal" as const)
+  return usePersonPref(recorderCountdownPref)
+}
+
+/**
+ * "Countdown beep": the 3-2-1 tones. It was a plain `useState(true)` in the
+ * recorder, so it came back on with every reload and in every other project
+ * (AQU-2264).
+ * Remembered now, on by default. Device key `aq.recording-countdown-beep.v1`
+ * (`"off"` when turned off; absent means on).
+ */
+export function getRecordingCountdownBeep(): boolean {
+  return recorderCountdownBeepPref.get()
+}
+
+export function setRecordingCountdownBeep(on: boolean): void {
+  recorderCountdownBeepPref.set(on)
+}
+
+/** Reactive read of the countdown beep. */
+export function useRecordingCountdownBeep(): boolean {
+  return usePersonPref(recorderCountdownBeepPref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingCountdownCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

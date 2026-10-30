@@ -9,8 +9,8 @@ const configured = { ...env, STRIPE_SECRET_KEY: 'sk_test_fixture',
   STRIPE_PRICE_CATALOG: JSON.stringify(manifest) }
 async function setup(scope: 'personal' | 'team' = 'personal') {
   await seedUser(1, 'alice'); await seedUser(2, 'bob')
-  const created = await app.request(scope === 'team' ? '/api/v2/orgs' : '/api/v2/orgs/me', {
-    method: scope === 'team' ? 'POST' : 'GET', headers: authHeader(await jwtFor('alice')),
+  const created = await app.request(scope === 'team' ? '/api/v2/orgs' : '/api/v2/orgs/personal', {
+    method: 'POST', headers: authHeader(await jwtFor('alice')),
     ...(scope === 'team' ? { body: JSON.stringify({ name: 'Chosen workspace' }) } : {}),
   }, env)
   expect(created.status).toBe(200)

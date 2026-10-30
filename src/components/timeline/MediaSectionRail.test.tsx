@@ -4,7 +4,8 @@
 // the rail is a real, named, one-click control.
 
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import userEvent from "@testing-library/user-event"
 import {
   MediaSectionCollapseButton,
@@ -152,5 +153,21 @@ describe("MediaSectionFullscreenButton", () => {
     // plus the file name and nothing else.
     render(<MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={() => {}} />)
     expect(screen.getByTestId("media-fullscreen-video")).toHaveTextContent("")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A rail
+// that shows its section's word has no hover; a glyph-only rail keeps its name.
+describe("MediaSectionRail — hover only on the glyph-only rail", () => {
+  it("a rail with its section's word shows nothing on hover", async () => {
+    renderWithTooltips(<MediaSectionRail section="video" orientation="vertical" label="Video" onExpand={() => {}} />)
+    await userEvent.setup().hover(screen.getByTestId("media-rail-video"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("a glyph-only rail keeps its name on hover", async () => {
+    renderWithTooltips(<MediaSectionRail section="video" orientation="vertical" onExpand={() => {}} />)
+    await expectTooltip(screen.getByTestId("media-rail-video"), "Show the video")
   })
 })

@@ -179,8 +179,10 @@ export function MediaSectionRail({
     )
   }
 
+  // A hover may only NAME an icon-only button (AQU-2260): the glyph-only rail
+  // keeps its name; one that shows its section's word has no hover.
   return (
-    <AppTooltip content={name} side={orientation === "vertical" ? "right" : "bottom"}>
+    <AppTooltip content={label ? null : name} side={orientation === "vertical" ? "right" : "bottom"}>
       <button
         type="button"
         // `aria-expanded` rather than a bare label, so the control announces

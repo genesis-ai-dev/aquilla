@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { HistoryDrawer } from "./HistoryDrawer"
+import { expectClickNote } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 
@@ -120,5 +121,24 @@ describe("HistoryDrawer — post-editing distance", () => {
     ])
     expect(screen.getByText("stale branch")).toBeInTheDocument()
     expect(screen.queryByText(/AI draft kept/)).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The card's marks
+// open what they mean on a click.
+describe("HistoryDrawer — the card's marks explain themselves on click", () => {
+  it("says how the kept share is measured", async () => {
+    renderWith([entry("llm", "abcdefghij"), entry("human", "abcdefghXY")])
+    await expectClickNote(screen.getByText("80% of AI draft kept"), "measured character by character")
+  })
+
+  it("says what a stale branch is", async () => {
+    renderWith([entry("llm", "abcdefghij"), entry("human", "totally different text", { isStale: true })])
+    await expectClickNote(screen.getByText("stale branch"), "never applied to the cell's current value")
+  })
+
+  it("says an edit that could not sync is still safe in this browser", async () => {
+    renderWith([entry("human", "typed", { syncState: "failed" } as Partial<CellHistoryEntry>)])
+    await expectClickNote(screen.getByText("sync failed"), "safe in this browser")
   })
 })

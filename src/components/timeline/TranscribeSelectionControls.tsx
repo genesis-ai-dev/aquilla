@@ -28,6 +28,7 @@
 
 import { Sparkles } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -70,43 +71,42 @@ export function TranscribeSelectionControls({
   // and when they are, that IS the notice — said in the labels already on
   // screen rather than in a strip added to a row that was just decluttered.
   const collapsed = recordingCount > 0 && recordingCount < eligibleCount
+  // AQU-2260 (Sam, Oct 29): only why it is greyed out, opened on a click on
+  // it. Its words name it; why the two counts differ is behind the (i).
   const tooltip = busy
     ? t("editor.timeline.transcribeSelectionBusyTooltip")
     : eligibleCount === 0
       ? t("editor.timeline.transcribeSelectionNoAudioTooltip")
-      : collapsed
-        ? t("editor.timeline.transcribeSelectionSharedTooltip", { count: recordingCount })
-        : t("editor.timeline.transcribeSelectionTooltip")
+      : null
+  const actionLabel = recordingCount > 1
+    ? t("editor.timeline.transcribeSelectionActionMany", { count: recordingCount })
+    : t("editor.timeline.transcribeSelectionActionOne")
 
   return (
     <div
       data-testid="tl-transcribe-controls"
       className="flex min-w-0 items-center gap-2 text-xs"
     >
-      {/* THE MULTI-SELECT GESTURE IS A TOOLTIP NOW, not a line of text on the
-          far right (Sam: "just put that as like a tooltip or something it's just
-          stupid"). It hangs off the COUNT rather than off the button because
-          "how do I select more?" is a question you have while reading how many
-          you have selected.
-
-          `tabIndex` because it is a span: the text it replaces was readable by
-          everyone, so a pointer-only affordance would be a real regression
-          rather than a tidy-up. A focusable label is the cost of that. */}
-      <AppTooltip content={t("editor.timeline.transcribeSelectionHint")}>
-        <span
-          data-testid="tl-transcribe-count"
-          tabIndex={0}
-          className="shrink-0 rounded-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-        >
-          {t("editor.timeline.transcribeSelectionCount", { count: selectedCount })}
-          {collapsed && (
-            <span data-testid="tl-transcribe-recordings">
-              {" · "}
-              {t("editor.timeline.transcribeSelectionRecordings", { count: recordingCount })}
-            </span>
-          )}
-        </span>
-      </AppTooltip>
+      {/* THE MULTI-SELECT GESTURE IS A NOTE ON THE COUNT, not a line of text
+          on the far right (Sam: "just put that as like a tooltip or something
+          it's just stupid"). It hangs off the COUNT rather than off the button
+          because "how do I select more?" is a question you have while reading
+          how many you have selected. AQU-2260 (Oct 29): it opens on a click of
+          the count, never a hover; the count is a button, so the keyboard
+          reaches it too. */}
+      <NoteOnClick
+        note={t("editor.timeline.transcribeSelectionHint")}
+        testId="tl-transcribe-count"
+        className="shrink-0 text-muted-foreground"
+      >
+        {t("editor.timeline.transcribeSelectionCount", { count: selectedCount })}
+        {collapsed && (
+          <span data-testid="tl-transcribe-recordings" className="whitespace-pre">
+            {" · "}
+            {t("editor.timeline.transcribeSelectionRecordings", { count: recordingCount })}
+          </span>
+        )}
+      </NoteOnClick>
       <AppTooltip content={tooltip}>
         <button
           type="button"
@@ -125,11 +125,14 @@ export function TranscribeSelectionControls({
               sections performed by one heard line run ONE transcription, and a
               button promising three would be over-promising in the direction
               that matters. */}
-          {recordingCount > 1
-            ? t("editor.timeline.transcribeSelectionActionMany", { count: recordingCount })
-            : t("editor.timeline.transcribeSelectionActionOne")}
+          {actionLabel}
         </button>
       </AppTooltip>
+      {collapsed && (
+        <InfoNote label={t("common.aboutAria", { name: actionLabel })}>
+          {t("editor.timeline.transcribeSelectionSharedTooltip", { count: recordingCount })}
+        </InfoNote>
+      )}
       <button
         type="button"
         data-testid="tl-transcribe-clear"

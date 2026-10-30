@@ -2,6 +2,7 @@ import * as React from "react"
 import { Link } from "react-router-dom"
 import {
   flexRender,
+  functionalUpdate,
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
@@ -315,6 +316,12 @@ interface DataTableProps<TData, TValue> {
   data: TData[]
   getRowId?: (originalRow: TData, index: number) => string
   initialSorting?: SortingState
+  /**
+   * Called with the new sort whenever someone changes it from a header, so a
+   * caller can remember it (AQU-2259: the project list). Not called for the
+   * initial sort.
+   */
+  onSortingChange?: (sorting: SortingState) => void
   /** When set, renders a search input that drives TanStack `globalFilter`. */
   searchPlaceholder?: string
   /**
@@ -401,6 +408,7 @@ function DataTable<TData, TValue>({
   data,
   getRowId,
   initialSorting,
+  onSortingChange,
   searchPlaceholder,
   searchValue,
   onSearchChange,
@@ -443,7 +451,11 @@ function DataTable<TData, TValue>({
     // unless the column sets sortDescFirst.
     enableSortingRemoval: false,
     enableMultiSort: false,
-    onSortingChange: setSorting,
+    onSortingChange: (updater) => {
+      const next = functionalUpdate(updater, table.getState().sorting)
+      setSorting(next)
+      onSortingChange?.(next)
+    },
     onGlobalFilterChange: setGlobalFilter,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),

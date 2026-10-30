@@ -48,6 +48,8 @@ import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent
 import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
+import { readDraftingSettings } from "../../../db/shared/drafting-settings"
+import { resolveAnswerLanguage } from "../lib/agent/answer-language"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
@@ -499,6 +501,9 @@ const runRequestSchema = z.object({
     .max(10),
   context: z.object({ fileId: z.string().optional(), cellId: z.string().optional(), lane: z.string().max(64).optional() }).optional(),
   translatorProfile: translatorProfileSchema,
+  /** AQU-2263: the language the person uses Aquilla in (its English name), the
+   *  last step of resolveAnswerLanguage. Absent from older clients. */
+  appLanguage: z.string().max(100).optional(),
   /** AQU-AGENT Wave-2: files the user attached in the composer, already
    *  uploaded as project artifacts (POST /projects/:id/agent-artifacts). The
    *  agent is told they're available and can pull them into the sandbox with
@@ -822,6 +827,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   let focusedFile: { name?: string; kind?: string } = {}
   let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
   let briefSummary: string | undefined
+  // AQU-2263: the project's "The assistant answers the team in …".
+  let teamLanguage: string | undefined
   try {
     if (body.context?.fileId) {
       const row = await env.AQUILLA_PG.prepare(
@@ -832,11 +839,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
+      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
+              settings::jsonb -> 'draftingSettings' AS drafting_settings
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ brief_summary: string | null }>()
+      .first<{ brief_summary: string | null; drafting_settings: unknown }>()
     if (settings) {
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
       languages = languagesForLanes(lanes, body.context?.lane ?? "")
@@ -845,6 +853,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         : null
       if (fromLane) languages = { ...languages, targetLanguage: fromLane }
       briefSummary = settings.brief_summary ?? undefined
+      const rawDrafting = settings.drafting_settings
+      const drafting = typeof rawDrafting === "string" ? (() => { try { return JSON.parse(rawDrafting) as unknown } catch { return null } })() : rawDrafting
+      teamLanguage = readDraftingSettings(drafting)?.main_chat_language
     }
   } catch {
     /* prompt grounding is best-effort — the run proceeds without it */
@@ -853,6 +864,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Feature gate read once per run — gates the L1 aquifer contract (and the
   // execute.aquifer handler re-checks it before every external call).
   const bibleResourcesEnabled = await isBibleResourcesEnabled(env, body.projectId)
+  // AQU-2263: the language the agent answers in (see answer-language.ts).
+  const answerLanguage = resolveAnswerLanguage({
+    personal: body.translatorProfile?.responseLanguage,
+    team: teamLanguage,
+    app: body.appLanguage,
+  })
 
   // AQU-AGENT §2 — read-side memory context (approved memories + brief). Pure
   // reads; degrades to empty on any failure so a run never dies on grounding.
@@ -882,10 +899,11 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
-        // A configured profile language wins. When unset, the augmentation
-        // prompt below tells the agent to follow the user's latest message —
-        // never the project's translation target.
-        responseLanguage: body.translatorProfile?.responseLanguage,
+        // AQU-2263: the person's own language, then the project's language for
+        // the team. With neither, the augmentation prompt below tells the agent
+        // to follow the user's latest message (the app's language only when
+        // that can't be told) — never the project's translation target.
+        responseLanguage: answerLanguage.reply,
         briefSummary,
       }),
     },
@@ -896,7 +914,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       role: "system" as const,
       content: buildAugmentSystemPrompt({
         memory,
-        responseLanguage: body.translatorProfile?.responseLanguage,
+        responseLanguage: answerLanguage.reply,
+        unclearLanguage: answerLanguage.whenUnclear,
       }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in

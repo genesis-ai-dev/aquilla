@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { AdminBillingSection } from "./AdminBillingSection"
 import { fmtShortCalendarDate } from "@/lib/format-date"
+import { expectClickNote } from "@/test-utils/tooltip"
 import type { AdminBillingOrg, AdminBillingPlans } from "@/lib/frontier/admin"
 
 vi.mock("@/lib/frontier/admin", () => ({
@@ -215,6 +216,15 @@ describe("AdminBillingSection", () => {
     renderSection()
     const period = await screen.findByTestId("admin-period-1")
     expect(period.textContent).toMatch(/No period set/)
+  })
+
+  // AQU-2260 (Sam, Oct 29): what "No period set" means opens on click, never
+  // on hover (it was a native title).
+  it("explains a missing billing period on click, not on hover", async () => {
+    renderSection()
+    const period = await screen.findByTestId("admin-period-1")
+    expect(within(period).queryByTitle(/allowance applies/)).toBeNull()
+    await expectClickNote(within(period).getByRole("button", { name: "No period set" }), /allowance applies to the current cycle/)
   })
 })
 

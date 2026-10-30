@@ -29,7 +29,7 @@ import { TableEmptyState } from "@/components/ui/page"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { toUserFacingError } from "@/lib/errors/user-error"
@@ -247,15 +247,13 @@ export function OrgMembersTable({
           if (isOwner) return <span className="inline-flex items-center gap-2">{label}{badge}</span>
           return (
             <span className="inline-flex items-center gap-2">
-              <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
-                <span
-                  tabIndex={0}
-                  className="inline-flex cursor-help"
-                  aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
-                >
-                  {label}
-                </span>
-              </AppTooltip>
+              {/* AQU-2260: why it is read-only opens on click, never on hover. */}
+              <NoteOnClick
+                note={lockedOrgRoleTooltip(m.role.level)}
+                label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
+              >
+                {label}
+              </NoteOnClick>
               {badge}
             </span>
           )
@@ -440,6 +438,8 @@ export function OrgMembersTable({
                 )}
                 <DisabledFieldTooltip
                   disabled={!canRemove}
+                  align="start"
+                  noteClassName="px-2 pb-1.5"
                   tooltip={!isOwner ? REMOVE_REQUIRES_OWNER_TOOLTIP : undefined}
                 >
                   <MenuItem

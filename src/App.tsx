@@ -1,4 +1,5 @@
 import { CheckingPage } from "@/components/checking/CheckingPage"
+import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -23,6 +24,7 @@ import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { OfflineLaunchResume } from "@/components/OfflineLaunchResume"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
+import { PersonPrefsSyncMount } from "@/components/PersonPrefsSyncMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
@@ -378,6 +380,7 @@ export default function App() {
       <OfflineShutdownGuard />
       <OfflineLaunchResume />
       <LocalLlmConfigMount />
+      <PersonPrefsSyncMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />
@@ -430,6 +433,8 @@ function AppRoutes() {
   return (
     <>
       <BuildJobNotifier />
+      {/* AQU-2265: `?highlight=<id>` scrolls to one setting and flashes it. */}
+      <SettingHighlighter />
       {/* Workspace routes intentionally suspend to this outer boundary: when
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay

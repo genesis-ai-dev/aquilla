@@ -11,6 +11,7 @@ import { Eraser, Loader2, Pause, Play, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { keptWindowSec } from "@/lib/audio/kept-window"
@@ -189,14 +190,17 @@ export function TranscribeRow({
                 {t("transcribe.cleaned", { count: changes })}
               </span>
             )}
+            {/* A failure's detail opens on a click of its words, never a
+                hover (AQU-2260). */}
             {statusText && (
-              <span
-                className={cn(status.kind === "failed" ? "text-destructive" : "text-muted-foreground")}
-                title={statusDetail}
-                data-testid="transcribe-status"
-              >
-                {statusText}
-              </span>
+              <NoteOnClick note={statusDetail}>
+                <span
+                  className={cn(status.kind === "failed" ? "text-destructive" : "text-muted-foreground")}
+                  data-testid="transcribe-status"
+                >
+                  {statusText}
+                </span>
+              </NoteOnClick>
             )}
           </div>
         </div>

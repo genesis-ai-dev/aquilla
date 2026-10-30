@@ -21,6 +21,7 @@ import type { OrderedBy, ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { clearSelection, MAX_SELECTED, useSelectedIds } from "@/lib/audio/selection"
 import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAudioUnvalidate } from "@/lib/sync/events-emit"
@@ -731,11 +732,16 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-lg" />
+      {/* AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+          These carry their own words, so they have none. Why one is greyed
+          out opens on a click on it; what Voice together and Generate voice
+          each do, being easy to confuse, is behind an (i) beside each. */}
       {audioMode && !audioOnlyLane && (
+        <span className="flex shrink-0 items-center gap-0.5">
         <AppTooltip content={
           !onVoiceTogether ? t("editor.selection.voiceUnavailable") :
           voiceableCount < 2 ? t("editor.selection.voiceNeedTwo") :
-          t("editor.selection.voiceTooltip", { count: voiceableCount })
+          null
         }>
           <Button
             type="button"
@@ -757,17 +763,20 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
             )}
           </Button>
         </AppTooltip>
+        {onVoiceTogether && voiceableCount >= 2 && (
+          <InfoNote label={t("common.aboutAria", { name: t("editor.selection.voiceTogether") })} side="top">
+            {t("editor.selection.voiceTooltip", { count: voiceableCount })}
+          </InfoNote>
+        )}
+        </span>
       )}
       {/* AQU-1722: the other batch — one take PER line, all in one chosen
           voice, rather than one shared clip. Sits beside "Voice together"
-          because the two are easy to confuse and the tooltips are where the
-          difference is stated. */}
+          because the two are easy to confuse and the (i)s beside them are
+          where the difference is stated. */}
       {audioMode && !audioOnlyLane && (
-        <AppTooltip content={
-          voiceableCount === 0
-            ? t("audio.batchVoice.needTranslated")
-            : t("audio.batchVoice.tooltip", { count: voiceableCount })
-        }>
+        <span className="flex shrink-0 items-center gap-0.5">
+        <AppTooltip content={voiceableCount === 0 ? t("audio.batchVoice.needTranslated") : null}>
           <Button
             type="button"
             size="sm"
@@ -784,6 +793,12 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
             )}
           </Button>
         </AppTooltip>
+        {voiceableCount > 0 && (
+          <InfoNote label={t("common.aboutAria", { name: t("audio.batchVoice.title") })} side="top">
+            {t("audio.batchVoice.tooltip", { count: voiceableCount })}
+          </InfoNote>
+        )}
+        </span>
       )}
       {!audioMode && !audioOnlyLane && (
         <>
@@ -793,7 +808,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         !canCommitTarget ? t("editor.selection.translateNoPermission") :
         !completeBatch ? t("editor.selection.translateNotConfigured") :
         missingCount === 0 ? t("editor.selection.allTranslated") :
-        t("editor.selection.translateTooltip", { count: missingCount })
+        null
       }>
         <Button
           type="button"
@@ -815,11 +830,10 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           )}
         </Button>
       </AppTooltip>
-      <AppTooltip content={
-        validateDisabledReason
-          ?? validatePartialTooltip
-          ?? t("editor.selection.validateTooltip", { count: validatableCount })
-      }>
+      {/* Which lines a partial run signs off, and why it leaves the rest, is
+          behind the (i) beside it (AQU-2260; it was the button's hover). */}
+      <span className="flex shrink-0 items-center gap-0.5">
+      <AppTooltip content={validateDisabledReason}>
         <Button
           type="button"
           size="sm"
@@ -838,11 +852,13 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           )}
         </Button>
       </AppTooltip>
-      <AppTooltip content={
-        unvalidatableCount === 0
-          ? t("editor.selection.noValidations")
-          : t("editor.selection.unvalidateTooltip", { count: unvalidatableCount })
-      }>
+      {validatePartialTooltip && !validateDisabledReason && (
+        <InfoNote label={t("common.aboutAria", { name: t("editor.selection.validateText") })} side="top">
+          {validatePartialTooltip}
+        </InfoNote>
+      )}
+      </span>
+      <AppTooltip content={unvalidatableCount === 0 ? t("editor.selection.noValidations") : null}>
         <Button
           type="button"
           size="sm"
@@ -875,11 +891,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           validation it offers. */}
       {(fileHasAudio || audioOnlyLane) && (
         <>
-          <AppTooltip content={
-            validateAudioDisabledReason
-              ? validateAudioDisabledReason
-              : t("editor.selection.validateAudioTooltip", { count: audioTakeTargets.length })
-          }>
+          <AppTooltip content={validateAudioDisabledReason || null}>
             <Button
               type="button"
               size="sm"
@@ -896,11 +908,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
               )}
             </Button>
           </AppTooltip>
-          <AppTooltip content={
-            audioRemoveTargets.length === 0
-              ? t("editor.selection.noAudioValidations")
-              : t("editor.selection.unvalidateAudioTooltip", { count: audioRemoveTargets.length })
-          }>
+          <AppTooltip content={audioRemoveTargets.length === 0 ? t("editor.selection.noAudioValidations") : null}>
             <Button
               type="button"
               size="sm"
@@ -924,11 +932,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           translation (v1 minimum per spec). Disabled when canHarmonize=false
           (role too low) or onHarmonize callback not provided. */}
       {onHarmonize != null && harmonizableCount > 0 && (
-        <AppTooltip content={
-          !canHarmonize
-            ? t("editor.selection.harmonizeNeedLead")
-            : t("editor.selection.harmonizeTooltip", { count: harmonizableCount })
-        }>
+        <AppTooltip content={!canHarmonize ? t("editor.selection.harmonizeNeedLead") : null}>
           <Button
             type="button"
             size="sm"

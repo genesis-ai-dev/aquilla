@@ -14,7 +14,7 @@
 import type { ReactNode } from "react"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { LockedNote } from "@/components/ui/locked-note"
 import { cn } from "@/lib/utils"
 
 export interface ImportOptionCardProps {
@@ -28,7 +28,7 @@ export interface ImportOptionCardProps {
   description: string
   onSelect: () => void
   disabled?: boolean
-  /** Why it is disabled; shown as the card's tooltip. */
+  /** Why it is disabled; one short line in the card (AQU-2260: never a hover). */
   disabledTooltip?: string
   /** A chevron at the end, for a card that moves straight on when chosen. */
   chevron?: boolean
@@ -72,14 +72,14 @@ export function ImportOptionCard({
         "gap-0 px-3",
         emphasis && "bg-primary/5 ring-primary/50",
         disabled
-          ? "cursor-not-allowed opacity-55"
+          ? "cursor-not-allowed"
           : cn(
               "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               emphasis ? "hover:bg-primary/10" : "hover:bg-muted/50",
             ),
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className={cn("flex items-start gap-3", disabled && "opacity-55")}>
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Icon className="size-4" />
         </span>
@@ -93,9 +93,12 @@ export function ImportOptionCard({
         </div>
         {chevron && <ChevronRight className="mt-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       </div>
+      {/* Why it is greyed out, said once in the card where it is seen. */}
+      {disabled && disabledTooltip && (
+        <LockedNote className="mt-2 ps-11">{disabledTooltip}</LockedNote>
+      )}
     </Card>
   )
 
-  if (!disabled || !disabledTooltip) return card
-  return <AppTooltip content={disabledTooltip}>{card}</AppTooltip>
+  return card
 }

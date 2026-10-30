@@ -282,7 +282,6 @@ export const bibleData = defineNamespace({
     "bibleData.whosWho.panel.edgeTab": "People",
     "bibleData.whosWho.panel.showAria": "Show Who's Who",
     "bibleData.whosWho.panel.hideAria": "Hide Who's Who",
-    "bibleData.whosWho.panel.openTooltip": "Who's Who: the people in this passage",
     "bibleData.whosWho.panel.resizeAria": "Resize the Who's Who panel",
     "bibleData.whosWho.panel.scrollHint": "Scroll to a verse to see who is in its passage.",
     "bibleData.whosWho.panel.unavailable.offline":
@@ -1284,9 +1283,6 @@ export const bibleData = defineNamespace({
       },
       "bibleData.whosWho.panel.hideAria": {
         description: "Screen-reader name of the close button in the Who's Who panel.",
-      },
-      "bibleData.whosWho.panel.openTooltip": {
-        description: "Tooltip on the closed Who's Who panel's tab.",
       },
       "bibleData.whosWho.panel.resizeAria": {
         description: "Screen-reader name of the handle that changes the panel's width.",

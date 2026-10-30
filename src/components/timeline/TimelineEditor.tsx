@@ -734,6 +734,10 @@ interface LaneLabelReorder {
   dropEdge: "top" | "bottom" | null
   /** Drawn short and inset, meaning "inside the folder above". */
   dropIndent?: boolean
+  /** Where in the row the line is drawn instead, in px from its top, when its
+   *  edge is out of sight — scrolled up under the header or past the column's
+   *  foot (AQU-2236). Null while the edge itself can be seen. */
+  dropTopPx?: number | null
   onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
@@ -741,6 +745,9 @@ interface LaneLabelReorder {
 /** How far the lane prompt keeps from the visible left edge, and from the end
  *  of a lane long enough to hold it. */
 const LANE_PROMPT_INSET_PX = 10
+
+/** The track drop line's thickness (`h-0.5`), for holding it inside the view. */
+const DROP_LINE_PX = 2
 
 /**
  * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
@@ -985,11 +992,12 @@ function LaneLabel({
           data-testid="tl-track-drop-line"
           className={cn(
             "pointer-events-none absolute z-20 h-0.5 bg-sky-500",
-            reorder.dropEdge === "top" ? "top-0" : "bottom-0",
+            reorder.dropTopPx == null && (reorder.dropEdge === "top" ? "top-0" : "bottom-0"),
             // The indent matches the one a member row is drawn with, so the
             // line lands exactly where the row it promises will.
             reorder.dropIndent ? "left-3.5 right-0" : "inset-x-0",
           )}
+          style={reorder.dropTopPx == null ? undefined : { top: `${reorder.dropTopPx}px` }}
         />
       )}
       {/* The indent is on the CONTENT, not the row, so the drop line and the
@@ -1667,6 +1675,12 @@ export function TimelineEditor({
    *  back to the track column (AQU-1632). */
   const gutterRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
+  /** The header strip over the names, which `revealGutterRow` keeps a focused
+   *  row out from under (AQU-2236). */
+  const gutterHeaderRef = useRef<HTMLDivElement>(null)
+  /** Set by a keyboard move that went through, for the layout effect that
+   *  reveals the moved row once the new order lands (AQU-2236). */
+  const keyboardMovedRef = useRef(false)
   /** The horizontal offset this component has already reacted to. Stage 3 made
    *  the track column scroll in y as well, so a scroll event no longer implies
    *  a horizontal move — everything keyed on one has to check first. */
@@ -1713,6 +1727,15 @@ export function TimelineEditor({
      * agree by inspection.
      */
     target: TrackDropTarget | null
+    /** Past the 3px threshold: a drag, not a press. Stays true once set, for
+     *  the rest of the gesture — unlike `target`, which goes back to null
+     *  over the row's own slot — so what it switches on cannot flicker. */
+    moved: boolean
+    /** The stretch of the column that can be seen, in the same content frame
+     *  as `rowBounds`: from the header's foot to the column's. Measured with
+     *  the target, on every move, so the line is held inside it (AQU-2236).
+     *  Null when there is no layout to measure. */
+    view: { top: number; bottom: number } | null
   } | null>(null)
   const clock = useTimelineClock()
   const chipStripSlot = useUiSlot("media-chip-strip")
@@ -3008,6 +3031,52 @@ export function TimelineEditor({
     if (el && scrollTop !== 0) el.scrollTop += scrollTop
   }
 
+  /**
+   * AQU-2236: the header covers the column's top 28px, and the browser does
+   * not know that. A row up there counts as on screen, so focusing it — a
+   * Shift+Tab, the rename field, a menu handing focus back to its row —
+   * scrolls nothing, and the focus ring or the text being typed sits under
+   * the header. `scroll-padding-top` cannot help: it only changes where the
+   * browser aims, and this reveal would have to scroll the gutter UP, past the
+   * 0 that `handleGutterScroll` holds it at. So the track column, which owns
+   * the vertical offset, scrolls up by what the header hides of the row (or
+   * by all of it, for a row above the column's top).
+   *
+   * Only for a focus that SHOWS (`:focus-visible`). A row focused by a click
+   * draws no ring, so nothing is hidden, and sliding the row away mid-press
+   * can pull its speaker or ⋯ out from under the pointer, so the click misses.
+   *
+   * `belowToo` also brings the row up from under the column's bottom edge. A
+   * focus event must not ask for that: the browser already reveals downward,
+   * and AQU-1632 hands that scroll to the track column, so doing it here as
+   * well would scroll twice. A keyboard move needs it, because the moved row
+   * keeps its focus and gets no focus event at all.
+   */
+  function revealGutterRow(target: EventTarget | null, belowToo = false) {
+    const gutter = gutterRef.current
+    const header = gutterHeaderRef.current
+    const inner = gutterInnerRef.current
+    const el = scrollRef.current
+    if (!gutter || !header || !inner || !el || !(target instanceof Element)) return
+    if (!target.matches(":focus-visible")) return
+    // The ROW, not the control in it: a focused ⋯ alone would leave the row's
+    // own top edge under the header. The rows are `inner`'s children; a
+    // menu's portaled items, whose focus bubbles here through React, are not.
+    let row: Element | null = target
+    while (row && row.parentElement !== inner) row = row.parentElement
+    if (!row) return
+    const rect = row.getBoundingClientRect()
+    const hidden = header.getBoundingClientRect().bottom - rect.top
+    const below = rect.bottom - gutter.getBoundingClientRect().bottom
+    if (hidden > 0) el.scrollTop -= hidden
+    else if (belowToo && below > 0) el.scrollTop += below
+    else return
+    // Move the names NOW rather than on the scroll event, so a second look in
+    // the same frame (the browser's own reveal, or this one again from the
+    // focus React restores after a move) measures where the row really is.
+    handleTrackScroll()
+  }
+
   function applyZoom(next: number) {
     const z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, next))
     // AQU-646: keep an anchor stable across the zoom — the playhead when
@@ -3091,14 +3160,15 @@ export function TimelineEditor({
   /** A move expressed in SCOPE indices — see the trackDrag state for why the
    *  distinction is load-bearing. `scope.tracks` is ascending by `order` by
    *  construction (that is what scoping buys), which is the precondition
-   *  orderForDrop's midpoint arithmetic depends on. */
-  function commitScopedMove(scope: ScopeSiblings, toIndex: number) {
-    if (!onReorderTrack) return
+   *  orderForDrop's midpoint arithmetic depends on. Returns whether it wrote. */
+  function commitScopedMove(scope: ScopeSiblings, toIndex: number): boolean {
+    if (!onReorderTrack) return false
     const drop = orderForDrop(scope.tracks, scope.fromIndex, toIndex)
     // null covers both "did not move" and an index off either end (which is how
     // Alt+ArrowUp on the top row resolves), so neither needs its own guard.
-    if (!drop) return
+    if (!drop) return false
     onReorderTrack(drop.trackId, drop.order)
+    return true
   }
 
   /**
@@ -3188,7 +3258,15 @@ export function TimelineEditor({
       /* happy-dom / unsupported — the window listeners still carry the drag */
     }
     const restoreUserSelect = pauseTextSelection()
-    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null })
+    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false, view: null })
+    // AQU-2236: what the column shows, below the header. Read on every move,
+    // like the target it is drawn for, because the list can scroll mid-drag.
+    const visible = () => {
+      const header = gutterHeaderRef.current?.getBoundingClientRect()
+      const column = gutterRef.current?.getBoundingClientRect()
+      if (!header || !column || column.bottom <= header.bottom) return null
+      return { top: gutterContentY(header.bottom), bottom: gutterContentY(column.bottom) }
+    }
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
@@ -3204,7 +3282,8 @@ export function TimelineEditor({
         trackDragMovedRef.current = true
       }
       const target = moved ? resolve(ev) : null
-      setTrackDrag((d) => (d ? { ...d, dy, target } : d))
+      const view = moved ? visible() : null
+      setTrackDrag((d) => (d ? { ...d, dy, target, moved, view } : d))
     }
     const stop = () => {
       window.removeEventListener("pointermove", onMove)
@@ -3252,8 +3331,24 @@ export function TimelineEditor({
     // next sibling, not out of the folder.
     const scope = scopeSiblings(trackRows, fromIndex)
     if (!scope) return
-    commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))
+    if (commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))) {
+      keyboardMovedRef.current = true
+    }
   }
+
+  // AQU-2236: the row a keyboard move sends somewhere keeps its focus (React
+  // moves the node, or its neighbour, without a focus event), so nothing else
+  // would bring it out from under the header — or up from below the fold —
+  // where it lands. Keyed on the ORDER, so it runs in the commit that carries
+  // the move, not in some render before it. Only after a keyboard move: a
+  // collaborator's reorder must not scroll anyone's view to their focus.
+  const rowOrderKey = trackRows.map((r) => r.track.id).join("\n")
+  useLayoutEffect(() => {
+    if (!keyboardMovedRef.current) return
+    keyboardMovedRef.current = false
+    revealGutterRow(document.activeElement, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads refs and the DOM only; the order is the trigger
+  }, [rowOrderKey])
 
   /**
    * The insertion boundary the drop-indicator line is drawn at: 0..tracks.length,
@@ -3284,11 +3379,30 @@ export function TimelineEditor({
    * exactly what `top` inside the track content div means. If either height
    * ever changes without the other, the line will be off by the difference.
    */
-  const dropLineContentY =
+  const dropEdgeContentY =
     trackDrag && dropRow
       ? dropRow.edge === "top"
         ? trackDrag.rowBounds[dropRow.rowIndex]?.top
         : trackDrag.rowBounds[dropRow.rowIndex]?.bottom
+      : null
+  /**
+   * …held where it can be seen (AQU-2236). Near the top of a scrolled list the
+   * edge a drop lands on can be scrolled up past the header, out of the column,
+   * and the line drawn there showed nowhere — so the top row, the drop people
+   * reach for most up there, had no readout at all. The line stops just under
+   * the header instead, and just above the column's foot at the other end. The
+   * drop itself is unchanged: the line only ever moves to the edge of the view
+   * the real boundary lies beyond.
+   */
+  const dropLineContentY =
+    dropEdgeContentY == null || !trackDrag?.view
+      ? dropEdgeContentY
+      : Math.min(Math.max(dropEdgeContentY, trackDrag.view.top), trackDrag.view.bottom - DROP_LINE_PX)
+  /** The gutter half's place inside its row, or null where the row's own edge
+   *  is in sight and the line sits on it as it always has. */
+  const dropTopInRowPx =
+    dropRow && dropLineContentY != null && dropLineContentY !== dropEdgeContentY
+      ? dropLineContentY - (trackDrag?.rowBounds[dropRow.rowIndex]?.top ?? 0)
       : null
 
   // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
@@ -4752,23 +4866,38 @@ export function TimelineEditor({
               rows did. */}
           <div
             ref={gutterRef}
-            className="relative overflow-hidden bg-muted/20"
+            // `isolate` (AQU-2236): the z-indexes in here rank against EACH
+            // OTHER and nothing else — header 40 over names 30 over rule 20.
+            // Without it they ranked in the workspace's own stacking context,
+            // where 40 is the menus' tier (AppShell's z-scale), and the header
+            // and the names drew over the expanded search results (z-20) that
+            // are meant to cover the editor.
+            className="relative isolate overflow-hidden bg-muted/20"
             onScroll={handleGutterScroll}
+            // React's onFocus bubbles: any row, or any control in one, that
+            // takes focus under the header comes back out from under it.
+            onFocus={(e) => revealGutterRow(e.target)}
           >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
                 BORDER. It was `border-r` on this container — but a border
                 paints outside the content box, so no row could ever cover its
                 own segment of it, and Sam wants the folder band to run
                 UNBROKEN across both columns. Same pixel (border-box kept the
-                1px inside this cell's width, and so does right-0 w-px), full
-                height including the header strip and the space below the
-                rows, exactly as before — except where a folder row (opaque,
-                z-30) now paints over it. z-20 keeps it above the header's
-                opaque z-10 background, where the old border also showed. */}
+                1px inside this cell's width, and so does end-0 w-px), full
+                height through the space below the rows — except where a
+                folder row (opaque, z-30) paints over it.
+
+                The header covers its top 28px (AQU-2236): the names scroll
+                under the header now, so the header outranks them, and this
+                rule with them. The header draws that stretch of the divider
+                itself, with its own `border-e`. Keep both: raising the rule
+                over the header would raise it over the folder band too, and
+                the header without its border would leave the strip with no
+                divider at all. */}
             <div
               aria-hidden
               data-testid="tl-gutter-rule"
-              className="pointer-events-none absolute inset-y-0 right-0 z-20 w-px bg-border"
+              className="pointer-events-none absolute inset-y-0 end-0 z-20 w-px bg-border"
             />
             {/* The ruler's opposite number. It does NOT translate — the labels
                 below slide under it exactly as the chips slide under the sticky
@@ -4777,7 +4906,17 @@ export function TimelineEditor({
                 through it would still be perfectly legible; this paints
                 `bg-background` and lays the same tint back over it, reproducing
                 today's composite to the pixel. */}
-            <div className="relative z-10 h-7 border-b border-border bg-background">
+            {/* z-40, above the track names (z-30, raised for the folder band
+                below): they scroll UNDER this header, as the chips slide under
+                the ruler. Above the divider rule too, so the header draws that
+                pixel itself (`border-e`, on the rule's own column).
+
+                LOGICAL SIDES, here and on the rule: Arabic and
+                Urdu flip `<html dir>`, the grid puts this column on the RIGHT,
+                and the edge it shares with the lanes is then its left one.
+                `border-e` and `end-0` follow that edge; `border-r` and
+                `right-0` would draw the divider on the column's outer edge. */}
+            <div ref={gutterHeaderRef} className="relative z-40 h-7 border-b border-e border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE CORNER CELL (media redesign, layout): "Tracks", and the
                   timeline's own Full screen, Fold and ⋯ — the timeline has no
@@ -4840,7 +4979,17 @@ export function TimelineEditor({
               // rule still shows through every ordinary row and is covered only
               // where a row paints something opaque, which is what the folder
               // band is.
-              className="relative z-30"
+              //
+              // …AND OVER THE HEADER TOO, BUT ONLY MID-DRAG (AQU-2236). At rest
+              // the names pass under the header, as the chips pass under the
+              // ruler. During a drag the lane half of the drop line still draws
+              // over the ruler (its z-30 beats the ruler's z-20), so near the
+              // top the gutter half and the row in the air would vanish under
+              // the header while the lane half showed — and the drop still
+              // resolves up there. A dragged chip lifts its whole lane over the
+              // ruler for the same reason (TargetAudioLane): mid-gesture, the
+              // thing under the pointer is what you need to see.
+              className={cn("relative", trackDrag?.moved ? "z-50" : "z-30")}
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
@@ -5024,6 +5173,7 @@ export function TimelineEditor({
                             // outcomes of one gesture are distinguishable
                             // before the pointer is let go.
                             dropIndent: Boolean(dropRow?.indent),
+                            dropTopPx: dropRow?.rowIndex === index ? dropTopInRowPx : null,
                             onPointerDown: (e) => beginTrackDrag(index, e),
                             onKeyDown: (e) => onTrackLabelKeyDown(index, e),
                           }

@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_TRACK_IDS,
+  SOURCE_CUES_TRACK_NAME,
   TRACK_KIND_LABELS,
   deriveDefaultTracks,
   deriveTracksForFile,
@@ -170,13 +171,51 @@ describe("deriveDefaultTracks — the derivation context", () => {
     ])
   })
 
-  it("draws it once there are cues for it to hold", () => {
+  it("draws it once there are cues for it to hold, as the Source cues row", () => {
     expect(shape(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasAudioCues: true }))).toEqual([
       ["source-subtitles", "source-subtitles", "Source text", 0, null],
       ["target-subtitles", "target-subtitles", "Target text", 1, null],
-      ["source-audio", "source-audio", "Source audio", 2, null],
+      ["source-audio", "source-audio", "Source cues", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
+  })
+
+  // Sam, Oct 30: the row that holds the audio VTT's cues is "Source cues". The
+  // kind and id stay "source-audio" (persisted in trackOverrides), so only the
+  // name moves, and a row of real source audio keeps "Source audio".
+  describe("the Source cues name", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    const sourceRow = (context: TrackDerivationContext) =>
+      deriveDefaultTracks(context).find((t) => t.id === "source-audio")
+
+    it("names the cue row Source cues on a film's subtitle file and on a book with only cues", () => {
+      expect(SOURCE_CUES_TRACK_NAME).toBe("Source cues")
+      expect(sourceRow({ ...SUBTITLE_IMPORT, hasAudioCues: true, hasLinkedFilm: true })?.name).toBe("Source cues")
+      expect(sourceRow({ ...BOOK, hasAudioCues: true })?.name).toBe("Source cues")
+    })
+
+    it("keeps Source audio for a row of real source audio", () => {
+      expect(sourceRow({ ...BOOK, hasSourceAudio: true })?.name).toBe("Source audio")
+      expect(sourceRow({ ...BOOK, hasSourceAudio: true, hasAudioCues: true })?.name).toBe("Source audio")
+      expect(sourceRow(MEDIA)?.name).toBe("Source audio")
+    })
+
+    // Sam, Oct 30: a YouTube film plus an uploaded recording of the source is a
+    // media file (the recording's rows), so the recording keeps its own Source
+    // audio row beside the film.
+    it("keeps a YouTube film's uploaded recording on its own Source audio row", () => {
+      expect(sourceRow({ ...MEDIA, hasLinkedFilm: true })?.name).toBe("Source audio")
+    })
+
+    it("still gives way to a rename", () => {
+      const tracks = deriveTracksForFile(
+        { trackOverrides: { "source-audio": { name: "Heard lines" } } },
+        { ...SUBTITLE_IMPORT, hasAudioCues: true },
+      )
+      expect(tracks.find((t) => t.id === "source-audio")?.name).toBe("Heard lines")
+    })
   })
 
   it("keeps every other row's order identical across that row appearing", () => {

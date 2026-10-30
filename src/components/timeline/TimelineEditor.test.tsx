@@ -2707,7 +2707,8 @@ describe("TimelineEditor — rows come from the track model", () => {
         onRetimeSubtitle={() => {}}
       />,
     )
-    expect(gutterNames()).toEqual(["Source text", "Target text", "Source audio", "Target audio"])
+    // Sam, Oct 30: a row of cues is "Source cues", not "Source audio".
+    expect(gutterNames()).toEqual(["Source text", "Target text", "Source cues", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "source-audio-cues", "tl-target-lane"])
   })
 
@@ -4585,7 +4586,7 @@ describe("TimelineEditor — an added track finds its takes where they actually 
   // not a source. And as far as source text and source audio go, in BTT
   // products where source audio is linked to source text the new tracks align
   // with the source audio regardless of which you select."
-  it("offers one honest alignment on a cue-linked file, named for the audio", () => {
+  it("offers one honest alignment on a cue-linked file, named for the cues", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable
@@ -4606,8 +4607,9 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     // the dialog takes both clicks.
     fireEvent.click(screen.getByTestId("tl-add-track"))
     fireEvent.click(screen.getByText("Audio track"))
-    // One option, stated rather than asked…
-    expect(screen.getByTestId("tl-add-track-align-fixed")).toHaveTextContent("Source audio")
+    // One option, stated rather than asked, under the row's own name (Sam,
+    // Oct 30: the cues row is "Source cues")…
+    expect(screen.getByTestId("tl-add-track-align-fixed")).toHaveTextContent("Source cues")
     expect(screen.queryByTestId("tl-add-track-align")).toBeNull()
     // …and the boring automatic name.
     expect(screen.getByTestId("tl-add-track-name")).toHaveValue("Track")
@@ -6158,7 +6160,7 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     const menu = await screen.findByRole("menu")
     const text = menu.textContent ?? ""
     // The film (its name, Change, Fold), then the other sources.
-    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Audio cues"].map((word) => text.indexOf(word))
+    const order = ["a.mp4", "Change", "Fold the film", "Sources", "Source cues"].map((word) => text.indexOf(word))
     expect(order.every((i) => i >= 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
     fireEvent.click(within(menu).getByTestId("top-film-hide"))
@@ -6181,7 +6183,7 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(within(menu).getByTestId("top-film-change")).toBeInTheDocument()
     expect(within(menu).getByTestId("top-film-hide")).toBeInTheDocument()
     // The other sources, and their heading, stay behind the setting.
-    expect(text).not.toMatch(/Audio cues/)
+    expect(text).not.toMatch(/Source cues/)
     expect(text).not.toMatch(/^Sources|Sources$/m)
     fireEvent.click(within(menu).getByTestId("top-film-hide"))
     expect(film.onHide).toHaveBeenCalled()

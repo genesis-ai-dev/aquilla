@@ -1439,7 +1439,8 @@ export const editor = defineNamespace({
     "editor.timeline.menuStopLinking": "Stop linking",
     "editor.timeline.menuCheckCharacters": "Check characters",
     "editor.timeline.menuFilm": "Film",
-    "editor.timeline.menuAudioCues": "Audio cues",
+    // Sam, Oct 30: the cues are the "Source cues", here and on the timeline.
+    "editor.timeline.menuAudioCues": "Source cues",
     "editor.timeline.badgeCharactersSubtitle": "{count} subtitle",
     "editor.timeline.badgeCharactersHeard": "{count} heard",
     "editor.timeline.badgeCharactersBoth": "{subtitle} + {heard}",
@@ -1609,12 +1610,12 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttTitleReplace": "Replace the audio VTT",
     "editor.timeline.audioVttTitleNew": "Import an audio VTT",
     "editor.timeline.audioVttDescription":
-      "The cues become a read-only Source audio track on this file's timeline — " +
+      "The cues become a read-only Source cues track on this file's timeline — " +
       "the transcript of what is said in the film, on the film's own timings. The " +
       "dialogue table below is untouched: no rows are added to \"{fileName}\", and " +
       "nothing here is translated or exported.",
     "editor.timeline.audioVttDescriptionReplacing":
-      "The audio track this file has now will be replaced.",
+      "The Source cues track this file has now will be replaced.",
     "editor.timeline.audioVttCueSummary": "{count} cues, {span}",
     "editor.timeline.audioVttRepairedShortForm":
       "{count} short-form timestamps read as minutes and seconds.",
@@ -1660,7 +1661,7 @@ export const editor = defineNamespace({
       "{lead} and will no longer be reachable. The audio itself is kept, but " +
       "nothing in the app would show it.",
     "editor.timeline.audioVttRemoveLead":
-      "Take the Source audio track off \"{fileName}\"? The {count} cues and every " +
+      "Take the Source cues track off \"{fileName}\"? The {count} cues and every " +
       "subtitle pairing go with it.",
     "editor.timeline.audioVttRemoveTakesLead": plural({
       one: "{count} recording sits on those cues",
@@ -3068,7 +3069,7 @@ export const editor = defineNamespace({
       },
       "editor.timeline.badgeImportedCount": {
         description:
-          "State badge on the Sources menu's 'Audio cues' row, saying how many " +
+          "State badge on the Sources menu's 'Source cues' row, saying how many " +
           "cues the file already carries. Lower-case, no period — it sits beside " +
           "the row's label as a status, not a sentence.",
         placeholders: {
@@ -3996,7 +3997,10 @@ export const editor = defineNamespace({
         description: "Sources menu row for the film (video) linked to this file; its badge says Linked or Not linked.",
       },
       "editor.timeline.menuAudioCues": {
-        description: "Sources menu row for the file's audio cues (imported from an audio VTT); its badge says how many.",
+        description:
+          "Sources menu row for the file's source cues: the timed transcript of what is said in the film, " +
+          "imported from an audio VTT. The same name as the timeline row that shows those cues, so say it " +
+          "the same way in both places. Its badge says how many.",
       },
       "editor.timeline.badgeCharactersSubtitle": {
         description: "Badge on the Characters row: how many characters came from the subtitles. Short; 'subtitle' qualifies the count.",
@@ -9316,7 +9320,8 @@ export const editor = defineNamespace({
         description:
           "Explanatory paragraph under the title of the 'import an audio VTT' " +
           "dialog. Says what the import adds (a read-only track of the film's " +
-          "spoken dialogue) and, just as importantly, what it does NOT touch.",
+          "spoken dialogue, named 'Source cues' on the timeline) and, just as " +
+          "importantly, what it does NOT touch.",
         placeholders: {
           fileName: "Name of the text file the track attaches to, e.g. 'ep101.vtt'. Content — never translate it.",
         },
@@ -9434,10 +9439,10 @@ export const editor = defineNamespace({
       },
       "editor.timeline.audioVttRemoveLead": {
         description:
-          "The question asked by the second step of removing the audio track, " +
-          "naming the file and what goes with the track.",
+          "The question asked by the second step of removing the Source cues track " +
+          "(the timeline row of the film's cues), naming the file and what goes with the track.",
         placeholders: {
-          fileName: "Name of the text file losing its audio track. Content — never translate it.",
+          fileName: "Name of the text file losing its Source cues track. Content — never translate it.",
           count: "Number of cues that would be removed.",
         },
       },

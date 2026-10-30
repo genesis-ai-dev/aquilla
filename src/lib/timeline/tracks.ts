@@ -10,7 +10,7 @@
 //
 // TRACKS ARE CUE DATA, AND THE FILM'S SOUNDTRACK GETS NO ROW, EVER. The picture
 // is heard from the video pane whatever the timeline shows, so there is nothing
-// for a "the film's own audio" row to hold. "Source audio" is the row for the
+// for a "the film's own audio" row to hold. "Source cues" is the row for the
 // AUDIO VTT's cues — a near-verbatim transcript of that soundtrack, imported as
 // a hidden sibling file — and until such an import exists there is nothing to
 // draw and the row is simply absent. That is why derivation takes a
@@ -151,6 +151,16 @@ export const TRACK_KIND_LABELS: Record<TrackKind, string> = {
   folder: "Folder",
   audio: "Audio",
 }
+
+/**
+ * The name of the Source-audio row while what it holds is the AUDIO VTT's cues,
+ * the transcript of the film's own speech, rather than a source recording (Sam,
+ * Oct 30: "Source cues"). Same kind, same id, same seat: only what the row is
+ * CALLED changes, so a rename still wins and nothing persisted moves. A row of
+ * real source audio (an imported recording, a book's chapter audio) keeps
+ * "Source audio".
+ */
+export const SOURCE_CUES_TRACK_NAME = "Source cues"
 
 /**
  * THE RESERVED IDS — every kind, not "the rows this file starts with".
@@ -321,10 +331,17 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // went. With no source audio there is nothing for a Source-audio row to
   // hold, and an empty one reads as "the source is silent", so it is left
   // out, the same rule as a subtitle file's below.
+  //
+  // Its recording, when it has one, is what the row draws; with only cues, it
+  // is the Source cues row.
   if (!context.isSubtitleImport) {
     return [
       trackRow("source-subtitles"),
-      ...(context.hasAudioCues || context.hasSourceAudio ? [trackRow("source-audio")] : []),
+      ...(context.hasSourceAudio
+        ? [trackRow("source-audio")]
+        : context.hasAudioCues
+          ? [trackRow("source-audio", SOURCE_CUES_TRACK_NAME)]
+          : []),
       trackRow("target-audio"),
     ]
   }
@@ -338,7 +355,9 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
     // A linked film's own sound is NOT drawn here (Sam, Oct 29): it lives on
     // the film track, which carries its mute. Until then (AQU-1566, Oct 5) this
     // row stood in for it as one dashed band, "The video's own sound".
-    ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
+    //
+    // What it holds here is always the cues, so it is the Source cues row.
+    ...(context.hasAudioCues ? [trackRow("source-audio", SOURCE_CUES_TRACK_NAME)] : []),
     trackRow("target-audio"),
   ]
 }

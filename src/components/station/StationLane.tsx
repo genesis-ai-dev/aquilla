@@ -124,6 +124,9 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
   const progress = ed.playT != null ? (ed.playT - va) / w : null
   const mid = sel ? Math.max(16, Math.min(84, (((sel.a + sel.b) / 2 - va) / w) * 100)) : 50
   const joins = joinsOf(ed.placed).filter(inView)
+  // Slice 13: below 520 px the bar's actions keep their icons and tooltips
+  // and drop their words, so it fits over the lane.
+  const narrow = size.width > 0 && size.width < 520
   const inserted = ed.placed.filter((g) => g.ins && g.t1 > va && g.t0 < vb)
 
   return (
@@ -254,19 +257,19 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
               {range && editable ? (
                 <ActionButton tip={t("editor.station.keepTip")} onClick={() => void ed.keepSelection()} testId="station-keep" className="text-foreground">
                   <Check className="size-[13px]" />
-                  {t("editor.station.keepThis")}
+                  {narrow ? <span className="sr-only">{t("editor.station.keepThis")}</span> : t("editor.station.keepThis")}
                 </ActionButton>
               ) : null}
               {range && onDelete ? (
                 <ActionButton tip={t("editor.station.deleteTip")} onClick={onDelete} testId="station-delete" className="text-destructive">
                   <Trash2 className="size-[13px]" />
-                  {t("editor.station.deleteThis")}
+                  {narrow ? <span className="sr-only">{t("editor.station.deleteThis")}</span> : t("editor.station.deleteThis")}
                 </ActionButton>
               ) : null}
               {onInsert ? (
                 <ActionButton tip={t("editor.station.insertTip")} onClick={onInsert} testId="station-insert" className="text-sky-700 dark:text-sky-400" expanded={insertOpen}>
                   <Plus className="size-[13px]" />
-                  {t("editor.station.insertHere")}
+                  {narrow ? <span className="sr-only">{t("editor.station.insertHere")}</span> : t("editor.station.insertHere")}
                 </ActionButton>
               ) : null}
               {editNote ? <span className="px-1 text-[11px] text-muted-foreground/70">{editNote}</span> : null}

@@ -130,7 +130,7 @@ export function StationNotice({
   return (
     <div
       data-testid="station-notice"
-      className="mx-3 flex shrink-0 items-start gap-4 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
+      className="mx-3 flex shrink-0 flex-wrap items-start gap-x-4 gap-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
     >
       <span className="inline-flex h-6 shrink-0 items-center gap-1.5 text-amber-700 dark:text-amber-400">
         <TriangleAlert className="size-[13px]" aria-hidden />

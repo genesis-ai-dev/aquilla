@@ -265,6 +265,27 @@ describe("two devices at once (P13.7)", () => {
     expect(log).toEqual(["undo Rename 1:7"])
   })
 
+  // Review, Oct 29: a NEW step from another device is not that device taking
+  // this one. The press undoes the step the button named; the other device's
+  // step stays on Undo, and the next press takes it.
+  it("a new step made on another device meanwhile does not stop this Undo", async () => {
+    recordStep(step("Rename 1:7"))
+    await settle()
+    // Computer A is in use (this copy has heard from it), then makes a step.
+    await writeOnComputerA((h) => h)
+    await refreshHistory()
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename 1:9", h.undo[0].at + 1)] }))
+
+    const reads = server.reads
+    const result = await undoLast()
+    expect(server.reads).toBe(reads + 1)
+    expect(result?.step.labelKey).toBe("Rename 1:7")
+    expect(result?.outcome.kind).toBe("done")
+    expect(log).toEqual(["undo Rename 1:7"])
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:9"])
+    expect(historyView().redoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:7"])
+  })
+
   it("it waits at most 1.5 s for the server's answer, then undoes", async () => {
     await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename take")] }))
     await refreshHistory()

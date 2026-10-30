@@ -516,9 +516,15 @@ async function claim(key: string, id: string, which: "undo" | "redo"): Promise<"
   if (timer) clearTimeout(timer)
   if (result !== "merged") return "ok"
   const s = stacksFor(key)
-  const from = which === "undo" ? s.undo : s.redo
-  return from[from.length - 1]?.id === id ? "ok" : "moved"
+  return stillOn(which === "undo" ? s.undo : s.redo, id) ? "ok" : "moved"
 }
+
+/**
+ * Whether a step is still where the press found it. Not "still on top": a
+ * step another device made meanwhile may now sit above it, and that device
+ * took nothing (review, Oct 29). The press undoes the step its button named.
+ */
+const stillOn = (list: readonly StepRecord[], id: string) => list.some((r) => r.id === id)
 
 if (typeof window !== "undefined") {
   // Steps made offline reach the server as soon as the connection is back.
@@ -886,7 +892,7 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     if (top.lane !== undefined && top.lane !== activeLane) {
       const opened = laneSwitcher ? await laneSwitcher(top.lane) : "blocked"
       if (activeScope !== scope) return null
-      if (fromList()[fromList().length - 1]?.id !== top.id) return { step: label, outcome: { kind: "moved" } }
+      if (!stillOn(fromList(), top.id)) return { step: label, outcome: { kind: "moved" } }
       if (opened === "denied") {
         // The person may no longer work in that language (gap 29).
         takeOut(fromList(), top.id)

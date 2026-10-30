@@ -311,7 +311,11 @@ export interface EventPayloads {
      *  still advances, so targets go stale. */
     transcription?: string
   }
-  'source.cell.delete': Record<string, never>
+  'source.cell.delete': {
+    /** Slice 13: the undo of "make rows from a recording" names the line's
+     *  creating event (recording-line-authority.ts). */
+    undoOfEventId?: string
+  }
   'source.cell.reorder': {
     anchorCellId: string | null
   }

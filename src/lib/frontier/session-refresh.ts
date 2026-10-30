@@ -122,12 +122,33 @@ async function runRefresh(): Promise<boolean> {
 
   let nextJwt: string
   try {
-    const res = await fetch(`${AUTH_BASE}/api/v2/auth/refresh`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${previousJwt}` },
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort()
+        reject(new DOMException("Session renewal timed out", "TimeoutError"))
+      }, 15_000)
     })
-    if (!res.ok) return false
-    const body = (await res.json()) as { access_token?: unknown }
+    // Race the entire exchange, not just headers. Some browsers leave fetch
+    // pending across reconnects; abort alone cannot guarantee lock release.
+    let body: { access_token?: unknown }
+    try {
+      body = await Promise.race([
+        deadline,
+        (async () => {
+          const res = await fetch(`${AUTH_BASE}/api/v2/auth/refresh`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${previousJwt}` },
+            signal: controller.signal,
+          })
+          if (!res.ok) return {}
+          return await res.json() as { access_token?: unknown }
+        })(),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
     if (typeof body.access_token !== "string" || body.access_token.length === 0) {
       return false
     }

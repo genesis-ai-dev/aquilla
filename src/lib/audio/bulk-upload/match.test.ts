@@ -765,6 +765,21 @@ describe("the review's cases (Oct 29)", () => {
     expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])
   })
 
+  it("leaving a file out of a run in folder order closes the run up", () => {
+    const runOpts = (files: BulkInputFile[], targets: TargetFile[], scope: MatchScope, opts: Parameters<typeof matchRecordings>[2]) => {
+      const projectFiles: ProjectFileInfo[] = targets.map((t) => ({ fileId: t.fileId, name: t.name, bookCode: t.bookCode }))
+      const read = readRecordings(files, { scope, index: new BookNameIndex(), projectFiles, maxBytes: 2048 * MB })
+      const assignments = matchRecordings(read, new Map(targets.map((t) => [t.fileId, t])), opts)
+      return { read, assignments, jobs: planJobs(assignments, read) }
+    }
+    const files = ["IMG_4521.m4a", "IMG_4522.m4a", "IMG_4523.m4a", "IMG_4524.m4a"].map((n) => audio(n))
+    const { assignments } = runOpts(files, [doc("d", "Welcome", 6)], fileScope("d"), { overrides: new Map([[1, "skip" as const]]) })
+    expect(assignments.map(lineOf)).toEqual(["d#1", "skipped", "d#2", "d#3"])
+    // A file moved by hand leaves the run too, and the rest close up.
+    const moved = runOpts(files, [doc("d", "Welcome", 6)], fileScope("d"), { overrides: new Map([[0, { fileId: "d", cellId: "d#6" }]]) })
+    expect(moved.assignments.map(lineOf)).toEqual(["d#6", "d#1", "d#2", "d#3"])
+  })
+
   it("on a bridged line, the same verse twice is two takes; different verses are its pieces", () => {
     const g = book("g", "GEN", "Genesis", [0])
     g.lines.push({ cellId: "g:1:1-2", ref: "GEN 1:1-2", text: "1-2", structural: false, hasRecording: false })

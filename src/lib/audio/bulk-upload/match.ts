@@ -905,7 +905,12 @@ export function matchRecordings(
       (lone.has(x.r.index) && !loneFinds(x.r.index))
     if (!anyFound && !otherBookOnly && (anyNumbered ? results.every(counterLike) : true)) {
       for (const x of results) if (!x.interp && "reason" in x.res) out.set(x.r.index, { index: x.r.index, reason: x.res.reason })
-      const ordered = results.filter((x) => x.interp).map((x) => x.r).sort((a, b) => compareFolderOrder(a.file.path, b.file.path))
+      // A file the person left out or placed by hand leaves the run, and the
+      // run closes up behind it: skipping a junk clip moves the later files
+      // up one line instead of leaving its line empty.
+      const handled = (index: number) => opts.overrides?.has(index) === true
+      for (const x of results) if (x.interp && handled(x.r.index)) out.set(x.r.index, { index: x.r.index, method: "order", orderRun: groupKey })
+      const ordered = results.filter((x) => x.interp && !handled(x.r.index)).map((x) => x.r).sort((a, b) => compareFolderOrder(a.file.path, b.file.path))
       // A folder named for a chapter ("Ruth 2") starts the run at its first
       // verse; otherwise at the file's first line. The person moves it from there.
       const folderChapter = ordered[0]?.folderChapter?.chapter

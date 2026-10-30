@@ -1,6 +1,6 @@
 ---
 name: record-promo-video
-description: Build a persona-targeted PROMO trailer (hype/launch reel) — fast cuts, kinetic type, synced score, in 16:9 and 9:16 — combining the Hormozi hook framework with REAL walkthrough footage from doc-mode recordings, via the deterministic scripts/promo pipeline. Use when asked to "make a promo / trailer / launch video", "hype reel", "social cut", "sizzle", or to produce marketing video for a persona. For a clarity-first how-to use record-docs-video; for the full announce+docs+market loop use distribution-cycle.
+description: Build a persona-targeted PROMO trailer (hype/launch reel) — fast cuts, kinetic type, synced score, in 16:9 and 9:16 — combining the Hormozi hook framework with REAL walkthrough footage from doc-mode recordings, via the deterministic scripts/promo pipeline. Use when asked to "make a promo / trailer / launch video", "hype reel", "social cut", "sizzle", or to produce marketing video for a persona. For a clarity-first how-to use record-docs-video; for the full announce+docs+market loop use distribution-cycle. For a pure kinetic-typography film built as code (one web page rendered at 1080p or 4K with motion blur, music and sound effects from Scenario MCP, no app footage required) use scenario-kinetic-film.
 ---
 
 # Record a promo trailer

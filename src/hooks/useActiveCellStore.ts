@@ -48,6 +48,7 @@ const NO_AUDIT: CellAuditStats = Object.freeze({
   lastEditAt: null,
   lastEditEventId: null,
   activeValidators: Object.freeze([]) as unknown as string[],
+  validatorDecidedTs: Object.freeze({}) as unknown as Record<string, number>,
   waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
 })
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -3808,6 +3809,19 @@ function waiversEqual(a: readonly RuleWaiver[], b: readonly RuleWaiver[]): boole
   return true
 }
 
+/** AQU-2296: two `username -> timestamp` records, compared by value. */
+function sameStampRecord(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): boolean {
+  if (a === b) return true
+  const left = a ?? {}
+  const right = b ?? {}
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => left[key] === right[key])
+}
+
 function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | undefined): boolean {
   if (a === b) return true
   if (!a || !b) return false
@@ -3817,6 +3831,10 @@ function auditStatsEqual(a: CellAuditStats | undefined, b: CellAuditStats | unde
     a.lastEditAt === b.lastEditAt &&
     a.lastEditEventId === b.lastEditEventId &&
     sameStringArray(a.activeValidators, b.activeValidators) &&
+    // AQU-2296: a re-validation on the SAME head moves one person's
+    // `decided_ts` forward without changing the name set, so the stamps have
+    // to be compared or the popover would keep showing the older date.
+    sameStampRecord(a.validatorDecidedTs, b.validatorDecidedTs) &&
     waiversEqual(a.waivers, b.waivers)
   )
 }

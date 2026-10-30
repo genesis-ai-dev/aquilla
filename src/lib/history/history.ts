@@ -426,6 +426,41 @@ function schedulePush(key: string): void {
   })()
 }
 
+/**
+ * The most history sent to the server, in characters of the request body. The
+ * server refuses more than 2 MiB (EDIT_HISTORY_MAX_BYTES,
+ * db/shared/edit-history.ts); this keeps clear of that, and of sending
+ * megabytes with every step.
+ */
+const SEND_LIMIT_CHARS = 1_500_000
+
+/**
+ * Make the history fit what the server keeps (review, Oct 29). Its OLDEST
+ * steps give way first, Undo's before Redo's, and on every device: they are
+ * buried, so no copy brings them back. The newest step always stays. False
+ * when the history still does not fit; it then stays on this device.
+ */
+function fitForServer(key: string, s: Stacks, body: string): boolean {
+  let over = body.length - SEND_LIMIT_CHARS
+  if (over <= 0) return true
+  const dropped: string[] = []
+  const giveWay = (list: StepRecord[], keep: number) => {
+    while (over > 0 && list.length > keep) {
+      const [oldest] = list.splice(0, 1)
+      over -= JSON.stringify(oldest).length + 1
+      dropped.push(oldest.id)
+    }
+  }
+  giveWay(s.undo, 1)
+  giveWay(s.redo, s.undo.length > 0 ? 0 : 1)
+  for (const id of dropped) bury(s, id)
+  if (dropped.length > 0) {
+    void writeLocal(key)
+    emit()
+  }
+  return over <= 0
+}
+
 async function pushOnce(key: string): Promise<void> {
   const [projectId] = splitKey(key)
   // A conflict means another device wrote first: merge its copy and try again
@@ -437,9 +472,17 @@ async function pushOnce(key: string): Promise<void> {
     // Signed with this device and the time, so the person's other devices know
     // it is in use (see `claim`).
     const wrote = { id: thisDevice(), at: Date.now() }
-    const snapshot = JSON.parse(JSON.stringify({ ...docOf(s), devices: mergeDevices(s.devices, [wrote]) })) as HistoryDoc
+    const sign = () => JSON.stringify({ baseRevision: s.revision ?? 0, history: { ...docOf(s), devices: mergeDevices(s.devices, [wrote]) } })
+    let body = sign()
+    if (body.length > SEND_LIMIT_CHARS) {
+      if (!fitForServer(key, s, body)) return
+      body = sign()
+    }
+    const snapshot = (JSON.parse(body) as { history: HistoryDoc }).history
     const res = await r.write(projectId, s.revision ?? 0, snapshot)
-    if (!res) return // offline or refused: it stays unpushed, and goes with the next write
+    // Offline, refused, or too large after all: it stays unpushed, and goes
+    // with the next write.
+    if (!res || res.kind === "tooLarge") return
     if (res.kind === "saved") {
       s.devices = mergeDevices(s.devices, [wrote])
       s.revision = res.revision

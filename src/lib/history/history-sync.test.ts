@@ -34,6 +34,9 @@ class FakeServer {
   hang = false
   writes = 0
   reads = 0
+  /** Bodies longer than this are refused, as the route refuses over 2 MB (413). */
+  maxChars = Number.POSITIVE_INFINITY
+  refused = 0
   as(user: string): HistoryRemote {
     const key = (projectId: string) => `${projectId}|${user}`
     const copy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T
@@ -49,6 +52,10 @@ class FakeServer {
       },
       write: async (projectId, baseRevision, history) => {
         if (!this.online) return null
+        if (JSON.stringify({ baseRevision, history }).length > this.maxChars) {
+          this.refused += 1
+          return { kind: "tooLarge" }
+        }
         const row = this.rows.get(key(projectId))
         const current = row?.revision ?? 0
         if (baseRevision !== current) return { kind: "conflict", revision: current, history: row ? copy(row.history) : null }
@@ -199,6 +206,23 @@ describe("the history follows the person (P13.2)", () => {
     recordStep(step("Second"))
     await settle()
     expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["First", "Second"])
+  })
+
+  // Review, Oct 29: the server keeps at most 2 MB of history. Past that, the
+  // oldest steps give way, rather than every later step sending megabytes
+  // that are refused and the history no longer following the person.
+  it("a history too large for the server keeps its newest steps that fit", async () => {
+    server.maxChars = 2 * 1024 * 1024
+    const big = (name: string) => ({ ...step(name), data: { name, filler: "x".repeat(1_100_000) } })
+    recordStep(big("Validated chapter 1"))
+    await settle()
+    recordStep(big("Validated chapter 2"))
+    await settle()
+    recordStep(step("Rename take"))
+    await settle()
+    expect(server.refused).toBe(0)
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Validated chapter 2", "Rename take"])
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Validated chapter 2", "Rename take"])
   })
 
   it("opening the History panel picks up steps made elsewhere since", async () => {

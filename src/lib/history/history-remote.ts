@@ -23,6 +23,8 @@ export type RemoteRead =
 export type RemoteWrite =
   | { kind: "saved"; revision: number }
   | { kind: "conflict"; revision: number; history: HistoryDoc | null }
+  // Larger than the server keeps (413): sending it again is no use.
+  | { kind: "tooLarge" }
 
 export interface HistoryRemote {
   read(projectId: string, since: number | null): Promise<RemoteRead | null>
@@ -58,6 +60,7 @@ export function httpHistoryRemote(getJwt: () => string | null): HistoryRemote {
           headers: headers(jwt),
           body: JSON.stringify({ baseRevision, history }),
         })
+        if (res.status === 413) return { kind: "tooLarge" }
         const body = (await res.json().catch(() => null)) as { revision?: number; history?: unknown } | null
         if (res.status === 409 && typeof body?.revision === "number") {
           return { kind: "conflict", revision: body.revision, history: body.history ? normalizeHistoryDoc(body.history) : null }

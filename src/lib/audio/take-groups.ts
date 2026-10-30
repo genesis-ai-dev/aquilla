@@ -168,3 +168,12 @@ export function originalRecordingId(
   }
   return id
 }
+
+/**
+ * How many takes the recorder's list shows, across every track. AQU-981 (Sam,
+ * 2026-10-29): a take split into pieces is one take, so it counts once, as it
+ * is one row in the list.
+ */
+export function listedTakeCount(groups: readonly TakeGroup[]): number {
+  return groups.reduce((n, g) => n + takeRows(g.takes).length, 0)
+}

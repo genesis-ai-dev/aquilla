@@ -489,9 +489,16 @@ export function TakesStrip({
     setDenoisingId(att.audioId)
     try {
       const { denoiseSplitTake, denoiseTake } = await import("@/lib/audio/denoise-take")
+      // Decision 11: an Undo step, naming the take that played in the slot the
+      // cleaned one lands in (none when another slot's take was playing).
+      const playing = takes.find((t) => t.audioId === (optimisticSelectedId ?? activeTakeId))
+      const playingIn = (slot: string) => (playing && playing.slot === slot ? (playing.pieceOf ?? playing.audioId) : null)
       // AQU-1767: a split take is cleaned whole and keeps its cuts.
       if (pieces && pieces.length > 1) {
-        await denoiseSplitTake({ projectId, fileId, cellId, pieces, author, session, ...(targetLang ? { targetLang } : {}) })
+        await denoiseSplitTake({
+          projectId, fileId, cellId, pieces, author, session, ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: playingIn(pieces[0].slot) },
+        })
         return
       }
       await denoiseTake({
@@ -501,6 +508,7 @@ export function TakesStrip({
         author,
         session,
         ...(targetLang ? { targetLang } : {}),
+        history: { selectedBefore: playingIn(RECORDING_SLOT) },
       })
     } catch {
       // Failure leaves the original untouched; the strip simply doesn't gain a
@@ -508,7 +516,7 @@ export function TakesStrip({
     } finally {
       setDenoisingId((cur) => (cur === att.audioId ? null : cur))
     }
-  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang])
+  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang, takes, optimisticSelectedId, activeTakeId])
 
   // Round 8: names are PERSISTED (att.label) — never derived from position.
   // Strip-local overrides show a rename/backfill instantly (a bus inject

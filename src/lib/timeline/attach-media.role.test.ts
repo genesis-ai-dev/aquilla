@@ -98,7 +98,7 @@ describe("attachMediaFileToTimeline", () => {
   it("attaches the uploaded clip to every row as the file's source audio", async () => {
     asRole(ROLE.PROJECT_LEAD)
     const file = new File([new Uint8Array(16)], "episode.wav", { type: "audio/wav" })
-    await expect(attachMediaFileToTimeline(file, ctx)).resolves.toEqual({ segments: 2 })
+    await expect(attachMediaFileToTimeline(file, ctx)).resolves.toMatchObject({ segments: 2, lines: [expect.anything(), expect.anything()] })
     expect(emitted.attaches).toHaveLength(2)
     for (const a of emitted.attaches) {
       expect(a).toMatchObject({ slot: "recording", role: "source", audioId: "f1-clip.wav" })
@@ -117,7 +117,7 @@ describe("attachMediaFileToTimeline", () => {
   it("lets an unknown role through, like every other client mirror (the server decides)", async () => {
     asRole(null)
     const file = new File([new Uint8Array(16)], "episode.wav", { type: "audio/wav" })
-    await expect(attachMediaFileToTimeline(file, ctx)).resolves.toEqual({ segments: 2 })
+    await expect(attachMediaFileToTimeline(file, ctx)).resolves.toMatchObject({ segments: 2, lines: [expect.anything(), expect.anything()] })
   })
 })
 

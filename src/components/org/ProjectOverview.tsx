@@ -686,6 +686,7 @@ export function ProjectOverview() {
   // read above is refused for them). See src/lib/sync/project-org-policy.ts.
   const carriedOrgPolicy = projectSettings?.orgPolicy
   const carriedVisibilityFloors = projectSettings?.visibilityFloors
+  const carriedImportFloor = projectSettings?.importFloor
   const projectSettingsBlob = projectSettings?.settings
   // The floors are not known until the project's own settings arrive: a
   // project may be stricter than its org, and only that response says so.
@@ -694,12 +695,13 @@ export function ProjectOverview() {
     () => resolveProjectPolicy({
       orgPolicy: carriedOrgPolicy,
       visibilityFloors: carriedVisibilityFloors,
+      importFloor: carriedImportFloor,
       projectSettings: projectSettingsBlob,
       org: orgSettings,
       roleLevel: projectRoleLevel,
       projectSettingsFetched,
     }),
-    [carriedOrgPolicy, carriedVisibilityFloors, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
+    [carriedOrgPolicy, carriedVisibilityFloors, carriedImportFloor, projectSettingsBlob, orgSettings, projectRoleLevel, projectSettingsFetched],
   )
   // Primitives, so the memos below depend on values rather than on the
   // policy object (a new one every render).

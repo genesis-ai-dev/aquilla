@@ -695,6 +695,20 @@ export const projectSettings = defineNamespace({
     // {role} is a plural role name: "Owners".
     "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
 
+    // ── ProjectImportFloorSection ── AQU-2305: who may bring a NEW source file
+    // into THIS project. The organization's floor (AQU-2304), which a project
+    // may only make stricter.
+    "projectSettings.importFloor.label": "Who can import files",
+    "projectSettings.importFloor.description":
+      "Minimum role required to bring a new source file into this project, " +
+      "including re-importing one. Your organization sets this; a project can " +
+      "make it stricter, never looser. Importing a translation into a file " +
+      "that is already here is not affected.",
+    // Shown on a role the organization's own floor rules out, so the option
+    // says why it cannot be chosen.
+    "projectSettings.importFloor.stricterOnly":
+      "your organization requires more; a project can only be stricter",
+
     // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
@@ -3314,6 +3328,21 @@ export const projectSettings = defineNamespace({
         placeholders: {
           value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
         },
+      },
+      "projectSettings.importFloor.label": {
+        description:
+          "Row label in Project settings \u2192 Import: the minimum role needed to bring a NEW source file into this "
+          + "project. Same wording as the organization-wide row on Settings \u2192 Security.",
+      },
+      "projectSettings.importFloor.description": {
+        description:
+          "Help text under that row. Says the organization sets the floor and a project can only be stricter, and that "
+          + "importing a translation into a file already in the project is not affected.",
+      },
+      "projectSettings.importFloor.stricterOnly": {
+        description:
+          "Appended to a role option this project cannot choose because the organization already requires a higher "
+          + "role. Shown after the role name and a dash, on a disabled option, e.g. \"Project lead \u2014 \u2026\".",
       },
       "projectSettings.visibility.onlyRoleLoosens": {
         description:

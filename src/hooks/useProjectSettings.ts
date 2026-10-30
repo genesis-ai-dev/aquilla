@@ -17,7 +17,7 @@ import {
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
@@ -330,6 +330,10 @@ export interface UseProjectSettings {
    */
   orgPolicy: ProjectOrgPolicy | null
   visibilityFloors: ProjectVisibilityFloors | null
+  /** AQU-2305: the import floor this project enforces, split org / own /
+   *  effective. Null until a response carries it (and on a server that
+   *  predates it), where `resolveProjectPolicy` derives the same split. */
+  importFloor: VisibilityFloorView | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -561,6 +565,7 @@ export function useProjectSettings(
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
+  const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
@@ -573,6 +578,7 @@ export function useProjectSettings(
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
+    if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
@@ -1140,6 +1146,7 @@ export function useProjectSettings(
     orgValidationCountAudio,
     orgPolicy,
     visibilityFloors,
+    importFloor,
     orgMediaDefaults,
     lanes,
     isOnline,

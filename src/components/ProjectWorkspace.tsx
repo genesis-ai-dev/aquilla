@@ -838,7 +838,13 @@ export function ProjectWorkspace() {
   // permissive, never wrongly closed, and the server refuses the write either
   // way. The user-visible affordances below gate on `projectPolicy`, which
   // also falls back to the org read for a server predating the carried field.
-  const carriedImportMinRole = projectSettings?.orgPolicy?.importMinRole ?? null
+  // AQU-2305: the EFFECTIVE floor — the org's raised by this project's own —
+  // so a project that reserved its own imports for maintainers stops a lead's
+  // `file.create` at the same place the server does. `importFloor.effective` is
+  // the server's own arithmetic; the org's value alone is the fallback for a
+  // server that predates that field.
+  const carriedImportMinRole =
+    projectSettings?.importFloor?.effective ?? projectSettings?.orgPolicy?.importMinRole ?? null
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -6118,6 +6124,9 @@ export function ProjectWorkspace() {
   const projectPolicy = resolveProjectPolicy({
     orgPolicy: projectSettings?.orgPolicy,
     visibilityFloors: projectSettings?.visibilityFloors,
+    // AQU-2305: the org's floor raised by this project's own, as the server
+    // resolved it for this project.
+    importFloor: projectSettings?.importFloor,
     projectSettings: projectSettings?.settings,
     org: orgSettingsForProject,
     roleLevel: project?.syncRole?.level ?? null,

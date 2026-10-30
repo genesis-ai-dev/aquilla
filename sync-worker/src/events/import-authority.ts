@@ -23,13 +23,21 @@
 //   - the Door43 upstream panel is hard-wired to Maintainer whichever way the
 //     org sets this.
 //
-// Fail-safe, matching every other floor on this plumbing: an org-less project,
-// a missing settings row, a blob that will not parse, a non-numeric or
-// out-of-ladder value, or a database failure all resolve to PROJECT_LEAD — the
-// behaviour of every org that never touches the key. A misconfigured floor is
-// a no-op, never a lockout.
+// AQU-2305: a PROJECT may raise the floor again, above its org's. The floor it
+// enforces is the HIGHER of the two (db/shared/import-floor.ts), so a project
+// value at or below its org's is inert and a project can never loosen what the
+// org closed. The project's own value is read off the `wp_import_min_role`
+// projection, which the batch has already loaded for the timing, validation and
+// track-editing questions — so the second floor costs no extra round-trip.
+//
+// Fail-safe, matching every other floor on this plumbing: a missing settings
+// row, a blob that will not parse, a non-numeric or out-of-ladder value, or a
+// database failure all resolve to PROJECT_LEAD — the behaviour of every org
+// that never touches the key. A misconfigured floor is a no-op, never a
+// lockout.
 
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { effectiveImportFloor } from '../../../db/shared/import-floor'
 import { makeRequestCache, type RequestCache } from './request-cache'
 
 /**
@@ -55,12 +63,18 @@ export function resolveImportMinRole(minRole?: unknown): number {
 }
 
 /**
- * The org-configured import floor for the project's org.
+ * The import floor ONE project enforces: its org's (AQU-2304), raised by the
+ * project's own stricter value (AQU-2305).
  *
  * Reads go through the per-request cache (request-cache.ts), so an outbox
  * flush carrying several `file.create` events — a multi-book scripture import
- * emits one per book (AQU-1187) — pays one org-settings lookup for the whole
- * batch rather than one per file.
+ * emits one per book (AQU-1187) — pays one org-settings lookup and one
+ * project-settings lookup for the whole batch rather than a pair per file.
+ *
+ * A project with no org has no org floor to read, so it starts from the default
+ * and its own stricter value still applies: the stricter-only rule is about the
+ * project never being looser than its org, and an org-less project has nothing
+ * to be looser than.
  *
  * Fails CLOSED to the default (500) on any error, for the reason
  * resolveTermbaseFloor gives: an exception at this perimeter must not degrade
@@ -73,9 +87,11 @@ export async function resolveImportFloor(
 ): Promise<number> {
   try {
     const orgId = await cache.projectOrgId(projectId)
-    if (orgId == null) return DEFAULT_IMPORT_MIN_ROLE
-    const parsed = await cache.orgSettings(orgId)
-    return resolveImportMinRole(parsed?.importMinRole)
+    const orgFloor = resolveImportMinRole(
+      orgId == null ? undefined : (await cache.orgSettings(orgId))?.importMinRole,
+    )
+    const own = (await cache.writePathSettings(projectId))?.importMinRole
+    return effectiveImportFloor(orgFloor, own)
   } catch {
     return DEFAULT_IMPORT_MIN_ROLE
   }

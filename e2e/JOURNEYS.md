@@ -439,6 +439,28 @@ UI chrome that used to be one smoke file per click is covered under
   had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
   rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
   smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
+- Project import floor (AQU-2305): a project may make that same floor **stricter and never looser**.
+  A maintainer sets **Project settings → Import → "Who can import files"** from "Organization default
+  (Project lead)" to "Set for this project" → Maintainer, and in that project alone a project lead
+  loses Import "New source text", the sidebar re-import and the IDML repair, while the same lead still
+  imports in a sibling project of the same org. With the org itself at Maintainer the project's role
+  select offers nothing lower — the lower rung is disabled with the stricter-only reason on the option
+  — and a value below the org's floor written through the settings API is refused with a 400 naming
+  that floor, so the picker's restraint is a convenience and not the protection. A stored value the
+  org has since overtaken is inert: it displays as following the organization and enforces the org's
+  floor. The floor the perimeter applies is the HIGHER of the two
+  (`sync-worker/src/__tests__/authorize-project-import-floor.test.ts` — stricter enforced, looser and
+  off-ladder inert, no project row / a throwing read → Project lead, an owner reads neither settings
+  row, each row read once per batch); the write refusal, the three-way `importFloor` on the settings
+  response, the clear-on-omit and the project lead's 403 in
+  `auth-worker/src/__tests__/project-import-floor.test.ts`; the row itself — the source selector, the
+  disabled lower option with its hint, the cleared key on "Organization default", an inert stored
+  value reading as the org's, and the whole row disabled for a lead — in
+  `ProjectSettings.importFloor.test.tsx`. The key is never copied down a source link
+  (`inherited-settings.test.ts`). **No smoke, for AQU-2304's reason and inheriting its gap:** the walk
+  that matters spans two projects, two roles and a direct sync-API post, which needs a running stack
+  this box has no Docker for. It is on the ticket's QA checklist rather than written blind, and it
+  would extend the AQU-2304 journey file that does not exist yet rather than adding a second one.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.

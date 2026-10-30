@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  FILM_FRAME_BLANK_RETRIES,
   FILM_FRAME_CACHE_MAX,
   FilmFrameQueue,
   FrameUnavailableError,
+  drawnFrameKind,
+  drawUntilPictured,
   resetFilmFramesForTests,
   type CaptureFrame,
+  type DrawnFrame,
 } from "./film-frames"
 
 // AQU-2253: where the film track's frames come from. One capture at a time,
@@ -131,5 +135,71 @@ describe("FilmFrameQueue", () => {
     calls[0].resolve("data:1")
     await flush()
     expect(q.stats()).toMatchObject({ captured: 1, avgMs: 40, maxMs: 40 })
+  })
+})
+
+// Safari's black tiles: a draw of the hidden film right after a seek can come
+// back black, or with nothing in it, though the frame is there a beat later.
+function pixels(...rgba: [number, number, number, number][]): Uint8ClampedArray {
+  return new Uint8ClampedArray(rgba.flat())
+}
+
+describe("drawnFrameKind", () => {
+  it("a picture: any pixel brighter than black", () => {
+    expect(drawnFrameKind(pixels([0, 0, 0, 255], [0, 0, 0, 255], [180, 40, 20, 255]))).toBe("picture")
+  })
+
+  it("black: every pixel drawn, none brighter than near-black", () => {
+    expect(drawnFrameKind(pixels([0, 0, 0, 255], [12, 9, 16, 255]))).toBe("black")
+  })
+
+  it("empty: nothing was drawn at all", () => {
+    expect(drawnFrameKind(pixels([0, 0, 0, 0], [0, 0, 0, 0]))).toBe("empty")
+  })
+
+  it("a bright pixel the draw never covered does not count", () => {
+    expect(drawnFrameKind(pixels([0, 0, 0, 255], [255, 255, 255, 0]))).toBe("black")
+  })
+})
+
+describe("drawUntilPictured", () => {
+  function draws(...kinds: DrawnFrame[]) {
+    let i = 0
+    const settles: number[] = []
+    return {
+      draw: () => kinds[Math.min(i++, kinds.length - 1)],
+      settle: async (retry: number) => {
+        settles.push(retry)
+      },
+      count: () => i,
+      settles,
+    }
+  }
+
+  it("a picture on the first draw is kept, with no waiting", async () => {
+    const d = draws("picture")
+    expect(await drawUntilPictured(d.draw, d.settle)).toBe("picture")
+    expect(d.count()).toBe(1)
+    expect(d.settles).toEqual([])
+  })
+
+  it("a blank draw waits a beat and draws again, until the picture comes", async () => {
+    const d = draws("black", "empty", "picture")
+    expect(await drawUntilPictured(d.draw, d.settle)).toBe("picture")
+    expect(d.count()).toBe(3)
+    expect(d.settles).toEqual([1, 2])
+  })
+
+  it("gives up after a few tries: black then is the film's own black", async () => {
+    const d = draws("black")
+    expect(await drawUntilPictured(d.draw, d.settle)).toBe("black")
+    expect(d.count()).toBe(1 + FILM_FRAME_BLANK_RETRIES)
+    expect(d.settles).toEqual([1, 2, 3])
+  })
+
+  it("and a draw that never held anything says so", async () => {
+    const d = draws("empty")
+    expect(await drawUntilPictured(d.draw, d.settle)).toBe("empty")
+    expect(d.count()).toBe(1 + FILM_FRAME_BLANK_RETRIES)
   })
 })

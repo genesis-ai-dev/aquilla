@@ -39,6 +39,46 @@ export class FrameUnavailableError extends Error {
   }
 }
 
+/** More draws of one frame after a blank one, before the blank is believed. */
+export const FILM_FRAME_BLANK_RETRIES = 3
+/** A channel at or under this reads as black. */
+const BLACK_MAX = 16
+
+/** What one draw of the film put in the picture: nothing at all, only black,
+ *  or a picture. */
+export type DrawnFrame = "empty" | "black" | "picture"
+
+/** Read a drawn picture's pixels (RGBA, as a canvas's getImageData gives). */
+export function drawnFrameKind(rgba: ArrayLike<number>): DrawnFrame {
+  let drawn = false
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    if (rgba[i + 3] === 0) continue
+    drawn = true
+    if (rgba[i] > BLACK_MAX || rgba[i + 1] > BLACK_MAX || rgba[i + 2] > BLACK_MAX) return "picture"
+  }
+  return drawn ? "black" : "empty"
+}
+
+/**
+ * Draw a frame until it shows a picture. Safari can hand back black, or
+ * nothing, for a frame it has seeked to but not yet put on screen (Sam's
+ * black strip, Oct 29); a beat later the same draw has the picture. So a
+ * blank draw gets `FILM_FRAME_BLANK_RETRIES` more, with `settle` between them.
+ * Black after all of them is the film's own (a fade, a night scene); empty
+ * means the film never drew.
+ */
+export async function drawUntilPictured(
+  draw: () => DrawnFrame,
+  settle: (retry: number) => Promise<void>,
+): Promise<DrawnFrame> {
+  let kind = draw()
+  for (let retry = 1; kind !== "picture" && retry <= FILM_FRAME_BLANK_RETRIES; retry++) {
+    await settle(retry)
+    kind = draw()
+  }
+  return kind
+}
+
 export interface FilmFrameStats {
   captured: number
   failed: number

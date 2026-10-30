@@ -348,7 +348,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -800,6 +800,20 @@ export function ProjectWorkspace() {
     projectSettings?.settings?.countStructuralCells
     ?? projectSettings?.orgCountStructuralCells
     ?? true
+  // AQU-2304: the org's `file.create` floor as the server resolved it FOR THIS
+  // PROJECT, read straight off the settings response — the same response as
+  // `countStructuralCells` above, so an org-level flip reaches this workspace
+  // on its next re-read (focus, or a remote change frame) without a reload.
+  //
+  // Taken here, early, because the emit-layer bridge is wired further down
+  // than `projectPolicy` is resolved, and the bridge is deliberately given the
+  // CARRIED value only: null means "unknown" to the emit gate, which then
+  // applies the static Project-lead bar alone. That is the mirror's fail-open
+  // contract — a floor the client has not loaded can only make the client more
+  // permissive, never wrongly closed, and the server refuses the write either
+  // way. The user-visible affordances below gate on `projectPolicy`, which
+  // also falls back to the org read for a server predating the carried field.
+  const carriedImportMinRole = projectSettings?.orgPolicy?.importMinRole ?? null
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -1734,9 +1748,13 @@ export function ProjectWorkspace() {
       activeFileId,
       username: currentUsername,
       roleLevel: project.syncRole?.level ?? null,
+      // AQU-2304: the org's import floor, so the emit layer refuses a
+      // `file.create` the org reserved for maintainers before it reaches the
+      // durable outbox — the same reason the static mirror exists.
+      importMinRole: carriedImportMinRole,
     })
     return () => setCqrsOutboxBridge(null)
-  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level])
+  }, [project?.id, activeFileId, currentUsername, project?.syncRole?.level, carriedImportMinRole])
 
   // The outbox drain loop is owned by the app-shell OutboxProvider (FRO-221)
   // so the queue drains on every route, not just inside a project. We consume
@@ -5947,6 +5965,8 @@ export function ProjectWorkspace() {
     // AQU-1391: org default for repetition auto-propagation (a project may
     // override it either way). OFF until the org's answer is known.
     autoPropagateRepetitions: orgAutoPropagateRepetitions,
+    // AQU-2304: org-configured floor for bringing a NEW source file in.
+    importMinRole: orgImportMinRole,
   } = projectPolicy
   const { rules: laneRules } = useRules(
     project ?? null,
@@ -11594,7 +11614,20 @@ export function ProjectWorkspace() {
   // `roleAllows` uses — so the button's enabled state and the action's
   // `isAvailable` can never disagree and leave a live button that no-ops.
   // Fails open on a null role (local/unsynced project, no server floor).
-  const canImportSource = canPerform("file.create", project?.syncRole?.level ?? null)
+  //
+  // AQU-2304: the org may RAISE that floor to Maintainer (`importMinRole`),
+  // so this asks `canImportSourceFiles` rather than `canPerform` alone — the
+  // static table cannot see a per-org floor. The value rides the project's own
+  // settings response, which is what a member outside the org can read and
+  // what an open workspace re-reads on focus and on a remote change, so
+  // flipping the org setting restores or withdraws this without a reload of
+  // its own. Every source-import affordance below (header button, dialog's
+  // "New source text", sidebar re-import, IDML copy repair) gates on this one
+  // value, so none of them can drift from the server's answer.
+  const canImportSource = canImportSourceFiles(
+    project?.syncRole?.level ?? null,
+    orgImportMinRole,
+  )
   // AQU-1365: the Import dialog also brings in a translation of a file that is
   // already here, which commits target cells (`target.cell.commit`,
   // CONTRIBUTOR 400) and creates nothing. So the header button opens from
@@ -11602,9 +11635,11 @@ export function ProjectWorkspace() {
   // old three-dot target import had no gate at all, and Contributors must not
   // lose it now that it lives here.
   const canImportTranslation = canPerform("target.cell.commit", project?.syncRole?.level ?? null)
+  // AQU-2304: name the floor that actually refused — a lead locked out by an
+  // org at Maintainer must be told "Maintainer", not "Project lead".
   const sourceImportDenialReason = canImportSource
     ? null
-    : denialMessage(t, ROLE.PROJECT_LEAD, project?.syncRole?.level ?? null)
+    : denialMessage(t, importDenialFloor(orgImportMinRole), project?.syncRole?.level ?? null)
   // A Contributor in a project with no files could only reach a dialog with
   // both choices greyed out, so the button says why instead (AQU-1365 review).
   const importDenialReason = canImportSource
@@ -11612,7 +11647,14 @@ export function ProjectWorkspace() {
     : !canImportTranslation
       ? denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
       : (project?.files.length ?? 0) === 0
-        ? t("importExport.intent.translation.noFilesLead")
+        // AQU-2304: name whoever can actually add the source text under this
+        // org's floor. "A project lead needs to…" would tell a project lead
+        // to do the one thing their org has just stopped them doing.
+        ? t(
+            importDenialFloor(orgImportMinRole) >= ROLE.MAINTAINER
+              ? "importExport.intent.translation.noFilesMaintainer"
+              : "importExport.intent.translation.noFilesLead",
+          )
         : null
   // AQU-1365: the files a translation can go into, in sidebar order, so the
   // picker reads like the file list beside it.
@@ -11631,10 +11673,13 @@ export function ProjectWorkspace() {
     // explanation. AQU-1365: Contributor is the floor now (a translation); the
     // dialog itself greys out New source text below Project lead.
     const level = project.syncRole?.level ?? null
-    if (!canPerform("file.create", level) && !canPerform("target.cell.commit", level)) return
+    if (
+      !canImportSourceFiles(level, orgImportMinRole) &&
+      !canPerform("target.cell.commit", level)
+    ) return
     setReimportTarget(null)
     setImportOpen(true)
-  }, [project])
+  }, [project, orgImportMinRole])
 
   const openExportFlow = useCallback(() => {
     // FRO-253 (b fix): do NOT fire the action on an optimistic pre-fetch canExport value.

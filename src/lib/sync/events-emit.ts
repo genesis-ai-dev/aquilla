@@ -17,7 +17,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
-import { canAttachSourceAudio, canPerform, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
+import { canAttachSourceAudio, canImportSourceFiles, canPerform, importDenialFloor, requiredRoleFor, ROLE, SOURCE_AUDIO_ATTACH_FLOOR } from "./role-policy"
 import type { ConceptExternalIds, TermRendering, TermMatchOptions } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
@@ -245,16 +245,37 @@ function withResolvedTargetLane<K extends OutboxEventKind>(
   }
 }
 
+/**
+ * Pre-enqueue role gate (client mirror of the server's authorize() check).
+ * Only throws when the role is KNOWN and provably insufficient — otherwise it
+ * returns and lets the server stay authoritative.
+ *
+ * AQU-2304: `file.create` carries a SECOND, org-configurable floor on top of
+ * the static table — `importMinRole`, which an org raises to reserve source
+ * imports for maintainers. It lives on the bridge rather than in
+ * `REQUIRED_ROLE` because that table is static and this floor is per-org. An
+ * absent floor means "unknown", not "Project lead": the gate then applies the
+ * static bar alone, so a stale bridge can only make the client more
+ * permissive, never wrongly closed.
+ */
+function refuseEventBelowFloor(kind: string, roleLevel: number | null): void {
+  if (roleLevel == null) return
+  if (!canPerform(kind, roleLevel)) {
+    throw new InsufficientRoleError(kind, roleLevel, requiredRoleFor(kind) ?? 0)
+  }
+  if (kind !== "file.create") return
+  const importMinRole = getCqrsOutboxBridge()?.importMinRole
+  if (importMinRole == null) return
+  if (!canImportSourceFiles(roleLevel, importMinRole)) {
+    throw new InsufficientRoleError(kind, roleLevel, importDenialFloor(importMinRole))
+  }
+}
+
 export async function enqueueEvent<K extends OutboxEventKind>(
   rawInput: BuildEventInput<K>,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }> {
-  // Pre-enqueue role gate (client mirror of the server's authorize() check).
-  // Only blocks when the role is KNOWN and provably insufficient — otherwise
-  // fail open and let the server stay authoritative.
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
-  if (!canPerform(rawInput.kind, roleLevel) && roleLevel != null) {
-    throw new InsufficientRoleError(rawInput.kind, roleLevel, requiredRoleFor(rawInput.kind) ?? 0)
-  }
+  refuseEventBelowFloor(rawInput.kind, roleLevel)
   const input = withResolvedTargetLane(rawInput)
   const event = buildRawEvent(input)
   // The legacy outbox accepts CqrsRawEvent; our OutboxRawEvent is a superset
@@ -275,9 +296,7 @@ export async function enqueueEvents<K extends OutboxEventKind>(
   if (inputs.length === 0) return []
   const roleLevel = getCqrsOutboxBridge()?.roleLevel ?? null
   const events = inputs.map((input) => {
-    if (!canPerform(input.kind, roleLevel) && roleLevel != null) {
-      throw new InsufficientRoleError(input.kind, roleLevel, requiredRoleFor(input.kind) ?? 0)
-    }
+    refuseEventBelowFloor(input.kind, roleLevel)
     // AQU-1902: resolved before anything is written, so one unresolvable
     // event refuses the whole batch rather than half-queuing it.
     return buildRawEvent(withResolvedTargetLane(input))

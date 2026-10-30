@@ -58,7 +58,12 @@ beforeEach(() => {
     const url = String(input)
     const method = init?.method ?? "GET"
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null })
-    if (url.includes("/recording-names/saved") && method === "GET") return new Response(JSON.stringify({ rules: saved }), { status: 200 })
+    // Answered a little later, as a real server would: the preview re-renders
+    // meanwhile, which once cancelled the saved-rule lookup (Chromium, Oct 30).
+    if (url.includes("/recording-names/saved") && method === "GET") {
+      await new Promise((r) => setTimeout(r, 30))
+      return new Response(JSON.stringify({ rules: saved }), { status: 200 })
+    }
     if (url.includes("/recording-names/saved")) return new Response(JSON.stringify({ saved: true }), { status: 200 })
     if (url.includes("/recording-names")) return new Response(JSON.stringify({ rule: answers.shift() ?? RULE }), { status: 200 })
     return new Response("{}", { status: 404 })

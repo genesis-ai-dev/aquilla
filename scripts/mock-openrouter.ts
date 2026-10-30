@@ -241,6 +241,28 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // AQU-2302: a recordings folder's naming. Route on the server-owned system
+  // contract, like the importer above. The "brain" reads the first sampled
+  // name: "Mt-ch19_v01" gets the chapter-and-verse rule; anything else gets a
+  // rule that fits nothing, so the retry and the "didn't fit" path can be seen.
+  const namesSystemPrompt = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You work out how a folder of audio recordings is named"),
+  )
+  if (namesSystemPrompt && userText.includes("<file-names>")) {
+    const first = userText.split("<file-names>\n")[1]?.split("\n")[0] ?? ""
+    const retry = userText.includes("<failed-names>")
+    console.log(`[mock] recording-names rule${retry ? " (retry)" : ""} for ${first}`)
+    return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
+      ? {
+          templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+          books: { Mt: "MAT", Mk: "MRK" },
+          explanation: "Mt is Matthew, then the chapter and the verse.",
+        }
+      : { templates: [{ pattern: "rec-{verse}" }], explanation: "rec- then the verse." }))
+  }
+
   // Monday.com board SELECTION (auth-worker lib/monday/selectBoardForProject):
   // runs before the mapping call when the wizard omits a boardId. Echo back a
   // real id from the prompt — a bogus one would exercise the fallback instead

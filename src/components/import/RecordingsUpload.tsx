@@ -266,7 +266,9 @@ export function RecordingsReview({
   // Everything after that is the ordinary matching below.
   const [rule, setRule] = useState<AppliedRule | null>(null)
   const [assistant, setAssistant] = useState<AssistantState>({ kind: "idle" })
-  const [savedChecked, setSavedChecked] = useState(false)
+  // Asked once per preview. A ref, not state: setting state here would re-run
+  // the effect below and cancel the very request it just made.
+  const savedChecked = useRef(false)
   const effectiveInputs = useMemo(() => {
     if (!rule) return inputs
     return inputs.map((f, i) => {
@@ -383,17 +385,15 @@ export function RecordingsReview({
 
   // A team's saved rule for these names' shape is used with no call at all.
   useEffect(() => {
-    if (!ready || rule || savedChecked || unplaced.length === 0 || !session?.jwt) return
-    let live = true
-    setSavedChecked(true)
+    if (!ready || rule || savedChecked.current || unplaced.length === 0 || !session?.jwt) return
+    savedChecked.current = true
+    const names = unplaced.map((i) => inputs[i].name)
     void loadSavedNamingRules({ projectId, identityToken: session.jwt }).then((saved) => {
-      if (!live) return
-      const shape = shapesOf(unplaced.map((i) => inputs[i].name))[0]
+      const shape = shapesOf(names)[0]
       const hit = shape ? saved.get(shape) : undefined
       if (hit) applyRule(hit, "saved", unplaced, 0)
     })
-    return () => { live = false }
-  }, [ready, rule, savedChecked, unplaced, session?.jwt, projectId, inputs, applyRule])
+  }, [ready, rule, unplaced, session?.jwt, projectId, inputs, applyRule])
 
   // The one retry: only the names the first answer failed on go back. A rule
   // that still places nothing is set aside, and the files are chosen by hand.

@@ -731,6 +731,19 @@ function loadRowHeight(fileId: string): number {
 }
 
 /**
+ * Turns text selection off on the page for a drag, and returns how to put it
+ * back. Kept outside the component: writing the page's own style from inside
+ * it reads to React's compiler as a render changing something it doesn't own.
+ */
+function pauseTextSelection(): () => void {
+  const before = document.body.style.userSelect
+  document.body.style.userSelect = "none"
+  return () => {
+    document.body.style.userSelect = before
+  }
+}
+
+/**
  * Everything a gutter row needs to be DRAGGED, or undefined for a user who may
  * not reorder tracks — in which case the row renders exactly the DOM it always
  * has. See `onReorderTrack` for why the gate is all-or-nothing.
@@ -3216,8 +3229,7 @@ export function TimelineEditor({
     } catch {
       /* happy-dom / unsupported — the window listeners still carry the drag */
     }
-    const restoreUserSelect = document.body.style.userSelect
-    document.body.style.userSelect = "none"
+    const restoreUserSelect = pauseTextSelection()
     setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null })
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
@@ -3240,7 +3252,7 @@ export function TimelineEditor({
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
-      document.body.style.userSelect = restoreUserSelect
+      restoreUserSelect()
       setTrackDrag(null)
     }
     const onUp = (ev: PointerEvent) => {

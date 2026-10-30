@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MediaPanelsMenu, type MediaPanelsMenuProps } from "./MediaPanelsMenu"
 import { dockView, startDockLayout, type DockLayout, type DockPresence } from "./media-dock-layout"
 import type { MediaDock } from "./useMediaDock"
@@ -96,7 +97,7 @@ describe("MediaPanelsMenu", () => {
     expect(dock.fold).not.toHaveBeenCalled()
   })
 
-  it("while full screen: one short line, the folded list in its tooltip, and Restore", async () => {
+  it("while full screen: one short line, its (i) opening what full screen folded, and Restore", async () => {
     const layout: DockLayout = {
       ...startDockLayout(),
       folded: { tl: false, ll: true, lr: true },
@@ -106,7 +107,25 @@ describe("MediaPanelsMenu", () => {
     draw(dock)
     const note = screen.getByTestId("panels-full-note")
     expect(note).toHaveTextContent(/^Full screen is onRestore\s*Esc$/)
-    await expectTooltip(note, "Full screen folded the bottom left, the bottom right, the left panel. Restoring unfolds just those.")
+    // Hovering the line or its (i) opens nothing: an (i) is a click (Sam, Oct 28).
+    const info = screen.getByRole("button", { name: "About full screen" })
+    const folded = screen.getByTestId("panels-full-info")
+    const hover = userEvent.setup()
+    await hover.hover(note)
+    await hover.hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expect(folded).toHaveAttribute("data-open", "false")
+    expect(folded).toHaveAttribute("aria-hidden", "true")
+    expect(info).toHaveAttribute("aria-controls", "panels-full-info")
+    // A click opens the folded list in place, under the line; a second shuts it.
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(folded).toHaveAttribute("data-open", "true")
+    expect(folded).toHaveTextContent("Full screen folded the bottom left, the bottom right, the left panel. Restoring unfolds just those.")
+    expect(dock.restore).not.toHaveBeenCalled()
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(folded).toHaveAttribute("data-open", "false")
     fireEvent.click(screen.getByTestId("panels-restore"))
     expect(dock.restore).toHaveBeenCalled()
   })

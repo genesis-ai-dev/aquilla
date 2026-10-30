@@ -30,7 +30,7 @@
 // covers is the line's own joined with its takes', so a take that runs past
 // its line is never cut off by a jump.
 
-import { useEffect, useMemo } from "react"
+import { useEffect } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { resolveTargetPieces } from "@/lib/audio/track-audio"
 import { isHiddenCell } from "@/lib/cells/hidden"
@@ -39,12 +39,7 @@ import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { targetChipGeom } from "./lane-timing"
 import { playedProgramme, slotHasNothingToPlay } from "./programme"
 import { isDefaultTrackSlot, RECORDING_SLOT } from "./track-slots"
-import {
-  useVirtualClockDuration,
-  useVirtualClockPlaying,
-  useVirtualClockSec,
-  virtualClockSeek,
-} from "./virtual-clock"
+import { setVirtualClockJumps, type ClockJump } from "./virtual-clock"
 
 export interface ClockSpan {
   start: number
@@ -63,9 +58,6 @@ export interface ClockSoundMap {
   hidden: ClockSpan[]
 }
 
-/** A jump shorter than this is no jump — the clock is already there. */
-const MIN_JUMP_SEC = 0.01
-
 function lineSpan(cell: CellData): ClockSpan | null {
   const { startTime, endTime } = cell
   if (typeof startTime !== "number" || !Number.isFinite(startTime)) return null
@@ -73,7 +65,7 @@ function lineSpan(cell: CellData): ClockSpan | null {
   return { start: startTime, end: endTime }
 }
 
-/** Map a file's timed lines for `silentSkipTarget`, over the tracks that sound (`slots`). */
+/** Map a file's timed lines for `clockJumps`, over the tracks that sound (`slots`). */
 export function clockSoundMap(cells: readonly CellData[], slots: readonly string[]): ClockSoundMap {
   const sounding: ClockSpan[] = []
   const silent: ClockSpan[] = []
@@ -107,26 +99,57 @@ export function clockSoundMap(cells: readonly CellData[], slots: readonly string
 }
 
 /**
- * Where the clock should jump to from `sec`, or null to play on: the start of
- * the next line it plays (or `endSec` when there is none) — but only when no
- * line it plays is under `sec` and a line it skips lies between here and
- * there. With `skipSilent` (the setting, on by default) it plays the lines
- * with something to hear and skips the rest; off, it plays every line but a
- * hidden one.
+ * The stretches the clock jumps, for `setVirtualClockJumps`. With
+ * `skipSilent` (the setting, on by default) it plays the lines with something
+ * to hear and skips the rest; off, it plays every line but a hidden one. In
+ * the gap between two lines it plays, it jumps to the next one from anywhere
+ * up to the end of the last line it skips there — so a seek past that line
+ * plays the file's own gap — and after the last line it plays, it runs out to
+ * the end.
  */
-export function silentSkipTarget(map: ClockSoundMap, sec: number, endSec: number, skipSilent = true): number | null {
-  if (!Number.isFinite(sec)) return null
-  const played = skipSilent ? map.sounding : [...map.sounding, ...map.silent]
+export function clockJumps(map: ClockSoundMap, skipSilent = true): ClockJump[] {
+  const played = joined(skipSilent ? map.sounding : [...map.sounding, ...map.silent])
   const skipped = skipSilent ? [...map.silent, ...map.hidden] : map.hidden
-  let next: number | null = null
-  for (const s of played) {
-    if (sec >= s.start && sec < s.end) return null // a line it plays is here
-    if (s.start > sec && (next == null || s.start < next)) next = s.start
+  // Gap k runs from the end of played line k-1 to the start of played line k;
+  // the first opens at -Infinity and the last closes at the end (Infinity).
+  const gapFrom = (k: number) => (k === 0 ? -Infinity : played[k - 1].end)
+  const gapTo = (k: number) => (k < played.length ? played[k].start : Infinity)
+  /** How far into each gap the lines it skips reach. */
+  const reach = new Array<number>(played.length + 1).fill(-Infinity)
+  for (const line of skipped) {
+    for (let k = playedStartingBy(played, line.start); k <= played.length && gapFrom(k) < line.end; k++) {
+      reach[k] = Math.max(reach[k], line.end)
+    }
   }
-  const until = next ?? endSec
-  if (!(until - sec >= MIN_JUMP_SEC)) return null
-  const skippedLineAhead = skipped.some((l) => l.end > sec && l.start < until)
-  return skippedLineAhead ? until : null
+  const jumps: ClockJump[] = []
+  for (let k = 0; k <= played.length; k++) {
+    const end = Math.min(reach[k], gapTo(k))
+    if (end > gapFrom(k)) jumps.push({ start: gapFrom(k), end, to: gapTo(k) })
+  }
+  return jumps
+}
+
+/** Overlapping (or touching) spans joined into one. By start. */
+function joined(spans: readonly ClockSpan[]): ClockSpan[] {
+  const out: ClockSpan[] = []
+  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
+    const last = out[out.length - 1]
+    if (last && s.start <= last.end) last.end = Math.max(last.end, s.end)
+    else out.push({ ...s })
+  }
+  return out
+}
+
+/** How many of the played spans start at or before `sec` — the gap a line starting there opens into. */
+function playedStartingBy(played: readonly ClockSpan[], sec: number): number {
+  let lo = 0
+  let hi = played.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (played[mid].start <= sec) lo = mid + 1
+    else hi = mid
+  }
+  return lo
 }
 
 /** What decides whether "Skip lines with nothing to play" can change anything on a file. */
@@ -169,12 +192,13 @@ function soundingSlots(slots: readonly string[]): readonly string[] {
 }
 
 /**
- * Drive the jumps on the built-in clock while it is this file's transport
- * (`active`) and running: every line with nothing to hear with the setting
- * on, only the hidden lines with it off. Handed the same cells the dub driver
- * plays from, and the same target tracks (`slots`) the workspace hands the
- * queue — never the queue's own copy, which the workspace publishes only
- * after it renders — so the two agree about what sounds.
+ * Hand the built-in clock its jumps while it is this file's transport
+ * (`active`): every line with nothing to hear with the setting on, only the
+ * hidden lines with it off. Handed the same cells the dub driver plays from,
+ * and the same target tracks (`slots`) the workspace hands the queue — never
+ * the queue's own copy, which the workspace publishes only after it renders —
+ * so the two agree about what sounds. The clock walks them itself
+ * (`setVirtualClockJumps`), so nothing here runs on its beats.
  */
 export function useSkipSilentLinesOnVirtualClock(
   cells: readonly CellData[],
@@ -182,18 +206,9 @@ export function useSkipSilentLinesOnVirtualClock(
   active: boolean,
 ): void {
   const skip = useSkipSilentLinesPref()
-  const sec = useVirtualClockSec()
-  const playing = useVirtualClockPlaying()
-  const durationSec = useVirtualClockDuration()
-  const map = useMemo(() => {
-    if (!active) return null
-    const m = clockSoundMap(cells, soundingSlots(slots))
-    // Off, and no hidden line on the clock: nothing to jump.
-    return skip || m.hidden.length > 0 ? m : null
-  }, [active, skip, cells, slots])
   useEffect(() => {
-    if (!map || !playing || sec == null) return
-    const to = silentSkipTarget(map, sec, durationSec, skip)
-    if (to != null) virtualClockSeek(to)
-  }, [map, playing, sec, durationSec, skip])
+    if (!active) return
+    setVirtualClockJumps(clockJumps(clockSoundMap(cells, soundingSlots(slots)), skip))
+    return () => setVirtualClockJumps(null)
+  }, [active, skip, cells, slots])
 }

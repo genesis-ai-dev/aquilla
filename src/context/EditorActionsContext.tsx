@@ -190,6 +190,18 @@ export interface EditorActionsContextValue {
    * live-linked nor DCS-pinned).
    */
   onSetCellHidden?: (cellId: string, hidden: boolean) => void
+  /**
+   * AQU-2308: open "Set a new milestone…" with this cell as the range's start.
+   *
+   * Only the cell is passed. The other edge, the file's cell order and its
+   * divisions all live in the workspace, which owns the store — so the row
+   * says which line the menu was opened on and nothing else, and a shift-click
+   * selection is read where the order to resolve it against exists.
+   *
+   * Absent ⇒ nobody here may set milestones (below Maintainer, or a
+   * live-linked downstream project), and the entry is not drawn at all.
+   */
+  onSetMilestone?: (cellId: string) => void
   /** Retime one line. The workspace's handler owns the lock check and the
    *  media-vs-text choice of event, so the menu adds nothing to it. */
   onRetimeCell?: (cellId: string, startSec: number, endSec: number) => void

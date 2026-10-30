@@ -2064,6 +2064,29 @@ export const editor = defineNamespace({
     "editor.cellMenu.startsAfterNext":
       "This would put the line after the one below it. Its start has to stay before {to}.",
     "editor.cellMenu.saveTimestamps": "Save",
+
+    // AQU-2308: "Set a new milestone…" — naming a start→end range of this
+    // file's cells so the chapter navigator lists it. The name itself is
+    // CONTENT, typed by a maintainer and shown exactly as typed, so it is not
+    // in this catalog; everything around it is.
+    "editor.cellMenu.setMilestone": "Set a new milestone…",
+    "editor.setMilestone.title": "Set a new milestone",
+    "editor.setMilestone.description":
+      "Name a run of lines and it gets its own entry in this file's navigator.",
+    "editor.setMilestone.nameLabel": "Name",
+    "editor.setMilestone.namePlaceholder": "The storm",
+    "editor.setMilestone.startLabel": "First line",
+    "editor.setMilestone.endLabel": "Last line",
+    "editor.setMilestone.endPlaceholder": "Pick the last line",
+    "editor.setMilestone.searchPlaceholder": "Search this file's lines",
+    "editor.setMilestone.noMatches": "No lines match that",
+    "editor.setMilestone.save": "Set milestone",
+    "editor.setMilestone.backwards": "The last line has to come after the first.",
+    "editor.setMilestone.crossesDivision":
+      "This range crosses the edge of {division}. A milestone has to stay inside one division.",
+    "editor.setMilestone.overlaps":
+      "This range overlaps \u201c{name}\u201d. Two milestones cannot share a line.",
+    "editor.setMilestone.saveFailed": "That milestone could not be set.",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
     "editor.source.multiLaneTitle": "Change the source every language shares?",
@@ -7886,6 +7909,112 @@ export const editor = defineNamespace({
           "lives, because the lock covers the whole project and they should see " +
           "that before changing it. Imperative.",
         maxLength: 40,
+      },
+      // AQU-2308. Every key gets its own entry: the two refusals carry
+      // placeholders, and the rest are short controls in a narrow dialog, so a
+      // ceiling is the useful thing to tell a translator.
+      "editor.cellMenu.setMilestone": {
+        description:
+          "Menu entry on a source cell that opens a form for naming a run of lines " +
+          "(\"lines 50 to 70 are The storm\"), which then gets its own entry in the " +
+          "file's chapter navigator. Only maintainers see it. Imperative, and the " +
+          "ellipsis is the house convention for an entry that opens a form rather " +
+          "than acting at once.",
+        maxLength: 28,
+      },
+      "editor.setMilestone.title": {
+        description:
+          "Title of that form. The same words as the menu entry without the " +
+          "ellipsis, because the form IS the thing the entry promised.",
+        maxLength: 32,
+      },
+      "editor.setMilestone.description": {
+        description:
+          "One sentence under the title saying what setting a milestone achieves: " +
+          "the named range becomes a row in the list a translator navigates the " +
+          "file by, beside the chapters or parts already there.",
+      },
+      "editor.setMilestone.nameLabel": {
+        description:
+          "Label of the field holding what to call this range. The name is shown " +
+          "exactly as typed wherever the milestone appears.",
+        maxLength: 12,
+      },
+      "editor.setMilestone.namePlaceholder": {
+        description:
+          "Example text in the empty name field, showing the KIND of name wanted — " +
+          "what this stretch of the document is about, not a number. Translate it " +
+          "as a plausible name in the target language rather than transliterating.",
+        maxLength: 20,
+      },
+      "editor.setMilestone.startLabel": {
+        description:
+          "Label of the picker choosing the line the range starts on. \"Line\" is the " +
+          "row of the file being translated — a verse, a subtitle cue, a paragraph.",
+        maxLength: 14,
+      },
+      "editor.setMilestone.endLabel": {
+        description:
+          "Label of the picker choosing the line the range finishes on, inclusive. " +
+          "Sits directly under the first-line picker.",
+        maxLength: 14,
+      },
+      "editor.setMilestone.endPlaceholder": {
+        description:
+          "What the last-line picker shows while nothing is chosen — which happens " +
+          "when the person moved the first line past the last. Imperative.",
+        maxLength: 24,
+      },
+      "editor.setMilestone.searchPlaceholder": {
+        description:
+          "Placeholder in the search box inside either line picker. The list holds " +
+          "one row per line of the file, found by its number, its reference or the " +
+          "words on it.",
+        maxLength: 28,
+      },
+      "editor.setMilestone.noMatches": {
+        description:
+          "Shown inside a line picker when nothing in the file matches what was " +
+          "typed in its search box.",
+        maxLength: 24,
+      },
+      "editor.setMilestone.save": {
+        description:
+          "The form's confirm button. Imperative, and it names the thing being made " +
+          "rather than saying \"Save\", because nothing existed to save until now.",
+        maxLength: 18,
+      },
+      "editor.setMilestone.backwards": {
+        description:
+          "Why the range cannot be saved: the last line sits before the first one in " +
+          "the file. A full sentence, shown under the pickers.",
+      },
+      "editor.setMilestone.crossesDivision": {
+        description:
+          "Why the range cannot be saved: it starts inside a division the FILE " +
+          "supplies — a Scripture chapter, a heading's section, a slide, a story — " +
+          "and runs out the other side. A milestone may sit inside one of those or " +
+          "replace stretches the app invented, but never straddle a real boundary. " +
+          "A full sentence, shown under the pickers.",
+        placeholders: {
+          division: "The division whose edge is crossed, named as the navigator names it — \"Mark 4\", \"Introduction\". Content from the file; never translate it.",
+        },
+      },
+      "editor.setMilestone.overlaps": {
+        description:
+          "Why the range cannot be saved: some of its lines already belong to " +
+          "another hand-set milestone, which is named so the person can go and look " +
+          "at it. A full sentence, shown under the pickers. Keep the quotation marks " +
+          "— they are what separate a typed name from the sentence around it.",
+        placeholders: {
+          name: "The clashing milestone's name, exactly as a maintainer typed it. Content; never translate it.",
+        },
+      },
+      "editor.setMilestone.saveFailed": {
+        description:
+          "Error toast when the milestone could not be written — the device is " +
+          "offline, or the server refused it. The form's own checks catch every " +
+          "refusal a person can cause, so this is the unexpected case.",
       },
       "editor.cellMenu.startLabel": {
         description:

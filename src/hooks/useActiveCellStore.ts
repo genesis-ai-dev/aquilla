@@ -3126,6 +3126,9 @@ export interface UseActiveCellStoreOptions {
    *  from the display list. Default false. Only ever passed true for someone who
    *  may edit source text — see RuntimeContext.showHidden. */
   showHidden?: boolean
+  /** AQU-2308: the file's hand-set milestones (`useFileMilestones`). Must be a
+   *  stable array — see RuntimeContext.userMilestones. */
+  userMilestones?: readonly FileMilestone[]
 }
 
 export interface UseActiveCellStoreResult {
@@ -3164,6 +3167,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     lane = "",
     countStructural = true,
     showHidden = false,
+    userMilestones = EMPTY_USER_MILESTONES,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // Debug handle for the console and e2e probes. Published from an effect
@@ -3216,8 +3220,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden })
-  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden, userMilestones })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, userMilestones, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under

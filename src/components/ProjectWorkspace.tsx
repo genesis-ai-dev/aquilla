@@ -244,7 +244,7 @@ import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { extractCuesFromCells } from "@/lib/video/vtt-generator"
+import { extractCuesFromCells, parseTimestampRange } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
@@ -289,7 +289,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -619,6 +619,17 @@ import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
+import { useFileMilestones } from "@/hooks/useFileMilestones"
+import {
+  divisionsForOrder,
+  milestoneDraftCells,
+  milestoneDraftPrefill,
+} from "@/lib/editor/milestone-draft"
+import {
+  SetMilestoneDialog,
+  type MilestoneDraftSubmission,
+} from "@/components/editor/SetMilestoneDialog"
+import { normalizeMilestoneName } from "../../db/shared/file-milestones"
 import {
   setVisibleCellIds as setEditorViewportVisibleCellIds,
   setTrackedCellRef as setEditorViewportTrackedCellRef,
@@ -1910,6 +1921,27 @@ export function ProjectWorkspace() {
     project?.syncRole?.level ?? null,
   )
   const showHiddenCellsPref = useShowHiddenCells()
+  /**
+   * AQU-2308: this file's hand-set milestones.
+   *
+   * A navigation INPUT rather than cell data, so it is read by its own hook and
+   * handed to the store, which is the one place that decides which division
+   * each cell belongs to. Read for every role — a contributor navigates by the
+   * same divisions a maintainer named — and the Maintainer floor sits on
+   * SETTING one, where the menu entry and the server check are.
+   */
+  const fileMilestones = useFileMilestones({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+  })
+  // All three are `useCallback`-stable for the hook's life, so pulling them out
+  // keeps them out of the dep arrays that would otherwise churn on the whole
+  // result object — including the WS effect's, which must not resubscribe.
+  const {
+    setMilestoneLocally: paintMilestone,
+    removeMilestoneLocally: unpaintMilestone,
+    refresh: refreshFileMilestones,
+  } = fileMilestones
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
   // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
   // rule as useCells) before the one-target-per-cell pairing. N=1 is
@@ -1942,6 +1974,9 @@ export function ProjectWorkspace() {
     // is device-scoped and survives a role downgrade, so on its own a demoted
     // lead would keep seeing hidden rows in a file they may no longer park.
     showHidden: showHiddenCellsPref && mayParkCellsInProject,
+    // AQU-2308: the hook's `milestones` is already a stable `useMemo`d array,
+    // which the store's navigation cache compares by reference.
+    userMilestones: fileMilestones.milestones,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   /**
@@ -3816,6 +3851,124 @@ export function ProjectWorkspace() {
       await applying
     },
     [applyCellHidden, activeFileId],
+  )
+
+  /**
+   * AQU-2308: the range "Set a new milestone…" is open on, or null when it is
+   * shut. Held here rather than in the row because the prefill, the pickers and
+   * the refusals all need the file's cell ORDER, which only the store has.
+   */
+  const [milestoneDraft, setMilestoneDraft] = useState<
+    { startCellId: string; endCellId: string } | null
+  >(null)
+
+  const handleSetMilestoneFromCell = useCallback((cellId: string) => {
+    // The DISPLAY order, which is what the navigator derives its divisions from
+    // and therefore what the stored anchors are resolved against.
+    setMilestoneDraft(
+      milestoneDraftPrefill(cellStore.getCellIdsForLens(), cellId, getSelectedIds()),
+    )
+  }, [cellStore])
+
+  /**
+   * Write one hand-set milestone.
+   *
+   * Optimistic, like every other write here: the row has to appear in the
+   * navigator the moment the dialog shuts, and the event behind it can sit in
+   * the outbox for a while. The overlay retires when the server AGREES — see
+   * `useFileMilestones` — so a refusal has to retract it explicitly rather than
+   * wait for a clock to run out.
+   */
+  const handleSubmitMilestone = useCallback(async (draft: MilestoneDraftSubmission) => {
+    const projectId = project?.id
+    const fileId = activeFileId
+    if (!projectId || !fileId) return
+    // The dialog's own save gate uses the same shared rule, so this is the
+    // belt-and-braces one: it is what stops a blank name reaching the emitter,
+    // which throws on one.
+    const name = normalizeMilestoneName(draft.name)
+    if (name === null) return
+    const milestoneId = uuidv7()
+    const record = {
+      id: milestoneId,
+      name,
+      startCellId: draft.startCellId,
+      endCellId: draft.endCellId,
+    }
+    setMilestoneDraft(null)
+    paintMilestone(record)
+    const retract = () => {
+      unpaintMilestone(milestoneId)
+      refreshFileMilestones()
+    }
+    try {
+      await emitFileMilestoneSet({
+        projectId,
+        fileId,
+        milestoneId,
+        name,
+        startCellId: record.startCellId,
+        endCellId: record.endCellId,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        // A per-event 4xx arrives inside a 200 and the flusher drops it, so
+        // without this the row would simply vanish from the navigator with no
+        // explanation — which reads as the app undoing the user's work.
+        onRejected: (entries) => {
+          const mine = entries.filter((r) => (
+            r.kind === "file.milestone.set" && r.fileId === fileId
+          ))
+          if (mine.length === 0) return
+          retract()
+          toast.add({
+            type: "error",
+            title: t("editor.setMilestone.saveFailed"),
+            description: mine[0].reason,
+          })
+        },
+      })
+      refreshFileMilestones()
+    } catch {
+      retract()
+      toast.add({ type: "error", title: t("editor.setMilestone.saveFailed") })
+    }
+  }, [
+    project?.id, activeFileId, currentUsername, paintMilestone, unpaintMilestone,
+    refreshFileMilestones, getTokenForProjectFile, toast, t,
+  ])
+
+  /**
+   * The pickers' rows and the divisions a refusal names, or null while the
+   * dialog is shut.
+   *
+   * `readAtVersion` because the React Compiler memoises a version-only
+   * dependency away — see the note in `useActiveCellStore`. `getNavigationIndex`
+   * is asked for the divisions rather than re-deriving them, so the dialog
+   * refuses exactly what the navigator would have refused.
+   */
+  const milestoneDialogData = useMemo(
+    () => readAtVersion(cellStoreVersion, () => {
+      if (milestoneDraft === null) return null
+      const order = cellStore.getCellIdsForLens()
+      return {
+        cells: milestoneDraftCells(order, (cellId) => {
+          const summary = cellStore.getCellSummary(cellId)
+          if (!summary) return null
+          const context = summary.context.trim()
+          // A timecode is not a reference. Same parser the source row uses to
+          // decide which corner its context belongs in, rather than a second
+          // rule for telling "MRK 4:35" from "00:01:02 → 00:01:05".
+          return {
+            reference: context && !parseTimestampRange(context) ? context : null,
+            text: summary.original,
+          }
+        }),
+        divisions: divisionsForOrder(order, cellStore.getNavigationIndex(order)),
+      }
+    }),
+    [cellStore, cellStoreVersion, milestoneDraft],
   )
 
   // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
@@ -8803,6 +8956,20 @@ export function ProjectWorkspace() {
                 },
                 refreshDrafts: refreshContextualDrafts,
               })
+              // AQU-2308: AHEAD of the generic `file.` branch below, which
+              // would otherwise swallow a milestone into a whole-project
+              // `refresh()` — the wrong answer twice over: it re-pulls the file
+              // inventory, which a milestone does not touch, and it never
+              // re-reads the milestones, which is the only thing that moved.
+              // The read is per-file, so a frame for another file is ignored.
+              if (
+                !msg.cell
+                && (msg.kind === "file.milestone.set" || msg.kind === "file.milestone.remove")
+                && msg.project === pid
+              ) {
+                if (msg.file === activeFileIdRef.current) refreshFileMilestones()
+                return
+              }
               // File-scoped events (file.create / file.rename) carry no cell;
               // they change the project's file inventory or labels. Re-pull the
               // project so renames + new files surface live and the local
@@ -9133,6 +9300,7 @@ export function ProjectWorkspace() {
     sendPresenceUpdate,
     refreshContextualDrafts,
     revalidateAuditStats,
+    refreshFileMilestones,
   ])
 
   // FRO-288: workspace-level focus-lock with renewal.
@@ -9905,6 +10073,9 @@ export function ProjectWorkspace() {
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
     onSetCellHidden: handleSetCellHiddenStable,
+    // AQU-2308: also passed unconditionally — the Maintainer gate and the
+    // live-link test are applied in the row, beside the other role gates.
+    onSetMilestone: handleSetMilestoneFromCell,
     onRetimeCell: handleRetimeSubtitle,
     timingLocked,
     canUnlockTiming,
@@ -9912,7 +10083,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -18397,6 +18568,20 @@ export function ProjectWorkspace() {
           setPendingCellRemoval(null)
         }}
       />
+      {/* AQU-2308: name a start→end range of this file's lines. Rendered only
+          while a range is being named — the pickers hold one row per cell, and
+          building that for every file nobody is dividing is pure waste. */}
+      {milestoneDraft && milestoneDialogData && (
+        <SetMilestoneDialog
+          onDismiss={() => setMilestoneDraft(null)}
+          cells={milestoneDialogData.cells}
+          divisions={milestoneDialogData.divisions}
+          existing={fileMilestones.milestones}
+          initialStartCellId={milestoneDraft.startCellId}
+          initialEndCellId={milestoneDraft.endCellId}
+          onSubmit={(draft) => { void handleSubmitMilestone(draft) }}
+        />
+      )}
       {/* AQU-1759: what a split will make, before it makes it. */}
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}

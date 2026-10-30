@@ -28,6 +28,7 @@ import {
   BookOpenText,
   CloudOff,
   Quote,
+  Flag,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
@@ -3919,6 +3920,11 @@ function CellSourceMenu({
   hidden,
   onToggleHidden,
   hiddenDisabledReason,
+  /** AQU-2308: open "Set a new milestone…" with this row as the range's start.
+   *  Absent ⇒ no entry at all, the same rule the park entry follows and for the
+   *  same reason: a contributor must not learn that naming a range is a thing
+   *  this file does, and the answer never changes while they are in the file. */
+  onSetMilestone,
 }: {
   cellId: string
   onInsertBelow?: () => void
@@ -3938,6 +3944,7 @@ function CellSourceMenu({
   /** AQU-1422: park it / bring it back. Absent ⇒ not offered at all. */
   onToggleHidden?: () => void
   hiddenDisabledReason?: string | null
+  onSetMilestone?: () => void
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -3953,7 +3960,10 @@ function CellSourceMenu({
   // corner already handled by not rendering — the tier does not admit you, or
   // the source is mirrored from upstream. Those never change while you are in
   // the file, so a permanently dead button would be furniture.
-  if (!structural && !parkable && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
+  if (
+    !structural && !parkable && !onSetMilestone
+    && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps
+  ) return null
 
   return (
     <>
@@ -4010,8 +4020,20 @@ function CellSourceMenu({
               onSelect={() => setTimesOpen(true)}
             />
           )}
-          {(structural || parkable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
+          {(structural || parkable || onSetMilestone) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
             <DropdownMenuSeparator />
+          )}
+          {/* AQU-2308: a milestone is about the FILE's divisions rather than
+              this row, so it sits above the row's own structural actions —
+              nearest the park entry, which is the other action that changes
+              what the file shows rather than what a cell says. */}
+          {onSetMilestone && (
+            <RowInsertItem
+              testId="cell-menu-set-milestone"
+              icon={<Flag className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.cellMenu.setMilestone")}
+              onSelect={onSetMilestone}
+            />
           )}
           {parkable && (
             <RowInsertItem
@@ -5723,7 +5745,7 @@ function EditorRow({
     onOpenAttachment, attachmentsByCell, onAttachmentAdded,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, countCastLines, onTakeSaved, onLastTakeRemoved, audioHomeFor, myScopes,
     cellStore: previewCellStore,
-    onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onRetimeCell, onSplitAtQuotes,
+    onAddLineAt, onInsertCellBeside, onRemoveCell, onSetCellHidden, onSetMilestone, onRetimeCell, onSplitAtQuotes,
     timingLocked, canUnlockTiming, onOpenTimingSettings, followsRecordings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -6060,6 +6082,27 @@ function EditorRow({
   const cellHidden = cell.hidden === true
   const onToggleHidden = mayParkCells && canEditSource && onSetCellHidden
     ? () => onSetCellHidden(cell.id, !cellHidden)
+    : undefined
+
+  /**
+   * AQU-2308: may this person name a range of this file's lines?
+   *
+   * `canPerform` against the SAME role table `file.milestone.set` is enforced
+   * by, not a re-derived rank — and it is the Maintainer floor, a rung above
+   * the park/edit-source gate above, because a division relayouts the
+   * navigator for everyone who opens the file.
+   *
+   * The live-link test is the one `canEditSource` makes for itself: a
+   * downstream project mirroring another's source is read-only structure, so
+   * the entry is absent for every role there. It is NOT gated on
+   * `canEditSource` itself — that flag is forced false by a DCS pin for every
+   * role, and a DCS pin protects the source TEXT; which divisions this file is
+   * navigated by is still this project's own business.
+   */
+  const maySetMilestones = canPerform("file.milestone.set", project.syncRole?.level ?? null)
+    && project.sourceLinkMode !== "live"
+  const onSetMilestoneForCell = maySetMilestones && onSetMilestone
+    ? () => onSetMilestone(cell.id)
     : undefined
 
   // AQU-1068 item 5: the source cell's menu. The row's own reasons arrived as
@@ -8565,6 +8608,8 @@ function EditorRow({
               hidden={cellHidden}
               onToggleHidden={onToggleHidden}
               hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
+              // AQU-2308: absent ⇒ no entry, for the same reason park's is.
+              onSetMilestone={onSetMilestoneForCell}
             />
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
                 mirrors the target column's header lane, and that mirror is what

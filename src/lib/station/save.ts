@@ -16,7 +16,7 @@ import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/uplo
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { recordTakeAdded, type TakeRemoveData } from "@/lib/history/take-steps"
-import { emitCellAudioAttach, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
 
 /** One line the new version goes on, and how it sits there. */
 export interface VersionPlacement {
@@ -40,6 +40,8 @@ export interface VersionPlacement {
    * their approvals.
    */
   pieceOf?: string | null
+  /** Its volume and fades (AQU-2327), carried over to the new take. */
+  level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
 }
 
 export interface SaveVersionArgs {
@@ -107,6 +109,10 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             author: args.author,
           })
           attached += 1
+          const lvl = p.level
+          if (lvl && (lvl.gainDb != null || lvl.fadeInMs != null || lvl.fadeOutMs != null)) {
+            await emitCellAudioGain({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId, ...lvl, ...lane, author: args.author })
+          }
           // AQU-2267: both places, so neither timing moves.
           const placeP =
             p.targetOffsetMs != null || p.recordingsOffsetMs != null
@@ -138,6 +144,9 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               recordingsOffsetMs: p.recordingsOffsetMs,
               ...(p.label ? { label: p.label } : {}),
               ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}),
+              ...(p.level?.gainDb != null ? { gainDb: p.level.gainDb } : {}),
+              ...(p.level?.fadeInMs != null ? { fadeInMs: p.level.fadeInMs } : {}),
+              ...(p.level?.fadeOutMs != null ? { fadeOutMs: p.level.fadeOutMs } : {}),
             },
             placeP ?? eventId,
           )

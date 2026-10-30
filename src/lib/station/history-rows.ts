@@ -22,6 +22,9 @@ type Payload = {
   trimEndMs?: number | null
   label?: string | null
   atMs?: number
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
 }
 
 /**
@@ -55,6 +58,17 @@ export function historyRowsFromEvents(
         })
         break
       }
+      case "cell.audio.gain":
+        rows.push({
+          key: "editor.station.hLevel",
+          params: {
+            db: `${(p.gainDb ?? 0) > 0 ? "+" : (p.gainDb ?? 0) < 0 ? "−" : ""}${Math.abs(p.gainDb ?? 0)} dB`,
+            fin: formatStationLength((p.fadeInMs ?? 0) / 1000),
+            fout: formatStationLength((p.fadeOutMs ?? 0) / 1000),
+          },
+          ...who,
+        })
+        break
       case "cell.audio.validate":
         rows.push({ key: "editor.station.hApproved", ...who })
         break

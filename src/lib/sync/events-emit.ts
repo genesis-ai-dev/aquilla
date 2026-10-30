@@ -863,6 +863,48 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
   return eventId
 }
 
+export interface CellAudioGainInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** Volume in dB; null = as recorded. */
+  gainDb: number | null
+  /** Fade lengths in ms; null = none. */
+  fadeInMs: number | null
+  fadeOutMs: number | null
+  /** AQU-1462: lane the member was working in. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.gain` (AQU-2327) — the clip's volume and fades ONLY,
+ * all three stated (null clears). Never selection, trims or the recording.
+ */
+export async function emitCellAudioGain(input: CellAudioGainInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.gain",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      gainDb: input.gainDb,
+      fadeInMs: input.fadeInMs,
+      fadeOutMs: input.fadeOutMs,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioPlaceInput {
   projectId: string
   fileId: string

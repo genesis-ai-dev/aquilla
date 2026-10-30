@@ -29,7 +29,7 @@ interface LaneProps {
   insertOpen?: boolean
   insertMenu?: ReactNode
   /** Items 21–22, shown while the pointer is over the lane (slice 7). */
-  hoverLayer?: (hover: boolean) => ReactNode
+  hoverLayer?: (hover: boolean, lane: HTMLElement | null) => ReactNode
   /** The pointer is over the lane: the quiet hint steps aside (item 29). */
   onHover?(hover: boolean): void
 }
@@ -238,7 +238,7 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
           <Flag at={pct(sel.a)} side="mid" label={t("editor.station.insertFlag", { time: formatStationTime(sel.a) })} />
         ) : null}
 
-        {hoverLayer?.(hover)}
+        {hoverLayer?.(hover, box)}
 
         {/* Item 17: the actions at the selection. */}
         {sel && (range || onInsert) ? (

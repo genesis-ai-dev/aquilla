@@ -39,6 +39,22 @@ export function applyClipMix(samples: Float32Array, rate: number, clip: ClipMix)
   return out
 }
 
+/**
+ * The whole recording as the clip plays it (the Station's preview): its
+ * volume everywhere, and the fades inside the kept part. A selection outside
+ * the kept part still plays, at the clip's volume.
+ */
+export function mixWhole(samples: Float32Array, rate: number, clip: ClipMix): Float32Array {
+  const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+  if (flat) return samples
+  const out = new Float32Array(samples.length)
+  const g0 = Math.pow(10, (clip.gainDb || 0) / 20)
+  const a = Math.round(clip.trimA * rate)
+  const b = Math.round(clip.trimB * rate)
+  for (let i = 0; i < samples.length; i++) out[i] = samples[i] * (i >= a && i <= b ? gainAt(i / rate, clip) : g0)
+  return out
+}
+
 /** The loudest sample, for drawing every view against the same scale. */
 export function peakOf(data: Float32Array): number {
   let m = 0

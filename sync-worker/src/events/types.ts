@@ -94,6 +94,8 @@ export type EventKind =
   // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
+  // AQU-2327: a take's volume and fades — data on the clip, like the trim.
+  | 'cell.audio.gain'
   | 'cell.audio.place'
   // AQU-1767: cut one dub piece in two at a point in its own audio. Both
   // pieces share the bytes, stay on the same row, and start unvalidated.
@@ -675,6 +677,22 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
+   * fades in ms — always all three stated, null meaning none (0 dB, no fade),
+   * for the reason `cell.audio.trim` states both ends. Like a trim they never
+   * change the recording, set nothing else, and keep the take's approvals.
+   */
+  'cell.audio.gain': {
+    audioId: string
+    gainDb: number | null
+    fadeInMs: number | null
+    fadeOutMs: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

@@ -41,5 +41,15 @@ export const STATION_PICKS = {
   showApprovalCount: true,
 } as const
 
+/**
+ * Q9's switch: the timeline and the exports apply a clip's volume and fades
+ * (the playback mixer, slice 8). With "together", the Station shows its volume
+ * line and fade corners only once this is true.
+ */
+export const MIXER_READY = false
+
+/** The Station shows its volume and fade controls (items 21–22). */
+export const levelsShown = (): boolean => STATION_PICKS.levelsRelease === "stationFirst" || MIXER_READY
+
 /** Q8: Loop is a button after the speed menu; L toggles it. */
 export const LOOP_KEY = "l"

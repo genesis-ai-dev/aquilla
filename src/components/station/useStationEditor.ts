@@ -24,7 +24,7 @@ import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
 import { StationPreview } from "@/lib/station/preview"
-import { renderSegments, type PcmSource } from "@/lib/station/render"
+import { mixWhole, renderSegments, type PcmSource } from "@/lib/station/render"
 import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
 
@@ -121,7 +121,35 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   }, [ops, draft.trim, storedA, storedB, pcm])
   const [liveTrim, setLiveTrim] = useState<{ a: number; b: number } | null>(null)
   const { trimA, trimB } = clampTrim(liveTrim?.a ?? baseTrim.a, liveTrim?.b ?? baseTrim.b, length)
-  const clip: ClipMix = useMemo(() => ({ trimA, trimB, fadeIn: 0, fadeOut: 0, gainDb: 0 }), [trimA, trimB])
+  // ——— Volume and fades (items 21–22): the clip's own data (cell.audio.gain),
+  // or the corner / line being dragged. They never change the recording.
+  const stored = useMemo(
+    () => ({ gainDb: take.att.gainDb ?? 0, fadeIn: (take.att.fadeInMs ?? 0) / 1000, fadeOut: (take.att.fadeOutMs ?? 0) / 1000 }),
+    [take.att.gainDb, take.att.fadeInMs, take.att.fadeOutMs],
+  )
+  const [liveLevel, setLiveLevel] = useState<{ gainDb: number; fadeIn: number; fadeOut: number } | null>(null)
+  const level = liveLevel ?? stored
+  const clip: ClipMix = useMemo(
+    () => ({ trimA, trimB, fadeIn: level.fadeIn, fadeOut: level.fadeOut, gainDb: level.gainDb }),
+    [trimA, trimB, level.fadeIn, level.fadeOut, level.gainDb],
+  )
+  /** Save the level as one Undo step (`take.gain`). */
+  const commitLevel = useCallback(
+    async (next: { gainDb: number; fadeIn: number; fadeOut: number }) => {
+      setLiveLevel(null)
+      const half = Math.max(0, (trimB - trimA) / 2)
+      const gainDb = Math.max(-12, Math.min(6, Math.round(next.gainDb * 2) / 2))
+      const fadeIn = Math.max(0, Math.min(half, round2(next.fadeIn)))
+      const fadeOut = Math.max(0, Math.min(half, round2(next.fadeOut)))
+      if (gainDb === stored.gainDb && fadeIn === stored.fadeIn && fadeOut === stored.fadeOut) return
+      await host.setLevel(target.cellId, target.audioId, {
+        gainDb: gainDb === 0 ? null : gainDb,
+        fadeInMs: fadeIn > 0 ? Math.round(fadeIn * 1000) : null,
+        fadeOutMs: fadeOut > 0 ? Math.round(fadeOut * 1000) : null,
+      })
+    },
+    [host, stored, target.audioId, target.cellId, trimA, trimB],
+  )
 
   /** Save a trim as one Undo step; null on an end = back to the edge. While
    *  sound edits are unsaved, the trim waits with them for the new version. */
@@ -181,13 +209,17 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // volume line doesn't render on every move).
   useEffect(() => {
     if (!pcm) return
-    if (ops.length === 0) {
+    const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+    if (ops.length === 0 && flat) {
       preview.setSamples(pcm.data, pcm.rate)
       return
     }
-    const id = setTimeout(() => preview.setSamples(renderSegments(placed, lookup, pcm.rate), pcm.rate), 150)
+    const id = setTimeout(() => {
+      const whole = ops.length === 0 ? pcm.data : renderSegments(placed, lookup, pcm.rate)
+      preview.setSamples(mixWhole(whole, pcm.rate, clip), pcm.rate)
+    }, 150)
     return () => clearTimeout(id)
-  }, [pcm, ops, placed, lookup, preview])
+  }, [pcm, ops, placed, lookup, preview, clip])
 
   const pause = useCallback(() => {
     preview.pause()
@@ -342,6 +374,9 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     liveTrim,
     setLiveTrim,
     commitTrim,
+    level,
+    setLiveLevel,
+    commitLevel,
     sel,
     select,
     clearSel,

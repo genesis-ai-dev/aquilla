@@ -6,6 +6,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { HistoryResult } from "@/lib/history/history"
+import type { TakeLevel } from "@/lib/history/take-steps"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { InsertChoice } from "./StationEdits"
 
@@ -33,6 +34,8 @@ export interface StationHost {
   vote(cellId: string, audioId: string, validated: boolean): Promise<void>
   /** Trim, recorded as one Undo step (the timeline's own edge-drag path). */
   trim(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): Promise<void>
+  /** AQU-2327: the take's volume and fades, as one Undo step (`take.gain`). */
+  setLevel(cellId: string, audioId: string, level: TakeLevel): Promise<void>
   /** How many approvals a recording needs in this project. */
   approvalsNeeded: number
   /** Stop the timeline and any other player before the Station plays. */

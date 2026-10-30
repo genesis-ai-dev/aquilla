@@ -16,7 +16,7 @@ import { castNameOf } from "@/lib/audio/voices"
 import { historyView, newestStepMatches, subscribeHistory, undoLast } from "@/lib/history/history"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
-import { STATION_PICKS } from "@/lib/station/picks"
+import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, readDraft } from "@/lib/station/drafts"
@@ -36,6 +36,7 @@ import type { StationHost, StationTake } from "./station-host"
 import { changedKinds, StationInsertMenu, StationNotice, type InsertChoice } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
+import { StationLevels } from "./StationLevels"
 import { StationScroll, StationTransport } from "./StationTransport"
 import { useStationEditor } from "./useStationEditor"
 
@@ -229,6 +230,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           targetOffsetMs: p.att.targetOffsetMs ?? null,
           recordingsOffsetMs: p.att.recordingsOffsetMs ?? null,
           selectedBefore: host.selectedIn(p.cell.id, slot),
+          // Its volume and fades go with it: the clip's, not the recording's.
+          level: isOpen
+            ? { gainDb: ed.level.gainDb || null, fadeInMs: ed.level.fadeIn > 0 ? Math.round(ed.level.fadeIn * 1000) : null, fadeOutMs: ed.level.fadeOut > 0 ? Math.round(ed.level.fadeOut * 1000) : null }
+            : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
           ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
         }
       })
@@ -324,6 +329,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             trackVars={host.trackVars(take.fileId, take.att.slot)}
             generated={Boolean(take.att.voiceId)}
             onHover={setHovering}
+            {...(editable && levelsShown() ? { hoverLayer: (h: boolean, lane: HTMLElement | null) => <StationLevels ed={ed} lane={lane} hover={h} /> } : {})}
             {...(editable
               ? {
                   onDelete: ed.deleteSelection,

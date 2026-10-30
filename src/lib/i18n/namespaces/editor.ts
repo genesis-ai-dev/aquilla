@@ -1117,6 +1117,7 @@ export const editor = defineNamespace({
     "editor.history.stepChangeVoice": "Change the voice",
     "editor.history.stepRemoveNoise": "Remove noise",
     "editor.history.stepStationVersion": "Save a new version",
+    "editor.history.stepTakeLevel": "Change volume or fades",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
     "editor.history.stepLinkFilm": "Link film",
@@ -1400,6 +1401,17 @@ export const editor = defineNamespace({
     "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
     "editor.station.undoUnsaved": "Undo the last unsaved change",
     "editor.station.fileLabel": "the file “{name}”",
+    "editor.station.fadeIn": "Fade in",
+    "editor.station.fadeOut": "Fade out",
+    "editor.station.fadeInLen": "Fade in {len} s",
+    "editor.station.fadeOutLen": "Fade out {len} s",
+    "editor.station.fadeTip": "{fade}: drag the corner inward, or click",
+    "editor.station.volumeDragTip": "Drag the line up or down to change the volume",
+    "editor.station.quieter": "Quieter",
+    "editor.station.quieterTip": "Drag the line down, or click: 3 dB quieter",
+    "editor.station.louder": "Louder",
+    "editor.station.louderTip": "Drag the line up, or click: 3 dB louder",
+    "editor.station.hLevel": "Volume {db} · fades {fin} in, {fout} out",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3333,6 +3345,53 @@ export const editor = defineNamespace({
         description: "How an inserted file is named in the History row and the inserted mark's tooltip.",
         placeholders: {
           name: "The file's name without its extension.",
+        },
+      },
+      "editor.station.fadeIn": {
+        description: "Label beside the fade-in corner, and its screen-reader name, when there is no fade yet.",
+      },
+      "editor.station.fadeOut": {
+        description: "Screen-reader name of the fade-out corner when there is no fade yet.",
+      },
+      "editor.station.fadeInLen": {
+        description: "The fade-in corner's label and name: how long the fade is.",
+        placeholders: {
+          len: "Seconds, e.g. 0.30.",
+        },
+      },
+      "editor.station.fadeOutLen": {
+        description: "The fade-out corner's name: how long the fade is.",
+        placeholders: {
+          len: "Seconds, e.g. 0.30.",
+        },
+      },
+      "editor.station.fadeTip": {
+        description: "Tooltip of a fade corner.",
+        placeholders: {
+          fade: "The corner's label, e.g. 'Fade in 0.30 s'.",
+        },
+      },
+      "editor.station.volumeDragTip": {
+        description: "Tooltip of the clip's volume line.",
+      },
+      "editor.station.quieter": {
+        description: "Screen-reader name of the volume's minus button.",
+      },
+      "editor.station.quieterTip": {
+        description: "Tooltip of the volume's minus button.",
+      },
+      "editor.station.louder": {
+        description: "Screen-reader name of the volume's plus button.",
+      },
+      "editor.station.louderTip": {
+        description: "Tooltip of the volume's plus button.",
+      },
+      "editor.station.hLevel": {
+        description: "History row: the clip's volume or fades changed.",
+        placeholders: {
+          db: "The volume, e.g. '−3 dB'.",
+          fin: "Fade-in length.",
+          fout: "Fade-out length.",
         },
       },
       "editor.dock.film": {
@@ -7410,6 +7469,7 @@ export const editor = defineNamespace({
       "editor.history.stepUploadTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio file was uploaded as a line's take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepGenerateVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a voice (text-to-speech take) was generated for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
       "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepLinesFromRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was split into new lines (rows) of the open file, with their transcripts. A short verb phrase.", maxLength: 40 },

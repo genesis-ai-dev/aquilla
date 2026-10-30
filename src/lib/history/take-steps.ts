@@ -39,6 +39,10 @@ export interface CutRecord {
 }
 
 export interface TakeWindowData { cellId: string; audioId: string; before: TakeWindow; after: TakeWindow }
+/** AQU-2327: a take's volume (dB) and fades (ms), as stored (null = none). */
+export interface TakeLevel { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
+/** A change to a take's volume or fades (the Station's volume line and corners). */
+export interface TakeGainData { cellId: string; audioId: string; before: TakeLevel; after: TakeLevel }
 /** AQU-2267: a take's place in each timing, as stored (null = not placed there). */
 export interface StoredTakePlace { targetOffsetMs: number | null; recordingsOffsetMs: number | null }
 /**
@@ -94,6 +98,8 @@ export interface TakeStepContext {
   /** Which take plays in a slot right now (the group's first piece for a cut take). */
   selectedIn(cellId: string, slot: string): string | null
   applyTrim(cellId: string, audioId: string, w: TakeWindow): Promise<void>
+  /** AQU-2327: a take's volume and fades, all three in one write. */
+  applyGain?(cellId: string, audioId: string, level: TakeLevel): Promise<void>
   /** AQU-2267: both places, in one write. */
   applyPlace(cellId: string, audioId: string, place: StoredTakePlace): Promise<void>
   /** Cut `c.audioId` at `c.atMs` into a new piece `newAudioId`. */
@@ -125,6 +131,16 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     if (!att) return GONE
     if (!sameWindow(att, from)) return CHANGED
     await ctx.applyTrim(d.cellId, d.audioId, to)
+    return DONE
+  }
+  // AQU-2327: the level together — a change since, to any of the three, is
+  // someone else's, and the step leaves it alone.
+  const gainFlip = async (d: TakeGainData, from: TakeLevel, to: TakeLevel): Promise<StepOutcome> => {
+    const att = ctx.readTake(d.cellId, d.audioId)
+    if (!att) return GONE
+    if (!ctx.applyGain) return { kind: "skipped", reason: "unavailable" }
+    if ((att.gainDb ?? null) !== from.gainDb || (att.fadeInMs ?? null) !== from.fadeInMs || (att.fadeOutMs ?? null) !== from.fadeOutMs) return CHANGED
+    await ctx.applyGain(d.cellId, d.audioId, to)
     return DONE
   }
   // AQU-2267: both places together — checked together (a move since, in
@@ -214,6 +230,10 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     "take.window": {
       undo: (d: TakeWindowData) => windowFlip(d, d.after, d.before),
       redo: (d: TakeWindowData) => windowFlip(d, d.before, d.after),
+    } as StepHandler<never>,
+    "take.gain": {
+      undo: (d: TakeGainData) => gainFlip(d, d.after, d.before),
+      redo: (d: TakeGainData) => gainFlip(d, d.before, d.after),
     } as StepHandler<never>,
     "take.place": {
       undo: (d: TakePlaceData) => placeFlip(d, placeAfter(d), placeBefore(d)),

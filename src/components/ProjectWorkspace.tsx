@@ -294,7 +294,7 @@ import { editStepHandlers } from "@/lib/history/edit-steps"
 import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
-import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace } from "@/lib/history/take-steps"
+import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
@@ -306,7 +306,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -3918,6 +3918,50 @@ export function ProjectWorkspace() {
       await applyTakeTrim(cellId, audioId, trims)
     },
     [applyTakeTrim, readTake, activeFileId],
+  )
+
+  // AQU-2327: a take's volume and fades — the trim's sibling, same order:
+  // optimistic overlay, the durable event, flush, then the bus poke.
+  const applyTakeGain = useCallback(
+    async (cellId: string, audioId: string, level: TakeLevel) => {
+      if (!project?.id) return
+      const owner = resolveTakeCellRef.current(cellId)
+      const att = owner?.cell.attachments?.[audioId]
+      if (!owner || !att) return
+      const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const p = emitCellAudioGain({
+        projectId: project.id,
+        fileId: owner.fileId,
+        cellId,
+        audioId,
+        gainDb: level.gainDb,
+        fadeInMs: level.fadeInMs,
+        fadeOutMs: level.fadeOutMs,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...level }, p)
+      await p
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(owner.fileId)
+    },
+    [project?.id, currentUsername, getTokenForProjectFile, activeLane],
+  )
+  const handleGainTarget = useCallback(
+    async (cellId: string, audioId: string, level: TakeLevel) => {
+      const before = readTake(cellId, audioId)
+      if (!before) return
+      const was: TakeLevel = { gainDb: before.att.gainDb ?? null, fadeInMs: before.att.fadeInMs ?? null, fadeOutMs: before.att.fadeOutMs ?? null }
+      recordStep({
+        kind: "take.gain",
+        data: { cellId, audioId, before: was, after: level },
+        labelKey: "editor.history.stepTakeLevel",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+      await applyTakeGain(cellId, audioId, level)
+    },
+    [applyTakeGain, readTake, activeFileId],
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
@@ -13128,6 +13172,7 @@ export function ProjectWorkspace() {
       voteState: timelineVoteState,
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
+      setLevel: handleGainTarget,
       approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
       pauseOtherPlayback: () => pauseAllTransports(),
       reportHistory,
@@ -13177,7 +13222,7 @@ export function ProjectWorkspace() {
         return out
       },
     }
-  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
   // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
   // and — while the Station's tab shows — follow the take you click.
   const handleEditInStation = useCallback((cellId: string, audioId: string) => {
@@ -15235,6 +15280,7 @@ export function ProjectWorkspace() {
           return owner.cell.attachments?.[id]?.pieceOf ?? id
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
+        applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
         uncut: applyTakeUncut,
@@ -15372,7 +15418,7 @@ export function ProjectWorkspace() {
     })
     return unregister
   }, [
-    readTake, applyTakeTrim, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,

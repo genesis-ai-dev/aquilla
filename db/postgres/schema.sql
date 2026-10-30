@@ -1099,6 +1099,12 @@ CREATE TABLE cell_audio (
     -- limits. NULL = no place of its own there: that timing reads
     -- target_offset_ms, as every take before 0189 does.
     recordings_offset_ms BIGINT,
+    -- AQU-2327 (0193): the clip's volume (dB) and fades (ms), written only by
+    -- cell.audio.gain. Like the trim they never change the recording; NULL =
+    -- as recorded, no fade.
+    gain_db            REAL,
+    fade_in_ms         BIGINT,
+    fade_out_ms        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

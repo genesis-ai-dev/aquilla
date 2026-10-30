@@ -5,6 +5,7 @@
 // cell.audio.rename). Self-contained: resolves frontier audio URLs to
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
+import { STATION_PICKS } from "@/lib/station/picks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { recordStep } from "@/lib/history/history"
 import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
@@ -540,16 +541,40 @@ export function TakesStrip({
       return changed ? next : prev
     })
   }, [takes])
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name;
+  // the list tells them apart by "· version N", counted up the chain of takes
+  // each was made from (`referenceAudioId`).
+  const versionOf = useCallback(
+    (att: AudioAttachmentOut): number => {
+      if (STATION_PICKS.versions !== "under") return 1
+      const byId = new Map(takes.map((x) => [x.audioId, x]))
+      let n = 1
+      let ref = att.referenceAudioId
+      const seen = new Set<string>()
+      while (ref && !seen.has(ref) && byId.has(ref)) {
+        seen.add(ref)
+        if ((byId.get(ref)!.label ?? null) !== (att.label ?? null)) break
+        n += 1
+        ref = byId.get(ref)!.referenceAudioId
+      }
+      return n
+    },
+    [takes],
+  )
   const displayLabel = useCallback(
-    (att: AudioAttachmentOut): string =>
-      labelOverrides.get(att.audioId) ??
-      // A stored name is user data — never translated. Only the placeholder
-      // shown until a name exists (or is backfilled) is a UI string.
-      att.label ??
-      (isDenoisedAudioId(att.audioId)
-        ? t("audio.takesStrip.cleanedLabel")
-        : t("audio.takesStrip.takeFallback")),
-    [labelOverrides, t],
+    (att: AudioAttachmentOut): string => {
+      const base =
+        labelOverrides.get(att.audioId) ??
+        // A stored name is user data — never translated. Only the placeholder
+        // shown until a name exists (or is backfilled) is a UI string.
+        att.label ??
+        (isDenoisedAudioId(att.audioId)
+          ? t("audio.takesStrip.cleanedLabel")
+          : t("audio.takesStrip.takeFallback"))
+      const v = versionOf(att)
+      return v > 1 ? t("editor.station.takeVersion", { take: base, n: v }) : base
+    },
+    [labelOverrides, t, versionOf],
   )
 
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).

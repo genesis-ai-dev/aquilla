@@ -1418,6 +1418,7 @@ export const editor = defineNamespace({
     "editor.station.voiceUnavailable": "This line’s voice can’t be changed here.",
     "editor.station.recordedInsert": "a recording made here",
     "editor.station.tooLong": "Too long to cut or insert here yet; trims, volume and fades work.",
+    "editor.station.takeVersion": "{take} · version {n}",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3421,6 +3422,13 @@ export const editor = defineNamespace({
       },
       "editor.station.tooLong": {
         description: "Note in the selection's bar on a recording longer than ten minutes, where Delete and Insert are not offered yet.",
+      },
+      "editor.station.takeVersion": {
+        description: "A take's name in the lists of takes when it is a version saved from the Station (it keeps its take's name).",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          n: "The version number (2 or more).",
+        },
       },
       "editor.dock.film": {
         description:

@@ -5,7 +5,7 @@
 // made before it arrives are delivered once it does, in order, and an error
 // thrown in those first seconds is still reported.
 
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 
 const calls: string[] = []
 const fake = {
@@ -20,7 +20,10 @@ vi.mock("posthog-js", () => ({ default: fake }))
 // test-setup.ts stubs this module for every other test; this one is about it.
 vi.unmock("@/lib/posthog")
 
+beforeEach(() => localStorage.setItem("aquilla:analyticsEnabled", "true"))
+
 afterEach(() => {
+  localStorage.clear()
   vi.unstubAllEnvs()
   vi.resetModules()
   calls.length = 0
@@ -62,4 +65,17 @@ describe("deferred posthog (AQU-2093)", () => {
     expect(fake.init).not.toHaveBeenCalled()
     expect(calls).toEqual([])
   })
+})
+
+it("discards pre-consent events rather than replaying them after opt-in", async () => {
+  localStorage.removeItem("aquilla:analyticsEnabled")
+  vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
+  const { default: posthog } = await import("./posthog")
+  posthog.capture("before_consent")
+  window.dispatchEvent(new ErrorEvent("error", { error: new Error("private error") }))
+  localStorage.setItem("aquilla:analyticsEnabled", "true")
+  posthog.capture("after_consent")
+  await vi.waitFor(() => expect(calls).toContain("capture:after_consent"))
+  expect(calls).not.toContain("capture:before_consent")
+  expect(calls).not.toContain("exception:private error")
 })

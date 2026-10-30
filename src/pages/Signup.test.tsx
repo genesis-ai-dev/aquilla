@@ -19,6 +19,7 @@ function show(path = "/signup") {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  localStorage.clear()
   auth.session = null
   auth.loading = false
   auth.sessionLoadError = null
@@ -34,6 +35,10 @@ it.each([
   ["/signup?next=https%3A%2F%2Fevil.test", "Workspace destination"],
 ])("registers directly and preserves a safe destination from %s", async (path, destination) => {
   show(path)
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByRole("switch", { name: /share usage data/i })).not.toBeChecked()
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
   expect(screen.queryByRole("progressbar")).toBeNull()
   expect(screen.queryByRole("button", { name: /skip for now/i })).toBeNull()
   fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
@@ -58,4 +63,15 @@ it("uses a valid existing account without replaying setup", async () => {
   show("/onboarding")
   await screen.findByText("Workspace destination")
   expect(auth.register).not.toHaveBeenCalled()
+})
+
+it("offers returning users a direct login and respects an existing consent choice", () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "true")
+  show("/signup?next=%2Fjoin-org%2Finvite")
+  expect(screen.getByRole("link", { name: /already have an account/i })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("switch")).toBeNull()
+  expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
 })

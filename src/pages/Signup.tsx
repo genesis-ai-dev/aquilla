@@ -1,7 +1,10 @@
 import { Navigate, Link, useNavigate, useSearchParams } from "react-router-dom"
 import { useState } from "react"
-import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
-import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { VersionBadge } from "@/components/VersionBadge"
+import { WelcomeStep } from "@/components/onboarding/steps/WelcomeStep"
+import { PrivacyStep } from "@/components/onboarding/steps/PrivacyStep"
+import { hasAnalyticsConsentBeenSet } from "@/lib/analytics-consent"
+
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
@@ -13,13 +16,14 @@ import { billingSelectionPath, readBillingIntent } from "@/lib/billing/intent"
 import { loginPath, safeLoginNext } from "@/lib/navigation/login-path"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-/** Account creation is a single form. Workspace setup happens in the app. */
+/** Welcome and privacy precede signup; workspace setup happens in the app. */
 export function Signup() {
   const t = useT()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   const [mode, setMode] = useState<"signup" | "login" | "forgot">("signup")
+  const [step, setStep] = useState<1 | 2 | 3>(1)
   const [identifier, setIdentifier] = useState<string | null>(null)
   const billing = readBillingIntent(params)
   const next = billing.kind === "paid"
@@ -31,11 +35,18 @@ export function Signup() {
   if (sessionLoadError && !session) return <SessionHydrationError retry={retrySessionLoad} />
   if (session && !isJwtExpired(session.jwt)) return <Navigate to={next} replace />
 
-  return <AuthPage><AuthPanel>
-    <CardHeader><CardTitle role="heading" aria-level={1}>
+  return <main className="flex min-h-svh flex-col bg-background p-4 sm:p-6">
+    <div className="flex flex-1 items-center justify-center py-8"><div className="w-full max-w-md">
+    <div className="mb-8 flex justify-center gap-2" aria-label={t("onboarding.wizard.stepProgress", { step, total: 3 })}>
+      {[1, 2, 3].map(n => <span key={n} className={`size-2 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`} />)}
+    </div>
+    {step === 1 && <><WelcomeStep onNext={() => setStep(hasAnalyticsConsentBeenSet() ? 3 : 2)} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("auth.login.submitDefault")}</Link></p></>}
+    {step === 2 && <PrivacyStep onNext={() => setStep(3)} onBack={() => setStep(1)} />}
+    {step === 3 && <>
+    <h1 className="mb-6 text-center text-2xl font-semibold">
       {t(mode === "signup" ? "nav.account.signupTitle" : mode === "login" ? "auth.login.title" : "auth.resetPassword.title")}
-    </CardTitle></CardHeader>
-    <CardContent className="flex flex-col gap-6">
+    </h1>
+    <div className="flex flex-col gap-6">
       {billing.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
       {mode === "signup" && <FrontierSignupForm onSuccess={complete} onSwitchToLogin={(value) => {
         setIdentifier(value)
@@ -46,6 +57,7 @@ export function Signup() {
       {mode === "signup" && <p className="text-center text-sm text-muted-foreground">
         {t("auth.join.alreadyHaveAccount")}{" "}<Link className="font-medium text-foreground hover:underline" to={loginPath({ next })}>{t("auth.login.submitDefault")}</Link>
       </p>}
-    </CardContent>
-  </AuthPanel></AuthPage>
+    </div></>}
+    </div></div><footer className="w-full"><VersionBadge inline /></footer>
+  </main>
 }

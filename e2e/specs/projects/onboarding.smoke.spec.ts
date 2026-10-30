@@ -1,12 +1,15 @@
 import { test, expect } from "@playwright/test"
 import { resetBackend } from "../../helpers/seed"
 
-// AQU-2300: the old wizard is retired. Legacy marketing links still register
-// through the real auth worker, persist the session, and reach the app directly.
-test("legacy onboarding link creates an account and reaches the app without setup steps", async ({ page }) => {
+// AQU-2300: retain welcome and privacy, then register through the real auth
+// worker and reach the app without workspace/project setup.
+test("welcome and privacy choice lead to signup and the app without workspace setup", async ({ page }) => {
   test.setTimeout(120_000)
   await resetBackend()
   await page.goto("/onboarding")
+  await page.getByRole("button", { name: /get started/i }).click()
+  await expect(page.getByRole("switch", { name: /share usage data/i })).not.toBeChecked()
+  await page.getByRole("button", { name: /^continue$/i }).click()
   await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
   await expect(page.getByRole("button", { name: /skip for now/i })).toHaveCount(0)
   await expect(page.getByRole("progressbar")).toHaveCount(0)

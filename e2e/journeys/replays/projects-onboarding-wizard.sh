@@ -3,6 +3,8 @@
 . "$(dirname "$0")/_lib.sh"
 SIGNUP_USER="signup$(date +%s)"
 ab open "$BASE/onboarding" >/dev/null || fail "open signup"
+ab find role button click --name "Get Started" >/dev/null || fail "welcome"
+ab find role button click --name "Continue" >/dev/null || fail "privacy choice"
 ab wait --text "Create an Aquilla Account" >/dev/null || fail "signup heading"
 ab find label "Username" fill "$SIGNUP_USER" >/dev/null || fail "username"
 ab find label "Email" fill "$SIGNUP_USER@example.test" >/dev/null || fail "email"

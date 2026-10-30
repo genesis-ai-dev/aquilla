@@ -5,6 +5,7 @@
 // header (an MP3's frame header, an M4A's movie box) and never decodes the
 // audio. A length it can't read is left out.
 
+import { mapWithConcurrency } from "@/lib/concurrency"
 import { probeMediaDurationMs } from "@/lib/import"
 
 /** How much of a WAV is read to find its header: far more than any header. */
@@ -67,16 +68,8 @@ export async function recordingLengthMs(file: File): Promise<number | null> {
 
 /** The lengths of `files[i]` for each i in `indices`, a few at a time. */
 export async function readLengths(files: readonly File[], indices: readonly number[]): Promise<Map<number, number>> {
+  const lengths = await mapWithConcurrency(indices, CONCURRENCY, async (i) => (files[i] ? recordingLengthMs(files[i]) : null))
   const out = new Map<number, number>()
-  let next = 0
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, indices.length) }, async () => {
-    while (next < indices.length) {
-      const i = indices[next++]
-      const file = files[i]
-      if (!file) continue
-      const ms = await recordingLengthMs(file)
-      if (ms != null) out.set(i, ms)
-    }
-  }))
+  lengths.forEach((ms, k) => { if (ms != null) out.set(indices[k], ms) })
   return out
 }

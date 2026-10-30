@@ -54,6 +54,7 @@ import { learnHeaderNames, loadTargetFile, projectFileInfos, type ProjectFileLik
 import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib/audio/bulk-upload/engine"
 import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-summary"
 import { readLengths } from "@/lib/audio/bulk-upload/read-length"
+import { mapWithConcurrency } from "@/lib/concurrency"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
 
@@ -187,13 +188,6 @@ type Phase =
 
 const LOAD_CONCURRENCY = 3
 
-async function inBatches<T>(items: readonly T[], size: number, fn: (item: T) => Promise<void>): Promise<void> {
-  let next = 0
-  await Promise.all(Array.from({ length: Math.min(size, items.length) }, async () => {
-    while (next < items.length) await fn(items[next++])
-  }))
-}
-
 /** "Genesis 1:3", or "Welcome letter · 12" for a document's line. */
 function lineLabel(file: TargetFile, line: TargetLine, position: number): string {
   const m = line.ref ? /^([1-3]?[A-Z]{2,3})\s+(\d+:\S+)$/.exec(line.ref) : null
@@ -280,7 +274,7 @@ export function RecordingsReview({
         const scoped = file ? infos.filter((f) => f.fileId === file.id) : infos.filter((f) => f.bookCode)
         const wantsNames = file != null || read.some((r) => r.reading.unknownBookWord || r.targetReason?.code === "noBook")
         if (wantsNames && scoped.some((f) => f.bookCode)) {
-          await inBatches(scoped, LOAD_CONCURRENCY, async (f) => {
+          await mapWithConcurrency(scoped, LOAD_CONCURRENCY, async (f) => {
             const jwt = await getToken(f.fileId)
             if (jwt) await learnHeaderNames(projectId, f, jwt, lane, index).catch(() => {})
           })

@@ -4,7 +4,7 @@
 // in a booth session — a wrong audioId or slot here silently corrupts the mix.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
@@ -744,7 +744,9 @@ describe("one number per take, however many pieces it has", () => {
     const offline = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
     const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
     render(<TakesStrip {...common} variant="pieces" takes={[take("b", 1000), piece]} selectedAudioId="b" />)
-    await new Promise((r) => setTimeout(r, 50))
+    // The naming effect calls the rename before its first await, so once the
+    // effects and their microtasks have run, a rename would already be here.
+    await act(async () => {})
     expect(emitRename).not.toHaveBeenCalled()
     offline.mockRestore()
   })

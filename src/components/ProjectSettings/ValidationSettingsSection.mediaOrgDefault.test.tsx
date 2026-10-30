@@ -40,13 +40,19 @@ const isDisabled = (el: HTMLElement) =>
   el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true" || el.hasAttribute("data-disabled")
 
 describe("ValidationSettingsSection — audio settings follow the organization", () => {
-  it("shows the organization's values, disabled, while the project sets none", () => {
+  it("shows the organization's values while the project sets none, and they can be changed right there", () => {
     draw()
     expect(selfSource().textContent).toContain("Organization default (off)")
     expect(selfSwitch().getAttribute("aria-checked") === "true" || selfSwitch().hasAttribute("data-checked")).toBe(false)
-    expect(isDisabled(selfSwitch())).toBe(true)
+    expect(isDisabled(selfSwitch())).toBe(false)
     expect(floorSource().textContent).toContain("Organization default (Project lead)")
-    expect(isDisabled(screen.getByRole("combobox", { name: "Minimum role to validate recordings" }))).toBe(true)
+    expect(isDisabled(screen.getByRole("combobox", { name: "Minimum role to validate recordings" }))).toBe(false)
+  })
+
+  it("flipping a switch that follows the organization sets it for this project in one step (Sam, Oct 28)", async () => {
+    const { onChange } = draw()
+    await userEvent.click(selfSwitch())
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ allowSelfValidationAudio: true })
   })
 
   it("'Set for this project' starts from the organization's value", async () => {

@@ -41,11 +41,12 @@ export interface MyOrg {
   role: { level: number; name: string }
 }
 
-/** GET /api/v2/orgs/me — alice's seeded "Acme" org. Returns the row even
- * if she's never explicitly created one (frontier-server lazy-creates a
- * personal org on first call). */
+/** The caller's personal workspace — alice's seeded "Acme" org — made for
+ * the fixture if they have none. AQU-2259: reading `/orgs/me` no longer
+ * creates one, so the fixture asks for it explicitly, the way onboarding's
+ * "Just me" does (POST /api/v2/orgs/personal, idempotent). */
 export async function getMyOrg(jwt: string): Promise<MyOrg> {
-  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/me`, { headers: authHeaders(jwt) })
+  const r = await fetch(`${FRONTIER_BASE}/api/v2/orgs/personal`, { method: "POST", headers: authHeaders(jwt) })
   if (!r.ok) throw new Error(`getMyOrg failed: HTTP ${r.status} — ${await r.text()}`)
   return (await r.json()) as MyOrg
 }

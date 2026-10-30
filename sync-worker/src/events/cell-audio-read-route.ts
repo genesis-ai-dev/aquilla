@@ -110,16 +110,24 @@ export async function handleCellAudioReadRequest(
   // would arrive twice — which the collapse below would quietly tolerate,
   // since it keys attachments by audio_id and the last row would simply win.
   // The bug would surface as nothing at all until somebody read a duration.
+  //
+  // AQU-2296: WHEN each person voted rides along in the same lateral, as
+  // `jsonb_object_agg` keyed by username — a record rather than a second
+  // array, so the pairing cannot drift from `names`. Cast to TEXT on purpose:
+  // a jsonb column arrives parsed through some drivers and raw through
+  // others, and one shape is easier to normalize than two.
   const res = await env.AQUILLA_PG.prepare(
     `SELECT a.cell_id, a.audio_id, a.slot, a.url, a.mime_type, a.voice_id,
             a.reference_audio_id, a.duration_ms, a.label, a.trim_start_ms,
             a.trim_end_ms, a.target_offset_ms, a.recordings_offset_ms, a.timings_json, a.selected,
             a.created_ts, a.validator_count, a.role, a.created_by, a.piece_of,
             a.asr_text, a.asr_model, a.transcript_ai,
-            COALESCE(v.names, ARRAY[]::text[]) AS validators
+            COALESCE(v.names, ARRAY[]::text[]) AS validators,
+            v.decided_ts AS validator_decided_ts
        FROM cell_audio a
        LEFT JOIN LATERAL (
-         SELECT ARRAY_AGG(cav.username ORDER BY cav.decided_ts DESC) AS names
+         SELECT ARRAY_AGG(cav.username ORDER BY cav.decided_ts DESC) AS names,
+                jsonb_object_agg(cav.username, cav.decided_ts)::text AS decided_ts
            FROM cell_audio_validators cav
           WHERE cav.project_id = a.project_id AND cav.file_id = a.file_id
             AND cav.cell_id = a.cell_id AND cav.audio_id = a.audio_id

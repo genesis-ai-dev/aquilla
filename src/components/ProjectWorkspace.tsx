@@ -1,4 +1,5 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
 import { useShowExtensionDataFiles } from "@/lib/tools/show-data-files"
 import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/client"
@@ -251,7 +252,6 @@ import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { SharePanel } from "./SharePanel"
 import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
@@ -359,7 +359,7 @@ import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/s
 import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
-import { denialMessage } from "@/lib/permissions/denial"
+import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { takeVoiceNote } from "@/lib/audio/take-voice"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
@@ -1309,7 +1309,6 @@ export function ProjectWorkspace() {
     corpusMarker?: string
   } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
@@ -1602,7 +1601,10 @@ export function ProjectWorkspace() {
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
-  const currentUsername = frontierSession?.username || project?.username || "local"
+  // AQU-2259: signed out, the name set in Preferences (it used to be a
+  // per-project field in Project settings, which still counts when unset).
+  const localAuthorName = useLocalAuthorName()
+  const currentUsername = authorNameFor(frontierSession?.username, project?.username, localAuthorName)
   // Desktop: lets an offline launch reopen this project (OfflineLaunchResume).
   useRememberLastWorkspace(projectId, frontierSession?.username)
   // Smart Extensions: an installed `editor` extension may replace the
@@ -4205,7 +4207,7 @@ export function ProjectWorkspace() {
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
   // the file row, so refresh the project (not just cells). `file.video.set`
-  // needs contributor access and the emit THROWS on refusal, so surface that
+  // needs project lead access and the emit THROWS on refusal, so surface that
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
@@ -4244,7 +4246,9 @@ export function ProjectWorkspace() {
             ? e instanceof Error
               ? e.message
               : "Could not save the video link."
-            : denialMessage(t, ROLE.CONTRIBUTOR, level) })
+            // AQU-2230: name the floor the policy actually enforces (project
+            // lead since 2026-08-18), not a role written out by hand.
+            : denialMessageForEvent(t, "file.video.set", level, ROLE.PROJECT_LEAD) })
       }
     },
     [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
@@ -18040,6 +18044,8 @@ export function ProjectWorkspace() {
           onOpenChange={setAiSetupOpen}
           project={project}
           onUpdated={handleProjectUpdated}
+          patchSettings={patchSettings}
+          canEditShared={projectSettings?.canEdit ?? false}
         />
       )}
       {/* FRO-192: Assign work modal */}
@@ -18449,12 +18455,6 @@ export function ProjectWorkspace() {
           leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />
       )}
-      <SharePanel
-        open={shareOpen} onOpenChange={setShareOpen}
-        projectId={projectId!}
-        projectName={project?.name}
-        onSharesChanged={refreshChecklistShares}
-      />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}
       {batchFileModal && project && (

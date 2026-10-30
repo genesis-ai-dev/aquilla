@@ -65,7 +65,6 @@ const SETTINGS: CompletionSettings = {
   maxTokens: 2048,
   temperature: 0.1,
   systemPrompt: "sys",
-  llmHealthPenalty: 0.1,
 }
 
 function structuredRule(name: string) {

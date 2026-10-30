@@ -485,7 +485,7 @@ const TOOL_SPECS: McpToolSpec[] = [
       'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
       'targetLang (required lane id from get_project, not a language tag) and fileId (only needed when ' +
       'the same cellId exists in more than one file). This is the verification half of prompt ' +
-      'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
+      'tuning: after PatchSettings changes systemPrompt / draftingSettings / ' +
       'translationBrief / rules, or after a terminology entry lands, call this on a ' +
       'representative cell to confirm the change actually reached the model instead of ' +
       'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +

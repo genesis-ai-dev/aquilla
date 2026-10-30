@@ -737,8 +737,25 @@ describe("the review's cases (Oct 29)", () => {
     expect(assignments[1].reason).toEqual({ code: "rangeBackwards", from: "Genesis 1:5", to: "Genesis 1:3" })
   })
 
+  it("a second file for the same part is refused, not joined as a third piece", () => {
+    const files = ["Genesis 1-1a.mp3", "Genesis 1-1b.mp3", "Genesis 1-1b copy.mp3"].map((n) => audio(n))
+    const { assignments, jobs } = run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g"))
+    expect(jobs).toEqual([{ kind: "pieces", fileId: "g", cellId: "g:1:1", files: [0, 1] }])
+    expect(assignments[2].reason).toEqual({ code: "duplicate", target: "Genesis 1:1", other: "Genesis 1-1b.mp3" })
+  })
+
   it("a folder that is just a number is that chapter", () => {
     const files = ["05.mp3", "06.mp3"].map((n) => audio(`3/${n}`))
     expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])
+  })
+
+  it("on a bridged line, the same verse twice is two takes; different verses are its pieces", () => {
+    const g = book("g", "GEN", "Genesis", [0])
+    g.lines.push({ cellId: "g:1:1-2", ref: "GEN 1:1-2", text: "1-2", structural: false, hasRecording: false })
+    g.lines.push({ cellId: "g:1:3", ref: "GEN 1:3", text: "3", structural: false, hasRecording: false })
+    const twice = ["Genesis 1-1.mp3", "Genesis 1-1 take 2.mp3"].map((n) => audio(n))
+    expect(run(twice, [g], fileScope("g")).jobs).toEqual([{ kind: "single", fileId: "g", cellId: "g:1:1-2", files: [0, 1] }])
+    const two = ["Genesis 1-1.mp3", "Genesis 1-2.mp3"].map((n) => audio(n))
+    expect(run(two, [g], fileScope("g")).jobs).toEqual([{ kind: "pieces", fileId: "g", cellId: "g:1:1-2", files: [0, 1] }])
   })
 })

@@ -119,6 +119,9 @@ export interface PartInfo {
   rank: number
   /** As written: "a", "2", "end". */
   label: string
+  /** The verse's own part of a bridged line ("19:1" on "19:1-2"), not a part
+   *  the name gave. */
+  bridged?: boolean
 }
 
 export interface Assignment {
@@ -680,11 +683,12 @@ type Resolved = { cellIds: string[]; read: string } | { reason: UnmatchedReason 
 /**
  * A verse's file landing on a bridged line ("MAT 19:1-2") is that line's piece
  * for the verse, so verses 1 and 2 join in order rather than becoming two
- * takes of the whole line.
+ * takes of the whole line. Files that all name the same verse of it are takes
+ * of the line instead (`takesOnOneVerse`).
  */
 function bridgedPart(line: TargetLine, verse: number): PartInfo | undefined {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
-  return m && m[5] && Number(m[5]) > Number(m[3]) ? { rank: verse, label: String(verse) } : undefined
+  return m && m[5] && Number(m[5]) > Number(m[3]) ? { rank: verse, label: String(verse), bridged: true } : undefined
 }
 
 function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Resolved & { part?: PartInfo } {
@@ -934,6 +938,8 @@ export function matchRecordings(
     }
   }
 
+  takesOnOneVerse(out)
+
   // The person's own choices win over every rule.
   for (const [index, choice] of opts.overrides ?? []) {
     const prev = out.get(index)
@@ -960,6 +966,27 @@ export function matchRecordings(
   return settleConflicts(read, [...out.values()].sort((a, b) => a.index - b.index))
 }
 
+/**
+ * On a bridged line, files that all name the same one of its verses ("1-1",
+ * "1-1 take 2" on "1:1-2") are takes of the line, not pieces of it: one verse
+ * twice is a retake (rule 4). Different verses stay its pieces.
+ */
+function takesOnOneVerse(out: Map<number, Assignment>): void {
+  const byLine = new Map<string, Assignment[]>()
+  for (const a of out.values()) {
+    if (!a.part?.bridged || a.cellIds?.length !== 1) continue
+    const key = `${a.fileId}\u0000${a.cellIds[0]}`
+    byLine.set(key, [...(byLine.get(key) ?? []), a])
+  }
+  for (const list of byLine.values()) {
+    if (list.length < 2 || new Set(list.map((a) => a.part!.rank)).size !== 1) continue
+    for (const a of list) {
+      const { part: _part, ...rest } = a
+      out.set(a.index, rest)
+    }
+  }
+}
+
 /** How a chosen or order-placed line reads in the preview. */
 function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): string {
   const m = line.ref ? VERSE_REF.exec(line.ref) : null
@@ -979,7 +1006,8 @@ function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): strin
 function settleConflicts(read: readonly ReadRecording[], assignments: Assignment[]): Assignment[] {
   const nameOf = (i: number) => read[i]?.file.name ?? ""
   const pathOf = (i: number) => read[i]?.file.path ?? ""
-  const claims = new Map<string, Assignment>()
+  // Every assignment on each line, so a third file is compared with all of them.
+  const claims = new Map<string, Assignment[]>()
   const order = assignments
     .filter((a) => a.cellIds && a.cellIds.length > 0)
     .sort((a, b) => Number(Boolean(b.chosen)) - Number(Boolean(a.chosen)) || compareFolderOrder(pathOf(a.index), pathOf(b.index)))
@@ -987,12 +1015,14 @@ function settleConflicts(read: readonly ReadRecording[], assignments: Assignment
   for (const a of order) {
     let clash: Assignment | undefined
     for (const cellId of a.cellIds!) {
-      const held = claims.get(`${a.fileId}\u0000${cellId}`)
-      if (!held) continue
-      const sameLine = held.cellIds!.length === 1 && a.cellIds!.length === 1
-      const pieces = sameLine && held.part != null && a.part != null && held.part.rank !== a.part.rank
-      const takes = sameLine && !held.part && !a.part
-      if (!pieces && !takes) { clash = held; break }
+      const held = claims.get(`${a.fileId}\u0000${cellId}`) ?? []
+      for (const h of held) {
+        const sameLine = h.cellIds!.length === 1 && a.cellIds!.length === 1
+        const pieces = sameLine && h.part != null && a.part != null && h.part.rank !== a.part.rank
+        const takes = sameLine && !h.part && !a.part
+        if (!pieces && !takes) { clash = h; break }
+      }
+      if (clash) break
     }
     if (clash) {
       dropped.set(a.index, { code: "duplicate", target: targetLabel(clash), other: nameOf(clash.index) })
@@ -1000,7 +1030,7 @@ function settleConflicts(read: readonly ReadRecording[], assignments: Assignment
     }
     for (const cellId of a.cellIds!) {
       const key = `${a.fileId}\u0000${cellId}`
-      if (!claims.has(key)) claims.set(key, a)
+      claims.set(key, [...(claims.get(key) ?? []), a])
     }
   }
   return assignments.map((a) => {

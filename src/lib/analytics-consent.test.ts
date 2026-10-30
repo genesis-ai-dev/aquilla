@@ -1,13 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest"
-import {
-  isAnalyticsEnabled,
-  hasAnalyticsConsentBeenSet,
-  setAnalyticsEnabled,
-} from "./analytics-consent"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+let consent: typeof import("./analytics-consent")
+let isAnalyticsEnabled: typeof consent.isAnalyticsEnabled
+let hasAnalyticsConsentBeenSet: typeof consent.hasAnalyticsConsentBeenSet
+let setAnalyticsEnabled: typeof consent.setAnalyticsEnabled
+beforeEach(async () => {
+  vi.resetModules()
+  consent = await import("./analytics-consent")
+  ;({ isAnalyticsEnabled, hasAnalyticsConsentBeenSet, setAnalyticsEnabled } = consent)
+})
 
 const STORAGE_KEY = "aquilla:analyticsEnabled"
 
 afterEach(() => {
+  vi.restoreAllMocks()
   localStorage.clear()
 })
 
@@ -55,4 +60,24 @@ describe("setAnalyticsEnabled", () => {
     setAnalyticsEnabled(false)
     expect(isAnalyticsEnabled()).toBe(false)
   })
+})
+
+it.each(["read", "write", "both"])("retains explicit choices and notifications when storage %s is denied", (denied) => {
+  const notify = vi.fn()
+  const off = consent.onAnalyticsConsentChange(notify)
+  try {
+    expect(isAnalyticsEnabled()).toBe(true)
+    expect(hasAnalyticsConsentBeenSet()).toBe(false)
+    // A stale persisted ON must not override a failed opt-out write.
+    if (denied === "write") localStorage.setItem(STORAGE_KEY, "true")
+    if (denied !== "write") vi.spyOn(window.localStorage, "getItem").mockImplementation(() => { throw new DOMException("Denied", "SecurityError") })
+    if (denied !== "read") vi.spyOn(window.localStorage, "setItem").mockImplementation(() => { throw new DOMException("Denied", "SecurityError") })
+    setAnalyticsEnabled(false)
+    expect(isAnalyticsEnabled()).toBe(false)
+    expect(hasAnalyticsConsentBeenSet()).toBe(true)
+    expect(notify).toHaveBeenLastCalledWith(false)
+    setAnalyticsEnabled(true)
+    expect(isAnalyticsEnabled()).toBe(true)
+    expect(notify).toHaveBeenLastCalledWith(true)
+  } finally { off() }
 })

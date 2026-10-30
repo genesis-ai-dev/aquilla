@@ -105,6 +105,23 @@ describe("HistoryPanel", () => {
     expect(skipped.textContent).toContain("ben approved it afterwards")
   })
 
+  // The history follows the person to their other devices, which may run a
+  // newer version of the app: a step it recorded can name a message this
+  // version doesn't have. The panel still opens and names it.
+  it("names a step a newer version of the app made, instead of failing", async () => {
+    act(() => recordStep({ kind: "test.step", data: { name: "plain" }, labelKey: "editor.history.stepFromALaterVersion" }))
+    act(() =>
+      recordStep({ kind: "test.step", data: { name: "parts" }, labelKey: "editor.history.stepFromALaterVersion", labelParams: { count: 2 } }),
+    )
+    render(<HistoryPanel onResult={vi.fn()} />)
+    await userEvent.click(screen.getByTestId("history-panel-trigger"))
+    const steps = within(await screen.findByTestId("history-panel-steps")).getAllByTestId("history-step")
+    expect(steps.map((li) => li.textContent)).toEqual([
+      expect.stringContaining("A change made in a newer version of Aquilla"),
+      expect.stringContaining("A change made in a newer version of Aquilla"),
+    ])
+  })
+
   it("says so when there is nothing to undo", async () => {
     render(<HistoryPanel onResult={vi.fn()} />)
     await userEvent.click(screen.getByTestId("history-panel-trigger"))

@@ -370,7 +370,8 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // General's own controls are present...
     expect(screen.getByLabelText(/project title/i)).toBeTruthy()
-    expect(screen.getByLabelText(/username/i)).toBeTruthy()
+    // AQU-2259: the username moved to Preferences; a note is left here.
+    expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
 
     // ...but a control that lives in a different group (AI & completion) is
     // NOT rendered at the same time. This is the core "no more one long
@@ -492,7 +493,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
-    expect(screen.getByLabelText(/username/i)).toBeTruthy()
+    expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
     // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
     expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()
     expect(screen.getByLabelText(/project title/i).closest(".max-w-6xl")).toBeNull()

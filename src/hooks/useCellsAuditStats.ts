@@ -27,6 +27,13 @@ export interface CellAuditStats {
   /** Active validators tied to lastEditEventId. Empty when the current edit has
    *  no approvals or when lastEditEventId is null. */
   activeValidators: string[]
+  /** AQU-2296: username → when that validator cast the vote tied to
+   *  `lastEditEventId` (server clock, ms). Keyed by name rather than paired
+   *  positionally with `activeValidators`, so the two cannot drift. A name
+   *  with no entry has no known stamp. Optional for the same reason the wire
+   *  field is: a fixture or a worker that predates it reads as "no stamps
+   *  known", which the popover draws as a name with no date line. */
+  validatorDecidedTs?: Record<string, number>
   /** Active QA rule waivers on this cell (one per dismissed rule). Empty when
    *  no rule is currently waived. */
   waivers: RuleWaiver[]
@@ -77,6 +84,7 @@ export function deriveCommittedCellStats(
     lastEditAt: row.lastEditAt ?? null,
     lastEditEventId: row.eventId,
     activeValidators: headChanged ? [] : (prev?.activeValidators ?? []),
+    validatorDecidedTs: headChanged ? {} : (prev?.validatorDecidedTs ?? {}),
     waivers: prev?.waivers ?? [],
   }
 }
@@ -116,6 +124,7 @@ function toCellAuditStats(row: CellAuditStatsWireRow): CellAuditStats | null {
     lastEditAt: row.lastEditAt ?? null,
     lastEditEventId: row.lastEditEventId ?? null,
     activeValidators: row.activeValidators ?? [],
+    validatorDecidedTs: row.validatorDecidedTs ?? {},
     waivers: row.waivers ?? [],
   }
 }

@@ -13,64 +13,30 @@
  *
  * Key schema: `aq.recording-auto-advance.v1` (stores `"off"` when the user has
  * turned auto-advance off; absent means on).
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
-
-const STORAGE_KEY = "aq.recording-auto-advance.v1"
-
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: boolean | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): boolean {
-  if (typeof localStorage === "undefined") return true
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "off"
-  } catch {
-    return true
-  }
-}
-
-function peek(): boolean {
-  if (cached === undefined) cached = read()
-  return cached
-}
+import { recorderMoveOnAfterSavingPref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
 /** True when saving a take should move on to the next cell. */
 export function getRecordingAutoAdvance(): boolean {
-  return peek()
+  return recorderMoveOnAfterSavingPref.get()
 }
 
 export function setRecordingAutoAdvance(enabled: boolean): void {
-  cached = enabled
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (enabled) localStorage.removeItem(STORAGE_KEY)
-      else localStorage.setItem(STORAGE_KEY, "off")
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
+  recorderMoveOnAfterSavingPref.set(enabled)
 }
 
 /** Reactive read of the auto-advance preference. */
 export function useRecordingAutoAdvance(): boolean {
-  return useSyncExternalStore(subscribe, peek, () => true)
+  return usePersonPref(recorderMoveOnAfterSavingPref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingAutoAdvanceCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

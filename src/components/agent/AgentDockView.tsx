@@ -20,6 +20,7 @@ import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/c
 import { InputGroupButton } from "@/components/ui/input-group"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { composeAgentSend } from "@/lib/agent/compose-send"
+import { appLanguageName } from "@/lib/agent/app-language"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import { composerDraftKey, composerDraftStore, useComposerDraft, type ComposerDraftScope } from "@/lib/agent/composer-drafts"
 import { TEAM_CHAT_CONVERSATION } from "@/lib/agent/team-channel"
@@ -222,6 +223,8 @@ function ScopedAgentDockView({
           projectId,
           context: { fileId: candidate.id },
           ...(translatorProfile ? { translatorProfile } : {}),
+          // AQU-2263: the last step of the language the assistant answers in.
+          appLanguage: appLanguageName(),
         },
       })
     },

@@ -26,13 +26,12 @@ describe("GET /api/v2/orgs", () => {
     expect(byId[2].role.level).toBe(700) // own workspace
   })
 
-  it("lazy-creates a personal org for a brand-new user", async () => {
+  // AQU-2259: listing is a read, and a read never creates an organization.
+  it("lists nothing for a brand-new user, and creates nothing", async () => {
     await seedUser(3, "newbie")
     const { status, body } = await getOrgs("newbie")
     expect(status).toBe(200)
-    expect(body.orgs).toHaveLength(1)
-    expect(body.orgs[0].role.level).toBe(700)
-    expect(body.orgs[0].name).toBe("newbie's workspace")
+    expect(body.orgs).toEqual([])
   })
 
   // The org switcher pins the personal workspace to the top with a Home tag;

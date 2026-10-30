@@ -61,6 +61,13 @@ export interface AudioAttachmentOut {
   validatorCount?: number
   validators?: string[]
   /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms). Optional for the same reason `validators` is — a worker that predates
+   * it must read as "no stamps known", which the popover draws as a name with
+   * no date line rather than an "Invalid Date".
+   */
+  validatorDecidedTs?: Record<string, number>
+  /**
    * 'dub' is somebody's translation of this line. 'source' is the shared
    * programme audio an import attached — it sits SELECTED in the recording
    * slot on every cell of a media file, so "selected" alone can never mean "a

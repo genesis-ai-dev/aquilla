@@ -223,6 +223,34 @@ describe("E2E backend-reset transport retry", () => {
     expect(source.match(/for \(const port of MANAGED_PORTS\)/g)?.length).toBe(2)
   })
 
+  it("pins the IPv4 loopback in every local Postgres URL a worker dials", () => {
+    // AQU-2107: the e2e reset reaches Postgres over a unix socket (`docker
+    // exec`, or E2E_PG_ADMIN_URL), but the workers dial the Hyperdrive
+    // connection string over TCP from inside workerd — the suite's only
+    // resolver-dependent hop. A `localhost` that resolves to `::1` ahead of
+    // 127.0.0.1 (the macOS /etc/hosts default) against a runtime publishing
+    // 5432 on IPv4 only can then add connect latency the database never sees,
+    // which is the leading explanation for that ticket's worker statement
+    // timeouts on sub-millisecond queries. Whatever the final diagnosis,
+    // resolution order must not decide whether the gating suite can reach its
+    // database, so the host stays a literal.
+    const offenders: string[] = []
+    for (const file of sourceFiles(path.join(REPO_ROOT, "scripts"))) {
+      if (/\.test\.ts$/.test(file)) continue
+      const source = readFileSync(file, "utf8")
+      if (/postgresql:\/\/[^\s"'`]*@localhost:/.test(source)) {
+        offenders.push(path.relative(REPO_ROOT, file))
+      }
+    }
+    expect(offenders).toEqual([])
+
+    // The two stack entrypoints whose string the workers actually dial.
+    const e2eUp = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
+    expect(e2eUp).toContain("postgresql://aquilla:aquilla@127.0.0.1:5432/")
+    const devStack = readFileSync(path.join(REPO_ROOT, "scripts/dev-stack.ts"), "utf8")
+    expect(devStack).toContain("postgresql://aquilla:aquilla@127.0.0.1:5432/")
+  })
+
   it("isolates Wrangler registry heartbeat files per e2e stack", () => {
     const source = readFileSync(path.join(REPO_ROOT, "scripts/e2e-up.ts"), "utf8")
     expect(source).toContain("isolatedWranglerName")

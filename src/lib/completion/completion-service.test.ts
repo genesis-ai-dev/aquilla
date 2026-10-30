@@ -25,7 +25,6 @@ const BASE: CompletionSettings = {
   maxTokens: 128,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
 }
 
 const SESSION: FrontierSession = {

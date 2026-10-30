@@ -9,11 +9,15 @@ import { useT } from "@/lib/i18n/I18nProvider"
 export function NameStep({
   value,
   onChange,
+  onSave,
   onNext,
   onBack,
 }: {
   value: string
   onChange: (v: string) => void
+  /** AQU-2259: called with the trimmed name on Continue, to save it as the
+   *  account's display name. Not called when the field is empty. */
+  onSave?: (name: string) => void
   onNext: () => void
   onBack: () => void
 }) {
@@ -27,10 +31,12 @@ export function NameStep({
     }
   }, [session?.username])
 
+  // AQU-2259: the name used to go to a browser key nothing read. It is the
+  // account's display name now; an empty field leaves the username in place.
   function handleContinue() {
-    const name = value.trim() || "Anonymous"
-    localStorage.setItem("aquilla:username", name)
+    const name = value.trim()
     onChange(name)
+    if (name) onSave?.(name)
     onNext()
   }
 

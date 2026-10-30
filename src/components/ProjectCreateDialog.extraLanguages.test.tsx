@@ -148,6 +148,17 @@ function addExtraLanguage(tag: string) {
   fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
 
+// AQU-2263: New Project adds a language with the same "Add language" piece as
+// Project settings → Languages, in the same words.
+describe("ProjectCreateDialog — the shared Add language piece", () => {
+  it("is the same Add language button Project settings uses", () => {
+    openDialogWithBasics()
+    const add = addLaneButton()
+    expect(add).toHaveTextContent("Add language")
+    expect(add).toHaveAttribute("data-add-language")
+  })
+})
+
 describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()

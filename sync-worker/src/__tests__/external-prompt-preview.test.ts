@@ -248,6 +248,30 @@ describe("external prompt preview", () => {
       expect(body.retrieval.primitive).toBe("branching-search")
     })
 
+    // AQU-2259: the team's drafting settings are where the SPA saves them now.
+    it("reads the team's drafting settings over the older nested copy", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        completionSettings: { model: "old-model", top_k: 3, fewShotExampleFormat: "source-and-target" },
+        draftingSettings: {
+          provider: "custom",
+          model: "team-model",
+          temperature: 0.6,
+          top_k: 7,
+          fewShotExampleFormat: "target-only",
+        },
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.generation).toMatchObject({
+        provider: "custom",
+        model: "team-model",
+        temperature: 0.6,
+        exampleFormat: "target-only",
+        topK: 7,
+      })
+    })
+
     it("reports the project's generation configuration", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",

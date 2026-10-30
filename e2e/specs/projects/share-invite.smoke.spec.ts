@@ -1,12 +1,17 @@
 import type { Locator } from "@playwright/test"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
+import path from "node:path"
+import { Client } from "pg"
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { expectSelectValue, pickSelectOption } from "../../helpers/base-ui"
 import { ensureAuthState } from "../../helpers/auth"
 import {
   addOrgMember,
   createOrg,
+  createOrgInvite,
   createProjectInvite,
   createProjectServerSide,
+  listMyOrgs,
   ROLE,
 } from "../../helpers/frontier-api"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
@@ -28,6 +33,75 @@ async function chooseEveryCurrentLane(dialog: Locator) {
   await expect(every).toBeVisible({ timeout: 10_000 })
   await every.check()
 }
+
+test("org invitation survives password recovery in a fresh browser session", async ({ page, browser, baseURL, request }) => {
+  await resetBackend()
+  // Recover an existing, verified account. The shared seed intentionally has
+  // unverified email addresses, which cannot accept email-bound invitations.
+  const database = new URL(process.env.E2E_DATABASE_URL ?? "")
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(database.hostname)
+    || !/^\/aquilla_e2e(?:_s\d+)?$/.test(database.pathname)) {
+    throw new Error("Recovery fixture requires a local E2E database")
+  }
+  const db = new Client({ connectionString: database.toString() })
+  await db.connect()
+  try {
+    const verified = await db.query("UPDATE users SET email_verified_at = now() WHERE username = 'bob'")
+    expect(verified.rowCount).toBe(1)
+  } finally { await db.end() }
+  const alice = await ensureAuthState("alice")
+  const org = await createOrg(alice.jwt, "Recovery invitation workspace")
+  const invite = await createOrgInvite(alice.jwt, org.id, { email: "bob@example.test", role: ROLE.VIEWER })
+  const returnTo = `/join-org/${invite.token}`
+  await page.goto(returnTo)
+  await page.getByRole("button", { name: /forgot password/i }).click()
+  await expect(page.getByText(org.name!, { exact: true })).toBeVisible()
+  await page.getByLabel("Email", { exact: true }).fill("bob@example.test")
+  const resetRequested = page.waitForResponse(r => r.url().endsWith("/password-reset/request") && r.request().method() === "POST")
+  await page.getByRole("button", { name: /send reset link/i }).click()
+  const response = await resetRequested
+  expect(response.status()).toBe(200)
+  expect(response.request().postDataJSON()).toEqual({ email: "bob@example.test", return_to: returnTo })
+
+  // Miniflare captures outbound mail locally. Consume the actual handler's
+  // email (including its reset token and returnTo), without sending real mail
+  // or replacing auth responses. The unique invitation identifies this mail.
+  const mailRoot = path.resolve("auth-worker/.wrangler/tmp/email")
+  let resetUrl: URL | undefined
+  await expect.poll(() => {
+    const files = existsSync(mailRoot) ? readdirSync(mailRoot, { recursive: true, encoding: "utf8" }) : []
+    for (const file of files.filter(f => f.includes("email-text/") && f.endsWith(".txt"))) {
+      const text = readFileSync(path.join(mailRoot, file), "utf8")
+      const link = text.match(/https?:\/\/\S+\/reset-password\?\S+/)?.[0]
+      if (!link) continue
+      const url = new URL(link)
+      if (url.searchParams.get("returnTo") === returnTo && url.searchParams.get("username") === "bob") {
+        resetUrl = url
+        return true
+      }
+    }
+    return false
+  }, { message: "reset email contains the original invitation" }).toBe(true)
+
+  const fresh = await browser.newContext({ baseURL })
+  try {
+    const recovery = await fresh.newPage()
+    await recovery.goto(`${resetUrl!.pathname}${resetUrl!.search}`)
+    await recovery.getByLabel("New password", { exact: true }).fill("RecoveredPassword123!")
+    await recovery.getByRole("button", { name: /set new password/i }).click()
+    await expect(recovery).toHaveURL(new RegExp(`${returnTo}$`))
+    await expect(recovery.getByRole("button", { name: /accept invitation/i })).toBeVisible()
+    const authBase = process.env.VITE_AUTH_BASE ?? process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
+    const login = await request.post(`${authBase}/api/v2/auth/token`, {
+      data: { username: "bob", password: "RecoveredPassword123!" },
+    })
+    expect(login.status()).toBe(200)
+    const jwt = (await login.json()).access_token as string
+    expect((await listMyOrgs(jwt)).some(o => o.id === org.id)).toBe(false)
+    await recovery.getByRole("button", { name: /accept invitation/i }).click()
+    await expect.poll(async () => (await listMyOrgs(jwt)).some(o => o.id === org.id)).toBe(true)
+  } finally { await fresh.close() }
+})
 
 test("share invite link chrome surface session", async ({ alice }) => {
   test.setTimeout(120_000)

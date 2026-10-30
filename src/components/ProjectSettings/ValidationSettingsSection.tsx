@@ -17,7 +17,7 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { VALIDATION_FLOOR_ROLE_OPTIONS, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { OrgDefaultSource, orgBooleanOptionLabel } from "./OrgDefaultSource"
+import { OrgDefaultSource, SELECT_LIST_BELOW, orgBooleanOptionLabel } from "./OrgDefaultSource"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 
@@ -176,9 +176,10 @@ export function ValidationSettingsSection({
   }
 
   // AQU-1771: "Organization default (N)" or this project's own number, then
-  // the number itself when it is the project's own. Picking the default clears
-  // the project's value; picking "Set for this project" starts from the number
-  // in force, so nothing changes until the user edits it.
+  // the number in force. Picking the default clears the project's value;
+  // picking "Set for this project" starts from the number in force, so nothing
+  // changes until the user edits it. AQU-2263: editing the number while the
+  // project follows the organization sets it for this project straight away.
   function countControl(opts: {
     id: string
     label: string
@@ -211,7 +212,7 @@ export function ValidationSettingsSection({
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent {...SELECT_LIST_BELOW}>
               <SelectGroup>
                 {sourceItems.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
@@ -221,19 +222,20 @@ export function ValidationSettingsSection({
               </SelectGroup>
             </SelectContent>
           </Select>
-          {opts.value != null && (
-            <Input
-              id={opts.id}
-              type="number"
-              min={1}
-              max={15}
-              disabled={disabled}
-              value={opts.value}
-              onChange={(e) => opts.emit(clamp(e.target.value))}
-              className="w-20 bg-background"
-              aria-label={opts.label}
-            />
-          )}
+          {/* AQU-2263: the box is always there. While the project follows the
+              organization it shows the organization's number, and typing in
+              it sets this project's own number in one step. */}
+          <Input
+            id={opts.id}
+            type="number"
+            min={1}
+            max={15}
+            disabled={disabled}
+            value={opts.value ?? opts.orgValue ?? 1}
+            onChange={(e) => opts.emit(clamp(e.target.value))}
+            className="w-20 bg-background"
+            aria-label={opts.label}
+          />
         </div>
       </DisabledFieldTooltip>
     )
@@ -244,9 +246,7 @@ export function ValidationSettingsSection({
       {notice}
       <SettingsGroup label={t("projectSettings.validation.textGroup")}>
         <SettingsRow
-          // AQU-1771: while inheriting there is no number box, so the label names
-          // the "Organization default" select instead.
-          label={<label htmlFor={validationCount == null ? "validation-count-source" : "validation-count"}>{t("projectSettings.validation.requiredTextLabel")}</label>}
+          label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
           description={t("projectSettings.validation.requiredTextDescription")}
           control={countControl({
             id: "validation-count",
@@ -341,7 +341,7 @@ export function ValidationSettingsSection({
           (Sam, PR 1 test pass). */}
       <SettingsGroup label={t("projectSettings.validation.audioGroup")}>
         <SettingsRow
-          label={<label htmlFor={validationCountAudio == null ? "validation-count-audio-source" : "validation-count-audio"}>{t("projectSettings.validation.requiredAudioLabel")}</label>}
+          label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
           description={t("projectSettings.validation.requiredAudioAppliesNote")}
           // AQU-490: never gated on "audio exists". That gate read a
           // device-local latch and locked a fully dubbed project's threshold
@@ -375,7 +375,7 @@ export function ValidationSettingsSection({
               />
               <Select
                 items={ROLE_OPTIONS}
-                disabled={disabled || validationRoleFloorAudio == null}
+                disabled={disabled}
                 value={effectiveFloorAudio}
                 onValueChange={(v) =>
                   onChange({
@@ -390,7 +390,7 @@ export function ValidationSettingsSection({
                 >
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent {...SELECT_LIST_BELOW}>
                   <SelectGroup>
                     {ROLE_OPTIONS.map((o) => (
                       <SelectItem key={`audio-${o.value}`} value={o.value}>
@@ -420,7 +420,7 @@ export function ValidationSettingsSection({
               />
               <Switch
                 id="allow-self-validation-audio"
-                disabled={disabled || allowSelfValidationAudio == null}
+                disabled={disabled}
                 checked={effectiveSelfAudio}
                 onCheckedChange={(checked) => onChange({ allowSelfValidationAudio: checked })}
                 aria-label={t("projectSettings.validation.allowSelfAudioLabel")}

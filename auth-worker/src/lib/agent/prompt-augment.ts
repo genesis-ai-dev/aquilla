@@ -20,6 +20,11 @@ export interface AugmentArgs {
   memory: MemoryContext
   /** Explicit user preference. Unset means follow the latest user message. */
   responseLanguage?: string
+  /**
+   * AQU-2263: when the latest message's language can't be told, use this (the
+   * language the person uses Aquilla in) rather than English.
+   */
+  unclearLanguage?: string
 }
 
 /**
@@ -84,7 +89,7 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
     "## Conversation language\n" +
       (responseLanguage
         ? `Reply to the user in ${responseLanguage}.`
-        : "Reply in the language of the user's latest message; if it is ambiguous, use English.") +
+        : `Reply in the language of the user's latest message; if it is ambiguous, use ${args.unclearLanguage?.trim() || "English"}.`) +
       " The project target language applies only to translated content, never ordinary conversation.",
   )
 

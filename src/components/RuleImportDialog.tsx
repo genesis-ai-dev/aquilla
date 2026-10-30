@@ -57,7 +57,6 @@ const FALLBACK_SETTINGS: CompletionSettings = {
   maxTokens: 2048,
   temperature: 0.1,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
 }
 
 interface Props {

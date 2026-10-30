@@ -12,6 +12,7 @@ import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { layOutProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -965,7 +966,7 @@ function progRebuild(): void {
   const ctx = activeContext
   if (!ctx || timingMode !== "audioFirst") {
     programme = null
-    progLayers = []
+    progLayers = NO_LAYERS
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
@@ -988,14 +989,14 @@ function progRebuild(): void {
   // plain line-by-line path it always had rather than going quiet.
   if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
     programme = null
-    progLayers = []
+    progLayers = NO_LAYERS
     return
   }
   // Hidden lines keep their place (the timeline draws them there, faded) but
   // their takes are taken out of what plays: a hidden verse sounds only its
   // original, and one with no original is skipped.
   programme = withoutHiddenTakes(built, new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
-  progLayers = progBuildLayers(programme, ctx.cells)
+  progLayers = buildLayerSchedule(programme, ctx.cells)
   setProgress({ duration: programme.totalSec })
 }
 
@@ -1067,21 +1068,13 @@ function progAdvance(): void {
 // and is asked at every slot open, every 60 ms boundary check, every pause,
 // resume and re-flow, and by a timer aimed at the next layer's start. It never
 // clocks a line, never holds a readiness gate, and never starts during one.
-
-interface ProgLayerRef {
-  cellId: string
-  slot: string
-  audioId: string
-  url: string
-  /** Where it starts and stops sounding, on the programme clock. */
-  startSec: number
-  endSec: number
-  /** Its window on its own clip's clock. */
-  window: { start: number; end: number }
-}
+//
+// What is laid where, and what sounds when, is ./play-queue-layers (pure, and
+// searched rather than walked, since all of this runs on every beat); what
+// stays here is everything that drives players, the clock and the transport.
 
 /** Every playable layer of the programme, soonest first. Rebuilt with it. */
-let progLayers: ProgLayerRef[] = []
+let progLayers: LayerSchedule = NO_LAYERS
 /** Layers whose clip failed to load — not fired again until the next jump. */
 const progLayerFailed = new Set<string>()
 let progLayerTimer: ReturnType<typeof setTimeout> | null = null
@@ -1093,35 +1086,13 @@ const LAYER_TAIL_SEC = 0.25
 
 const layerKey = (l: { cellId: string; slot: string; audioId: string }) => overlayPieceKey(l.cellId, l.slot, l.audioId)
 
-function progBuildLayers(prog: Programme | null, cells: readonly CellData[]): ProgLayerRef[] {
-  if (!prog) return []
-  const byId = new Map(cells.map((c) => [c.id, c]))
-  const out: ProgLayerRef[] = []
-  for (const slot of prog.slots) {
-    const cell = slot.layers ? byId.get(slot.cellId) : undefined
-    if (!cell) continue
-    for (const l of slot.layers ?? []) {
-      // No honest length → nothing honest to play, the main take's rule too.
-      const url = cell.attachments?.[l.audioId]?.url
-      if (!l.window || !url) continue
-      const startSec = slot.startSec + l.atSec
-      out.push({
-        cellId: slot.cellId, slot: l.slot, audioId: l.audioId, url,
-        startSec, endSec: startSec + (l.window.end - l.window.start), window: l.window,
-      })
-    }
-  }
-  return out.sort((a, b) => a.startSec - b.startSec)
-}
-
 function progLayersMayPlay(): boolean {
   return timingMode === "audioFirst" && state.kind === "playing"
 }
 
 /** Does any layer still sound in what is left of this line from `atSec`? */
 function progSlotHolds(slot: ProgrammeSlot, atSec: number): boolean {
-  const end = slot.startSec + slot.slotLenSec
-  return progLayers.some((l) => l.startSec < end && l.endSec > Math.max(atSec, slot.startSec))
+  return layersSoundIn(progLayers, Math.max(atSec, slot.startSec), slot.startSec + slot.slotLenSec)
 }
 
 /** The programme second NOW, read off whatever is clocking the line. */
@@ -1170,9 +1141,7 @@ function progLayersSync(atSec: number): void {
   if (timingMode !== "audioFirst" || !programme || !activeContext || !Number.isFinite(atSec)) return
   const playing = progLayersMayPlay()
   const due = new Map<string, ProgLayerRef>()
-  for (const l of progLayers) {
-    if (l.startSec - LAYER_EARLY_SEC <= atSec && atSec < l.endSec) due.set(layerKey(l), l)
-  }
+  for (const l of layersDueAt(progLayers, atSec, LAYER_EARLY_SEC)) due.set(layerKey(l), l)
   for (const entry of [...overlayPool]) {
     if (!entry.layer) continue
     const key = layerKey(entry)
@@ -1230,16 +1199,15 @@ function progStockLayers(atSec: number): void {
   const ctx = activeContext
   if (!ctx) return
   const wanted = new Set<string>()
-  for (const l of progLayers) {
-    if (wanted.size >= STOCK_AHEAD) break
-    if (l.startSec - LAYER_EARLY_SEC <= atSec || progLayerFailed.has(layerKey(l))) continue
-    const cell = ctx.cells.find((c) => c.id === l.cellId)
-    if (!cell) continue
+  const { layers } = progLayers
+  for (let i = layerIndexAfter(progLayers, atSec + LAYER_EARLY_SEC); i < layers.length && wanted.size < STOCK_AHEAD; i++) {
+    const l = layers[i]
+    if (progLayerFailed.has(layerKey(l))) continue
     wanted.add(stashKey(l.cellId, l.slot, l.audioId))
     stockDub({
       cellId: l.cellId, slot: l.slot, audioId: l.audioId, url: l.url,
       startAtClipSec: l.window.start, stopAtClipSec: l.window.end, dueSec: l.startSec, layer: true,
-    }, cell, ctx)
+    }, l.cell, ctx)
   }
   for (const key of [...dubStash.keys()]) if (!wanted.has(key)) disposeStashed(key)
 }
@@ -1249,7 +1217,11 @@ function progStockLayers(atSec: number): void {
 function progAimLayerTimer(atSec: number): void {
   progClearLayerTimer()
   if (!progLayersMayPlay()) return
-  const next = progLayers.find((l) => l.startSec - LAYER_EARLY_SEC > atSec && !progLayerFailed.has(layerKey(l)))
+  const { layers } = progLayers
+  let next: ProgLayerRef | undefined
+  for (let i = layerIndexAfter(progLayers, atSec + LAYER_EARLY_SEC); i < layers.length && !next; i++) {
+    if (!progLayerFailed.has(layerKey(layers[i]))) next = layers[i]
+  }
   if (!next) return
   const rate = progress.rate || 1
   progLayerTimer = setTimeout(() => {
@@ -1340,7 +1312,7 @@ function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boo
   const last = prog?.slots[lastIndex]
   if (!prog || !last) return false
   const at = Math.max(atSec, last.startSec + last.slotLenSec)
-  if (prog.totalSec - at <= HOLD_MIN_SEC || !progLayers.some((l) => l.endSec - at > HOLD_MIN_SEC)) return false
+  if (prog.totalSec - at <= HOLD_MIN_SEC || !layersSoundIn(progLayers, at + HOLD_MIN_SEC, Infinity)) return false
   progIndex = lastIndex
   progStartEndStop()
   progClearGate()
@@ -4316,7 +4288,7 @@ export function stopQueue(): void {
   disposeProgPrefetch()
   disposeCurrent()
   programme = null
-  progLayers = []
+  progLayers = NO_LAYERS
   progIndex = -1
   progSuppressPause = 0
   setState(IDLE)

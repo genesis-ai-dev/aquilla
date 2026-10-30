@@ -78,8 +78,12 @@ export function DenoiseButton(props: Props) {
     setError(null)
     setProcessing(true)
     try {
+      // Decision 11: an Undo step; the take cleaned is the one that played.
       if (split) {
-        await denoiseSplitTake({ projectId, fileId, cellId, pieces: split, author, session, ...(targetLang ? { targetLang } : {}) })
+        await denoiseSplitTake({
+          projectId, fileId, cellId, pieces: split, author, session, ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: split[0].pieceOf ?? split[0].audioId },
+        })
       } else {
         await denoiseTake({
           projectId, fileId, cellId,
@@ -88,6 +92,7 @@ export function DenoiseButton(props: Props) {
           author,
           session,
           ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: selectedAudioId },
         })
       }
       // Success: the cleaned take is optimistically selected, so this component

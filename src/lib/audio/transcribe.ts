@@ -20,6 +20,7 @@ import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import type { WordTiming } from "@/lib/codex-editor/types"
+import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
 import { transcribeHosted, type ZeroShotCellContext } from "./transcribe-hosted"
 import type {
@@ -613,7 +614,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // handlers flush the outbox and revalidate the cell the moment this
       // promise settles; a fire-and-forget emit let that flush race ahead of
       // the IDB write, so the transcript only surfaced after a manual refresh.
-      await emitCellAudioAttach({
+      // Decision 11: the take was undone while it was being transcribed. A
+      // re-attach would bring it back (see undone-takes.ts), so the timings
+      // stay in memory only.
+      if (!wasTakeUndone(audioId)) await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,

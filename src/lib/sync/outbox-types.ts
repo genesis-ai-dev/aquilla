@@ -204,6 +204,9 @@ export interface OutboxEventPayloads {
   "source.cell.delete": {
     /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
     tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+    /** Slice 13: the undo of "make rows from a recording" names the line's
+     *  creating event, so its author may take it back below Maintainer. */
+    undoOfEventId?: string
   }
   "source.cell.reorder": {
     anchorCellId: string | null

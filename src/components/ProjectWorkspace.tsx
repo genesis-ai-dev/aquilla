@@ -13105,10 +13105,9 @@ export function ProjectWorkspace() {
       // a sibling still loading: the row exists, drawn empty, rather than
       // appearing a moment after the timeline settles.
       hasAudioCues: audioCues !== null,
-      // AQU-1566 (Sam, Oct 5): a subtitle file linked to a video keeps its
-      // Source audio row for the video's own sound. AQU-2253: in both timings
-      // — the film and its sound play straight through on its own clock.
-      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl),
+      // Sam, Oct 29: a linked film's own sound lives on the film track and
+      // never makes a Source audio row (see tracks.ts).
+      hasLinkedFilm: Boolean(activeFile?.coreMediaUrl),
       // AQU-1758: a book or document, and whether it has a source recording
       // of its own.
       sequenceOrdered: !activeFileTimeOrdered,

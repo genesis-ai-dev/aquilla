@@ -210,10 +210,12 @@ export interface TrackDerivationContext {
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
   hasAudioCues: boolean
-  /** The file plays a linked video with its sound on (in both timings since
-   *  AQU-2253), so the Source-audio row has the video's own sound to stand for
-   *  even with no cues. Absent reads as false. */
-  hasLinkedVideoSound?: boolean
+  /** The file has a linked film. Its own sound lives on the film track (AQU-2253)
+   *  and NEVER makes a Source-audio row (Sam, Oct 29: "source audio track only
+   *  shows up when the source that is imported is literally just audio"). The
+   *  derivation reads nothing from it; it is here so that rule is stated and
+   *  pinned in tests. Absent reads as false. */
+  hasLinkedFilm?: boolean
   /** AQU-1758: the file is in reading order — a Bible book, a document —
    *  rather than timed. Absent reads as false. */
   sequenceOrdered?: boolean
@@ -308,9 +310,7 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   if (!context.isSubtitleImport) {
     return [
       trackRow("source-subtitles"),
-      ...(context.hasAudioCues || context.hasLinkedVideoSound || context.hasSourceAudio
-        ? [trackRow("source-audio")]
-        : []),
+      ...(context.hasAudioCues || context.hasSourceAudio ? [trackRow("source-audio")] : []),
       trackRow("target-audio"),
     ]
   }
@@ -321,10 +321,10 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
     // No audio VTT imported yet means no cues, and a row with nothing to draw
     // is worse than no row: it reads as "this episode has no speech".
     //
-    // A linked video's own sound IS something to draw (Sam, Oct 5): the row
-    // stays as one dashed band, "The video's own sound", with its mute button,
-    // the same row the file had before its captions became rows (AQU-1566).
-    ...(context.hasAudioCues || context.hasLinkedVideoSound ? [trackRow("source-audio")] : []),
+    // A linked film's own sound is NOT drawn here (Sam, Oct 29): it lives on
+    // the film track, which carries its mute. Until then (AQU-1566, Oct 5) this
+    // row stood in for it as one dashed band, "The video's own sound".
+    ...(context.hasAudioCues ? [trackRow("source-audio")] : []),
     trackRow("target-audio"),
   ]
 }

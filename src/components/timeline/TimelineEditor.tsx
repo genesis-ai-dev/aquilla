@@ -2757,9 +2757,8 @@ export function TimelineEditor({
    * that plays, so an empty Target audio lane, or a Source audio lane on a
    * file with no sound at all, offered a mute that did nothing you could hear.
    *
-   *  - Source audio: its recording's segments, or a linked video's own sound,
-   *    which plays straight through with the picture in both timings
-   *    (AQU-2253).
+   *  - Source audio: its recording's segments. A linked film's own sound is
+   *    the film track's to mute (Sam, Oct 29), not this lane's.
    *  - Target audio and added tracks: at least one take on the lane.
    *
    * The caller keeps the button on a lane that is muted right now, whatever
@@ -2768,7 +2767,7 @@ export function TimelineEditor({
   function laneHasSound(track: TimelineTrack): boolean {
     switch (track.kind) {
       case "source-audio":
-        return dialogue.length > 0 || Boolean(coreMediaUrl)
+        return dialogue.length > 0
       case "target-audio":
         return targetItems.length > 0
       case "audio":
@@ -4913,10 +4912,16 @@ export function TimelineEditor({
             >
               {/* AQU-2253 (board 56): the film, pinned above every track
                   whenever one is linked. Not a track in the contract — it
-                  cannot be moved, renamed, coloured or muted (its sound is the
-                  Source audio row's) — so it carries no reorder handle and no
-                  menu, and the drag code, which counts `[data-tl-track-row]`,
-                  never sees it. Its header is just "Film" and the film's name. */}
+                  cannot be moved, renamed or coloured — so it carries no
+                  reorder handle and no menu, and the drag code, which counts
+                  `[data-tl-track-row]`, never sees it. Its header is just
+                  "Film" and the film's name. Sam, Oct 29: the film's own sound
+                  lives with the film, never as Source audio, so its one button
+                  is that sound's mute (the same "source" switch the video
+                  element has always obeyed). A film file that already has a
+                  Source audio recording of its own keeps that switch on the
+                  Source audio row, exactly where it was (no change for old
+                  files), so one switch never shows twice. */}
               {coreMediaUrl && (
                 <LaneLabel
                   data-testid="tl-film-track-label"
@@ -4925,6 +4930,7 @@ export function TimelineEditor({
                   dot={TRACK_DOT_CLASS}
                   hueVars={filmTrackHueVars()}
                   collapsed={gutterCollapsed}
+                  trailing={dialogue.length > 0 ? undefined : speakerToggle("source", "the film's own sound")}
                 />
               )}
               {/* The gutter is the track list, exactly as the lanes beside it are —

@@ -2122,6 +2122,9 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     fireEvent.click(speaker)
     expect(screen.getByTestId("tl-speaker-source")).toHaveAttribute("aria-pressed", "false")
     expect(lastAudibility).toEqual({ source: false, target: true })
+    // Sam, Oct 29: a film file that already has a Source audio recording keeps
+    // it as it was, mute and all; the film's row adds no second switch.
+    expect(within(screen.getByTestId("tl-film-track-label")).queryByRole("button")).toBeNull()
   })
 
   // Round 8: the VTT's own timing is not ours to nudge, but a line added into
@@ -5798,12 +5801,26 @@ describe("TimelineEditor — the film track", () => {
     expect(parseFloat(content.style.width)).toBeGreaterThanOrEqual(parseFloat(strip.style.width))
   })
 
-  it("is never a track you can drag, rename or open a menu on", () => {
+  it("is never a track you can drag, rename or open a menu on; its one button mutes the film", () => {
     draw("dubbing", { onReorderTrack: vi.fn(), onRenameTrack: vi.fn() })
     const label = screen.getByTestId("tl-film-track-label")
     expect(label).not.toHaveAttribute("data-tl-track-row")
     expect(label).not.toHaveAttribute("role", "listitem")
-    expect(within(label).queryByRole("button")).toBeNull()
+    const buttons = within(label).queryAllByRole("button")
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toHaveAccessibleName(/mute the film's own sound/i)
+  })
+
+  // Sam, Oct 29: the film's own sound lives with the film. Its mute is on the
+  // film's row, and no Source audio row stands in for it.
+  it("has no Source audio row standing in for the film's sound", () => {
+    draw("dubbing", {
+      tracks: deriveTracksForFile(null, {
+        isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false, hasLinkedFilm: true,
+      }),
+    })
+    const names = Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+    expect(names).not.toContain("Source audio")
   })
 
   it("no film, no film row", () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
@@ -13,6 +13,8 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
+import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
+import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
@@ -673,6 +675,66 @@ describe("TimelineEditor", () => {
     expect(item()).toHaveAttribute("aria-checked", "true")
     fireEvent.click(item())
     expect(item()).toHaveAttribute("aria-checked", "false")
+  })
+
+  // AQU-2264: Follow playhead was a plain useState(true): back on after every
+  // reload, and turned back on by every press of play. It is a remembered
+  // preference now (it follows the person), and play keeps to it.
+  const forgetTimelinePrefs = () => {
+    localStorage.removeItem("aq.timeline-follow-playhead.v1")
+    localStorage.removeItem("aquilla:timelineSnap")
+    resetPersonPrefCachesForTests()
+  }
+  afterEach(forgetTimelinePrefs)
+
+  // The layout puts Snap and Follow playhead in the timeline's corner ⋯ as
+  // checkbox items (aria-checked), not toolbar buttons.
+  const follow = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
+  const snap = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
+
+  it("remembers Follow playhead turned off, through a reload", () => {
+    const { unmount } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    fireEvent.click(follow())
+    expect(follow()).toHaveAttribute("aria-checked", "false")
+    unmount()
+    resetPersonPrefCachesForTests() // a reload
+    render(
+      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(follow()).toHaveAttribute("aria-checked", "false")
+  })
+
+  it("keeps Follow playhead off when playback starts, and on again once turned on", () => {
+    const view = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    fireEvent.click(follow())
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      view.rerender(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      expect(follow()).toHaveAttribute("aria-checked", "false")
+      fireEvent.click(follow())
+      expect(follow()).toHaveAttribute("aria-checked", "true")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("shows a snap or follow change made elsewhere (Preferences) at once", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(snap()).toHaveAttribute("aria-checked", "true")
+    act(() => {
+      timelineSnapPref.set(false)
+      timelineFollowPlayheadPref.set(false)
+    })
+    expect(snap()).toHaveAttribute("aria-checked", "false")
+    expect(follow()).toHaveAttribute("aria-checked", "false")
   })
 
   // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──

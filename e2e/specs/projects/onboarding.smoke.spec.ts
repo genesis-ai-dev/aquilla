@@ -5,16 +5,16 @@ import { advanceOnboardingTo } from "../../helpers/onboarding"
 /**
  * Surface session: onboarding wizard steps as one sequential walkthrough.
  *
- * The wizard classifies every sign-in through GET /orgs at the sign-in step
- * (OnboardingWizard.handleLoginComplete), and the server lazily creates a
- * personal org for any org-less account on that same call — so every LOGIN
- * (and any already-signed-in Continue) takes the returning-user skip to the
- * workspace instead of walking the wizard. That skip fork is RTL-covered in
- * OnboardingWizard.skip.test.tsx. The only flow that still walks steps 4–8
- * is the brand-new SIGNUP path — the wizard's primary funnel — so this
- * journey registers a fresh account through the real /auth/register route
- * (backed by the mock legacy-migration server in the e2e stack) and carries
- * it through name → project creation → ready.
+ * The wizard classifies every sign-in through GET /orgs (and, for an account
+ * in no organization, its projects) at the sign-in step
+ * (OnboardingWizard.handleLoginComplete). Since AQU-2259 that read no longer
+ * creates a personal org, so a LOGIN takes the returning-user skip only for an
+ * account that already has an organization or a project. That skip fork is
+ * RTL-covered in OnboardingWizard.skip.test.tsx. This journey walks the
+ * brand-new SIGNUP path — the wizard's primary funnel — registering a fresh
+ * account through the real /auth/register route (backed by the mock
+ * legacy-migration server in the e2e stack) and carrying it through name →
+ * "Just me" (which now creates the personal workspace) → project → ready.
  */
 
 test("onboarding wizard welcome through ready surface session", async ({ page }) => {

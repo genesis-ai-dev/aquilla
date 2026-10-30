@@ -30,6 +30,7 @@ import type { BiblePackStatus } from "@/components/bible-data/bible-data-bus"
 import type { BibleVoiceOverrides } from "../../db/shared/bible-voice-overrides"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { scaledDefaultCellFontSizePx, useOptionalFontSizeScale } from "@/branding/FontSize"
 import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import {
   setUnresolvedCommentHighlight,
@@ -158,6 +159,8 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onTargetKeyTermHighlightModeChange,
 }, ref) {
   const t = useT()
+  // AQU-2263: what an untouched file shows — the app font size from Preferences.
+  const defaultFontSize = scaledDefaultCellFontSizePx(useOptionalFontSizeScale())
   const [menuOpen, setMenuOpen] = useState(false)
   const splitByMilestone = useMilestoneSplit()
   // AQU-1259: like the milestone split, a device preference read straight from
@@ -506,18 +509,38 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               label={t("editor.column.source")}
               value={sourceFontSize}
               disabled={!fileOpen}
-              explicit={sourceFontSizeExplicit}
               onChange={onSourceFontSizeChange}
-              onReset={onSourceFontSizeReset}
             />
             <FontSizeRow
               label={t("editor.column.target")}
               value={targetFontSize}
               disabled={!fileOpen}
-              explicit={targetFontSizeExplicit}
               onChange={onTargetFontSizeChange}
-              onReset={onTargetFontSizeReset}
             />
+            {/* AQU-2263: a file's size overrides the app font size from
+                Preferences, so say what that default is, and put both columns
+                back on it in one step. */}
+            <div className={cn("flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs text-muted-foreground", !fileOpen && "opacity-50")}>
+              <span data-testid="font-size-default" className="whitespace-nowrap">
+                {t("editor.view.fontSizeDefault", { size: defaultFontSize })}
+              </span>
+              {(sourceFontSizeExplicit || targetFontSizeExplicit) && (onSourceFontSizeReset || onTargetFontSizeReset) ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="-ms-1.5 h-auto px-1.5 py-0.5 text-xs"
+                  disabled={!fileOpen}
+                  onClick={() => {
+                    if (sourceFontSizeExplicit) onSourceFontSizeReset?.()
+                    if (targetFontSizeExplicit) onTargetFontSizeReset?.()
+                  }}
+                >
+                  <RotateCcw className="size-3" aria-hidden />
+                  {t("editor.view.fontSizeReset")}
+                </Button>
+              ) : null}
+            </div>
           </div>
 
           {/* AQU-1191: a device setting, not a file one — it stays usable with
@@ -586,16 +609,12 @@ function FontSizeRow({
   label,
   value,
   disabled,
-  explicit,
   onChange,
-  onReset,
 }: {
   label: string
   value: number
   disabled: boolean
-  explicit: boolean
   onChange: (v: number) => void
-  onReset?: () => void
 }) {
   const t = useT()
   const side = label.toLowerCase()
@@ -635,23 +654,6 @@ function FontSizeRow({
             <span className="text-[11px] leading-none select-none">A+</span>
           </Button>
         </AppTooltip>
-        <span className="flex size-5 items-center justify-center">
-          {explicit && onReset ? (
-            <AppTooltip content={t("editor.view.useAppFontSize", { side })}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("editor.view.useAppFontSize", { side })}
-                disabled={disabled}
-                onClick={onReset}
-                className="size-5 text-muted-foreground"
-              >
-                <RotateCcw className="h-3 w-3" />
-              </Button>
-            </AppTooltip>
-          ) : null}
-        </span>
       </span>
     </div>
   )

@@ -60,9 +60,24 @@ const PERSIST_DIR = path.join(REPO_ROOT, `.wrangler-e2e-state${SUFFIX}`)
 //
 // The reset prefers the Docker container `aquilla-dev-pg` (the canonical
 // CI/dev setup); when Docker isn't available it falls back to a local `psql`
-// against the same localhost:5432 endpoint (e.g. a Homebrew Postgres dev box).
+// against the same 127.0.0.1:5432 endpoint (e.g. a Homebrew Postgres dev box).
+//
+// AQU-2107: the host is the IPv4 literal, never the `localhost` hostname. The
+// reset reaches Postgres over a unix socket (`docker exec`, or
+// E2E_PG_ADMIN_URL), so it cannot see a TCP resolution problem; the workers
+// dial this string over TCP from inside workerd, making it the only
+// resolver-dependent hop in the gating suite. A `localhost` that resolves to
+// `::1` ahead of 127.0.0.1 (the macOS /etc/hosts default) against a runtime
+// that publishes 5432 on IPv4 only is therefore the one hop that can add
+// connect latency the database never sees — the leading explanation for
+// AQU-2107's worker statement timeouts and 16-60s requests on endpoints whose
+// queries measure under a millisecond, with no matching sessions in
+// pg_stat_activity. That chain is not yet confirmed on a box that reproduces
+// the stall, but pinning the literal removes the variable and matches every
+// other local Postgres URL in this repo (dev-stack.ts, neon-target.ts, the
+// scripts/neon-* maintenance tools), which this one alone did not.
 const E2E_PG_DB = `aquilla_e2e${SHARDED ? `_s${K}` : ""}`
-const E2E_PG_URL = `postgresql://aquilla:aquilla@localhost:5432/${E2E_PG_DB}`
+const E2E_PG_URL = `postgresql://aquilla:aquilla@127.0.0.1:5432/${E2E_PG_DB}`
 const PG_CONTAINER = "aquilla-dev-pg"
 // Admin connection used only by the Docker-less reset fallback. Drop/recreate
 // needs CREATE DATABASE, which the `aquilla` login role lacks, so we default to
@@ -364,7 +379,7 @@ function hasLocalPsql(): boolean {
 /**
  * Drop + recreate the e2e database from a clean schema. Prefers the Docker
  * container (`aquilla-dev-pg`, the canonical CI/dev setup); falls back to a
- * local `psql` against localhost:5432 when Docker is unavailable. Exits the
+ * local `psql` against 127.0.0.1:5432 when Docker is unavailable. Exits the
  * process on failure — we refuse to run the suite against a stale/partial
  * schema (it manifests as confusing 500s like "column p.is_active does not
  * exist").
@@ -375,7 +390,7 @@ function hasLocalPsql(): boolean {
  */
 /**
  * The reset applies the schema through `docker exec` (a unix socket inside the
- * container) while the workers reach Postgres over TCP at localhost:5432. Those
+ * container) while the workers reach Postgres over TCP at 127.0.0.1:5432. Those
  * are only the same database if exactly one Postgres owns that port. Two Docker
  * runtimes side by side (Colima + Docker Desktop) each publish their own
  * `aquilla-dev-pg` on 5432, so the reset lands in one and every worker query
@@ -450,11 +465,11 @@ function resetE2ePostgres(): string {
     console.error(
       `${TAG}[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n` +
         "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
-        "  Postgres reachable at localhost:5432 with role 'aquilla'. See e2e/README.md.",
+        "  Postgres reachable at 127.0.0.1:5432 with role 'aquilla'. See e2e/README.md.",
     )
     process.exit(1)
   }
-  console.log(`${TAG}[e2e-up] Docker unavailable — resetting via local psql (localhost:5432).`)
+  console.log(`${TAG}[e2e-up] Docker unavailable — resetting via local psql (127.0.0.1:5432).`)
   // Drop/recreate needs CREATE DATABASE (the `aquilla` login role lacks it), so
   // run it through the admin connection and hand ownership to `aquilla` so the
   // schema apply (as aquilla) can create objects in the public schema.

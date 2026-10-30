@@ -335,7 +335,14 @@ export async function buildPromptPreview(
 
   // ── settings ─────────────────────────────────────────────────────────────
   const { settings, lanes } = await loadProjectSettings(db, projectId)
-  const completion = objectSetting(settings, "completionSettings")
+  // AQU-2259: the team's drafting settings (`draftingSettings`: retrieval,
+  // example format, provider, model, sampling). Each of its fields wins over
+  // the older nested `completionSettings` copy, which the SPA no longer
+  // writes; that copy still supplies `systemPrompt` below.
+  const completion = {
+    ...objectSetting(settings, "completionSettings"),
+    ...objectSetting(settings, "draftingSettings"),
+  }
   const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 

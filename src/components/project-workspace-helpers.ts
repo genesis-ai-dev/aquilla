@@ -160,6 +160,33 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
 }
 
 /**
+ * AQU-646 stage 2 / AQU-2214: may this caller RESTRUCTURE the file's timeline —
+ * add tracks, delete them, group them into folders?
+ *
+ * Two independent conditions, which is why they are spelled out here rather
+ * than read off one flag: the maintainer floor `file.track.set` already carries
+ * (role-policy.ts), AND the project's `allowTrackEditing`. The server checks
+ * both separately (sync-worker's `resolveAllowTrackEditing`), so this answers
+ * which controls the timeline OFFERS, never who is permitted.
+ *
+ * `undefined` is the unset case and reads ON since AQU-2214 — the default
+ * flipped, the gate did not, so an explicit `false` from the project or
+ * inherited from its org still withholds the controls from an owner. Keep that
+ * reading in lock-step with the worker's; a client that offers a button the
+ * perimeter refuses is the failure this pair exists to prevent.
+ *
+ * RENAME, DRAG-TO-REORDER AND RECOLOUR ARE DELIBERATELY NOT IN HERE. All three
+ * ship on the maintainer floor alone, so turning the setting off must not take
+ * them away.
+ */
+export function canRestructureTracks(args: {
+  roleLevel: number
+  allowTrackEditing: boolean | undefined
+}): boolean {
+  return args.roleLevel >= ROLE.MAINTAINER && (args.allowTrackEditing ?? true)
+}
+
+/**
  * What the outbox says happened to a track deletion, and therefore whether its
  * recordings may now be removed. (AQU-646, 2026-08-27)
  *

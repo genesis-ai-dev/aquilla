@@ -89,12 +89,19 @@ describe("ResetPassword — token verification", () => {
 })
 
 describe("ResetPassword — success path", () => {
-  it("calls resetPassword + login on submit and navigates to /", async () => {
+  it.each([
+    [undefined, "/"],
+    ["/join-org/invite-token", "/join-org/invite-token"],
+    ["https://example.com/join-org/invite-token", "/"],
+    ["//example.com/join-org/invite-token", "/"],
+    ["/join-org/../settings", "/"],
+    ["/join-org/invite-token?next=https://example.com", "/"],
+  ])("resets and signs in before navigating safely from %s to %s", async (returnTo, destination) => {
     mockVerifyResetToken.mockResolvedValue(undefined)
     mockResetPassword.mockResolvedValue(undefined)
     mockLogin.mockResolvedValue({ username: "alice", jwt: "jwt123" })
 
-    renderReset()
+    renderReset(`?token=tok123&username=alice${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""}`)
 
     await waitFor(() => {
       expect(screen.getByLabelText("New password")).toBeInTheDocument()
@@ -109,7 +116,7 @@ describe("ResetPassword — success path", () => {
       expect(mockResetPassword).toHaveBeenCalledWith("tok123", "alice", "NewSecret99!")
     })
     expect(mockLogin).toHaveBeenCalledWith("alice", "NewSecret99!")
-    expect(navigate).toHaveBeenCalledWith("/", { replace: true })
+    expect(navigate).toHaveBeenCalledWith(destination, { replace: true })
   })
 
   it("shows error message when resetPassword fails", async () => {
@@ -155,12 +162,12 @@ describe("ResetPassword — success path", () => {
 })
 
 describe("ResetPassword — recovery (TokenExpiredView) form", () => {
-  it("sends reset request with entered email", async () => {
+  it.each([undefined, "/join-org/invite-token"])("preserves %s when reissuing an expired reset link", async (returnTo) => {
     const { FrontierAuthError } = await import("@/lib/frontier/auth")
     mockVerifyResetToken.mockRejectedValue(new FrontierAuthError("Invalid token", 400))
     mockRequestPasswordReset.mockResolvedValue(undefined)
 
-    renderReset()
+    renderReset(`?token=tok123&username=alice${returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""}`)
 
     await waitFor(() => {
       expect(screen.getByLabelText("Email")).toBeInTheDocument()
@@ -172,8 +179,9 @@ describe("ResetPassword — recovery (TokenExpiredView) form", () => {
     fireEvent.submit(document.getElementById("token-expired-form")!)
 
     await waitFor(() => {
-      expect(mockRequestPasswordReset).toHaveBeenCalledWith("alice@example.com")
+      expect(mockRequestPasswordReset).toHaveBeenCalledWith("alice@example.com", returnTo)
     })
     expect(screen.getByText(/new reset link has been sent/i)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /back to app/i })).toHaveAttribute("href", returnTo ?? "/")
   })
 })

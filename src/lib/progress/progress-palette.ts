@@ -4,7 +4,7 @@
 // file rows and chapter squares, the editor footer and chapter picker, the
 // assignment and language bars, the org tables) draws from these five tones,
 // defined once as CSS custom properties in `src/index.css`. Text is blue and
-// audio is magenta. Within each, the dark step means VALIDATED and the light
+// audio is plum (magenta until Sam switched it on 2026-10-25). Within each, the dark step means VALIDATED and the light
 // step means DONE BUT NOT VALIDATED YET (translated, or recorded). An AI draft
 // nobody has validated is drawn as stripes of the translated colour.
 //

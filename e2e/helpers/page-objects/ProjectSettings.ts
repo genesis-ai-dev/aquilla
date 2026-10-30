@@ -42,28 +42,34 @@ export class ProjectSettings {
   }
 
   private laneRow(tag: string): Locator {
-    return this.page.getByTestId("target-lanes-list").locator("li").filter({ hasText: tag })
+    return this.page.getByTestId("target-lanes-list").getByRole("row").filter({ hasText: tag })
   }
 
   async enableTimelineTracks(projectId: string): Promise<void> {
     await this.page.goto(`/project/${projectId}/settings/audio-media`)
     const setting = this.page.getByTestId("settings-allow-track-editing")
     await expect(setting).toBeVisible({ timeout: 10_000 })
-    await expect(setting).not.toBeChecked()
+    // AQU-2214: the box now reads ON while the project follows the default, so
+    // this helper pins an EXPLICIT project-level yes rather than flipping the
+    // switch. It stays in the specs that need track editing because an
+    // explicit choice is what they are actually asserting against, and because
+    // an org that turns the default off must not silently disarm them.
     // AQU-1768: a project follows the organization's default until it sets its
     // own, and the box stays locked to the organization's value until then.
     await this.page.getByTestId("allow-track-editing-source").click()
     await this.page.getByRole("option", { name: "Set for this project" }).click()
     await expect(setting).toBeEnabled()
-    await setting.click()
+    if (!(await setting.isChecked())) await setting.click()
     await this.page.getByRole("button", { name: /Save changes/i }).click()
     await expect(this.page.getByText("Saved: timeline track editing.", { exact: true }))
       .toBeVisible({ timeout: 10_000 })
     await expect(setting).toBeChecked()
   }
 
-  /** Add a target lane via the Languages section's add-lane form. */
+  /** Add a target lane via the Languages section's "Add language" form. */
   async addTargetLanguage(tag: string): Promise<void> {
+    const open = this.page.getByTestId("add-lane-open")
+    if (await open.isVisible()) await open.click()
     const input = this.page.getByTestId("add-target-lang-input")
     await expect(input).toBeVisible({ timeout: 10_000 })
     await input.fill(tag)

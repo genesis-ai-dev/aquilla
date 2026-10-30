@@ -1,9 +1,17 @@
 import type { CharacterResolution, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { VOICE_PALETTE, getVoiceLibrary } from "@/lib/audio/voices"
+import { buildCharacterCastWrite, type CharacterCastWrite } from "@/lib/audio/character-cast"
 
 export interface SpeakerAssignment {
   cellId: string
   speaker: string | undefined
+  /**
+   * AQU-2125: the import wrote `speaker` onto the line itself as its character
+   * (`metadata.cast_name`), so the line can be cast by character. False or
+   * absent for a line it could not name — a re-import keeps the line's own
+   * character, so its speaker still casts that one line.
+   */
+  castNamed?: boolean
 }
 
 export interface CastAdditions {
@@ -112,6 +120,34 @@ export function buildCastAdditions(
     castAssignments[cellId] = voiceId
   }
   return { voices, castAssignments }
+}
+
+/**
+ * What an import with speaker names stores (AQU-2125): the whole voice library
+ * and the whole project-wide cast map to persist.
+ *
+ * Lines the import named (`castNamed`) are cast by CHARACTER, exactly as a
+ * character sheet casts them — one entry per speaker, not per line. Lines it
+ * could not name keep today's one entry per line, on top of that, with the
+ * same voices.
+ */
+export function buildSpeakerCastWrite(
+  pairs: readonly SpeakerAssignment[],
+  settings: ProjectTtsSettings | undefined,
+  mintId: () => string,
+): CharacterCastWrite {
+  const named = buildCharacterCastWrite(
+    pairs.filter((p) => p.castNamed).map((p) => ({ cellId: p.cellId, castName: p.speaker })),
+    settings,
+    mintId,
+  )
+  const unnamed = pairs.filter((p) => !p.castNamed && p.speaker?.trim())
+  if (unnamed.length === 0) return named
+  const perLine = buildCastAdditions(unnamed, { ...(settings ?? {}), ...named }, mintId)
+  return {
+    voices: perLine.voices,
+    castAssignments: { ...named.castAssignments, ...perLine.castAssignments },
+  }
 }
 
 /**

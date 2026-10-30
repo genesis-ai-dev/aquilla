@@ -81,6 +81,11 @@ export interface AudioAttachmentOut {
    * group is — see `selectedPieceIds`.
    */
   pieceOf?: string | null
+  /** 0186 (two-step transcription): what ASR heard, kept through corrections. */
+  asrText?: string | null
+  asrModel?: string | null
+  /** Provenance of an AI cleanup while the transcript is still the AI's. */
+  transcriptAi?: { model: string; at: number; changes: number } | null
 }
 
 /** AQU-1767: the piece group a take belongs to — its root's id. */

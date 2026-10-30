@@ -14,7 +14,6 @@ import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/
 import {
   patchAdminOrgPlan,
   patchAdminWeeklyAllowance,
-  getAdminBillingOrgs,
   getAdminBillingPlans,
   grantAdminCredits,
   grantAdminWords,
@@ -25,6 +24,8 @@ import {
   type AdminBillingOrg,
   type AdminBillingPlans,
 } from "@/lib/frontier/admin"
+import { useAdminBillingOrgList } from "./useAdminBillingOrgList"
+import { AdminBillingOrgToolbar, RowSaveStatusLine } from "./AdminBillingOrgToolbar"
 
 /**
  * Platform billing: Field Plan catalog amounts + per-org grants/resets.
@@ -33,8 +34,8 @@ import {
  */
 export function AdminBillingSection({ jwt }: { jwt: string }) {
   const [catalog, setCatalog] = useState<AdminBillingPlans | null>(null)
-  const [orgs, setOrgs] = useState<AdminBillingOrg[] | null>(null)
-  const [loading, setLoading] = useState(true)
+  const list = useAdminBillingOrgList(jwt)
+  const { orgs, act, rowStatus } = list
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -56,15 +57,12 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
     }
   }, [])
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setError(null)
+  const refreshCatalog = useCallback(async () => {
     try {
-      const [plans, rows] = await Promise.all([getAdminBillingPlans(jwt), getAdminBillingOrgs(jwt)])
+      const plans = await getAdminBillingPlans(jwt)
       if (!aliveRef.current) return
       setFreeWeekly(String(plans.plan.freeWeeklyRawUsd ?? 1))
       setCatalog(plans)
-      setOrgs(rows)
       setPrice(String(plans.plan.priceCents / 100))
       setAddonPrice(String(plans.plan.addonPriceCents / 100))
       setWordsPerCredit(String(plans.plan.wordsPerCredit ?? 100))
@@ -74,14 +72,12 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       setEnterpriseCredits(String(plans.plan.enterpriseCreditsPerLanguagePerYear ?? 10_000))
     } catch (err) {
       if (aliveRef.current) setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      if (aliveRef.current) setLoading(false)
     }
   }, [jwt])
 
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void refreshCatalog()
+  }, [refreshCatalog])
 
   async function saveCatalog() {
     if (!catalog) return
@@ -102,27 +98,15 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       })
       setCatalog({ ...catalog, plan: saved.plan, version: saved.version })
       setNotice(saved.warnings.length > 0 ? saved.warnings.join(" ") : "Catalog saved.")
-      await refresh()
+      await refreshCatalog()
+      // Catalog amounts feed every row's allowance.
+      list.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
   }
-
-  const act = useCallback(
-    async (fn: () => Promise<void>) => {
-      setError(null)
-      setNotice(null)
-      try {
-        await fn()
-        await refresh()
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    },
-    [refresh],
-  )
 
   const unitsPerRawUsd = catalog?.plan.unitsPerRawUsd ?? 400
   const columns = useMemo<ColumnDef<AdminBillingOrg>[]>(
@@ -131,10 +115,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         id: "org",
         accessorFn: (row) => row.orgName ?? `#${row.orgId}`,
         header: "Org",
+        // The server orders the list; sorting one page here would mislead.
+        enableSorting: false,
         cell: ({ row }) => (
           <div className="min-w-[120px]">
             <OrgWithAvatar name={row.original.orgName ?? `#${row.original.orgId}`} />
             <div className="pl-7 text-[10px] tabular-nums text-muted-foreground">#{row.original.orgId} · {row.original.ownerUsername}</div>
+            <RowSaveStatusLine orgId={row.original.orgId} status={rowStatus[row.original.orgId]} />
           </div>
         ),
       },
@@ -146,7 +133,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         cell: ({ row }) => (
           <OrgPlanControl
             org={row.original}
-            onCommit={(plan) => void act(() => patchAdminOrgPlan(jwt, row.original.orgId, plan))}
+            onCommit={(plan) => void act(row.original.orgId, () => patchAdminOrgPlan(jwt, row.original.orgId, plan))}
           />
         ),
       },
@@ -171,7 +158,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         cell: ({ row }) => <WeeklyAllowanceUsd
           org={row.original}
           unitsPerRawUsd={unitsPerRawUsd}
-          onCommit={value => void act(() => patchAdminWeeklyAllowance(jwt, row.original.orgId, value))}
+          onCommit={value => void act(row.original.orgId, () => patchAdminWeeklyAllowance(jwt, row.original.orgId, value))}
         />,
       },
       {
@@ -180,7 +167,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         cell: ({ row }) => (
           <OverrideCredits
             value={row.original.includedCreditsOverride}
-            onCommit={(v) => void act(() => patchAdminBillingOrg(jwt, row.original.orgId, { includedCredits: v }))}
+            onCommit={(v) => void act(row.original.orgId, () => patchAdminBillingOrg(jwt, row.original.orgId, { includedCredits: v }))}
           />
         ),
       },
@@ -219,7 +206,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <OrgActions
             org={row.original}
             onGrantWords={() =>
-              void act(() =>
+              void act(row.original.orgId, () =>
                 grantAdminWords(
                   jwt,
                   row.original.orgId,
@@ -229,27 +216,26 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
               )
             }
             onResetWords={() =>
-              void act(() => resetAdminWords(jwt, row.original.orgId, "admin usage reset"))
+              void act(row.original.orgId, () => resetAdminWords(jwt, row.original.orgId, "admin usage reset"))
             }
             onGrantCredits={() =>
-              void act(() => grantAdminCredits(jwt, row.original.orgId, 100, "admin courtesy grant"))
+              void act(row.original.orgId, () => grantAdminCredits(jwt, row.original.orgId, 100, "admin courtesy grant"))
             }
             onResetCredits={() =>
-              void act(() => resetAdminCredits(jwt, row.original.orgId, "admin credit reset"))
+              void act(row.original.orgId, () => resetAdminCredits(jwt, row.original.orgId, "admin credit reset"))
             }
           />
         ),
       },
     ],
-    [act, jwt, unitsPerRawUsd],
+    [act, jwt, rowStatus, unitsPerRawUsd],
   )
 
   // AQU-942: only a first load that has resolved nothing may replace the
-  // section. Every grant/reset/save round-trips through `refresh`, which flips
-  // `loading` back on — gating on it alone unmounted the catalog form and the
-  // org table after each action, losing the table's sort/scroll and flashing
-  // the whole tab. Errors already render inline inside the shell below.
-  if (loading && !catalog && !orgs) return <AdminSectionSkeleton label="Loading billing" />
+  // section. Later page reads and per-row refreshes keep the catalog form and
+  // the org table mounted, so the tab never flashes. Errors already render
+  // inline inside the shell below.
+  if (!catalog && !orgs && !error) return <AdminSectionSkeleton label="Loading billing" />
   if (error && !catalog) return <p className="text-sm text-destructive">{error}</p>
 
   return (
@@ -289,30 +275,32 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           : "Weekly AI allowance enforcement is off. These allowances take effect when enforcement is enabled."}
       </p>
       <Section title="Organizations" description="Set each org’s plan and weekly AI allowance in raw provider dollars. Every org is Free unless set otherwise; Enterprise is unmetered until its contract ends, then gets a 14-day Team-sized grace. Weekly grants preserve usage and Stripe billing. Blank uses the plan default.">
-        {orgs && orgs.length > 0 ? (
-          <DataTable
-            columns={columns}
-            data={orgs}
-            getRowId={(row) => String(row.orgId)}
-            initialSorting={[{ id: "org", desc: false }]}
-            searchPlaceholder="Search organizations…"
-            globalFilterFn={(row, _columnId, filterValue) => {
-              const q = String(filterValue).trim().toLowerCase()
-              if (!q) return true
-              const org = row.original
-              return (
-                (org.orgName ?? "").toLowerCase().includes(q) ||
-                (org.ownerUsername ?? "").toLowerCase().includes(q) ||
-                `#${org.orgId}`.includes(q) ||
-                String(org.orgId).includes(q)
-              )
-            }}
-            testId="admin-billing-orgs"
-            rowClassName="align-top"
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">No orgs found.</p>
-        )}
+        <DataTable
+          columns={columns}
+          data={orgs ?? []}
+          getRowId={(row) => String(row.orgId)}
+          searchPlaceholder="Search name, owner or org id…"
+          searchValue={list.search}
+          onSearchChange={list.setSearch}
+          searching={list.loading}
+          loading={orgs === null}
+          loadingLabel="Loading organizations"
+          toolbar={
+            <AdminBillingOrgToolbar
+              tierFilter={list.tierFilter}
+              onTierFilter={list.setTierFilter}
+              sort={list.sort}
+              onSort={list.setSort}
+              offset={list.offset}
+              total={list.total}
+              loading={list.loading}
+              onOffset={list.setOffset}
+            />
+          }
+          emptyState={<p className="text-sm text-muted-foreground">No orgs found.</p>}
+          testId="admin-billing-orgs"
+          rowClassName="align-top"
+        />
       </Section>
 
       <AdminWouldBlockReport jwt={jwt} />
@@ -322,9 +310,9 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           {notice}
         </p>
       ) : null}
-      {error ? (
+      {error || list.listError ? (
         <p className="text-sm text-destructive" role="alert">
-          {error}
+          {error ?? list.listError}
         </p>
       ) : null}
     </div>

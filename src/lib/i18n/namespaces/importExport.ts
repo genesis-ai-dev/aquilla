@@ -577,6 +577,7 @@ export const importExport = defineNamespace({
     "importExport.upload.finishingUp": "Finishing up…",
     "importExport.upload.finalizationFailed": "Import finalization failed",
     "importExport.upload.uploadingFile": "Uploading {fileName}…",
+    "importExport.upload.aligningIdmlStyles": "Aligning styles in {fileName}… {count}/{total}",
     "importExport.upload.notAttempted": "not attempted after an earlier file failed",
     "importExport.upload.castAssignmentsLabel": "Cast assignments",
     "importExport.upload.importFinalizationLabel": "Import finalization",
@@ -669,6 +670,11 @@ export const importExport = defineNamespace({
     "importExport.format.md.description":
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
+    "importExport.format.html.label": "Web page",
+    "importExport.format.html.description":
+      "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
+      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
+      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -918,7 +924,14 @@ export const importExport = defineNamespace({
       "suitable for re-import.",
     "importExport.dialog.prefixWithRef": "Prefix each line with canonical ref (e.g. {example})",
     "importExport.dialog.downloadOriginalUnchanged": "Download original unchanged",
-    "importExport.dialog.repairByReimporting": "Repair by re-importing",
+    "importExport.dialog.repairByReimporting": "Repair a copy",
+    "importExport.dialog.repairingIdmlCopy": "Repairing a copy of {fileName}…",
+    "importExport.dialog.repairIdmlCopyDone": "Created {fileName}. The original file was left unchanged.",
+    "importExport.dialog.repairIdmlCopyDoneUnmatched": plural({
+      one: "Created {fileName}. {count} translation could not be paired and stayed on the original file.",
+      other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
+    }),
+    "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -972,6 +985,16 @@ export const importExport = defineNamespace({
       other: "Downloaded {fileName} ({count} rows)",
     }),
     "importExport.status.buildingZip": "Building zip for {count} files…",
+    // AQU-2183: the whole-project HTML zip reports two independent counts, so
+    // the skipped half is its own phrase, appended only when something was.
+    "importExport.status.exportedHtmlBooks": plural({
+      one: "Exported {count} book as HTML",
+      other: "Exported {count} books as HTML",
+    }),
+    "importExport.status.skippedNonBookFiles": plural({
+      one: ", skipped {count} file that isn't a USFM book",
+      other: ", skipped {count} files that aren't USFM books",
+    }),
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
@@ -1037,6 +1060,31 @@ export const importExport = defineNamespace({
       one: "{count} cue time could not be read, so its wording is not in this import.",
       other: "{count} cue times could not be read, so their wording is not in this import.",
     }),
+
+    // — Frames written as hundredths (AQU-2197): src/components/import/
+    //   FramesAsHundredthsNotice.tsx, in the import preview. A subtitle file
+    //   whose every cue time is a video frame number written as hundredths of
+    //   a second, with the choice to fix it or keep it. The frame rate is
+    //   worked out (the linked film's, else the frame numbers'), never asked.
+    "importExport.framesAsHundredths.warning":
+      "This file's times look like video frame numbers written as hundredths of a second, " +
+      "so lines may start up to 0.7 s early.",
+    "importExport.framesAsHundredths.infoLabel": "Why these times look wrong",
+    "importExport.framesAsHundredths.explain":
+      "Film and video tools write times as timecode, where the last part is a frame number: " +
+      "00:01:06:15 is frame 15 of that second. A converter that forgets the frame rate writes " +
+      "that frame as hundredths of a second, 00:01:06.150, instead of the real time, 00:01:06.625 " +
+      "at 24 frames a second. Every time in this file looks like that: always in steps of ten, " +
+      "and never past .{max}0. Fixing reads each one back as the frame it is, at the linked " +
+      "film's frame rate when it fits, and otherwise at the rate the highest frame number points to.",
+    "importExport.framesAsHundredths.fix": "Fix the times",
+    "importExport.framesAsHundredths.fixFilm": "Converted at {rate} frames a second, the film's rate.",
+    "importExport.framesAsHundredths.fixFrames": "Converted at {rate} frames a second, from the frame numbers.",
+    "importExport.framesAsHundredths.fixChosen": "Converted at {rate} frames a second, the rate you picked.",
+    "importExport.framesAsHundredths.fixPending": "Checking the film's frame rate…",
+    "importExport.framesAsHundredths.otherRate": "Use a different frame rate",
+    "importExport.framesAsHundredths.rateLabel": "Frame rate",
+    "importExport.framesAsHundredths.keep": "Keep as is",
 
     // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
     //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
@@ -1269,6 +1317,29 @@ export const importExport = defineNamespace({
     "importExport.preview.commitFailed": "Import failed: {error}",
     "importExport.preview.confidencePercent": "{percent}% confidence",
     "importExport.preview.confirmImport": "Confirm import",
+    "importExport.reimport.title": "Re-import {name}",
+    "importExport.reimport.oneFile": "Choose one file to re-import.",
+    "importExport.reimport.oneDocument": "Re-import takes one document, not a project or a set of books.",
+    "importExport.reimport.update": "Update this file",
+    "importExport.reimport.updatedCopy": "Make updated copy",
+    "importExport.reimport.blankCopy": "Make a blank copy",
+    "importExport.reimport.nameUpdated": "updated",
+    "importExport.reimport.nameBlank": "blank",
+    "importExport.reimport.hint": "Translations already in the file are kept. A changed source line is marked for review until it is validated.",
+    "importExport.reimport.added": plural({
+      one: "{count} cell added",
+      other: "{count} cells added",
+    }),
+    "importExport.reimport.updated": plural({
+      one: "{count} cell updated",
+      other: "{count} cells updated",
+    }),
+    "importExport.reimport.analysis": "Analysis",
+    "importExport.reimport.noChanges": "Nothing in this file has changed.",
+    "importExport.reimport.more": plural({
+      one: "{count} more",
+      other: "{count} more",
+    }),
     "importExport.preview.epubChaptersTitle": "Chapters in this book",
     "importExport.preview.epubRoleChapter": "Chapter",
     "importExport.preview.epubRoleNavigation": "Table of contents",
@@ -1567,6 +1638,58 @@ export const importExport = defineNamespace({
           count:
             "Number of cue timestamp lines that produced no cue; also governs the plural form.",
         },
+      },
+
+      // Frames written as hundredths (AQU-2197) — the import preview's warning
+      // for a subtitle file converted from video timecode without its frame
+      // rate, and the choice to fix it or keep it. The rate the fix uses is
+      // worked out and stated, never asked for.
+      "importExport.framesAsHundredths.warning": {
+        description:
+          "Warning at the top of the import preview for a subtitle file whose every cue time looks like a video frame number written as hundredths of a second (00:01:06:15 written as 00:01:06.150). Says the consequence plainly: lines start early, by up to 0.7 seconds.",
+      },
+      "importExport.framesAsHundredths.infoLabel": {
+        description:
+          "Accessible name of the small (i) button beside that warning, which shows the longer explanation.",
+      },
+      "importExport.framesAsHundredths.explain": {
+        description:
+          "The longer explanation behind the (i): what timecode is, how a converter that forgets the frame rate turns a frame number into hundredths of a second, the pattern that gives this file away, and how the fix picks its frame rate (the linked film's when it fits, otherwise the one the highest frame number implies). The times (00:01:06:15, 00:01:06.150, 00:01:06.625) are literal examples; keep them as written.",
+        placeholders: {
+          max: "The highest frame number seen, as one or two digits; shown after a decimal point with a trailing 0 (for 23 the text reads '.230').",
+        },
+      },
+      "importExport.framesAsHundredths.fix": {
+        description:
+          "The first choice, selected to start with: convert the file's times back from frame numbers into real times.",
+      },
+      "importExport.framesAsHundredths.fixFilm": {
+        description:
+          "Line under 'Fix the times' when the rate comes from the video linked to the file, which states its own frame rate.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixFrames": {
+        description:
+          "Line under 'Fix the times' when there is no linked video (or its rate does not fit), so the rate is the one the file's highest frame number implies: a file that never goes past frame 23 counts 24 frames a second.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixChosen": {
+        description: "Line under 'Fix the times' once the person has picked a frame rate themselves.",
+        placeholders: { rate: "A frame rate as written in film work: 23.976, 24, 25, 29.97 or 30." },
+      },
+      "importExport.framesAsHundredths.fixPending": {
+        description:
+          "Line under 'Fix the times' for the moment the linked video's frame rate is being read over the network.",
+      },
+      "importExport.framesAsHundredths.otherRate": {
+        description:
+          "Quiet link after that line. Clicking it shows a frame-rate picker, for someone who knows the file's rate is different.",
+      },
+      "importExport.framesAsHundredths.rateLabel": {
+        description: "Accessible name of the frame-rate picker (23.976, 24, 25, 29.97 or 30).",
+      },
+      "importExport.framesAsHundredths.keep": {
+        description: "The second choice: import the file's times unchanged.",
       },
 
       // Timeline media import (AQU-1431) — the three dialogs that review segments
@@ -2170,6 +2293,33 @@ export const importExport = defineNamespace({
         description: "Upload-phase progress label on the Upload files panel, naming the file currently uploading.",
         placeholders: { fileName: "Name of the file currently uploading — not translated." },
       },
+      "importExport.upload.aligningIdmlStyles": {
+        description:
+          "Progress label after an IDML file is updated in place, while existing translations are placed into the source's style runs.",
+        placeholders: {
+          fileName: "Name of the IDML file whose styles are being aligned — not translated.",
+          count: "Number of cells placed so far, already locale-formatted.",
+          total: "Number of cells that need placement, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairingIdmlCopy": {
+        description: "Progress label in the Export dialog while a repaired copy of the current IDML file is being built.",
+        placeholders: { fileName: "Display name of the file being copied — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDone": {
+        description: "Success message after a repaired IDML copy is created. The original file is not modified.",
+        placeholders: { fileName: "Display name of the new repaired copy — not translated." },
+      },
+      "importExport.dialog.repairIdmlCopyDoneUnmatched": {
+        description: "Success message when some translations could not be matched to the re-parsed IDML and remain only on the original file.",
+        placeholders: {
+          fileName: "Display name of the new repaired copy — not translated.",
+          count: "Number of translations that stayed on the original file, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.repairIdmlCopyNeedsOriginal": {
+        description: "Error when the file being repaired has no stored IDML package to re-parse.",
+      },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",
         placeholders: {
@@ -2400,6 +2550,14 @@ export const importExport = defineNamespace({
       "importExport.status.exportedFilesCount": {
         description: "Success-status message after a project-scope USFM export, or a single-file-scope USFM export whose count is 1.",
         placeholders: { count: "Number of files exported." },
+      },
+      "importExport.status.exportedHtmlBooks": {
+        description: "Success-status message after a whole-project HTML export, which downloads a zip of one page per Bible book.",
+        placeholders: { count: "Number of Bible books exported." },
+      },
+      "importExport.status.skippedNonBookFiles": {
+        description: "Second half of the whole-project HTML export success message, appended after exportedHtmlBooks when some files were left out. Starts with a comma because it continues that sentence.",
+        placeholders: { count: "Number of files skipped because they are not USFM Bible books." },
       },
       "importExport.status.skippedOlderImports": {
         description: "Second half of the USFM project-export success message, appended after exportedFilesCount when some files were skipped.",
@@ -3537,6 +3695,80 @@ export const importExport = defineNamespace({
           "Primary button in the footer of the preview screen that commits the " +
           "previewed lines into the project and starts the upload. Imperative verb " +
           "plus noun; it is the point of no return, so it should read as decisive.",
+      },
+      "importExport.reimport.title": {
+        description:
+          "Dialog title while re-importing one file chosen from the sidebar. Names the file being updated.",
+        placeholders: {
+          name: "The file's current name in the project. Do not translate.",
+        },
+      },
+      "importExport.reimport.oneFile": {
+        description:
+          "Error shown when the re-import dialog is given more than one file. One short sentence.",
+      },
+      "importExport.reimport.oneDocument": {
+        description:
+          "Error shown when the chosen upload is a multi-book project or otherwise not a single document.",
+      },
+      "importExport.reimport.update": {
+        description:
+          "Primary button after the preview. Writes the new source into the file that was chosen in the sidebar.",
+        maxLength: 28,
+      },
+      "importExport.reimport.updatedCopy": {
+        description:
+          "Button that leaves the current file alone and creates a copy with the new source and the kept translations.",
+        maxLength: 28,
+      },
+      "importExport.reimport.blankCopy": {
+        description:
+          "Button that imports the uploaded file as a new file with empty translations.",
+        maxLength: 28,
+      },
+      "importExport.reimport.nameUpdated": {
+        description:
+          "Word placed in parentheses after a copied file's name when that name is already in the project. Lowercase noun.",
+        maxLength: 16,
+      },
+      "importExport.reimport.nameBlank": {
+        description:
+          "Word placed in parentheses after a blank copy's name when that name is already in the project. Lowercase adjective.",
+        maxLength: 16,
+      },
+      "importExport.reimport.hint": {
+        description:
+          "One sentence under the three re-import buttons explaining that existing translations stay and changed lines need review.",
+      },
+      "importExport.reimport.added": {
+        description:
+          "Count shown above the re-import choices: how many cells in the uploaded document are not already in the file. Shown next to the updated count.",
+        placeholders: {
+          count: "Number of new cells; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updated": {
+        description:
+          "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
+        placeholders: {
+          count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.analysis": {
+        description:
+          "Title of the box above the re-import buttons that lists cells the uploaded file would add or change.",
+        maxLength: 24,
+      },
+      "importExport.reimport.noChanges": {
+        description:
+          "Shown in the re-import Analysis window when the uploaded file matches the original cell for cell.",
+      },
+      "importExport.reimport.more": {
+        description:
+          "Line under a truncated list in the re-import Analysis window, saying how many further cells are not shown.",
+        placeholders: {
+          count: "Number of cells left off the list; also selects the plural form.",
+        },
       },
       "importExport.preview.epubChaptersTitle": {
         description:

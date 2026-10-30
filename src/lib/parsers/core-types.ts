@@ -7,6 +7,7 @@
 // re-exports these names, so existing SPA imports of "@/lib/parsers/types"
 // are unaffected. Do NOT add imports here that reach outside shared/.
 
+import type { FramesAsHundredths } from "./frame-timecode"
 import type { ImportMilestone, ImportSourceLocator, SourceArtifactFormat } from "../../../shared/import-contract"
 import type { UsfmStructureFinding } from "./usfm-structure-check"
 
@@ -74,6 +75,12 @@ export interface TranslatableString {
   /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
    *  Drives paragraph grouping for multi-cell draft operations. */
   paragraphStart?: boolean
+  /** AQU-2184: USFM only — the bare paragraph marker that opened this cell's
+   *  block ("p", "m", "q1", "pi2", …). Present only alongside
+   *  `paragraphStart`; the marker sits between verse spans, so this is the
+   *  only record of whether the block is prose or a poetry line at level N.
+   *  Rides into `metadata.paragraphMarker` on import. */
+  paragraphMarker?: string
   /**
    * Extensible per-cell metadata bucket, mirrored through the import path into
    * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
@@ -129,6 +136,10 @@ export interface ParsedTextFileResult {
   structureFindings?: UsfmStructureFinding[]
   /** Subtitle (vtt/srt) cue counts (AQU-2119). Absent when both are zero. */
   cueRepair?: SubtitleCueRepair
+  /** AQU-2197: the file's cue times look like video frame numbers written as
+   *  hundredths of a second (`00:01:06:15` → `00:01:06.150`). Numbers only;
+   *  the preview words it and offers to convert. Absent when they don't. */
+  framesAsHundredths?: FramesAsHundredths
 }
 
 /**

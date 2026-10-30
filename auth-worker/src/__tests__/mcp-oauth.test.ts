@@ -251,6 +251,30 @@ describe("what the human approves", () => {
 })
 
 describe("untrusted clients", () => {
+  it("accepts only a registered loopback port variation and binds code exchange to it", async () => {
+    const jwt = await seed()
+    for (const host of ["localhost", "127.0.0.1"]) {
+      const registered = `http://${host}:8000/callback?native=1`
+      const actual = `http://${host}:45678/callback?native=1`
+      clientDocument = { ...clientDocument, redirect_uris: [registered] }
+      expect((await consent("request", await authorizeParams({ redirect_uri: actual }), jwt)).status).toBe(200)
+      const { code } = await approveFor(jwt, { redirect_uri: actual })
+      expect((await redeem(tokenFields(code, { redirect_uri: registered }))).status).toBe(400)
+      expect((await redeem(tokenFields(code, { redirect_uri: actual }))).status).toBe(200)
+      for (const bad of [
+        `http://${host}:45678/other?native=1`, `http://${host}:45678/callback?native=2`,
+        `http://${host}.evil.test:45678/callback?native=1`,
+        `http://user@${host}:45678/callback?native=1`,
+        `http://${host}:45678/callback?native=1#fragment`,
+        `https://${host}:45678/callback?native=1`,
+      ]) {
+        const response = await consent("request", await authorizeParams({ redirect_uri: bad }), jwt)
+        expect(response.status, bad).toBe(400)
+        expect(await response.json()).not.toHaveProperty("redirect")
+      }
+    }
+  })
+
   it("never redirects to a URI the client document does not list", async () => {
     const jwt = await seed()
     const response = await consent("request", await authorizeParams({ redirect_uri: "https://evil.example/cb" }), jwt)

@@ -339,6 +339,61 @@ export function normalizeItemName(name: string): string {
   return name.trim().toLowerCase()
 }
 
+// ── Subitems ───────────────────────────────────────────────────────────────
+//
+// Monday keeps a board's subitems on a board of their own, named in the
+// settings of the parent board's Subitems column. Until something adds the
+// first subitem the parent board has no such column and there is no board.
+
+/** The board this board's subitems live on, or null while it has none. */
+export async function fetchSubitemsBoardId(accessToken: string, boardId: string): Promise<string | null> {
+  const data = await mondayGraphQL<{
+    boards: Array<{ columns: Array<{ settings_str?: string | null }> }> | null
+  }>(accessToken, `query { boards(ids: ${gqlString(boardId)}) { columns(types: [subtasks]) { settings_str } } }`)
+  for (const column of data.boards?.[0]?.columns ?? []) {
+    try {
+      const ids = (JSON.parse(column.settings_str ?? "{}") as { boardIds?: unknown }).boardIds
+      if (Array.isArray(ids) && ids.length > 0) return String(ids[0])
+    } catch {
+      // unreadable settings: look at the next column
+    }
+  }
+  return null
+}
+
+export interface MondaySubitem {
+  id: string
+  name: string
+  boardId: string | null
+  /** The subitem's text in `idColumnId` (its Aquilla ID), when one was asked for. */
+  idText: string | null
+}
+
+/** The subitems under one item, with their Aquilla ID when `idColumnId` names that column. */
+export async function fetchSubitems(
+  accessToken: string,
+  parentItemId: string,
+  idColumnId?: string,
+): Promise<MondaySubitem[]> {
+  const values = idColumnId ? ` column_values(ids: [${gqlString(idColumnId)}]) { id text }` : ""
+  const data = await mondayGraphQL<{
+    items: Array<{
+      subitems: Array<{
+        id: string | number
+        name: string
+        board?: { id: string | number } | null
+        column_values?: Array<{ id: string; text: string | null }>
+      }> | null
+    }> | null
+  }>(accessToken, `query { items(ids: [${gqlString(parentItemId)}]) { subitems { id name board { id }${values} } } }`)
+  return (data.items?.[0]?.subitems ?? []).map((s) => ({
+    id: String(s.id),
+    name: s.name,
+    boardId: s.board?.id != null ? String(s.board.id) : null,
+    idText: s.column_values?.find((c) => c.id === idColumnId)?.text ?? null,
+  }))
+}
+
 // ── Webhooks ───────────────────────────────────────────────────────────────
 
 const WEBHOOK_EVENTS = ["create_column", "item_deleted"] as const

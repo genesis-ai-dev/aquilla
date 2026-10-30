@@ -67,13 +67,16 @@ export function buildSampleSession() {
     events.syncCursorSet({ projectId: "proj1", fileId: "file2", serverSeq: 17, projectEpoch: 1 }),
     events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: at, queueDepth: 0 }),
 
-    // q1 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
+    // q1, q5, q6 sent, q2 mid-flush, q3 refused (403), q4 waiting; q2–q4 must survive every later build.
     queued("q1", "GEN 1:1", "En el principio creó Dios"),
     queued("q2", "GEN 1:2", "Y la tierra estaba desordenada"),
     queued("q3", "EXO 1:1", "Estos son los nombres"),
     queued("q4", "GEN 1:1", "En el principio creó Dios los cielos"),
+    queued("q5", "GEN 1:2", "y las tinieblas"),
+    queued("q6", "EXO 1:1", "Estos son"),
     events.eventQueueStatusSet({ id: "q1", status: "flushing" }),
     events.eventDequeued({ id: "q1" }),
+    events.eventsDequeued({ ids: ["q5", "q6"] }),
     events.eventQueueStatusSet({ id: "q2", status: "flushing" }),
     events.eventQueueStatusSet({ id: "q3", status: "failed" }),
 
@@ -85,6 +88,17 @@ export function buildSampleSession() {
     events.fileRemoved({ id: "file3" }),
     events.projectRemoved({ id: "proj2" }),
     events.offlineProjectRemoved({ projectId: "proj2" }),
+
+    events.offlineProjectStatusSet({ projectId: "proj3", status: "ready", syncedAt: at, queueDepth: 0 }),
+    events.projectSynced({ id: "proj3", name: "Luke", orgId: "org1", settings: null, syncedAt: at }),
+    events.fileSynced({ id: "file4", projectId: "proj3", name: "LUK", type: "usfm", sequenceIndex: 0 }),
+    events.cellsSynced({
+      projectId: "proj3",
+      fileId: "file4",
+      rows: [{ ...sourceRow("LUK 1:1", 0), targetLang: "", laneId: null }],
+    }),
+    events.syncCursorSet({ projectId: "proj3", fileId: "file4", serverSeq: 5, projectEpoch: 1 }),
+    events.offlineCopyRemoved({ projectId: "proj3" }),
     events.localCheckpoint({}),
   ]
 }

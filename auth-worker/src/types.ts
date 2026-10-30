@@ -186,10 +186,13 @@ export interface Env {
    *  allowlist of domains (comma-separated, manifest.web syntax). Unset = any
    *  domain a user approves for an extension. */
   TOOLS_WEB_ALLOWED_DOMAINS?: string
-  /** Omnilingual ASR Modal app base URL (infra/modal/omnilingual_asr.py),
+  /** Omnilingual ASR Modal app base URL (infra/modal/omni_asr.py),
    *  e.g. https://<workspace>--omnilingual-asr-web.modal.run. Unset = hosted
    *  transcription for non-Whisper languages answers 503. */
   OMNI_ASR_MODAL_URL?: string
+  /** Self-hosted Omnilingual ASR base URL (infra/selfhost), tried before
+   *  Modal; Modal takes over on a network error, timeout or 5xx. */
+  OMNI_ASR_PRIMARY_URL?: string
   /** Secret: shared with the Modal app's `aquilla-omni-asr` secret, sent as
    *  X-Omni-Secret. `wrangler secret put OMNI_SHARED_SECRET`. */
   OMNI_SHARED_SECRET?: string
@@ -451,9 +454,11 @@ export type Variables = {
 }
 
 /**
- * Row shape of the `users` table. Mirrors the schema in
- * `apps/identity/migrations/0001_initial.sql`. Legacy gitlab_* / stripe_*
- * columns were removed in the clean-break migration (2026-05-13).
+ * Row shape of the `users` table — the columns this worker types off its
+ * `SELECT *` lookups. The live schema is `db/postgres/schema.sql`, which also
+ * carries display_name / avatar_url / email_verified_at (read elsewhere, by
+ * their own row types). Legacy gitlab_* / stripe_* columns were removed in the
+ * clean-break migration (2026-05-13).
  */
 export interface UserRow {
   id: number
@@ -513,7 +518,7 @@ export interface JWTPayload {
 }
 
 /**
- * Sync-token claim shape — must match apps/sync/src/auth.ts.
+ * Sync-token claim shape — must match sync-worker/src/auth.ts.
  * See `docs/SYNC.md` (this repo) for the security model.
  */
 export interface SyncTokenClaims {
@@ -627,7 +632,8 @@ export interface ProjectRow {
   archived_at: string | null
 }
 
-/** Numeric ladder; mirrors src/lib/frontier/roles.ts and apps/sync/. */
+/** Numeric ladder; mirrors src/lib/frontier/roles.ts and
+ *  sync-worker/src/events/role-policy.ts. */
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,

@@ -168,7 +168,7 @@ export const settings = defineNamespace({
     "settings.mediaDefaults.timingLockedDescription":
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
-      "Whether maintainers may add, group and recolour timeline tracks. Projects use this unless they set their own.",
+      "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
     "settings.mediaDefaults.cellEditingFloorDescription":
       "Who may add and remove lines. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowSelfValidationAudioDescription":
@@ -226,7 +226,7 @@ export const settings = defineNamespace({
     "settings.personalProvider.groupLabel": "Personal override",
     "settings.personalProvider.advancedToggleLabel": "AI provider (advanced)",
     "settings.personalProvider.description":
-      "Use your own OpenAI-compatible endpoint instead of Frontier for AI " +
+      "Use your own OpenAI-compatible endpoint instead of Aquilla for AI " +
       "translations. Stored only in this browser, never synced. Default for " +
       "projects that don't have their own API key; a project key beats this.",
     // Rendered via <RichMessage> so the two path fragments keep their

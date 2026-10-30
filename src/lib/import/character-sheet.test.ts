@@ -305,6 +305,82 @@ describe("keying rows to cells", () => {
   })
 })
 
+// ── AQU-2193: a sheet whose times are video timecode ─────────────────────
+// Come and See re-delivered episode 101 (Oct 26) with the sheet's times as
+// `HH:MM:SS:FF` timecode — a FRAME after the seconds — which the clock reader
+// cannot parse, so every row was refused although its `Translation` column
+// matched the file's lines word for word. The header and line shapes below are
+// theirs; the file's cells carry their own words, as the editor's do.
+describe("a sheet whose times are video timecode (AQU-2193)", () => {
+  const TC_HEADER = ["Line #", "startTime", "endTime", "Character", "Translation", "Camera", "TC In (orig)", "TC Out (orig)"]
+  const tcRow = (line: string, tc: string, who: string, words: string, camera = "ON") =>
+    [line, tc, tc, who, words, camera, tc, tc]
+  const cols = guessCharacterColumns(TC_HEADER)!
+  const cells = [
+    { id: "t1", startTime: 4.19, original: "COME AND SEE" },
+    { id: "c1", startTime: 63.05, original: "Abba?" },
+    { id: "c2", startTime: 66.15, original: "You should be sleeping, little one." },
+    { id: "c3", startTime: 68.21, original: "Sit down." },
+    { id: "c4", startTime: 70.05, original: "Sit down." },
+    { id: "c5", startTime: 73.2, original: "No." },
+  ]
+  const rows = readCharacterRows(
+    [
+      TC_HEADER,
+      tcRow("10", "00:01:03:05", "LITTLE MARY MAGDALENE\u00a0   (ON)", "Abba?"),
+      tcRow("11", "00:01:06:15", "MARY MAGDALENE'S FATHER\u00a0   (ON)", "You should be sleeping, little one."),
+      tcRow("13", "00:01:08:21", "MARY MAGDALENE'S FATHER\u00a0   (ON)", "Sit down."),
+      tcRow("14", "00:01:10:05", "MARY MAGDALENE'S FATHER\u00a0   (ON)", "Sit down."),
+      tcRow("16", "00:01:13:20", "LITTLE MARY MAGDALENE\u00a0   (OFF)", "No.", "OFF"),
+    ],
+    cols,
+  )
+
+  it("reads the timecode as no time at all", () => {
+    expect(cols.text).toBe(4)
+    expect(rows.every((r) => r.startSec === undefined)).toBe(true)
+  })
+
+  it("matches every row by its words instead of refusing the sheet", () => {
+    const p = planCharacterAssignments({ rows, cells })
+    expect(p.unmatchedRows).toEqual([])
+    expect(p.matchedByWords).toBe(5)
+    expect(p.assignments.map((a) => [a.rowNumber, a.cellId, a.lineNumber])).toEqual([
+      [2, "c1", "10"],
+      [3, "c2", "11"],
+      // The two identical lines keep their order.
+      [4, "c3", "13"],
+      [5, "c4", "14"],
+      [6, "c5", "16"],
+    ])
+    expect(p.assignments[4].cameraState).toBe("off")
+    expect(p.cellsWithoutRow).toBe(1)
+  })
+
+  it("still refuses a sheet whose words are another episode's", () => {
+    const other = readCharacterRows(
+      [
+        TC_HEADER,
+        tcRow("10", "00:01:03:05", "JESUS (ON)", "Follow me."),
+        tcRow("11", "00:01:06:15", "PETER (ON)", "Where are we going?"),
+        tcRow("12", "00:01:08:21", "JESUS (ON)", "No."),
+      ],
+      cols,
+    )
+    const p = planCharacterAssignments({ rows: other, cells })
+    // "No." exists in both, so it can match; the rest cannot, and those rows
+    // are what refuses the sheet.
+    expect(p.unmatchedRows).toEqual([2, 3])
+  })
+
+  it("leaves a sheet whose times already match exactly as it was", () => {
+    const timed = readCharacterRows([HEADER, row("00:00:10.000", "JESUS. (On)")], COLS)
+    const p = planCharacterAssignments({ rows: timed, cells: [{ id: "c1", startTime: 10, original: "Hello." }] })
+    expect(p.assignments.map((a) => a.cellId)).toEqual(["c1"])
+    expect(p.matchedByWords).toBe(0)
+  })
+})
+
 // ── The real workbook ────────────────────────────────────────────────────
 // Client source files live outside the repo so they are never committed.
 const MEDIA = path.join(os.homedir(), "Code", "aquilla-app", "the-chosen-media", "101")
@@ -362,5 +438,64 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     // "JESUS.  (Off)", so splitting the angle collapses seven of them. 41 is
     // the number the cast gutter and the export voice filter actually see.
     expect(plan.distinctCharacters).toBe(41)
+  })
+})
+
+// ── AQU-2197: the sheet's timecode read at the frame rate that lines it up ──
+// The follow-up to AQU-2193. A timecode sheet now matches BY TIME when some
+// common frame rate lines its rows up with the file's lines; the words are
+// only the fallback. The file's cells here carry no words at all, so nothing
+// below can be the word pass.
+describe("a sheet whose times are video timecode, read at its frame rate (AQU-2197)", () => {
+  const TC_HEADER = ["Line #", "startTime", "endTime", "Character", "Translation", "Camera", "TC In (orig)", "TC Out (orig)"]
+  const cols = guessCharacterColumns(TC_HEADER)!
+  const tcs = ["00:01:03:05", "00:01:06:15", "00:01:08:21", "00:01:10:05", "00:01:13:20", "00:02:40:11", "00:09:12:03"]
+  const sheet = readCharacterRows(
+    [TC_HEADER, ...tcs.map((tc, i) => [String(10 + i), tc, tc, `PERSON ${i} (ON)`, `Words ${i}`, "ON", tc, tc])],
+    cols,
+  )
+  const seconds = (tc: string, fps: number, nominal: number) => {
+    const [h, m, s, f] = tc.split(":").map(Number)
+    return ((h * 3600 + m * 60 + s) * nominal + f) / fps
+  }
+  const cellsAt = (fps: number, nominal: number) =>
+    tcs.map((tc, i) => ({ id: `c${i}`, startTime: seconds(tc, fps, nominal) }))
+
+  it("keeps the timecode on the row until the rate is known", () => {
+    expect(sheet[0].startSec).toBeUndefined()
+    expect(sheet[0].startTimecode).toEqual({ hours: 0, minutes: 1, seconds: 3, frames: 5, dropFrame: false })
+  })
+
+  it("matches every row by time at 24 frames a second", () => {
+    const p = planCharacterAssignments({ rows: sheet, cells: cellsAt(24, 24) })
+    expect(p.timecode).toEqual({ rows: 7, frameRate: "24" })
+    expect(p.unmatchedRows).toEqual([])
+    expect(p.matchedByWords).toBe(0)
+    expect(p.assignments.map((a) => a.cellId)).toEqual(["c0", "c1", "c2", "c3", "c4", "c5", "c6"])
+  })
+
+  it("tells 23.976 from 24 by the drift", () => {
+    const p = planCharacterAssignments({ rows: sheet, cells: cellsAt(24000 / 1001, 24) })
+    expect(p.timecode?.frameRate).toBe("23.976")
+    expect(p.unmatchedRows).toEqual([])
+  })
+
+  it("rules out a rate the frames exceed", () => {
+    const fast = readCharacterRows([TC_HEADER, ["1", "00:00:05:27", "", "A (ON)", "x", "ON", "", ""]], cols)
+    const p = planCharacterAssignments({ rows: fast, cells: [{ id: "c", startTime: 5 + 27 / 30 }] })
+    expect(p.timecode?.frameRate).toBe("30")
+  })
+
+  it("does not read the timecode against a file it doesn't fit, and still refuses without words", () => {
+    // Their VTT as delivered: the frames written as hundredths. No rate lines
+    // the rows up, and with no words to fall back on the sheet is refused.
+    const broken = tcs.map((tc, i) => {
+      const [h, m, s, f] = tc.split(":").map(Number)
+      return { id: `c${i}`, startTime: h * 3600 + m * 60 + s + f / 100 }
+    })
+    const p = planCharacterAssignments({ rows: sheet, cells: broken })
+    expect(p.timecode).toEqual({ rows: 7, frameRate: null })
+    expect(p.assignments).toEqual([])
+    expect(p.unmatchedRows).toHaveLength(7)
   })
 })

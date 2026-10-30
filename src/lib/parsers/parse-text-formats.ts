@@ -32,6 +32,7 @@ import type {
   TranslatableString,
 } from "./core-types"
 import { checkUsfmStructure, type UsfmStructureFinding } from "./usfm-structure-check"
+import { detectFramesAsHundredths } from "./frame-timecode"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -101,6 +102,7 @@ export function usfmSectionToStrings(
       section: `${bookId} ${v.chapter}`,
       type: "verse" as const,
       paragraphStart: v.paragraphStart,
+      paragraphMarker: v.paragraphMarker,
     })),
     // Headings include book-name/title/TOC + intro when excludeFrontMatter is
     // false (AQU-634 default). When opted out, parseUsfmLossless already omits
@@ -113,6 +115,7 @@ export function usfmSectionToStrings(
       section: h.chapter > 0 ? `${bookId} ${h.chapter}` : bookId,
       type: h.kind,
       paragraphStart: undefined as boolean | undefined,
+      paragraphMarker: undefined as string | undefined,
     })),
   ].sort((a, b) => a.order - b.order)
   const strings: TranslatableString[] = allSpans.map((s) => ({
@@ -125,6 +128,7 @@ export function usfmSectionToStrings(
     globalReferences: [s.ref],
     type: s.type,
     ...(s.paragraphStart ? { paragraphStart: true } : {}),
+    ...(s.paragraphMarker ? { paragraphMarker: s.paragraphMarker } : {}),
   }))
   return { bookId, strings, duplicateRefs, structureFindings: checkUsfmStructure(section) }
 }
@@ -162,7 +166,15 @@ function parseSubtitleFormat(
     droppedCues: Math.max(0, repaired.cueLines - strings.length),
   }
   const clean = cueRepair.repairedShortForm === 0 && cueRepair.droppedCues === 0
-  return { name, strings, ...(clean ? {} : { cueRepair }) }
+  // AQU-2197: times that are frame numbers written as hundredths. Reported,
+  // never fixed silently: only a person knows the file's frame rate.
+  const framesAsHundredths = detectFramesAsHundredths(strings)
+  return {
+    name,
+    strings,
+    ...(clean ? {} : { cueRepair }),
+    ...(framesAsHundredths ? { framesAsHundredths } : {}),
+  }
 }
 
 /**

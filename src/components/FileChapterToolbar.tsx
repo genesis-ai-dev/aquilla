@@ -48,6 +48,9 @@ interface FileChapterToolbarProps {
   translateAsReadDisabled?: boolean
   translateAsReadActive?: boolean
   onTranslateAsReadChange?: (enabled: boolean) => void
+  /** Media redesign slice 2: an Audio language has no AI drafting, so the
+   *  menu does not offer Draft as you read there at all. */
+  audioLane?: boolean
   /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
   historyControl?: ReactNode
 }
@@ -71,6 +74,7 @@ export function FileChapterToolbar({
   translateAsReadDisabled = false,
   translateAsReadActive = false,
   onTranslateAsReadChange,
+  audioLane = false,
   historyControl,
 }: FileChapterToolbarProps) {
   const t = useT()
@@ -99,7 +103,7 @@ export function FileChapterToolbar({
         type: "label" as const,
         label: t("nav.fileMenu.section.editorTools"),
       },
-      ...(onTranslateAsReadChange ? [{
+      ...(onTranslateAsReadChange && !audioLane ? [{
         id: "translate-as-read",
         type: "checkbox" as const,
         label: t("agentWorkspace.translateAsRead"),
@@ -126,6 +130,7 @@ export function FileChapterToolbar({
       ...menuItems,
     ]
   }, [
+    audioLane,
     menuItems,
     checkOpen,
     checkRunning,

@@ -455,6 +455,46 @@ export class Workspace {
     }
   }
 
+  /** Sidebar Re-import → Update this file. The file was already chosen. */
+  async sidebarReimportUpdate(filePath: string): Promise<void> {
+    const row = this.page.locator('[data-showcase="sidebar.file"]').filter({ hasText: /genesis\.usfm/i }).first()
+    await row.hover()
+    await row.getByRole("button", { name: /^File actions$/i }).click()
+    await this.page.getByRole("menuitem", { name: /^Re-import$/i }).click()
+
+    const chooseFilesBtn = this.page.getByRole("button", { name: /Choose Files/i })
+    await expect(chooseFilesBtn).toBeVisible({ timeout: 10_000 })
+    await chooseFilesBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    const update = this.page.getByRole("button", { name: /^Update this file$/i })
+    await expect(update).toBeVisible({ timeout: 30_000 })
+    const reconciled = this.page.waitForResponse(
+      (response) => response.url().endsWith("/import/reconcile") && response.request().method() === "POST",
+      { timeout: 30_000 },
+    )
+    await update.click()
+    const response = await reconciled
+    if (!response.ok()) {
+      throw new Error(`Sidebar re-import failed (${response.status()}): ${await response.text()}`)
+    }
+    await expect(this.page.getByRole("button", { name: /^Update this file$/i })).toBeHidden({ timeout: 30_000 })
+  }
+
+  /** Index of the editor row whose source contains this text. */
+  async cellIndexBySource(text: string): Promise<number> {
+    // A restored row can render before its latest source text hydrates.
+    // Wait for the requested source, rather than taking a one-time snapshot.
+    await expect(
+      this.cellRows().locator('[data-cell-type="source"]').filter({ hasText: text }).first(),
+    ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    const count = await this.cellRows().count()
+    for (let index = 0; index < count; index += 1) {
+      const source = await this.cellRow(index).locator('[data-cell-type="source"]').innerText()
+      if (source.includes(text)) return index
+    }
+    throw new Error(`No source cell contains ${JSON.stringify(text)}`)
+  }
+
   private uploadFilesCard(): Locator {
     return this.page.getByRole("button", { name: /^Upload files/i }).first()
   }
@@ -626,9 +666,13 @@ export class Workspace {
     // rather than reject, so neither can win merely by timing out first, and
     // the whole wait stays bounded by the one EDITOR_READY_TIMEOUT_MS budget —
     // this is a better diagnosis of the same stall, not a shorter deadline.
+    let rowFailure: unknown = null
     const ready = firstCell
       .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
-      .then(() => true, () => false)
+      .then(() => true, (error: unknown) => {
+        rowFailure = error
+        return false
+      })
     const crashed = this.crashScreen
       .waitFor({ state: "visible", timeout: EDITOR_READY_TIMEOUT_MS })
       .then(() => true, () => false)
@@ -644,6 +688,11 @@ export class Workspace {
     // happen, so consult both before deciding which stall this is.
     if (await crashed) await this.failCrashedEditor()
     if (await ready) return
+    // Only the locator's own deadline means "still hydrating". Anything else
+    // (the page or context closed under the wait, a navigation) is the reason
+    // the row never showed up, and the wait did not run its full budget, so
+    // report that rather than a 30-second stall that never happened.
+    if (rowFailure instanceof Error && rowFailure.name !== "TimeoutError") throw rowFailure
     throw new Error(
       `Editor never mounted: ${expectedCellId ? `[data-cell-id="${expectedCellId}"]` : "[data-cell-id]"} `
         + `was not visible within ${EDITOR_READY_TIMEOUT_MS} ms and the editor did not crash — `

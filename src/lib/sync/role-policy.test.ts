@@ -119,7 +119,8 @@ describe("role-policy (client mirror)", () => {
     // Both relayout the timeline for every collaborator, so they sit a rung
     // above the contributor-level editing kinds. Drift here costs a redundant
     // 403 rather than a hole, but it defeats the guard — so pin both sides.
-    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.MAINTAINER)
+    // AQU-2204: project lead and above choose a file's timing.
+    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.PROJECT_LEAD)
     expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
   })
 

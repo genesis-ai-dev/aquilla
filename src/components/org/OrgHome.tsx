@@ -11,7 +11,7 @@ import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-
 import { resolveAllOrgsLanding } from "@/lib/navigation/all-orgs-landing"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
+import { getPortfolioAggregates, translatedPct, validatedPct, attentionRank, audioPct, deadlineStatus, languagePairLabel, portfolioDeliversText, progressPct, type PortfolioAggregates, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { emptyPortfolioAggregate } from "@/lib/frontier/portfolio-metrics"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { ProjectDeadlineStatuses, deadlineStatusTooltip } from "@/components/ProjectStatus"
@@ -303,10 +303,12 @@ export function sortProjectsByLens(projects: PortfolioProjectRow[], lens: Projec
     switch (lens) {
       case "recent":
         return (b.lastEditAt ?? 0) - (a.lastEditAt ?? 0) || a.name.localeCompare(b.name)
+      // Media redesign slice 1: progress by what each language delivers —
+      // the translated share for a Text project, as before.
       case "least-translated":
-        return translatedPct(a) - translatedPct(b) || a.name.localeCompare(b.name)
+        return progressPct(a) - progressPct(b) || a.name.localeCompare(b.name)
       case "most-progress":
-        return translatedPct(b) - translatedPct(a) || a.name.localeCompare(b.name)
+        return progressPct(b) - progressPct(a) || a.name.localeCompare(b.name)
       case "name":
         return a.name.localeCompare(b.name)
       case "pm": {
@@ -489,13 +491,25 @@ export function ProjectTable({
                   />
                 </span>
 
-                <span
-                  data-testid="project-table-translated-value"
-                  className="justify-self-start text-start font-medium tabular-nums text-foreground"
-                  aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
-                >
-                  {tpct}%
-                </span>
+                {portfolioDeliversText(p) ? (
+                  <span
+                    data-testid="project-table-translated-value"
+                    className="justify-self-start text-start font-medium tabular-nums text-foreground"
+                    aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
+                  >
+                    {tpct}%
+                  </span>
+                ) : (
+                  // Media redesign slice 1: a project whose languages all
+                  // deliver audio has no text to translate.
+                  <span
+                    data-testid="project-table-translated-value"
+                    className="justify-self-start text-start text-muted-foreground"
+                    aria-label={t("org.orgHome.table.noTextToTranslateAria")}
+                  >
+                    —
+                  </span>
+                )}
                 <span
                   data-testid="project-table-validated-value"
                   className="justify-self-start text-start tabular-nums text-muted-foreground"

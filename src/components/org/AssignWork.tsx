@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from "react"
-import { fetchProjectRoster, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { AddProjectMembersHint } from "@/components/AddProjectMembersHint"
+import { ROLE } from "@/lib/frontier/roles"
+import { fetchProjectRoster, hasLanguageWorker, partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { compareByCanonicalBookOrder, getBookName } from "@/lib/file-labeling/bible-book-names"
 import { createAssignment, getFileChapters } from "@/lib/sync/assignments"
 import {
@@ -24,7 +26,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   Select,
@@ -193,6 +194,9 @@ export function AssignWork({
   }
   // AQU-1308: why the roster is empty, when it is empty for a reason.
   const [rosterError, setRosterError] = useState<"hidden" | "load-failed" | null>(null)
+  // AQU-2194: whether the roster fetch for this opening has answered, so the
+  // "nobody else is on this project" line never flashes before it does.
+  const [rosterLoaded, setRosterLoaded] = useState(false)
 
   // AQU-582 / AQU-678: list books in canonical Bible reading order (Genesis →
   // Revelation) rather than the incoming prop order, matching the sidebar and
@@ -220,10 +224,12 @@ export function AssignWork({
     if (!open) return
     let cancelled = false
     setRosterError(null)
+    setRosterLoaded(false)
     fetchProjectRoster(jwt, projectId)
       .then((r) => {
         if (cancelled) return
         setMembers(r.kind === "ok" ? r.members : [])
+        setRosterLoaded(true)
         if (r.kind === "roster-hidden") setRosterError("hidden")
         else if (r.kind === "no-access") setRosterError("load-failed")
       })
@@ -231,6 +237,7 @@ export function AssignWork({
         if (cancelled) return
         setMembers([])
         setRosterError("load-failed")
+        setRosterLoaded(true)
         setError(e instanceof Error ? e.message : String(e))
       })
     return () => { cancelled = true }
@@ -247,6 +254,13 @@ export function AssignWork({
   )
   const effectiveCallerUserId =
     callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
+  // AQU-2194: nobody on the project to give language work to leaves the picker
+  // without a linguist and no word why (AssignModal's showStaffHint, same rule).
+  const showStaffHint =
+    rosterLoaded &&
+    !isSelfAssignMode &&
+    !rosterError &&
+    !hasLanguageWorker(eligibleMembers, effectiveCallerUserId)
 
   useEffect(() => {
     if (isSelfAssignMode && effectiveCallerUserId != null) {
@@ -496,6 +510,9 @@ export function AssignWork({
                 {t("org.assignWork.selfAssignNote")}
               </FieldDescription>
             )}
+            {showStaffHint && (
+              <AddProjectMembersHint projectId={projectId} testId="assign-work-staff-hint" canAddPeople={roleLevel >= ROLE.MAINTAINER} />
+            )}
             {/* AQU-1308: name the failure right under the picker it emptied. */}
             {rosterError && (
               <FieldError>
@@ -578,7 +595,7 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-deadline">
-              {t("dialog.assign.deadlineLabel")} <OptionalMark />
+              {t("dialog.assign.deadlineLabel")}
             </FieldLabel>
             <DatePicker
               id="assign-work-deadline"

@@ -56,6 +56,45 @@ describe("generateAndAttachCellVoice routing", () => {
     )
   })
 
+  it("a character (library) voice reads with the stock voice, then re-voices that clip", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-1", durationSeconds: 1.2,
+      objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+    }))
+    const emitAttach = vi.fn(async () => {})
+    const convert = vi.fn(async () => ({
+      audioId: "audio-clone-9", ext: "wav", url: "frontier-audio://audio-clone-9.wav", bytes: 4,
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: convert }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    const res = await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(convert).toHaveBeenCalledWith(expect.objectContaining({
+      libraryVoiceId: "narrator-hearth", sourceAudioId: "audio-tts-1.wav",
+    }))
+    expect(emitAttach).toHaveBeenCalledTimes(1)
+    expect(emitAttach).toHaveBeenCalledWith(expect.objectContaining({
+      audioId: "audio-clone-9.wav", url: "frontier-audio://audio-clone-9.wav", voiceId: "v-hearth", durationMs: 1200,
+    }))
+    expect(res.audioId).toBe("audio-clone-9.wav")
+  })
+
   it("leftover Kokoro voices take the Inworld server path with Dennis", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({

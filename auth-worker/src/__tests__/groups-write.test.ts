@@ -84,6 +84,56 @@ describe("team membership", () => {
     expect(res.status).toBe(409)
   })
 
+  // AQU-2238: the direct invite-to-team path. The org add → team add → org
+  // remove dance is what these replace; `external` is an explicit opt-in so the
+  // default above keeps failing closed.
+  it("adds a non-org-member with external:true and writes NO org_members row", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "outsider", external: true }) }, env)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ userId: 9, username: "outsider", external: true })
+    const row = await env.AQUILLA_PG.prepare("SELECT user_id FROM group_members WHERE group_id = 10 AND user_id = 9").first()
+    expect(row).not.toBeNull()
+    // The whole point: no org-roster entry, so nothing to delete afterwards.
+    const orgRow = await env.AQUILLA_PG.prepare("SELECT user_id FROM org_members WHERE org_id = 1 AND user_id = 9").first()
+    expect(orgRow).toBeNull()
+  })
+
+  it("resolves an outside invite by email address", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "OUTSIDER@example.com", external: true }) }, env)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ userId: 9, username: "outsider" })
+  })
+
+  it("404s an outside invite for someone with no account, and names the invite path", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ username: "nobody@example.com", external: true }) }, env)
+    expect(res.status).toBe(404)
+    expect((await res.json() as { error: string }).error).toMatch(/project invite/)
+  })
+
+  it("reports external:false for an org member added through the external path", async () => {
+    await seedTeam()
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("wendi")), body: JSON.stringify({ usernames: ["anna", "outsider"], external: true }) }, env)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      results: [
+        { username: "anna", ok: true, external: false },
+        { username: "outsider", ok: true, external: true },
+      ],
+    })
+  })
+
+  it("still requires org role >= maintainer for an outside invite", async () => {
+    await seedTeam()
+    // anna is an org contributor (100) — below the team-write gate.
+    const res = await app.request("/api/v2/orgs/1/groups/10/members", { method: "POST", headers: authHeader(await jwtFor("anna")), body: JSON.stringify({ username: "outsider", external: true }) }, env)
+    expect(res.status).toBe(403)
+    const row = await env.AQUILLA_PG.prepare("SELECT user_id FROM group_members WHERE group_id = 10 AND user_id = 9").first()
+    expect(row).toBeNull()
+  })
+
   it("removes a member", async () => {
     await seedTeam()
     await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id, added_by) VALUES (10, 2, 1)").run()

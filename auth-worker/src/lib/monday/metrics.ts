@@ -20,6 +20,12 @@
 //     dashboard's "Has audio" (db/shared/audio-progress.ts `has_dub`).
 //   * projects.deadline_at — the project's deadline, a calendar date; every
 //     file row carries the project's.
+//   * lanes.delivers (media redesign slice 1) — what each language delivers.
+//     Each language's lines count by it (src/lib/lanes/lane-delivers.ts): a
+//     Text language reads exactly as before; an Audio one by its approved
+//     recordings, against the file's cue sheet where it has one; a Text and
+//     audio one by the lines done on both halves. Completion % and Status
+//     follow, so a recording-only project is "In progress" from its first take.
 
 import { ROLE } from "../../types"
 import { countedFileSql, inAudioCountedFileSql } from "../../../../db/shared/counted-files"
@@ -30,6 +36,12 @@ import {
 } from "../../../../src/lib/frontier/portfolio-metrics"
 import { laneDisplayName } from "../../../../src/lib/lanes/lane-display"
 import { loadEffectiveThreshold } from "../../../../db/shared/validation-threshold"
+import {
+  bothApprovedFromHistogram,
+  laneCountsAudio,
+  laneMeasure,
+  parseLaneDelivers,
+} from "../../../../src/lib/lanes/lane-delivers"
 
 export interface MondayEntityMetrics {
   completion_pct: number
@@ -152,6 +164,8 @@ interface FileRow {
 
 interface ProgressRow {
   file_id: string
+  lane_id: string
+  delivers: string | null
   total_count: number
   filled_count: number
   validator_histogram: unknown
@@ -162,6 +176,8 @@ interface ProgressRow {
   structural_audio_validator_histogram: unknown
   audio_count: number
   structural_audio_count: number
+  text_audio_validator_histogram: unknown
+  structural_text_audio_validator_histogram: unknown
 }
 
 function parseHistogram(raw: unknown): Map<number, number> {
@@ -201,6 +217,14 @@ interface EntityTotals {
   validated: number
   audioValidated: number
   hasAudio: number
+  /**
+   * Media redesign slice 1: Completion %'s numerator, and the lines with any
+   * work in them, each by what its language delivers (`laneMeasure`). Absent,
+   * they are `filled` — what both were before languages said what they
+   * deliver, and still are for every Text language.
+   */
+  headline?: number
+  started?: number
 }
 
 function buildMetrics(
@@ -210,7 +234,9 @@ function buildMetrics(
   facts: ProjectFacts,
 ): MondayEntityMetrics {
   const { total, filled, validated, audioValidated, hasAudio } = totals
-  const completionPct = total > 0 ? round1((filled / total) * 100) : 0
+  const headline = totals.headline ?? filled
+  const started = totals.started ?? filled
+  const completionPct = total > 0 ? round1((headline / total) * 100) : 0
   return {
     completion_pct: completionPct,
     validated_pct: total > 0 ? round1((validated / total) * 100) : 0,
@@ -221,7 +247,7 @@ function buildMetrics(
     validated_count: validated,
     translators,
     last_activity: lastActivity,
-    status_auto: filled <= 0 ? "Not started" : completionPct >= 100 ? "Complete" : "In progress",
+    status_auto: started <= 0 ? "Not started" : completionPct >= 100 ? "Complete" : "In progress",
     ...facts,
   }
 }
@@ -240,6 +266,45 @@ function subtractHistogram(from: Map<number, number>, raw: unknown): void {
     const remaining = (from.get(bucket) ?? 0) - amount
     if (remaining > 0) from.set(bucket, remaining)
     else from.delete(bucket)
+  }
+}
+
+/**
+ * One progress row's counts at the project's thresholds, headings left out
+ * when the project leaves them out. Subtracted per row and clamped, as the
+ * dashboard does, so a partly backfilled row never goes negative.
+ */
+function laneRowCounts(
+  row: ProgressRow,
+  countStructural: boolean,
+  threshold: number,
+  audioThreshold: number,
+): { total: number; filled: number; validated: number; recorded: number; audioApproved: number; bothApproved: number } {
+  const histogram = parseHistogram(row.validator_histogram)
+  const audioHistogram = parseHistogram(row.audio_validator_histogram)
+  let total = Number(row.total_count) || 0
+  let filled = Number(row.filled_count) || 0
+  let recorded = Number(row.audio_count) || 0
+  let bothApproved = bothApprovedFromHistogram(row.text_audio_validator_histogram, threshold, audioThreshold)
+  if (!countStructural) {
+    total -= Number(row.structural_count) || 0
+    filled -= Number(row.structural_filled_count) || 0
+    recorded -= Number(row.structural_audio_count) || 0
+    subtractHistogram(histogram, row.structural_validator_histogram)
+    subtractHistogram(audioHistogram, row.structural_audio_validator_histogram)
+    bothApproved -= bothApprovedFromHistogram(
+      row.structural_text_audio_validator_histogram,
+      threshold,
+      audioThreshold,
+    )
+  }
+  return {
+    total: Math.max(0, total),
+    filled: Math.max(0, filled),
+    validated: validatedAtThreshold(histogram, threshold),
+    recorded: Math.max(0, recorded),
+    audioApproved: validatedAtThreshold(audioHistogram, audioThreshold),
+    bothApproved: Math.max(0, bothApproved),
   }
 }
 
@@ -298,8 +363,9 @@ export async function computeProjectMetrics(
   // lane's work, so they stand; with two or more the sum is partly another
   // lane's work, so the numerators are empty rather than wrong. None yet
   // counts as one and an archived lane still counts, because both are what
-  // the counters already added up. The denominator is `files.cell_count`
-  // either way. A project with progress rows never reaches this.
+  // the counters already added up. With two or more, each active language
+  // missing a row adds `files.cell_count` to the total (see the file loop).
+  // A file with progress rows never reaches the counters.
   const laneCountRow = await db
     .prepare("SELECT COUNT(*) AS target_lanes FROM lanes WHERE project_id = ? AND role = 'target'")
     .bind(projectId)
@@ -330,7 +396,8 @@ export async function computeProjectMetrics(
       // count to the board's total a second time. An archived lane's row is
       // the same kind of extra: the board would count work nobody is still
       // planning.
-      `SELECT fsp.file_id AS file_id, fsp.total_count AS total_count,
+      `SELECT fsp.file_id AS file_id, l.id AS lane_id, l.delivers AS delivers,
+              fsp.total_count AS total_count,
               fsp.filled_count AS filled_count,
               fsp.validator_histogram AS validator_histogram,
               fsp.structural_count AS structural_count,
@@ -339,7 +406,9 @@ export async function computeProjectMetrics(
               fsp.audio_validator_histogram AS audio_validator_histogram,
               fsp.structural_audio_validator_histogram AS structural_audio_validator_histogram,
               fsp.audio_count AS audio_count,
-              fsp.structural_audio_count AS structural_audio_count
+              fsp.structural_audio_count AS structural_audio_count,
+              fsp.text_audio_validator_histogram AS text_audio_validator_histogram,
+              fsp.structural_text_audio_validator_histogram AS structural_text_audio_validator_histogram
          FROM file_section_progress fsp
          JOIN lanes l
            ON l.project_id = fsp.project_id AND l.id = fsp.lane_id AND l.role = 'target'
@@ -353,6 +422,25 @@ export async function computeProjectMetrics(
     const list = progressByFile.get(row.file_id) ?? []
     list.push(row)
     progressByFile.set(row.file_id, list)
+  }
+
+  // Media redesign slice 1: a language that delivers audio is measured by its
+  // recordings, and a dubbing file records against its hidden cue sheet — the
+  // newest live one, the plan board's own rule (plan-units.ts). Only asked
+  // when some language counts audio, so a text project costs nothing more.
+  const cueSheetOf = new Map<string, string>()
+  if ((progressResult.results ?? []).some((row) => laneCountsAudio(parseLaneDelivers(row.delivers)))) {
+    const cues = await db
+      .prepare(
+        `SELECT DISTINCT ON (anchor_file_id) anchor_file_id, id
+           FROM files
+          WHERE project_id = ? AND role = 'audio-cues' AND deleted_at IS NULL
+            AND anchor_file_id IS NOT NULL
+          ORDER BY anchor_file_id, id DESC`,
+      )
+      .bind(projectId)
+      .all<{ anchor_file_id: string; id: string }>()
+    for (const cue of cues.results ?? []) cueSheetOf.set(cue.anchor_file_id, cue.id)
   }
 
   const translatorsResult = await db
@@ -412,12 +500,13 @@ export async function computeProjectMetrics(
 
   const languagesResult = await db
     .prepare(
-      `SELECT name, language, role FROM lanes
+      `SELECT id, name, language, role FROM lanes
         WHERE project_id = ? AND role = 'target' AND archived_at IS NULL
         ORDER BY position, id`,
     )
     .bind(projectId)
-    .all<{ name: string | null; language: string | null; role: "target" }>()
+    .all<{ id: string; name: string | null; language: string | null; role: "target" }>()
+  const activeLaneIds = (languagesResult.results ?? []).map((l) => l.id)
 
   let activeContributors = 0
   let daysSinceActivity: number | null = null
@@ -490,71 +579,78 @@ export async function computeProjectMetrics(
   }
 
   const fileEntries: FileMetricsEntry[] = []
-  const projectTotals: EntityTotals = { total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
+  const projectTotals: EntityTotals = {
+    total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0, headline: 0, started: 0,
+  }
 
   for (const file of files) {
     const laneRows = progressByFile.get(file.id) ?? []
+    const less = (n: unknown) => (countStructural ? 0 : Number(n) || 0)
+    const fileTotal = Math.max(0, (Number(file.cell_count) || 0) - less(file.structural_cell_count))
     let totals: EntityTotals
-    if (laneRows.length > 0) {
-      const histogram = new Map<number, number>()
-      // AQU-1771: audio has its own histogram (validator counts on the
-      // selected dub take, weakest track deciding — db/shared/audio-progress.ts).
-      // Audio % used to be read off the TEXT histogram, so it reported text
-      // validation under an audio heading.
-      const audioHistogram = new Map<number, number>()
-      let total = 0
-      let filled = 0
-      let hasAudio = 0
+    if (laneRows.length > 0 || !singleLane) {
+      totals = { total: 0, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0, headline: 0, started: 0 }
       for (const lane of laneRows) {
-        total += Number(lane.total_count) || 0
-        filled += Number(lane.filled_count) || 0
-        hasAudio += Number(lane.audio_count) || 0
-        const laneHistogram = parseHistogram(lane.validator_histogram)
-        const laneAudio = parseHistogram(lane.audio_validator_histogram)
-        if (!countStructural) {
-          total -= Number(lane.structural_count) || 0
-          filled -= Number(lane.structural_filled_count) || 0
-          hasAudio -= Number(lane.structural_audio_count) || 0
-          subtractHistogram(laneHistogram, lane.structural_validator_histogram)
-          subtractHistogram(laneAudio, lane.structural_audio_validator_histogram)
-        }
-        for (const [bucket, amount] of laneHistogram) {
-          histogram.set(bucket, (histogram.get(bucket) ?? 0) + amount)
-        }
-        for (const [bucket, amount] of laneAudio) {
-          audioHistogram.set(bucket, (audioHistogram.get(bucket) ?? 0) + amount)
-        }
+        const delivers = parseLaneDelivers(lane.delivers)
+        const own = laneRowCounts(lane, countStructural, threshold, audioThreshold)
+        // A language that counts audio reads its recordings off the file's cue
+        // sheet where it has one, in the same language. A Text language keeps
+        // reading its own row's, exactly as before.
+        const cueId = laneCountsAudio(delivers) ? cueSheetOf.get(file.id) : undefined
+        const cueRow = cueId
+          ? progressByFile.get(cueId)?.find((row) => row.lane_id === lane.lane_id)
+          : undefined
+        const audio = cueRow ? laneRowCounts(cueRow, countStructural, threshold, audioThreshold) : own
+        const measure = laneMeasure(delivers, {
+          total: own.total,
+          filled: own.filled,
+          validated: own.validated,
+          audioTotal: audio.total,
+          recorded: audio.recorded,
+          audioApproved: audio.audioApproved,
+          bothApproved: own.bothApproved,
+        })
+        totals.total += measure.total
+        totals.filled += own.filled
+        totals.validated += measure.done
+        totals.audioValidated += audio.audioApproved
+        totals.hasAudio += audio.recorded
+        totals.headline! += measure.headline
+        totals.started! += measure.started
       }
-      totals = {
-        total: Math.max(0, total),
-        filled: Math.max(0, filled),
-        validated: validatedAtThreshold(histogram, threshold),
-        audioValidated: validatedAtThreshold(audioHistogram, audioThreshold),
-        hasAudio: Math.max(0, hasAudio),
-      }
+      // A language owes every line of every file, whether or not the
+      // projection has written its row for this file yet: rows appear when a
+      // file is next recomputed, so a language added after a file was last
+      // touched has none for it. Each such language adds the file's lines to
+      // the total and nothing done. This used to add a file with no rows once
+      // in all, however many languages owed it, and one with some rows not at
+      // all for the languages missing — a two-language project read 3,131
+      // lines short of its 2 × 73,715.
+      const missing = activeLaneIds.filter((id) => !laneRows.some((row) => row.lane_id === id)).length
+      totals.total += missing * fileTotal
+      // No active language at all: the file still counts once.
+      if (laneRows.length === 0 && activeLaneIds.length === 0) totals.total += fileTotal
     } else {
       // Pre-backfill fallback: file counters (approved ≈ validated), and only
       // on a single-lane project — see `singleLane` above.
-      const less = (n: unknown) => (countStructural ? 0 : Number(n) || 0)
-      const total = Math.max(0, (Number(file.cell_count) || 0) - less(file.structural_cell_count))
-      totals = singleLane
-        ? {
-            total,
-            filled: Math.max(0, (Number(file.filled_count) || 0) - less(file.structural_filled_count)),
-            validated: Math.max(
-              0,
-              (Number(file.approved_count) || 0) - less(file.structural_approved_count),
-            ),
-            audioValidated: 0,
-            hasAudio: 0,
-          }
-        : { total, filled: 0, validated: 0, audioValidated: 0, hasAudio: 0 }
+      totals = {
+        total: fileTotal,
+        filled: Math.max(0, (Number(file.filled_count) || 0) - less(file.structural_filled_count)),
+        validated: Math.max(
+          0,
+          (Number(file.approved_count) || 0) - less(file.structural_approved_count),
+        ),
+        audioValidated: 0,
+        hasAudio: 0,
+      }
     }
     projectTotals.total += totals.total
     projectTotals.filled += totals.filled
     projectTotals.validated += totals.validated
     projectTotals.audioValidated += totals.audioValidated
     projectTotals.hasAudio += totals.hasAudio
+    projectTotals.headline! += totals.headline ?? totals.filled
+    projectTotals.started! += totals.started ?? totals.filled
     fileEntries.push({
       fileId: file.id,
       fileName: file.name,

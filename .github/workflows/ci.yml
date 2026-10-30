@@ -8,10 +8,12 @@ name: CI
 #
 # Branch protection on dev requires the jobs that always report a status on a
 # pull request: lint, unit, schema-migrations, auth-worker-tests,
-# sync-worker-tests, agent-worker-tests. A path-filtered worker job reports
-# success when that worker did not change. A skipped required check would
-# block the pull request. The Cloudflare preview stays a separate required
-# check. enforce_admins is false, so an admin can still merge around a red run.
+# sync-worker-tests, agent-worker-tests. `unit` aggregates the three
+# `unit-shard` matrix jobs (AQU-1991), so that name is stable. A path-filtered
+# worker job reports success when that worker did not change. A skipped
+# required check would block the pull request. The Cloudflare preview stays a
+# separate required check. enforce_admins is false, so an admin can still merge
+# around a red run.
 #
 # This workflow does not apply migrations. The nightly Neon refresh
 # (dev-neon-refresh.yml) has not restored dev since 2026-09-29 — NEON_API_KEY was
@@ -59,6 +61,7 @@ jobs:
       auth: ${{ steps.filter.outputs.auth }}
       sync: ${{ steps.filter.outputs.sync }}
       agent: ${{ steps.filter.outputs.agent }}
+      monitor: ${{ steps.filter.outputs.monitor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -116,8 +119,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npx tsc -b --noEmit
 
-  unit:
+  # The root Vitest suite, split three ways (AQU-1991). One runner took 20-34
+  # minutes for ~2,100 files; each shard takes a third of the test time plus a
+  # minute of setup. `--shard` splits the sorted file list, so every file runs
+  # exactly once across the three. Branch protection names `unit`, so the
+  # `unit` job below aggregates the shards and keeps that name stable.
+  unit-shard:
+    name: unit (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -126,14 +139,30 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      # Run worker coverage explicitly; pushes use affected browser tests.
-      - run: pnpm test:worker
+      # `pnpm test` is `vitest run`; the shard flag goes straight to vitest.
+      - run: pnpm vitest run --shard=${{ matrix.shard }}/3
+      # The worker/ suite is two files; one shard carries it.
+      - if: matrix.shard == 1
+        run: pnpm test:worker
       # IDML is a dispatch-only browser suite. A pull request does not run it.
       - uses: ./.github/actions/playwright-chromium
-        if: github.event_name == 'workflow_dispatch'
-      - if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 1
+      - if: github.event_name == 'workflow_dispatch' && matrix.shard == 1
         run: pnpm test:idml
+
+  # Required check. Reports the shards' combined result under the name branch
+  # protection expects; a skipped or cancelled shard fails it.
+  unit:
+    needs: unit-shard
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every shard passed
+        if: needs.unit-shard.result != 'success'
+        run: |
+          echo "unit-shard result: ${{ needs.unit-shard.result }}"
+          exit 1
+      - run: echo "All unit shards passed."
 
   tauri-unit:
     if: github.event_name == 'workflow_dispatch'
@@ -311,6 +340,36 @@ jobs:
       - if: needs.changes.outputs.agent == 'true'
         run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
+
+  # Not a required check yet: add it to branch protection once it has run.
+  monitor-worker-tests:
+    needs: changes
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail when worker scope did not resolve
+        if: needs.changes.result != 'success'
+        run: exit 1
+      - name: Report success when monitor-worker did not change
+        if: needs.changes.result == 'success' && needs.changes.outputs.monitor != 'true'
+        run: echo "monitor-worker did not change. Reporting success so a path-filter skip cannot block branch protection."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.changes.outputs.monitor == 'true'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.changes.outputs.monitor == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: monitor-worker/package-lock.json
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm ci
+        working-directory: monitor-worker
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm run type-check
+        working-directory: monitor-worker
+      - if: needs.changes.outputs.monitor == 'true'
+        run: npm test
+        working-directory: monitor-worker
 
   # NOTE: there is intentionally no `preview` job here. PR previews are owned
   # by Cloudflare Workers Builds (scripts/cloudflare-pr-preview.mjs), not this

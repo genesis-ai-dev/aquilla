@@ -171,6 +171,9 @@ export const org = defineNamespace({
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
     "org.laneChips.ariaLabel": "{label}: {pct} translated",
+    // Media redesign slice 1: the same chip for a language that delivers audio.
+    "org.laneChips.recordedTooltip": "{label} — {pct} recorded",
+    "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
     "org.orgHome.signedOut.heading": "Sign in to see your workspace",
@@ -197,6 +200,14 @@ export const org = defineNamespace({
     "org.orgHome.dueDate": "Due {date}",
     "org.orgHome.pctTranslated": "{pct}% translated",
     "org.orgHome.pctValidated": "{pct}% validated",
+    "org.orgHome.pctRecorded": "{pct}% recorded",
+    // AQU-2178 / AQU-2179: the two halves of "{pct}% validated", for the rows
+    // that sit under no column headings and so must name their own figures —
+    // the project overview's archived languages, and the org projects table's
+    // expanded per-language rows. A row prints only the halves its language
+    // owes, so neither key ever stands in for a missing figure.
+    "org.orgHome.pctTextValidated": "{pct}% text validated",
+    "org.orgHome.pctAudioValidated": "{pct}% audio validated",
     // AQU-883: the project directory backs shared/guest projects; its failure used to
     // be indistinguishable from an empty list, so it gets its own announced state.
     "org.orgHome.projectDirectoryError.title": "Couldn’t load your project directory",
@@ -274,11 +285,20 @@ export const org = defineNamespace({
     "org.orgHome.table.validatedHeaderLabel": "Validated",
     "org.orgHome.table.validatedHeaderDescription":
       "Validated: percentage of cells marked validated by a reviewer.",
+    // AQU-2178: the project overview's Languages table splits that one heading
+    // in two — a language's validated TEXT under this one, its approved
+    // recordings under org.projectOverview.audioValidated, whose tile on the
+    // same page shows the very same figure. Title case follows those tiles, so
+    // the pair reads alike wherever both are on screen.
+    "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
     "org.orgHome.table.audioHeaderDescription":
       "Audio: percentage of cells with at least one recording attached.",
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
+    // Media redesign slice 1: a project whose languages all deliver audio has
+    // no text to translate; its Translated cell shows a dash with this name.
+    "org.orgHome.table.noTextToTranslateAria": "No text to translate: this project delivers audio",
 
     // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
@@ -407,6 +427,16 @@ export const org = defineNamespace({
     "org.teamDetail.addMemberButton": "Add member",
     "org.teamDetail.removeAriaLabel": "Remove {name}",
     "org.teamDetail.allMembersAddedNotice": "All org members are already in this team.",
+    // AQU-2238: direct invite-to-team for someone who is not an org member.
+    "org.teamDetail.outsideOrgLabel": "Invite someone outside the organization",
+    "org.teamDetail.outsideOrgPlaceholder": "Username or email",
+    "org.teamDetail.outsideOrgScopeWithProjects":
+      "Someone outside the organization joins this team only, and reaches its projects: {projects}. They are not added to the organization's member list and see nothing else.",
+    "org.teamDetail.outsideOrgScopeNoProjects":
+      "Someone outside the organization joins this team only. No project is attached to this team yet, so they will see nothing until one is. They are not added to the organization's member list.",
+    "org.teamDetail.outsideOrgRole": "Outside org",
+    "org.teamDetail.outsideOrgRoleTooltip":
+      "Not on this organization's member list. They reach only the projects attached to the teams they are on.",
     "org.teamDetail.addErrorPrefix": "Couldn't add: {error}",
     "org.teamDetail.couldntBeAddedFallback": "couldn't be added",
     // "Adding…" → common.adding (identical text)
@@ -574,11 +604,6 @@ export const org = defineNamespace({
     "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.importedOriginalsHeading": "Imported originals",
     "org.projectOverview.importedOriginalsListAria": "Imported original files",
-    "org.projectOverview.importedOriginalsShowMore": plural({
-      one: "Show {count} more",
-      other: "Show {count} more",
-    }),
-    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -597,7 +622,6 @@ export const org = defineNamespace({
       one: "+{count} more file — show all",
       other: "+{count} more files — show all",
     }),
-    "org.projectOverview.showFewer": "Show fewer",
     "org.projectOverview.deadlineHeading": "Deadline",
     "org.projectOverview.noDeadlineSet": "No deadline set",
     "org.projectOverview.change": "Change",
@@ -815,12 +839,12 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.description": "People in this organization and their access.",
     "org.membersPage.orgPage.loadErrorTitle": "Couldn't load your organization",
     "org.membersPage.orgPage.loadErrorHint":
-      "Common causes: the Frontier worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
+      "Common causes: the Aquilla worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
     "org.membersPage.orgPage.signInTitle": "Sign in to manage members",
     "org.membersPage.orgPage.selectOrgDescription":
       "Member access is managed within a single organization. Choose one from the switcher to continue.",
     "org.membersPage.orgPage.signInDescription":
-      "Member access requires a Frontier session. Sign in from the dashboard and come back to this page.",
+      "Member access requires a Aquilla session. Sign in from the dashboard and come back to this page.",
     "org.membersPage.orgPage.pageDescriptionPrefix": "People in",
     "org.membersPage.orgPage.pageDescriptionSuffix":
       ". Org-level roles apply across every project; per-project access can be granted separately via the Add-to-projects flow.",
@@ -1146,6 +1170,13 @@ export const org = defineNamespace({
     // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
     "org.membersPanel.scopesToggleLabel": "Scopes",
     "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
+    // AQU-2054: a project lead can be limited to lanes, and can grant only
+    // the lanes they hold. Someone who already has every lane stays read-only
+    // for that caller, because changing them would remove other languages.
+    "org.membersPanel.leadEveryLane": "Every lane",
+    "org.membersPanel.leadLaneChangeHint": "This includes languages you don't hold, so it can't be changed here.",
+    "org.membersPanel.grantOnlyYourLanes": "You can grant only the lanes you hold. Lanes you don't hold stay as they are.",
+    "org.membersPanel.cannotGrantEveryLane": "Leave at least one lane. Clearing every lane would give access to every language.",
     "org.membersPanel.lanesLegend": "Lanes",
     "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
@@ -1444,8 +1475,8 @@ export const org = defineNamespace({
     // the row's hidden popover anchor already carries that, and two buttons
     // with one name in a row tell a screen-reader user nothing apart.
     "org.overviewLaneTable.peopleCellAriaLabel": "People on {lane}",
-    "org.overviewLaneTable.sectionDescription":
-      "Progress, people, and actions for each target language on this project.",
+    // AQU-2180: the card's subtitle is gone — no sibling card on the project
+    // overview carries one, so its string went with it.
 
     // -- ProjectOverview: per-project overview page (most already i18n'd) --
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
@@ -2017,6 +2048,31 @@ export const org = defineNamespace({
         description: "Second line of the project-row deadline tooltip on OrgHome, naming the exact due date.",
         placeholders: { date: "Already-formatted deadline date (e.g. 'Jan 1, 2020')." },
       },
+      "org.orgHome.table.noTextToTranslateAria": {
+        description:
+          "Accessible name of the em dash shown in a project row's Translated cell when every language of the project delivers audio, so there is no text to translate.",
+      },
+      "org.laneChips.recordedTooltip": {
+        description:
+          "Tooltip on a per-lane progress chip for a language that delivers audio: the share of its lines that have a recording. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.laneChips.recordedAriaLabel": {
+        description:
+          "Accessible name for a per-lane progress chip of a language that delivers audio. Same {label}/{pct} semantics as org.laneChips.tooltip.",
+        placeholders: {
+          label: "Lane display name (target language or lane tag) — not translated, may be a language name.",
+          pct: "Pre-formatted percentage string (e.g. '31%'), already locale-aware and bidi-isolated.",
+        },
+      },
+      "org.orgHome.pctRecorded": {
+        description:
+          "Accessible name for a language's progress figure when that language delivers audio: the share of its lines that have a recording.",
+        placeholders: { pct: "Whole-number recorded percentage, e.g. 40." },
+      },
       "org.orgHome.pctTranslated": {
         description:
           "Percentage-translated figure on OrgHome — used both as the org-card summary line ('{pct}% translated') and as the accessible name for a project row's translated-percent cell.",
@@ -2026,6 +2082,27 @@ export const org = defineNamespace({
         description:
           "Percentage-validated figure on OrgHome — used both as the org-card summary line ('{pct}% validated') and as the accessible name for a project row's validated-percent cell.",
         placeholders: { pct: "Whole-number validated percentage, e.g. 20." },
+      },
+      "org.orgHome.pctTextValidated": {
+        description:
+          "A language's validated-TEXT figure on the rows that carry no column " +
+          "headings — the project overview's archived languages, and the org projects " +
+          "table's expanded per-language rows. Unlike the Languages table's 'Text " +
+          "Validated' header this one names itself in a short lower-case phrase after " +
+          "the percentage. 'text' distinguishes it from the audio figure beside it " +
+          "(org.orgHome.pctAudioValidated) — the share of the language's lines whose " +
+          "TRANSLATION a reviewer has signed off, not its recordings. Shown only for a " +
+          "language that delivers text.",
+        placeholders: { pct: "Whole-number text-validated percentage, e.g. 20." },
+      },
+      "org.orgHome.pctAudioValidated": {
+        description:
+          "A language's approved-RECORDINGS figure on the rows that carry no column " +
+          "headings, the twin of org.orgHome.pctTextValidated and shown only for a " +
+          "language that owes audio. 'audio' distinguishes it from the text figure " +
+          "beside it — the share of the language's lines whose RECORDING a reviewer has " +
+          "approved, not its translations.",
+        placeholders: { pct: "Whole-number audio-validated percentage, e.g. 20." },
       },
       "org.orgHome.organizationsPanel.countFraction": {
         description:
@@ -2176,6 +2253,11 @@ export const org = defineNamespace({
         description:
           "Accessible name for a 'remove' control on TeamDetail — used both for a staged-member chip's × button and for a team member row's Remove action. {name} is whichever person's username is being removed.",
         placeholders: { name: "Username of the person the control removes — not translated." },
+      },
+      "org.teamDetail.outsideOrgScopeWithProjects": {
+        description:
+          "AQU-2238: scope sentence under the 'invite someone outside the organization' field in the team add-member dialog, naming exactly what the guest will and won't reach (AQU-1030). {projects} is the team's attached projects. The no-project wording is a separate key.",
+        placeholders: { projects: "The team's attached project names, joined as a localized list — project names are not translated." },
       },
       "org.teamDetail.addErrorPrefix": {
         description:
@@ -2373,16 +2455,6 @@ export const org = defineNamespace({
       "org.projectOverview.importedOriginalsListAria": {
         description:
           "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
-      },
-      "org.projectOverview.importedOriginalsShowMore": {
-        description:
-          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
-        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
-      },
-      "org.projectOverview.importedOriginalsShowAll": {
-        description:
-          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
-        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",

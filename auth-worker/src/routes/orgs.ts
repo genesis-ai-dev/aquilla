@@ -37,6 +37,7 @@ import {
   listUserDirectMembershipsInOrg,
   listProjectGrantOrgIds,
   listPlatformAdminOrgsPage,
+  countVisibleActiveLanguages,
   listOrgPortfolioPage,
   listUserOrgs,
   summarizeVisiblePortfolios,
@@ -60,18 +61,21 @@ import {
   ROLE_NAMES,
 } from "../services/project-permissions"
 import { countTargetLanesByOrg } from "../lib/billing/words"
-import { lookupUserByUsername } from "../services/user-lookup"
+import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lanes/read-wall"
+import { lookupUserByUsername, lookupUserByUsernameOrEmail } from "../services/user-lookup"
 import { auditMembershipChange, isAdminActor, priorMembershipRole } from "../services/admin-audit"
 import { getOrgAssignmentWorkload, getMyAssignmentsAcrossOrg } from "../services/assignments"
 import { loadProjectVisibilityOverrides } from "../../../db/shared/visibility-floors"
 import { ViewerScope } from "../services/access-payload"
 import { sendOrgInviteEmail } from "../services/email"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 import { getTeamMemberRole, setTeamMemberRole, TEAM_SCOPE_ROLES } from "../services/team-roles"
 import {
   applyTeamMemberLaneGrants,
   applyTeamProjectLaneGrants,
   applyTeamRosterLaneChecks,
   reconcileMemberProjectLanes,
+  relevelTeamMemberLaneGrants,
   resolveTeamLaneSelection,
   saveTeamLaneSelection,
 } from "../services/lane-grants"
@@ -463,19 +467,24 @@ orgs.get("/:orgId/portfolio", async (c) => {
     ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
     : null
   // AQU-1071: the active-lane count rides along with the rollup the org
-  // dashboard is already asking for, so its tile costs no extra round trip. It
-  // is the same count billing bills on, and deliberately org-wide rather than
-  // scoped to `page` or to the caller's visible projects (AQU-745): a partner
-  // reading a smaller figure than their invoice is the confusion this ticket
-  // exists to remove, and a bare count names no project, so it discloses
-  // nothing the visibility rule guards.
-  const [{ projects, nextCursor }, laneCounts] = await Promise.all([
+  // dashboard is already asking for, so its tile costs no extra round trip.
+  // Maintainer+, platform admins, and any deployment with the read wall off
+  // still get the org-wide figure billing bills on (not scoped to this page).
+  // AQU-1515: below that wall the figure is only the lanes this caller may
+  // see — the same decision that hides sibling lane names. The field stays
+  // on the response either way; a real zero and a withheld registry are
+  // different numbers, and neither one is an omitted field.
+  const seesEveryLanguage =
+    isAdmin || role >= READ_WALL_MAINTAINER || !laneReadWallEnabled(c.env.LANE_READ_WALL)
+  const [{ projects, nextCursor }, activeLanguageCount] = await Promise.all([
     listOrgPortfolioPage(c.env, [orgId], { userId: user.id, isAdmin }, page),
-    countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]),
+    seesEveryLanguage
+      ? countTargetLanesByOrg(c.env.AQUILLA_PG, [orgId]).then(({ byOrg }) => byOrg.get(orgId) ?? 0)
+      : countVisibleActiveLanguages(c.env, orgId, user.id),
   ])
   return c.json({
     projects: projects.map(({ orgId: _orgId, ...project }) => project),
-    activeLanguageCount: laneCounts.byOrg.get(orgId) ?? 0,
+    activeLanguageCount,
     nextCursor,
   })
 })
@@ -795,8 +804,18 @@ orgs.delete("/:orgId/groups/:groupId", async (c) => {
 // AQU-736: team membership has no role, so the batch shape is a plain username
 // array (`{ usernames: [...] }`). The legacy single-user body (`{ username }`)
 // keeps working exactly as before.
-const memberSingle = z.object({ username: z.string().min(1) })
-const memberBatch = z.object({ usernames: z.array(z.string().min(1)).min(1).max(100) })
+//
+// AQU-2238: `external: true` opts the request into adding people who are NOT on
+// the org roster — the "invite someone outside the organization" path. It is an
+// explicit opt-in so the default stays fail-closed: a picker-driven add of
+// someone who silently lost their org membership still 409s rather than quietly
+// minting a guest. Each entry may be a username or an email address, because an
+// outsider has no username the inviter could have been offered.
+const memberSingle = z.object({ username: z.string().min(1), external: z.boolean().optional() })
+const memberBatch = z.object({
+  usernames: z.array(z.string().min(1)).min(1).max(100),
+  external: z.boolean().optional(),
+})
 const memberBody = z.union([memberBatch, memberSingle])
 
 const GROUP_GRANT_ERROR_STATUS: Record<string, 404 | 409> = {
@@ -805,7 +824,7 @@ const GROUP_GRANT_ERROR_STATUS: Record<string, 404 | 409> = {
 }
 
 type GroupGrantOutcome =
-  | { ok: true; userId: number; username: string }
+  | { ok: true; userId: number; username: string; external: boolean }
   | { ok: false; username: string; code: string; message: string }
 
 /**
@@ -820,12 +839,25 @@ async function grantGroupMemberOne(
   addedBy: number,
   username: string,
   actor: AuthUser,
+  allowExternal = false,
 ): Promise<GroupGrantOutcome> {
-  const target = await lookupUserByUsername(env, username)
+  const target = allowExternal
+    ? await lookupUserByUsernameOrEmail(env, username)
+    : await lookupUserByUsername(env, username)
   if (!target) {
-    return { ok: false, username, code: "user_not_found", message: "user not found" }
+    return {
+      ok: false,
+      username,
+      code: "user_not_found",
+      // AQU-2238: an outside invite usually fails because the person has no
+      // Aquilla account yet, which the bare "user not found" never said. The
+      // project invite-by-email link is the path that reaches them.
+      message: allowExternal
+        ? "no Aquilla account matches that username or email — send them a project invite instead"
+        : "user not found",
+    }
   }
-  const result = await addGroupMember(env, orgId, groupId, target.id, addedBy)
+  const result = await addGroupMember(env, orgId, groupId, target.id, addedBy, { allowExternal })
   if (result === "not-org-member") {
     return { ok: false, username, code: "not_org_member", message: "user is not a member of this org" }
   }
@@ -840,8 +872,9 @@ async function grantGroupMemberOne(
     target: { id: target.id, username: target.username },
     roleBefore: null,
     roleAfter: null,
+    external: result === "ok-external",
   })
-  return { ok: true, userId: target.id, username: target.username }
+  return { ok: true, userId: target.id, username: target.username, external: result === "ok-external" }
 }
 
 orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), async (c) => {
@@ -855,6 +888,8 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
 
   const body = c.req.valid("json")
 
+  const allowExternal = body.external === true
+
   if ("usernames" in body) {
     const seen = new Set<string>()
     const names = body.usernames.filter((u) => {
@@ -864,24 +899,25 @@ orgs.post("/:orgId/groups/:groupId/members", zValidator("json", memberBody), asy
       return true
     })
     const results: Array<
-      { username: string; ok: true } | { username: string; ok: false; error: { code: string; message: string } }
+      | { username: string; ok: true; external: boolean }
+      | { username: string; ok: false; error: { code: string; message: string } }
     > = []
     for (const username of names) {
-      const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, username, user)
+      const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, username, user, allowExternal)
       results.push(
         outcome.ok
-          ? { username, ok: true }
+          ? { username, ok: true, external: outcome.external }
           : { username, ok: false, error: { code: outcome.code, message: outcome.message } },
       )
     }
     return c.json({ results })
   }
 
-  const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, body.username, user)
+  const outcome = await grantGroupMemberOne(c.env, orgId, groupId, user.id, body.username, user, allowExternal)
   if (!outcome.ok) {
     return c.json({ error: outcome.message }, GROUP_GRANT_ERROR_STATUS[outcome.code] ?? 400)
   }
-  return c.json({ userId: outcome.userId, username: outcome.username })
+  return c.json({ userId: outcome.userId, username: outcome.username, external: outcome.external })
 })
 
 orgs.delete("/:orgId/groups/:groupId/members/:userId", async (c) => {
@@ -949,6 +985,9 @@ orgs.patch("/:orgId/groups/:groupId/members/:userId", zValidator("json", teamRol
     return c.json({ error: "cannot change the team role of someone at or above you" }, 403)
   }
   await setTeamMemberRole(c.env, groupId, targetUserId, roleLevel)
+  // AQU-1809: the team-scope role is part of the effective project role.
+  // Rows this member already holds move to that level; their lanes do not.
+  await relevelTeamMemberLaneGrants(c.env.AQUILLA_PG, groupId, targetUserId)
   await auditMembershipChange(c.env, user, {
     action: "team.member.role",
     where: { scope: "team", orgId, groupId },
@@ -1356,6 +1395,14 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
       403,
     )
   }
+  // AQU-1579: the match above is only a string compare. Refuse before the
+  // invite is claimed so an unverified account cannot spend it.
+  const unverified = await emailBoundInviteUnverified(
+    c.env.AQUILLA_PG,
+    user.id,
+    invite.email,
+  )
+  if (unverified) return c.json(unverified, 403)
 
   const org = await c.env.AQUILLA_PG.prepare(
     "SELECT id, name FROM organizations WHERE id = ?",

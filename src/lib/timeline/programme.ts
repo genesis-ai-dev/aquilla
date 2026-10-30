@@ -24,7 +24,8 @@
 // data edit in the first place.
 
 import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-audio"
-import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC } from "./lane-timing"
+import { hasTiming, sortByLens } from "./derive"
+import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
 /** A window on some clock, in seconds. */
@@ -50,8 +51,9 @@ export interface ProgrammeSlot {
   /** What the ORIGINAL's card is drawn at: its real audible length, or the
    *  whole verse when there is no original audio to be honest about. */
   cardLenSec: number
-  /** max(sourceLenSec, targetLenSec) — the verse's footprint. Every part of it
-   *  is covered by audio, which is what lets the clock run without skipping. */
+  /** The verse's footprint: targetLeadSec + targetLenSec when it has a take
+   *  of known length (AQU-2204: only the recordings set it), else its
+   *  stand-in or its own span. */
   slotLenSec: number
   /**
    * Which side runs long enough to clock the slot, or null when neither side
@@ -73,6 +75,33 @@ export interface ProgrammeSlot {
    * never split.
    */
   targetPieces?: { audioId: string; start: number; end: number }[]
+  /**
+   * AQU-2204: the line has no times of its own and no recording, so its
+   * length is a STAND-IN from its text (lib/timeline/stand-in). It is drawn
+   * dashed with no time on it, and playback steps over it (nothing to play).
+   * Absent on every other slot.
+   */
+  standIn?: true
+  /**
+   * AQU-2204 (Sam, Oct 26): a PAUSE someone left before the take — the take
+   * was placed (or recorded) that far after its line's start. Following the
+   * recordings keeps it inside the line: the take starts this long into the
+   * slot, the slot is that much longer, and the timeline draws the pause
+   * lightly. Absent when the take starts on its line (or before it).
+   */
+  targetLeadSec?: number
+}
+
+/** A pause shorter than this is a placement wobble, not a pause. */
+export const MIN_TARGET_LEAD_SEC = 0.05
+
+export interface BuildProgrammeOptions {
+  /**
+   * AQU-2204: the stand-in length of a line with NO TIMES. When given, such a
+   * line takes its place in the programme (its recording's length once it has
+   * one, else this) instead of being left out.
+   */
+  standInLenSec?(cell: CellData): number
 }
 
 export interface Programme {
@@ -118,28 +147,29 @@ function splitWindows(
  * `cells` must already be the dialogue lane, time-sorted (deriveLanes does
  * both) — the programme's order IS the cells' order.
  */
-export function buildProgramme(cells: readonly CellData[]): Programme {
+export function buildProgramme(cells: readonly CellData[], opts?: BuildProgrammeOptions): Programme {
   if (cells.length === 0) return EMPTY
   const slots: ProgrammeSlot[] = []
   const byCellId = new Map<string, ProgrammeSlot>()
   let cursor = 0
 
   for (const cell of cells) {
-    const nominalLenSec = sectionLenSec(cell)
+    let nominalLenSec = sectionLenSec(cell)
     // A section with no usable timing has no place in a laid-out programme —
     // it lives in the Untimed strip, exactly as it does in dubbing mode.
-    if (nominalLenSec <= 0) continue
+    // AQU-2204: unless the caller gives it a stand-in length (a file with no
+    // times at all, following its recordings), in which case it takes room.
+    const untimed = nominalLenSec <= 0
+    if (untimed) {
+      if (!opts?.standInLenSec) continue
+      nominalLenSec = Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+    }
 
-    const hasSourceClip = sourceClipAudioForCell(cell) != null
-    const sourceWindow: Window | null =
-      hasSourceClip && typeof cell.startTime === "number" && typeof cell.endTime === "number"
-        ? { start: cell.startTime, end: cell.endTime }
-        : null
-    // A verse whose source clip is gone (generated-voice-only, or a lone take)
-    // has NO original to hear. Letting its section span reserve room anyway
-    // would leave a stretch of the verse that nothing can play — and the clock
-    // would have to skip it, which is exactly what this design avoids.
-    const sourceLenSec = sourceWindow ? nominalLenSec : 0
+    // An untimed line has no window into any source recording to play.
+    const hasSourceClip = !untimed && sourceClipAudioForCell(cell) != null
+    const fullSourceStart = hasSourceClip && typeof cell.startTime === "number" && typeof cell.endTime === "number"
+      ? cell.startTime
+      : null
 
     const pieces = resolveTargetPieces(cell)
     const target = pieces[0] ?? null
@@ -159,20 +189,44 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
     const targetWindow: Window | null =
       target && effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null
 
-    const audibleLenSec = Math.max(sourceLenSec, targetLenSec)
-    // Nothing playable at all: keep the section's own length so its card is
-    // still readable. Playback skips such a verse outright.
-    const slotLenSec = audibleLenSec > 0 ? audibleLenSec : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
-    const clock: ProgrammeSlot["clock"] =
-      sourceWindow && targetWindow
-        ? targetLenSec > sourceLenSec
-          ? "target"
-          : "source"
-        : sourceWindow
-          ? "source"
-          : targetWindow
-            ? "target"
-            : null
+    // AQU-2204: a pause someone left before the take stays inside its line.
+    // It is where the take was PLACED (its clip's start against the line's),
+    // never a head trim, which only removes the start of the recording. Only a
+    // whole take with a known length on a line with times can carry one — a
+    // split take's pieces sit end to end from the slot's start.
+    const leadGeom = !untimed && targetWindow && !split ? targetChipGeom(cell, att) : null
+    const rawLeadSec = leadGeom && typeof cell.startTime === "number" ? leadGeom.anchor - cell.startTime : 0
+    const targetLeadSec = rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0
+    // AQU-2204 (Sam, Oct 27): FOLLOWING THE RECORDINGS, ONLY THE RECORDINGS
+    // SET A LINE'S LENGTH. Today's Free timing followed both (each line the
+    // longer of its source and its take); the source no longer has a say:
+    //   - a line with a take lasts the pause someone left before it plus the take;
+    //   - a take whose length isn't known yet keeps the line's own span, which
+    //     its chip already borrows;
+    //   - a line with no take lasts its stand-in length, from its words (the
+    //     caller's estimator), else its own span;
+    // and the source sounds only as long as the line lasts: cut where it ends.
+    const recordedLenSec = targetWindow ? targetLeadSec + targetLenSec : 0
+    const usesStandIn = !target && (untimed || Boolean(opts?.standInLenSec))
+    const unrecordedLenSec = untimed
+      ? nominalLenSec
+      : opts?.standInLenSec
+        ? Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+        : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
+    const slotLenSec = recordedLenSec > 0
+      ? recordedLenSec
+      : target
+        ? Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
+        : unrecordedLenSec
+    // A verse whose source clip is gone (generated-voice-only, or a lone take)
+    // has NO original to hear; one that runs past the line is cut at its end.
+    const sourceLenSec = fullSourceStart != null ? Math.min(nominalLenSec, slotLenSec) : 0
+    const sourceWindow: Window | null =
+      fullSourceStart != null ? { start: fullSourceStart, end: fullSourceStart + sourceLenSec } : null
+    // The take clocks its line (the source never outlasts it now); a line with
+    // no take is clocked by its source, else nothing plays and playback steps
+    // over it.
+    const clock: ProgrammeSlot["clock"] = targetWindow ? "target" : sourceWindow ? "source" : null
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -186,6 +240,8 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
       sourceWindow,
       targetWindow,
       ...(split ? { targetPieces: split.pieces } : {}),
+      ...(usesStandIn ? { standIn: true as const } : {}),
+      ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
     }
     slots.push(slot)
     byCellId.set(cell.id, slot)
@@ -193,6 +249,25 @@ export function buildProgramme(cells: readonly CellData[]): Programme {
   }
 
   return { slots, totalSec: cursor, byCellId }
+}
+
+/**
+ * AQU-2204: the lines a file's programme is laid out from, in its order — the
+ * ONE answer the timeline and the transport share, so the drawing and the
+ * playback can never disagree about where a line is:
+ *   - the timed media cells (an mp3 import, a source recording cut into lines);
+ *   - else the timed cells (AQU-1704: a video-less subtitle import's cues);
+ *   - else, for a file with NO times at all (an audio Bible book), every line in
+ *     its own order, each laid out at its recording's length or a stand-in.
+ * `untimed` says which of the last applies: the caller then passes the stand-in
+ * estimator to `buildProgramme`.
+ */
+export function programmeLines(cells: readonly CellData[]): { lines: CellData[]; untimed: boolean } {
+  const media = cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c))
+  if (media.length > 0) return { lines: sortByLens(media, "time"), untimed: false }
+  const timed = cells.filter((c) => hasTiming(c))
+  if (timed.length > 0) return { lines: sortByLens(timed, "time"), untimed: false }
+  return { lines: sortByLens(cells, "sequence"), untimed: cells.length > 0 }
 }
 
 /**
@@ -334,4 +409,34 @@ export function fileSpanToProgrammeSpan(
 export function targetRatio(slot: ProgrammeSlot): number | null {
   if (slot.targetLenSec <= 0 || slot.sourceLenSec <= 0) return null
   return slot.targetLenSec / slot.sourceLenSec
+}
+
+/**
+ * AQU-2215 (Sam, Oct 27): whether a take on this line can carry a PAUSE
+ * before it — exactly the conditions `buildProgramme` keeps one under, so a
+ * take the timeline lets you drag is always a take whose new pause the
+ * programme reads back. A line with no times of its own has nothing to
+ * measure a pause from; a split take's pieces sit end to end from the slot's
+ * start; a take of unknown length has no window. None of the three can hold
+ * one, and letting a chip be dragged anyway would spring it back.
+ */
+export function canCarryTargetLead(cell: CellData, slot: ProgrammeSlot): boolean {
+  return sectionLenSec(cell) > 0 && slot.targetWindow != null && slot.targetPieces == null
+}
+
+/**
+ * AQU-2215: the pause a move gesture is asking for — where the take's audible
+ * start was dragged to, measured from its line's start on the programme clock.
+ *
+ * Following the recordings a take moves only INSIDE its own line: dragging
+ * right grows the pause (and the line with it, so the lines after move along),
+ * dragging left shrinks it back to none. Zero is the floor — a take never
+ * starts before the line it performs — and anything under
+ * `MIN_TARGET_LEAD_SEC` is the same placement wobble `buildProgramme` already
+ * reads as no pause, so the gesture stores none rather than a value the
+ * layout would then ignore.
+ */
+export function leadSecForMove(slot: ProgrammeSlot, audibleStartSec: number): number {
+  const lead = audibleStartSec - slot.startSec
+  return lead >= MIN_TARGET_LEAD_SEC ? lead : 0
 }

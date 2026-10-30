@@ -93,7 +93,7 @@ export function emptyBillingRow(orgId: number): OrgBillingRow {
   }
 }
 
-function normalizeBillingRow(row: OrgBillingRow): OrgBillingRow {
+export function normalizeBillingRow(row: OrgBillingRow): OrgBillingRow {
   return {
     ...row,
     plan: (row.plan as BillingPlan) || "none",
@@ -187,12 +187,22 @@ async function sumWordsSince(db: AquillaDb, orgId: number, since: string): Promi
   }
 }
 
-function periodStartDate(billing: OrgBillingRow): string {
+/** First day of the trailing-year window the talk-to-us check reads. */
+export function trailingYearStart(): string {
+  return nDaysAgoUtc(364)
+}
+
+/** Where a period starts when the org has none on record. */
+export function defaultPeriodStart(): string {
+  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+}
+
+export function periodStartDate(billing: OrgBillingRow): string {
   if (billing.current_period_start) {
     const parsed = Date.parse(billing.current_period_start)
     if (Number.isFinite(parsed)) return utcDateKey(new Date(parsed))
   }
-  return nDaysAgoUtc(FIELD_PLAN.intervalDays - 1)
+  return defaultPeriodStart()
 }
 
 export async function resetWordUsage(db: AquillaDb, orgId: number, since?: string): Promise<number> {
@@ -209,14 +219,23 @@ export async function resetWordUsage(db: AquillaDb, orgId: number, since?: strin
 }
 
 export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Promise<OrgBillingOverrides> {
-  const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
   try {
     const row = await db
       .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
       .bind(orgId)
       .first<{ settings: string }>()
-    if (!row?.settings) return empty
-    const parsed = JSON.parse(row.settings) as Record<string, unknown>
+    return parseBillingOverrides(row?.settings)
+  } catch {
+    return { includedCredits: null, billedLanguageCount: null }
+  }
+}
+
+/** The `billing` key of an org_settings blob. Malformed JSON reads as no overrides. */
+export function parseBillingOverrides(settings: string | null | undefined): OrgBillingOverrides {
+  const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
+  if (!settings) return empty
+  try {
+    const parsed = JSON.parse(settings) as Record<string, unknown>
     const billing = parsed.billing
     if (!billing || typeof billing !== "object" || Array.isArray(billing)) return empty
     const blob = billing as Record<string, unknown>
@@ -341,29 +360,48 @@ export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise
   return byOrg.get(orgId) ?? 0
 }
 
+export type SnapshotCatalog = Pick<
+  ResolvedFieldPlan,
+  | "includedWords"
+  | "addonWords"
+  | "talkToUsWordsPerYear"
+  | "wordsPerCredit"
+  | "exploreCreditsPerCycle"
+  | "fieldCreditsPerCycle"
+  | "addonCredits"
+  | "enterpriseCreditsPerLanguagePerYear"
+>
+
+/** The rows one snapshot is computed from. readWordSnapshot reads them for one
+ * org; readWordSnapshots (word-snapshots.ts) reads them for many at once. */
+export interface WordSnapshotInputs {
+  billing: OrgBillingRow
+  wordsUsed: number
+  trailingYearWords: number
+  overrides: OrgBillingOverrides
+  autoLaneCount: number
+}
+
 export async function readWordSnapshot(
   db: AquillaDb,
   orgId: number,
-  catalog?: Pick<
-    ResolvedFieldPlan,
-    | "includedWords"
-    | "addonWords"
-    | "talkToUsWordsPerYear"
-    | "wordsPerCredit"
-    | "exploreCreditsPerCycle"
-    | "fieldCreditsPerCycle"
-    | "addonCredits"
-    | "enterpriseCreditsPerLanguagePerYear"
-  >,
+  catalog?: SnapshotCatalog,
 ): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
   const [wordsUsed, trailingYearWords, overrides, autoLaneCount] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
-    sumWordsSince(db, orgId, nDaysAgoUtc(364)),
+    sumWordsSince(db, orgId, trailingYearStart()),
     readOrgBillingOverrides(db, orgId),
     countOrgTargetLanes(db, orgId),
   ])
+  return buildWordSnapshot({ billing, wordsUsed, trailingYearWords, overrides, autoLaneCount }, catalog)
+}
+
+export function buildWordSnapshot(
+  { billing, wordsUsed, trailingYearWords, overrides, autoLaneCount }: WordSnapshotInputs,
+  catalog?: SnapshotCatalog,
+): OrgWordSnapshot {
   const wordsPerCredit = catalog?.wordsPerCredit ?? 100
   const languageCount = overrides.billedLanguageCount ?? autoLaneCount
   const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords

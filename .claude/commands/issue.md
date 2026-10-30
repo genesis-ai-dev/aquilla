@@ -56,7 +56,8 @@ Parse `$ARGUMENTS`:
   it. If it has no project, put it in `Prototype Debugging` and say so.
 - **`next`** (or empty) → `list_issues` filtered to team `Aquilla` + status `Todo` (the
   agent-ready queue — **never `Triage`/`Backlog`**), across every project — the V1 projects
-  and `Prototype Debugging` alike. Skip anything labelled `HITL`. Pick the
+  and `Prototype Debugging` alike. Skip anything labelled `HITL` (a veto on top of status, per
+  `AGENTS.md` → "the pickup contract"). Pick the
   highest-priority / lowest-numbered one and operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
   Create the issue first (`save_issue` with the team, a project per the placement rule —

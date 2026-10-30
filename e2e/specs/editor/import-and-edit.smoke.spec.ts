@@ -40,7 +40,8 @@ test("YouTube picture imports without captions; its first captions become its ro
     .toEqual([expect.objectContaining({ payload: expect.objectContaining({ coreMediaUrl: url }) })])
   expect(before.filter(event => event.kind === "source.cell.create")).toHaveLength(0)
 
-  // Track editing is still OFF: adding captions as rows does not need it.
+  // The project has made no track-editing choice of its own: adding captions
+  // as rows is ungated either way, and does not need the setting.
   await ws.openTextView()
   const srt = Buffer.from("1\n00:00:02,000 --> 00:00:03,000\nLater caption\n\n"
     + "2\n00:00:00,500 --> 00:00:01,500\nEarlier caption\n")

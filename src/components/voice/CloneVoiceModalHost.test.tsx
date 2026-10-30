@@ -62,7 +62,10 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
     castStats: new Map(),
     saveTts: vi.fn(async () => {}),
     assignCells: vi.fn(),
+    assignCharacter: vi.fn(),
+    assignPick: vi.fn(),
     ...over,
+    applySplitCastCopies: over.applySplitCastCopies ?? vi.fn(),
   }
 }
 
@@ -230,7 +233,9 @@ describe("Clone voice button → New voice modal (AQU-1001)", () => {
     renderWithTooltips(<Harness />)
     expect(screen.queryByTestId("new-voice-modal")).toBeNull()
 
+    // AQU-2212: the button clones in place; the dialog is under More options.
     await user.click(screen.getByRole("button", { name: /clone/i }))
+    await user.click(screen.getByRole("button", { name: "More options" }))
 
     const modal = screen.getByTestId("new-voice-modal")
     expect(modal.getAttribute("data-mode")).toBe("clone")

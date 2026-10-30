@@ -469,10 +469,44 @@ export async function updateAdminBillingPlans(
   return (await res.json()) as { plan: AdminFieldPlan; version: number; warnings: string[] }
 }
 
-export async function getAdminBillingOrgs(jwt: string): Promise<AdminBillingOrg[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs`, { headers: authHeaders(jwt) })
+/** `paid` = Team or Enterprise. */
+export type AdminBillingTierFilter = OrgTier | "paid"
+/** `usage`: most agent credits used this period first. */
+export type AdminBillingSort = "name" | "usage"
+
+export interface AdminBillingOrgQuery {
+  q?: string
+  tier?: AdminBillingTierFilter
+  sort?: AdminBillingSort
+  limit?: number
+  offset?: number
+}
+
+/** One page of orgs; `total` counts every match for paging. */
+export async function getAdminBillingOrgs(
+  jwt: string,
+  query: AdminBillingOrgQuery = {},
+): Promise<{ orgs: AdminBillingOrg[]; total: number }> {
+  const params = new URLSearchParams()
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.tier) params.set("tier", query.tier)
+  if (query.sort && query.sort !== "name") params.set("sort", query.sort)
+  if (query.limit !== undefined) params.set("limit", String(query.limit))
+  if (query.offset !== undefined) params.set("offset", String(query.offset))
+  const qs = params.toString()
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs${qs ? `?${qs}` : ""}`, {
+    headers: authHeaders(jwt),
+  })
   if (!res.ok) throw new UserError(res.status, await readError(res))
-  return ((await res.json()) as { orgs: AdminBillingOrg[] }).orgs
+  const body = (await res.json()) as { orgs: AdminBillingOrg[]; total: number }
+  return { orgs: body.orgs, total: body.total }
+}
+
+/** One org's row, for refreshing it after a change. */
+export async function getAdminBillingOrg(jwt: string, orgId: number): Promise<AdminBillingOrg> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs/${orgId}`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { org: AdminBillingOrg }).org
 }
 
 export async function patchAdminBillingOrg(

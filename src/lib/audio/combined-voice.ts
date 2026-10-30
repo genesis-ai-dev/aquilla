@@ -106,14 +106,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   const statusKeys = chosen.map((c) => ttsStatusKey(c.id))
   const setAll = (s: Parameters<typeof setTtsStatus>[1]) => { for (const k of statusKeys) setTtsStatus(k, s) }
 
-  const voice = resolveCastVoice(settings, chosen[0].id)
+  const voice = resolveCastVoice(settings, chosen[0])
   const provider = voice.provider ?? resolveTtsProvider(settings)
   const joined = chosen.map((c) => c.translated.trim()).join(SEPARATOR)
   const getSyncToken = audioSyncTokenFetcherForSession(session)
   // AQU-1978: the languages of the lanes this clip performs, not the retired
   // project-level pair (AQU-1594/1595), which is empty on a new project.
-  const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined
-  const sourceLanguage = sourceLaneLanguage(project.lanes, project) ?? undefined
+  const targetLanguage = laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined
+  const sourceLanguage = sourceLaneLanguage(project.lanes) ?? undefined
 
   setAll({ kind: "synthesizing" })
   try {

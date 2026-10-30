@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import {
   login,
+  logout,
   register,
   redeemAccessLink,
   requestPasswordReset,
@@ -238,6 +239,25 @@ describe("register — AQU-820 (server detail composed into a translated frame)"
 describe("password reset + verify-email — AQU-820 (no raw server body)", () => {
   beforeEach(() => { vi.restoreAllMocks(); });
 
+  it.each([
+    [undefined, undefined],
+    ["/join-org/invite-token", "/join-org/invite-token"],
+    ["https://example.com/join-org/invite-token", undefined],
+    ["//example.com/join-org/invite-token", undefined],
+    ["/join-org/../settings", undefined],
+    ["/join-org/invite%2Ftoken", undefined],
+    ["/join-org/invite-token?next=/settings", undefined],
+    ["/join-org/invite-token#fragment", undefined],
+    ["/join-org/invite-token\n", undefined],
+  ])("only sends supported invitation context for %s", async (returnTo, expected) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    await requestPasswordReset("alice@example.com", returnTo);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `${AUTH_BASE}/api/v2/auth/password-reset/request`,
+      expect.objectContaining({ body: JSON.stringify({ email: "alice@example.com", return_to: expected }) }),
+    );
+  });
+
   it("requestPasswordReset drops server body.error/detail", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "no such account on file" }), { status: 404 })
@@ -370,5 +390,20 @@ describe("AUTH_BASE env override", () => {
     vi.resetModules();
     const mod = await import("./auth");
     expect(mod.AUTH_BASE).toBe("https://api.aquilla.app/identity");
+  });
+});
+
+// AQU-2239: local account removal must not depend on a responsive transport.
+describe("logout deadline", () => {
+  it("settles and aborts a hung revocation request", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(() => {}));
+      const result = logout("jwt");
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(result).resolves.toBeUndefined();
+      expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); vi.restoreAllMocks(); }
   });
 });

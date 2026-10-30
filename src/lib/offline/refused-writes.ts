@@ -15,16 +15,14 @@ export function countRefusedWrites(store: OfflineStore): number {
 
 /** Puts every refused write back in line; the sync adapter's queue subscription sends it. */
 export function retryRefusedWrites(store: OfflineStore): void {
-  for (const id of store.query(refusedWritesQuery)) {
-    store.commit(events.eventQueueStatusSet({ id, status: "pending" }))
-  }
+  const ids = store.query(refusedWritesQuery)
+  if (ids.length > 0) store.commit(...ids.map((id) => events.eventQueueStatusSet({ id, status: "pending" })))
 }
 
 /** Drops every refused write from the queue. Irreversible — the edits are gone. */
 export function discardRefusedWrites(store: OfflineStore): void {
-  for (const id of store.query(refusedWritesQuery)) {
-    store.commit(events.eventDequeued({ id }))
-  }
+  const ids = store.query(refusedWritesQuery)
+  if (ids.length > 0) store.commit(events.eventsDequeued({ ids: [...ids] }))
 }
 
 /**

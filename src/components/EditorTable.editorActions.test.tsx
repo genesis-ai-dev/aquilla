@@ -14,6 +14,7 @@ import { createHash } from "node:crypto"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
+import type { Editor } from "@tiptap/core"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
 import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -21,7 +22,7 @@ import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
+import { markManualStyleAlign, markStyleAlignDirty, resetStyleAlignDirtyForTests } from "@/lib/store/style-align-dirty"
 import {
   resetVisibleStyleSegmentsCacheForTests,
   setVisibleStyleSegments,
@@ -244,6 +245,9 @@ function renderTable(
     onAlignStyles?: () => void | Promise<boolean>
     isCompletionConfigured?: boolean
     isCompletionAvailable?: boolean
+    onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
+    audioOnlyLane?: boolean
+    languagesLoading?: boolean
   },
 ) {
   const qc = new QueryClient()
@@ -267,6 +271,9 @@ function renderTable(
           onCompleteSingle={() => {}}
           onCompleteBatch={() => {}}
           onAlignStyles={options?.onAlignStyles}
+          onOptimisticEdit={options?.onOptimisticEdit}
+          audioOnlyLane={options?.audioOnlyLane}
+          languagesLoading={options?.languagesLoading}
           healthMap={new Map()}
           lineNumbersEnabled={false}
           cellLabelsEnabled={false}
@@ -281,8 +288,9 @@ function renderTable(
 
 describe("EditorTable — EditorActionsContext wiring", () => {
   /**
-   * AQU-200: the rail keeps only AI-generate as a direct button; comments,
-   * history, record, play, TTS and footnote now live behind a single `⋯`.
+   * AQU-200: the rail keeps only AI-generate (and, since AQU-2287, record) as
+   * direct buttons; comments, history, play, TTS and footnote live behind a
+   * single `⋯`.
    * These tests are about the WIRING of those actions, not their placement, so
    * they open the overflow first and assert the same behaviour as before.
    * The popup portals to the document body, so query it off `screen`, not the
@@ -296,12 +304,12 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   // ── AQU-200 regression guard ───────────────────────────────────────────────
   //
   // The rail grew to six-plus buttons plus a chevron and read as noise. The
-  // rule that keeps it calm: at most AI-generate stays a direct button (the
-  // row's other always-visible action, validate, lives in the left gutter),
-  // and everything else is reachable through exactly ONE `⋯`. A future feature
-  // that wants a rail button has to earn one of those two slots or go in the
-  // overflow — this test is what says so.
-  it("AQU-200: a focused row shows the AI-generate group and one ⋯ — no button per action", async () => {
+  // rule that keeps it calm: only AI-generate and record stay direct buttons
+  // (the row's other always-visible action, validate, lives in the left
+  // gutter), and everything else is reachable through exactly ONE `⋯`. A
+  // future feature that wants a rail button has to earn a direct slot or go in
+  // the overflow — this test is what says so.
+  it("AQU-200: a focused row shows the AI-generate group, record and one ⋯ — no button per action", async () => {
     renderTable({ onOpenComments: vi.fn(), onOpenHistory: vi.fn(), onOpenRecording: vi.fn() })
 
     const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
@@ -313,30 +321,198 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       .map((b) => b.getAttribute("aria-label") ?? "")
 
     // ONE overflow trigger for the whole rail — not one per action group.
+    const overflowIndex = directLabels.findIndex((l) => l.startsWith("More actions · Translation for"))
     expect(directLabels.filter((l) => l.startsWith("More actions · Translation for"))).toHaveLength(1)
 
-    // The lower-frequency actions are NOT direct buttons any more. This is the
-    // half that regresses if someone promotes "just one" back onto the rail.
-    // The mic renders under its denied label in this fixture (no getUserMedia
-    // in happy-dom) — same button, same slot, just a different tooltip.
+    // AQU-2287: record is a direct button, after the AI group and right before
+    // the `⋯`. The mic renders under its denied label in this fixture (no
+    // getUserMedia in happy-dom) — same button, same slot, just a different
+    // tooltip.
     const MIC = "Microphone access blocked — click for help"
-    const collapsed = ["Add comment", "Edit history", MIC, "Upload audio file", "Add footnote"]
+    expect(directLabels.indexOf(MIC)).toBeGreaterThan(0)
+    expect(directLabels.indexOf(MIC)).toBe(overflowIndex - 1)
+
+    // The lower-frequency actions are NOT direct buttons. This is the half
+    // that regresses if someone promotes "just one" more onto the rail.
+    const collapsed = ["Add comment", "Edit history", "Upload audio file", "Add footnote"]
     for (const label of collapsed) {
       expect(directLabels).not.toContain(label)
     }
 
-    // What's left is the AI-generate group (sparkle + regenerate) plus the two
-    // pieces of rail chrome — four at the absolute most, against the nine-odd
-    // buttons this rail used to grow to.
-    expect(directLabels.length).toBeLessThanOrEqual(4)
+    // What's left is the AI-generate group (sparkle + regenerate), record and
+    // the two pieces of rail chrome — five at the absolute most, against the
+    // nine-odd buttons this rail used to grow to.
+    expect(directLabels.length).toBeLessThanOrEqual(5)
     expect(directLabels).toContain("Open cell details")
 
     // …and every collapsed action that this row's gates allow is still
-    // reachable, through that one ⋯.
+    // reachable, through that one ⋯ — which no longer carries a second mic.
     await openRailOverflow(rail)
-    for (const label of ["Add comment", "Edit history", MIC]) {
+    for (const label of ["Add comment", "Edit history"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
     }
+    const mics = screen.getAllByRole("button", { name: MIC })
+    expect(mics).toHaveLength(1)
+    expect(rail).toContainElement(mics[0])
+  })
+
+  it("AQU-2287: an audio-only lane's rail has record as its only direct action", async () => {
+    renderTable({ onOpenRecording: vi.fn() }, new Map(), { audioOnlyLane: true })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const rail = row.querySelector('[data-slot="cell-action-rail"]') as HTMLElement
+    const directLabels = within(rail)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label") ?? "")
+
+    expect(directLabels).toEqual([
+      "Microphone access blocked — click for help",
+      expect.stringMatching(/^More actions · Translation for/),
+      "Open cell details",
+    ])
+  })
+
+  it("AQU-2287: a row the user can't edit has no record button, in the rail or the ⋯", async () => {
+    // Lanes still loading is the cheapest read-only row this harness can make:
+    // it drops edit rights the same way a Viewer role or a frozen lane does.
+    renderTable({ onOpenRecording: vi.fn() }, new Map(), { languagesLoading: true })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    await openRailOverflow(row)
+    expect(screen.queryByRole("button", { name: /Microphone access blocked|Record audio|Recording unavailable/ }))
+      .not.toBeInTheDocument()
+  })
+
+  // ── AQU-2173 regression guard ──────────────────────────────────────────────
+  //
+  // The rail is chrome. Every footnote action lives behind the `⋯` (AQU-200),
+  // so if pressing `⋯` lets the browser move focus off the cell editor, the
+  // text selection — and with it the footnote's anchor — is gone before the
+  // menu even paints: the marker lands at the end of the cell with nothing
+  // prefilled. Cancelling the mouse-down is what keeps the caret where it is.
+  it("AQU-2173: pressing ⋯ cancels its mouse-down so the cell keeps the caret", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+
+    // fireEvent returns false when a cancelable event was preventDefault()ed.
+    expect(fireEvent.mouseDown(trigger)).toBe(false)
+
+    // …and the menu still opens on the click that follows.
+    fireEvent.click(trigger)
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+  })
+
+  // The other half of AQU-2173: because the caret stays in the cell, an Escape
+  // aimed at the open menu starts inside the editor. The row has to swallow it
+  // there, or the editor's own Escape (AQU-297 — commit and exit to the grid)
+  // would fire on the way out and take the caret with it.
+  it("AQU-2173: the open ⋯ menu leaves the caret in the cell, and Escape closes only the menu", async () => {
+    renderTable({ onOpenComments: vi.fn() })
+
+    // Click into the cell so the editor is mounted and holds the caret — the
+    // state this guard is about.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const editorSurface = document.querySelector(".ProseMirror") as HTMLElement
+    fireEvent.focus(editorSurface)
+    const row = editorSurface.closest("[data-grid-row]") as HTMLElement
+
+    // A pointer open, not a bare click: base-ui reads the interaction type to
+    // decide whether to pull focus into the popup, and only a keyboard open
+    // should (otherwise the menu is unreachable from the `⋯`).
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    expect(await screen.findByRole("button", { name: "Add comment" })).toBeInTheDocument()
+
+    // The menu is open and the cell still has the caret — the selection the
+    // menu's actions act on is still there to act on.
+    expect(document.activeElement).toBe(editorSurface)
+
+    fireEvent.keyDown(editorSurface, { key: "Escape" })
+
+    // Escape closed the menu…
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
+    })
+    // …and did nothing else. Let it through to the editor and ProseMirror's own
+    // handler blurs it and hands focus back to the grid row (AQU-297), losing
+    // the caret with it.
+    expect(document.activeElement).toBe(editorSurface)
+  })
+
+  // ── AQU-2206 regression guard ──────────────────────────────────────────────
+  //
+  // AQU-2173 fixed the anchor CAPTURE; the insertion still ignored it. The Add
+  // Footnote dialog's autofocused text field pulls focus out of the cell, the
+  // editor's blur deactivates the row, and the live editor is gone by the time
+  // Add runs — so the row commits the stored text itself. That path appended the
+  // marker, which put every footnote at the end of the cell however good the
+  // anchor was, and made the dialog's Target preview a lie. This drives the real
+  // path: select a word, open the `⋯`, add the note, and read the committed text.
+  it("AQU-2206: a footnote added over a selection commits the marker at the anchor, not the end of the cell", async () => {
+    const onOptimisticEdit = vi.fn()
+    renderTable({ onOpenComments: vi.fn() }, new Map(), {
+      cellStore: makeStore("cell-1"),
+      onOptimisticEdit,
+    })
+
+    // Click into the cell so the editor mounts and can hold a selection.
+    fireEvent.click(await screen.findByText("bonjour"))
+    await waitFor(() => {
+      expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    })
+    const surface = document.querySelector(".ProseMirror") as HTMLElement & { editor?: Editor }
+    const editor = surface.editor!
+    act(() => {
+      fireEvent.focus(surface)
+      // "bon|jour|" — a phrase that is NOT at the end of the cell, which is the
+      // whole point: appending and splicing differ only for such a phrase.
+      editor.commands.insertContent(" le monde")
+      editor.commands.setTextSelection({ from: 1, to: 1 + "bonjour".length })
+    })
+
+    // Open the `⋯` the way a pointer does. base-ui reads the interaction type
+    // to decide whether to pull focus into the popup, and a focus pull here
+    // deactivates the cell before the rail can read its anchor (AQU-2173).
+    const row = surface.closest("[data-grid-row]") as HTMLElement
+    const trigger = within(row).getByRole("button", { name: /^More actions · Translation for/ })
+    fireEvent.pointerDown(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseDown(trigger, { button: 0 })
+    fireEvent.pointerUp(trigger, { pointerType: "mouse", button: 0 })
+    fireEvent.mouseUp(trigger, { button: 0 })
+    fireEvent.click(trigger, { detail: 1 })
+    const addFootnote = await screen.findByRole("button", { name: "Add footnote" })
+    // The cell is still live, so there is an anchor left to capture.
+    expect(document.querySelector(".ProseMirror")).not.toBeNull()
+    // The rail captures the anchor on mouse-DOWN, before focus can move.
+    fireEvent.mouseDown(addFootnote)
+    fireEvent.click(addFootnote)
+
+    // What the dialog's autofocused field does to the cell: focus leaves the
+    // editor, the row deactivates, and the live editor unmounts.
+    act(() => { fireEvent.blur(surface) })
+
+    const noteField = await screen.findByRole("textbox", { name: "Footnote text" })
+    fireEvent.change(noteField, { target: { value: "bonjour: a greeting" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add footnote" }))
+
+    await waitFor(() => {
+      expect(onOptimisticEdit).toHaveBeenCalled()
+    })
+    const committed = onOptimisticEdit.mock.calls.at(-1)![1].value as string
+    // The marker sits where the preview promised — right after the anchored
+    // phrase — and the rest of the cell still follows it.
+    expect(committed).toMatch(/^bonjour\\f [^]*?\\f\* le monde$/)
+    expect(committed.endsWith(" le monde")).toBe(true)
+    expect(committed).toContain("a greeting")
   })
 
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
@@ -627,16 +803,14 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("raises and unclamps the row while microphone-permission help is open", async () => {
     renderTable({ onOpenRecording: vi.fn() })
 
-    await openRailOverflow()
+    // AQU-2287: the mic is a direct rail button — no `⋯` to open first.
     const micButton = await screen.findByRole("button", {
       name: "Microphone access blocked — click for help",
     })
     fireEvent.click(micButton)
 
     expect(screen.getByText("Microphone blocked")).toBeInTheDocument()
-    // AQU-200: the mic now lives in the overflow popup, which portals out of
-    // the row — so reach the row through its content, not through the button.
-    const row = screen.getByText("bonjour").closest("[data-grid-row]")
+    const row = micButton.closest("[data-grid-row]")
     expect(row).toHaveClass("z-30", "overflow-visible")
   })
   // ── 2026-08-07 (wire b): a plain row click points the timeline at the cell ──
@@ -731,6 +905,32 @@ describe("EditorTable — EditorActionsContext wiring", () => {
       resetVisibleStyleSegmentsCacheForTests()
       resetStyleAlignDirtyForTests()
       localStorage.clear()
+    }
+  })
+
+  it("flags a re-imported cell in yellow when Align styles was left for a manual pass", async () => {
+    const source = idmlParagraph(idmlSlot(0, "Plain", "Hello ") + idmlSlot(1, "Bold", "world"))
+    const target = idmlParagraph(idmlSlot(0, "Plain", "Bonjour monde") + idmlSlot(1, "Bold", ""))
+    markManualStyleAlign("cell-1")
+    setVisibleStyleSegments(false)
+    const onAlignStyles = vi.fn().mockResolvedValue(true)
+    try {
+      renderTable(
+        { onOpenComments: vi.fn() },
+        new Map(),
+        {
+          cellStore: makePlainRunStore("cell-1", source, target),
+          onAlignStyles,
+          isCompletionConfigured: true,
+          isCompletionAvailable: true,
+        },
+      )
+      const warning = await screen.findByRole("button", { name: "This cell needs Align styles" })
+      fireEvent.click(warning)
+      expect(onAlignStyles).toHaveBeenCalledTimes(1)
+    } finally {
+      resetStyleAlignDirtyForTests()
+      resetVisibleStyleSegmentsCacheForTests()
     }
   })
 

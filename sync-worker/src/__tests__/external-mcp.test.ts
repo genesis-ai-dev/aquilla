@@ -8,7 +8,7 @@
 // transport-level failures (bad credential -> 401, unknown tool + unknown method
 // -> JSON-RPC errors).
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // commit path: mcp-handlers -> changesets-route -> commit.ts -> events/route ->
 // broadcast.ts -> partyserver (cloudflare:*). Stub it as the changeset suite does.
@@ -110,6 +110,8 @@ function toolPayload(result: { content: { text: string }[]; isError?: boolean })
 } {
   return { payload: JSON.parse(result.content[0].text), isError: result.isError === true }
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 beforeEach(async () => {
@@ -224,7 +226,7 @@ describe('MCP tools/list', () => {
     })
   })
 
-  it('returns all 32 tools each with an input schema', async () => {
+  it('returns all 34 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -239,6 +241,8 @@ describe('MCP tools/list', () => {
         'get_skill',
         'list_changesets',
         'list_memory', 'list_orgs', 'list_projects',
+        // AQU-2195 style-rule read.
+        'list_style_rules',
         // AQU-1175 termbase read.
         'list_terms',
         'patch_settings', 'prepare_import',
@@ -249,10 +253,10 @@ describe('MCP tools/list', () => {
         'search_project', 'search_projects',
         // Omnilingual ASR spec §7.
         'transcribe_audio', 'transcription_status',
-        'wait_for_changeset',
+        'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(32)
+    expect(body.result.tools).toHaveLength(34)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

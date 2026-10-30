@@ -426,7 +426,10 @@ describe('caption rows promotion through POST /import', () => {
     expect((await post('v2', { complete: true, publishEventId: 'c2-reveal',
       trackPublication: { contentFileId: 'c2', trackId: 'episode', eventId: 'c2-bind',
         name: 'Episode captions' } })).status).toBe(200)
-    await store.pg.query(`UPDATE project_settings SET settings = '{}'`)
+    // Promotion is deliberately NOT gated on track editing, so the rebuild
+    // runs with the project's explicit no in place (AQU-2214: an absent key
+    // would now read as the ON default and prove nothing).
+    await store.pg.query(`UPDATE project_settings SET settings = '{"allowTrackEditing":false}'`)
     expect((await post('v2', { complete: true, captionPromotion: {
       contentFileId: 'c2', trackId: 'episode', genesisEventId: 'v2-rows',
       retireEventId: 'v2-retire', deleteEventId: 'c2-delete',

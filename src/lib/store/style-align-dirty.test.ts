@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  clearManualStyleAlign,
   clearStyleAlignDirty,
+  markManualStyleAlign,
   markStyleAlignDirty,
   resetStyleAlignDirtyForTests,
   styleAlignDirtyMatches,
+  useManualStyleAlign,
 } from "./style-align-dirty"
+import { renderHook } from "@testing-library/react"
 
 beforeEach(() => {
   localStorage.clear()
@@ -23,5 +27,19 @@ describe("style-align dirty marks", () => {
     clearStyleAlignDirty("cell-1")
     expect(styleAlignDirtyMatches("cell-1", "<p>Bonjour</p>")).toBe(false)
     expect(localStorage.getItem("aq.style-align-dirty.v1")).toBeNull()
+  })
+
+  it("remembers a cell that still needs a manual Align styles pass", () => {
+    const { result, rerender } = renderHook(() => useManualStyleAlign("cell-50"))
+    expect(result.current).toBe(false)
+
+    markManualStyleAlign("cell-50")
+    rerender()
+    expect(result.current).toBe(true)
+    expect(localStorage.getItem("aq.style-align-manual.v1")).toContain("cell-50")
+
+    clearManualStyleAlign("cell-50")
+    rerender()
+    expect(result.current).toBe(false)
   })
 })

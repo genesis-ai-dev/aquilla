@@ -3,8 +3,8 @@
  *
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
- * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese render LTR. Add a locale here + a catalog in
+ * `translate.ts`). Directions follow the ticket: Arabic and Urdu are RTL;
+ * Thai/Burmese/Malay/Chinese/French/Spanish/Portuguese/Swahili/Hindi/Hausa/Bengali/Amharic/Punjabi render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
  * A locale's `code` and `nativeName` are load-bearing claims, not decoration:
@@ -62,6 +62,43 @@ export const LOCALES: readonly LocaleMeta[] = [
   // the varieties are mutually readable, and the brief, not the menu label,
   // fixes which one the strings are.
   { code: "pt", englishName: "Portuguese", nativeName: "Português", dir: "ltr" },
+  // One Swahili catalog, worded as Kiswahili sanifu (the written East African
+  // standard), not a national dialect and not Congolese Swahili. Buttons use
+  // the imperative (Hifadhi, Ghairi). `sw-KE` and `sw-TZ` fold onto `sw` by
+  // the primary subtag; `swc` does not share that subtag and must not.
+  { code: "sw", englishName: "Swahili", nativeName: "Kiswahili", dir: "ltr" },
+  // One Hindi catalog, in Devanagari, addressed with the polite form (आप).
+  // Buttons use the polite imperative (सहेजें, रद्द करें), which is the form
+  // Hindi software uses. `hi-IN` folds onto `hi` by the primary subtag.
+  { code: "hi", englishName: "Hindi", nativeName: "हिन्दी", dir: "ltr" },
+  // One Hausa catalog, worded as standard written Hausa (Kano / Boko, the
+  // variety of education and BBC Hausa). Latin script, including ɓ ɗ ƙ.
+  // Buttons use the polite plural imperative (ku). `ha-NG`, `ha-NE`, and
+  // `ha-Latn` fold onto `ha` by the primary-subtag match. Ajami (`ha-Arab`)
+  // is not registered.
+  { code: "ha", englishName: "Hausa", nativeName: "Hausa", dir: "ltr" },
+  // One Urdu catalog, worded as Modern Standard Urdu (معیاری اردو): formal آپ,
+  // Perso-Arabic script, polite imperative buttons (کریں / کیجیے). Not Deccani,
+  // not Rekhta, and not Hindi written in Urdu script. `ur-PK` and `ur-IN` fold
+  // onto `ur` by the primary-subtag match.
+  { code: "ur", englishName: "Urdu", nativeName: "اردو", dir: "rtl" },
+  // One Bengali catalog, worded as Bangladeshi standard colloquial
+  // (প্রমিত চলিত বাংলা): আপনি imperative, পানি not জল. Not sadhu bhasha and
+  // not a regional dialect. `bn-BD` and `bn-IN` both fold onto `bn`. The
+  // endonym stays "বাংলা" — the brief, not the menu label, fixes which
+  // national standard the strings are.
+  { code: "bn", englishName: "Bengali", nativeName: "বাংলা", dir: "ltr" },
+  // One Amharic catalog, worded as standard written Amharic (the Addis Ababa
+  // standard used in education and the press, Geʽez script, formal written
+  // imperative). Not Tigrinya, and not a regional dialect. `am-ET` folds onto
+  // `am` by the primary-subtag match, the same way `fr-CA` folds onto `fr`.
+  { code: "am", englishName: "Amharic", nativeName: "አማርኛ", dir: "ltr" },
+  // One Punjabi catalog, Gurmukhi Majhi (the written standard of Indian Punjab).
+  // Bare `pa` is Gurmukhi, so `pa-IN` folding onto `pa` is right. `pa-Arab` and
+  // `pa-PK` also fold here by primary subtag, which is the wrong script for a
+  // Shahmukhi reader; Shahmukhi needs its own future locale. Do not alias them
+  // away and do not change `normalizeLocale` to split the scripts.
+  { code: "pa", englishName: "Punjabi", nativeName: "ਪੰਜਾਬੀ", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

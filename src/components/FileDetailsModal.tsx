@@ -13,7 +13,7 @@ import {
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { progressPercent } from "@/lib/progress/progress-percent"
 
-interface FileStats { translated: number; validated: number; total: number }
+import type { FileStats } from "@/lib/progress/file-summary-progress"
 
 interface FileDetailsModalProps {
   file: FileReference | null
@@ -78,12 +78,25 @@ export function FileDetailsModal({
             <DetailRow label={t("fileDetails.imported")}>
               <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />
             </DetailRow>
-            {translatedPct !== null && validatedPct !== null && (
+            {translatedPct !== null && validatedPct !== null && progress && (
               <DetailRow label={t("fileDetails.progress")}>
-                {t("fileDetails.progressValue", {
-                  translated: bidiIsolate(formatNumber(translatedPct, locale)),
-                  validated: bidiIsolate(formatNumber(validatedPct, locale)),
-                })}
+                {/* Media redesign slice 2: a language that counts its
+                    recordings reads the same lines as the status bar. */}
+                {progress.delivers === "audio"
+                  ? t("fileDetails.audioProgressValue", {
+                      recorded: bidiIsolate(formatNumber(progress.translated, locale)),
+                      total: bidiIsolate(formatNumber(progress.total, locale)),
+                      approved: bidiIsolate(formatNumber(progress.validated, locale)),
+                    })
+                  : progress.delivers === "text_and_audio"
+                    ? t("fileDetails.bothProgressValue", {
+                        done: bidiIsolate(formatNumber(progress.validated, locale)),
+                        total: bidiIsolate(formatNumber(progress.total, locale)),
+                      })
+                    : t("fileDetails.progressValue", {
+                        translated: bidiIsolate(formatNumber(translatedPct, locale)),
+                        validated: bidiIsolate(formatNumber(validatedPct, locale)),
+                      })}
               </DetailRow>
             )}
           </dl>

@@ -108,7 +108,7 @@ export function projectSettingsPath(projectId: string, section?: string): string
  * search box and matches cards in other groups, so the person arrived at what
  * looked like a search they never ran. `"languages"` is the Languages card
  * (Change target language…, the single-lane TARGET pill, "Set target
- * language"); `"add-lane"` is its "Add a target lane" field (Add lane…).
+ * language"); `"add-lane"` is its "Add language" form, opened (Add lane…).
  * The `focus` values are read by `SETTINGS_FOCUS_TARGETS` in ProjectSettings.
  */
 export function projectLanguageSettingsPath(

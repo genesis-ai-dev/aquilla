@@ -90,6 +90,7 @@ import aiBriefInternalRoutes from "./routes/ai-brief-internal"
 import aiSeamsRoutes from "./routes/ai-seams"
 import aiPassageTagsRoutes from "./routes/ai-passage-tags"
 import aiSmartEditsRoutes from "./routes/ai-smart-edits"
+import aiTranscriptCleanupRoutes from "./routes/ai-transcript-cleanup"
 import aiHarmonizeRoutes from "./routes/ai-harmonize"
 import aquiferRoutes from "./routes/aquifer"
 import parseDocumentRoutes from "./routes/parse-document"
@@ -199,6 +200,18 @@ app.use("*", async (c, next) => {
   for (const [k, v] of Object.entries(CORS_HEADERS)) {
     c.res.headers.set(k, v)
   }
+})
+
+// Baseline response hardening for an API that only ever returns JSON / SSE /
+// downloads: no MIME sniffing, no Referer (several flows carry a token in the
+// URL), and authenticated bodies are not heuristically cached by browsers or
+// intermediaries unless a route opts in with its own Cache-Control.
+app.use("*", async (c, next) => {
+  await next()
+  const h = c.res.headers
+  h.set("X-Content-Type-Options", "nosniff")
+  h.set("Referrer-Policy", "no-referrer")
+  if (c.req.method !== "OPTIONS" && !h.has("Cache-Control")) h.set("Cache-Control", "no-store")
 })
 
 // Observability: ship 4xx/5xx responses and unhandled throws to PostHog Logs
@@ -449,6 +462,7 @@ app.route("/api/v1/ai/passage-tags", aiPassageTagsRoutes)
 // (memory → Jev verify). Same session auth and per-user window as the seam
 // route; never fails its caller.
 app.route("/api/v1/ai/smart-edits", aiSmartEditsRoutes)
+app.route("/api/v1/ai/transcript-cleanup", aiTranscriptCleanupRoutes)
 // Harmonizer: cross-cell checks by SFL metafunction (quotation continuity
 // first). One batched Jev call per passage; never fails its caller.
 app.route("/api/v1/ai/harmonize", aiHarmonizeRoutes)

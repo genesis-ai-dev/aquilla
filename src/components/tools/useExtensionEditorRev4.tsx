@@ -256,7 +256,7 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
           }
         }
         const isGenerated = id === cell.selectedGeneratedVoiceAudioId && kept.kind !== "section"
-        const lineVoice = resolveCastVoice(args_.ttsSettings, cell.id, cell.ttsSettings?.voiceId)
+        const lineVoice = resolveCastVoice(args_.ttsSettings, cell, cell.ttsSettings?.voiceId)
         const takeVoice = isGenerated && att.voiceId && att.voiceId !== lineVoice.id ? findVoice(args_.ttsSettings, att.voiceId) : undefined
         const out: ToolVoiceTake = {
           audioId: id,
@@ -288,8 +288,8 @@ export function useExtensionEditorRev4(args: ExtensionEditorRev4Args): Extension
         for (const cellId of args_.store.getCellIds()) {
           const cell = args_.store.getCellView(cellId)
           if (!cell) continue
-          const v = resolveCastVoice(args_.ttsSettings, cellId, cell.ttsSettings?.voiceId)
-          current[cellId] = { id: v.id, name: v.name, explicit: Boolean(findVoice(args_.ttsSettings, assignedCastVoiceId(args_.ttsSettings, cellId) ?? cell.ttsSettings?.voiceId)) }
+          const v = resolveCastVoice(args_.ttsSettings, cell, cell.ttsSettings?.voiceId)
+          current[cellId] = { id: v.id, name: v.name, explicit: Boolean(findVoice(args_.ttsSettings, assignedCastVoiceId(args_.ttsSettings, cell) ?? cell.ttsSettings?.voiceId)) }
         }
         return { voices: getVoiceLibrary(args_.ttsSettings).map((v) => ({ id: v.id, name: v.name })), current, canClone: true }
       },

@@ -111,7 +111,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
           // The linked subtitle's assignment when there is one — see
           // `voiceCellId`. Falls back to this cell's own, which is every
           // non-cue arrangement.
-          args.voiceCellId ?? cell.id,
+          // AQU-2125: this cell itself (not its id) so its character is found.
+          args.voiceCellId ?? cell,
           cell.ttsSettings?.voiceId,
         ).id,
       // AQU-1978: the languages of the LANES this voice belongs to. The
@@ -119,8 +120,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       // project, which left Inworld with no language and the default voice
       // picked for none — on every regenerate, voice-panel and batch voice.
       geminiContext: {
-        sourceLanguage: sourceLaneLanguage(project.lanes, project) ?? undefined,
-        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined,
+        sourceLanguage: sourceLaneLanguage(project.lanes) ?? undefined,
+        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined,
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,

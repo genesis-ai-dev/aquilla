@@ -191,7 +191,7 @@ export function useBibleData({
     (): VoiceCastCell[] =>
       cellIds.map((cellId, position) => {
         const view = cellStore.getCellView(cellId)
-        const pickedVoice = findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, cellId))?.name ?? null
+        const pickedVoice = findVoice(ttsSettings, assignedCastVoiceId(ttsSettings, view ?? cellId))?.name ?? null
         return { ...cells[position], cellId, castName: pickedVoice ?? (view ? ownCastName(view) : null) }
       }),
     [cellIds, cells, cellStore, ttsSettings],

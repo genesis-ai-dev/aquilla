@@ -27,7 +27,7 @@
 // stored before AQU-2037 keep working everywhere until AQU-2039 migrates them,
 // and a `builtIn` preset is never stamped because every lane falls back to it.
 
-import { PRESET_VOICES, getVoiceLibrary, resolveVoice } from "@/lib/audio/voices"
+import { NO_CAST_VOICE, PRESET_VOICES, getVoiceLibrary, resolveVoice } from "@/lib/audio/voices"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
 /**
@@ -122,7 +122,8 @@ export function laneScopedTtsSettings(
   if (settings.castAssignments !== undefined) {
     const kept: Record<string, string> = {}
     for (const [cellId, voiceId] of Object.entries(settings.castAssignments)) {
-      if (ids.has(voiceId)) kept[cellId] = voiceId
+      // "No voice" names no lane's voice, so it is every lane's (AQU-2125).
+      if (voiceId === NO_CAST_VOICE || ids.has(voiceId)) kept[cellId] = voiceId
     }
     scoped.castAssignments = kept
   }

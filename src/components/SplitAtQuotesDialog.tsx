@@ -30,11 +30,13 @@ interface SplitAtQuotesDialogProps {
   pieces: readonly QuoteSplitPiece[] | null
   /** The line has recordings of its own — say they stay where they are. */
   hasRecordings: boolean
+  /** Live target languages. Two or more gets the shared-source warning. */
+  targetLaneCount?: number
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function SplitAtQuotesDialog({ pieces, hasRecordings, onConfirm, onCancel }: SplitAtQuotesDialogProps) {
+export function SplitAtQuotesDialog({ pieces, hasRecordings, targetLaneCount = 1, onConfirm, onCancel }: SplitAtQuotesDialogProps) {
   const t = useT()
   const count = pieces?.length ?? 0
   return (
@@ -65,6 +67,11 @@ export function SplitAtQuotesDialog({ pieces, hasRecordings, onConfirm, onCancel
           {t("editor.splitQuotes.translationsNote")}
           {hasRecordings ? ` ${t("editor.splitQuotes.recordingsNote")}` : ""}
         </p>
+        {targetLaneCount >= 2 && (
+          <p data-testid="split-quotes-lane-warning" className="text-sm text-amber-800 dark:text-amber-200">
+            {t("editor.splitQuotes.multiLaneWarning")}
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             {t("common.cancel")}

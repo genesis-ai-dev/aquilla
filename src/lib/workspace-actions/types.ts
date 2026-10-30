@@ -14,6 +14,12 @@ export interface FileProgressEntry {
 export interface WorkspaceActionContext {
   project: ProjectRecord
   activeFileId: string | null
+  /**
+   * Media redesign slice 2: the open language delivers Audio and no text, so
+   * the text-only actions — AI drafting, validating text, generating a voice
+   * from text — leave the menu (P2.3). Absent: every action as before.
+   */
+  audioOnlyLane?: boolean
   fileProgress: Map<string, FileProgressEntry>
   /** Org export-policy floor (AQU-253). When false, Export is hidden from the
    *  action menu — openExportFlow no-ops anyway, but don't show a dead item. */

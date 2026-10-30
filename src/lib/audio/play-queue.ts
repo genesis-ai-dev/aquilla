@@ -11,8 +11,8 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { hasTiming, sortByLens } from "@/lib/timeline/derive"
-import { buildProgramme, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { buildProgramme, programmeLines, slotAtProgrammeSec, withoutHiddenTakes, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { standInEstimator } from "@/lib/timeline/stand-in"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
@@ -901,6 +901,9 @@ function progTargetEntry(): OverlayEntry | null {
  * stalling the transport; with neither side playable the verse is skipped.
  */
 function progEffectiveClock(slot: ProgrammeSlot): "source" | "target" | null {
+  // AQU-2204: during a take's pause the take still to come clocks its verse,
+  // so a source that ends inside the pause goes quiet instead of advancing.
+  if (progLead && progLead.cellId === slot.cellId) return "target"
   if (slot.clock === "target" && !progTargetEntry()) return slot.sourceWindow ? "source" : null
   return slot.clock
 }
@@ -921,24 +924,26 @@ function progRebuild(): void {
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
-  // drawing would disagree about where a verse is: same filter, same sort.
-  const mediaCells = sortByLens(
-    ctx.cells.filter((c) => (c.medium ?? "text") === "media" && hasTiming(c)),
-    "time",
-  )
-  // AQU-1704: a video-less subtitle import has no media cells, so its cues are
-  // the verses. TimelineEditor's layout falls back to the subtitle lane the same way.
-  const dialogue =
-    mediaCells.length > 0
-      ? mediaCells
-      : sortByLens(
-          ctx.cells.filter((c) => hasTiming(c)),
-          "time",
-        )
+  // drawing would disagree about where a verse is: ONE shared answer
+  // (programmeLines). AQU-1704: a video-less subtitle import's cues are the
+  // verses. AQU-2204: a file with no times at all lays its lines out in order,
+  // an unrecorded one at a stand-in length that playback steps over.
+  const { lines: dialogue, untimed } = programmeLines(ctx.cells)
+  // AQU-2204: following the recordings, every unrecorded line takes its stand-in.
+  const built = buildProgramme(dialogue, { standInLenSec: standInEstimator(dialogue) })
+  // A take whose length was never measured (a generated voice nobody has
+  // played yet) has no window the programme can play. On a file with times
+  // that is today's rule — the verse is silent — but a file with NO times only
+  // reaches the programme through AQU-2204's stand-ins, so there it keeps the
+  // plain line-by-line path it always had rather than going quiet.
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) {
+    programme = null
+    return
+  }
   // Hidden lines keep their place (the timeline draws them there, faded) but
   // their takes are taken out of what plays: a hidden verse sounds only its
   // original, and one with no original is skipped.
-  programme = withoutHiddenTakes(buildProgramme(dialogue), new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
+  programme = withoutHiddenTakes(built, new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
   setProgress({ duration: programme.totalSec })
 }
 
@@ -961,6 +966,7 @@ function progPrevPlayable(from: number): number {
 
 function progFinish(): void {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   progQuiet(currentAudio)
@@ -1035,6 +1041,81 @@ interface ProgGate {
 
 let progGate: ProgGate | null = null
 let progGateSeq = 0
+
+/**
+ * AQU-2204 (Sam, Oct 26): a PAUSE someone left before a take
+ * (`slot.targetLeadSec`) is waited out, never skipped — the timeline draws it
+ * inside the line, so the transport must take as long. Until the pause is over
+ * the take isn't due: the verse sounds only its source (or holds the clock in
+ * silence), a ticker keeps the clock moving, and at the pause's end the take
+ * joins through an ordinary gate.
+ */
+interface ProgLead {
+  cellId: string
+  explicit: boolean
+  timer: ReturnType<typeof setTimeout> | null
+  ticker: ReturnType<typeof setInterval> | null
+}
+let progLead: ProgLead | null = null
+
+function progClearLead(): void {
+  if (progLead?.timer != null) clearTimeout(progLead.timer)
+  if (progLead?.ticker != null) clearInterval(progLead.ticker)
+  progLead = null
+}
+
+/** Wait out the pause from `atSec`, then bring the take in at its start. */
+function progArmLead(slot: ProgrammeSlot, atSec: number, explicit: boolean): void {
+  progClearLead()
+  const leadEndSec = slot.startSec + (slot.targetLeadSec ?? 0)
+  const rate = progress.rate || 1
+  const startedAt = performance.now()
+  const lead: ProgLead = { cellId: slot.cellId, explicit, timer: null, ticker: null }
+  lead.ticker = setInterval(() => {
+    if (progLead !== lead) return
+    const t = atSec + ((performance.now() - startedAt) / 1000) * rate
+    setProgress({ currentTime: Math.min(t, leadEndSec) })
+  }, 100)
+  lead.timer = setTimeout(() => progLeadEnd(lead), Math.max(0, ((leadEndSec - atSec) / rate) * 1000))
+  progLead = lead
+}
+
+function progLeadEnd(lead: ProgLead): void {
+  if (progLead !== lead) return
+  progClearLead()
+  const slot = progCurrentSlot()
+  const cell = slot ? activeContext?.cells.find((c) => c.id === slot.cellId) : undefined
+  if (!slot || !cell || slot.cellId !== lead.cellId) return
+  const leadSec = slot.targetLeadSec ?? 0
+  const target = slot.targetWindow ? progTargetFor(cell) : null
+  const sourcePlaying = Boolean(
+    currentAudio && !currentAudio.paused && slot.sourceWindow && currentAudio.currentTime < slot.sourceWindow.end,
+  )
+  // Nothing sounding (or no take any more): land on the take's start like a seek.
+  if (!sourcePlaying || !target) {
+    void progPlaySlot(progIndex, slot.startSec + leadSec, true, lead.explicit)
+    return
+  }
+  // The source plays on untouched; the take joins it through a dub-only gate.
+  const gate: ProgGate = {
+    token: ++progGateSeq,
+    cellId: slot.cellId,
+    into: leadSec,
+    wantPlay: true,
+    timer: null,
+    pending: new Set(["target"]),
+    dueSource: true,
+    dueTarget: true,
+    explicit: lead.explicit,
+  }
+  progGate = gate
+  progCueTarget(slot, cell, target, 0, gate)
+  if (progGate === gate && gate.pending.size === 0) {
+    progStartSides(gate)
+    return
+  }
+  if (progGate === gate) gate.timer = setTimeout(() => progGateTimeout(gate), GATE_TIMEOUT_MS)
+}
 
 function progClearGate(): void {
   if (progGate?.timer != null) clearTimeout(progGate.timer)
@@ -1317,7 +1398,7 @@ function progTargetTick(entry: OverlayEntry, audio: HTMLAudioElement): void {
   const slot = progCurrentSlot()
   if (!slot || slot.cellId !== entry.cellId) return
   if (slot.clock !== "target" || !slot.targetWindow) return
-  const t = slot.startSec + (audio.currentTime - slot.targetWindow.start)
+  const t = slot.startSec + (slot.targetLeadSec ?? 0) + (audio.currentTime - slot.targetWindow.start)
   setProgress({
     currentTime: Math.min(Math.max(t, slot.startSec), slot.startSec + slot.slotLenSec),
   })
@@ -1545,10 +1626,16 @@ async function progPlaySlot(
         Math.min(atProgrammeSec ?? slot.startSec, slot.startSec + slot.slotLenSec - 0.001),
       )
   const into = at - slot.startSec
+  // AQU-2204: a pause someone left before the take. Until it is over the take
+  // isn't due; progArmLead waits it out and brings the take in at its start.
+  const leadSec = slot.targetLeadSec ?? 0
+  const leadAhead = Boolean(slot.targetWindow && leadSec > 0 && into < leadSec - 0.001)
+  const intoTake = Math.max(0, into - leadSec)
 
   // A newer slot open orphans any pending gate (and its timeout — a stale
   // 6s timer must never fire into this verse's cue).
   progClearGate()
+  progClearLead()
   // The dub side rides the overlay pool, so the speaker buttons, rate and
   // volume keep applying to it exactly as they do in dubbing mode.
   disposeAllOverlays()
@@ -1556,7 +1643,7 @@ async function progPlaySlot(
   pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
   const target = slot.targetWindow ? progTargetFor(cell) : null
-  const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
+  const dubDue = Boolean(slot.targetWindow && target && !leadAhead && into < leadSec + slot.targetLenSec)
   const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
 
   // Park the clock at the landing position. Under a gate this is where the
@@ -1571,7 +1658,7 @@ async function progPlaySlot(
     // remember whether the USER chose this verse so that re-entry keeps the
     // explicit flag a gate would have carried.
     progCuedExplicit = explicit
-    if (dubDue && target) progCueTarget(slot, cell, target, into, null)
+    if (dubDue && target) progCueTarget(slot, cell, target, intoTake, null)
     if (sourceDue && slot.sourceWindow) {
       await progOpenSource(cell, slot.sourceWindow.start + into)
     } else {
@@ -1585,6 +1672,14 @@ async function progPlaySlot(
   // `explicit` (already in hand) is the truth from here on.
   progCuedExplicit = false
 
+  if (leadAhead && !sourceDue) {
+    // AQU-2204: nothing sounds during the pause — hold the clock in silence
+    // for it, then the take comes in.
+    progQuiet(currentAudio)
+    setState({ kind: "playing", ...progStateCell() })
+    progArmLead(slot, at, explicit)
+    return
+  }
   if (!dubDue && !sourceDue) {
     // Nothing in this verse can sound from here (both sides already spent,
     // or neither loadable) — don't sit in silence.
@@ -1614,7 +1709,8 @@ async function progPlaySlot(
   if (sourceDue && !seamlessSrc) gate.pending.add("source")
   progGate = gate
 
-  if (dubDue && target) progCueTarget(slot, cell, target, into, gate)
+  if (leadAhead) progArmLead(slot, at, explicit)
+  if (dubDue && target) progCueTarget(slot, cell, target, intoTake, gate)
   if (sourceDue && slot.sourceWindow) {
     // Seamless: never progCueSource — progOpenSource's same-clip branch is an
     // unconditional seek (backward by the overshoot: an audible replay) plus
@@ -3377,6 +3473,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
  *  prefetch can't survive into (or resurrect from) the fallback. */
 function progEngageForContext(): boolean {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   progRebuild()
@@ -3589,6 +3686,9 @@ export function pauseQueue(): void {
       setState({ kind: "paused", ...progStateCell() })
       return
     }
+    // AQU-2204: pausing inside a take's pause stops waiting it out; resume
+    // re-enters from where the clock stopped.
+    progClearLead()
     // The source may already be quiet (its part of the verse is over) while
     // the dub carries on — pause BOTH, then say so once.
     progQuiet(currentAudio)
@@ -3634,6 +3734,12 @@ export async function resumeQueue(): Promise<void> {
     }
     const slot = progCurrentSlot()
     if (!slot) return
+    // AQU-2204: paused inside a take's pause — re-enter, so the rest of the
+    // pause is waited out before the take.
+    if (slot.targetWindow && (slot.targetLeadSec ?? 0) > progress.currentTime - slot.startSec + 0.001) {
+      void progPlaySlot(progIndex, progress.currentTime, true, progCuedExplicit)
+      return
+    }
     // FORTIFY: a resume must obey the same rule as a slot open — sides start
     // TOGETHER. A paused CUE whose dub is still resolving (click-a-verse then
     // Space before the clip arrives) has a due side that is missing or still
@@ -3647,7 +3753,7 @@ export async function resumeQueue(): Promise<void> {
       const cell = activeContext?.cells.find((c) => c.id === slot.cellId)
       const into = Math.max(0, progress.currentTime - slot.startSec)
       const dubDue = Boolean(
-        slot.targetWindow && cell && progTargetFor(cell) && into < slot.targetLenSec,
+        slot.targetWindow && cell && progTargetFor(cell) && into < (slot.targetLeadSec ?? 0) + slot.targetLenSec,
       )
       const sourceDue = Boolean(slot.sourceWindow && into < slot.sourceLenSec)
       const dubReady = overlayPool.some((e) => e.element && e.element.readyState >= 3)
@@ -3703,6 +3809,7 @@ export async function resumeQueue(): Promise<void> {
 
 export function stopQueue(): void {
   progClearGate()
+  progClearLead()
   progStopEndStop()
   disposeProgPrefetch()
   disposeCurrent()

@@ -1,3 +1,4 @@
+import { fetchIdentity } from './identity-bridge'
 // Agent API transcription (Omnilingual ASR spec §7).
 //
 //   POST /api/v1/external/projects/:projectId/transcriptions
@@ -21,13 +22,15 @@
 // so this tool only works on dev/prod. Moving the weekly-usage ledger into
 // db/shared to avoid the hop would be a much larger change than this feature.
 //
-// Auth: a PROJECT-scoped `aqk_` credential with write access (it spends the
+// Auth: a project-scoped credential or delegated organization-scoped MCP OAuth,
+// with write access (it spends the
 // workspace's credits), owned by a contributor or above.
 
 import { errorResponse, type ExternalErrorCode } from './errors'
 import { authArtifact } from './artifacts-route'
 import { resolveExternalLaneParam } from './external-lane'
 import { publicBaseFrom } from './mcp-oauth-metadata'
+import { McpDelegatedRequest } from '../../../db/shared/api-credentials'
 import { ROLE } from '../events/role-policy'
 import { laneLanguageCode } from '../../../src/lib/lanes/lane-display'
 import type { ExternalEnv } from './types'
@@ -104,7 +107,7 @@ async function callAuthWorker(env: ExternalEnv, path: string, body: unknown): Pr
     return errorResponse('job_failed', 'transcription backend is not configured in this environment')
   }
   try {
-    return await fetch(`${env.AUTH_WORKER_URL.replace(/\/+$/, '')}${path}`, {
+    return await fetchIdentity(env, `${env.AUTH_WORKER_URL.replace(/\/+$/, '')}${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${env.SYNC_SECRET_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -139,7 +142,10 @@ export async function handleExternalTranscriptionRequest(
     writes: true, action: 'transcribe audio (it spends workspace credits)',
   })
   if (!authed.ok) return authed.response
-  if (authed.cred.projectId == null) {
+  if (authed.cred.projectId == null && !(
+    request instanceof McpDelegatedRequest && authed.cred.oauthResource !== undefined &&
+    authed.cred.orgIds !== undefined
+  )) {
     return errorResponse('scope_denied', 'transcription needs a credential scoped to this one project')
   }
   const db = env.AQUILLA_PG as AquillaDb

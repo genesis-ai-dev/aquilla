@@ -314,7 +314,8 @@ export function validateCellFieldCommand(
  * requires and as the UI's own source-edit floor already is.
  *
  * SetTiming is the max of the parts it carries: cell.retime is CONTRIBUTOR,
- * file.timing.set is MAINTAINER, so a command doing both is a maintainer's.
+ * file.timing.set is PROJECT_LEAD (AQU-2204), so a command doing both is a
+ * project lead's.
  * The DYNAMIC timing-lock bump (locked project → MAINTAINER for a retime) is
  * a live-state question and lives in the engine, not here.
  */

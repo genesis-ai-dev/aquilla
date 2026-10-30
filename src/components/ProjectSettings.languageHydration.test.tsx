@@ -162,7 +162,15 @@ function renderSettings() {
   return render(tree())
 }
 
-const sourceField = () => screen.getByLabelText(/source language/i) as HTMLInputElement
+// Media redesign (design B): the source is one line with Change; a target's
+// language is plain text in the table until its row is opened.
+const sourceLine = () => screen.getByTestId("source-language-line").textContent ?? ""
+const targetLanguage = () => screen.getByTestId("lane-language-cell-target-lane").textContent
+/** Change opens the source's fields; this is its Language box. */
+function openSourceField(): HTMLInputElement {
+  fireEvent.click(screen.getByTestId("source-language-change"))
+  return screen.getByTestId("lane-language-source-lane") as HTMLInputElement
+}
 
 function sourceLane(language: string) {
   return { ...currentLanes[0]!, language }
@@ -185,8 +193,9 @@ describe("ProjectSettings — languages live on the lane, not Project Info (AQU-
     currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
     currentLanes = [sourceLane("English"), targetLane("French")]
     renderSettings()
-    expect(sourceField().value).toBe("English")
-    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("French")
+    expect(sourceLine()).toContain("English")
+    expect(sourceLine()).not.toContain("Spanish")
+    expect(targetLanguage()).toBe("French")
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
@@ -195,29 +204,32 @@ describe("ProjectSettings — languages live on the lane, not Project Info (AQU-
     currentHasFetched = false
     currentLanes = [sourceLane("English"), targetLane("French")]
     const { rerender } = renderSettings()
-    expect(sourceField().value).toBe("English")
+    expect(sourceLine()).toContain("English")
 
     currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
     currentHasFetched = true
     rerender(tree())
 
-    expect(sourceField().value).toBe("English")
-    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("French")
+    expect(sourceLine()).toContain("English")
+    expect(sourceLine()).not.toContain("Spanish")
+    expect(targetLanguage()).toBe("French")
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
   it("leaves a genuinely empty lane language empty", () => {
     currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
     renderSettings()
-    expect(sourceField().value).toBe("")
-    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("")
+    expect(sourceLine()).toContain("No language set")
+    expect(sourceLine()).not.toContain("English")
+    expect(targetLanguage()).toBe("No language set")
+    expect(openSourceField().value).toBe("")
   })
 
   it("shows a free-text lane language outside the catalog verbatim", () => {
     currentLanes = [sourceLane("Grade 7 English"), targetLane("Kâ-nêhiyawêt")]
     renderSettings()
-    expect(sourceField().value).toBe("Grade 7 English")
-    expect((screen.getByTestId("lane-language-target-lane") as HTMLInputElement).value).toBe("Kâ-nêhiyawêt")
+    expect(sourceLine()).toContain("Grade 7 English")
+    expect(targetLanguage()).toBe("Kâ-nêhiyawêt")
   })
 
   it("never stomps a language the user typed when the settings blob arrives", () => {
@@ -225,13 +237,14 @@ describe("ProjectSettings — languages live on the lane, not Project Info (AQU-
     currentHasFetched = false
     const { rerender } = renderSettings()
 
-    fireEvent.change(sourceField(), { target: { value: "Koine Greek" } })
-    expect(sourceField().value).toBe("Koine Greek")
+    fireEvent.change(openSourceField(), { target: { value: "Koine Greek" } })
+    const field = () => screen.getByTestId("lane-language-source-lane") as HTMLInputElement
+    expect(field().value).toBe("Koine Greek")
 
     currentSettings = { sourceLanguage: "English", targetLanguage: "French" }
     currentHasFetched = true
     rerender(tree())
 
-    expect(sourceField().value).toBe("Koine Greek")
+    expect(field().value).toBe("Koine Greek")
   })
 })

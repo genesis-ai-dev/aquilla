@@ -10,7 +10,7 @@
 // `readCellsCache`) against `fake-indexeddb`, so the meta store, the eviction
 // transaction and the LRU bump are all exercised as the app uses them.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CellRow } from "./cells-read-types"
 import {
   purgeCellsCacheForQuota,
@@ -63,12 +63,26 @@ async function wipeCellsCache(): Promise<void> {
   })
 }
 
+/**
+ * LRU order is `lastAccessAt`, stamped from `Date.now()`. Back-to-back writes
+ * in a test often land in the same millisecond, and a tie falls back to the
+ * meta store's key order (`…:exo` before `…:gen`), so the wrong file got
+ * evicted about one run in three. A clock that ticks on every read gives each
+ * write and bump its own instant, so the order is always the order of the calls.
+ */
+function useTickingClock(): void {
+  let now = Date.now()
+  vi.spyOn(Date, "now").mockImplementation(() => ++now)
+}
+
 beforeEach(async () => {
   await wipeCellsCache()
   setCellsCacheOwner("account-1")
+  useTickingClock()
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await wipeCellsCache()
 })
 

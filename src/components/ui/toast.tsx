@@ -33,11 +33,30 @@ function withDedupeId<Data extends object>(
   }
 }
 
+/**
+ * Toasts whose latest change came through `toast.update` (AQU-2125). The pulse
+ * means "that happened again", which is what a repeated `add` is; an update is
+ * a progress count ticking or a loading toast turning into its result, and a
+ * character import that reports every tenth line would otherwise throb the
+ * whole way through.
+ */
+const quietUpdates = new Set<string>()
+
 const toast = {
   ...toastManager,
   add<Data extends object = object>(options: ToastManagerAddOptions<Data>) {
-    return toastManager.add(withDedupeId(options))
+    const deduped = withDedupeId(options)
+    if (deduped.id != null) quietUpdates.delete(deduped.id)
+    return toastManager.add(deduped)
   },
+  update: ((id, updates) => {
+    quietUpdates.add(id)
+    return toastManager.update(id, updates)
+  }) as typeof toastManager.update,
+  close: ((id) => {
+    if (id != null) quietUpdates.delete(id)
+    return toastManager.close(id)
+  }) as typeof toastManager.close,
 }
 
 function ToastProvider({ ...props }: ToastPrimitive.Provider.Props) {
@@ -130,27 +149,43 @@ function ToastItem({
 }) {
   const [pulsing, setPulsing] = React.useState(false)
   const updateKey = toastItem.updateKey ?? 0
+  const secondaryAction = secondaryActionFromToast(toastItem.data)
+  // AQU-2175: a button keeps its full width, so sharing the row with the
+  // message crushed the message into a one-word column. The buttons get their
+  // own row underneath — rendered only when there is one, so a plain notice
+  // keeps today's single row with no trailing gap.
+  const hasActions = toastItem.actionProps != null || secondaryAction != null
 
   React.useEffect(() => {
-    // First paint is updateKey 0 — skip. Only upserts pulse.
-    if (updateKey === 0) return
+    // First paint is updateKey 0 — skip. Only upserts pulse, and only repeats:
+    // an update (progress, a result) stays still.
+    if (updateKey === 0 || quietUpdates.has(toastItem.id)) return
     setPulsing(true)
     const settle = window.setTimeout(() => setPulsing(false), 120)
     return () => window.clearTimeout(settle)
-  }, [updateKey])
+  }, [updateKey, toastItem.id])
 
   return (
     <Toast toast={toastItem}>
       <ToastPulse pulsing={pulsing}>
         <ToastContent>
-          <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <ToastTitle />
-            <ToastDescription />
+          <div className="flex items-start gap-3">
+            <ToastIcon type={toastItem.type} icon={iconFromToast(toastItem.data)} />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <ToastTitle />
+              <ToastDescription />
+            </div>
+            <ToastClose className="-mt-1" />
           </div>
-          <ToastSecondaryAction toastId={toastItem.id} action={secondaryActionFromToast(toastItem.data)} />
-          <ToastAction />
-          <ToastClose />
+          {hasActions && (
+            <div
+              data-slot="toast-actions"
+              className="flex flex-wrap items-center justify-end gap-2"
+            >
+              <ToastSecondaryAction toastId={toastItem.id} action={secondaryAction} />
+              <ToastAction />
+            </div>
+          )}
         </ToastContent>
       </ToastPulse>
     </Toast>
@@ -269,7 +304,7 @@ function ToastContent({ className, ...props }: ToastPrimitive.Content.Props) {
     <ToastPrimitive.Content
       data-slot="toast-content"
       className={cn(
-        "flex h-full items-center gap-3 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
+        "flex h-full flex-col justify-center gap-2 overflow-hidden p-4 transition-opacity duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] data-behind:opacity-0 data-expanded:opacity-100",
         className
       )}
       {...props}
@@ -380,7 +415,7 @@ function ToastIcon({ type, icon }: { type: string | undefined; icon?: React.Reac
   return (
     <span
       data-slot="toast-icon"
-      className="shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
+      className="mt-0.5 shrink-0 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4"
     >
       {glyph}
     </span>

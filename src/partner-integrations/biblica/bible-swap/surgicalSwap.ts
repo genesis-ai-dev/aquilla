@@ -543,10 +543,31 @@ export function isVerseMarkerStyle(style: string): boolean {
 }
 
 export function isCvVerseMarkerStyle(style: string): boolean {
+    // `cv:v1` / `cv:v1_sp` is the visible number on a chapter-opening verse.
+    // A word boundary does not fall between the "v" and that "1".
     return (
-        /(?:^|\/)cv%3av(?:$|\b)/.test(style) ||
-        /(?:^|\/)cv:v(?:$|\b)/.test(style)
+        /(?:^|\/)cv%3av\d*(?:_|\b|$)/.test(style) ||
+        /(?:^|\/)cv:v\d*(?:_|\b|$)/.test(style)
     );
+}
+
+/** A superscription that is itself a numbered verse (Habakkuk 3:1). */
+function isNumberedSuperscription(
+    storyXml: string,
+    style: string,
+    bodyStart: number,
+    bodyEnd: number
+): boolean {
+    if (!isPsalmSubheaderParagraphStyle(style)) return false;
+    for (const csr of iterateCsrAbs(storyXml, bodyStart, bodyEnd)) {
+        if (
+            isVerseMarkerStyle(csr.appliedCharacterStyle) ||
+            isCvVerseMarkerStyle(csr.appliedCharacterStyle)
+        ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 function isNoStyleContentStyle(style: string): boolean {
@@ -843,8 +864,19 @@ function walkStory(
             currentChapter = chapterInPara;
         }
 
-        if (!isReplaceableParagraphStyle(para.appliedParagraphStyle, options)) {
+        if (
+            !isReplaceableParagraphStyle(para.appliedParagraphStyle, options) &&
+            !isNumberedSuperscription(
+                storyXml,
+                para.appliedParagraphStyle,
+                para.bodyStart,
+                para.bodyEnd
+            )
+        ) {
             // intro / title / notes / other meta — skip without touching state.
+            // A numbered superscription (HAB 3:1) is a verse and carries the
+            // chapter drop cap, so it has to be indexed or structure swap
+            // deletes it with the span and never puts it back.
             continue;
         }
 

@@ -666,6 +666,11 @@ export interface CellAudioAttachInput {
   /** AQU-1767: born a PIECE of this take (the group's root). Fill-only on the
    *  server — a re-attach can never move a take into or out of a group. */
   pieceOf?: string
+  /** Two-step transcription: what ASR heard (before learned corrections).
+   *  Only the transcription path sends it; the server keeps it through corrections. */
+  asr?: { text: string; model: string }
+  /** Provenance of an AI cleanup. New timings without it clear the server's mark. */
+  transcriptAi?: { model: string; at: number; changes: number }
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -736,6 +741,8 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
+      ...(input.asr !== undefined ? { asr: input.asr } : {}),
+      ...(input.transcriptAi !== undefined ? { transcriptAi: input.transcriptAi } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

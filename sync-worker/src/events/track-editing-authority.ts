@@ -3,8 +3,13 @@
 // `allowTrackEditing` (project settings; the write route is maintainer-gated)
 // decides whether a project's timelines may be restructured at all — tracks
 // added and deleted, grouped into folders. It is the sibling of
-// timing-authority.ts, and it fails safe to OFF because the affordance is the
-// liability the setting exists to contain.
+// timing-authority.ts.
+//
+// AQU-2214 FLIPPED ITS DEFAULT: unset now reads ON (Sam, Oct 27, after the
+// ETEN demo). The setting is still a real gate — an explicit `false` on the
+// project or its org refuses a gated write to an OWNER, as below — but it is
+// now an opt-OUT. A failed settings READ still reads OFF: "unknown" is not
+// "unset", and this is a write perimeter.
 //
 // IT IS NOW THE ONLY PROJECT SETTING OF ITS KIND STILL ENFORCED HERE, and the
 // contrast worth knowing is with the cell-editing tier. That one was checked
@@ -142,12 +147,23 @@ export function isGatedTrackPatch(payload: unknown): boolean {
 }
 
 /**
- * Has this project opted into restructuring its timelines?
+ * Has this project opted out of restructuring its timelines?
  *
- * Returns `false` (the restrictive answer) when the project has no settings
- * row, the blob will not parse, or `allowTrackEditing` is anything other than
- * exactly `true`. Keep in lock-step with the client's read of the same key
- * (`project?.allowTrackEditing ?? false`).
+ * AQU-2214 (Sam, after the ETEN demo): the UNSET default is now ON. A project
+ * that has never been asked, under an org that set no default either, may
+ * restructure its timelines — adding a track is the common case, not the
+ * exceptional one. Only an explicit `false`, on the project or inherited from
+ * its org, turns it off, and an explicit choice on either side is untouched
+ * (`effectiveMediaSettings` already resolves project → org).
+ *
+ * A non-boolean value is NOT an explicit choice: it reads as unset, exactly as
+ * `withOrgMediaDefaults` treats it, so a hand-edited blob falls to the default
+ * instead of silently disabling the setting.
+ *
+ * The one answer that stays `false` is the catch below — an unreachable or
+ * unparseable settings row is not "unset", it is "unknown", and this is a
+ * write perimeter. Keep in lock-step with the client's read of the same key
+ * (`project?.allowTrackEditing ?? true`).
  */
 export async function resolveAllowTrackEditing(
   db: AquillaDb,
@@ -163,7 +179,9 @@ export async function resolveAllowTrackEditing(
   try {
     // AQU-1768: a project with no setting of its own follows its org's.
     const parsed = await effectiveMediaSettings(cache, projectId)
-    return parsed?.allowTrackEditing === true
+    const chosen = parsed?.allowTrackEditing
+    // AQU-2214: unset (no row, no key, or a value no reader accepts) is ON.
+    return typeof chosen === 'boolean' ? chosen : true
   } catch {
     return false
   }

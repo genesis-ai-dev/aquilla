@@ -106,7 +106,7 @@ import {
   createProjectLane,
   renameProjectLane,
   setProjectLaneArchived,
-  setProjectLaneRecordsAudio,
+  setProjectLaneDelivers,
   fetchLaneLastChange,
   settingsEditorName,
   type LaneLastChangeResult,
@@ -125,7 +125,8 @@ import { AirtableIntegrationSection } from "./ProjectSettings/AirtableIntegratio
 import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { LinkSourceSection } from "./ProjectSettings/LinkSourceSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
-import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
+import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
@@ -165,10 +166,10 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * implemented but not ready to expose in the UI yet. Keep the code — flip this
  * flag to `true` when we want it back in settings nav + main content.
  *
- * Also re-enable the skipped smoke specs:
- *   - e2e/specs/projects/project-settings-termbase-sharing.smoke.spec.ts
- *   - e2e/specs/projects/project-settings-termbase-publish-toggle.smoke.spec.ts
- *   - e2e/specs/projects/termbase-subscribe-unsubscribe.smoke.spec.ts
+ * Smoke coverage has to be written, not un-skipped: the three specs this note
+ * used to name (project-settings-termbase-sharing, -publish-toggle,
+ * termbase-subscribe-unsubscribe) are not in e2e/specs/projects/, and no
+ * termbase sharing spec exists anywhere under e2e/ today.
  *
  * Backend routes + TermbaseSharingSection.tsx remain live; only settings UI
  * entry points are gated here.
@@ -588,6 +589,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       code?: string | null
       /** AQU-1784: the section already warned about the duplicate inline. */
       allowDuplicateName?: boolean
+      /** Media redesign: the add form's Delivers choice. */
+      delivers?: LaneDelivers
     },
   ) => {
     const jwt = session?.jwt
@@ -602,14 +605,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     return "invalid" as const
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
-  // AQU-1954: the "Records audio" switch on one language row.
-  const setLaneRecordsAudio = useCallback(async (laneId: string, recordsAudio: boolean) => {
+  // Media redesign slice 1: the "Delivers" choice on one language row.
+  const setLaneDelivers = useCallback(async (laneId: string, delivers: LaneDelivers): Promise<LaneDeliversOutcome> => {
     const jwt = session?.jwt
-    if (!jwt || !id) return false
-    const result = await setProjectLaneRecordsAudio(jwt, id, laneId, recordsAudio)
-    if (result.kind !== "ok") return false
+    if (!jwt || !id) return "error"
+    const result = await setProjectLaneDelivers(jwt, id, laneId, delivers)
+    if (result.kind === "forbidden") return "forbidden"
+    if (result.kind !== "ok") {
+      return typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : "error"
+    }
     await refreshSharedSettingsAfterWrite()
-    return true
+    return "ok"
   }, [session?.jwt, id, refreshSharedSettingsAfterWrite])
 
   const setLaneArchived = useCallback(async (laneId: string, archived: boolean) => {
@@ -781,7 +787,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // shows while the project follows the organization, and where "Set for this
   // project" starts from.
   const effectiveTimingLocked = resolveTimingLocked({ timingLocked: timingLocked ?? orgMediaDefaults.timingLocked })
-  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? false
+  // AQU-2214: the built-in default is ON — the project's own choice first, then
+  // the organization's, then on.
+  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? true
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
@@ -1730,7 +1738,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "experimental",
       label: "Experimental",
-      description: "Early features, this device only",
+      description: "Autopilot, extensions, and other early features",
       icon: FlaskConical,
       hub: "Integrations",
       sectionIds: ["section-experimental"],
@@ -1877,12 +1885,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Frontier" : "Custom",
+    ai: provider === "frontier" ? "Aquilla" : "Custom",
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com, Airtable",
-    experimental: "This device",
   }
 
   const headerActions = (
@@ -2238,8 +2245,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             onRenameLane={isCloudProject ? renameLane : undefined}
             onCreateLane={isCloudProject ? createLane : undefined}
             onSetLaneArchived={isCloudProject ? setLaneArchived : undefined}
-            onSetLaneRecordsAudio={isCloudProject ? setLaneRecordsAudio : undefined}
+            onSetLaneDelivers={isCloudProject ? setLaneDelivers : undefined}
             onLoadLaneLastChange={isCloudProject ? loadLaneLastChange : undefined}
+            startAdding={focusTarget === "add-lane"}
           />
         )}
         {/* AQU-1688: facts about the target language that Bible data checks
@@ -2677,11 +2685,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>
@@ -2789,7 +2795,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       userKey={completionUserKey}
                       onProjectKeyChange={setApiKey}
                       onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Aquilla."
                     />
                   </SettingsRow>
                   {models.length > 0 && (
@@ -3130,8 +3136,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               {/* AQU-646 stage 2. LAST in the card, because it is the wider
                   claim of the two: the lock above constrains what may move on
                   a timeline, this one decides whether the timeline's own rows
-                  may be added to, grouped and recoloured at all. Off by
-                  default, and enforced on the server as well — the UI
+                  may be added to, grouped and recoloured at all. ON by default
+                  since AQU-2214, and enforced on the server as well — the UI
                   withholding a button is not a permission. */}
               <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
@@ -3151,7 +3157,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   id="allow-track-editing-source"
                   settingLabel={t("projectSettings.timeline.trackEditingLabel")}
                   inherited={allowTrackEditing == null}
-                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? false)}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? true)}
                   disabled={!canEditShared}
                   onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
                 />

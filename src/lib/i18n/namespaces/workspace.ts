@@ -401,6 +401,11 @@ export const workspace = defineNamespace({
     "workspace.statusBar.audioSummary": "{total} lines · {translated} recorded {pct}",
     "workspace.statusBar.unvalidatedAudioBadge": "{count} recorded, not validated",
     "workspace.statusBar.audioValidatedBadge": "{count} audio validated",
+    // Media redesign: the footer of a language that delivers Text and audio
+    // counts the lines done on both halves, and says what is left of each.
+    "workspace.statusBar.bothSummary": "{total} lines · {done} done {pct}",
+    "workspace.statusBar.textLeftBadge": "Text left: {count}",
+    "workspace.statusBar.audioLeftBadge": "Audio left: {count}",
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
@@ -441,28 +446,19 @@ export const workspace = defineNamespace({
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
 
     // -- timeline/LinkVideoTimingDialog --
-    "workspace.linkVideoTiming.title": "This file uses Free timing — the video won't be shown",
+    "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
     "workspace.linkVideoTiming.description":
-      "A linked video plays on the original recording's timing. This file is set to Free timing, " +
-      "where the timeline re-flows to the translations' own lengths, so the video will stay " +
-      "hidden until the file switches back to Original's timing — a maintainer can change that " +
-      "any time with the timing control in the Media timeline, and switching is lossless.",
-    "workspace.linkVideoTiming.linkAnyway": "Link anyway",
+      "This file follows its recordings. A file timed to a film always follows its source, so " +
+      "once the film is linked its lines keep the film's times and the film plays. No recordings " +
+      "or times change, and clearing the film lets the file follow its recordings again.",
+    "workspace.linkVideoTiming.linkAnyway": "Link the film",
 
     // -- timeline/TimingModeChangedDialog --
-    "workspace.timingModeChanged.title": "Timing mode changed",
+    "workspace.timingModeChanged.title": "Timing changed",
     "workspace.timingModeChanged.description":
-      "Someone with settings access switched this file from {from} to {to}. The Media timeline " +
-      "now lays out on the new mode — recordings and timing data are untouched.",
+      "A project lead switched this file's timing from {from} to {to}. The Media timeline now " +
+      "follows the new choice — recordings and times are untouched.",
 
-    // -- timeline/TimingVideoWarningDialog --
-    "workspace.timingVideoWarning.title": "Switch to Free timing and hide the video?",
-    "workspace.timingVideoWarning.description":
-      "This file has a linked video, which plays on the original recording's timing. Free " +
-      "timing re-flows the timeline to the translations' own lengths, so the video will stay " +
-      "hidden until the file switches back to Original's timing. Switching is lossless — no " +
-      "timing data is changed either way.",
-    "workspace.timingVideoWarning.confirmButton": "Switch to Free timing",
 
     // -- timeline/TimelineCard --
     "workspace.timelineCard.camLabel": "cam {state}",
@@ -514,11 +510,16 @@ export const workspace = defineNamespace({
     "workspace.dataTable.noResults": "No results.",
 
     // -- voice/CastGutterVoice --
-    "workspace.castGutterVoice.applyToAllLines": "Apply to all «{name}» lines",
-    "workspace.castGutterVoice.applyToAllLinesCount": plural({
-      one: "Apply to the {count} «{name}» line",
-      other: "Apply to all {count} «{name}» lines",
+    "workspace.castGutterVoice.scopeLegend": "Use this voice for",
+    "workspace.castGutterVoice.scopeLine": "This line",
+    "workspace.castGutterVoice.scopeFile": "Every «{name}» line in this file",
+    "workspace.castGutterVoice.scopeFileCount": plural({
+      one: "Every «{name}» line in this file ({count})",
+      other: "Every «{name}» line in this file ({count})",
     }),
+    "workspace.castGutterVoice.scopeEverywhere": "Every «{name}» line, in every episode",
+    "workspace.castGutterVoice.scopeNoCharacter": "This line has no character, so the voice is for this line only.",
+    "workspace.castGutterVoice.clearOneFileAtATime": "Choose this line or this file to remove a character.",
 
     // -- hooks/useOpenWorkspace --
     "workspace.openWorkspace.openingProject": "Opening project",
@@ -1323,7 +1324,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.description": {
         description:
-          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "Subtitle of the one-time Set up AI chooser. They pick Aquilla, a " +
           "project API key, or a personal override; the dialog does not return " +
           "after that choice.",
         screenshot: "confirm-dialog",
@@ -1338,7 +1339,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.frontierDescriptionSignedIn": {
         description:
-          "Body of the Frontier option when the user is signed in. Names the " +
+          "Body of the Aquilla option when the user is signed in. Names the " +
           "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
         placeholders: {
           username: "Signed-in account username.",
@@ -1348,7 +1349,7 @@ export const workspace = defineNamespace({
       "workspace.aiSetup.projectKeyLabel": {
         description:
           "Title of the per-project bring-your-own-key option. Contrast with " +
-          "the personal override (Preferences, all projects) and Frontier " +
+          "the personal override (Preferences, all projects) and Aquilla " +
           "(hosted). Short, no period.",
         screenshot: "confirm-dialog",
       },
@@ -1825,6 +1826,29 @@ export const workspace = defineNamespace({
         },
         screenshot: "workspace-nav",
       },
+      "workspace.statusBar.bothSummary": {
+        description:
+          "Main status line in the bottom footer for a language that delivers text and " +
+          "audio: how many lines the file has and how many are done (text validated AND " +
+          "recording approved). Values arrive formatted and bidi-isolated.",
+        placeholders: {
+          total: "Already-formatted line count.",
+          done: "Already-formatted count of lines done on both halves.",
+          pct: "Already-formatted percentage in parentheses, e.g. '(42%)'.",
+        },
+      },
+      "workspace.statusBar.textLeftBadge": {
+        description:
+          "Badge in the status footer, for a language that delivers text and audio, " +
+          "counting lines whose text is not yet validated.",
+        placeholders: { count: "How many lines still need their text validated." },
+      },
+      "workspace.statusBar.audioLeftBadge": {
+        description:
+          "Badge in the status footer, for a language that delivers text and audio, " +
+          "counting lines whose recording is not yet approved.",
+        placeholders: { count: "How many lines still need an approved recording." },
+      },
       "workspace.statusBar.unvalidatedBadge": {
         description:
           "Small badge in the status footer counting cells not yet " +
@@ -1952,17 +1976,17 @@ export const workspace = defineNamespace({
 
       "workspace.linkVideoTiming.title": {
         description:
-          "Heading of the warning dialog shown when linking a video to a " +
-          "file that's currently in Free timing (the video won't display " +
-          "until the mode changes).",
+          "Heading of the dialog shown when linking a film to a file whose timing " +
+          "is 'Follows recordings': a file timed to a film always follows its source, " +
+          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.description": {
-        description: "Body copy of the same dialog, explaining why the video would stay hidden and how to fix it.",
+        description: "Body copy of the same dialog: what linking does to the file's timing, and that nothing is lost.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.linkAnyway": {
-        description: "Confirm button that links the video despite the Free-timing warning.",
+        description: "Confirm button that links the film (and so switches the file to following its source).",
       },
 
       "workspace.timingModeChanged.title": {
@@ -1974,8 +1998,8 @@ export const workspace = defineNamespace({
       },
       "workspace.timingModeChanged.description": {
         description:
-          "Body of the timing-mode-changed heads-up dialog. {from} and {to} " +
-          "are the old and new timing mode names, both rendered in bold.",
+          "Body of the timing-changed heads-up dialog. {from} and {to} are the old " +
+          "and new timing choices ('Follows source' / 'Follows recordings'), both in bold.",
         placeholders: {
           from: "The file's previous timing mode name, rendered as bold markup.",
           to: "The file's new timing mode name, rendered as bold markup.",
@@ -1983,22 +2007,6 @@ export const workspace = defineNamespace({
         screenshot: "confirm-dialog",
       },
 
-      "workspace.timingVideoWarning.title": {
-        description: "Heading of the confirm dialog shown before switching a file with a linked video to Free timing.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.timingVideoWarning.description": {
-        description: "Body copy of the same dialog, explaining the consequence and that switching is lossless.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.timingVideoWarning.confirmButton": {
-        description:
-          "Confirm button proceeding with the switch to Free timing. Keep " +
-          "the English wording an e2e/browser-pass guard matches this exact " +
-          "button name verbatim in the default locale; translate normally " +
-          "for other locales.",
-        screenshot: "confirm-dialog",
-      },
 
       "workspace.timelineCard.camLabel": {
         description:
@@ -2208,23 +2216,51 @@ export const workspace = defineNamespace({
           "admin and settings tables app-wide.",
       },
 
-      "workspace.castGutterVoice.applyToAllLines": {
+      "workspace.castGutterVoice.scopeLegend": {
         description:
-          "Checkbox label in the footer of the per-line character-voice " +
-          "picker popover, offering to apply the pick to every line spoken " +
-          "by the same character. {name} is the character/speaker name, " +
+          "Heading over three choices in the footer of the per-line voice " +
+          "picker: how far the voice picked above reaches (Sam, Oct 23). Read " +
+          "together with each choice: \"Use this voice for — This line\".",
+      },
+      "workspace.castGutterVoice.scopeLine": {
+        description:
+          "First choice under \"Use this voice for\", selected every time the " +
+          "picker opens: the voice is for the one line the picker was opened on.",
+      },
+      "workspace.castGutterVoice.scopeFile": {
+        description:
+          "Second choice under \"Use this voice for\": every line in the open " +
+          "file spoken by the same character. {name} is the character name, " +
           "wrapped in guillemets by the template — keep some form of visual " +
           "quoting around it.",
-        placeholders: { name: "The diarized/VTT speaker (character) name." },
+        placeholders: { name: "The character (speaker) name on this line." },
       },
-      "workspace.castGutterVoice.applyToAllLinesCount": {
+      "workspace.castGutterVoice.scopeFileCount": {
         description:
-          "The same checkbox label, saying how many lines in the file share the " +
-          "character and would all change (Sam, 2026-09-28). Off by default.",
+          "The same choice, with how many lines in the open file share the " +
+          "character (all of them would change).",
         placeholders: {
-          name: "The diarized/VTT speaker (character) name.",
-          count: "How many lines share that name; it also selects the plural form.",
+          name: "The character (speaker) name on this line.",
+          count: "How many lines in this file share that name; it also selects the plural form.",
         },
+      },
+      "workspace.castGutterVoice.scopeEverywhere": {
+        description:
+          "Third choice under \"Use this voice for\": the character itself, so " +
+          "its lines in every episode (every file of the project) speak with " +
+          "this voice, except lines given a voice of their own.",
+        placeholders: { name: "The character (speaker) name on this line." },
+      },
+      "workspace.castGutterVoice.scopeNoCharacter": {
+        description:
+          "Shown in place of the three choices when the line has no character: " +
+          "a voice picked here can only be for this line.",
+      },
+      "workspace.castGutterVoice.clearOneFileAtATime": {
+        description:
+          "Small reason under the disabled \"No character\" row while \"every " +
+          "episode\" is chosen: removing a character works on this line or on " +
+          "this file, not across every episode.",
       },
 
       "workspace.openWorkspace.openingProject": {

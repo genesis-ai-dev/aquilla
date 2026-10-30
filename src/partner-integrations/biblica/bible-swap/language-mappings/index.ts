@@ -73,6 +73,24 @@ export function isMappedBibleSwapLanguage(language: string | undefined): boolean
  * known volumes keeps a renamed export on the right book range. Unrecognised
  * names pass through unchanged.
  */
+/**
+ * Portuguese project titles for the six study volumes. Exports are named from
+ * the project file ("Isaías a Malaquias - Atualizado"), not `ISA-MAL.idml`,
+ * and the volume id is what turns on the Isaiah plan patch.
+ */
+const LOCALIZED_VOLUME_NAMES: ReadonlyArray<[string, (typeof ALL_STUDY_VOLUMES)[number]]> = [
+    ["GENESIS A DEUTERONOMIO", "GEN-DEU"],
+    ["JOSUE A ESTER", "JOS-EST"],
+    ["JO A CANTARES", "JOB-SNG"],
+    ["ISAIAS A MALAQUIAS", "ISA-MAL"],
+    ["MATEUS A JOAO", "MAT-JOHN"],
+    ["ATOS A APOCALIPSE", "ACT-REV"],
+];
+
+function foldVolumeName(value: string): string {
+    return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
 export function studyVolumeFromFileName(fileName: string): string {
     const base = fileName
         .replace(/^.*[\\/]/, "")
@@ -86,7 +104,12 @@ export function studyVolumeFromFileName(fileName: string): string {
                 base.startsWith(`${volume}-`) ||
                 base.startsWith(`${volume} `)
         );
-    return known ?? base;
+    if (known) return known;
+    const folded = foldVolumeName(base);
+    const alias = LOCALIZED_VOLUME_NAMES.find(
+        ([name]) => folded === name || folded.startsWith(`${name} `) || folded.startsWith(`${name}-`)
+    );
+    return alias?.[1] ?? base;
 }
 
 /**

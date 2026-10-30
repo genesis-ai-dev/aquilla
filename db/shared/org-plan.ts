@@ -1,6 +1,6 @@
 import type { AquillaDb } from '../shim/postgres'
 import {
-  rawUsdToAllowanceUnits, readAllowancePolicy, teamWeeklyRawUsd, weeklyUsagePeriod,
+  type AllowancePolicy, rawUsdToAllowanceUnits, readAllowancePolicy, teamWeeklyRawUsd, weeklyUsagePeriod,
 } from './allowance-policy'
 import { resolveWorkspaceAccess, type WorkspaceAccess } from './workspace-access'
 
@@ -59,6 +59,23 @@ export function resolveEnterpriseContract(contractEndsAt: string | null, now: Da
   return null
 }
 
+const PLAN_COLUMNS = `o.id AS org_id, o.created_at::text AS created_at,
+      to_jsonb(b) ->> 'tier' AS tier, b.plan,
+      to_jsonb(b) ->> 'contract_ends_at' AS contract_ends_at, b.weekly_allowance,
+      e.offer, e.usage_anchor::text AS usage_anchor,
+      s.payment_failed, s.paid_through::text AS paid_through, s.cancel_at_period_end
+    FROM organizations o
+    LEFT JOIN org_billing b ON b.org_id = o.id
+    LEFT JOIN workspace_plan_entitlements e ON e.org_id = o.id
+    LEFT JOIN workspace_subscription_state s ON s.org_id = o.id`
+
+interface PlanRow {
+  org_id: number; created_at: string; tier: OrgTier | null; plan: string | null
+  contract_ends_at: string | null; weekly_allowance: number | null
+  offer: 'team' | null; usage_anchor: string | null
+  payment_failed: boolean | null; paid_through: string | null; cancel_at_period_end: boolean | null
+}
+
 /** The one plan resolver. Returns null only when the org does not exist.
  * `billing_scope` and checkout eligibility play no part: a personal workspace
  * or an unconfirmed org is Free like any other (spec §4.2, §5.1).
@@ -72,22 +89,35 @@ export async function resolveOrgPlan(db: AquillaDb, orgId: number, now = new Dat
   // error, so these workers can deploy before the migration: a NULL tier falls
   // back to the legacy plan. One statement, so it is safe inside the usage
   // transaction. Read the columns directly once 0182 is applied everywhere.
-  const row = await db.prepare(`SELECT o.created_at::text AS created_at,
-      to_jsonb(b) ->> 'tier' AS tier, b.plan,
-      to_jsonb(b) ->> 'contract_ends_at' AS contract_ends_at, b.weekly_allowance,
-      e.offer, e.usage_anchor::text AS usage_anchor,
-      s.payment_failed, s.paid_through::text AS paid_through, s.cancel_at_period_end
-    FROM organizations o
-    LEFT JOIN org_billing b ON b.org_id = o.id
-    LEFT JOIN workspace_plan_entitlements e ON e.org_id = o.id
-    LEFT JOIN workspace_subscription_state s ON s.org_id = o.id
-    WHERE o.id = ?`).bind(orgId).first<{
-      created_at: string; tier: OrgTier | null; plan: string | null
-      contract_ends_at: string | null; weekly_allowance: number | null
-      offer: 'team' | null; usage_anchor: string | null
-      payment_failed: boolean | null; paid_through: string | null; cancel_at_period_end: boolean | null
-    }>()
+  const row = await db.prepare(`SELECT ${PLAN_COLUMNS} WHERE o.id = ?`).bind(orgId).first<PlanRow>()
   if (!row) return null
+  return planFromRow(orgId, row, await readAllowancePolicy(db), now)
+}
+
+/** resolveOrgPlan for many orgs: one row query and one policy read, whatever
+ * the count. For the admin billing list; admission keeps the per-org read.
+ * Orgs that do not exist are absent from the map. */
+export async function resolveOrgPlans(
+  db: AquillaDb, orgIds: readonly number[], now = new Date(),
+): Promise<Map<number, OrgPlan>> {
+  const ids = [...new Set(orgIds)].filter((id) => Number.isSafeInteger(id) && id > 0)
+  const out = new Map<number, OrgPlan>()
+  if (ids.length === 0) return out
+  const [{ results }, policy] = await Promise.all([
+    db.prepare(`SELECT ${PLAN_COLUMNS} WHERE o.id IN (${ids.map(() => '?').join(', ')})`)
+      .bind(...ids).all<PlanRow>(),
+    readAllowancePolicy(db),
+  ])
+  for (const row of results ?? []) {
+    const orgId = Number(row.org_id)
+    out.set(orgId, planFromRow(orgId, row, policy, now))
+  }
+  return out
+}
+
+function planFromRow(
+  orgId: number, row: PlanRow, policy: AllowancePolicy, now: Date,
+): OrgPlan {
   const stored: OrgTier | null = row.tier ?? (row.plan != null ? tierFromLegacyPlan(row.plan) : null)
   const contractEndsAt = row.contract_ends_at === null ? null
     : new Date(Date.parse(row.contract_ends_at)).toISOString()
@@ -114,7 +144,6 @@ export async function resolveOrgPlan(db: AquillaDb, orgId: number, now = new Dat
     source = 'stored'
   }
 
-  const policy = await readAllowancePolicy(db)
   // The per-org admin override (units) beats the plan default for metered plans.
   const weeklyAllowanceUnits = tier === 'enterprise' ? null
     : row.weekly_allowance != null ? Number(row.weekly_allowance)

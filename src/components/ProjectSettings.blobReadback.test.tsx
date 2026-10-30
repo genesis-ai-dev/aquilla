@@ -215,8 +215,12 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     currentLanes = lanesFor("Greek", "Tok Pisin")
     currentSettings = { sourceLanguage: "Spanish", targetLanguage: "German" }
     renderSettings("general")
-    expect(screen.getByLabelText("Source Language")).toHaveValue("Greek")
-    expect(screen.getByTestId("lane-language-target-lane")).toHaveValue("Tok Pisin")
+    // Media redesign (design B): the source is one line, a target's language
+    // is plain text in the table.
+    expect(screen.getByTestId("source-language-line")).toHaveTextContent("Greek")
+    expect(screen.getByTestId("lane-language-cell-target-lane")).toHaveTextContent("Tok Pisin")
+    expect(screen.queryByText("Spanish")).toBeNull()
+    expect(screen.queryByText("German")).toBeNull()
     expect(screen.queryByDisplayValue("Spanish")).toBeNull()
     expect(screen.queryByDisplayValue("German")).toBeNull()
   })
@@ -227,10 +231,10 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     expect(screen.getByTestId("settings-timing-locked")).not.toBeChecked()
   })
 
-  it("allowTrackEditing", () => {
-    currentSettings = { allowTrackEditing: true }
+  it("allowTrackEditing (absent means ON since AQU-2214, so a stored false must show off)", () => {
+    currentSettings = { allowTrackEditing: false }
     renderSettings("audio-media")
-    expect(screen.getByTestId("settings-allow-track-editing")).toBeChecked()
+    expect(screen.getByTestId("settings-allow-track-editing")).not.toBeChecked()
   })
 
   it("draftContext.precedingTargetCells", () => {
@@ -338,6 +342,9 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
   })
 })
 
+/** The source language's Language box, once Change has opened it. */
+const sourceLanguageField = () => screen.getByTestId("lane-language-source-lane")
+
 describe("ProjectSettings — a settings GET that lands after a successful save", () => {
   it("does not mark the form dirty or revert the saved source language (AQU-1744)", async () => {
     const user = userEvent.setup()
@@ -346,8 +353,10 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
 
     const renamed = "Blob Readback Test Project renamed"
     fireEvent.change(screen.getByLabelText("Project title"), { target: { value: renamed } })
-    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    // The source line's Change opens its fields.
+    fireEvent.click(screen.getByTestId("source-language-change"))
+    fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
+    expect(sourceLanguageField()).toHaveValue("English (US)")
 
     await user.click(screen.getByRole("button", { name: /save changes/i }))
     expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
@@ -364,7 +373,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
 
     expect(screen.queryByText("Unsaved changes")).toBeNull()
     expect(screen.getByText(/Saved: project title\./i)).toBeInTheDocument()
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(sourceLanguageField()).toHaveValue("English (US)")
     // The untouched field still adopts the server value, and that is not an edit.
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
@@ -375,7 +384,9 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     const view = renderSettings("general")
 
     fireEvent.change(screen.getByLabelText("Project title"), { target: { value: "Blob Readback Test Project renamed" } })
-    fireEvent.change(screen.getByLabelText("Source Language"), { target: { value: "English (US)" } })
+    // The source line's Change opens its fields.
+    fireEvent.click(screen.getByTestId("source-language-change"))
+    fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
 
     // A title-only save goes through renameProject, not the settings patch.
     // Hold that call open so the stale GET lands while the save is in flight.
@@ -398,7 +409,7 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     expect(await screen.findByText(/Saved: project title\./i)).toBeInTheDocument()
     expect(patchSpy).not.toHaveBeenCalled()
     expect(screen.queryByText("Unsaved changes")).toBeNull()
-    expect(screen.getByLabelText("Source Language")).toHaveValue("English (US)")
+    expect(sourceLanguageField()).toHaveValue("English (US)")
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })
 })

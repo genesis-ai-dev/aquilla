@@ -615,6 +615,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const onFootnoteHoverRef = useRef(onFootnoteHover)
   useEffect(() => { onFootnoteHoverRef.current = onFootnoteHover }, [onFootnoteHover])
   const initialIdmlSelectionRef = useRef(initialIdmlSelection)
+  // AQU-2173: true once the user has actually been in this cell's editor. Any
+  // rail affordance the user reaches for next takes DOM focus off the editor,
+  // so `editor.isFocused` alone cannot tell "the user never put a caret here"
+  // (anchor at the end of the cell) apart from "the user selected a phrase and
+  // then clicked the rail" (anchor at that phrase). This flag carries that
+  // distinction; ProseMirror keeps the selection itself across the blur. It is
+  // about THIS cell, so a recycled editor starts over on a new one.
+  const hasBeenFocusedRef = useRef(false)
+  useEffect(() => { hasBeenFocusedRef.current = false }, [cellId])
   const [pendingFootnoteDelete, setPendingFootnoteDelete] = useState<PendingFootnoteDelete | null>(null)
   const pendingFootnoteDeleteRef = useRef<PendingFootnoteDelete | null>(null)
   // AQU-810: while the OS input method is composing (Japanese romaji→kana,
@@ -1498,6 +1507,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       scheduleSelectionPublish(editor)
     },
     onFocus({ editor }) {
+      hasBeenFocusedRef.current = true
       applyEditorDirection(editor)
       const pointerSelection = initialIdmlSelectionRef.current
       initialIdmlSelectionRef.current = null
@@ -1676,7 +1686,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     getFootnoteInsertionAnchor() {
       if (!editor || isReadOnly) return null
       const { state } = editor
-      if (!editor.isFocused) {
+      // AQU-2173: fall back to the end of the cell only when the user never had
+      // a caret in here (the rail reached by hover alone). Once they have been
+      // in the editor, the selection ProseMirror still holds is their anchor —
+      // opening the `⋯` overflow blurs the editor before "Add footnote" can
+      // run, and reading `isFocused` alone sent every one of those footnotes to
+      // the end of the cell with no prefill.
+      if (!editor.isFocused && !hasBeenFocusedRef.current) {
         return withFootnotePreview(state.doc, {
           position: getDocumentEndPosition(state.doc),
           from: getDocumentEndPosition(state.doc),
@@ -2183,11 +2199,15 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // Keep focus in the editor: a blur here would close the cell.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => { void startLlmAsk() }}
-          className="absolute bottom-1 right-1 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-violet-700 opacity-70 transition-opacity hover:bg-violet-500/10 hover:opacity-100 dark:text-violet-300"
+          // Icon-only at rest so it can't cover text; the label slides out on hover/focus.
+          aria-label={t("smartEdits.askAi")}
+          className="group/ask-ai absolute bottom-1 right-1 inline-flex items-center rounded-full p-1 text-[11px] text-violet-700 opacity-60 transition-all hover:bg-background hover:px-2 hover:opacity-100 hover:shadow-sm hover:ring-1 hover:ring-violet-500/30 focus-visible:bg-background focus-visible:px-2 focus-visible:opacity-100 dark:text-violet-300"
           data-testid="smart-edit-ask-ai"
         >
-          <Sparkles className="size-3" aria-hidden />
-          {t("smartEdits.askAi")}
+          <Sparkles className="size-3 shrink-0" aria-hidden />
+          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-all group-hover/ask-ai:ml-1 group-hover/ask-ai:max-w-40 group-focus-visible/ask-ai:ml-1 group-focus-visible/ask-ai:max-w-40">
+            {t("smartEdits.askAi")}
+          </span>
         </button>
       )}
       {llmAsk && (

@@ -55,6 +55,7 @@ import type { FileFilterFocusHandle } from "@/hooks/useFileFilterFocus"
 // AQU-2111: the shared shape, which now carries the audio pair too — a local
 // re-declaration would have dropped it silently on the way to FileRow.
 import type { FileStats } from "@/lib/progress/file-summary-progress"
+import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 
 /** What the Reset-order confirmation needs to remember while it is open: which
  *  group is being reset, how to label it, and the writes that will clear it. */
@@ -127,6 +128,12 @@ interface Props {
   /** AQU-1083: the project's effective structural-cell policy, forwarded to
    *  each expanded file's section grid so a flip revalidates its snapshot. */
   countStructural?: boolean
+  /**
+   * Media redesign: what the open language (`lane`) delivers, when someone has
+   * chosen. The expanded files' chapter grids draw in that unit; absent, each
+   * file's own evidence decides (AQU-2110).
+   */
+  delivers?: LaneDelivers | null
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
   /** Opens the FileDetailsModal for the given file (rendered by the caller). */
@@ -149,6 +156,8 @@ interface Props {
   assignedFileIds?: ReadonlySet<string>
   /** Opens the Segmentation dialog for the given file (rendered by the caller). */
   onSegmentation?: (fileId: string) => void
+  /** Opens the single-file re-import dialog for the given file. */
+  onReimport?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -217,7 +226,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, countStructural, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
+  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -644,6 +653,7 @@ export function ExpandableFileList({
                             onExport={onExport ? () => onExport(file.id) : undefined}
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
+                            onReimport={onReimport ? () => onReimport(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)
@@ -670,6 +680,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               countStructural={countStructural}
+                              delivers={delivers}
                               getTokenForFile={getTokenForFile}
                               getChapters={file.id === activeFileId ? getActiveChapterHealth : undefined}
                               deferFetch={deferSectionProgress}

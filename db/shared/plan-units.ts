@@ -121,6 +121,9 @@ export interface PlanUnitRow {
   // instead of trusting a stored verdict that a threshold change invalidates.
   audio_validator_histogram: Record<string, number> | string
   structural_audio_validator_histogram: Record<string, number> | string
+  /** Media redesign slice 2: the unit's own joint text × audio histogram (0187). */
+  text_audio_validator_histogram?: Record<string, number> | string
+  structural_text_audio_validator_histogram?: Record<string, number> | string
   /**
    * The denominator the audio counts are measured against: the CUE SHEET's
    * cell count where one is linked, and NULL where none is — which is the
@@ -194,7 +197,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
   // in the place the single lane bind always sat.
   return `WITH units AS (${planUnitsSql("f.project_id = ?")}),
      want_lane AS (
-       SELECT project_id, id AS lane_id FROM public.lanes
+       SELECT project_id, id AS lane_id, delivers FROM public.lanes
         WHERE role = 'target' AND legacy_tag = ?
           AND project_id IN (SELECT project_id FROM units)
      )
@@ -237,11 +240,26 @@ export function readPlanUnitsSql(extraScope = ""): string {
             CASE WHEN cs.id IS NOT NULL THEN COALESCE(psl.structural_audio_validator_histogram, ps.structural_audio_validator_histogram, '{}'::jsonb)
                  ELSE COALESCE(pl.structural_audio_validator_histogram, pd.structural_audio_validator_histogram, '{}'::jsonb) END
               AS structural_audio_validator_histogram,
+            -- Media redesign slice 2: the unit's OWN joint text × audio
+            -- histogram — what a "Text and audio" language counts as done.
+            -- Never the cue sheet's: its lines hold no text.
+            COALESCE(pl.text_audio_validator_histogram, '{}'::jsonb) AS text_audio_validator_histogram,
+            COALESCE(pl.structural_text_audio_validator_histogram, '{}'::jsonb)
+              AS structural_text_audio_validator_histogram,
             -- NULL where there is no sheet: the reader's signal to measure
             -- audio against the text total, exactly as it always has.
             CASE WHEN cs.id IS NOT NULL
                  THEN COALESCE(ps.total_count, cs.cell_count, 0) END AS audio_total_count,
-            COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,
+            -- Media redesign slice 1: recording and approving are activity. A
+            -- take or a vote writes no cell row, so it never moves
+            -- last_edit_at; for a language that counts its recordings, the
+            -- unit's row (and its cue sheet's) restamp on every recompute and
+            -- stand in. A Text language's clock is exactly what it was.
+            CASE WHEN (SELECT w.delivers FROM want_lane w WHERE w.project_id = u.project_id)
+                        IN ('audio', 'text_and_audio')
+                 THEN NULLIF(GREATEST(COALESCE(pl.last_edit_at, pd.last_edit_at, 0),
+                                      COALESCE(pl.updated_at, 0), COALESCE(psl.updated_at, 0)), 0)
+                 ELSE COALESCE(pl.last_edit_at, pd.last_edit_at) END AS last_edit_at,
             GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0),
                      COALESCE(ps.revision, 0), COALESCE(psl.revision, 0)) AS revision,
             -- The projection stamps this on every recompute. A backfill can

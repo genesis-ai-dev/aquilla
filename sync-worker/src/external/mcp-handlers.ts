@@ -12,6 +12,7 @@
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { ExternalError } from './errors'
+import { uploadArtifact } from './mcp-artifact-upload'
 import type { ExternalErrorCode } from './errors'
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
@@ -25,6 +26,7 @@ import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalCommentsRequest } from './comments-route'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
+import { handleExternalStyleRulesReadRequest } from './style-rules-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
@@ -605,6 +607,30 @@ async function listMemory(
   return runMemoryRead(env, token, `${encodeURIComponent(projectId)}/memory${qs}`)
 }
 
+async function listStyleRules(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/style-rules${qs}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalStyleRulesReadRequest(req, env)
+  if (!res) return fail('not_found', 'style-rules read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
+}
+
 async function readCellMemory(
   env: ExternalEnv,
   token: string,
@@ -1103,6 +1129,7 @@ async function exportFile(
   env: ExternalEnv,
   token: string,
   args: Record<string, unknown>,
+  cred: ApiCredentialContext,
 ): Promise<McpToolResult> {
   const projectId = str(args, 'projectId')
   const fileId = str(args, 'fileId')
@@ -1128,11 +1155,15 @@ async function exportFile(
   const exportMode = res.headers.get('X-Export-Mode') ?? 'round-trip'
   const lossyHeader = res.headers.get('X-Usfm-Lossy-Verse-Count')
 
+  const fallback = cred.oauthResource
+    ? 'Open the project in Aquilla and export from the app. MCP OAuth credentials cannot authorize REST downloads.'
+    : `Fetch the bytes with this separately authorized REST credential: GET ${restPath}`
+
   if (!contentType.startsWith('text/')) {
     return fail(
       'validation_failed',
-      `"${fileName}" exports as ${contentType}, which MCP (JSON-RPC text) cannot carry — ` +
-        `fetch the bytes over REST instead: GET ${restPath}`,
+      `"${fileName}" exports as ${contentType}, which this inline text export does not support. ` +
+        fallback,
       { restPath, contentType, exportMode },
     )
   }
@@ -1143,7 +1174,7 @@ async function exportFile(
     return fail(
       'validation_failed',
       `"${fileName}" is ${bytes} bytes, over the ${MCP_EXPORT_MAX_BYTES}-byte inline export ` +
-        `limit — fetch it over REST instead: GET ${restPath}`,
+        `limit. ${fallback}`,
       { restPath, bytes, maxBytes: MCP_EXPORT_MAX_BYTES, exportMode },
     )
   }
@@ -1425,6 +1456,8 @@ export async function callTool(
       return listMemory(env, token, args)
     case 'read_cell_memory':
       return readCellMemory(env, token, args)
+    case 'list_style_rules':
+      return listStyleRules(env, token, args)
     case 'read_quality':
       return readQuality(env, token, args)
     case 'read_term_consistency':
@@ -1435,12 +1468,14 @@ export async function callTool(
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':
       return patchSettings(env, token, args, ctx)
+    case 'upload_artifact':
+      return uploadArtifact(env, token, args)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':
       return runParseArtifact(env, token, args, true)
     case 'export_file':
-      return exportFile(env, token, args)
+      return exportFile(env, token, args, cred)
     case 'get_changeset':
       return getChangeset(env, token, args)
     case 'list_changesets':

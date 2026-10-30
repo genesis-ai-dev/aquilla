@@ -137,7 +137,7 @@ export function VoicePlaybackBar({
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
-  const activeVoice = activeCell ? resolveCastVoice(settings, activeCell.id) : undefined
+  const activeVoice = activeCell ? resolveCastVoice(settings, activeCell) : undefined
 
   // Keep the running queue's snapshot fresh so a mid-playback generate is heard
   // on the next advance.

@@ -411,6 +411,10 @@ export interface OutboxEventPayloads {
     role?: "dub" | "source"
     /** AQU-1767: born a piece of this take (a split take's cleaned copy). Fill-only. */
     pieceOf?: string
+    /** Two-step transcription (0186): what ASR heard, before learned corrections. */
+    asr?: { text: string; model: string }
+    /** Provenance of an AI cleanup; new timings without it clear the mark. */
+    transcriptAi?: { model: string; at: number; changes: number }
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -789,7 +793,7 @@ export interface OutboxEventPayloads {
   // defaults. Inside a patch, null means "clear THAT override" and an absent
   // key means "leave it alone"; `kind` has no null form because a track's
   // kind is its identity. The patch is FLAT on purpose — the projection
-  // strips nulls recursively. Maintainer floor, like file.timing.set.
+  // strips nulls recursively. Maintainer floor.
   //
   // The kind union is spelled out here rather than imported from
   // @/lib/timeline/tracks: this module is the wire mirror of

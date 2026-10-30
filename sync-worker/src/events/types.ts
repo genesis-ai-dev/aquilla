@@ -609,6 +609,18 @@ export interface EventPayloads {
      * source.cell.create UPSERT clobbering segment fields.
      */
     transcription?: string
+    /**
+     * Two-step transcription (migration 0186): what ASR heard, before learned
+     * corrections. Sent only by the transcription path; a correction never
+     * sends it and the projection keeps the stored value.
+     */
+    asr?: { text: string; model: string }
+    /**
+     * Provenance of an AI cleanup of this clip's transcript. An attach that
+     * carries new `timings` (or `transcription`) without it clears the stored
+     * value: the transcript is no longer the AI's.
+     */
+    transcriptAi?: { model: string; at: number; changes: number }
     /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

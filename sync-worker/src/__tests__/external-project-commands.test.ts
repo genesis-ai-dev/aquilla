@@ -5,7 +5,7 @@
 // are about the projects / project_members / project_settings rows and the
 // receipt-only receipt shape, plus the scope/role gates and version guard.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*). The
 // project-lifecycle commands never route through /events, but the import graph
@@ -17,6 +17,8 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleExternalMcpRequest } from '../external/mcp-route'
+import { CHATGPT_TOOLS } from '../external/mcp-chatgpt-tools'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -131,6 +133,8 @@ async function seedConfirmation(
     .bind(`conf-${changesetId.slice(0, 8)}`, changesetId, String(userId), credentialId, digest, new Date(Date.now() + 60_000).toISOString())
     .run()
 }
+
+afterEach(async () => { await tdb?.close() })
 
 let tdb: TestDb
 beforeEach(async () => {
@@ -323,6 +327,35 @@ describe('CreateProject — accepted fields (AQU-1223)', () => {
     const rows = await tdb.rows<{ project_id: string; settings: string; version: number }>('project_settings')
     return rows.find((r) => r.project_id === projectId)
   }
+
+  it('passes declared OAuth language lanes through forced human approval and project creation', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c1'
+    const token = await credToken(tdb, { credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null })
+    await tdb.pg.query('UPDATE api_credentials SET oauth_resource = $1 WHERE id = $2', ['https://w/api/v1/external/mcp', credentialId])
+    const tool = CHATGPT_TOOLS.find(t => t.name === 'prepare_create_project')!
+    expect(JSON.stringify(tool.inputSchema)).toContain('"lanes"')
+    async function call(name: string, args: Record<string, unknown>) {
+      const response = await handleExternalMcpRequest(new Request('https://w/api/v1/external/mcp', {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+      }), env)
+      const body = await response!.json() as { result: { content: { text: string }[]; isError?: boolean } }
+      return { error: body.result.isError === true, payload: JSON.parse(body.result.content[0].text) }
+    }
+    const staged = await call('prepare_create_project', { projectId: 'oauth-lanes', updates: [{ name: 'OAuth lanes', orgId: ORG_ID, lanes: [
+      { role: 'source', language: 'English', code: 'en' }, { role: 'target', language: 'Spanish', code: 'es' },
+    ] }] })
+    expect(staged.error).toBe(false)
+    expect(staged.payload.mode).toBe('ask')
+    const args = { projectId: 'oauth-lanes', changesetId: staged.payload.changesetId, digest: staged.payload.digest }
+    expect((await call('confirm_changeset', args)).payload.error.code).toBe('confirmation_required')
+    await seedConfirmation(tdb, staged.payload.changesetId, staged.payload.digest, 1, credentialId)
+    expect((await call('confirm_changeset', args)).error).toBe(false)
+    const lanes = await tdb.pg.query<{ role: string; language: string; lang_code: string }>("SELECT role, language, lang_code FROM lanes WHERE project_id = 'oauth-lanes' ORDER BY role")
+    expect(lanes.rows).toEqual([{ role: 'source', language: 'English', lang_code: 'en' }, { role: 'target', language: 'Spanish', lang_code: 'es' }])
+  })
 
   it('creates source and target lane rows and does not write the language settings keys', async () => {
     const env = makeEnv(tdb.db)

@@ -138,6 +138,27 @@ describe("segmentUsfmForDisplay — inline character-marker formatting", () => {
     expect(marksFor("\\pn Moses\\pn*", "Moses")).toEqual([])
   })
 
+  // AQU-2184: `marks` is the VISUAL reduction, so a role that carries no
+  // styling of its own vanishes from it — and words of Jesus is exactly such a
+  // role, while the HTML export has to style it. `roles` is the same window,
+  // unreduced, so a consumer that needs one of those can still find it.
+  it("reports the open roles beside the marks, including ones that carry no mark", () => {
+    const rolesFor = (raw: string, needle: string): readonly string[] => {
+      const seg = segmentUsfmForDisplay(raw)!
+        .filter((s): s is UsfmTextSegment => s.kind === "text")
+        .find((s) => s.text.includes(needle))
+      return seg?.roles ?? []
+    }
+
+    expect(rolesFor("\\wj said\\wj*", "said")).toEqual(["words-of-jesus"])
+    expect(rolesFor("plain \\nd Lord\\nd* tail", "Lord")).toEqual(["divine-name"])
+    expect(rolesFor("plain \\nd Lord\\nd* tail", "plain")).toEqual([])
+    // Nested markers report outermost first, both of them.
+    expect(rolesFor("\\wj \\+nd Lord\\+nd*\\wj*", "Lord")).toEqual(["words-of-jesus", "divine-name"])
+    // `\no` cancels what is outside it, for roles as for marks.
+    expect(rolesFor("\\bd \\+no plain\\+no*\\bd*", "plain")).toEqual([])
+  })
+
   it("unions nested markers and emits them in a stable order regardless of nesting", () => {
     expect(marksFor("\\bd \\+it deep\\+it*\\bd*", "deep")).toEqual(["bold", "italic"])
     expect(marksFor("\\it \\+bd deep\\+bd*\\it*", "deep")).toEqual(["bold", "italic"])

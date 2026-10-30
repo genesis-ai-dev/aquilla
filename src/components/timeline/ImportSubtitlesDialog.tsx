@@ -13,7 +13,7 @@
 // is nothing to reconcile against and no take to strand. Re-importing over
 // existing cues is `import-file-target.ts`'s problem, not this one's.
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -30,6 +30,10 @@ import {
   SUBTITLE_SIDECAR_ACCEPT,
   type ParsedSubtitleSidecar,
 } from "@/lib/timeline/subtitle-source-import"
+import {
+  FramesAsHundredthsNotice,
+  useFramesAsHundredths,
+} from "@/components/import/FramesAsHundredthsNotice"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fmtClock } from "./format"
 
@@ -38,6 +42,9 @@ interface Props {
   /** The time-ordered file the cues will land on — named so it is obvious
    *  which file is about to gain them. */
   textFileName: string
+  /** The file's linked film, if any. AQU-2197: its frame rate is the one to
+   *  read frame numbers written as hundredths at. */
+  filmUrl?: string | null
   onConfirm(parsed: ParsedSubtitleSidecar): void
   onCancel(): void
 }
@@ -49,7 +56,7 @@ function cueSpan(parsed: ParsedSubtitleSidecar): string | null {
   return `${fmtClock(spanStartMs / 1000)} – ${fmtClock(spanEndMs / 1000)}`
 }
 
-export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel }: Props) {
+export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, onCancel }: Props) {
   const t = useT()
   const [picked, setPicked] = useState<{
     parsed: ParsedSubtitleSidecar
@@ -89,8 +96,26 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
     }
   }
 
-  const report = picked?.parsed.report
-  const span = picked ? cueSpan(picked.parsed) : null
+  // AQU-2197: the same frames-as-hundredths check, notice and conversion as
+  // every other VTT import; `fixed` is what the import writes.
+  const frames = useFramesAsHundredths(picked?.parsed.cues, { filmUrl })
+  const fixed = useMemo<ParsedSubtitleSidecar | null>(() => {
+    if (!picked) return null
+    if (frames.cues === picked.parsed.cues) return picked.parsed
+    const starts = frames.cues.flatMap((c) => (typeof c.start === "number" ? [c.start] : []))
+    const ends = frames.cues.flatMap((c) => (typeof c.end === "number" ? [c.end] : []))
+    return {
+      cues: [...frames.cues],
+      report: {
+        ...picked.parsed.report,
+        ...(starts.length ? { spanStartMs: Math.round(Math.min(...starts) * 1000) } : {}),
+        ...(ends.length ? { spanEndMs: Math.round(Math.max(...ends) * 1000) } : {}),
+      },
+    }
+  }, [picked, frames.cues])
+
+  const report = fixed?.report
+  const span = fixed ? cueSpan(fixed) : null
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
@@ -131,6 +156,14 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
               <p className="text-xs text-muted-foreground" data-testid="import-subtitles-untimed">
                 {t("editor.timeline.subtitleSourceUntimedCues", { count: report.untimedCues })}
               </p>
+            )}
+            {frames.state && (
+              <div className="mt-2">
+                <FramesAsHundredthsNotice
+                  state={frames.state}
+                  onChange={frames.setPick}
+                />
+              </div>
             )}
           </div>
         ) : (
@@ -173,8 +206,8 @@ export function ImportSubtitlesDialog({ open, textFileName, onConfirm, onCancel 
             data-testid="import-subtitles-confirm"
             disabled={!picked}
             onClick={() => {
-              if (!picked) return
-              onConfirm(picked.parsed)
+              if (!fixed) return
+              onConfirm(fixed)
             }}
           >
             {picked

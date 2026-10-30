@@ -15,6 +15,7 @@ interface CapturedMembersPanelProps {
   scopeConfig?: MembersPanelScopeConfig
   suggestions?: Array<{ id: number; username: string }>
   emptySuggestionsHint?: string
+  searchDisabledReason?: string
 }
 
 let lastMembersPanelProps: CapturedMembersPanelProps | null = null
@@ -62,13 +63,14 @@ const contributorMembers = [
 ]
 
 let mockMembers = leadMembers
+let mockRosterHidden = false
 
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
     members: mockMembers,
     isLoading: false,
     error: null,
-    rosterHidden: false,
+    rosterHidden: mockRosterHidden,
     refresh: vi.fn(),
     add: vi.fn(),
     addMany: vi.fn(async () => []),
@@ -128,6 +130,7 @@ describe("SharePanel — member scopes wiring", () => {
     vi.clearAllMocks()
     lastMembersPanelProps = null
     mockMembers = leadMembers
+    mockRosterHidden = false
     mockFetchProjectSettings.mockResolvedValue({
       version: 3,
       updatedAt: "2026-07-01T00:00:00Z",
@@ -170,6 +173,7 @@ describe("SharePanel — member scopes wiring", () => {
       { id: "f2", name: "Exodus" },
     ])
     expect(typeof config.onSave).toBe("function")
+    expect(lastMembersPanelProps?.searchDisabledReason).toBeUndefined()
   })
 
   it("labels a lane tagged with its own id by the row's code, never the id", async () => {
@@ -193,6 +197,18 @@ describe("SharePanel — member scopes wiring", () => {
     })
   })
 
+  it("disables member search when the roster is hidden from the caller", async () => {
+    mockRosterHidden = true
+    mockMembers = []
+    renderPanel()
+
+    await waitFor(() => {
+      expect(lastMembersPanelProps?.searchDisabledReason).toMatch(
+        /restricted who can view the member list/,
+      )
+    })
+  })
+
   it("does not pass scopeConfig when callerMaxRole < 500", async () => {
     mockMembers = contributorMembers
     renderPanel()
@@ -209,23 +225,35 @@ describe("SharePanel — member scopes wiring", () => {
     // useProjectOrgId (org-member suggestions), which runs for every caller.
   })
 
-  it("fetches scopes for scopable (sub-500) members and feeds scopesByUser", async () => {
+  it("fetches lane limits for everyone below maintainer, including a project lead", async () => {
+    mockMembers = [
+      ...leadMembers,
+      { userId: 9, username: "maya", role: { level: 600, name: "maintainer", source: "override" as const }, secondarySources: [] },
+    ]
     mockFetchMemberScopes.mockImplementation(async (_jwt: string, _projectId: string, userId: number) =>
-      userId === 2 ? [{ kind: "lane", value: "es" }] : [],
+      userId === 1 ? [{ kind: "lane", value: "es" }] : userId === 2 ? [{ kind: "lane", value: "de" }] : [],
     )
     renderPanel()
 
     await waitFor(() => {
+      expect(mockFetchMemberScopes).toHaveBeenCalledWith("test-jwt", "proj-1", 1)
       expect(mockFetchMemberScopes).toHaveBeenCalledWith("test-jwt", "proj-1", 2)
     })
-    // alice (userId 1) is project_lead (500) — never fetched/scoped.
-    expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("test-jwt", "proj-1", 1)
+    // maya (userId 9) is maintainer (600) — sees every lane, never fetched.
+    expect(mockFetchMemberScopes).not.toHaveBeenCalledWith("test-jwt", "proj-1", 9)
 
     await waitFor(() => {
       // AQU-1607: a stored legacy tag is shown as the lane id once rows exist.
-      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[2]).toEqual([
+      // AQU-2054: the lead's limit is included, the same as the contributor's.
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[1]).toEqual([
         { kind: "lane", value: "lnes0001" },
       ])
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[2]).toEqual([
+        { kind: "lane", value: "lnde0001" },
+      ])
+      expect(lastMembersPanelProps?.scopeConfig?.scopesByUser[9]).toBeUndefined()
+      // Alice is the caller and holds Spanish only, so that is all she can grant.
+      expect(lastMembersPanelProps?.scopeConfig?.grantableLaneValues).toEqual(["lnes0001"])
     })
   })
 
@@ -283,6 +311,7 @@ describe("SharePanel — eligible org-member suggestions", () => {
     vi.clearAllMocks()
     lastMembersPanelProps = null
     mockMembers = leadMembers
+    mockRosterHidden = false
     orgMocks.activeOrgId = 7
     orgMocks.roster = []
     mockFetchProjectSettings.mockResolvedValue(null)
@@ -348,6 +377,7 @@ describe("SharePanel — invite create needs the admin code", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockMembers = leadMembers
+    mockRosterHidden = false
   })
 
   it("shows the admin-code message instead of the generic failure", async () => {
@@ -407,6 +437,7 @@ describe("SharePanel — active invite links name their language scope (AQU-528)
   beforeEach(() => {
     vi.clearAllMocks()
     mockMembers = leadMembers
+    mockRosterHidden = false
     mockFetchProjectSettings.mockResolvedValue(null)
     mockFetchProjectSettingsResult.mockResolvedValue({ ok: true, value: { lanes: laneRows } })
   })

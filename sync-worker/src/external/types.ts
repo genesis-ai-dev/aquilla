@@ -1,5 +1,6 @@
 // Shared types for the changeset engine.
 
+import type { IdentityTransport } from './identity-bridge'
 import type { TextDirection } from '../../../db/shared/text-direction'
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
@@ -8,7 +9,7 @@ import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
  *  (the compiled events are routed back through handleEventsWriteRequest). */
-export type ExternalEnv = EventsRouteEnv & {
+export type ExternalEnv = EventsRouteEnv & IdentityTransport & {
   /** AQU-730 read wall. Unset locally and in e2e. */
   /** Request-local trusted MCP delegation factory, never a network header. */
   mcpRequest?: (input: RequestInfo | URL, init?: RequestInit) => Request
@@ -152,10 +153,17 @@ export interface ChangesetSummary {
    *  AddNote): the command kind, so the human on /approve/:id sees WHICH
    *  lifecycle op they're approving instead of an empty "No changes
    *  summarized." box (design §2 / blind-approval fix). */
-  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote' | 'ReviewStyleRules'
   /** AQU-1228 memory commands: the memory path being written or retired, plus
    *  a one-line preview, so the human on /approve/:id sees the actual effect. */
   memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
+  /** AQU-2195 ReviewStyleRules: how many rules get each decision, and each
+   *  rule's id, action and (clipped) instruction, so the human on /approve/:id
+   *  can see what is being approved or rejected. */
+  styleRuleReviews?: {
+    counts: { approve: number; reject: number; update: number }
+    items: { ruleId: string; action: 'approve' | 'reject' | 'update'; instruction: string }[]
+  }
   /** CreateProject: the project name being created. RenameProject: the new
    *  name. ArchiveProject / UnarchiveProject: the project's current name, so
    *  the approval box names what is being trashed or restored. */
@@ -607,6 +615,23 @@ export interface MemoryWriteReceipt {
   note?: string
 }
 
+/** AQU-2195 receipt for ReviewStyleRules. Receipt-only like the memory writes.
+ *  Names every rule's resulting status and version, in command order. */
+export interface StyleRuleReviewReceipt {
+  credentialId: string
+  channel: ProvenanceChannel
+  changesetId: string
+  command: 'ReviewStyleRules'
+  appliedAt: string
+  projectId: string
+  rules: {
+    ruleId: string
+    action: 'approve' | 'reject' | 'update'
+    status: string
+    version: number
+  }[]
+}
+
 /** The full stored plan, as persisted in `changesets`. */
 export interface StoredChangeset {
   id: string
@@ -637,7 +662,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | StyleRuleReviewReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

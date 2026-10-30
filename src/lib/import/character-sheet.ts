@@ -31,6 +31,14 @@
 import { splitCastName } from "@/lib/parsers/spreadsheet"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
+import {
+  FRAME_RATES,
+  parseTimecode,
+  timecodeToSeconds,
+  type FrameRateLabel,
+  type Timecode,
+} from "@/lib/parsers/frame-timecode"
+import { alignPairs, normalizeCueText } from "./cue-reconcile"
 
 // Re-exported rather than redeclared: this file used to carry its own copy of
 // the union, which meant widening it for `group` (2026-08-20) would have left
@@ -154,6 +162,13 @@ export interface CharacterRow {
    *  than resolved loudly — see `planCharacterAssignments`. */
   cameraDisagrees: boolean
   startSec: number | undefined
+  /**
+   * The start as video timecode (`00:01:03:05`), when that is how the sheet
+   * wrote it. `startSec` stays undefined for these: timecode means nothing
+   * without a frame rate, and the rate is settled against the file's own
+   * lines in `planCharacterAssignments`, not guessed here. (AQU-2197)
+   */
+  startTimecode?: Timecode
   /** The line's own words when the sheet carries them; "" when it does not. */
   text: string
   /**
@@ -197,6 +212,14 @@ export function readCharacterRows(
     if (startSec === undefined && cols.range != null) {
       startSec = parseTimestampRange(row[cols.range] ?? "")?.start
     }
+    // AQU-2197: video timecode is kept as written; its frame rate is settled
+    // against the file's lines when the rows are keyed.
+    let startTimecode: Timecode | undefined
+    if (startSec === undefined) {
+      startTimecode =
+        (cols.start == null ? undefined : parseTimecode(row[cols.start] ?? "")) ??
+        (cols.range == null ? undefined : parseTimecode((row[cols.range] ?? "").split("-->")[0] ?? ""))
+    }
 
     out.push({
       rowNumber: i + offset,
@@ -205,6 +228,7 @@ export function readCharacterRows(
       cameraState,
       cameraDisagrees: Boolean(fromColumn && embedded && fromColumn !== embedded),
       startSec,
+      ...(startTimecode ? { startTimecode } : {}),
       text: cols.text == null ? "" : (row[cols.text] ?? "").trim(),
       lineNumber:
         cols.lineNumber == null ? undefined : (row[cols.lineNumber] ?? "").trim() || undefined,
@@ -219,6 +243,10 @@ export interface KeyableCell {
   id?: string
   /** Seconds. */
   startTime?: number
+  /** The line's own words. Lets a row the timestamps missed be matched by its
+   *  wording instead, when the sheet carries the text too — see the word pass
+   *  in `planCharacterAssignments`. */
+  original?: string
 }
 
 export interface CharacterAssignment {
@@ -246,14 +274,106 @@ export interface CharacterAssignmentPlan {
    *  `planCharacterAssignments`. Worth reporting: it means the sheet and the
    *  subtitles disagree slightly about where some lines start. */
   filledByPosition: number
+  /** Rows the timestamp missed but their WORDS matched — see the word pass in
+   *  `planCharacterAssignments`. Non-zero means the sheet's times and the
+   *  file's disagree (or the sheet's times could not be read at all). */
+  matchedByWords: number
   /** How many different people are in this episode. */
   distinctCharacters: number
+  /**
+   * What happened to rows whose times are video timecode (AQU-2197). `rows`
+   * is how many there were; `frameRate` is the rate they were read at, or null
+   * when no common rate lined them up with this file's lines — those rows were
+   * then left to the word pass. Absent when the sheet has no timecode.
+   */
+  timecode?: { rows: number; frameRate: FrameRateLabel | null }
 }
 
 export interface PlanCharacterAssignmentsArgs {
   rows: readonly CharacterRow[]
   cells: readonly KeyableCell[]
   toleranceMs?: number
+}
+
+/** A row's timecode must line up with this share of the file's lines at a
+ *  frame rate before the sheet's timecode is read at that rate. */
+export const TIMECODE_MIN_SHARE = 0.5
+
+interface RateTrial {
+  label: FrameRateLabel
+  matches: number
+  /** Total distance from each matched row to its line, in ms: the tiebreak. */
+  errorMs: number
+  secondsByRow: Map<number, number>
+}
+
+/**
+ * Settle the frame rate of a sheet's timecode against the file's own lines.
+ * (AQU-2197.)
+ *
+ * Timecode needs a rate, and the rates differ by more than the match
+ * tolerance within a minute: 24 against 23.976 drifts 0.1%, which is 60 ms a
+ * minute and about 3.6 s an hour. So each common rate is tried, every row read
+ * at it and keyed to the nearest free line within tolerance, and the rate that
+ * lines up the most rows wins. A rate whose frame count a row exceeds (frame 24
+ * at 24 fps) is out. The winner is used only when it lines up at least half the
+ * timecode rows; otherwise the times are not this file's clock at any rate (the
+ * file may have been re-timed, or converted wrongly), and the rows are left for
+ * the word pass to place, as before.
+ */
+function settleTimecodeRate(
+  rows: readonly CharacterRow[],
+  timed: readonly { startMs: number }[],
+  toleranceMs: number,
+): { rate: FrameRateLabel | null; seconds: Map<number, number>; rows: number } {
+  const tcRows = rows.filter((r) => r.castName !== "" && r.startSec === undefined && r.startTimecode)
+  if (tcRows.length === 0) return { rate: null, seconds: new Map(), rows: 0 }
+  const starts = timed.map((c) => c.startMs)
+  const trials: RateTrial[] = []
+  for (const rate of FRAME_RATES) {
+    const secondsByRow = new Map<number, number>()
+    let possible = true
+    for (const row of tcRows) {
+      const sec = timecodeToSeconds(row.startTimecode!, rate)
+      if (sec === undefined) { possible = false; break }
+      secondsByRow.set(row.rowNumber, sec)
+    }
+    if (!possible) continue
+    const claimed = new Set<number>()
+    let matches = 0
+    let errorMs = 0
+    for (const row of tcRows) {
+      const want = Math.round(secondsByRow.get(row.rowNumber)! * 1000)
+      // `starts` is sorted: find the first start within reach, then the
+      // nearest free one inside the window.
+      let lo = 0
+      let hi = starts.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (starts[mid] < want - toleranceMs) lo = mid + 1
+        else hi = mid
+      }
+      let best = -1
+      let bestD = Infinity
+      for (let i = lo; i < starts.length && starts[i] <= want + toleranceMs; i++) {
+        if (claimed.has(i)) continue
+        const d = Math.abs(starts[i] - want)
+        if (d < bestD) { best = i; bestD = d }
+      }
+      if (best >= 0) {
+        claimed.add(best)
+        matches++
+        errorMs += bestD
+      }
+    }
+    trials.push({ label: rate.label, matches, errorMs, secondsByRow })
+  }
+  trials.sort((a, b) => b.matches - a.matches || a.errorMs - b.errorMs)
+  const winner = trials[0]
+  if (!winner || winner.matches === 0 || winner.matches < Math.ceil(tcRows.length * TIMECODE_MIN_SHARE)) {
+    return { rate: null, seconds: new Map(), rows: tcRows.length }
+  }
+  return { rate: winner.label, seconds: winner.secondsByRow, rows: tcRows.length }
 }
 
 /**
@@ -264,14 +384,26 @@ export interface PlanCharacterAssignmentsArgs {
  * first. A cell is claimed once — two rows cannot both take it.
  */
 export function planCharacterAssignments({
-  rows,
+  rows: sheetRows,
   cells,
   toleranceMs = MATCH_TOLERANCE_MS,
 }: PlanCharacterAssignmentsArgs): CharacterAssignmentPlan {
   const timed = cells
-    .map((c) => ({ id: c.cellId ?? c.id ?? "", startMs: Math.round((c.startTime ?? NaN) * 1000) }))
+    .map((c) => ({
+      id: c.cellId ?? c.id ?? "",
+      startMs: Math.round((c.startTime ?? NaN) * 1000),
+      text: c.original ?? "",
+    }))
     .filter((c) => c.id !== "" && Number.isFinite(c.startMs))
     .sort((a, b) => a.startMs - b.startMs)
+
+  // AQU-2197: rows written in video timecode get their seconds here, at the
+  // frame rate that lines them up with this file — or stay without a time,
+  // for the word pass, when no rate does.
+  const settled = settleTimecodeRate(sheetRows, timed, toleranceMs)
+  const rows = settled.rate
+    ? sheetRows.map((r) => (settled.seconds.has(r.rowNumber) ? { ...r, startSec: settled.seconds.get(r.rowNumber) } : r))
+    : sheetRows
 
   const assignments: CharacterAssignment[] = []
   const unmatchedRows: number[] = []
@@ -311,6 +443,53 @@ export function planCharacterAssignments({
       rowNumber: row.rowNumber,
       ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
     })
+  }
+
+  // ── Word pass: rows whose TIME missed, matched by their WORDS. (AQU-2193,
+  // 2026-10-26, from Come and See's re-delivered episode 101.)
+  //
+  // Their new sheet writes its times as video timecode, `00:01:03:05` — hours,
+  // minutes, seconds and a FRAME — which `parseClock` cannot read (AQU-2197
+  // now reads it, when a frame rate lines it up with the file), so every
+  // row came back unmatched and the whole sheet was refused, though its
+  // `Translation` column matched the file's 548 lines word for word. When the
+  // sheet carries the line's own words and the cells carry theirs, those
+  // words are better evidence than a clock anyway: the same order-preserving
+  // alignment the audio sheet uses (`alignPairs`), over only the rows the
+  // timestamps left and the cells nobody claimed. Identical wording only, so
+  // nothing here is a guess; a wrong-episode sheet still matches almost
+  // nothing, and its unmatched rows still refuse it.
+  let matchedByWords = 0
+  if (unmatchedRows.length > 0 && rows.some((r) => r.text !== "") && timed.some((c) => c.text !== "")) {
+    const waiting = new Set(unmatchedRows)
+    const wanting = rows.filter((r) => waiting.has(r.rowNumber))
+    const free = timed.filter((c) => !claimed.has(c.id))
+    // An empty line never matches anything, including another empty line.
+    const rowKeys = wanting.map((r, i) => normalizeCueText(r.text) || `\u0000row${i}`)
+    const cellKeys = free.map((c, j) => normalizeCueText(c.text) || `\u0001cell${j}`)
+    const pairs = alignPairs(
+      rowKeys,
+      cellKeys,
+      wanting.map((r) => (r.startSec === undefined ? 0 : Math.round(r.startSec * 1000))),
+      free.map((c) => c.startMs),
+    )
+    for (const [ri, ci] of pairs) {
+      const row = wanting[ri]
+      const cell = free[ci]
+      claimed.add(cell.id)
+      waiting.delete(row.rowNumber)
+      assignments.push({
+        cellId: cell.id,
+        castName: row.castName,
+        cameraState: row.cameraState,
+        rowNumber: row.rowNumber,
+        ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
+      })
+      matchedByWords++
+    }
+    const left = unmatchedRows.filter((n) => waiting.has(n))
+    unmatchedRows.length = 0
+    unmatchedRows.push(...left)
   }
 
   // ── Second pass: recover rows that DRIFTED but are pinned by their
@@ -378,6 +557,8 @@ export function planCharacterAssignments({
     cellsWithoutRow: timed.length - claimed.size,
     cameraDisagreements,
     filledByPosition,
+    matchedByWords,
     distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
+    ...(settled.rows > 0 ? { timecode: { rows: settled.rows, frameRate: settled.rate } } : {}),
   }
 }

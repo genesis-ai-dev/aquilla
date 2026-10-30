@@ -1,7 +1,7 @@
 // The events replay gate (docs/RELEASE-RISK-GATES.md, "Replay gate").
 //
 // A corpus entry is one project's event log plus the rows the rebuild reads
-// beside it (lanes, chain_claims, project_seq_counters, the project row). The
+// beside it (lanes, chain_claims, project_seq_counters). The
 // gate seeds those into a fresh PGlite, runs the production rebuild endpoint
 // from genesis, and hashes every projection table it produced. A PR that
 // changes what the events project to changes a hash; the committed golden
@@ -22,9 +22,9 @@ import { makeTestDb, type Seed } from "./pg-test-db"
 export const CORPUS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../replay-corpus")
 
 /** Rows the rebuild reads but never writes as projection: seeded, not hashed.
- *  `events` is the log itself. Order matters for lanes-before-content, which
- *  makeTestDb handles; the rest have no cross-table constraints. */
-export const INPUT_TABLES = ["projects", "lanes", "project_seq_counters", "chain_claims", "events"] as const
+ *  `events` is the log itself. No `projects` row: nothing in the replay reads
+ *  it, it carries user foreign keys, and its name identifies the client. */
+export const INPUT_TABLES = ["lanes", "project_seq_counters", "chain_claims", "events"] as const
 
 /** Every table buildEventProjectionStmts / the progress recompute can land a
  *  row in (ProjectionTouches in event-projection.ts, plus the progress
@@ -52,7 +52,6 @@ const VOLATILE_COLUMNS = new Set(["created_at", "updated_at", "value_tsv"])
 
 export interface CorpusEntry {
   slug: string
-  projectId: string
   /** `synthetic` is committed under replay-corpus/synthetic; `r2` is fetched
    *  into replay-corpus/cache by scripts/replay-corpus.mjs. */
   source: "synthetic" | "r2"
@@ -104,6 +103,14 @@ export function loadCorpus(entry: CorpusEntry): CorpusRows {
     throw new Error(`${entry.file}: sha256 ${actual} does not match manifest ${entry.sha256}; re-run the export or fix the manifest`)
   }
   return JSON.parse(text) as CorpusRows
+}
+
+/** The project a corpus describes, read off its own log: the manifest
+ *  deliberately carries no production project id. */
+export function corpusProjectId(corpus: CorpusRows): string {
+  const id = corpus.events?.[0]?.project_id
+  if (typeof id !== "string" || !id) throw new Error("corpus has no events, so no project id")
+  return id
 }
 
 /** JSONB columns come out of the exporter as objects; PGlite binds them as

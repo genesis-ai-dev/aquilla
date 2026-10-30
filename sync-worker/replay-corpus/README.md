@@ -6,9 +6,21 @@ one project's event log plus the rows the projection rebuild reads beside it.
 Postgres, runs the production rebuild from genesis, and compares a hash of
 every projection table with `golden.json`.
 
+## What is in the repo, and what never is
+
+The repo is public (MIT). Nothing here carries client content or names a
+client: `manifest.json` holds opaque slugs (`prod-07`), the file's sha256,
+event counts and a capture date; `golden.json` holds row counts and hashes.
+The corpus files themselves (every event payload: verse text, comments,
+authors; the lanes and chain claims) live only in the private production
+snapshots bucket under `replay-corpus/` and in the gitignored `cache/`. The
+export deliberately leaves out the `projects` row, so not even the project's
+name or id is written anywhere; the harness reads the project id off the
+events in the fetched file. Do not add an identifying column to the manifest.
+
 | File | Committed | What |
 | --- | --- | --- |
-| `manifest.json` | yes | every corpus: slug, project id, file, sha256, event count |
+| `manifest.json` | yes | every corpus: slug, file, sha256, event count (no project id) |
 | `golden.json` | yes | per corpus, per table: row count + sha256 of the canonical rows |
 | `synthetic/*.json` | yes | generated corpora (`node scripts/replay-corpus.mjs synthetic`) |
 | `cache/*.json` | **no** | real projects, fetched from R2 (`… fetch`); client content |

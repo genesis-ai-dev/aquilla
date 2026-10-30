@@ -7,7 +7,6 @@ export type CorpusRows = Record<string, Array<Record<string, unknown>>>
 
 export interface CorpusEntry {
   slug: string
-  projectId: string
   source: "synthetic" | "r2"
   file: string
   sha256: string
@@ -26,7 +25,6 @@ export function serializeRow(row: Record<string, unknown>): Record<string, unkno
 export function corpusBytes(rows: CorpusRows): string
 export function manifestEntry(input: {
   slug: string
-  projectId: string
   source: "synthetic" | "r2"
   file: string
   bytes: string

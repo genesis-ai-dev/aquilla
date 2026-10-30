@@ -29,25 +29,26 @@ describe("serializeRow", () => {
 
 describe("corpusBytes + manifestEntry", () => {
   it("is byte-stable and the manifest pins exactly those bytes", () => {
-    const { projectId, rows } = buildSyntheticCorpus()
+    const { rows } = buildSyntheticCorpus()
     const a = corpusBytes(rows)
     const b = corpusBytes(buildSyntheticCorpus().rows)
     expect(a).toBe(b)
-    const entry = manifestEntry({ slug: "s", projectId, source: "synthetic", file: "s.json", bytes: a, events: rows.events, capturedAt: "2026-10-30T00:00:00.000Z" })
+    const entry = manifestEntry({ slug: "s", source: "synthetic", file: "s.json", bytes: a, events: rows.events, capturedAt: "2026-10-30T00:00:00.000Z" })
     expect(entry.sha256).toBe(sha256Hex(a))
+    expect(entry).not.toHaveProperty("projectId")
     expect(entry.events).toBe(rows.events.length)
     expect(entry.maxSeq).toBe(rows.events.length)
   })
 
   it("writes every input table even when a capture has no rows for it", () => {
     const parsed = JSON.parse(corpusBytes({ events: [] }))
-    expect(Object.keys(parsed)).toEqual(["projects", "lanes", "project_seq_counters", "chain_claims", "events"])
+    expect(Object.keys(parsed)).toEqual(["lanes", "project_seq_counters", "chain_claims", "events"])
   })
 })
 
 describe("upsertEntry", () => {
   it("replaces an entry by slug and keeps the list sorted", () => {
-    const base = { format: 1 as const, projects: [{ slug: "b", projectId: "p", source: "r2" as const, file: "b.json", sha256: "old", events: 1, maxSeq: 1, capturedAt: "" }] }
+    const base = { format: 1 as const, projects: [{ slug: "b", source: "r2" as const, file: "b.json", sha256: "old", events: 1, maxSeq: 1, capturedAt: "" }] }
     const next = upsertEntry(base, { ...base.projects[0], sha256: "new" })
     expect(next.projects).toHaveLength(1)
     expect(next.projects[0].sha256).toBe("new")

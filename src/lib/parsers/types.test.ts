@@ -7,7 +7,6 @@ import {
   isAudioCueFile,
   isHiddenTimelineFile,
   isSubtitleImportFile,
-  isVideoTimedSubtitleFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
   isFilmTimedFile,
@@ -160,24 +159,6 @@ describe("hidden timeline content", () => {
   })
 })
 
-describe("isVideoTimedSubtitleFile", () => {
-  it.each(["vtt", "srt", "sbv"] as const)("%s with footage linked is video-timed", (type) => {
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(true)
-  })
-
-  it.each(["vtt", "srt", "sbv"] as const)("%s with no footage is not", (type) => {
-    expect(isVideoTimedSubtitleFile({ type })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: null })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "" })).toBe(false)
-  })
-
-  it("a non-subtitle file is never video-timed, footage or not", () => {
-    expect(isVideoTimedSubtitleFile({ type: "audio", coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(false)
-    expect(isVideoTimedSubtitleFile(null)).toBe(false)
-    expect(isVideoTimedSubtitleFile(undefined)).toBe(false)
-  })
-})
-
 describe("resolveFileTimingMode", () => {
   it.each(["vtt", "srt", "sbv"] as const)(
     "%s with footage linked still ignores the legacy project-level audioFirst",
@@ -254,13 +235,13 @@ describe("resolveFileTimingMode", () => {
   })
   // AQU-1565 follow-up: a file timed to a linked YouTube video defaults to
   // Original timing, so the legacy project-level Free timing no longer hides
-  // the video on a file nobody set. A Free timing chosen ON the file (through
-  // the video-stays-hidden warning) still stands: an existing YouTube file
-  // with an uploaded recording does not silently re-flow.
+  // the video on a file nobody set. A Free timing chosen ON the file still
+  // stands: an existing YouTube file with an uploaded recording does not
+  // silently re-flow. (AQU-2227: a linked film of any kind does this now.)
   it("a file timed to a linked YouTube video ignores the project's audioFirst", () => {
-    const opts = { timedToLinkedVideo: true }
-    expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
-    expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
+    const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    expect(resolveFileTimingMode({ type: "video", coreMediaUrl: youTube }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
+    expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: youTube }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
   })
 
   // AQU-2204 (Sam, Oct 26): a file timed to a film ONLY follows its source —
@@ -273,7 +254,7 @@ describe("resolveFileTimingMode", () => {
     expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: film }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
     // A lead switched it: the switch stands.
     expect(
-      resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null, { timedToLinkedVideo: true }),
+      resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null),
     ).toBe("audioFirst")
     expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: film, timingMode: "audioFirst" }, null)).toBe("audioFirst")
   })
@@ -289,11 +270,9 @@ describe("resolveFileTimingMode", () => {
     ).toBe("audioFirst")
   })
 
-  it("without the flag a video file keeps Free timing exactly as before", () => {
+  it("a video file with no footage linked keeps the project's Free timing exactly as before", () => {
     expect(resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
-    expect(
-      resolveFileTimingMode({ type: "video" }, { audioTimingMode: "audioFirst" }, { timedToLinkedVideo: false }),
-    ).toBe("audioFirst")
+    expect(resolveFileTimingMode({ type: "video", coreMediaUrl: null }, { audioTimingMode: "audioFirst" })).toBe("audioFirst")
   })
 })
 

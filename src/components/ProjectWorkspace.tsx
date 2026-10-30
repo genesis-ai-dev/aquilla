@@ -2898,12 +2898,6 @@ export function ProjectWorkspace() {
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
-  // AQU-1565 follow-up: a file linked to a YouTube video is timed to that
-  // video, so it defaults to Original timing and the Media view shows the
-  // video. The legacy project-level Free timing no longer reaches it; a Free
-  // timing chosen on the file itself (through the video-stays-hidden warning)
-  // still stands, so the timing control stays on these files.
-  const timedToLinkedVideo = youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
   // AQU-1704: which subtitle imports have only ONE timing mode available, and
   // so get no picker. Not "is a subtitle import" — that hid the control from
   // audio-only dubbing projects, whose source is an SRT with no video and for
@@ -2934,7 +2928,6 @@ export function ProjectWorkspace() {
   // timing in Project Settings keep it), else "Follows source". AQU-2204: a
   // file timed to a film always follows its source.
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, {
-    timedToLinkedVideo,
     hasAudioCues: fileHasAudioCues,
     nothingToFollow: timingNothingToFollow,
   })
@@ -2943,7 +2936,6 @@ export function ProjectWorkspace() {
   // flips the resolved mode the moment a file's lines load, and nobody changed
   // anything.
   const timingChoiceMode = resolveFileTimingMode(activeFile, project ?? undefined, {
-    timedToLinkedVideo,
     hasAudioCues: fileHasAudioCues,
   })
 

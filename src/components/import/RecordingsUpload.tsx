@@ -291,13 +291,16 @@ export function RecordingsReview({
       live.clear()
     }
   }, [])
+  // Keyed on the names the rule made, not on the rule itself: settling which
+  // of two answers is used reads nothing again when it keeps the one just read.
+  const made = rule?.made
   const effectiveInputs = useMemo(() => {
-    if (!rule) return inputs
+    if (!made) return inputs
     return inputs.map((f, i) => {
-      const made = rule.made.get(i)
-      return made ? { ...f, name: made, path: made } : f
+      const name = made.get(i)
+      return name ? { ...f, name, path: name } : f
     })
-  }, [inputs, rule])
+  }, [inputs, made])
 
   // Read every name, learn the project's own book names where a name has a
   // book word nothing knows, then load the lines of every file named.
@@ -374,7 +377,7 @@ export function RecordingsReview({
   )
 
   const identityToken = session?.jwt
-  const ask = useCallback(async (eligible: readonly number[], retryOf?: { rule: NamingRule; failures: readonly RuleFailure[] }) => {
+  const ask = useCallback(async (eligible: readonly number[], retryOf?: { first: AppliedRule; placed: number; failures: readonly RuleFailure[] }) => {
     if (!identityToken || !canAskAssistant || callCount.current >= MAX_ASSISTANT_CALLS) return
     callCount.current += 1
     setCallsMade(callCount.current)
@@ -388,12 +391,14 @@ export function RecordingsReview({
         // The retry sends only the names the first rule failed on.
         names: sampleNames(retryOf ? retryOf.failures.map((f) => f.name) : eligible.map((i) => inputs[i].name)),
         outline: projectOutline(projectFileInfos(projectFiles, new BookNameIndex())),
-        ...(retryOf ? { previous: retryOf.rule, failures: retryOf.failures } : {}),
+        ...(retryOf ? { previous: retryOf.first.rule, failures: retryOf.failures } : {}),
         signal: controller.signal,
       })
       if (controller.signal.aborted) return
       setAssistant({ kind: "idle" })
-      setRule(appliedRule(next, "assistant", eligible, inputs, { retried: Boolean(retryOf) }))
+      setRule(appliedRule(next, "assistant", eligible, inputs, retryOf
+        ? { retried: true, firstAnswer: { applied: retryOf.first, placed: retryOf.placed } }
+        : {}))
     } catch (e) {
       if (controller.signal.aborted) return
       setAssistant({ kind: "problem", problem: e instanceof NamingRuleError ? e.problem : "failed" })
@@ -423,12 +428,29 @@ export function RecordingsReview({
   }, [ready, rule, unplaced, session?.jwt, projectId, inputs])
 
   // The one retry: only the names the first answer failed on go back, and
-  // only while a call is left. A rule that still places nothing is set aside,
-  // and the files are chosen by hand.
+  // only while a call is left. The retry's rule is used only when it places
+  // more of the folder's names than the first answer's did, counted as
+  // `judgeRule` counts them; on fewer, or on a tie, the first answer's rule
+  // stays in use (Sam, Oct 30). Either way no call follows. A rule that still
+  // places nothing is set aside, and the files are chosen by hand.
   useEffect(() => {
-    if (!judgement || !rule || rule.from !== "assistant" || assistant.kind === "asking" || judgement.failures.length === 0) return
+    if (!judgement || !rule || rule.from !== "assistant" || assistant.kind === "asking") return
+    const first = rule.firstAnswer
+    if (first) {
+      if (judgement.placed.size > first.placed) {
+        const { firstAnswer: _weighed, ...retry } = rule
+        setRule(retry)
+      } else if (first.placed > 0) {
+        setRule({ ...first.applied, retried: true })
+      } else {
+        setRule(null)
+        setAssistant({ kind: "problem", problem: "noFit" })
+      }
+      return
+    }
+    if (judgement.failures.length === 0) return
     if (!rule.retried && callCount.current < MAX_ASSISTANT_CALLS) {
-      void ask([...rule.eligible], { rule: rule.rule, failures: judgement.failures })
+      void ask([...rule.eligible], { first: rule, placed: judgement.placed.size, failures: judgement.failures })
     } else if (judgement.placed.size === 0) {
       setRule(null)
       setAssistant({ kind: "problem", problem: "noFit" })
@@ -440,7 +462,11 @@ export function RecordingsReview({
     inFlight.current.clear()
   }
 
-  if (phase.kind !== "ready") {
+  // Until the lines are read with the rule in use, and while a retry's answer
+  // is weighed against the first, the preview waits: the other rule's rows,
+  // note and keep never stand in for the one in use.
+  const settling = Boolean(rule && (rule.firstAnswer || !ruleRead))
+  if (phase.kind !== "ready" || settling) {
     return (
       <div className="flex flex-col items-center gap-3 py-10 text-center" data-testid="recordings-loading">
         {phase.kind === "failed" ? (
@@ -453,11 +479,11 @@ export function RecordingsReview({
           </>
         ) : (
           <p className="text-sm font-medium" role="status">
-            {phase.kind === "reading"
-              ? t("recordingsUpload.loading.reading", { count: formatNumber(chosen.length, locale) })
+            {phase.kind === "loading"
+              ? t("recordingsUpload.loading.lines", { name: phase.name })
               : phase.kind === "lengths"
                 ? t("recordingsUpload.loading.lengths", { count: formatNumber(phase.count, locale) })
-                : t("recordingsUpload.loading.lines", { name: phase.name })}
+                : t("recordingsUpload.loading.reading", { count: formatNumber(chosen.length, locale) })}
           </p>
         )}
       </div>
@@ -568,8 +594,13 @@ interface AppliedRule {
   made: ReadonlyMap<number, string>
   /** The names' shapes the team keeps it under. */
   shapes: string[]
-  /** The answer to the one retry: no further call follows it. */
+  /** The answer to the one retry, or the first answer kept over it: no
+   *  further call follows it. */
   retried: boolean
+  /** On the retry's answer until it is weighed: the first answer's rule and
+   *  how many names it placed. The retry's rule is used only when it places
+   *  more (Sam, Oct 30). */
+  firstAnswer?: { applied: AppliedRule; placed: number }
   /** For a saved rule, the shape it was found under (what "Don't use this
    *  naming" forgets). */
   savedShape?: string
@@ -580,7 +611,7 @@ function appliedRule(
   from: AppliedRule["from"],
   eligible: readonly number[],
   inputs: readonly { name: string; path: string }[],
-  extra: { retried?: boolean; savedShape?: string } = {},
+  extra: { retried?: boolean; savedShape?: string; firstAnswer?: AppliedRule["firstAnswer"] } = {},
 ): AppliedRule {
   const made = new Map<number, string>()
   for (const i of eligible) {
@@ -596,6 +627,7 @@ function appliedRule(
     shapes: shapesOf(eligible.map((i) => inputs[i].name)).slice(0, 5),
     retried: extra.retried ?? false,
     ...(extra.savedShape ? { savedShape: extra.savedShape } : {}),
+    ...(extra.firstAnswer ? { firstAnswer: extra.firstAnswer } : {}),
   }
 }
 

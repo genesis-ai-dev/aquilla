@@ -341,6 +341,93 @@ describe("a rule is kept for the team only when it truly placed the folder (revi
   })
 })
 
+describe("a retry that does worse doesn't win (Sam, Oct 30)", () => {
+  // Read the right way round, and with the chapter and the verse swapped
+  // (Mt-ch19_v01 as Matthew 1:19): a model's likely slip on a retry.
+  const RIGHT = { ...RULE, explanation: "The chapter, then the verse." }
+  const SWAPPED = { templates: [{ pattern: "{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "The verse, then the chapter." }
+
+  async function askTwice(names: readonly string[]) {
+    review(names)
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-note")).toBeInTheDocument())
+    await settle()
+  }
+  const targets = () => screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target"))
+  /** Every line a row was ever put on, even for one render: what the person
+   *  could have seen, and confirmed. */
+  function everShown(): () => string[] {
+    const seen = new Set<string>()
+    const rowsIn = (node: Node) => node instanceof Element
+      ? [...(node.matches("[data-testid=recordings-row]") ? [node] : []), ...node.querySelectorAll("[data-testid=recordings-row]")]
+      : []
+    const look = (records: MutationRecord[]) => {
+      // A row is new, or a row kept by React is moved to another line.
+      for (const record of records) {
+        if (record.type === "attributes" && record.oldValue) seen.add(record.oldValue)
+        for (const row of [...[...record.addedNodes].flatMap(rowsIn), ...(record.type === "attributes" ? rowsIn(record.target) : [])]) {
+          seen.add(row.getAttribute("data-target") ?? "")
+        }
+      }
+      for (const row of rowsIn(document.body)) seen.add(row.getAttribute("data-target") ?? "")
+    }
+    const observer = new MutationObserver(look)
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-target"], attributeOldValue: true })
+    return () => { look(observer.takeRecords()); observer.disconnect(); return [...seen].sort() }
+  }
+  const marked = () => screen.getAllByTestId("recordings-row").filter((r) => within(r).getByTestId("recordings-how").textContent === "by the assistant's rule").length
+
+  it("keeps the first rule when the retry's places fewer of the folder's names, and asks nothing more", async () => {
+    // The first places 19:1, 19:2 and 19:30, and not 19:99. Swapped, the
+    // retry places only 1:19 and 2:19 (Matthew has no chapter 30 or 99).
+    answers = [RIGHT, SWAPPED]
+    const shown = everShown()
+    await askTwice(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v30.ogg", "Mt-ch19_v99.ogg"])
+    expect(targets()).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:30"])
+    // The swapped rule's rows (Matthew 1:19, 2:19) never showed, not even
+    // while it was weighed.
+    expect(shown()).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:30"])
+    expect(marked()).toBe(3)
+    const note = screen.getByTestId("recordings-assistant-note")
+    expect(note).toHaveTextContent("The chapter, then the verse.")
+    expect(note).toHaveTextContent("3 recordings are placed by this naming.")
+    expect(screen.getAllByTestId("recordings-unmatched-row").map((r) => r.getAttribute("data-name"))).toEqual(["Mt-ch19_v99.ogg"])
+    await settle(500)
+    expect(asks()).toHaveLength(2)
+    // The first rule missed a name, so it isn't kept.
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1))
+    await settle(100)
+    expect(saves()).toHaveLength(0)
+  })
+
+  it("keeps the first rule on a tie", async () => {
+    // Both place two: 19:1 and 19:2 the right way round, 1:19 and 2:19 swapped.
+    answers = [RIGHT, SWAPPED]
+    await askTwice(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v99.ogg"])
+    expect(targets()).toEqual(["Matthew 19:1", "Matthew 19:2"])
+    expect(marked()).toBe(2)
+    expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("The chapter, then the verse.")
+    await settle(500)
+    expect(asks()).toHaveLength(2)
+  })
+
+  it("uses a retry that places more, and keeps it when it placed every name", async () => {
+    // Swapped first: 1:19 and 2:19, not 30:19. The retry places all three.
+    answers = [SWAPPED, RIGHT]
+    await askTwice(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v30.ogg"])
+    expect(targets()).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:30"])
+    expect(marked()).toBe(3)
+    expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("The chapter, then the verse.")
+    await settle(500)
+    expect(asks()).toHaveLength(2)
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(saves()).toHaveLength(1))
+    expect(saves()[0].body!.rule).toMatchObject({ templates: RIGHT.templates })
+  })
+})
+
 describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
   it("shows a contributor one plain line instead of the offer, and never asks", async () => {
     review(NAMES, { canAsk: false })

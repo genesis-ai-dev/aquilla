@@ -110,7 +110,7 @@ describe("mergeCellsWithAudio — trim windows (AQU-646)", () => {
 // The symptom would be a gutter reading "nobody has validated this" on a take
 // two people signed off, and nothing in any log.
 describe("mergeCellsWithAudio — validation fields (AQU-490)", () => {
-  it("forwards the vote count, the validators, the role and the recorder", () => {
+  it("forwards the vote count, the validators, their dates, the role and the recorder", () => {
     const cell = { id: "cell-3", fileId: "f1" } as CellData
     const entry: CellAudioEntry = {
       attachments: {
@@ -118,6 +118,7 @@ describe("mergeCellsWithAudio — validation fields (AQU-490)", () => {
           ...recording("rec.webm"),
           validatorCount: 2,
           validators: ["ana", "bo"],
+          validatorDecidedTs: { ana: 1700, bo: 1800 },
           role: "dub",
           recordedBy: "cy",
         },
@@ -130,6 +131,7 @@ describe("mergeCellsWithAudio — validation fields (AQU-490)", () => {
     expect(merged.attachments?.["rec.webm"]).toMatchObject({
       validatorCount: 2,
       validators: ["ana", "bo"],
+      validatorDecidedTs: { ana: 1700, bo: 1800 },
       role: "dub",
       recordedBy: "cy",
     })

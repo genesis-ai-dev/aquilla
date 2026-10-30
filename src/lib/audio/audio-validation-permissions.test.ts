@@ -172,6 +172,20 @@ describe("audioEntryFromCell", () => {
     })
   })
 
+  // AQU-2296, second pass: the stamps were on the wire and in the control,
+  // and dropped HERE in between — so the audio popover shipped with names and
+  // no dates while the text popover beside it had both.
+  it("carries each validator's stamp through, for the date under their name", () => {
+    const entry = audioEntryFromCell({
+      attachments: {
+        "take-1": { slot: "recording", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: 1700 } },
+      },
+      selectedBySlot: { recording: "take-1" },
+      selectedAudioId: "take-1",
+    })!
+    expect(audioValidationTakes(entry, {}, policy(), reason)[0].validatorDecidedTs).toEqual({ bo: 1700 })
+  })
+
   it("carries role through, so a source clip still does not count", () => {
     const entry = audioEntryFromCell({
       attachments: { src: { slot: "recording", role: "source" } },

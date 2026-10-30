@@ -27,6 +27,6 @@ it.each(['offer=field&interval=year&quantity=1', 'offer=pro&interval=year&quanti
 it('keeps ordinary and free onboarding unchanged and does not accept arbitrary return destinations', () => {
   expect(readBillingIntent(new URLSearchParams())).toEqual({ kind: 'none' })
   expect(readBillingIntent(new URLSearchParams('offer=free&interval=annual&quantity=1&audience=individual'))).toEqual({ kind: 'none' })
-  expect(onboardingForBillingNext('/app')).toBe('/onboarding')
-  expect(onboardingForBillingNext('https://evil.test/billing/select?offer=pro&interval=year&quantity=1')).toBe('/onboarding')
+  expect(onboardingForBillingNext('/app')).toBe('/signup')
+  expect(onboardingForBillingNext('https://evil.test/billing/select?offer=pro&interval=year&quantity=1')).toBe('/signup')
 })

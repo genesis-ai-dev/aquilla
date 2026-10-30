@@ -690,6 +690,19 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
 CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
     ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
+-- Decision 11 (migration 0191): each person's undo history for a project, so
+-- it follows them between devices. One row per (project, person); `history`
+-- is the client's JSON document and `revision` the compare-and-swap counter a
+-- write must name (auth-worker routes/edit-history.ts).
+CREATE TABLE IF NOT EXISTS edit_histories (
+    project_id  TEXT    NOT NULL,
+    user_id     BIGINT  NOT NULL,
+    revision    INTEGER NOT NULL,
+    history     TEXT    NOT NULL,
+    updated_at  BIGINT  NOT NULL,
+    PRIMARY KEY (project_id, user_id)
+);
+
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
     project_id     TEXT NOT NULL,

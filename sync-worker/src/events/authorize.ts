@@ -4,11 +4,13 @@
 // module boundary so the type system AND lint together form a two-layer guard.
 
 import type { EventKind, EventClaims, RawEvent } from './types'
-import { requiredRoleFor, ROLE } from './role-policy'
+import { requiredRoleFor, ROLE, roleLabel } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
+import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
+import { resolveImportFloor } from './import-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
@@ -717,6 +719,29 @@ export async function authorize<K extends EventKind>(
     }
   }
 
+  // AQU-2304: the org's configurable import floor raises `file.create` from
+  // its static PROJECT_LEAD floor. Like the timing lock below it this is a
+  // conditional RAISE evaluated AFTER the static gate, so a below-lead caller
+  // still gets the generic "role too low" refusal (the static floor is what
+  // stops them) and only a lead the org has locked out sees this one — which
+  // names the role the org asked for, so the client can say why.
+  //
+  // Ordered so the common path is free: an owner can never be below any
+  // in-ladder floor, so they never read org settings at all. Everyone else
+  // reads through the per-request cache, one lookup per batch.
+  if (db != null && raw.kind === 'file.create' && tokenClaims.role < ROLE.OWNER) {
+    const importFloor = await resolveImportFloor(db, raw.projectId, settings)
+    if (tokenClaims.role < importFloor) {
+      return {
+        ok: false,
+        status: 403,
+        reason:
+          `importing a new source file needs ${roleLabel(importFloor)} ` +
+          `in this organization (required role ${importFloor})`,
+      }
+    }
+  }
+
   // AQU-646: the project-wide timing lock raises cell.retime / cell.lane.retime
   // from their static CONTRIBUTOR floor to MAINTAINER while a project is
   // locked. See timing-authority.ts for why it is a raised floor rather than a
@@ -808,7 +833,24 @@ export async function authorize<K extends EventKind>(
       raw.fileId != null &&
       raw.cellId != null &&
       (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
-    if (!userInserted) {
+    // Slice 13 (Sam, Oct 28): the undo of "make rows from an audio or video
+    // file" may take back lines its author just made, while nobody else has
+    // touched them — never anyone else's, never other imported lines
+    // (recording-line-authority.ts).
+    const undoOf = (raw.payload as { undoOfEventId?: unknown } | null)?.undoOfEventId
+    const ownRecordingLine =
+      !userInserted &&
+      raw.fileId != null &&
+      raw.cellId != null &&
+      typeof undoOf === 'string' &&
+      (await isOwnUntouchedRecordingLine(db, {
+        projectId: raw.projectId,
+        fileId: raw.fileId,
+        cellId: raw.cellId,
+        createEventId: undoOf,
+        author: tokenUsername,
+      }))
+    if (!userInserted && !ownRecordingLine) {
       return {
         ok: false,
         status: 403,

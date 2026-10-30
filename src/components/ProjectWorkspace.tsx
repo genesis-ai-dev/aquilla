@@ -274,6 +274,7 @@ import { injectOptimisticAudioTrim,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
+import { stepLabel } from "@/lib/history/step-label"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
@@ -4234,7 +4235,7 @@ export function ProjectWorkspace() {
   )
   const reportHistory = useCallback(
     (which: "undo" | "redo", result: HistoryResult) => {
-      const name = t(result.step.labelKey as never, result.step.labelParams as never)
+      const name = stepLabel(t as never, result.step)
       const o = result.outcome
       if (o.kind === "done" && o.partial) {
         toast.add({

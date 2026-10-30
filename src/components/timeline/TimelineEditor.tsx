@@ -53,6 +53,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
+import { stepLabel } from "@/lib/history/step-label"
 import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
@@ -4263,7 +4264,7 @@ export function TimelineEditor({
               <AppTooltip
                 content={
                   history.nextUndo
-                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never, history.nextUndo.labelParams as never) })
+                    ? t("editor.history.undoTooltip", { step: stepLabel(t as never, history.nextUndo) })
                     : t("editor.history.nothingToUndo")
                 }
               >
@@ -4281,7 +4282,7 @@ export function TimelineEditor({
               <AppTooltip
                 content={
                   history.nextRedo
-                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never, history.nextRedo.labelParams as never) })
+                    ? t("editor.history.redoTooltip", { step: stepLabel(t as never, history.nextRedo) })
                     : t("editor.history.nothingToRedo")
                 }
               >

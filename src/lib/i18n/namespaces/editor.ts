@@ -1140,6 +1140,7 @@ export const editor = defineNamespace({
       other: "Change {count} characters",
     }),
     "editor.history.stepEditSource": "Edit the source text",
+    "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
     "editor.timeline.bluetoothPill": "Bluetooth",
@@ -6682,6 +6683,7 @@ export const editor = defineNamespace({
       "editor.history.stepRepairCues": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): every subtitle line was paired with its heard lines again from scratch ('Re-pair'). A short verb phrase.", maxLength: 40 },
       "editor.history.stepCharacters": { description: "Name of one history step: the character (speaker) of one or more lines was set, changed or cleared. {count} is how many lines.", placeholders: { count: "A number." } },
       "editor.history.stepEditSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the source text of a line was edited (one editing session). A short verb phrase.", maxLength: 40 },
+      "editor.history.stepUnknown": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel) when the step was made on another of the person's devices running a newer version of the app, so this version has no name for it.", maxLength: 60 },
       "editor.timeline.videoHiddenNote": {
         description:
           "Note replacing the linked video player when the file is in free-timing " +

@@ -944,12 +944,12 @@ export async function redoLast(): Promise<HistoryResult | null> {
 // 2026-10-13, where one undo could take seconds and most presses vanished).
 let queue: Promise<unknown> = Promise.resolve()
 
-function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
+function run(which: "undo" | "redo", pickId?: string): Promise<HistoryResult | null> {
   if (!activeScope) return Promise.resolve(null)
   // A press belongs to the project it was made in; if the user has moved on
   // by the time its turn comes, it does nothing.
   const scope = activeScope
-  const turn = queue.then(() => runNow(which, scope))
+  const turn = queue.then(() => runNow(which, scope, pickId))
   queue = turn.catch(() => {})
   return turn
 }
@@ -959,14 +959,18 @@ function takeOut(list: StepRecord[], id: string): StepRecord | null {
   return at >= 0 ? (list.splice(at, 1)[0] ?? null) : null
 }
 
-async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryResult | null> {
+async function runNow(which: "undo" | "redo", scope: string, pickId?: string): Promise<HistoryResult | null> {
   if (activeScope !== scope) return null
   const s = stacksFor(scope)
   // Looked up afresh after every wait: a merge may have replaced the arrays' contents.
   const fromList = () => (which === "undo" ? s.undo : s.redo)
   const toList = () => (which === "undo" ? s.redo : s.undo)
-  const top = fromList()[fromList().length - 1]
+  // The newest step — or, for the Station's own Undo (AQU-2327, Q4), one
+  // older step by id: a newer step elsewhere doesn't block it, and each
+  // step's own "changed since?" guard still holds.
+  const top = pickId ? fromList().find((r) => r.id === pickId) : fromList()[fromList().length - 1]
   if (!top) return null
+  const startedAt = fromList().findIndex((r) => r.id === top.id)
   const label = { labelKey: top.labelKey, labelParams: top.labelParams, fileName: top.fileName ?? null, lane: top.lane }
   if (top.fileId && openFileProbe && !openFileProbe(top.fileId)) {
     return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
@@ -1018,7 +1022,9 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     // Moving back is a move too, and the newest one: a copy that took the
     // in-flight one (on the other stack) must not win a later merge.
     record.movedAt = Math.max(stampFor(s), (record.movedAt ?? record.at) + 1)
-    fromList().push(record)
+    // An older step picked out of order goes back where it was.
+    if (pickId && startedAt >= 0) fromList().splice(Math.min(startedAt, fromList().length), 0, record)
+    else fromList().push(record)
   } else {
     bury(s, record.id)
     logSkip(s, record, which, outcome)
@@ -1133,6 +1139,33 @@ export function newestStepAt(): number | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
   const top = s?.undo[s.undo.length - 1]
   return top ? (recordedHere.get(top.id) ?? top.at) : null
+}
+
+/**
+ * The newest step Undo can reach that touches something `match` names — for a
+ * group, any of its parts — or null. The Station's own Undo button (AQU-2327,
+ * Q4, Sam Oct 30) always takes back your last change to the recording it has
+ * open, even when you have changed other things since; ⌘Z stays the
+ * project's newest step.
+ */
+export function newestMatchingStep(match: (kind: string, data: unknown) => boolean): StepSummary | null {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  if (!s) return null
+  for (let i = s.undo.length - 1; i >= 0; i--) {
+    const r = s.undo[i]
+    const hit =
+      r.kind === GROUP_KIND
+        ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+        : match(r.kind, r.data)
+    if (hit) return summary(r)
+  }
+  return null
+}
+
+/** Undo one step by id, out of order (the Station's own Undo, Q4). It then
+ *  sits on top of Redo, so Redo brings it back as usual. */
+export function undoStepById(id: string): Promise<HistoryResult | null> {
+  return run("undo", id)
 }
 
 /** The signed-in person the active scope belongs to. */

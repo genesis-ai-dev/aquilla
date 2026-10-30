@@ -11,6 +11,7 @@
 ALTER TABLE project_settings
   ADD COLUMN IF NOT EXISTS auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED;
 
--- Numbered 0190: 0188 is the undo-per-project branch's (0188_edit_histories.sql) and
--- 0189 is AQU-2267's (0189_cell_audio_recordings_offset.sql). Renumber on merge if
--- either lands after this.
+-- Numbered 0190: dev's 0188 is 0188_archived_lanes_onto_rows.sql, 0189 is AQU-2267's
+-- (0189_cell_audio_recordings_offset.sql) and 0191 is the undo-per-project branch's
+-- (0191_edit_histories.sql). The runner applies any file it hasn't seen, in name
+-- order, so the landing order of these three doesn't matter.

@@ -2917,7 +2917,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       control={
                         // AQU-2290: a provider can list hundreds of models, so the
                         // list searches as you type, like every list that grows
-                        // with your data (AQU-2260).
+                        // with your data (AQU-2260). A long model name is cut short
+                        // to fit; hovering over it shows the whole name (Sam, Oct
+                        // 30), and the whole name stays the row's text, so a
+                        // keyboard user's screen reader reads it in full.
                         <SearchSelect
                           id="mdl"
                           aria-label={t("projectSettings.advancedLlm.modelLabel")}
@@ -2926,6 +2929,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                           onValueChange={(value) => setModel(value)}
                           disabled={!canEditShared}
                           className="w-56 bg-background"
+                          renderOption={(o) => <span className="min-w-0 truncate" title={o.label}>{o.label}</span>}
+                          renderValue={(o) => <span title={o.label}>{o.label}</span>}
                         />
                       }
                     />

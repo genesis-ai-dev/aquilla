@@ -28,7 +28,11 @@ const { MODELS } = vi.hoisted(() => ({ MODELS: [
   "anthropic/claude-haiku-5-5", "google/gemini-2.5-pro", "google/gemini-2.5-flash", "meta-llama/llama-4-maverick",
   "meta-llama/llama-4-scout", "mistralai/mistral-large", "mistralai/mistral-small", "qwen/qwen3-235b",
   "deepseek/deepseek-v3", "deepseek/deepseek-r1", "x-ai/grok-4", "cohere/command-a", "nvidia/nemotron-70b",
+  "nousresearch/hermes-4-405b-instruct-extended-context-preview-2026-10",
 ] }))
+
+// Far wider than the 14rem list: it is cut short on screen.
+const LONG_MODEL = "nousresearch/hermes-4-405b-instruct-extended-context-preview-2026-10"
 
 
 
@@ -167,5 +171,26 @@ describe("ProjectSettings — the AI model list can be searched (AQU-2290)", () 
     expect(screen.getByRole("option", { name: "anthropic/claude-sonnet-5-5" })).toBeInTheDocument()
     await user.click(screen.getByRole("option", { name: "anthropic/claude-sonnet-5-5" }))
     await waitFor(() => expect(trigger).toHaveTextContent("anthropic/claude-sonnet-5-5"))
+  })
+
+  // Sam, Oct 30: a long name may be cut short, but hovering over it shows the
+  // whole name, and a keyboard user still hears the whole name.
+  it("a long model name shows in full on hover, and is the option's whole accessible name", async () => {
+    const user = userEvent.setup()
+    renderSettings()
+    const trigger = await screen.findByRole("combobox", { name: /^Model$/ }, { timeout: 4000 })
+    await user.click(trigger)
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    await user.type(search, "hermes")
+    const option = await screen.findByRole("option", { name: LONG_MODEL })
+    expect(option.querySelector(`[title="${LONG_MODEL}"]`)).toHaveTextContent(LONG_MODEL)
+    // From the keyboard: the highlighted row is named in full, and Enter picks it.
+    await user.keyboard("{ArrowDown}")
+    await waitFor(() => expect(option).toHaveAttribute("data-highlighted"))
+    expect(option).toHaveAccessibleName(LONG_MODEL)
+    await user.keyboard("{Enter}")
+    await waitFor(() => expect(trigger).toHaveTextContent(LONG_MODEL))
+    // The chosen name on the button is cut short too, and shows in full on hover.
+    expect(trigger.querySelector(`[title="${LONG_MODEL}"]`)).toHaveTextContent(LONG_MODEL)
   })
 })

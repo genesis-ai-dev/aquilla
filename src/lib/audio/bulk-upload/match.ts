@@ -108,6 +108,7 @@ export type UnmatchedReason =
   | { code: "beforeFirstLine" }
   | { code: "duplicate"; target: string; other: string }
   | { code: "rangeOnTimedFile" }
+  | { code: "rangeBackwards"; from: string; to: string }
   | { code: "chapterOrVerse"; count: number; book: string; chapters: number; verses: number; lengthMs?: number }
   | { code: "bookVerseDisagree"; count: number; verse: number; ref: string }
   | { code: "noSuchBookVerse"; count: number; verses: number; book: string }
@@ -565,8 +566,9 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
   const after = verseMark ? rest : rest.slice(1)
   const next = after[0]
   if (next && isRangeSep(next.sepBefore)) {
-    // "1:31-2:3" crosses a chapter; "1:1-3" stays in it.
-    const cross = after[1] && !isRangeSep(after[1].sepBefore) ? after[1] : undefined
+    // "1:31-2:3" and "1-31-2-3" cross a chapter; "1:1-3" stays in it.
+    if (after.length > 2) return { wanted: { kind: "error", reason: { code: "tooManyNumbers" } }, ...base }
+    const cross = after[1]
     return {
       wanted: cross
         ? { kind: "verseRange", chapter, verse: verseNum.value, toChapter: next.value, toVerse: cross.value }
@@ -722,9 +724,13 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       const to = fi.verses.get(`${wanted.toChapter}:${wanted.toVerse}`)
       if (!from) return { reason: fi.chapters.has(wanted.chapter) ? { code: "noSuchVerse", ref: refLabel(fi, wanted.chapter, wanted.verse) } : { code: "noSuchChapter", book: bookLabel(fi), chapter: wanted.chapter } }
       if (!to) return { reason: fi.chapters.has(wanted.toChapter) ? { code: "noSuchVerse", ref: refLabel(fi, wanted.toChapter, wanted.toVerse) } : { code: "noSuchChapter", book: bookLabel(fi), chapter: wanted.toChapter } }
-      const a = fi.position.get(from.cellId)!
-      const b = fi.position.get(to.cellId)!
-      const [lo, hi] = a <= b ? [a, b] : [b, a]
+      const lo = fi.position.get(from.cellId)!
+      const hi = fi.position.get(to.cellId)!
+      // "1-5-3" runs backwards: a typo, or two numbers swapped. Say so rather
+      // than quietly covering 1:3 to 1:5.
+      if (hi < lo) {
+        return { reason: { code: "rangeBackwards", from: refLabel(fi, wanted.chapter, wanted.verse), to: refLabel(fi, wanted.toChapter, wanted.toVerse) } }
+      }
       const cellIds = fi.content.slice(lo, hi + 1).filter((l) => l.ref && VERSE_REF.test(l.ref)).map((l) => l.cellId)
       const read = wanted.chapter === wanted.toChapter
         ? `${refLabel(fi, wanted.chapter, wanted.verse)}–${wanted.toVerse}`
@@ -743,7 +749,8 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       return { cellIds: [line.cellId], read: lineReadLabel(fi, line, wanted.line - 1), ...(part ? { part } : {}) }
     }
     case "lineRange": {
-      const [lo, hi] = wanted.line <= wanted.toLine ? [wanted.line, wanted.toLine] : [wanted.toLine, wanted.line]
+      if (wanted.toLine < wanted.line) return { reason: { code: "rangeBackwards", from: `line ${wanted.line}`, to: `line ${wanted.toLine}` } }
+      const [lo, hi] = [wanted.line, wanted.toLine]
       if (lo < 1 || !fi.content[lo - 1]) return { reason: { code: "noSuchLine", line: lo, count: fi.content.length } }
       if (!fi.content[hi - 1]) return { reason: { code: "noSuchLine", line: hi, count: fi.content.length } }
       return { cellIds: fi.content.slice(lo - 1, hi).map((l) => l.cellId), read: `lines ${lo}–${hi}` }

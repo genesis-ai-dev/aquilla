@@ -227,6 +227,7 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n
     case "beforeFirstLine": return t("recordingsUpload.reason.beforeFirstLine")
     case "duplicate": return t("recordingsUpload.reason.duplicate", { other: reason.other, target: reason.target })
     case "rangeOnTimedFile": return t("recordingsUpload.reason.rangeOnTimedFile")
+    case "rangeBackwards": return t("recordingsUpload.reason.rangeBackwards", { from: reason.from, to: reason.to })
     case "chapterOrVerse":
       return reason.lengthMs != null
         ? t("recordingsUpload.reason.chapterOrVerseLength", { count: fmt(reason.count), book: reason.book, chapters: fmt(reason.chapters), verses: fmt(reason.verses), length: len(reason.lengthMs) })

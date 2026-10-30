@@ -729,6 +729,14 @@ describe("the review's cases (Oct 29)", () => {
     expect(run(numbered, [g], fileScope("g")).assignments.map(lineOf)).toEqual(["g:1:1", "g:1:2", "g:2:1"])
   })
 
+  it("a range written with dashes only can cross a chapter, and a range that runs backwards is refused", () => {
+    const g = book("g", "GEN", "Genesis", GEN)
+    const files = ["Genesis 1-31-2-3.mp3", "Genesis 1-5-3.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [g], fileScope("g"))
+    expect(assignments[0].cellIds).toEqual(["g:1:31", "g:2:1", "g:2:2", "g:2:3"])
+    expect(assignments[1].reason).toEqual({ code: "rangeBackwards", from: "Genesis 1:5", to: "Genesis 1:3" })
+  })
+
   it("a folder that is just a number is that chapter", () => {
     const files = ["05.mp3", "06.mp3"].map((n) => audio(`3/${n}`))
     expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])

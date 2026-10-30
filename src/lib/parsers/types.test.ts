@@ -11,6 +11,7 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
   isFilmTimedFile,
+  linkSwitchesTimingToSource,
   resolveFileTimingMode,
   type FileType,
 } from "./types"
@@ -345,5 +346,29 @@ describe("resolveFileTimingMode — where each file starts (AQU-2204, board 23)"
     expect(
       resolveFileTimingMode({ type: "mp4", timingMode: "audioFirst", coreMediaUrl: "https://youtu.be/x" } as never, null),
     ).toBe("audioFirst")
+  })
+})
+
+// AQU-2227: the link-film dialog says linking "makes this file follow its
+// source". Now that a file's own choice and a file with nothing to follow both
+// outrank the film, that is only true of a file with no choice of its own.
+describe("linkSwitchesTimingToSource (AQU-2227)", () => {
+  const film = "https://cdn.test/ep1/master.m3u8"
+
+  it("is true for a file with no choice of its own under a project that follows its recordings", () => {
+    expect(linkSwitchesTimingToSource({ type: "audio" }, { audioTimingMode: "audioFirst" }, film)).toBe(true)
+  })
+
+  it("is false for a file whose own choice is Follows recordings: that choice stands", () => {
+    expect(linkSwitchesTimingToSource({ type: "vtt", timingMode: "audioFirst" }, null, film)).toBe(false)
+  })
+
+  it("is false for a file with nothing to follow: it keeps following its recordings", () => {
+    expect(linkSwitchesTimingToSource({ type: "usfm" } as never, null, film, { nothingToFollow: true })).toBe(false)
+  })
+
+  it("is false for a file already following its source, and when the film is cleared", () => {
+    expect(linkSwitchesTimingToSource({ type: "audio" }, null, film)).toBe(false)
+    expect(linkSwitchesTimingToSource({ type: "audio" }, { audioTimingMode: "audioFirst" }, null)).toBe(false)
   })
 })

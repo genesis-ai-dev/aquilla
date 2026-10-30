@@ -1,9 +1,10 @@
 // Flow B (decision 2026-08-05, simplified 2026-08-06; pre-merge round:
 // file-scoped — the timing mode is per-file now, set from the timeline
-// toolbar). AQU-2204 (Sam, Oct 26): a file timed to a film always follows its
-// source, so linking a film to a file that follows its recordings SWITCHES it.
-// This says so before the link is made; clearing the film later gives the file
-// its own choice back.
+// toolbar). AQU-2227: a film only STARTS a file on Follows source, so linking
+// one switches a file that follows its recordings only when the file has no
+// choice of its own (it was following the project's old setting). This says so
+// before the link is made; the workspace asks `linkSwitchesTimingToSource`
+// whether it applies, and clearing the film later takes the file back.
 
 import { Button } from "@/components/ui/button"
 import {

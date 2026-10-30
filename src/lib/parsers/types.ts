@@ -1193,6 +1193,25 @@ export function resolveFileTimingMode(
   return project?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
 }
 
+/**
+ * AQU-2227: whether linking `coreMediaUrl` to this file moves it from
+ * "Follows recordings" onto "Follows source" — the one case the link-film
+ * dialog is for. Asked of the file as it is now (before the link), with the
+ * same options the workspace resolves the file's timing with.
+ */
+export function linkSwitchesTimingToSource(
+  file: Pick<FileReference, "timingMode" | "type" | "coreMediaUrl"> | null | undefined,
+  project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
+  coreMediaUrl: string | null,
+  opts?: { hasAudioCues?: boolean; nothingToFollow?: boolean },
+): boolean {
+  if (!coreMediaUrl) return false
+  return (
+    resolveFileTimingMode(file, project, opts) === "audioFirst" &&
+    resolveFileTimingMode(file ? { ...file, coreMediaUrl } : null, project, opts) === "dubbing"
+  )
+}
+
 export interface ProjectMember {
   userId: string
   role: "owner" | "translator" | "reviewer"

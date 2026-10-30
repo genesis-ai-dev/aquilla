@@ -448,9 +448,9 @@ export const workspace = defineNamespace({
     // -- timeline/LinkVideoTimingDialog --
     "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
     "workspace.linkVideoTiming.description":
-      "This file follows its recordings. A file timed to a film always follows its source, so " +
+      "This file follows its recordings. A file with a film starts on following its source, so " +
       "once the film is linked its lines keep the film's times and the film plays. No recordings " +
-      "or times change, and clearing the film lets the file follow its recordings again.",
+      "or times change. A project lead can switch it back under Timing, and clearing the film does too.",
     "workspace.linkVideoTiming.linkAnyway": "Link the film",
 
     // -- timeline/TimingModeChangedDialog --
@@ -1977,8 +1977,9 @@ export const workspace = defineNamespace({
       "workspace.linkVideoTiming.title": {
         description:
           "Heading of the dialog shown when linking a film to a file whose timing " +
-          "is 'Follows recordings': a file timed to a film always follows its source, " +
-          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
+          "is 'Follows recordings' and that has no timing choice of its own: a file with " +
+          "a film starts on following its source, so linking switches it. Use the same " +
+          "names as the timeline's Timing dropdown.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.description": {

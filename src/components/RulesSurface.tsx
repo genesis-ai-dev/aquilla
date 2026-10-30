@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/page"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -349,10 +350,13 @@ export function RulesSurface({
 
       <div className={embedded ? "flex flex-col gap-6" : "min-h-0 flex-1 overflow-y-auto"}>
         <div className={embedded ? "flex flex-col gap-6" : "mx-auto flex max-w-2xl flex-col gap-6 p-6"}>
+        {/* AQU-2260: what the line counts opens on click, never on hover. */}
         {usageSummary && (
-          <AppTooltip content={t("rules.surface.usageTooltip")}>
-            <p className="text-xs text-muted-foreground">{usageSummary}</p>
-          </AppTooltip>
+          <p className="text-xs text-muted-foreground">
+            <NoteOnClick note={t("rules.surface.usageTooltip")} align="start">
+              {usageSummary}
+            </NoteOnClick>
+          </p>
         )}
 
         {multiLane && (
@@ -487,18 +491,16 @@ export function RulesSurface({
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 ps-7">
-                      <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
-                        >
-                          <Wand2 data-icon="inline-start" />
-                          {t("rules.surface.tryToFixAllButton")}
-                        </Button>
-                      </AppTooltip>
+                      {/* AQU-2260: labelled buttons say nothing on hover. */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                      >
+                        <Wand2 data-icon="inline-start" />
+                        {t("rules.surface.tryToFixAllButton")}
+                      </Button>
                       {canEditOrgRules && patchOrgSettings && (
-                        <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
                         <Button
                           size="sm"
                           variant="outline"
@@ -507,7 +509,6 @@ export function RulesSurface({
                           <ArrowUpCircle data-icon="inline-start" />
                           {t("rules.surface.promoteToOrgButton")}
                         </Button>
-                        </AppTooltip>
                       )}
                       {!canEditOrgRules && canRequestPromotion && requestPromotion && (
                         (() => {
@@ -521,17 +522,15 @@ export function RulesSurface({
                               {notice ?? t("rules.surface.requestedBadge")}
                             </Badge>
                           ) : (
-                            <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleRequestPromotion(rule)}
-                                disabled={isRequesting}
-                              >
-                                <ArrowUpCircle data-icon="inline-start" />
-                                {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
-                              </Button>
-                            </AppTooltip>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleRequestPromotion(rule)}
+                              disabled={isRequesting}
+                            >
+                              <ArrowUpCircle data-icon="inline-start" />
+                              {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
+                            </Button>
                           )
                         })()
                       )}

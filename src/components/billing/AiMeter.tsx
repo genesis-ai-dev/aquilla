@@ -3,11 +3,12 @@
 // looks the same wherever it is seen. It shows a percentage and when it
 // resets; it never shows credits, words or dollars (R7).
 
-import { useState, type ReactNode } from "react"
+import { useId, useState, type ReactNode } from "react"
 import { Link } from "react-router-dom"
-import { Gem, Info, KeyRound, Sparkles } from "lucide-react"
+import { Gem, KeyRound, Sparkles } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useAiMeter } from "@/hooks/useAiMeter"
 import { METER_WARNING_PERCENT, meterView, type MeterView } from "@/lib/billing/ai-meter"
@@ -51,20 +52,7 @@ export function AiMeter({ view, orgId, canManage, onUseOwnKey, agent = false, cl
       </MeterFrame>
     )
   }
-  if (view.kind === "byok") {
-    return (
-      <MeterFrame className={className} state="byok" aside={
-        <AppTooltip content={t("billing.meter.byokTooltip")}>
-          <button type="button" className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:text-foreground" aria-label={t("billing.meter.byokInfoAriaLabel")}>
-            <Info className="size-4" />
-          </button>
-        </AppTooltip>
-      }>
-        <p className="text-3xl font-semibold tracking-tight text-muted-foreground/70">{t("billing.meter.byok")}</p>
-        <div className="mt-3 h-2 rounded-full bg-foreground/5 text-muted-foreground ai-meter-hatched" aria-hidden data-testid="ai-meter-track" />
-      </MeterFrame>
-    )
-  }
+  if (view.kind === "byok") return <ByokMeter className={className} />
 
   const day = resetDay(view.resetsAt)
   return (
@@ -84,6 +72,26 @@ export function AiMeter({ view, orgId, canManage, onUseOwnKey, agent = false, cl
           <Sparkles className="mt-0.5 size-3.5 shrink-0" />{t("billing.meter.agentNote")}
         </p>
       ) : null}
+    </MeterFrame>
+  )
+}
+
+/** BYOK: a greyed meter. Why it is not metered opens in place under the
+ *  figure on a click of the (i), and shuts on a second one (AQU-2260: the meter
+ *  is a card, so no hover and no floating note). */
+function ByokMeter({ className }: { className?: string }) {
+  const t = useT()
+  const id = useId()
+  const [open, toggle] = useInfoOpen()
+  return (
+    <MeterFrame className={className} state="byok" aside={
+      <InfoToggle open={open} onToggle={toggle} label={t("billing.meter.byokInfoAriaLabel")} controls={id} testId="ai-meter-byok-info" />
+    }>
+      <p className="text-3xl font-semibold tracking-tight text-muted-foreground/70">{t("billing.meter.byok")}</p>
+      <InfoReveal open={open} id={id} testId="ai-meter-byok-info-text" className="text-xs text-muted-foreground">
+        {t("billing.meter.byokTooltip")}
+      </InfoReveal>
+      <div className="mt-3 h-2 rounded-full bg-foreground/5 text-muted-foreground ai-meter-hatched" aria-hidden data-testid="ai-meter-track" />
     </MeterFrame>
   )
 }

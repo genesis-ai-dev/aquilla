@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { useState } from "react"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { useProjectTts } from "@/hooks/useProjectTts"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -122,6 +123,8 @@ describe("CellVoicePanel follows the line's voice (AQU-768)", () => {
       expect(screen.getByTestId("voice-card-offline")).toBeInTheDocument()
       await act(async () => { fireEvent.click(button) })
       expect(generateCellVoice).not.toHaveBeenCalled()
+      // AQU-2260: why, on a click, never a hover.
+      await expectDisabledNote(button, /needs a connection/)
     } finally {
       backendReachable = null
     }

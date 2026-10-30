@@ -23,7 +23,7 @@ import {
 import { FieldError } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/agent/role-floors"
@@ -71,13 +71,14 @@ export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: Ap
             >
               <div className="flex flex-wrap items-center gap-1.5">
                 <code className="min-w-0 truncate text-xs font-medium">{memory.path}</code>
+                {/* AQU-2260: what the badge protects opens on click, not hover. */}
                 {memory.humanEdited && (
-                  <AppTooltip content={t("agent.memory.protectedTooltip")}>
+                  <NoteOnClick note={t("agent.memory.protectedTooltip")}>
                     <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
                       <ShieldCheck className="h-2.5 w-2.5" />
                       {t("agent.memory.humanEditedBadge")}
                     </Badge>
-                  </AppTooltip>
+                  </NoteOnClick>
                 )}
                 <span className="text-[10px] text-muted-foreground">v{memory.version}</span>
               </div>

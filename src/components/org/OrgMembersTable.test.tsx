@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom"
 import { OrgMembersTable } from "./OrgMembersTable"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
 import type { OrgMember } from "@/lib/frontier/orgs"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "joel", createdAt: "x" }, loading: false }),
@@ -86,6 +87,16 @@ describe("OrgMembersTable — org role change (AQU-952)", () => {
     expect(screen.queryByText(/Owners get full control of this workspace/i)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(add).toHaveBeenCalledWith("esther", ROLE.MAINTAINER))
+  })
+
+  // AQU-2260 (Sam, Oct 29): why a member's org role is read-only here is a
+  // status note on the role itself, opened by a click, never a hover.
+  it("says on click why a non-owner cannot change an org role", async () => {
+    renderTable({ callerOrgRoleLevel: ROLE.MAINTAINER })
+    await expectClickNote(
+      await screen.findByRole("button", { name: /org-level role: contributor/i }),
+      /can only be changed by an org owner/,
+    )
   })
 
   it("does not offer Change role to a non-owner caller", async () => {

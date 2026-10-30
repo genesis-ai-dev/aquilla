@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -80,9 +83,10 @@ vi.mock("@/hooks/useProject", () => ({
 // real. The overview Members card (AQU-1171) mounts the same hook via
 // MembersSection once expanded; an empty roster is enough to prove the
 // surface is present without hitting identity.
+const pmMembers: { members: unknown[] } = { members: [] }
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
-    members: [],
+    members: pmMembers.members,
     isLoading: false,
     error: null,
     rosterHidden: false,
@@ -828,6 +832,30 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByTestId("customize-stat-validated")).not.toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29): a stat tile's explanation opens on click of the
+  // (i) by its label, never on hover of the tile.
+  it("explains the audio tiles behind an (i), on click", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    await userEvent.setup().hover(screen.getAllByText("Audio Validated")[0])
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Has audio" }), /at least one audio recording attached/)
+    await expectClickNote(screen.getByRole("button", { name: "About Audio Validated" }), /Of the audio recorded, 25% is validated/)
+  })
+
   it("AQU-2116: one target cell of text brings Translated/Validated back", async () => {
     // Evidence both ways: the work became text work, so the text figures are
     // owed again — and the Audio Validated figure must not budge.
@@ -1317,6 +1345,29 @@ describe("ProjectOverview PM assignment", () => {
     await waitFor(() =>
       expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
     )
+  })
+
+  // AQU-2260 (Sam, Oct 29, option 2B): one candidate per member, so the
+  // project manager list gets a search box.
+  it("the project manager list has a search box that narrows it", async () => {
+    pmMembers.members = [
+      { userId: 7, username: "wendi", role: { level: 500, name: "project_lead", source: "override" }, secondarySources: [] },
+      { userId: 8, username: "tomas", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      pm: { id: 7, username: "wendi" },
+    })
+    renderOverview()
+    fireEvent.click(await screen.findByRole("button", { name: "Change project manager" }))
+    fireEvent.click(await screen.findByRole("combobox", { name: "Project manager" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "tom" } })
+    expect(await screen.findByRole("option", { name: /tomas/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /wendi/ })).toBeNull()
+    pmMembers.members = []
   })
 
   it("clears the deadline from the edit-dialog Clear control", async () => {
@@ -3452,10 +3503,14 @@ describe("imported originals on the overview (AQU-656)", () => {
       fileWith("f2", "Notes.md"),
     ])
 
-    renderOverview()
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
 
     expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
     expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    // AQU-2260: a labelled button, so it says nothing on hover.
+    await userEvent.setup().hover(screen.getByTestId("download-originals-zip"))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
     const original = screen.getByTestId("download-original-file")
     expect(original.tagName).toBe("BUTTON")
     expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")

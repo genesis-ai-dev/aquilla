@@ -35,7 +35,6 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
-  Info,
   Link2,
   LocateFixed,
   Magnet,
@@ -72,7 +71,6 @@ import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
 import { RenameTakeDialog } from "./RenameTakeDialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -81,6 +79,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { InfoNote } from "@/components/ui/info-note"
 import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
@@ -4215,45 +4214,33 @@ export function TimelineEditor({
             browser reports, so this does NOT say "there is latency" — it says
             the part we cannot measure is still there. Shown only on a path
             slow enough that the reading is untrustworthy, which in practice
-            means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
+            means Bluetooth. Sam, 2026-10-15: a short amber word beside the
             heading (after the timing switch, when there is one), the full
-            message behind its info button — it was a full-width line. */}
+            message behind its info button — it was a full-width line.
+            AQU-2260 (Sam, Oct 29): plain amber text, never a pill. */}
         {outputLatencySec >= HIGH_LATENCY_SEC && (
           <span
             data-testid="tl-output-latency-note"
-            className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+            className="ms-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
           >
             {t("editor.timeline.bluetoothPill")}
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    data-testid="tl-output-latency-info"
-                    aria-label={t("editor.timeline.bluetoothPillInfo")}
-                    className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
-                  />
-                }
-              >
-                <Info className="h-3 w-3" />
-              </PopoverTrigger>
-              <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
-                {t("editor.timeline.outputLatencyNote")}
-              </PopoverContent>
-            </Popover>
+            {/* AQU-2260: the same click-open note as every toolbar (i). */}
+            <InfoNote
+              label={t("editor.timeline.bluetoothPillInfo")}
+              testId="tl-output-latency-info"
+              className="rounded-full p-0 text-amber-700/80 hover:text-amber-800 aria-expanded:text-amber-800 dark:text-amber-300/80 dark:hover:text-amber-200"
+              iconClassName="h-3 w-3"
+            >
+              {t("editor.timeline.outputLatencyNote")}
+            </InfoNote>
           </span>
         )}
         <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
-              playback; fast connections can opt into the original WAV. Mic
-              recordings have no lossless form — the tooltip says so. */}
-          <AppTooltip
-            content={
-              audioQuality === "original"
-                ? t("editor.timeline.qualityOriginalTooltip")
-                : t("editor.timeline.qualityCompressedTooltip")
-            }
-          >
+              playback; fast connections can opt into the original WAV.
+              AQU-2260: the hover only names it; it shows its state by its
+              tint (aria-pressed). */}
+          <AppTooltip content={t("editor.timeline.qualityToggleAria")}>
             <button
               type="button"
               aria-label={t("editor.timeline.qualityToggleAria")}
@@ -4635,13 +4622,15 @@ export function TimelineEditor({
           <span className="min-w-0 flex-1">
             {t("editor.timeline.measureNote", { count: legacyMeasure.count })}
           </span>
+          {/* Its words name it; why it is greyed out opens on a click on it,
+              and what it does is behind the (i) beside it (AQU-2260). */}
           <AppTooltip
             content={
               !online
                 ? t("editor.timeline.measureOfflineTooltip")
                 : batchProgress != null
                   ? t("editor.timeline.measureBusyTooltip")
-                  : t("editor.timeline.measureTooltip")
+                  : null
             }
           >
             <button
@@ -4654,6 +4643,9 @@ export function TimelineEditor({
               {t("editor.timeline.measureNow")}
             </button>
           </AppTooltip>
+          <InfoNote label={t("common.aboutAria", { name: t("editor.timeline.measureNow") })} align="end">
+            {t("editor.timeline.measureTooltip")}
+          </InfoNote>
           <button
             type="button"
             aria-label={t("editor.timeline.measureDismiss")}

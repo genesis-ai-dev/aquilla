@@ -21,6 +21,7 @@ import { Check, ChevronDown, ChevronUp, FileText, MessageSquare, Pencil, Plus, S
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Spinner } from "@/components/ui/spinner"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
@@ -168,12 +169,12 @@ function StagedEventRow({
             believing the change lands in the file they have open — say so
             explicitly rather than leaving it to a bare verse ref. */}
         {ev.display.fileName && (
-          <AppTooltip content={t("agent.proposal.landsInFile", { fileName: ev.display.fileName })}>
-            <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
+          <NoteOnClick note={t("agent.proposal.landsInFile", { fileName: ev.display.fileName })} className="max-w-[12rem]">
+            <Badge variant="outline" className="max-w-full gap-1 px-1.5 py-0 text-[10px]">
               <FileText className="h-2.5 w-2.5 shrink-0" />
               <span className="truncate">{ev.display.fileName}</span>
             </Badge>
-          </AppTooltip>
+          </NoteOnClick>
         )}
         {ev.display.canonicalRef && (
           <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">

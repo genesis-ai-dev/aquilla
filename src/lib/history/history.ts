@@ -887,7 +887,6 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   busy = true
   emit()
   let record: StepRecord | null
-  let movedBefore: number | undefined
   let outcome: StepOutcome
   try {
     // Another device of the same person may have taken this step already.
@@ -916,7 +915,6 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     const movedAt = stampFor(s)
     record = takeOut(fromList(), top.id)
     if (!record) return null
-    movedBefore = record.movedAt
     record.movedAt = movedAt
     toList().push(record)
     scheduleSave(scope)
@@ -930,7 +928,9 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   if (outcome.kind === "done") {
     // Already where it belongs.
   } else if (outcome.kind === "blocked") {
-    record.movedAt = movedBefore
+    // Moving back is a move too, and the newest one: a copy that took the
+    // in-flight one (on the other stack) must not win a later merge.
+    record.movedAt = Math.max(stampFor(s), (record.movedAt ?? record.at) + 1)
     fromList().push(record)
   } else {
     bury(s, record.id)

@@ -391,6 +391,35 @@ describe("one device on its own does not wait (Sam, Oct 22)", () => {
   })
 })
 
+// Review, Oct 29: a step is saved as moved before it runs; when its handler
+// then answers "blocked" it goes back, and that going back must be the newest
+// word on where it is, for every copy that saw it in flight.
+describe("a step that turned out blocked while it ran", () => {
+  it("is back on Undo in every copy, including one that saw it on Redo", async () => {
+    let inFlight: HistoryDoc | null = null
+    registerStepKinds({
+      "test.blocked": {
+        undo: async () => {
+          await new Promise((r) => setTimeout(r, 20))
+          await settleHistorySyncForTests()
+          inFlight = JSON.parse(JSON.stringify(server.copyOf("p1", "asha"))) as HistoryDoc
+          return { kind: "blocked", reason: "elsewhere" }
+        },
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep({ kind: "test.blocked", data: {}, labelKey: "Imported a recording", lane: "Swahili" })
+    await settle()
+    expect((await undoLast())?.outcome.kind).toBe("blocked")
+    await settle()
+    expect(inFlight!.redo.map((r) => r.labelKey)).toEqual(["Imported a recording"])
+    // Another device pulled the in-flight copy and merges the server's now.
+    const elsewhere = mergeHistories(inFlight!, server.copyOf("p1", "asha")!, { steps: 100, log: 30 })
+    expect(elsewhere.undo.map((r) => r.labelKey)).toEqual(["Imported a recording"])
+    expect(elsewhere.redo).toEqual([])
+  })
+})
+
 // Review, Oct 29: each device stamps steps with its own clock, and clocks
 // disagree. What this device does after seeing a step must still count as
 // later than that step, wherever the copies are merged.

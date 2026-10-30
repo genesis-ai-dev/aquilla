@@ -835,4 +835,42 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     renderWithNav()
     expect(screen.getByTestId("rec-next")).toBeEnabled()
   })
+
+  // The pencil beside "Read aloud" leaves the recorder too, so it asks the
+  // same question and, on a discard, still goes where it was asked to.
+  function renderWithEdit() {
+    const onEditText = vi.fn()
+    const onClose = vi.fn()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cellWith("bonjour")]} activeCellId="c1"
+        username="sam" onActiveCellChange={() => {}} onEditText={onEditText} onClose={onClose}
+      />,
+    )
+    return { onEditText, onClose }
+  }
+
+  it("asks before leaving to edit the text", () => {
+    stopped()
+    const { onEditText } = renderWithEdit()
+    fireEvent.click(screen.getByTestId("rec-edit-text"))
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    expect(onEditText).not.toHaveBeenCalled()
+  })
+
+  it("goes to edit the text once the answer is to throw the take away", () => {
+    stopped()
+    const { onEditText, onClose } = renderWithEdit()
+    fireEvent.click(screen.getByTestId("rec-edit-text"))
+    fireEvent.click(screen.getByTestId("rec-confirm-discard"))
+    expect(onEditText).toHaveBeenCalledWith("c1")
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("goes straight to the text when no take is waiting", () => {
+    const { onEditText } = renderWithEdit()
+    fireEvent.click(screen.getByTestId("rec-edit-text"))
+    expect(screen.queryByTestId("rec-confirm-close")).toBeNull()
+    expect(onEditText).toHaveBeenCalledWith("c1")
+  })
 })

@@ -58,7 +58,12 @@ export function EgressAccessSection({ orgSettings, canEdit }: EgressAccessSectio
   return (
     <SettingsRow
       label={t("org.egressSettings.whoCanEgressLabel")}
-      description={t("org.egressSettings.whoCanEgressDescription")}
+      description={t("org.egressSettings.whoCanEgressSummary")}
+      info={{
+        label: t("common.aboutAria", { name: t("org.egressSettings.whoCanEgressLabel") }),
+        content: t("org.egressSettings.whoCanEgressInfo"),
+        testId: "settings-info-egress-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

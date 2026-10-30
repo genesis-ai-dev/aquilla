@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 
 import { Page, PageHeader, SettingsRow, StatTile, STAT_TILE_GRID } from "./page"
@@ -107,5 +107,41 @@ describe("SettingsRow", () => {
     const row = container.firstElementChild
     expect(row).toHaveClass("flex", "items-start", "justify-between")
     expect(row).not.toHaveClass("items-center")
+  })
+
+  it("runs its text the whole width up to the control (Sam, Oct 29)", () => {
+    const { container } = render(
+      <SettingsRow label="Who can export" description="One line" control={<button type="button">Pick</button>} />,
+    )
+    expect(container.firstElementChild?.firstElementChild).toHaveClass("min-w-0", "flex-1")
+  })
+
+  it("keeps the longer text behind a click (i) beside the title, under the one visible line", () => {
+    render(
+      <SettingsRow
+        label="Who can export"
+        description="One line"
+        info={{ label: "About Who can export", content: "The longer text", testId: "export-info" }}
+        control={<button type="button">Pick</button>}
+      />,
+    )
+    const info = screen.getByRole("button", { name: "About Who can export" })
+    const text = screen.getByTestId("export-info-text")
+    expect(screen.getByText("One line")).toBeInTheDocument()
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(info).toHaveAttribute("aria-controls", text.id)
+    expect(text).toHaveAttribute("data-open", "false")
+    expect(text).toHaveAttribute("aria-hidden", "true")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveTextContent("The longer text")
+    fireEvent.click(info)
+    expect(text).toHaveAttribute("data-open", "false")
+  })
+
+  it("draws no (i) when there is nothing more to say", () => {
+    render(<SettingsRow label="Font size" control={<button type="button">Pick</button>} />)
+    expect(screen.getAllByRole("button")).toHaveLength(1)
   })
 })

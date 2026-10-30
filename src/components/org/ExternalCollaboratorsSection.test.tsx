@@ -12,7 +12,8 @@ vi.mock("@/lib/frontier/members", () => ({
   fetchOrgMembersMatrix: vi.fn(async () => new Map()),
   removeProjectMember: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true, projects: [{ id: "p1", name: "Genesis" }] })),
   projectsResultError: vi.fn(() => new Error("x")),
 }))

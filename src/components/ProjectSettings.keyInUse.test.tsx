@@ -142,9 +142,9 @@ beforeEach(() => {
 })
 
 describe("Project settings → AI: which key is in use (AQU-2263)", () => {
-  it("drafts use Frontier with no key, and there is no Gemini key yet", async () => {
+  it("drafts use Aquilla with no key, and there is no Gemini key yet", async () => {
     renderAi()
-    expect(await screen.findByTestId("completion-key-in-use")).toHaveTextContent("Using Frontier. No key needed.")
+    expect(await screen.findByTestId("completion-key-in-use")).toHaveTextContent("Using Aquilla. No key needed.")
     expect(screen.getByTestId("gemini-key-in-use")).toHaveTextContent("No Gemini key yet.")
   })
 

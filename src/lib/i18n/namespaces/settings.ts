@@ -247,22 +247,22 @@ export const settings = defineNamespace({
 
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
-    "settings.assignmentAuthority.floorDescription":
-      "Minimum project role required to assign, reassign, or unassign file, chapter, language lane, " +
-      "and AI review tasks. Defaults to Project lead.",
+    // Sam, Oct 29: one short line under each setting; the rest behind its (i).
+    "settings.assignmentAuthority.floorSummary": "The lowest project role that can assign work to other people.",
+    "settings.assignmentAuthority.floorInfo":
+      "That covers assigning, reassigning and unassigning files, chapters, language lanes and " +
+      "AI review. Project lead by default.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
-    "settings.assignmentAuthority.description":
-      "When on, a member (contributor and above) can claim a book/chapter/take " +
-      "for themselves from the assign-work picker — they still can't assign " +
-      "work to anyone else. Leads and maintainers can always assign, to " +
-      "anyone, regardless of this setting.",
+    "settings.assignmentAuthority.summary": "Contributors can take work for themselves, but not give it to others.",
+    "settings.assignmentAuthority.info":
+      "A contributor or above can claim a book, chapter or take for themselves. Leads and " +
+      "maintainers can always assign work to anyone, whatever this is set to.",
     "settings.laneAssignmentAuthority.label": "Allow language lane coordinators to assign work",
-    "settings.laneAssignmentAuthority.description":
-      "When on, a member (contributor and above) who has been restricted to specific language lanes " +
-      "can assign work to other people — but only within those language lanes. Give a mentor or " +
-      "coordinator the language lanes they look after under Members, and they can hand out chapters " +
-      "there without any other admin rights. Members with no language lane restriction are " +
-      "unaffected by this setting.",
+    "settings.laneAssignmentAuthority.summary": "Members limited to some language lanes can assign work inside them.",
+    "settings.laneAssignmentAuthority.info":
+      "Give a mentor or coordinator the language lanes they look after under Members, and they " +
+      "can hand out chapters there without any other admin rights. Members who aren't limited " +
+      "to some language lanes aren't affected.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -280,7 +280,7 @@ export const settings = defineNamespace({
       "Usage events, like creating a project or exporting, and session recordings that help us diagnose problems. " +
       "Never the contents of your translations or files.",
     // ── AQU-2263: which AI key is in use right now (KeyInUseLine) ──
-    // {name} is the platform provider's name, "Frontier".
+    // {name} is the platform provider's name, "Aquilla".
     "settings.keyInUse.platform": "Using {name}. No key needed.",
     "settings.keyInUse.projectKey": "Using this project's key (this device only).",
     "settings.keyInUse.personalKey": "Using your own key (saved in this browser).",
@@ -295,7 +295,7 @@ export const settings = defineNamespace({
       "Saved, but voices don't use the organization's key yet: each project or person still needs their own.",
     "settings.keyInUse.orgGeminiNone": "No organization key.",
     "settings.keyInUse.prefsActive": "In use in every project that doesn't have its own provider.",
-    // {name} is the platform provider's name, "Frontier".
+    // {name} is the platform provider's name, "Aquilla".
     "settings.keyInUse.prefsNone": "Not set. Projects use {name} unless they have their own provider.",
     // "Clear" button → common.clear (identical text)
 
@@ -303,7 +303,7 @@ export const settings = defineNamespace({
     "settings.personalProvider.groupLabel": "Personal override",
     "settings.personalProvider.advancedToggleLabel": "AI provider (advanced)",
     "settings.personalProvider.description":
-      "Use your own OpenAI-compatible endpoint instead of Frontier for AI " +
+      "Use your own OpenAI-compatible endpoint instead of Aquilla for AI " +
       "translations. Stored only in this browser, never synced. Default for " +
       "projects that don't have their own API key; a project key beats this.",
     // Rendered via <RichMessage> so the two path fragments keep their
@@ -363,11 +363,10 @@ export const settings = defineNamespace({
 
     // ── TermbaseEditSection (org settings → security) ──
     "settings.termbase.label": "Who can manage terminology",
-    "settings.termbase.description":
-      "Minimum role required to add, edit, delete, and archive terms in a " +
-      "project's term base. Below this role the term base is read-only. This " +
-      "setting covers terminology only — every other project setting still " +
-      "requires Maintainer.",
+    "settings.termbase.summary": "The lowest role that can change a project's term base.",
+    "settings.termbase.info":
+      "That means adding, editing, deleting and archiving terms; below this role the term base " +
+      "is read-only. It covers terminology only: every other project setting still needs Maintainer.",
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.termbase.optionContributor": "Contributor — translators manage terms",
@@ -376,10 +375,10 @@ export const settings = defineNamespace({
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
     "settings.languageEdit.label": "Who can change project languages",
-    "settings.languageEdit.description":
-      "Minimum role required to change a project's source and target language and to add or archive " +
-      "extra language lanes. This setting covers languages only — every other project setting still " +
-      "requires Maintainer.",
+    "settings.languageEdit.summary": "The lowest role that can change a project's languages.",
+    "settings.languageEdit.info":
+      "That means its source and target languages, and adding or archiving language lanes. It " +
+      "covers languages only: every other project setting still needs Maintainer.",
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
@@ -767,13 +766,13 @@ export const settings = defineNamespace({
         description:
           "Beside an AI key field or provider choice (Project settings → AI, Preferences, the Set up AI dialog): " +
           "drafts currently go to the platform's own AI, which needs no key of yours.",
-        placeholders: { name: "The platform provider's product name, 'Frontier'. Not translated." },
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.keyInUse.prefsNone": {
         description:
           "Under 'AI provider (advanced)' in Preferences → AI provider keys, when the person has saved no provider " +
           "of their own: projects then use the platform's AI unless the project set its own provider.",
-        placeholders: { name: "The platform provider's product name, 'Frontier'. Not translated." },
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.overrideStatus.allFollow": {
         description:

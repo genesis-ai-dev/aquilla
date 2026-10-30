@@ -1,6 +1,7 @@
 import {
   mergeIdmlSliceTargetHtml,
   projectIdmlUnitToLocator,
+  releaseOversizedNoBreakInPackage,
   validateIdmlTranslation,
   type IdmlDiagnostic,
   type IdmlExportReport,
@@ -81,8 +82,11 @@ export async function exportIdml(
       exported.report.warnings,
     )
   }
+  // The proof above still sees NoBreak. A translated run can outgrow the
+  // column and stop composition; release that only on the bytes we hand back.
+  const repaired = await releaseOversizedNoBreakInPackage(exported.bytes)
   return {
-    blob: new Blob([exactArrayBuffer(exported.bytes)], { type: IDML_MIME }),
+    blob: new Blob([exactArrayBuffer(repaired)], { type: IDML_MIME }),
     report: exported.report,
     diagnostics,
   }

@@ -113,6 +113,7 @@ export function attachmentOutFrom(audioId: string, att: CodexCellAttachment, slo
     recordingsOffsetMs: att.recordingsOffsetMs ?? null,
     ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
     ...(att.validators ? { validators: att.validators } : {}),
+    ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),
     ...(att.role ? { role: att.role } : {}),
     ...(att.recordedBy != null ? { recordedBy: att.recordedBy } : {}),
     ...(att.pieceOf ? { pieceOf: att.pieceOf } : {}),

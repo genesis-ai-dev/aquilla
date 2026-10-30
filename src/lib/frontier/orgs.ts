@@ -238,26 +238,18 @@ export interface OrgInvitePreview {
 }
 
 /**
- * GET /api/v2/orgs/invite-preview/:token — public, no JWT. Returns null on ANY
- * failure (unknown/expired/used token, old server, network): JoinOrgPage falls
- * back to its generic copy and the accept endpoint stays the authority on
- * token validity.
+ * Null means the server confirmed an unavailable invitation (404/410).
+ * Other failures throw so the page can offer retry. An optional session lets
+ * the server recognize a still-member redeemer reopening their own used link.
  */
-export async function previewOrgInvite(token: string): Promise<OrgInvitePreview | null> {
-  try {
-    const res = await fetchWithTimeout(
-      `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
-      {},
-    );
-    if (!res.ok) {
-      console.warn(`[org-invites] previewOrgInvite → HTTP ${res.status}`);
-      return null;
-    }
-    return (await res.json()) as OrgInvitePreview;
-  } catch (err) {
-    console.warn("[org-invites] previewOrgInvite failed:", err);
-    return null;
-  }
+export async function previewOrgInvite(token: string, jwt?: string): Promise<OrgInvitePreview | null> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/invite-preview/${encodeURIComponent(token)}`,
+    jwt ? { headers: authHeaders(jwt) } : {},
+  );
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as OrgInvitePreview;
 }
 
 export interface AcceptOrgInviteResult {

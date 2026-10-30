@@ -1,0 +1,123 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
+import { screen, fireEvent, waitFor } from "@testing-library/react"
+import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { beforeEach, expect, it, vi } from "vitest"
+import { Signup } from "./Signup"
+
+const auth = vi.hoisted(() => ({ session: null as null | { jwt: string; username: string }, loading: false, sessionLoadError: null as Error | null, retrySessionLoad: vi.fn(async () => {}), register: vi.fn(), login: vi.fn() }))
+vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => auth }))
+vi.mock("@/lib/frontier/auth", async (load) => ({ ...await load<typeof import("@/lib/frontier/auth")>(), isJwtExpired: (jwt: string) => jwt === "expired" }))
+
+function show(path = "/signup") {
+  render(<MemoryRouter initialEntries={[path]}><Routes>
+    <Route path="/signup" element={<Signup />} />
+    <Route path="/onboarding" element={<Signup />} />
+    <Route path="/app" element={<p>Workspace destination</p>} />
+    <Route path="/join-org/:token" element={<p>Invitation destination</p>} />
+    <Route path="/billing/select" element={<p>Billing destination</p>} />
+  </Routes></MemoryRouter>)
+}
+beforeEach(() => {
+  vi.clearAllMocks()
+  localStorage.clear()
+  sessionStorage.clear()
+  auth.session = null
+  auth.loading = false
+  auth.sessionLoadError = null
+  auth.register.mockResolvedValue({ jwt: "valid", username: "new-person" })
+})
+
+it.each([
+  ["/signup", "Workspace destination"],
+  ["/onboarding", "Workspace destination"],
+  ["/signup?next=%2Fjoin-org%2Finvite", "Invitation destination"],
+  ["/onboarding?offer=team&interval=annual&quantity=1", "Billing destination"],
+  ["/signup?next=%2Fsignup", "Workspace destination"],
+  ["/signup?next=https%3A%2F%2Fevil.test", "Workspace destination"],
+])("registers directly and preserves a safe destination from %s", async (path, destination) => {
+  show(path)
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
+  expect(screen.queryByRole("progressbar")).toBeNull()
+  expect(screen.queryByRole("button", { name: /skip for now/i })).toBeNull()
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.test" } })
+  fireEvent.change(document.getElementById("s-pass")!, { target: { value: "safe-password-123" } })
+  fireEvent.submit(document.getElementById("signup-form")!)
+  await screen.findByText(destination)
+  expect(auth.register).toHaveBeenCalledExactlyOnceWith("new-person", "new@example.test", "safe-password-123")
+  expect(localStorage.getItem("aquilla:onboardingComplete:local")).toBeNull()
+})
+
+it("does not assume signed out when session hydration fails, and retries", async () => {
+  auth.sessionLoadError = new Error("storage unavailable")
+  show()
+  expect(screen.queryByLabelText("Username")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+  await waitFor(() => expect(auth.retrySessionLoad).toHaveBeenCalledOnce())
+})
+
+it("uses a valid existing account without replaying setup", async () => {
+  auth.session = { jwt: "valid", username: "existing" }
+  show("/onboarding")
+  await screen.findByText("Workspace destination")
+  expect(auth.register).not.toHaveBeenCalled()
+})
+
+it("offers returning users a direct login and respects an existing consent choice", () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "true")
+  show("/signup?next=%2Fjoin-org%2Finvite")
+  expect(screen.getByRole("link", { name: /already have an account/i })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("switch")).toBeNull()
+  expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
+})
+
+it("preserves a saved opt-out and skips the privacy screen", () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "false")
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("switch")).toBeNull()
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
+})
+
+it("returns to privacy without losing signup fields", () => {
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  fireEvent.change(screen.getByLabelText("Username"), { target: { value: "kept-name" } })
+  fireEvent.click(screen.getByRole("button", { name: /back/i }))
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  expect(screen.getByLabelText("Username")).toHaveValue("kept-name")
+})
+it("shows only required errors for empty signup email and password", async () => {
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  fireEvent.click(screen.getByRole("button", { name: /create account/i }))
+  await screen.findByText("Email is required")
+  expect(screen.queryByText("Enter a valid email address")).toBeNull()
+  expect(screen.queryByText("Password must be at least 8 characters")).toBeNull()
+  expect(screen.getByText("Password is required")).toBeVisible()
+})
+
+it.each(["true", "false"])("resumes account creation after login with saved sharing choice %s", choice => {
+  sessionStorage.setItem("aquilla:signupStarted", "true")
+  localStorage.setItem("aquilla:analyticsEnabled", choice)
+  show()
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
+  expect(screen.queryByRole("switch")).toBeNull()
+})
+it("resumes at usage sharing when Get Started was passed but no choice was saved", () => {
+  sessionStorage.setItem("aquilla:signupStarted", "true")
+  show()
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeVisible()
+  expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
+})

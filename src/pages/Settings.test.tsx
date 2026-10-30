@@ -84,6 +84,9 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
     languageEditMinRole: 600,
+    // AQU-2304: import floor — default Project lead, i.e. what every org does
+    // today until an owner raises it.
+    importMinRole: 500,
     // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
     commentCreateMinRole: 200,
     commentResolveMinRole: 400,
@@ -95,6 +98,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
   canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditEgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditCommentFloors: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditImportFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => {
@@ -244,6 +248,48 @@ describe("Security settings page", () => {
     expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
     expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
     expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
+    // AQU-2304: import sits with the other "Who can…" rows, beside languages.
+    expect(screen.getByLabelText(/who can import files/i)).toBeDefined()
+  })
+
+  // ── AQU-2304: the org's import floor ──────────────────────────────────────
+  it("offers exactly Project lead and Maintainer for the import floor", async () => {
+    renderSettings("/orgs/1/settings/security")
+    const trigger = await screen.findByRole("combobox", { name: /who can import files/i })
+    fireEvent.click(trigger)
+    const options = await screen.findAllByRole("option")
+    // Anything below Project lead would be a control that does nothing —
+    // `file.create`'s own static floor refuses a contributor regardless.
+    expect(options.map((o) => o.textContent)).toEqual([
+      expect.stringMatching(/project lead \(500\)/i),
+      expect.stringMatching(/maintainer \(600\)/i),
+    ])
+  })
+
+  it("patches the import floor on change — an owner reserves imports for maintainers (AQU-2304)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByLabelText(/who can import files/i)).toBeDefined())
+
+    await pickSelectOption(/who can import files/i, /maintainer \(600\)/i)
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ importMinRole: 600 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+  })
+
+  it("surfaces the owner-only refusal when a non-owner's import save is blocked", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "blocked" as const })
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByLabelText(/who can import files/i)).toBeDefined())
+
+    await pickSelectOption(/who can import files/i, /maintainer \(600\)/i)
+
+    expect(await screen.findByText(/only org owners can change the import permission policy/i)).toBeDefined()
+  })
+
+  it("says importing files in the page's own intro sentence (AQU-2304)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
+    expect(screen.getByText(/who can export, assign, manage terms, import files/i)).toBeDefined()
   })
 
   it("patches export on change without a Saved acknowledgment", async () => {
@@ -340,6 +386,8 @@ describe("Org settings you can open but not change (AQU-2260)", () => {
     expect(screen.getAllByTestId("org-settings-locked")).toHaveLength(1)
     // Read-only, not hidden: the controls are still there to read.
     expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    // AQU-2304: and the import floor is one of them — readable, not writable.
+    expect(screen.getByRole("combobox", { name: /who can import files/i })).toBeDisabled()
   })
 
   it("a Contributor reads Identity and Knowledge with the Maintainer line at the top", async () => {

@@ -19,6 +19,7 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
 import { emitCellAudioAttach, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { newPieceAudioId } from "./cut-take"
 import {
@@ -48,6 +49,9 @@ export interface DenoiseTakeArgs {
   session: FrontierSession | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 export interface DenoiseTakeResult {
@@ -145,6 +149,9 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot: "recording", selectedBefore: args.history.selectedBefore }, { fileId })
+  }
 
   return { audioId: fullAudioId, url: result.url, durationMs }
 }
@@ -159,6 +166,9 @@ export interface DenoiseSplitTakeArgs {
   session: FrontierSession | null
   /** AQU-1462: lane the member is working in. Omitted for the default lane. */
   targetLang?: string
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 /**
@@ -235,5 +245,18 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
     throw emitErr
   }
   notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded(
+      "denoise",
+      {
+        cellId,
+        audioId: rootId,
+        slot: first.slot,
+        selectedBefore: args.history.selectedBefore,
+        pieces: born.slice(1).map((b) => b.audioId),
+      },
+      { fileId },
+    )
+  }
   return { audioId: rootId, url: result.url, durationMs }
 }

@@ -12,9 +12,8 @@ afterEach(() => {
 })
 
 describe("isAnalyticsEnabled", () => {
-  it("returns true when no choice has been recorded (default-on)", () => {
-    // No key in storage — ON by default; consent is presented during
-    // onboarding and the user can opt out there or in settings.
+  it("returns true when no choice is recorded (production default)", () => {
+    // Match production: users can switch sharing off.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
     expect(isAnalyticsEnabled()).toBe(true)
   })

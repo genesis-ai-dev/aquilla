@@ -99,6 +99,7 @@ export type UnmatchedReason =
   | { code: "tooLarge"; mb: number; limitMb: number }
   | { code: "noBook" }
   | { code: "bookNotInProject"; book: string }
+  | { code: "bookNumberUnclear"; first: string; second: string }
   | { code: "otherBook"; book: string; fileName: string }
   | { code: "noSuchChapter"; book: string; chapter: number }
   | { code: "noSuchVerse"; ref: string }
@@ -315,11 +316,21 @@ export function readRecordings(files: readonly BulkInputFile[], opts: ReadOption
           const code = bookFromNumber(r.reading.numbers[0].value, scheme)
           return code != null && fileForBook(code) != null
         }).length
-      const scheme = score("paratext") > score("canonical") ? "paratext" : "canonical"
+      const paratext = score("paratext")
+      const canonical = score("canonical")
+      const scheme = paratext > canonical ? "paratext" : "canonical"
       for (const r of candidates) {
         const code = bookFromNumber(r.reading.numbers[0].value, scheme)
         const target = code ? fileForBook(code) : undefined
         if (!target) continue
+        // When both numberings find as many of the project's books, a number
+        // that is a different book in each ("41": Mark, or Paratext's Matthew)
+        // is asked about rather than guessed.
+        const other = paratext === canonical ? bookFromNumber(r.reading.numbers[0].value, "paratext") : null
+        if (code && other && other !== code && fileForBook(other)) {
+          r.targetReason = { code: "bookNumberUnclear", first: englishBookName(code), second: englishBookName(other) }
+          continue
+        }
         r.targetFileId = target.fileId
         r.targetReason = undefined
         r.bookFromNumber = true

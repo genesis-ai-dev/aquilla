@@ -217,6 +217,7 @@ function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n
     case "tooLarge": return t("recordingsUpload.reason.tooLarge", { mb: reason.mb, limit: reason.limitMb })
     case "noBook": return t("recordingsUpload.reason.noBook")
     case "bookNotInProject": return t("recordingsUpload.reason.bookNotInProject", { book: reason.book })
+    case "bookNumberUnclear": return t("recordingsUpload.reason.bookNumberUnclear", { first: reason.first, second: reason.second })
     case "otherBook": return t("recordingsUpload.reason.otherBook", { book: reason.book, fileName: reason.fileName })
     case "noSuchChapter": return t("recordingsUpload.reason.noSuchChapter", { book: reason.book, chapter: reason.chapter })
     case "noSuchVerse": return t("recordingsUpload.reason.noSuchVerse", { ref: reason.ref })

@@ -40,7 +40,7 @@ const LOCAL_COMPLETION = {
   fewShotExampleFormat: "source-and-target",
 } satisfies CompletionSettings
 
-let roleLevel = 700
+const roleLevel = 700
 function makeProject(): ProjectRecord {
   return {
     id: PROJECT_ID,
@@ -59,8 +59,8 @@ vi.mock("@/hooks/useProject", () => ({
 }))
 
 const patchSharedMock = vi.fn().mockResolvedValue({ kind: "ok" })
-let sharedBlob: ProjectWideSettings = {}
-let canEdit = true
+const sharedBlob: ProjectWideSettings = {}
+const canEdit = true
 vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({
     canEdit,

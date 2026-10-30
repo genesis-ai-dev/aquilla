@@ -75,7 +75,12 @@ export function LanguageEditSection({ orgSettings, canEdit }: LanguageEditSectio
   return (
     <SettingsRow
       label={t("settings.languageEdit.label")}
-      description={t("settings.languageEdit.description")}
+      description={t("settings.languageEdit.summary")}
+      info={{
+        label: t("common.aboutAria", { name: t("settings.languageEdit.label") }),
+        content: t("settings.languageEdit.info"),
+        testId: "settings-info-language-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

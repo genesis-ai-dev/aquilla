@@ -93,7 +93,9 @@ describe("TakesStrip — audio validation", () => {
       take({ audioId: "b", validatorCount: 1, validators: ["ana"] }),
     ], "a")
     const marks = screen.getAllByTestId("audio-validation-button")
-    await userEvent.hover(marks[1])
+    // AQU-2260: the list opens on a click of the check, never on hover; on a
+    // take that is not circled that click does not vote.
+    await userEvent.click(marks[1])
     // Scoped to the popover: AppTooltip mirrors the label into a portal.
     const list = await screen.findByRole("dialog")
     expect(within(list).getByText(/ana/)).toBeInTheDocument()

@@ -702,10 +702,12 @@ export const org = defineNamespace({
     // -- OrgSettingsExport: who may export a project's deliverables --
     "org.exportSettings.deliverablesGroupLabel": "Deliverables",
     "org.exportSettings.whoCanExportLabel": "Who can export",
-    "org.exportSettings.whoCanExportDescription":
-      "Lower the floor to let translators export their own work; raise it to " +
-      "keep deliverables with leads. Client-side formats (CSV, TSV) operate on " +
-      "already-loaded cells and can't be enforced here.",
+    // Sam, Oct 29: one short line under each setting; the rest behind its (i).
+    "org.exportSettings.whoCanExportSummary": "The lowest role that can export a project's deliverables.",
+    "org.exportSettings.whoCanExportInfo":
+      "Lower it to let translators export their own work, or raise it to keep deliverables " +
+      "with leads. CSV and TSV files are made in the browser from cells already loaded, so " +
+      "this setting can't block them.",
     "org.exportSettings.ownersOnlyPolicyNote": "Only org owners can change the export permission policy.",
     "org.exportSettings.roleOptionPlain": "{role}",
     "org.exportSettings.roleOptionViewer": "{role} — anyone with project access",
@@ -715,10 +717,10 @@ export const org = defineNamespace({
 
     // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
     "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
-    "org.egressSettings.whoCanEgressDescription":
-      "Minimum role that can open the organization-wide Data egress page and " +
-      "download everything as one archive. Owners always can; each project's " +
-      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.whoCanEgressSummary": "The lowest role that can download every project as one archive.",
+    "org.egressSettings.whoCanEgressInfo":
+      "That happens on the Data egress page. Owners can always use it, and each project's " +
+      "export setting still decides what goes into the archive.",
     "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
     "org.egressSettings.roleOptionViewer": "{role} — anyone with project access",
     "org.egressSettings.roleOptionOwner": "{role} — default",
@@ -2478,9 +2480,13 @@ export const org = defineNamespace({
         description:
           "Label for the dropdown that sets the lowest team role allowed to export files from any project in this organization, and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one, so avoid turning it into a full question.",
       },
-      "org.exportSettings.whoCanExportDescription": {
+      "org.exportSettings.whoCanExportSummary": {
         description:
-          "Explanatory paragraph under the export-permission dropdown on an organization's export settings page, addressed to the administrator making the choice. Two sentences: the first says what moving the minimum role down or up achieves, the second warns that two spreadsheet formats are produced entirely inside the reader's own browser and so cannot be blocked by this setting. The two abbreviations in brackets are file-format names and stay exactly as they are.",
+          "The one short line always shown under 'Who can export' on the organization's Security settings page, beside the dropdown of roles. It says the chosen role and every role above it can export the finished files of any project in this organization. Keep it to one short line.",
+      },
+      "org.exportSettings.whoCanExportInfo": {
+        description:
+          "The longer explanation that opens beneath 'Who can export' when the reader clicks the small (i) beside its title, addressed to the administrator making the choice. Two sentences: the first says what moving the role down or up achieves, the second warns that two spreadsheet formats are produced entirely inside the reader's own browser and so cannot be blocked by this setting. CSV and TSV are file-format names and stay exactly as they are.",
       },
       "org.exportSettings.ownersOnlyPolicyNote": {
         description:
@@ -2529,9 +2535,13 @@ export const org = defineNamespace({
         description:
           "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
       },
-      "org.egressSettings.whoCanEgressDescription": {
+      "org.egressSettings.whoCanEgressSummary": {
         description:
-          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+          "The one short line always shown under 'Who can use Data egress' on the organization's Security settings page, beside the dropdown of roles. It says the chosen role and every role above it can download all of this organization's projects together as a single archive file. Keep it to one short line.",
+      },
+      "org.egressSettings.whoCanEgressInfo": {
+        description:
+          "The longer explanation that opens beneath 'Who can use Data egress' when the reader clicks the small (i) beside its title. It names the page this setting opens ('Data egress' is that page's own title, org.egress.title, and must match it), then makes two statements: owners always have access whatever role is chosen, and each project's separate export setting still decides what the archive can contain.",
       },
       "org.egressSettings.ownersOnlyPolicyNote": {
         description:

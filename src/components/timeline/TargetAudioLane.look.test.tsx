@@ -16,6 +16,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { RowMetricsContext } from "./useRowMetrics"
 import { chipHeightPx, chipPadPx, ROW_H_MIN } from "@/lib/timeline/row-metrics"
+import { WAVE_LOOK } from "@/lib/timeline/track-colors"
 import type { CellData } from "@/hooks/useCells"
 
 const BINS = 320
@@ -78,12 +79,14 @@ describe("the take look on a timeline chip", () => {
     expect(clean.getAttribute("class")).toContain("fill-[color:var(--tl-track-wave)]")
   })
 
+  // From WAVE_LOOK, the one place the look's values live, so changing it there
+  // changes what a muted track shows.
   it("draws a muted track's takes at half strength", () => {
     const { unmount } = render(<TargetAudioLane {...base} items={[item()]} />)
-    expect(screen.getByTestId("tl-target-c1").className).not.toContain("opacity-50")
+    expect(screen.getByTestId("tl-target-c1").style.opacity).toBe("")
     unmount()
     render(<TargetAudioLane {...base} items={[item()]} muted />)
-    expect(screen.getByTestId("tl-target-c1").className).toContain("opacity-50")
+    expect(screen.getByTestId("tl-target-c1").style.opacity).toBe(String(WAVE_LOOK.muted))
   })
 
   it("rounds 6px, and 4px on a clip under 24px tall", () => {

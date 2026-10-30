@@ -74,7 +74,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { TRACK_BAR_CLASS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, trackHueVars } from "@/lib/timeline/track-colors"
+import { TRACK_BAR_CLASS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, WAVE_LOOK, trackHueVars } from "@/lib/timeline/track-colors"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
@@ -1235,6 +1235,9 @@ function TargetAudioChip({
         // AQU-2235: 4px on a clip under 24px tall (board 51).
         borderRadius: `${chipRadiusPx(paintedPx, chipH < 24 ? 4 : 6)}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
+        // AQU-2235: a muted track's takes, whole, bar and all, at the look's
+        // own strength (WAVE_LOOK.muted, 50%).
+        ...(muted ? { opacity: WAVE_LOOK.muted } : {}),
       }}
       className={cn(
         "group/chip absolute flex touch-none select-none items-center justify-center border",
@@ -1274,8 +1277,6 @@ function TargetAudioChip({
         selected === "line" && "ring-1 ring-sky-500/50",
         // Sam's decision: faded like the table's revealed hidden row.
         hiddenLine && "opacity-60",
-        // AQU-2235: a muted track's takes at half strength, bar and all.
-        muted && "opacity-50",
       )}
     >
       {drag && (

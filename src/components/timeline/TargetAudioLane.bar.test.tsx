@@ -382,7 +382,7 @@ describe("what the bar leaves alone", () => {
   it("fades a muted track's clip whole, bar included", () => {
     render(<TargetAudioLane {...base} items={[item()]} muted />)
     const chip = screen.getByTestId("tl-target-c1")
-    expect(chip.className).toContain("opacity-50")
+    expect(chip.style.opacity).toBe("0.5")
     expect(chip.contains(bar())).toBe(true)
   })
 })

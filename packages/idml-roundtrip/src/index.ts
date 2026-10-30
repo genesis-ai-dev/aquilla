@@ -6,12 +6,14 @@ export { inspectIdml } from "./archive.js"
 export {
   parseIdml,
   exportIdml,
+  releaseOversizedNoBreakInPackage,
   validateExport,
   partitionIdmlUnitAtLineBreaks,
   projectIdmlUnitToLocator,
   sliceIdmlUnit,
   mergeIdmlSliceTargetHtml,
 } from "./engine.js"
+export { releaseOversizedNoBreak } from "./no-break.js"
 export { renderIdmlUnitHtml, validateIdmlTranslation } from "./html.js"
 export { upgradeLegacyIdmlMetadata } from "./legacy.js"
 export {

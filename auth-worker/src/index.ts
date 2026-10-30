@@ -118,6 +118,7 @@ import agentSessionRoutes from "./routes/agent-sessions"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import knowledgeInternalRoutes from "./routes/knowledge-internal"
 import styleRulesRoutes from "./routes/style-rules"
+import editHistoryRoutes from "./routes/edit-history"
 import mondayRoutes from "./routes/monday"
 import airtableRoutes from "./routes/airtable"
 import langquestRoutes from "./routes/langquest"
@@ -352,6 +353,9 @@ app.route("/api/v2/projects", aiInterventionRoutes)
 // Scene briefs (contextual translation pipeline §9). Sibling router — same
 // agent-channel semantics as agent-memory (routes/scene-briefs.ts).
 app.route("/api/v2/projects", sceneBriefRoutes)
+// Decision 11: each person's undo history for a project, so it follows them
+// between devices (routes/edit-history.ts, migration 0191).
+app.route("/api/v2/projects", editHistoryRoutes)
 // Contextual translation run engine (pipeline design §8, slice D1): durable
 // Postgres-backed runs + steering + staged-draft review (routes/contextual.ts).
 app.route("/api/v2/projects", contextualRoutes)

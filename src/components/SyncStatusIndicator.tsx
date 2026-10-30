@@ -54,7 +54,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   const connected = status === "live" || status === "syncing" || status === "retrying"
   const quality = connected ? activity.quality : null
   const PingIcon = quality ? PING_ICON[quality] : Signal
-  const { dot, labelKey, tooltipKey } = describeStatus(status)
+  const { dot, labelKey, tooltipKey } = describeSyncStatus(status)
   const label = t(labelKey)
   const tooltip = t(tooltipKey)
   const rows = [
@@ -133,7 +133,7 @@ function PingSparkline({ history }: { history: ConnectionHistoryPoint[] }) {
 
 /** Pure — no hook access, so it returns message keys rather than text; the
  *  component above resolves them with `useT()`. */
-function describeStatus(status: SyncStatus): {
+export function describeSyncStatus(status: SyncStatus): {
   dot: string
   labelKey: MessageKey
   tooltipKey: MessageKey

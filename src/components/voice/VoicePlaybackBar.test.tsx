@@ -292,3 +292,32 @@ describe("VoicePlaybackBar — the chosen sound", () => {
     expect(transportArgs.last?.playbackSource).toBe("recording")
   })
 })
+
+// Media redesign, layout (Sam, Oct 27): the media view's transport is a thin
+// strip along its bottom — the time, previous · play · next, speed, volume,
+// and nothing else.
+describe("VoicePlaybackBar — the media view's strip", () => {
+  it("is 32 px with the time at the left, the three transport buttons, then speed and volume", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const strip = screen.getByTestId("media-play-strip")
+    expect(strip.className).toContain("h-8")
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
+    const centre = screen.getByTestId("top-transport")
+    expect(Array.from(centre.querySelectorAll("button")).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Previous line",
+      "Play all",
+      "Next line",
+    ])
+    expect(screen.getByTestId("transport-speed")).toBeInTheDocument()
+    expect(screen.getByTestId("transport-volume")).toBeInTheDocument()
+    // No "now playing" line, no scrubber, no status.
+    expect(screen.queryByRole("slider", { name: "Seek" })).toBeNull()
+    expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
+  })
+
+  it("drops the time first on a narrow view (a container query), never the buttons", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)
+    expect(screen.getByTestId("transport-play").className).not.toContain("hidden")
+  })
+})

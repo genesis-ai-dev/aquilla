@@ -23,6 +23,8 @@ export interface HistoryPanelProps {
   onResult: (which: "undo" | "redo", result: HistoryResult) => void
 }
 
+// Its button is a square like its neighbours in every view's bar, without
+// the count (canvas board 55, option E; in every view since Sam, Oct 28).
 export function HistoryPanel({ onResult }: HistoryPanelProps) {
   const t = useT()
   const fmt = useFormat()
@@ -61,10 +63,9 @@ export function HistoryPanel({ onResult }: HistoryPanelProps) {
               type="button"
               aria-label={t("editor.history.panelAria")}
               data-testid="history-panel-trigger"
-              className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <History className="h-3.5 w-3.5" />
-              {view.undoSteps.length > 0 && <span className="tabular-nums">{view.undoSteps.length}</span>}
             </button>
           }
         />

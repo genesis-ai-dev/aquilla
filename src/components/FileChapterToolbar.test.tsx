@@ -73,7 +73,7 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(onLensChange).toHaveBeenCalledWith("text")
   })
 
-  it("shows Text, Audio, and Agent labels beside the icons on larger screens", () => {
+  it("on larger screens, labels only the open view beside its icon (board 55, in every view)", () => {
     render(
       <FileChapterToolbar
         lens="text"
@@ -88,8 +88,8 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toHaveTextContent("Text")
-    expect(screen.getByRole("tab", { name: "Audio" })).toHaveTextContent("Audio")
-    expect(screen.getByRole("tab", { name: "Agent" })).toHaveTextContent("Agent")
+    expect(screen.getByRole("tab", { name: "Audio" }).textContent).toBe("")
+    expect(screen.getByRole("tab", { name: "Agent" }).textContent).toBe("")
     expect(screen.getByRole("tab", { name: "Agent" }).querySelector("svg")).not.toBeNull()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })

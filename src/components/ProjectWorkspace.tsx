@@ -5,7 +5,8 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -189,7 +190,7 @@ import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope,
 import type { FindToggles } from "@/lib/search/workspace-index"
 import type { EditorTableHandle } from "./EditorTable"
 import type { WorkspaceSearchResult } from "@/hooks/useWorkspaceSearch"
-import { StatusBar } from "./StatusBar"
+import { StatusBar, statusBarFigure } from "./StatusBar"
 import { SyncStatusIndicator } from "./SyncStatusIndicator"
 import { OutboxSyncIndicator } from "./OutboxSyncIndicator"
 import { EditorTable, type AudioLensContext, type BacktranslationActionSource } from "./EditorTable"
@@ -403,7 +404,7 @@ import { AgentWorkbench } from "./agent/AgentWorkbench"
 import { AgentMiniChat } from "./agent/AgentMiniChat"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { CheckFindingsDrawer } from "./CheckFindingsDrawer"
-import { FileChapterToolbar } from "./FileChapterToolbar"
+import { FileChapterToolbar, type FileChapterToolbarProps } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { useBibleChecks } from "@/hooks/useBibleChecks"
 import { SearchDockPanel } from "./SearchDockPanel"
@@ -461,12 +462,9 @@ import type { MediaTextSource } from "@/lib/import/media-cues"
 import { AlignTimelineScriptDialog } from "./import/AlignTimelineScriptDialog"
 import { ImportSubtitlesDialog } from "./timeline/ImportSubtitlesDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
-// AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
-// several of them depend on which sections are collapsed, and the stored sizes
-// are written by `useMediaSectionCollapse` at the end of a gesture. What is
-// left here is reading them for `defaultSize`.
-import { shouldShowVideoPane, readStoredVideoPaneWidth } from "./timeline/video-pane-layout"
-import { readStoredTimelinePaneHeight } from "./timeline/timeline-pane-layout"
+// Media redesign, layout: the panels' constraints, sizes, folds and full
+// screen all come from `useMediaDock`; the gate for the film stays here.
+import { shouldShowVideoPane } from "./timeline/video-pane-layout"
 import {
   getVideoClockPlaying,
   setVideoClockSec,
@@ -477,14 +475,19 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { MediaSectionRail } from "@/components/timeline/MediaSectionRail"
-import { useMediaSectionCollapse } from "@/components/timeline/useMediaSectionCollapse"
+import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
+import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
+import { useMediaDock } from "@/components/timeline/useMediaDock"
+import { MediaDockBody } from "@/components/timeline/MediaDockBody"
+import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
+import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
+import { regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
-import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
+import { EDITOR_SURFACE_TOOLBAR_CLASS, fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -13355,42 +13358,47 @@ export function ProjectWorkspace() {
     })
   }, [t])
 
-  // AQU-1119: which media-lens sections are collapsed, per file, plus the
-  // panel handles and the constraint rows that follow from it.
-  const mediaSections = useMediaSectionCollapse({
+  // Media redesign, layout: the arrangement this file STARTS from, by its
+  // kind — a dubbing episode opens with the picture large, a subtitles file
+  // with the text large, a scripture book with the timeline tall. Only a
+  // fallback: each person's own arrangement of a file wins, and Reset layout
+  // comes back here.
+  const mediaKind = useMemo(
+    () =>
+      mediaFileKind({
+        hasVideo: Boolean(activeFile?.coreMediaUrl),
+        isSubtitleFile,
+        hasAudioCues: audioCueSibling !== null,
+        isScripture:
+          ["usfm", "ebible", "helloao"].includes(activeFile?.type ?? "") || Boolean(activeFile?.corpusMarker),
+      }),
+    [activeFile?.coreMediaUrl, activeFile?.type, activeFile?.corpusMarker, isSubtitleFile, audioCueSibling],
+  )
+  const mediaStart = useMemo(() => startingLayout(mediaKind), [mediaKind])
+  // Media redesign, layout (canvas board 23): the timeline across the top, the
+  // film and the text in the two areas below it, each foldable to nothing,
+  // movable, and able to take the whole view — per person, per file.
+  const dockLeft = useMemo(
+    () => ({ tab: dockTab, isRail: lgUp, setTab: (tab: string | null) => setDockTab(tab as typeof dockTab) }),
+    [dockTab, lgUp, setDockTab],
+  )
+  const dock = useMediaDock({
     fileId: activeFileId,
     timelineStacked,
-    hasVideo: Boolean(activeFile?.coreMediaUrl),
-    // The rows stay mounted behind the rail — frozen and clipped, not
-    // unmounted — so a cell being edited would keep focus and keep taking
-    // keystrokes out of sight. Blurring runs the editor's real path: TipTap
-    // commits the text, and the row releases its collaboration lease.
-    onBeforeCollapseText: () => {
+    filmPresent: showVideoPane && Boolean(activeFile?.coreMediaUrl),
+    start: mediaStart,
+    left: dockLeft,
+    // A hidden text panel stays mounted (frozen, or a tab behind the film), so
+    // a cell being edited would keep focus and keep taking keystrokes out of
+    // sight. Blurring runs the editor's real path: TipTap commits the text,
+    // and the row releases its collaboration lease.
+    onBeforeHideText: () => {
       const active = document.activeElement
-      if (active instanceof HTMLElement && active.closest("[data-media-section='text']")) {
+      if (active instanceof HTMLElement && active.closest("[data-media-panel='text']")) {
         active.blur()
       }
     },
   })
-  const timelinePanelRef = mediaSections.panelRefs.timeline
-  useEffect(() => {
-    // `timelineStacked` is a dependency, not just a guard, and it is the whole
-    // fix for a bug this effect shipped with (AQU-1119): in the text lens the
-    // timeline panel is not rendered, so the ref is null and the resize is
-    // skipped. Without the dep the effect never re-ran on the way back, and the
-    // panel does not re-read `defaultSize` either — the group restores the
-    // layout it cached against the same panel ids. So a lens round-trip left
-    // the PREVIOUS file's height on screen, and the per-file height Sam asked
-    // for silently stopped being per file the moment anyone visited the text
-    // lens.
-    if (!activeFileId || !timelineStacked) return
-    // `restoreStoredSize` skips a collapsed section — a height restored under
-    // its rail is exactly the desync the pin exists to prevent — and tolerates
-    // the first commit, where the group has not laid out yet and `resize`
-    // would throw rather than no-op.
-    mediaSections.restoreStoredSize("timeline")
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
-  }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
   const anyCellClockIsFileTime = useMemo(
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
@@ -15903,6 +15911,42 @@ export function ProjectWorkspace() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  // The connection and save state: who else is here, Live, Synced. The
+  // footer's left half — and, in the media view, which has no footer, part of
+  // the status ring's popover and the top of the Panels menu.
+  const mediaStatusSync = (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <PeerPresence
+        store={presenceStore}
+        onJumpToPeer={handleJumpToPresencePeer}
+        resolveCellLabel={resolvePresenceCellLabel}
+      />
+      <SyncStatusIndicator status={fileSyncStatus} />
+      <OutboxSyncIndicator
+        pendingCount={Math.max(0, outboxPending - outboxFailed)}
+        failureStreak={outboxFailures}
+        failedCount={outboxFailed}
+        // SUB-9: all-status feed so quarantined refusals render in
+        // the inspector (with reason + Retry/Discard) instead of
+        // the popover claiming "all caught up" beside a failed pill.
+        records={outboxInspectorRecords}
+        onRetryNow={outboxFlushNow}
+        projectId={project?.id}
+      />
+    </div>
+  )
+  // The file's counts, as the footer shows them, for the status ring.
+  const mediaStatusStats = (
+    <StatusBar
+      className="p-0"
+      progress={editorStatusBarProgress}
+      getHealthByCell={getStatusBarHealth}
+      projectHealth={projectHealth}
+      staleSourceCount={staleCellIds.size}
+      onJumpToCell={jumpToCellId}
+    />
+  )
+
   const fileChapterToolbar = activeFileId ? (
     <FileChapterToolbar
       historyControl={<HistoryPanel onResult={reportHistory} />}
@@ -16726,10 +16770,44 @@ export function ProjectWorkspace() {
                 canControl={currentRoleLevel >= ROLE.CONTRIBUTOR}
               />
             )}
-            {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background/90 p-2 backdrop-blur-xl">
-                {fileChapterToolbar}
-              </div>
+            {timelineStacked && activeFile && project ? (
+              // Media redesign, layout: ONE 40 px bar for the whole view, in
+              // two groups (canvas board 55, option E). Left: the timeline's
+              // tools (Sources with the film first, Timing, a divider, Check),
+              // then History. Right: the status ring, the views, Panels, ⋯.
+              // The transport is the thin strip along the bottom of the view.
+              <MediaTopBar
+                afterTools={<HistoryPanel onResult={reportHistory} />}
+                trailing={
+                  <>
+                    <MediaStatusRing
+                      {...statusBarFigure(editorStatusBarProgress)}
+                      syncStatus={fileSyncStatus}
+                      fileName={fileDisplayName(activeFile)}
+                      projectId={project.id}
+                      pending={Math.max(0, outboxPending - outboxFailed)}
+                      closeWhen={dock.panelsOpen}
+                    >
+                      {mediaStatusSync}
+                      {showFileStats ? mediaStatusStats : null}
+                    </MediaStatusRing>
+                    {fileChapterToolbar && isValidElement<FileChapterToolbarProps>(fileChapterToolbar)
+                      ? cloneElement(fileChapterToolbar, {
+                          // History sits on the left of this bar.
+                          historyControl: undefined,
+                          beforeMenu: (
+                            <MediaPanelsMenu
+                              dock={dock}
+                              fileName={fileDisplayName(activeFile)}
+                              kind={mediaKind}
+                              filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
+                            />
+                          ),
+                        })
+                      : null}
+                  </>
+                }
+              />
             ) : null}
             <div className="min-h-0 flex-1">
               {/* 2026-08-07: ONE EditorTable across both lenses; the media lens
@@ -16752,6 +16830,13 @@ export function ProjectWorkspace() {
                   tree, so toggling the lens never remounts it and loses its
                   virtualization state (and the separator stays a direct DOM
                   child of its Group, which the library requires). */}
+              {/* Media redesign, layout (canvas board 23): the timeline across
+                  the top, then the row of areas — Bottom left and Bottom right,
+                  each holding the film or the text as a tab — any of which can
+                  fold to nothing or take the whole view. The film and the text
+                  render ONCE, below, through portals into hosts that the dock
+                  moves between the areas: the table keeps one mount across the
+                  lenses and across moves, as it has since 2026-08-07. */}
               <ResizablePanelGroup
                 // Named rather than left to useId: the library resolves a
                 // group by scanning ids and returns the first match, so two
@@ -16760,56 +16845,38 @@ export function ProjectWorkspace() {
                 id="media-lens-rows"
                 orientation="vertical"
                 className="min-h-0"
-                // AQU-1119: fires once per gesture, at pointer-up. A drag that
-                // shut a section is heard here, after the group has settled.
-                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
+                // Fires once per gesture, at pointer-up: a drag that shut a
+                // region is heard here, after the group has settled.
+                onLayoutChanged={(_layout, meta) => dock.noteLayoutSettled(meta)}
               >
               {timelineStacked && activeFile ? (
                 <>
                   <ResizablePanel
                     id="media-timeline"
-                    panelRef={timelinePanelRef}
-                    defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
-                    {...mediaSections.constraints.timeline}
-                    groupResizeBehavior="preserve-pixel-size"
-                    // The rail is positioned against this box.
-                    className="relative"
-                    // AQU-1119: a collapsed panel clips rather than reflows.
-                    // The library's own content box is `overflow: auto` and
-                    // spreads this after it, so without `hidden` the frozen
-                    // content would SCROLL inside the rail instead of being
-                    // hidden behind it.
-                    style={mediaSections.showsRail("timeline") ? { overflow: "hidden" } : undefined}
-                    // Records only. The remembered height is written once the
-                    // gesture ENDS (the group's onLayoutChanged), so a drag that
-                    // finishes collapsed never overwrites it on the way past
-                    // the floor.
-                    onResize={(size) => mediaSections.noteResize("timeline", size.inPixels)}
+                    panelRef={dock.panelRefs.tl}
+                    defaultSize={dock.defaults.tlHeight}
+                    {...dock.constraints.tl}
+                    // Folded, it clips rather than reflows (see MediaDockBody).
+                    style={!dock.view.isOpen("tl") ? { overflow: "hidden" } : undefined}
+                    // Records only; the height is remembered at pointer-up.
+                    onResize={(size) => dock.noteResize("tl", size.inPixels)}
                   >
                   {/* Rendered unconditionally, and only its inline style
-                      changes: adding or removing this wrapper on collapse
-                      would remount TimelineEditor, taking the portaled text
-                      header with it and resetting the per-file prefs guard,
+                      changes: adding or removing this wrapper on a fold would
+                      remount TimelineEditor, taking the portaled tools and
+                      text row with it and resetting the per-file prefs guard,
                       the viewport measurement and the follow state. Frozen at
-                      its last real size so nothing inside ever learns it got
-                      small. */}
+                      its last real size so nothing inside learns it got small. */}
                   <div
-                    ref={mediaSections.registerContent("timeline")}
-                    data-media-section="timeline"
+                    ref={dock.timelineContentBoxRef}
+                    data-media-region="tl"
                     className="flex h-full min-h-0 w-full min-w-0 flex-col"
                     style={
-                      mediaSections.isCollapsed("timeline") && mediaSections.frozen.timeline
-                        ? {
-                            minWidth: mediaSections.frozen.timeline.width,
-                            minHeight: mediaSections.frozen.timeline.height,
-                          }
+                      !dock.view.isOpen("tl") && dock.frozen.tl
+                        ? { minWidth: dock.frozen.tl.width, minHeight: dock.frozen.tl.height }
                         : undefined
                     }
-                    inert={mediaSections.isCollapsed("timeline") || undefined}
+                    inert={!dock.view.isOpen("tl") || undefined}
                   >
                   <TimelineEditor
                     cells={audioMergedCells}
@@ -16847,6 +16914,16 @@ export function ProjectWorkspace() {
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
+                    // Board 55: the film's own actions head the Sources menu.
+                    film={activeFile?.coreMediaUrl ? {
+                      name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
+                      hiddenByTiming: !showVideoPane,
+                      showing: dock.view.isShowing("film"),
+                      // A tab beside the text: the text shows instead. Alone
+                      // in its area: the area folds.
+                      onHide: () => dock.hide("film"),
+                      onShow: () => dock.show("film"),
+                    } : undefined}
                     onAddLine={handleAddLine}
                     // Through the confirmation, like the table's control —
                     // the two surfaces must not differ about what removing
@@ -16934,28 +17011,9 @@ export function ProjectWorkspace() {
                     // maintainer cannot change it here either.
                     timingFilmTimed={timingFilmTimed}
                     timingSourceUnavailable={timingNothingToFollow}
-                    // AQU-1119: the timeline's own collapse control, and the
-                    // text section's — the latter because TimelineEditor owns
-                    // the header it portals into the table column's slot.
-                    onCollapseSection={() => mediaSections.collapse("timeline")}
-                    onCollapseTextSection={
-                      // Withheld on a file with no linked video: the table is
-                      // then the only thing in its row, and a flex row with
-                      // nothing in it is the one arrangement the layout cannot
-                      // hold.
-                      activeFile.coreMediaUrl ? () => mediaSections.collapse("text") : undefined
-                    }
-                    // Full screen has its own gate. The text may take the
-                    // lens on a file with no film — folding the timeline is
-                    // all that takes — where collapsing it cannot.
-                    onToggleTextFullscreen={
-                      mediaSections.isFullscreen("text")
-                        ? () => mediaSections.exitFullscreen("text")
-                        : mediaSections.canFullscreen("text")
-                          ? () => mediaSections.enterFullscreen("text")
-                          : undefined
-                    }
-                    isTextFullscreen={mediaSections.isFullscreen("text")}
+                    // Media redesign, layout: Full screen, Fold and the ⋯, in
+                    // the timeline's corner cell beside "Tracks".
+                    layoutControls={regionControls(dock, "tl")}
                     onOpenRecording={handleOpenRecording}
                     // AQU-1684: the track taking a take can't be hidden meanwhile.
                     recordingSlot={recordingCellId !== null ? recordingSlot : null}
@@ -17014,164 +17072,69 @@ export function ProjectWorkspace() {
                     linkingModeRequest={linkingModeRequest}
                   />
                   </div>
-                  {mediaSections.showsRail("timeline") && (
-                    <MediaSectionRail
-                      section="timeline"
-                      orientation="horizontal"
-                      // The one rail wide enough to keep its name. Its tools go
-                      // with its body — every one of them acts on tracks that
-                      // are no longer on screen — and the rail painting over
-                      // the toolbar is what takes them away.
-                      label={t("editor.timeline.title")}
-                      preview={mediaSections.isPreviewingRail("timeline")}
-                      onExpand={() => mediaSections.expand("timeline")}
-                    />
-                  )}
                   </ResizablePanel>
                   {/* A pinned panel cannot be dragged, so the handle beside it
-                      must stop claiming it can: disabled drops its tab stop
-                      and its key handling rather than announcing a slider that
-                      will not move. */}
+                      stops claiming it can, and goes invisible. */}
                   <ResizableHandle
                     withHandle
-                    disabled={mediaSections.separatorDisabled("timeline-body")}
-                  />
-                </>
-              ) : null}
-              {/* `minSize` is the only thing keeping the dialogue table usable
-                  now that the timeline above it has a height control — and it
-                  is the mechanism behind an existing browser pass's floor check
-                  (browser-verify-media-table-sync.mjs asserts the table clears
-                  80px on a 1280x700 window). */}
-              <ResizablePanel id="media-body" {...mediaSections.constraints.body}>
-              {/* AQU-646: in the media lens a linked video docks to the LEFT of
-                  the table, under the chip strip. Dragging the divider shut is
-                  how you hide it; the table carries a pixel floor so a narrow
-                  window collapses the picture rather than crushing the text. */}
-              <ResizablePanelGroup
-                id="media-lens-body"
-                orientation="horizontal"
-                className="min-h-0 flex-1"
-                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
-                // Fires on every pointer MOVE, where the one above fires
-                // once at the release. Paints the rail over a section the
-                // drag has already shrunk to 40px; commits nothing.
-                onLayoutChange={() => mediaSections.notePointerLayout()}
-              >
-              {showVideoPane && activeFile?.coreMediaUrl ? (
-                <>
-                  <ResizablePanel
-                    id="media-video"
-                    panelRef={mediaSections.panelRefs.video}
-                    defaultSize={readStoredVideoPaneWidth()}
-                    // 2026-08-08 (Sam): the divider travels well past half —
-                    // the table's own pixel floor is what protects legibility.
-                    // AQU-1119 moved the rest of these here: the pane is
-                    // collapsible while OPEN so dragging it shut still works,
-                    // and pinned to the rail once closed so only the rail's
-                    // button can reopen it.
-                    {...mediaSections.constraints.video}
-                    groupResizeBehavior="preserve-pixel-size"
-                    className="relative"
-                    style={mediaSections.showsRail("video") ? { overflow: "hidden" } : undefined}
-                    // Records only; the width is remembered at pointer-up, and
-                    // only if the gesture ended with the picture open — a drag
-                    // that ends in the rail used to write 220 on its way past
-                    // the floor, so the rail reopened the picture at its bare
-                    // minimum instead of where the reader had left it.
-                    onResize={(size) => mediaSections.noteResize("video", size.inPixels)}
-                  >
-                    <div
-                      ref={mediaSections.registerContent("video")}
-                      data-media-section="video"
-                      className="flex h-full min-h-0 w-full min-w-0 flex-col"
-                      style={
-                        mediaSections.isCollapsed("video") && mediaSections.frozen.video
-                          ? {
-                              minWidth: mediaSections.frozen.video.width,
-                              minHeight: mediaSections.frozen.video.height,
-                            }
-                          : undefined
-                      }
-                      inert={mediaSections.isCollapsed("video") || undefined}
-                    >
-                    <MediaVideoPane
-                      key={activeFile.id}
-                      src={activeFile.coreMediaUrl}
-                      projectId={project.id}
-                      session={frontierSession}
-                      // AQU-646 stage 2: the pane's header now carries the
-                      // film's mute button, and audibility is stored per file.
-                      fileId={activeFile.id}
-                      cells={audioMergedCells}
-                      seekSec={videoSeek}
-                      togglePlay={videoToggle}
-                      suspended={recordingCellId !== null}
-                      onVideoTime={setVideoClockSec}
-                      onVideoPlaying={setVideoClockPlaying}
-                      onVideoDuration={setVideoDurationSec}
-                      onChangeVideo={() => setLinkVideoOpen(true)}
-                      // Sam, Oct 5: a click on a YouTube picture is the
-                      // transport's Play/Pause, never YouTube's own.
-                      onPictureClick={handleTimelineTogglePlay}
-                      sourceDirectionMode={fileMeta.sourceDirectionMode}
-                      targetDirectionMode={fileMeta.targetDirectionMode}
-                      sourceTextDirection={fileMeta.sourceTextDirection}
-                      targetTextDirection={fileMeta.targetTextDirection}
-                      onCollapse={
-                        timelineStacked ? () => mediaSections.collapse("video") : undefined
-                      }
-                      onToggleFullscreen={
-                        mediaSections.isFullscreen("video")
-                          ? () => mediaSections.exitFullscreen("video")
-                          : mediaSections.canFullscreen("video")
-                            ? () => mediaSections.enterFullscreen("video")
-                            : undefined
-                      }
-                      isFullscreen={mediaSections.isFullscreen("video")}
-                    />
-                    </div>
-                    {mediaSections.showsRail("video") && (
-                      <MediaSectionRail
-                        section="video"
-                        orientation="vertical"
-                        label={t("editor.timeline.videoPaneTitle")}
-                      preview={mediaSections.isPreviewingRail("video")}
-                        onExpand={() => mediaSections.expand("video")}
-                      />
-                    )}
-                  </ResizablePanel>
-                  <ResizableHandle
-                    withHandle
-                    disabled={mediaSections.separatorDisabled("video-table")}
+                    disabled={dock.separatorDisabled("tl-body")}
+                    className={dock.separatorDisabled("tl-body") ? "invisible" : undefined}
                   />
                 </>
               ) : null}
               <ResizablePanel
-                id="media-table"
-                panelRef={mediaSections.panelRefs.text}
-                {...mediaSections.constraints.table}
-                className="relative"
-                style={mediaSections.showsRail("text") ? { overflow: "hidden" } : undefined}
-                onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
+                id="media-body"
+                panelRef={dock.bodyRef}
+                {...(timelineStacked ? dock.constraints.body : {})}
+                // The timeline's full screen folds this whole row; clipped,
+                // like any folded panel.
+                style={timelineStacked && !dock.view.bodyOpen ? { overflow: "hidden" } : undefined}
+                className={timelineStacked && dock.view.isOpen("tl") ? "border-t border-border" : undefined}
               >
-              <div
-                ref={mediaSections.registerContent("text")}
-                data-media-section="text"
-                className="flex h-full min-h-0 min-w-0 flex-col"
-                style={
-                  mediaSections.isCollapsed("text") && mediaSections.frozen.text
-                    ? {
-                        minWidth: mediaSections.frozen.text.width,
-                        minHeight: mediaSections.frozen.text.height,
-                      }
-                    : undefined
-                }
-                inert={mediaSections.isCollapsed("text") || undefined}
-              >
-              {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
-                  TimelineEditor portals it here, and the video column carries
-                  its own "Video" header at the same height. */}
+                <MediaDockBody dock={dock} stacked={timelineStacked} />
+              </ResizablePanel>
+              </ResizablePanelGroup>
+              {/* Where a host waits while its area is not on screen. */}
+              <div ref={dock.parkingBoxRef} hidden />
+              {/* The film, once: the dock moves its host into its area. */}
+              {dock.hosts.film && timelineStacked && showVideoPane && activeFile?.coreMediaUrl
+                ? createPortal(
+                <MediaVideoPane
+                  key={activeFile.id}
+                  src={activeFile.coreMediaUrl}
+                  projectId={project.id}
+                  session={frontierSession}
+                  // AQU-646 stage 2: the pane's header now carries the
+                  // film's mute button, and audibility is stored per file.
+                  fileId={activeFile.id}
+                  cells={audioMergedCells}
+                  seekSec={videoSeek}
+                  togglePlay={videoToggle}
+                  suspended={recordingCellId !== null}
+                  onVideoTime={setVideoClockSec}
+                  onVideoPlaying={setVideoClockPlaying}
+                  onVideoDuration={setVideoDurationSec}
+                  onChangeVideo={() => setLinkVideoOpen(true)}
+                  // Sam, Oct 5: a click on a YouTube picture is the
+                  // transport's Play/Pause, never YouTube's own.
+                  onPictureClick={handleTimelineTogglePlay}
+                  sourceDirectionMode={fileMeta.sourceDirectionMode}
+                  targetDirectionMode={fileMeta.targetDirectionMode}
+                  sourceTextDirection={fileMeta.sourceTextDirection}
+                  targetTextDirection={fileMeta.targetTextDirection}
+                />
+                    ,
+                    dock.hosts.film,
+                  )
+                : null}
+              {/* The text, once — EditorTable keeps this one mount in both
+                  lenses and wherever its panel sits. */}
+              {dock.hosts.text
+                ? createPortal(
+              <>
+              {/* The text panel's context row (speaker, camera, transcribe,
+                  the chapter navigator): TimelineEditor portals it here, under
+                  the panel's strip. */}
               {timelineStacked ? <div ref={uiSlotRef("media-chip-strip")} className="shrink-0 empty:hidden" /> : null}
               <div className="min-h-0 min-w-0 flex-1">
               {lens === "transcribe" && activeFileId && project ? (
@@ -17179,7 +17142,8 @@ export function ProjectWorkspace() {
                 // then an AI cleanup taught by this file's corrections. The
                 // chapter toolbar (and its lens switch) stays above it.
                 <div className="flex h-full min-h-0 flex-col">
-                  {fileChapterToolbar ? <div className="shrink-0 border-b border-border px-4 py-1.5">{fileChapterToolbar}</div> : null}
+                  {/* The Text view's bar, on the right as there (Sam, Oct 28). */}
+                  {fileChapterToolbar ? <div data-testid="transcribe-toolbar-row" className={`${EDITOR_SURFACE_TOOLBAR_CLASS} justify-end`}>{fileChapterToolbar}</div> : null}
                   <TranscribeEditor
                     ref={transcribeRef}
                     initialTopCellId={transcribeTopCellId}
@@ -17376,13 +17340,14 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setEditorViewportTrackedCellRef}
-            // AQU-1119: the rows stay mounted behind the rail, frozen at their
-            // last real size — so without this they would keep reporting
-            // themselves as "on screen" and translate-as-read would queue work
-            // for lines nobody can see. Undefined short-circuits the whole
-            // reporter, and its cleanup emits an empty set on the way in.
+            // AQU-1119: a hidden text panel stays mounted — folded and frozen
+            // at its last real size, or a tab behind the film — so without
+            // this the rows would keep reporting themselves as "on screen" and
+            // translate-as-read would queue work for lines nobody can see.
+            // Undefined short-circuits the whole reporter, and its cleanup
+            // emits an empty set on the way in.
             onVisibleCellIdsChange={
-              mediaSections.isCollapsed("text") ? undefined : handleVisibleCellIdsChange
+              timelineStacked && !dock.view.isShowing("text") ? undefined : handleVisibleCellIdsChange
             }
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
@@ -17392,23 +17357,33 @@ export function ProjectWorkspace() {
               )}
               </div>
               <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
-              </div>
-              {mediaSections.showsRail("text") && (
-                <MediaSectionRail
-                  section="text"
-                  orientation="vertical"
-                  label={t("editor.timeline.textPaneTitle")}
-                  preview={mediaSections.isPreviewingRail("text")}
-                  onExpand={() => mediaSections.expand("text")}
-                />
-              )}
-              </ResizablePanel>
-              </ResizablePanelGroup>
-              </ResizablePanel>
-              </ResizablePanelGroup>
+              </>,
+                    dock.hosts.text,
+                  )
+                : null}
               </ForecastProvider>
               </EditorActionsProvider>
             </div>
+            {timelineStacked && activeFile && project ? (
+              // Sam, Oct 27: the playback controls back at the bottom, in a
+              // very narrow footprint — a 32 px strip across the view, outside
+              // the panels, so no fold or full screen ever hides it.
+              <VoicePlaybackBar
+                variant="strip"
+                cells={legacyCells}
+                projectId={project.id}
+                session={frontierSession ?? null}
+                settings={tts.laneSettings}
+                onActiveCell={handleBarActiveCell}
+                startCellId={timelineSelectedCellId}
+                coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                videoPaneOnScreen={showVideoPane}
+                timelineDurationSec={timelineDurationSec}
+                virtualSoundingCellId={virtualSoundingCellId}
+                freeTiming={timingMode === "audioFirst"}
+                lane={activeLane}
+              />
+            ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
             {footnoteViewMode === "tray" && (
               <FootnotesTray
@@ -17684,30 +17659,13 @@ export function ProjectWorkspace() {
             // lens is still selected from a prior editor visit.
             const showAudioToolbar =
               lens === "audio" && centerSurface === "editor" && !!project
+            // Media redesign, layout: the media view has no footer. Its
+            // transport is in its top bar and its status in the ring there.
+            if (timelineStacked && centerSurface === "editor") return null
             const syncStatus = (
               <WorkspaceStatusBar
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
-                left={
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence
-                      store={presenceStore}
-                      onJumpToPeer={handleJumpToPresencePeer}
-                      resolveCellLabel={resolvePresenceCellLabel}
-                    />
-                    <SyncStatusIndicator status={fileSyncStatus} />
-                    <OutboxSyncIndicator
-                      pendingCount={Math.max(0, outboxPending - outboxFailed)}
-                      failureStreak={outboxFailures}
-                      failedCount={outboxFailed}
-                      // SUB-9: all-status feed so quarantined refusals render in
-                      // the inspector (with reason + Retry/Discard) instead of
-                      // the popover claiming "all caught up" beside a failed pill.
-                      records={outboxInspectorRecords}
-                      onRetryNow={outboxFlushNow}
-                      projectId={project?.id}
-                    />
-                  </div>
-                }
+                left={mediaStatusSync}
               />
             )
             const fileStats = showFileStats ? (
@@ -17912,7 +17870,7 @@ export function ProjectWorkspace() {
             })
             setRecordingCellId(null)
             if (!rowId) return
-            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            if (timelineStacked && !dock.view.isShowing("text")) dock.show("text")
             // A frame later: during this click the recorder is still open, and
             // its focus trap would take the caret straight back.
             requestAnimationFrame(() => {

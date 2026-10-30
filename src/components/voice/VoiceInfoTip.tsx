@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Info } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 
@@ -6,7 +7,7 @@ export function VoiceInfoTip({
   content,
   label,
 }: {
-  content: string
+  content: ReactNode
   label: string
 }) {
   return (

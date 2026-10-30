@@ -7,7 +7,9 @@
  * first. None of them is "the" history, so they are merged STEP BY STEP, by id:
  *
  * - Every step knows when it last moved between Undo and Redo (`movedAt`). The
- *   copy that moved it most recently says where it is now.
+ *   copy that moved it most recently says where it is now. A device never
+ *   stamps a time earlier than the steps it already holds (history.ts,
+ *   `stampFor`), so a clock that runs behind cannot lose a move it made.
  * - A step that left both stacks (its undo was skipped, its action was refused,
  *   or a newer step cleared it from Redo) is remembered by id in `gone`, so a
  *   copy that still holds it cannot bring it back.

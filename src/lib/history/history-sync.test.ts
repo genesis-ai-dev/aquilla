@@ -24,7 +24,7 @@ import {
   type StepRecord,
 } from "./history"
 import { clearHistoryStoreForTests } from "./history-store"
-import { emptyHistoryDoc, mergeDevices, type HistoryDoc } from "./history-merge"
+import { emptyHistoryDoc, mergeDevices, mergeHistories, type HistoryDoc } from "./history-merge"
 import type { HistoryRemote } from "./history-remote"
 
 class FakeServer {
@@ -343,5 +343,39 @@ describe("one device on its own does not wait (Sam, Oct 22)", () => {
     const reads = server.reads
     expect((await undoLast())?.outcome.kind).toBe("done")
     expect(server.reads).toBe(reads + 1)
+  })
+})
+
+// Review, Oct 29: each device stamps steps with its own clock, and clocks
+// disagree. What this device does after seeing a step must still count as
+// later than that step, wherever the copies are merged.
+describe("devices whose clocks disagree", () => {
+  const AHEAD_MS = 120_000 // computer A's clock runs two minutes ahead of this one
+
+  it("an undo made here still wins over the copy it undid", async () => {
+    const ahead = Date.now() + AHEAD_MS
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename take", ahead)] }), ahead)
+    await refreshHistory()
+    expect((await undoLast())?.outcome.kind).toBe("done")
+    await settle()
+    // Computer A still holds its own copy, the step on Undo, and merges the server's.
+    const onA = mergeHistories(
+      { ...emptyHistoryDoc(), undo: [made("Rename take", ahead)] },
+      server.copyOf("p1", "asha")!,
+      { steps: 100, log: 30 },
+    )
+    expect(onA.undo.map((r) => r.labelKey)).toEqual([])
+    expect(onA.redo.map((r) => r.labelKey)).toEqual(["Rename take"])
+  })
+
+  it("a step made here after one from a device whose clock is ahead is undone first", async () => {
+    const ahead = Date.now() + AHEAD_MS
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("From A", ahead)] }), ahead)
+    await refreshHistory()
+    recordStep(step("From B"))
+    await settle()
+    await openOnNewDevice(server, "asha", log)
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["From A", "From B"])
+    expect((await undoLast())?.step.labelKey).toBe("From B")
   })
 })

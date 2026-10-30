@@ -191,6 +191,24 @@ function bury(s: Stacks, id: string): void {
   if (s.gone.length > GONE_LIMIT) s.gone.splice(0, s.gone.length - GONE_LIMIT)
 }
 
+/**
+ * The time to stamp on what this copy does now: this device's clock, but never
+ * earlier than any step it already holds. Each device stamps with its own
+ * clock, and clocks disagree (review, Oct 29): an undo made here after seeing
+ * a step from a device whose clock runs ahead must still count as later than
+ * that step, or merging the copies puts it back on Undo; a new step made here
+ * must still sit above it.
+ */
+function stampFor(s: Stacks): number {
+  let seen = 0
+  for (const list of [s.undo, s.redo]) for (const r of list) seen = Math.max(seen, r.at, r.movedAt ?? 0)
+  return Math.max(Date.now(), seen + 1)
+}
+
+/** When each step recorded in this session was recorded, by this device's
+ *  clock: what the shortcut arbiter compares with a toast's time. */
+const recordedHere = new Map<string, number>()
+
 function newId(): string {
   idCounter += 1
   return `${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -595,7 +613,7 @@ function laneFor(key: string, input: Pick<StepInput, "kind" | "data" | "lane">):
   return stepLane(input.kind, input.data, open)
 }
 
-function toRecord<D>(input: StepInput<D>, key: string, now = Date.now()): StepRecord<D> {
+function toRecord<D>(input: StepInput<D>, key: string, now = stampFor(stacksFor(key))): StepRecord<D> {
   const { lane: _lane, ...rest } = input
   const lane = laneFor(key, input)
   const named = rest.fileName == null && rest.fileId && fileNamer ? fileNamer(rest.fileId) : null
@@ -620,6 +638,7 @@ export function recordStep<D>(
   const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
   if (!key) return
   const record = toRecord(input, key)
+  recordedHere.set(record.id, input.at ?? Date.now())
   if (opts?.pending) {
     const pending = opts.pending.catch(() => false)
     pendingWrites.set(record.id, pending)
@@ -750,8 +769,8 @@ export function recordGroup(
   parts: ReadonlyArray<StepInput>,
 ): void {
   if (parts.length === 0 || !activeScope) return
-  const now = Date.now()
   const key = activeScope
+  const now = stampFor(stacksFor(key))
   const steps: StepRecord[] = parts.map((p) => toRecord(p, key, now))
   recordStep({
     kind: GROUP_KIND,
@@ -882,10 +901,11 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     // Saved as already moved before it runs: if the tab closes while its writes
     // are out, a reload offers it on the other side rather than offering to do
     // again what has (most likely) landed. Moved back if it doesn't go through.
+    const movedAt = stampFor(s)
     record = takeOut(fromList(), top.id)
     if (!record) return null
     movedBefore = record.movedAt
-    record.movedAt = Date.now()
+    record.movedAt = movedAt
     toList().push(record)
     scheduleSave(scope)
     emit()
@@ -1012,7 +1032,8 @@ export function subscribeHistory(fn: () => void): () => void {
 /** Newest step time in the active scope — the shortcut arbiter's input. */
 export function newestStepAt(): number | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
-  return s?.undo[s.undo.length - 1]?.at ?? null
+  const top = s?.undo[s.undo.length - 1]
+  return top ? (recordedHere.get(top.id) ?? top.at) : null
 }
 
 /** The signed-in person the active scope belongs to. */
@@ -1039,6 +1060,7 @@ export function resetHistoryForTests(): void {
   busy = false
   queue = Promise.resolve()
   pendingWrites.clear()
+  recordedHere.clear()
   openFileProbe = null
   laneSwitcher = null
   remote = null

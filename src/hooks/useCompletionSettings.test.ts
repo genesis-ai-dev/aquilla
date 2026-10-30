@@ -20,7 +20,6 @@ describe("buildCompletionSettings — AQU-408 retrieval-tuning keys", () => {
     maxTokens: 512,
     temperature: 0.3,
     systemPrompt: "existing instructions",
-    llmHealthPenalty: 0.1,
     top_k: 15,
     contextSize: "medium",
     useOnlyValidatedExamples: false,

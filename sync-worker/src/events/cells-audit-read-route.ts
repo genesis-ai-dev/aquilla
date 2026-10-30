@@ -90,7 +90,7 @@ export async function handleCellsAuditReadRequest(
 
   // DELETE-on-unvalidate: every row is active (no is_active filter needed).
   const validatorsSql = `
-    SELECT cell_id, event_id, username
+    SELECT cell_id, event_id, username, decided_ts
     FROM cell_validators
     WHERE project_id = ? AND file_id = ?${scopeSql}
   `
@@ -118,6 +118,8 @@ export async function handleCellsAuditReadRequest(
     cell_id: string
     event_id: string
     username: string
+    /** AQU-2296: server clock when this person last cast their vote. */
+    decided_ts: number | string | null
   }
   interface WaiverRow {
     cell_id: string
@@ -143,7 +145,14 @@ export async function handleCellsAuditReadRequest(
   // `fr`'s head — so keying on it already partitions validators by lane.
   // Matching on `target_lang` as well would only add a way to silently drop
   // validators if the legacy tag ever drifts from `lane_id`.
+  //
+  // AQU-2296: the vote's `decided_ts` rides along in a parallel record keyed
+  // by username, NOT as a second array, so the pairing cannot drift from the
+  // name list the client already reads. BIGINT arrives as a string through
+  // some drivers, hence the Number() and the finite guard — a NaN here would
+  // reach the popover as "Invalid Date".
   const byCell = new Map<string, Map<string, string[]>>()
+  const tsByCell = new Map<string, Map<string, Record<string, number>>>()
   for (const v of validatorsRes.results) {
     let perEdit = byCell.get(v.cell_id)
     if (!perEdit) {
@@ -156,6 +165,21 @@ export async function handleCellsAuditReadRequest(
       perEdit.set(v.event_id, names)
     }
     names.push(v.username)
+
+    let tsPerEdit = tsByCell.get(v.cell_id)
+    if (!tsPerEdit) {
+      tsPerEdit = new Map()
+      tsByCell.set(v.cell_id, tsPerEdit)
+    }
+    let stamps = tsPerEdit.get(v.event_id)
+    if (!stamps) {
+      stamps = {}
+      tsPerEdit.set(v.event_id, stamps)
+    }
+    // `Number(null)` is 0 — a finite number that would date the vote to 1970 —
+    // so a missing stamp is rejected by value rather than by the finite check.
+    const decided = v.decided_ts == null ? NaN : Number(v.decided_ts)
+    if (Number.isFinite(decided) && decided > 0) stamps[v.username] = decided
   }
 
   // Bucket waivers by cell_id → RuleWaiver[]. Shape matches the client's
@@ -207,6 +231,8 @@ export async function handleCellsAuditReadRequest(
       lastEditEventId: r.last_edit_event_id,
       sourceEventId: r.source_event_id,
       activeValidators,
+      validatorDecidedTs:
+        tsByCell.get(r.cell_id)?.get(r.last_edit_event_id) ?? {},
       waivers: waiversByCell.get(r.cell_id) ?? [],
     }
   })

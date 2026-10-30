@@ -219,7 +219,7 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
-    expect(screen.queryByRole("button", { name: "Use app font size for target" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
   })
 
   it("steps font size from the Small scaled default (AQU-1170)", () => {
@@ -243,9 +243,30 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(19)
 
-    fireEvent.click(screen.getByRole("button", { name: "Use app font size for target" }))
+    // AQU-2263: one "Reset to default" puts the pinned column back; the
+    // column that already follows Preferences is left alone.
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
     expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole("button", { name: "Use app font size for source" })).toBeNull()
+    expect(handlers.onSourceFontSizeReset).not.toHaveBeenCalled()
+  })
+
+  // AQU-2263: the file's size is an override of the app font size in
+  // Preferences, so the menu says what that default is.
+  it("says the default from Preferences, and offers Reset to default only once a size is changed", () => {
+    renderViewSettings({ sourceFontSize: 14, targetFontSize: 14 })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("font-size-default")).toHaveTextContent("Default from Preferences: 14px")
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
+  })
+
+  it("Reset to default puts both columns back when both were changed", () => {
+    const handlers = renderViewSettings({
+      sourceFontSize: 20, targetFontSize: 22, sourceFontSizeExplicit: true, targetFontSizeExplicit: true,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    expect(handlers.onSourceFontSizeReset).toHaveBeenCalledTimes(1)
+    expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
   })
 })
 

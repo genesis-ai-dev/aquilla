@@ -9,8 +9,8 @@ import manifest from '../../../config/pricing/stripe-sandbox.json'
 import type { PriceCatalog, StripePriceInput } from '../lib/billing/pricing-model'
 
 async function create(username: string, name?: string) {
-  const response = await app.request(name ? '/api/v2/orgs' : '/api/v2/orgs/me', {
-    method: name ? 'POST' : 'GET', headers: authHeader(await jwtFor(username)),
+  const response = await app.request(name ? '/api/v2/orgs' : '/api/v2/orgs/personal', {
+    method: 'POST', headers: authHeader(await jwtFor(username)),
     ...(name ? { body: JSON.stringify({ name }) } : {}),
   }, env)
   expect(response.status).toBe(200)

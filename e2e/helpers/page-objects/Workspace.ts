@@ -200,8 +200,13 @@ export class Workspace {
     await expect(this.modalDialogs()).toHaveCount(0, { timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
+  /** AQU-2196: zoom lives in the timeline's corner ⋯ (Timeline settings) now,
+   * as a stepper that leaves the menu open, so Escape closes it again. */
   async zoomTimelineIn(): Promise<void> {
+    await this.page.getByTestId("dock-more-tl").click()
     await this.page.getByRole("button", { name: "Zoom in", exact: true }).click()
+    await this.page.keyboard.press("Escape")
+    await expect(this.page.getByRole("button", { name: "Zoom in", exact: true })).toHaveCount(0)
   }
 
   async declineWhisperDownload(): Promise<void> {
@@ -229,13 +234,26 @@ export class Workspace {
       element.readyState), { timeout: EDITOR_READY_TIMEOUT_MS }).toBeGreaterThanOrEqual(2)
   }
 
+  /** AQU-2196: the media view's playback strip has no scrubber ("the timeline
+   * is the scrubber"), so seek the way a person does: click the ruler. Its
+   * left edge is 0 s; the scale comes from two of its own tick labels. */
   async seekLinkedVideo(seconds: number): Promise<void> {
-    const duration = await this.linkedVideo().evaluate((element: HTMLVideoElement) => element.duration)
-    const slider = this.page.getByRole("slider", { name: "Seek", exact: true })
-    const bounds = await slider.boundingBox()
+    const ruler = this.page.getByTestId("tl-ruler")
+    const pxPerSec = await ruler.evaluate((element) => {
+      const clock = (text: string) => {
+        const [m, s] = text.trim().split(":")
+        return Number(m) * 60 + Number(s)
+      }
+      const ticks = Array.from(element.children)
+        .map((tick) => ({ left: parseFloat((tick as HTMLElement).style.left), text: tick.textContent ?? "" }))
+        .filter((tick) => Number.isFinite(tick.left) && /^\d+:\d\d(\.\d+)?$/.test(tick.text.trim()))
+      if (ticks.length < 2) return 0
+      return (ticks[1].left - ticks[0].left) / (clock(ticks[1].text) - clock(ticks[0].text))
+    })
+    expect(pxPerSec).toBeGreaterThan(0)
+    const bounds = await ruler.boundingBox()
     expect(bounds).not.toBeNull()
-    await slider.click({ position: { x: bounds!.width * seconds / duration,
-      y: bounds!.height / 2 } })
+    await ruler.click({ position: { x: seconds * pxPerSec, y: bounds!.height / 2 } })
     await expect.poll(() => this.linkedVideo().evaluate((element: HTMLVideoElement, time) =>
       element.seeking ? 1 : Math.abs(element.currentTime - time), seconds))
       .toBeLessThan(0.05)
@@ -708,15 +726,22 @@ export class Workspace {
     await expect(files).toHaveAttribute("aria-pressed", "true")
   }
 
+  /** The view switch's Text tab. AQU-2196's media view also has a Text PANEL
+   * tab in its dock (`dock-tab-text`), with the same name. */
+  viewTab(name: "Text" | "Media"): Locator {
+    return this.page.getByRole("tab", { name, exact: true })
+      .and(this.page.locator(':not([data-testid^="dock-tab-"])'))
+  }
+
   async openTextView(): Promise<void> {
-    const tab = this.page.getByRole("tab", { name: "Text", exact: true })
+    const tab = this.viewTab("Text")
     await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     await tab.click()
     await expect(tab).toHaveAttribute("aria-selected", "true")
   }
 
   async openMediaView(): Promise<void> {
-    const tab = this.page.getByRole("tab", { name: "Media", exact: true })
+    const tab = this.viewTab("Media")
     await expect(tab).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
     await tab.click()
     await expect(tab).toHaveAttribute("aria-selected", "true")

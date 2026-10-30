@@ -291,6 +291,21 @@ describe('DraftCells — batch-size cap', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  // AQU-2259: the batch size the SPA saves now, in the team's drafting settings.
+  it("honours the batch size in the team's drafting settings", async () => {
+    tdb = await seed(20, { draftingSettings: { completionBatchSize: 20 }, completionSettings: { completionBatchSize: 5 } })
+    const env = makeEnv(tdb.db)
+    const { token } = await memberToken(tdb, 400)
+    const calls = draftEverything()
+
+    const cellIds = Array.from({ length: 20 }, (_, i) => `c${i + 1}`)
+    const { res, body } = await prepare(env, token, draftCmd(cellIds))
+
+    expect(res.status).toBe(200)
+    expect(body.summary?.translationsAdded).toBe(20)
+    expect(calls).toHaveLength(1)
+  })
+
   it("honours the project's configured batch size over the default", async () => {
     tdb = await seed(20, { completionSettings: { completionBatchSize: 20 } })
     const env = makeEnv(tdb.db)

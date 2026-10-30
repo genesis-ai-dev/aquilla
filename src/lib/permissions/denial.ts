@@ -18,6 +18,7 @@
  */
 
 import { roleNameKey, type RoleT } from "@/lib/frontier/roles"
+import { requiredRoleFor } from "@/lib/sync/role-policy"
 import { t } from "@/lib/i18n/standalone"
 
 /** @deprecated use `RoleT` from `@/lib/frontier/roles` — kept as an alias so
@@ -81,3 +82,20 @@ export function actionGateProps(
     tooltip: t("org.actionGate.deniedTooltip", { minRole: minRoleName }),
   }
 }
+
+/**
+ * AQU-2230: the denial for an event kind, naming the floor the role policy
+ * actually enforces for it. Writing the role out by hand at a call site is how
+ * the film-link refusal kept saying Contributor after `file.video.set` moved
+ * to Project lead. `fallbackLevel` is used only for a kind the policy does
+ * not list.
+ */
+export function denialMessageForEvent(
+  t: DenialT,
+  kind: string,
+  currentLevel: number | null | undefined,
+  fallbackLevel: number,
+): string {
+  return denialMessage(t, requiredRoleFor(kind) ?? fallbackLevel, currentLevel)
+}
+

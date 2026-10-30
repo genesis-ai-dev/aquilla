@@ -277,6 +277,10 @@ export interface UseOrgSettings {
    * org opts out; a project may still override it in either direction.
    */
   autoPropagateRepetitions: boolean
+  /** AQU-2263: how many projects set their own repetition answer and ignore it. */
+  autoPropagateRepetitionsOverrides: number
+  /** AQU-2263: put those projects back on the org's repetition default. */
+  resetAutoPropagateRepetitionsOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -293,7 +297,10 @@ export interface UseOrgSettings {
    * the caller may see, at most 50. Null where the server did not say (an
    * older server), and the line then shows its bare count.
    */
-  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> & {
+    /** AQU-2263: and "Auto-propagate repetitions" (absent from older callers' stand-ins). */
+    autoPropagateRepetitions?: OverrideProjectList | null
+  }
   /** AQU-1768: the same, for each media default's "N projects set their own". */
   mediaOverrideProjects: Partial<Record<MediaDefaultKey, OverrideProjectList | null>>
   /** Put the projects that set their own count back on the org default. */
@@ -383,6 +390,7 @@ const OVERRIDE_COUNT_KEYS = [
   "countStructuralOverrides",
   "validationCountOverrides",
   "validationCountAudioOverrides",
+  "autoPropagateRepetitionsOverrides",
   // AQU-1938: the projects behind those counts, kept for the same reason.
   "overrideProjects",
   "mediaDefaultOverrides",
@@ -485,6 +493,15 @@ export function useOrgSettings(
     const result = await resetProjectOverrides(
       jwt, orgId, key === "validationCount" ? "validation-count" : "validation-count-audio",
     )
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
+  /** AQU-2263: the same reset for "Auto-propagate repetitions". */
+  const resetRepetitionOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetProjectOverrides(jwt, orgId, "auto-propagate-repetitions")
     if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
     await refresh()
     return { ok: true, cleared: result.cleared }
@@ -612,10 +629,11 @@ export function useOrgSettings(
   const validationCountOverrides = server?.validationCountOverrides ?? 0
   const validationCountAudioOverrides = server?.validationCountAudioOverrides ?? 0
   // AQU-1938: the projects behind each count, read defensively.
-  const overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> = {
+  const overrideProjects: UseOrgSettings["overrideProjects"] = {
     countStructuralCells: parseOverrideProjectList(server?.overrideProjects?.countStructuralCells),
     validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
     validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
+    autoPropagateRepetitions: parseOverrideProjectList(server?.overrideProjects?.autoPropagateRepetitions),
   }
   // AQU-1768: valid values only, the same filter the server applies.
   const mediaDefaults = useMemo(() => mediaDefaultsFromOrgSettings(server?.settings), [server?.settings])
@@ -631,6 +649,7 @@ export function useOrgSettings(
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  const autoPropagateRepetitionsOverrides = server?.autoPropagateRepetitionsOverrides ?? 0
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -778,6 +797,8 @@ export function useOrgSettings(
     countStructuralCells,
     countStructuralOverrides,
     autoPropagateRepetitions,
+    autoPropagateRepetitionsOverrides,
+    resetAutoPropagateRepetitionsOverrides: resetRepetitionOverrides,
     resetCountStructuralOverrides: resetOverrides,
     validationCountDefault,
     validationCountAudioDefault,

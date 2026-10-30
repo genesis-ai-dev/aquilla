@@ -29,7 +29,6 @@ const ALLOWLISTED_PATTERNS = [
   "CommentsPage.tsx",
   "ProjectWorkspace.tsx",
   "EditorTable.tsx",
-  "SharePanel.tsx",
   "App.tsx",
   "Login.tsx",
   // Whole directory

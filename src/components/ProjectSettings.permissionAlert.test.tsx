@@ -306,7 +306,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
 // AQU-1083; the page gated the control on the maintainer floor instead.
 describe("ProjectSettings — Count headings follows its own project-lead floor (AQU-1912)", () => {
   const headingsControl = () =>
-    screen.getByRole("combobox", { name: /count headings as translatable content/i })
+    screen.getByRole("switch", { name: /count headings as translatable content/i })
   // Locked, the control has ONE hover (AQU-1912): DisabledFieldTooltip's
   // wrapper, which also says what the organization does.
   const lockHintTrigger = (control: HTMLElement) => control.closest("span.block")!
@@ -316,16 +316,17 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     currentCanEditCountStructural = true
     currentReasonCannotEditCountStructural = null
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).not.toBeDisabled()
+    expect(headingsControl()).not.toHaveAttribute("aria-disabled", "true")
     // canEdit (maintainer) stays false — see beforeEach.
-    expect(screen.getByRole("combobox", { name: /auto-propagate repetitions/i })).toBeDisabled()
+    expect(screen.getByRole("switch", { name: /auto-propagate repetitions/i })).toHaveAttribute("aria-disabled", "true")
   })
 
   it("a contributor sees it locked, and the hint names Project leads", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).toBeDisabled()
+    expect(headingsControl()).toHaveAttribute("aria-disabled", "true")
     await expectTooltip(lockHintTrigger(headingsControl()), /Only Project leads can modify/)
-    await expectTooltip(lockHintTrigger(headingsControl()), /The organization currently/)
+    // AQU-2263: what the organization does is on the menu beside it.
+    expect(screen.getByTestId("count-structural-cells-source")).toHaveTextContent(/Organization default/)
   })
 })

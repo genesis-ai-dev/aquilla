@@ -13,6 +13,7 @@
  * edits only the active lane's slice, then merges that slice back so a
  * save cannot wipe another lane.
  */
+import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus, Merge } from "lucide-react"
@@ -144,6 +145,7 @@ export function GlossaryEditor({
   const project = workspaceProject ?? ownedProject.project
   const loading = workspaceProject == null && ownedProject.loading
   const { session: frontierSession } = useFrontierSession()
+  const localAuthorName = useLocalAuthorName()
   const importInputRef = useRef<HTMLInputElement>(null)
 
   // File-scoped sync token for the occurrence page and the project scans.
@@ -689,7 +691,7 @@ export function GlossaryEditor({
         canEdit={canEditCells}
         projectId={id!}
         activeLane={activeLane}
-        username={frontierSession?.username ?? project?.username ?? "local"}
+        username={authorNameFor(frontierSession?.username, project?.username, localAuthorName)}
         onClose={handleCloseDetails}
         onCellCommitted={occurrences.revalidate}
         onOptimisticEdit={occurrences.applyOptimisticTargetEdit}

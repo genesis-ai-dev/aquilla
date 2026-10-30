@@ -98,6 +98,8 @@ describe("Preferences", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
+    // AQU-2263: the one Share usage data setting, as onboarding shows it.
+    expect(screen.getByTestId("share-usage-data")).toBeInTheDocument()
   })
 
   it("workspace settings use a right-side layout select and confirm switch", () => {
@@ -111,7 +113,8 @@ describe("Preferences", () => {
   it("translator profile renders one settings row per field", () => {
     renderAt("/preferences/profile")
     expect(screen.getByRole("heading", { name: "Translator profile" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Assistant language")).toBeInTheDocument()
+    // AQU-2263: named for what it does, so it no longer shares a name with the project setting.
+    expect(screen.getByLabelText("The assistant answers me in")).toBeInTheDocument()
     expect(screen.getByLabelText("Age")).toBeInTheDocument()
     expect(screen.getByLabelText("Other relevant information")).toBeInTheDocument()
     expect(screen.queryByText("Profile fields")).not.toBeInTheDocument()
@@ -233,5 +236,42 @@ describe("PreferencesDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: /close/i }))
     expect(screen.getByTestId("editor-background")).toBeInTheDocument()
     expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2259: "User → Username" in each project's settings was a person's own
+// setting, so it lives here now. Signed out, edits carry this name.
+describe("Preferences — name when signed out (AQU-2259)", () => {
+  it("is on the General card and remembered on this device", async () => {
+    renderAt("/preferences")
+    const input = await screen.findByLabelText("Name when signed out")
+    expect(input.closest("#pref-author-name")).not.toBeNull()
+    await userEvent.type(input, "Ana")
+    expect(window.localStorage.getItem("aq.local-author-name.v1")).toBe("Ana")
+  })
+})
+
+
+// AQU-2264: the recorder's and the timeline's preferences get a page of their
+// own, reached from the General card, like Workspace.
+describe("Preferences — Recording (AQU-2264)", () => {
+  it("has a Recording row on the General card that says where its settings live", () => {
+    renderAt("/preferences")
+    const row = screen.getByRole("link", { name: /^Recording/ })
+    expect(row).toHaveAttribute("href", "/preferences/recording")
+    // Signed in here (useFrontierSession is mocked with a session above).
+    expect(row).toHaveTextContent("Follows you")
+  })
+
+  it("opens the recorder's and the timeline's settings on its own page", () => {
+    renderAt("/preferences/recording")
+    expect(screen.getByRole("heading", { name: "Recording" })).toBeInTheDocument()
+    expect(screen.getByTestId("recording-prefs-scope").closest("p")).toHaveTextContent(
+      "How the recorder and the timeline work for you. They follow you:",
+    )
+    expect(screen.getByRole("tablist", { name: "Countdown" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Countdown beep" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Follow playhead" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Snap to neighboring edges" })).toBeInTheDocument()
   })
 })

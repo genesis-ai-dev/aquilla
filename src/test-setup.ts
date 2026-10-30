@@ -6,6 +6,7 @@ import type { ReactNode } from "react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 import { clearResolvedProjectSeeds } from "@/lib/sync/project-record-seed"
+import { resetLoadedPersonPrefsForTests } from "@/lib/prefs/person-prefs-reset"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import {
   createOffMachineFetchGuard,
@@ -137,6 +138,13 @@ afterEach(() => {
   // test that mounts the same id on the warm path (ready at once, then a
   // revalidated record) while it still reads as a cold-load test.
   clearResolvedProjectSeeds()
+  // AQU-2264: the preferences that follow the person cache their reads and
+  // hold a session and a send timer; a fresh tab starts with none of them.
+  // Through its seam, not person-prefs itself: an import here is evaluated
+  // before a test file's vi.mock() calls, and person-prefs reaches
+  // frontier/auth, orgs and elevation. See person-prefs-reset.ts and
+  // test-setup.imports.test.ts.
+  resetLoadedPersonPrefsForTests()
 
   // The guard throws at the call site, but callers routinely wrap fetch in
   // try/catch, which would swallow it and leave the test green despite a

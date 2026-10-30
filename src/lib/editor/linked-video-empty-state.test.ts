@@ -125,9 +125,13 @@ describe("mediaEmptyGates", () => {
       mediaEmptyGates({ roleLevel, captionRowsMode, canEditTracks: false, linkedVideoUrl }).offerVideoSoundRows
     const FILM = "https://cdn.thechosen.media/videos/ep101/master.m3u8"
 
-    it("offers a streamed film or a direct file link to a maintainer on an empty file", () => {
-      expect(sound(MAINTAINER, true, FILM)).toBe(true)
-      expect(sound(MAINTAINER, true, "https://files.example.test/ep101.mp4")).toBe(true)
+    // Sam, Oct 29: the film's own sound never splits off into Source audio
+    // ("for now… way down the line, it would be possible to extract the audio
+    // from that track"). Making rows from it stored a copy as the file's
+    // source recording, so the step is not offered at all for now.
+    it("is not offered for now, even to a maintainer on an empty file with a readable film", () => {
+      expect(sound(MAINTAINER, true, FILM)).toBe(false)
+      expect(sound(MAINTAINER, true, "https://files.example.test/ep101.mp4")).toBe(false)
     })
 
     it("never offers it for a YouTube video", () => {

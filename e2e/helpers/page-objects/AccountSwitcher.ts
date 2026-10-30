@@ -47,7 +47,7 @@ export class AccountSwitcherPage {
     await addAccount.click()
 
     await expect(
-      this.page.getByRole("heading", { name: /Add Frontier account/i }),
+      this.page.getByRole("heading", { name: /Add Aquilla account/i }),
     ).toBeVisible({ timeout: 10_000 })
   }
 }

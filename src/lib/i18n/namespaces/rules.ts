@@ -412,13 +412,13 @@ export const rules = defineNamespace({
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
-    "rules.completion.frontierLimitReached": "Frontier AI limit reached: {detail}",
+    "rules.completion.frontierLimitReached": "Aquilla AI limit reached: {detail}",
     "rules.completion.outOfCredits": "Out of credits.",
     "rules.completion.completionFailed": "Completion failed: {status} {text}",
     "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
     "rules.completion.streamError": "Completion stream error",
     "rules.completion.completionAborted": "Completion aborted",
-    "rules.completion.signInRequired": "Sign in to use Frontier AI.",
+    "rules.completion.signInRequired": "Sign in to use Aquilla AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
 
     // ── autofix.ts (LLM autofix proposal, lib/) — fallbacks only; the LLM's
@@ -936,7 +936,7 @@ export const rules = defineNamespace({
       },
       "rules.completion.frontierLimitReached": {
         description:
-          "Thrown error when a Frontier completion request 402s (subscription/credits exhausted).",
+          "Thrown error when a Aquilla completion request 402s (subscription/credits exhausted).",
         placeholders: { detail: "Server-provided detail text, or rules.completion.outOfCredits as a fallback." },
       },
       "rules.completion.completionFailed": {

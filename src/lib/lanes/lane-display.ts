@@ -42,21 +42,11 @@ export interface LaneIdentity {
 }
 
 /**
- * Kept so existing callers still type-check. {@link laneLanguage} does not
- * read these keys (AQU-1595). Backfill code reads them on its own.
- */
-export interface LaneLanguageSettings {
-  sourceLanguage?: unknown
-  targetLanguage?: unknown
-}
-
-/**
  * Optional context for {@link laneLanguage}. Existing callers that only have
  * a lane row keep compiling; every consumer that needs a language passes this
- * so the migration fallback and the tag can run.
+ * so the tag and code fallbacks can run.
  */
 export interface LaneLanguageContext {
-  settings?: LaneLanguageSettings | null
   /** Used when the lane object itself has no role. */
   role?: "source" | "target"
   /**

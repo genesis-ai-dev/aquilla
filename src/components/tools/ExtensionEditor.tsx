@@ -148,6 +148,7 @@ export function ExtensionEditorSurface({
         const id = ids?.getCellIds()[index]
         if (id) reveal(id, true)
       },
+      focusCellEditorId: (cellId) => reveal(cellId, true),
       getCurrentIndex: () => -1,
       // AQU-2153: the host cannot see inside the extension's own list, so a
       // lens switch has no row to remember and the view opens at the top, as

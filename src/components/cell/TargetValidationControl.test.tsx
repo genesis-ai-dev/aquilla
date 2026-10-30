@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import userEvent from "@testing-library/user-event"
 
 import { TargetValidationControl } from "./TargetValidationControl"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtShortCalendarDate, fmtShortCalendarDateTime } from "@/lib/format-date"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
@@ -388,7 +388,8 @@ describe("the date under each validator", () => {
 
     // Bob's own `decided_ts`, formatted the way every other date in the editor
     // is — NOT today, and not the cell's last-edit time.
-    expect(await rowFor("bob")).toHaveTextContent(fmtShortCalendarDate(bobVoted))
+    // The day and the clock time, not the day alone (Matthew, 2026-10-30).
+    expect(await rowFor("bob")).toHaveTextContent(fmtShortCalendarDateTime(bobVoted))
     // Cy has no stamp (a pre-AQU-2296 worker, or a row the read left out): the
     // name stands alone rather than carrying a blank line or "Invalid Date".
     expect((await rowFor("cy")).textContent).toBe("cy")
@@ -403,6 +404,7 @@ describe("the date under each validator", () => {
     fireEvent.click(screen.getByRole("button", { name: /Validated by you/ }))
     const row = await rowFor("alice")
     expect(row).toHaveTextContent("(you)")
+    // The day only: the click and this line can straddle a minute boundary.
     expect(row).toHaveTextContent(fmtShortCalendarDate(Date.now()))
   })
 })

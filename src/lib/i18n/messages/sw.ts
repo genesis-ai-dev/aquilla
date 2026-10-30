@@ -3521,7 +3521,6 @@ export const sw: Catalog = {
   "org.accessModelLegend.creator.description": "Jukumu la Mmiliki ni la kudumu hadi umiliki wa mradi uhamishwe. Dhibiti katika Mipangilio → Shiriki ya mradi.",
   "org.joinOrgPage.organizationLine": "Shirika: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "Shirika lisilo na jina",
-  "org.joinOrgPage.genericInviteFallback": "Umealikwa kujiunga na shirika kwenye Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "Huwezi kujiunga",
   "org.joinOrgPage.youreInTitle": "Uko ndani",
   "org.joinOrgPage.joinedRedirect": "Umejiunga na {org}. Unaelekezwa huko…",

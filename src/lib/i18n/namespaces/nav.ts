@@ -30,7 +30,7 @@ export const nav = defineNamespace({
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Aquilla account",
     "nav.account.loginTitle": "Log in to Aquilla",
-    "nav.account.signupTitle": "Create a Aquilla account",
+    "nav.account.signupTitle": "Create an Aquilla Account",
     "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",

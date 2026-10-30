@@ -536,3 +536,63 @@ export function resolveLanguageEditFloor(minRole?: number | null): number {
   if (minRole < 100 || minRole > 700) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
   return minRole
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: the org-configurable import floor.
+//
+// CLIENT MIRROR of sync-worker/src/events/import-authority.ts
+// (resolveImportMinRole / DEFAULT_IMPORT_MIN_ROLE) and auth-worker's
+// DEFAULT_IMPORT_MIN_ROLE. The server re-resolves the floor on every
+// `file.create`, so this is an affordance value — never authority.
+//
+// It is NOT a row in REQUIRED_ROLE above, and must not become one: that table
+// is static, and this floor is per-org. `file.create`'s entry there stays
+// PROJECT_LEAD (the lowest reachable bar, which the server also keeps), and
+// the org's value is applied ON TOP by whoever holds the project's resolved
+// policy — see `canImportSourceFiles` and src/lib/sync/project-org-policy.ts.
+// A surface that asks `canPerform("file.create", …)` alone is asking the
+// pre-AQU-2304 question and will offer an import the server refuses.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for importing a new source file when the org hasn't configured one. */
+export const DEFAULT_IMPORT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/** Clamp an org-configured import floor to the role ladder, else the default. */
+export function resolveImportFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_IMPORT_MIN_ROLE
+  }
+  if (minRole < 100 || minRole > 700) return DEFAULT_IMPORT_MIN_ROLE
+  return minRole
+}
+
+/**
+ * Whether `roleLevel` may bring a NEW source file into the project — the
+ * static `file.create` floor AND the org's configurable one, which only ever
+ * raises it (`Math.max`, the same direction the comment floors take).
+ *
+ * Fail-open on an unknown role, exactly as `canPerform`: a local or
+ * git-imported project has no sync role and no org floor to apply.
+ */
+export function canImportSourceFiles(
+  roleLevel: number | null | undefined,
+  importMinRole: number = DEFAULT_IMPORT_MIN_ROLE,
+): boolean {
+  if (roleLevel == null) return true
+  if (!canPerform("file.create", roleLevel)) return false
+  return roleLevel >= resolveImportFloor(importMinRole)
+}
+
+/**
+ * The floor a denial message should name for a refused source import: the
+ * higher of the static `file.create` bar and the org's. A lead refused by an
+ * org at Maintainer must be told "Maintainer", not "Project lead".
+ */
+export function importDenialFloor(
+  importMinRole: number = DEFAULT_IMPORT_MIN_ROLE,
+): number {
+  return Math.max(
+    requiredRoleFor("file.create") ?? DEFAULT_IMPORT_MIN_ROLE,
+    resolveImportFloor(importMinRole),
+  )
+}

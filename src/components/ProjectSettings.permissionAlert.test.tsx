@@ -335,7 +335,7 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
     expect(headingsControl()).toHaveAttribute("aria-disabled", "true")
     // The card says Maintainers once; Count headings, locked for another
-    // reason, says its own line beneath it (AQU-2260); what the organization
+    // reason, says its own line beneath it (AQU-2260). What the organization
     // does is on the menu beside it (AQU-2263).
     expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
     expect(screen.getByText("Only Project leads can change this.")).toBeVisible()

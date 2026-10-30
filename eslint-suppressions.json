@@ -216,7 +216,7 @@
   },
   "src/components/settings/PersonalProviderSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 2
     }
   },
   "src/components/sidebar/BookHealthSpine.tsx": {

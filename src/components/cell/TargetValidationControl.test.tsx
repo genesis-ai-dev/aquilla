@@ -1,8 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import userEvent from "@testing-library/user-event"
 
 import { TargetValidationControl } from "./TargetValidationControl"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
@@ -340,5 +341,68 @@ describe("TargetValidationControl", () => {
       expect(await screen.findByText("Text validated by")).toBeInTheDocument()
       expect(screen.getByText("bo")).toBeInTheDocument()
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2296: the date under each validator's name.
+//
+// The two lists sit side by side on the same line and are meant to be read
+// together, so the date line is the SAME component in both (ValidatedOnLine)
+// and the parity of their spacing is locked in AudioValidationControl.test.tsx.
+// ---------------------------------------------------------------------------
+
+describe("the date under each validator", () => {
+  const drawDated = (
+    activeValidators: string[],
+    validatorDecidedTs: Record<string, number>,
+    over: Partial<React.ComponentProps<typeof TargetValidationControl>> = {},
+  ) => render(
+    <TargetValidationControl
+      cellRef="Mark 1:1"
+      hasContent
+      validationStatus={activeValidators.includes("alice") ? "full-self" : "others"}
+      activeValidators={activeValidators}
+      validatorDecidedTs={validatorDecidedTs}
+      validationHistory={[]}
+      currentUsername="alice"
+      validationRequirement={1}
+      canValidate
+      canValidateThisCell
+      onValidationChange={vi.fn()}
+      {...over}
+    />,
+  )
+
+  const rowFor = async (name: string) => {
+    const list = await screen.findByRole("dialog")
+    return within(list).getByText(new RegExp(`^${name}`)).closest("li")!
+  }
+
+  it("dates each name from that person's own vote, and leaves an unknown one bare", async () => {
+    const bobVoted = Date.now() - 3 * 24 * 60 * 60 * 1000
+    // A viewer who cannot vote HERE, so the press opens the list instead of
+    // casting a vote.
+    drawDated(["bob", "cy"], { bob: bobVoted }, { canValidateThisCell: false })
+    fireEvent.click(screen.getByRole("button", { name: /Validated by others/ }))
+
+    // Bob's own `decided_ts`, formatted the way every other date in the editor
+    // is — NOT today, and not the cell's last-edit time.
+    expect(await rowFor("bob")).toHaveTextContent(fmtShortCalendarDate(bobVoted))
+    // Cy has no stamp (a pre-AQU-2296 worker, or a row the read left out): the
+    // name stands alone rather than carrying a blank line or "Invalid Date".
+    expect((await rowFor("cy")).textContent).toBe("cy")
+  })
+
+  it("dates my own row from the click, before the server has answered", async () => {
+    // The acceptance criterion the optimistic path exists for: validating must
+    // not leave your name sitting there undated until the read lands.
+    drawDated(["bob"], { bob: Date.now() - 86_400_000 })
+    // The first press is the VOTE (the list stays shut); the second opens it.
+    fireEvent.click(screen.getByRole("button", { name: /Validated by others/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Validated by you/ }))
+    const row = await rowFor("alice")
+    expect(row).toHaveTextContent("(you)")
+    expect(row).toHaveTextContent(fmtShortCalendarDate(Date.now()))
   })
 })

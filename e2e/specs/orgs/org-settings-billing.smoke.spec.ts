@@ -15,7 +15,8 @@ test("org billing settings preserves access while new pricing is unavailable", a
       body: JSON.stringify({ error: "prices_unavailable" }) }))
   await alice.goto(orgRoute(alice, "/settings"))
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible()
-  await alice.getByRole("link", { name: /^Billing$/i }).click()
+  // The index link's name is its title and its line: "Billing Plan & AI usage".
+  await alice.getByRole("link", { name: /^Billing\b/i }).click()
   await expect(alice).toHaveURL(orgRoute(alice, "/settings/billing"))
   await expect(alice.locator("h1").filter({ hasText: /^Billing$/i })).toBeVisible()
   await expect(alice.getByTestId("billing-plan")).toBeVisible()

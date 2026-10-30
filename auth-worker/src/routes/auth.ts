@@ -26,6 +26,7 @@ import {
 // email-verification tokens are bearer credentials of the same kind and had
 // no reason to be the only ones kept in plaintext at rest.
 import { sha256Hex } from "../../../db/shared/api-credentials"
+import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
 import {
   countRecentEvents,
   ipIdentifier,
@@ -102,6 +103,7 @@ const loginSchema = z.object({
 
 const passwordResetRequestSchema = z.object({
   email: z.string().email(),
+  return_to: z.string().max(512).optional(),
 })
 
 const passwordResetSchema = z.object({
@@ -1013,7 +1015,7 @@ auth.post(
   "/password-reset/request",
   zValidator("json", passwordResetRequestSchema),
   async (c) => {
-    const { email } = c.req.valid("json")
+    const { email, return_to } = c.req.valid("json")
     // The one response every outcome below returns. Whether the address is
     // registered, whether it was throttled, and whether the token mint or the
     // send failed must all be indistinguishable from here — see the
@@ -1101,7 +1103,9 @@ auth.post(
 
       const encodedUsername = encodeURIComponent(user.username)
       const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+      const returnTo = orgInviteReturnTo(return_to)
       const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
+        + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
       // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
       // used to fall through to the catch below and return a 500 with an
       // error message — distinguishable from the generic 200 an unregistered

@@ -264,6 +264,10 @@ export function useMediaDock(input: UseMediaDockInput) {
     }
     return { film: make("film"), text: make("text") } as Record<DockPanel, HTMLDivElement | null>
   })
+  // Moving a host and showing or hiding it changes the node itself, which a
+  // value from state may not have done to it; the DOM work reaches the same
+  // nodes through this ref instead.
+  const hostsRef = useRef(hosts)
   const boxesRef = useRef<Record<DockArea, HTMLElement | null>>({ ll: null, lr: null })
   const parkingRef = useRef<HTMLElement | null>(null)
   const latest = useRef({ view, timelineStacked })
@@ -273,7 +277,7 @@ export function useMediaDock(input: UseMediaDockInput) {
   const place = useCallback(() => {
     const { view: v, timelineStacked: stacked } = latest.current
     for (const panel of DOCK_PANELS) {
-      const host = hosts[panel]
+      const host = hostsRef.current[panel]
       if (!host) continue
       const area = v.areaOf(panel)
       const box = (area && boxesRef.current[area]) || parkingRef.current
@@ -286,7 +290,7 @@ export function useMediaDock(input: UseMediaDockInput) {
       const shown = stacked ? area !== null && v.activeOf(area) === panel : panel === "text"
       host.style.display = shown ? "" : "none"
     }
-  }, [hosts])
+  }, [])
 
   const boxRefs = useMemo(
     () =>

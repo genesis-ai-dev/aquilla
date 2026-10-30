@@ -92,6 +92,7 @@ export type MatchMethod = "name" | "number" | "order"
 /** Why a file will not be uploaded. Rendered as a sentence by the preview. */
 export type UnmatchedReason =
   | { code: "notAudio" }
+  | { code: "unplayableFormat"; ext: string }
   | { code: "systemFile" }
   | { code: "empty" }
   | { code: "tooLarge"; mb: number; limitMb: number }
@@ -169,7 +170,11 @@ export interface ReadRecording {
   folderKey: string
 }
 
-const AUDIO_EXTS = new Set(["wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac", "wma", "aif", "aiff", "amr", "3gp", "caf"])
+const AUDIO_EXTS = new Set(["wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac"])
+/** Audio the one-file upload refuses (attach-file.ts KNOWN_AUDIO_EXTS) and
+ *  most browsers can't play: uploaded, each would sit on its line as a take
+ *  that never plays. Refused here too, whatever type the file declares. */
+const UNPLAYABLE_EXTS = new Set(["wma", "aif", "aiff", "amr", "3gp", "caf"])
 const SYSTEM_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini", "icon\r"])
 
 function extOf(name: string): string {
@@ -183,6 +188,8 @@ export function precheckFile(file: BulkInputFile, maxBytes: number): UnmatchedRe
   if (lower.startsWith("._") || SYSTEM_NAMES.has(lower) || (lower.startsWith(".") && !AUDIO_EXTS.has(extOf(lower)))) {
     return { code: "systemFile" }
   }
+  const ext = extOf(file.name)
+  if (UNPLAYABLE_EXTS.has(ext)) return { code: "unplayableFormat", ext }
   const declaredAudio = file.type.toLowerCase().startsWith("audio/")
   if (!declaredAudio && !AUDIO_EXTS.has(extOf(file.name))) return { code: "notAudio" }
   if (file.size === 0) return { code: "empty" }
@@ -780,7 +787,7 @@ function refuseRangeOnTimed<R extends Resolved>(fi: FileIndex, res: R): R | { re
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /** Reasons no choice of line can fix: the file is not a recording at all. */
-const REFUSED: ReadonlySet<UnmatchedReason["code"]> = new Set(["notAudio", "systemFile", "empty", "tooLarge"])
+const REFUSED: ReadonlySet<UnmatchedReason["code"]> = new Set(["notAudio", "unplayableFormat", "systemFile", "empty", "tooLarge"])
 
 /** True when the person may still pick a line for this file in the preview. */
 export function canChooseLine(a: Assignment): boolean {

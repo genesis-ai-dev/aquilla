@@ -132,7 +132,7 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
             <input
               type="file"
               multiple
-              accept="audio/*,.wav,.mp3,.m4a,.ogg,.oga,.opus,.flac,.aac,.webm,.wma,.aif,.aiff,.amr,.caf"
+              accept="audio/*,.wav,.mp3,.m4a,.ogg,.oga,.opus,.flac,.aac,.webm"
               className="hidden"
               data-testid="recordings-input-files"
               onChange={(e) => { const list = e.target.files ? chosenFromInput(e.target.files) : []; e.target.value = ""; take(list) }}
@@ -211,6 +211,7 @@ function lengthText(ms: number, locale: string): string {
 function reasonText(t: ReturnType<typeof useT>, reason: UnmatchedReason, fmt: (n: number) => string, len: (ms: number) => string): string {
   switch (reason.code) {
     case "notAudio": return t("recordingsUpload.reason.notAudio")
+    case "unplayableFormat": return t("recordingsUpload.reason.unplayableFormat", { ext: reason.ext })
     case "systemFile": return t("recordingsUpload.reason.systemFile")
     case "empty": return t("recordingsUpload.reason.empty")
     case "tooLarge": return t("recordingsUpload.reason.tooLarge", { mb: reason.mb, limit: reason.limitMb })

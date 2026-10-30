@@ -744,6 +744,22 @@ describe("the review's cases (Oct 29)", () => {
     expect(assignments[2].reason).toEqual({ code: "duplicate", target: "Genesis 1:1", other: "Genesis 1-1b.mp3" })
   })
 
+  it("formats a browser can't play are refused, whatever type they declare", () => {
+    const files: BulkInputFile[] = [
+      { name: "Genesis 1-1.wma", path: "Genesis 1-1.wma", size: 1000, type: "audio/x-ms-wma" },
+      { name: "Genesis 1-2.aiff", path: "Genesis 1-2.aiff", size: 1000, type: "" },
+      { name: "Genesis 1-3.amr", path: "Genesis 1-3.amr", size: 1000, type: "audio/amr" },
+      { name: "Genesis 1-4.mp3", path: "Genesis 1-4.mp3", size: 1000, type: "audio/mpeg" },
+    ]
+    const { assignments } = run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g"))
+    expect(assignments.map((a) => a.reason ?? a.cellIds)).toEqual([
+      { code: "unplayableFormat", ext: "wma" },
+      { code: "unplayableFormat", ext: "aiff" },
+      { code: "unplayableFormat", ext: "amr" },
+      ["g:1:4"],
+    ])
+  })
+
   it("a folder that is just a number is that chapter", () => {
     const files = ["05.mp3", "06.mp3"].map((n) => audio(`3/${n}`))
     expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])

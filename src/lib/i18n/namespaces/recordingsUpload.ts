@@ -172,6 +172,7 @@ const KEYS = {
     "recordingsUpload.takes.summary": "{list}.",
     // Why a file is not uploaded
     "recordingsUpload.reason.notAudio": "This isn't an audio file.",
+    "recordingsUpload.reason.unplayableFormat": "Browsers can't play .{ext} recordings. Save it as .wav, .mp3, .m4a or .ogg first.",
     "recordingsUpload.reason.systemFile": "This is a hidden system file, not a recording.",
     "recordingsUpload.reason.empty": "This file is empty.",
     "recordingsUpload.reason.tooLarge": "This file is {mb} MB. The limit is {limit} MB.",
@@ -239,6 +240,7 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.preview.topFolder": { description: "Stands in for a folder name in 'files in {folder}' when the person chose files rather than a folder." },
   "recordingsUpload.banner.stop": { description: "Tooltip and accessible name of the X button on the upload progress banner; stops the upload." },
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
+  "recordingsUpload.reason.unplayableFormat": { description: "Why a recording is not uploaded: it is a kind of audio file (such as .wma or .aiff) that web browsers can't play, so it would never play once uploaded. {ext} is the file's extension without the dot, such as 'wma'. Keep the extensions as written. A full sentence." },
   "recordingsUpload.reason.rangeBackwards": { description: "Why a recording whose name covers several verses or lines (such as 'Genesis 1-5-3') is not uploaded: its range ends before it starts, which is usually a typo. {from} and {to} are where the name says it starts and ends (such as 'Genesis 1:5' and 'Genesis 1:3', or 'line 5' and 'line 3'). A full sentence." },
   "recordingsUpload.reason.bookVerseDisagree": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN619' in 'MAT_1_LN619') and a verse number within the chapter, and the two point to different verses. {count} is the place in the book, {verse} the verse number in the name, {ref} the verse the place points to (such as 'Matthew 19:1'). A full sentence." },
   "recordingsUpload.reason.noSuchBookVerse": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN2000'), and the book has fewer verses than that in this project. A full sentence." },

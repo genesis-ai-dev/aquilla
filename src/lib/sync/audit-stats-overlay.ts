@@ -17,6 +17,9 @@
  *    `editEventId` from the payload as `lastEditEventId` if a later commit
  *    didn't already overwrite it. Idempotent (set semantics).
  *  - cell.unvalidate: removes the author from `activeValidators`.
+ *  - AQU-2296: the same three rules apply to `validatorDecidedTs` (username →
+ *    when they voted): a validate stamps the event's own clock, an unvalidate
+ *    drops that name, and a commit clears the lot with the approvals.
  *  - cell.waive: upserts a RuleWaiver (set semantics keyed by
  *    (ruleId, matchHash) — AQU-1740, matching the projection's primary key, so
  *    waiving a second finding of the same rule does not replace the first).
@@ -84,7 +87,12 @@ export function applyOutboxOverlay(
     // cellId.
     let stats = out.get(cellId)
     if (stats && !owned.has(cellId)) {
-      stats = { ...stats, activeValidators: [...stats.activeValidators], waivers: [...stats.waivers] }
+      stats = {
+        ...stats,
+        activeValidators: [...stats.activeValidators],
+        validatorDecidedTs: { ...stats.validatorDecidedTs },
+        waivers: [...stats.waivers],
+      }
       out.set(cellId, stats)
     }
     owned.add(cellId)
@@ -96,6 +104,7 @@ export function applyOutboxOverlay(
         lastEditAt: null,
         lastEditEventId: null,
         activeValidators: [],
+        validatorDecidedTs: {},
         waivers: [],
       }
       out.set(cellId, stats)
@@ -108,6 +117,8 @@ export function applyOutboxOverlay(
       // New edit drops prior approvals — server-side projection works the same way:
       // cells.validated is recomputed against the *current* edit_event_id.
       stats.activeValidators = []
+      // AQU-2296: the stamps belong to the approvals that just lapsed.
+      stats.validatorDecidedTs = {}
     } else if (ev.kind === "cell.validate") {
       const p = ev.payload as CqrsPayloadFor<"cell.validate">
       // If the commit happened earlier in the outbox we already wrote
@@ -120,6 +131,9 @@ export function applyOutboxOverlay(
         if (!stats.activeValidators.includes(ev.author)) {
           stats.activeValidators.push(ev.author)
         }
+        // AQU-2296: the queued event's own clock, so the popover shows the
+        // date at once rather than waiting for the server's `decided_ts`.
+        stats.validatorDecidedTs = { ...stats.validatorDecidedTs, [ev.author]: ev.clientTs }
       }
     } else if (ev.kind === "cell.unvalidate") {
       const p = ev.payload as CqrsPayloadFor<"cell.unvalidate">
@@ -127,6 +141,8 @@ export function applyOutboxOverlay(
         stats.activeValidators = stats.activeValidators.filter(
           (u) => u !== ev.author,
         )
+        const { [ev.author]: _withdrawn, ...keptStamps } = stats.validatorDecidedTs ?? {}
+        stats.validatorDecidedTs = keptStamps
       }
     } else if (ev.kind === "cell.waive") {
       const p = ev.payload as CqrsPayloadFor<"cell.waive">

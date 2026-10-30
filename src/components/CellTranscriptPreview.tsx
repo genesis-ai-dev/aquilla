@@ -134,19 +134,17 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
           </AppTooltip>
         )}
         {editable === false && onCorrectTranscript && (
-          <AppTooltip content={t("editor.transcript.contributorRequired")}>
-            <span className="ml-auto inline-flex">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                disabled
-                aria-label={t("editor.transcript.contributorRequired")}
-                className="rounded-full text-muted-foreground"
-              >
-                <Pencil />
-              </Button>
-            </span>
+          <AppTooltip content={t("editor.transcript.contributorRequired")} disabledTriggerClassName="ml-auto">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              disabled
+              aria-label={t("editor.transcript.contributorRequired")}
+              className="rounded-full text-muted-foreground"
+            >
+              <Pencil />
+            </Button>
           </AppTooltip>
         )}
       </div>
@@ -202,43 +200,36 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
 
       {editable && state !== "match" && !editing && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {/* Text buttons: their words name them, so no hover (AQU-2260). */}
           {state === "stale" && onRetranscribe && (
-            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={onRetranscribe}
-              >
-                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
-              </Button>
-            </AppTooltip>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={onRetranscribe}
+            >
+              <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
+            </Button>
           )}
           {state === "differs" && onUseAsCellText && (
-            <AppTooltip content={cellHasText
-              ? t("workspace.transcriptPreview.replaceTextTooltip")
-              : t("workspace.transcriptPreview.fillTextTooltip")}>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => onUseAsCellText(transcript)}
-              >
-                <CornerDownLeft /> {cellHasText
-                  ? t("workspace.transcriptPreview.useWhatWasHeard")
-                  : t("workspace.transcriptPreview.useAsText")}
-              </Button>
-            </AppTooltip>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => onUseAsCellText(transcript)}
+            >
+              <CornerDownLeft /> {cellHasText
+                ? t("workspace.transcriptPreview.useWhatWasHeard")
+                : t("workspace.transcriptPreview.useAsText")}
+            </Button>
           )}
           {state === "differs" && onRetranscribe && (
-            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={onRetranscribe}
-                className="text-muted-foreground"
-              >
-                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
-              </Button>
-            </AppTooltip>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onRetranscribe}
+              className="text-muted-foreground"
+            >
+              <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
+            </Button>
           )}
         </div>
       )}

@@ -19,6 +19,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { COMMENT_HIGHLIGHT_MS, CommentThread } from "./CommentThread"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 const DENIAL = "Only Contributors and above can resolve a thread someone else started."
 
@@ -448,5 +449,22 @@ describe("CommentThread — author mark and focused reply", () => {
     expect([...list!.children].map((child) => child.tagName)).toEqual(["LI"])
     expect(list!.querySelector(":scope > [data-base-ui-focus-guard]")).toBeNull()
     expect(messageRow("Is this rendering right?")?.tagName).toBe("DIV")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The "stale" mark
+// says what it means on a click.
+describe("CommentThread — the stale mark explains itself on a click", () => {
+  it("says the translation changed since the thread was created", async () => {
+    render(
+      <CommentThread
+        thread={{ ...makeThread(), createdForTranslated: "Salut" }}
+        currentTranslated="Bonjour"
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+      />,
+    )
+    await expectClickNote(screen.getByText("stale"), "Translation changed since this thread was created")
   })
 })

@@ -22,11 +22,8 @@
 // priority — it is the more actionable, immediate signal.
 
 import { AlertTriangle, GitBranchPlus } from "lucide-react"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
@@ -138,50 +135,56 @@ function StaleBadge({
   // Direct (amber) takes priority when both apply — it's the more
   // actionable signal (this project's own pin moved), and showing both
   // icons would clutter the cell action rail for no added clarity.
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The badge is
+  // its own trigger: a click (or Enter / Space) opens what it means in a note
+  // anchored to it, and a second click shuts it. The click stops at the badge,
+  // so it never lands on the cell around it.
   if (direct) {
     return (
-      <Tooltip>
-        <TooltipTrigger
+      <Popover>
+        <PopoverTrigger
+          nativeButton={false}
           render={
             <span
-              role="img"
               aria-label={t("editor.stale.directLabel")}
               className={cn(
-                "inline-flex items-center text-amber-600 dark:text-amber-400",
+                "inline-flex cursor-pointer items-center text-amber-600 dark:text-amber-400",
                 className,
               )}
               data-testid="stale-source-indicator"
+              onClick={(event) => event.stopPropagation()}
             />
           }
         >
-          <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
-        </TooltipTrigger>
-        <TooltipContent>
+          <AlertTriangle className={iconClassName ?? "h-3 w-3"} aria-hidden="true" />
+        </PopoverTrigger>
+        <PopoverContent sideOffset={6} className={NOTE_CONTENT_CLASS}>
           {tooltipText ?? t("editor.stale.directTooltip")}
-        </TooltipContent>
-      </Tooltip>
+        </PopoverContent>
+      </Popover>
     )
   }
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <Popover>
+      <PopoverTrigger
+        nativeButton={false}
         render={
           <span
-            role="img"
             aria-label={t("editor.stale.upstreamLabel")}
             className={cn(
-              "inline-flex items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400",
+              "inline-flex cursor-pointer items-center rounded-sm border border-dotted border-violet-500 text-violet-600 dark:border-violet-400 dark:text-violet-400",
               className,
             )}
             data-testid="upstream-stale-source-indicator"
+            onClick={(event) => event.stopPropagation()}
           />
         }
       >
-        <GitBranchPlus className={iconClassName ?? "h-3 w-3"} />
-      </TooltipTrigger>
-      <TooltipContent>
+        <GitBranchPlus className={iconClassName ?? "h-3 w-3"} aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent sideOffset={6} className={NOTE_CONTENT_CLASS}>
         {upstreamTooltipText ?? t("editor.stale.upstreamTooltip")}
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   )
 }

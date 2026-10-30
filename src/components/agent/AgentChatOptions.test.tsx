@@ -14,6 +14,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { AgentChatOptions } from "./AgentChatOptions"
 import type { AgentSessionSummary } from "@/lib/agent/session-history"
 
@@ -169,14 +170,17 @@ describe("AgentChatOptions — labelled surface", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
   })
 
-  it("keeps the honest caveat on the button it belongs to", async () => {
-    const user = userEvent.setup()
-    render(<AgentChatOptions labelled onNewChat={vi.fn()} sessions={SESSIONS} currentSessionId="s-new" />)
+  // AQU-2260 (Sam, Oct 29): a labelled button does not explain itself on
+  // hover. The caveat sits in an (i) beside it and opens on click.
+  it("keeps the honest caveat beside the button, behind an (i) that opens on click", async () => {
+    renderWithTooltips(<AgentChatOptions labelled onNewChat={vi.fn()} sessions={SESSIONS} currentSessionId="s-new" />)
 
-    await user.hover(screen.getByRole("button", { name: "New chat" }))
-    const tip = await screen.findByRole("tooltip")
-    expect(tip).toHaveTextContent(/reopen it under Previous chats/i)
-    expect(tip).toHaveTextContent(/not the proposal cards/i)
+    await userEvent.setup().hover(screen.getByRole("button", { name: "New chat" }))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(
+      screen.getByRole("button", { name: "About New chat" }),
+      /reopen it under Previous chats[\s\S]*not the proposal cards/i,
+    )
   })
 
   it("names the chats menu for what it holds and opens the chat chosen", async () => {

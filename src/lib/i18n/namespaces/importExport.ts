@@ -1396,7 +1396,6 @@ export const importExport = defineNamespace({
       one: "{count} conflict",
       other: "{count} conflicts",
     }),
-    "importExport.review.contestedToggleHint": "Compare with the other cue that fits this line",
     "importExport.review.deselectAll": "Deselect all",
     "importExport.review.frameRateAdjusted": plural({
       one: "Frame rate adjusted (lines up {count} more)",
@@ -1463,8 +1462,6 @@ export const importExport = defineNamespace({
       other: "{count} cues skipped (empty or unreadable)",
     }),
     "importExport.review.swap": "Swap",
-    "importExport.review.swapHint": "Put this cue on this line instead",
-    "importExport.review.swapSameTimingHint": "Swap lines with the other cue that has the same timing",
     "importExport.review.matching": "Matching lines…",
     "importExport.review.offsetEarlier": plural({
       one: "Shift timings {amount} earlier (lines up {count} more)",
@@ -4029,12 +4026,6 @@ export const importExport = defineNamespace({
           count: "Number of pairings that would overwrite existing translated text.",
         },
       },
-      "importExport.review.contestedToggleHint": {
-        description:
-          "Tooltip on the \"Contested\" pill of a match-review row. Clicking the pill " +
-          "opens the row downward to show the other uploaded cue that also fits this " +
-          "line, so the two can be compared and swapped. Short imperative phrase.",
-      },
       "importExport.review.deselectAll": {
         description:
           "Small text button under the match-review list that clears every tick at " +
@@ -4396,18 +4387,6 @@ export const importExport = defineNamespace({
           "Small button beside a competing cue inside an opened \"Contested\" row: puts " +
           "that cue on this row's line, and moves this row's cue to where the other one " +
           "was (another line, or the list of cues that found no line). One word.",
-      },
-      "importExport.review.swapHint": {
-        description:
-          "Tooltip on the Swap button inside an opened \"Contested\" row of the " +
-          "match-review list. Short imperative phrase.",
-      },
-      "importExport.review.swapSameTimingHint": {
-        description:
-          "Tooltip on the small Swap button beside a \"Same timing\" pill in the " +
-          "match-review list: two uploaded cues share exactly the same timing, so " +
-          "which line each went to was decided by file order; the button exchanges " +
-          "their lines. Short imperative phrase.",
       },
       "importExport.review.matching": {
         description:

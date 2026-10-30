@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import userEvent from "@testing-library/user-event"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
 import type { QueueState, QueueProgress } from "@/lib/audio/play-queue"
@@ -10,6 +11,8 @@ import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
+import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
+import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
@@ -111,6 +114,20 @@ const cell = (o: Partial<CellData>): CellData =>
 function armLinking() {
   fireEvent.click(screen.getByTestId("tl-check-menu"))
   fireEvent.click(screen.getByText("Check links"))
+}
+
+
+// AQU-2260 (Sam, Oct 29): a toolbar (i) opens a small note on CLICK and shuts
+// it on a second click or a click outside. Hovering it shows nothing.
+async function expectInfoNote(button: HTMLElement, text: RegExp) {
+  await userEvent.setup().hover(button)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  fireEvent.click(button)
+  const note = await screen.findByTestId(`${button.dataset.testid}-note`)
+  expect(note).toHaveTextContent(text)
+  expect(button).toHaveAttribute("aria-expanded", "true")
+  fireEvent.click(button)
+  await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "false"))
 }
 
 describe("TimelineEditor", () => {
@@ -571,6 +588,61 @@ describe("TimelineEditor", () => {
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(btn).toHaveAttribute("aria-pressed", "false")
+  })
+
+  // AQU-2264: Follow playhead was a plain useState(true): back on after every
+  // reload, and turned back on by every press of play. It is a remembered
+  // preference now (it follows the person), and play keeps to it.
+  const forgetTimelinePrefs = () => {
+    localStorage.removeItem("aq.timeline-follow-playhead.v1")
+    localStorage.removeItem("aquilla:timelineSnap")
+    resetPersonPrefCachesForTests()
+  }
+  afterEach(forgetTimelinePrefs)
+
+  it("remembers Follow playhead turned off, through a reload", () => {
+    const { unmount } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    fireEvent.click(screen.getByLabelText("Follow playhead"))
+    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+    unmount()
+    resetPersonPrefCachesForTests() // a reload
+    render(
+      <TimelineEditor fileId="f2" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+  })
+
+  it("keeps Follow playhead off when playback starts, and on again once turned on", () => {
+    const view = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    fireEvent.click(screen.getByLabelText("Follow playhead"))
+    mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+    try {
+      view.rerender(
+        <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+      )
+      expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
+      fireEvent.click(screen.getByLabelText("Follow playhead"))
+      expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "true")
+    } finally {
+      mockQueueState = { kind: "idle" }
+    }
+  })
+
+  it("shows a snap or follow change made elsewhere (Preferences) at once", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-snap-toggle")).toHaveAttribute("aria-pressed", "true")
+    act(() => {
+      timelineSnapPref.set(false)
+      timelineFollowPlayheadPref.set(false)
+    })
+    expect(screen.getByTestId("tl-snap-toggle")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByLabelText("Follow playhead")).toHaveAttribute("aria-pressed", "false")
   })
 
   // ── AQU-646 round 3: text→media trace seed + media→text selection mirror ──
@@ -1316,7 +1388,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip = screen.getByTestId("tl-target-v1")
     expect(chip).toHaveAttribute("data-overflow", "none")
     expect(chip).toHaveAttribute("data-ratio", (11 / 6).toFixed(2))
-    await expectTooltip(chip, /11\.0s — 1\.8× the original/)
+    // AQU-2260: the take's details are at the top of its right-click menu.
+    fireEvent.contextMenu(chip, { button: 2 })
+    expect((await screen.findByTestId("tl-take-details-v1")).textContent).toMatch(/11\.0s — 1\.8× the original/)
     // The same take in dubbing mode is still flagged for running past its verse.
     renderAt("dubbing")
     expect(screen.getAllByTestId("tl-target-v1")[1]).toHaveAttribute("data-overflow", "overlap")
@@ -1346,7 +1420,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
+    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
   })
 
   it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
@@ -1421,6 +1495,26 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
     // The take starts where the pause ends.
     expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
+  // what it is on a click of it.
+  it("the pause before a take says what it is on a click, not a hover", async () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
   })
 
   // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
@@ -1575,17 +1669,20 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(control).toHaveAttribute("data-locked", "film")
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
-    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
+    await expectInfoNote(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
   })
 
-  // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
-  // timing switch, its explanation behind an info button — not a full line.
-  it("says Bluetooth in a pill after the timing switch, the full message behind its info button", async () => {
+  // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its
+  // explanation behind an info button — not a full line. AQU-2260 (Oct 29):
+  // plain amber text, not a pill (no border, no fill), the (i) a click note.
+  it("says Bluetooth in plain amber text after the timing switch, the full message behind its (i)", async () => {
     mockOutputLatencySec = 0.178
     try {
       renderAt("dubbing", { onChangeTimingMode: vi.fn() })
       const pill = screen.getByTestId("tl-output-latency-note")
       expect(pill).toHaveTextContent(/^Bluetooth$/)
+      expect(pill.className).not.toMatch(/\bborder\b|\bbg-|rounded-md|px-1\.5/)
+      expect(pill.className).toMatch(/text-amber-700/)
       const switchEl = screen.getByTestId("tl-timing-mode")
       expect(switchEl.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(switchEl.parentElement).toBe(pill.parentElement)
@@ -1597,7 +1694,7 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("shows no Bluetooth pill on a wired or measured output", () => {
+  it("shows no Bluetooth note on a wired or measured output", () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
     expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })
@@ -5020,12 +5117,18 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     const item = screen.getByRole("menuitem", { name: "Attach captions" })
     expect(item).toHaveAttribute("data-disabled")
     // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
-    // is the row's hover text and its accessible description.
+    // is behind the row's (i) — a click opens it in place (AQU-2260) — and is
+    // its accessible description.
     expect(within(item).queryByText("track editing off")).toBeNull()
     expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
-    // The row is disabled, so its content has to take the pointer itself for
-    // the hover text to open.
-    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
+    const info = within(item).getByRole("button", { name: "About Attach captions" })
+    // The row is disabled, so its (i) has to take the pointer back itself.
+    expect(info.parentElement!.className).toMatch(/pointer-events-auto/)
+    const reason = document.getElementById(info.getAttribute("aria-controls")!)!
+    expect(reason).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(reason).toHaveAttribute("data-open", "true")
+    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project Settings.")
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
@@ -5438,5 +5541,29 @@ describe("TimelineEditor — hiding tracks (AQU-1684)", () => {
     fireEvent.contextMenu(screen.getByTestId("tl-track-menu-target-audio"))
     expect(screen.getByTestId("tl-track-hide")).toHaveAttribute("data-disabled")
     fireEvent.pointerUp(window)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("TimelineEditor — the toolbar's hovers only name its icons", () => {
+  it("the quality toggle's hover names it, without the explanation", async () => {
+    renderWithTooltips(
+      <TimelineEditor fileId="q1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]} onRetimeSubtitle={() => {}} />,
+    )
+    await expectTooltip(screen.getByTestId("tl-quality-toggle"), "Play generated voices at original quality")
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/Toggle for|larger downloads/)
+  })
+
+  it("Measure now has no hover; what it does is behind its (i)", async () => {
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="m1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]}
+        onRetimeSubtitle={() => {}} legacyMeasure={{ count: 2, onMeasure: vi.fn() }}
+      />,
+    )
+    await userEvent.setup().hover(screen.getByTestId("tl-measure-run"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Measure now" }), "Nothing else about the takes changes")
   })
 })

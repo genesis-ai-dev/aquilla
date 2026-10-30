@@ -116,6 +116,15 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
                       className="font-mono"
                     />
                     {invalid && <FieldError errors={field.state.meta.errors} />}
+                    {/* AQU-2263: which key is in use. Voices never receive the
+                        organization's key yet (see key-in-use.ts), so a saved
+                        one says so rather than "in use". */}
+                    <p
+                      className={currentGeminiKey ? "text-xs font-medium text-amber-700 dark:text-amber-400" : "text-xs text-muted-foreground"}
+                      data-testid="org-gemini-key-in-use"
+                    >
+                      {currentGeminiKey ? t("settings.keyInUse.orgGeminiSaved") : t("settings.keyInUse.orgGeminiNone")}
+                    </p>
                   </Field>
                 )
               }}

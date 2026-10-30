@@ -35,7 +35,7 @@ test("sidebar re-import updates this file and flags the changed source", async (
   await expect(changedRow.locator('[data-cell-type="target"]')).toContainText(translated)
   await expect(changedRow).toHaveAttribute("data-source-review", "true")
   await changedRow.hover()
-  await expect(changedRow.getByRole("button", { name: /Validate|Validated/i }).first())
+  await expect(changedRow.getByTestId("validation-gutter").getByRole("button", { name: /Validate|Validated/i }).first())
     .toHaveAttribute("aria-pressed", "false")
 
   const inserted = await workspace.cellIndexBySource("This verse is new.")

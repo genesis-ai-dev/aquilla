@@ -10,7 +10,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldDesignPresetChips } from "@/components/voice/InworldDesignPresetChips"
@@ -383,22 +383,36 @@ export function InworldVoiceDesignField({
                 </p>
               </div>
 
-              <Tabs
-                value={mode}
-                onValueChange={(value) => {
-                  if (value === "freeform" || value === "structured") selectMode(value)
-                }}
-                className="gap-0"
-              >
-                <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
-                  <AppTooltip content={t("audio.newVoice.designModeFreeformHint")} className="max-w-xs">
+              {/* What each mode does is behind the (i) beside them, on a
+                  click (AQU-2260 — it was each tab's hover). */}
+              <div className="flex items-center gap-1.5">
+                <Tabs
+                  value={mode}
+                  onValueChange={(value) => {
+                    if (value === "freeform" || value === "structured") selectMode(value)
+                  }}
+                  className="gap-0"
+                >
+                  <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
                     <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
-                  </AppTooltip>
-                  <AppTooltip content={t("audio.newVoice.designModeStructuredHint")} className="max-w-xs">
                     <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
-                  </AppTooltip>
-                </TabsList>
-              </Tabs>
+                  </TabsList>
+                </Tabs>
+                <InfoNote label={t("common.aboutAria", { name: t("audio.newVoice.designModeGroupLabel") })}>
+                  <span className="flex flex-col gap-1.5">
+                    <span>
+                      <span className="font-medium">{t("audio.newVoice.designModeFreeform")}</span>
+                      {" — "}
+                      {t("audio.newVoice.designModeFreeformHint")}
+                    </span>
+                    <span>
+                      <span className="font-medium">{t("audio.newVoice.designModeStructured")}</span>
+                      {" — "}
+                      {t("audio.newVoice.designModeStructuredHint")}
+                    </span>
+                  </span>
+                </InfoNote>
+              </div>
 
               <form.Field
                 name="prompt"

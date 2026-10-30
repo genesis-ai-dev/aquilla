@@ -96,6 +96,10 @@ export interface CellData {
   validationStatus: ValidationStatus
   endorsementCount?: number
   activeValidators: string[]
+  /** AQU-2296: username → when that validator signed off the current head
+   *  (server clock, ms). Feeds the date under each name in the
+   *  "Text validated by" popover; a name with no entry gets no date line. */
+  validatorDecidedTs?: Record<string, number>
   /** Empty in Phase 2a — useCellEditHistory will own this in Phase 2b. */
   validationHistory: EditValidationSummary[]
   /** Empty in Phase 2a — useCellHistory will own this in Phase 2b. */
@@ -270,9 +274,23 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.cameraState === b.cameraState &&
     a.metadata === b.metadata &&
     stringArraysEqual(a.activeValidators, b.activeValidators) &&
+    sameStampRecord(a.validatorDecidedTs, b.validatorDecidedTs) &&
     stringArraysEqual(a.globalReferences, b.globalReferences) &&
     waiversEqual(a.waivers, b.waivers)
   )
+}
+
+/** AQU-2296: two `username -> timestamp` records, compared by value. */
+function sameStampRecord(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): boolean {
+  if (a === b) return true
+  const left = a ?? {}
+  const right = b ?? {}
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => left[key] === right[key])
 }
 
 function cellArraysEqual(a: readonly CellData[], b: readonly CellData[]): boolean {
@@ -428,6 +446,7 @@ export function buildCellData(
     validationStatus,
     endorsementCount,
     activeValidators,
+    validatorDecidedTs: stats?.validatorDecidedTs,
     validationHistory: EMPTY_VALIDATION_HISTORY,
     history: EMPTY_HISTORY,
     threads: EMPTY_THREADS,

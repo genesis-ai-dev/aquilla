@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
@@ -15,6 +16,12 @@ const barParts = (el: HTMLElement) =>
 
 // StaffLanePopover pulls org/project members over the network on mount — stub
 // it (it's covered by its own wave-A suite). We only assert it's wired here.
+const mockNavigate = vi.fn()
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return { ...actual, useNavigate: () => mockNavigate }
+})
+
 vi.mock("@/components/StaffLanePopover", () => ({
   StaffLanePopover: (props: { projectId: string; lane: string }) => (
     <button data-testid={`staff-${props.projectId}-${props.lane}`}>Staff…</button>
@@ -516,6 +523,16 @@ describe("units done column", () => {
     renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
     expect(screen.getByTestId("project-table-units-overdue")).toHaveTextContent("2")
     expect(screen.getByTestId("project-table-units-value")).toHaveAttribute("data-units-overdue", "true")
+  })
+
+  // AQU-2260 (Sam, Oct 29): the flag says what it counts on click, never on
+  // hover, and the click stays on the flag rather than opening the project.
+  it("says what the overdue flag counts on click, without opening the row", async () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
+    const flag = screen.getByTestId("project-table-units-overdue").closest("button")
+    expect(flag).not.toBeNull()
+    await expectClickNote(flag!, "2 units are past their target date")
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it("shows no flag when every unit is on time", () => {

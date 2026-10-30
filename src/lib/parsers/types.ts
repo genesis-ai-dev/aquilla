@@ -1221,8 +1221,6 @@ export interface CompletionSettings {
    * internal clarity; the two names refer to the same concept.
    */
   systemPrompt: string
-  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
-  llmHealthPenalty?: number
 
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 

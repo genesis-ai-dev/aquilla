@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  getOrCreateMyOrg,
+  getMyOrg,
+  createPersonalOrg,
   listOrgMembers,
   addOrgMember,
   removeOrgMember,
@@ -13,14 +14,35 @@ const ORIG = global.fetch;
 beforeEach(() => { global.fetch = vi.fn(); });
 afterEach(() => { global.fetch = ORIG; });
 
-describe("getOrCreateMyOrg", () => {
+describe("getMyOrg", () => {
   it("returns org from /orgs/me", async () => {
     (global.fetch as any).mockResolvedValueOnce(
       new Response(JSON.stringify({ id: 5, name: "anna", role: { level: 700, name: "owner" } }), { status: 200 })
     );
-    const org = await getOrCreateMyOrg("jwt");
-    expect(org.id).toBe(5);
-    expect(org.role.level).toBe(700);
+    const org = await getMyOrg("jwt");
+    expect(org?.id).toBe(5);
+    expect(org?.role.level).toBe(700);
+  });
+
+  // AQU-2259: the read no longer creates a workspace; "none" is an answer.
+  it("answers null when the caller owns no organization", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "no_organization" }), { status: 404 })
+    );
+    expect(await getMyOrg("jwt")).toBeNull();
+  });
+});
+
+describe("createPersonalOrg", () => {
+  it("POSTs to /orgs/personal", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 9, name: "ana's workspace", role: { level: 700, name: "owner" } }), { status: 200 })
+    );
+    const org = await createPersonalOrg("jwt");
+    expect(org.id).toBe(9);
+    const [url, init] = (global.fetch as any).mock.calls[0];
+    expect(String(url)).toMatch(/\/api\/v2\/orgs\/personal$/);
+    expect(init.method).toBe("POST");
   });
 });
 

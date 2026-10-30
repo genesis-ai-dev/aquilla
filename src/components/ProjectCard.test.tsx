@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { ProjectCard } from "./ProjectCard"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -210,5 +211,26 @@ describe("ProjectCard long unbroken project name (AQU-332)", () => {
     expect(badgeCluster?.className).toContain("shrink-0")
     // The git badge stays visible alongside the (now multi-line) title.
     expect(screen.getByText("git")).toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the card's badges explain themselves on a click,
+// never on hover — and that click stays on the badge: it does not open the
+// project.
+describe("ProjectCard badges", () => {
+  it("says what Inactive means on click, without opening the project", async () => {
+    const onClick = vi.fn()
+    renderWithTooltips(<ProjectCard project={makeProject({ isActive: false } as Partial<ProjectRecord>)} onClick={onClick} />)
+    await expectClickNote(screen.getByTestId("inactive-badge").closest("button")!, /cannot be edited until reactivated/)
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it("says the role is yours on click, without opening the project", async () => {
+    const onClick = vi.fn()
+    renderWithTooltips(<ProjectCard project={makeProject()} onClick={onClick} />)
+    const role = screen.getAllByRole("button").find((b) => b.dataset.slot === "note-on-click")
+    expect(role).toBeDefined()
+    await expectClickNote(role!, "Your role on this project")
+    expect(onClick).not.toHaveBeenCalled()
   })
 })

@@ -6,6 +6,8 @@
 // credit, word or dollar figure (R7).
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { MemoryRouter } from "react-router-dom"
 import type { MeterView } from "@/lib/billing/ai-meter"
 import { AiMeter, OrgAiMeter } from "./AiMeter"
@@ -87,6 +89,31 @@ describe("AiMeter", () => {
     expect(screen.queryByRole("progressbar")).toBeNull()
     expect(screen.getByRole("button", { name: "Why AI is not metered" })).toBeVisible()
     expectNoAmounts()
+  })
+
+  // AQU-2260 (Sam, Oct 29): the meter is a card, so why BYOK is not metered
+  // opens IN PLACE under the meter's figure on a click, and shuts on a second
+  // one. Hovering the (i) shows nothing.
+  it("BYOK: the (i) opens why AI is not metered in place, never on hover", async () => {
+    render(
+      <MemoryRouter>
+        <TooltipProvider delay={0}>
+          <AiMeter view={{ kind: "byok" }} orgId={7} canManage />
+        </TooltipProvider>
+      </MemoryRouter>,
+    )
+    const info = screen.getByRole("button", { name: "Why AI is not metered" })
+    await userEvent.setup().hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const reveal = document.getElementById(info.getAttribute("aria-controls") ?? "")
+    expect(reveal).not.toBeNull()
+    expect(reveal).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(reveal).toHaveAttribute("data-open", "true")
+    expect(reveal).toHaveTextContent("You're using your own AI provider, so Aquilla doesn't meter this.")
+    fireEvent.click(info)
+    expect(reveal).toHaveAttribute("data-open", "false")
   })
 
   it("Enterprise: Unlimited with the Enterprise mark, and no bar to watch", () => {

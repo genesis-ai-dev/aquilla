@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 // AQU-1075: the downstream maintainer chooses which settings a link copies.
 // The same list is the confirm step of a new link and the card in the
 // downstream project's settings. A field that is still arriving says which
@@ -160,11 +161,14 @@ export function InheritedSettingsSection({
   sourceProjectId,
   settings,
   canEdit,
+  locked,
   onPatch,
 }: {
   sourceProjectId: string
   settings: ProjectWideSettings | null | undefined
   canEdit: boolean
+  /** Why it cannot be changed, said once under the heading (AQU-2260). */
+  locked?: ReactNode
   onPatch: (partial: ProjectWideSettings) => Promise<unknown>
 }) {
   const t = useT()
@@ -182,7 +186,7 @@ export function InheritedSettingsSection({
   const name = upstreamName ?? sourceProjectId
 
   return (
-    <SettingsGroup label={t("projectSettings.inherit.title", { upstream: name })}>
+    <SettingsGroup label={t("projectSettings.inherit.title", { upstream: name })} locked={canEdit ? null : locked}>
       <div className="px-4 py-3">
         <InheritedSettingsChoice
           title=""

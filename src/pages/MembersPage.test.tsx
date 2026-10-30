@@ -3,6 +3,8 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { useOrgInvites } from "@/hooks/useOrgInvites"
 import { MembersPage } from "./MembersPage"
 
 // AQU-1277: OrgProvider loads the project directory via
@@ -51,10 +53,10 @@ vi.mock("@/hooks/useOrgSettings", () => ({
 // MembersPageContent, useOrgMembers, useOrgInvites, and useAccessibleProjects.
 //
 // listMyOrgs returns "Come and See" (org 42) — the active-org data.
-// getOrCreateMyOrg returns a DIFFERENT org ("Legacy Org", id 99) — owned-org data.
+// getMyOrg returns a DIFFERENT org ("Legacy Org", id 99) — owned-org data.
 // The test asserts "Come and See" appears, which only happens if MembersPage
 // reads from the active org (useActiveOrg / listMyOrgs), not the owned org
-// (useOrg / getOrCreateMyOrg).
+// (useOrg / getMyOrg).
 const listMyOrgs = vi.fn(async (_jwt?: string) => [
   { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
 ])
@@ -68,8 +70,8 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listPendingOrgInvites: vi.fn(async () => null),
   revokeProjectInvite: vi.fn(async () => true),
   // Deliberately different name so the test fails if MembersPage still reads
-  // the owned org via useOrg() / getOrCreateMyOrg.
-  getOrCreateMyOrg: vi.fn(async () => ({
+  // the owned org via useOrg() / getMyOrg.
+  getMyOrg: vi.fn(async () => ({
     id: 99,
     name: "Legacy Org",
     role: { level: 700, name: "owner" },
@@ -161,7 +163,7 @@ describe("MembersPage active-org", () => {
     // switcher + the "People in <org>" heading) since MembersPage renders inside
     // the org shell — so assert ≥1 match rather than exactly one. The point of
     // this test is active-vs-owned: "Come and See" (42, from listMyOrgs) shows
-    // and "Legacy Org" (99, from getOrCreateMyOrg) does NOT.
+    // and "Legacy Org" (99, from getMyOrg) does NOT.
     await waitFor(() =>
       expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0),
     )
@@ -499,5 +501,36 @@ describe("MembersPage — Teams-style roster table", () => {
       screen.getByText(/cannot see or open projects until they are added to a specific project or team/i),
     ).toBeInTheDocument()
     expect(screen.getByText(/only maintainer and owner can see every project/i)).toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a pending invite's kind (an email it was sent to, or
+// an open link) says what it means on a click, never on hover.
+describe("MembersPage pending invites", () => {
+  it("says what a targeted invite and an open link mean, on click", async () => {
+    const invite = (over: Record<string, unknown>) => ({
+      token: "t", projectId: "p1", projectName: "John", role: { level: 400, name: "contributor" },
+      createdBy: { userId: 1, username: "joel" }, createdAt: "2026-10-01T00:00:00Z", expiresAt: null, ...over,
+    })
+    vi.mocked(useOrgInvites).mockReturnValue({
+      invites: [invite({ token: "a", email: "anna@example.org" }), invite({ token: "b", email: null })],
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(async () => {}),
+      revoke: vi.fn(async () => false),
+    } as unknown as ReturnType<typeof useOrgInvites>)
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
+          <OrgProvider>
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+            </Routes>
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await expectClickNote(await screen.findByRole("button", { name: "anna@example.org" }), /sign-up form will be prefilled/)
+    await expectClickNote(screen.getByRole("button", { name: "open link" }), /anyone holding the URL can redeem/)
   })
 })

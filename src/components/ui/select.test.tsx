@@ -107,3 +107,51 @@ describe("Select trigger chrome", () => {
     ).not.toHaveAttribute("data-side", "none")
   })
 })
+
+// AQU-2260 (Sam, Oct 29, Settings cleanup option 2A): every list opens BELOW
+// its button — flipping above only when there is no room — and scrolls with a
+// normal scrollbar, the wheel and the keys. No ▲ ▼ strips anywhere.
+describe("Select list placement (AQU-2260)", () => {
+  function LongSelect() {
+    const options = Array.from({ length: 30 }, (_, i) => `Option ${i + 1}`)
+    return (
+      <Select defaultValue="Option 25">
+        <SelectTrigger aria-label="Long">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {options.map((o) => (
+              <SelectItem key={o} value={o}>{o}</SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    )
+  }
+
+  it("opens below its button by default, not laid over it", async () => {
+    const user = userEvent.setup()
+    render(<SortSelect />)
+    const trigger = screen.getByRole("combobox", { name: "Sort" })
+    await user.click(trigger)
+    await waitFor(() => {
+      const popup = document.querySelector("[data-slot=select-content]")
+      expect(popup).not.toBeNull()
+      expect(popup).toHaveAttribute("data-align-trigger", "false")
+      expect(popup?.closest("[data-side]")).not.toHaveAttribute("data-side", "none")
+      expect(trigger).toHaveAttribute("data-dropdown")
+    })
+  })
+
+  it("draws no scroll strips, even for a long list whose choice is far down", async () => {
+    const user = userEvent.setup()
+    render(<LongSelect />)
+    await user.click(screen.getByRole("combobox", { name: "Long" }))
+    await waitFor(() => expect(document.querySelector("[data-slot=select-content]")).not.toBeNull())
+    expect(document.querySelector("[data-slot=select-scroll-up-button]")).toBeNull()
+    expect(document.querySelector("[data-slot=select-scroll-down-button]")).toBeNull()
+    // The list itself is the scroller: a normal scrollbar, not a hover strip.
+    expect(document.querySelector("[data-slot=select-content]")?.className).toMatch(/overflow-y-auto/)
+  })
+})

@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import type { ComponentProps } from "react"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { BacktranslationPanel } from "./BacktranslationPanel"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 
 function cell(over: Partial<CellData> = {}): CellData {
@@ -41,7 +43,9 @@ function renderPanel(over: Partial<ComponentProps<typeof BacktranslationPanel>> 
   return {
     ...render(
       <I18nProvider>
-        <BacktranslationPanel {...props} />
+        <TooltipProvider delay={0}>
+          <BacktranslationPanel {...props} />
+        </TooltipProvider>
       </I18nProvider>,
     ),
     props,
@@ -269,5 +273,37 @@ describe("BacktranslationPanel — correcting the statistical gloss (AQU-1408 §
     const locked = screen.getByLabelText("Contributor+ required to correct the gloss")
     expect(locked).toBeTruthy()
     expect((locked as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("BacktranslationPanel — explanations open on click", () => {
+  it("explains the AI back-translation behind its (i), on a click", async () => {
+    renderPanel({
+      cell: cell({ backtranslation: "the house of him", backtranslationForText: "maison de lui" }),
+    })
+    await expectClickNote(
+      screen.getByRole("button", { name: "About AI back-translation" }),
+      "A literal back-translation into your source language",
+    )
+  })
+
+  it("says why a reviewer cannot edit the back-translation, on a click", async () => {
+    renderPanel({
+      editable: false,
+      cell: cell({ backtranslation: "the house of him", backtranslationForText: "maison de lui" }),
+    })
+    await expectDisabledNote(
+      screen.getByLabelText("Contributor+ required to edit back-translations"),
+      "Contributor+ required to edit back-translations",
+    )
+  })
+
+  it("says why a reviewer cannot correct the gloss, on a click", async () => {
+    renderPanel({ editable: false, statisticalGloss: "house of him" })
+    await expectDisabledNote(
+      screen.getByLabelText("Contributor+ required to correct the gloss"),
+      "Contributor+ required to correct the gloss",
+    )
   })
 })

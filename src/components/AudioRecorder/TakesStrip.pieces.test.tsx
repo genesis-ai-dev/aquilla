@@ -4,8 +4,9 @@
 // choosing, cleaning and deleting it whole, and takes no vote: it says how
 // many of its pieces are approved.
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
@@ -218,14 +219,17 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
     for (const id of [P1, P2, P3]) {
       const vote = voteOn(pieceRow(id))
       expect(vote.getAttribute("aria-label")).not.toMatch(/click to validate/i)
-      await userEvent.click(vote)
-      await userEvent.hover(vote)
-      // A piece nobody has voted on says it in its tooltip; one with votes,
-      // at the foot of its "validated by" list.
-      if (id === P2) expect(await screen.findByTestId("audio-validation-blocked-note")).toHaveTextContent(why)
-      else expect(await screen.findByRole("tooltip")).toHaveTextContent(why)
-      await userEvent.unhover(vote)
+      // A piece nobody has voted on says it in a note a click on its check
+      // opens (AQU-2260: never a hover); one with votes, at the foot of the
+      // "validated by" list the same click opens.
+      if (id === P2) {
+        await userEvent.click(vote)
+        expect(await screen.findByTestId("audio-validation-blocked-note")).toHaveTextContent(why)
+      } else {
+        await expectDisabledNote(vote, why)
+      }
       await userEvent.keyboard("{Escape}")
+      await waitFor(() => expect(document.querySelector('[data-slot="disabled-reason-note"], [role="dialog"]')).toBeNull())
     }
     expect(emitValidate).not.toHaveBeenCalled()
   })

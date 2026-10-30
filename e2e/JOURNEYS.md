@@ -61,7 +61,7 @@ not a micro-spec farm.
 | Collab | A corrected statistical gloss persists and reaches other members; below contributor the correction affordance is disabled with its reason (AQU-1408 §1) | `e2e/specs/collab/gloss-correction-syncs.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
-| Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
+| Sharing | Invite link → join → dashboard visibility; org invitation → password recovery in a fresh browser session → explicit acceptance and server-verified membership. The browser consumes the actual reset email captured by Miniflare; worker integration tests also cover ordinary resets and rejected redirect targets (no real mail is sent). | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
 | Admin | Billing credit catalog and organization usage grants; weekly allowance grants persist through admin → Postgres → workspace usage, while global Free limits and personal-workspace exceptions are covered in worker integration and RTL tests | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 

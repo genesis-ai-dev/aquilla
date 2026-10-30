@@ -148,6 +148,17 @@ function addExtraLanguage(tag: string) {
   fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
 
+// AQU-2263: New Project adds a language with the same "Add language" piece as
+// Project settings → Languages, in the same words.
+describe("ProjectCreateDialog — the shared Add language piece", () => {
+  it("is the same Add language button Project settings uses", () => {
+    openDialogWithBasics()
+    const add = addLaneButton()
+    expect(add).toHaveTextContent("Add language")
+    expect(add).toHaveAttribute("data-add-language")
+  })
+})
+
 describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
   beforeEach(() => {
     mockCreateCloudProject.mockClear()
@@ -543,5 +554,26 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       { name: "", language: "Swahili", delivers: "text" },
       { name: "", language: "Yoruba", delivers: "text_and_audio" },
     ])
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the language fields' (i) opens its text in place,
+// under the label, on click — and closes on a second click. No hover.
+describe("ProjectCreateDialog — the language fields' (i) (AQU-2260)", () => {
+  it("opens what you can enter, under the label, on click, and shuts it again", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    const [sourceInfo] = screen.getAllByRole("button", { name: "What can I enter here?" })
+    await userEvent.setup().hover(sourceInfo!)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "false")
+    const note = document.getElementById(sourceInfo!.getAttribute("aria-controls")!)!
+    expect(note).toHaveAttribute("data-open", "false")
+    fireEvent.click(sourceInfo!)
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "true")
+    expect(note).toHaveAttribute("data-open", "true")
+    expect(note).toHaveTextContent(/Type a language name or a description/)
+    fireEvent.click(sourceInfo!)
+    expect(note).toHaveAttribute("data-open", "false")
   })
 })

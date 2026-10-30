@@ -144,7 +144,8 @@ describe("DELETE /api/v2/orgs/:orgId", () => {
     expect(invite).not.toBeNull()
   })
 
-  it("recreates a personal workspace after the caller deletes their last org", async () => {
+  // AQU-2259: nothing recreates it until they choose a personal workspace again.
+  it("leaves the caller with no organization after they delete their last one", async () => {
     await seedUser(1, "kume")
     await env.AQUILLA_PG.prepare(
       "INSERT INTO organizations (id, name, owner_user_id, billing_scope) VALUES (7, 'kume''s workspace', 1, 'personal')",
@@ -163,9 +164,9 @@ describe("DELETE /api/v2/orgs/:orgId", () => {
       headers: authHeader(await jwtFor("kume")),
     }, env)
     const body = await listed.json() as { orgs: Array<{ id: number; name: string | null }> }
-    expect(body.orgs).toHaveLength(1)
-    expect(body.orgs[0].id).not.toBe(7)
-    expect(body.orgs[0].name).toBe("kume's workspace")
+    expect(body.orgs).toEqual([])
+    const left = await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM organizations").first<{ n: number }>()
+    expect(left?.n).toBe(0)
   })
 
   it("still renames for a maintainer", async () => {

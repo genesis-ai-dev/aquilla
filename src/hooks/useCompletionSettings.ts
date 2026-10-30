@@ -25,7 +25,6 @@ export function buildCompletionSettings(
     maxTokens: overrides.maxTokens ?? base?.maxTokens ?? DEFAULT_COMPLETION_MAX_TOKENS,
     temperature: overrides.temperature ?? base?.temperature ?? 0.3,
     systemPrompt: overrides.systemPrompt ?? base?.systemPrompt ?? "",
-    llmHealthPenalty: overrides.llmHealthPenalty ?? base?.llmHealthPenalty ?? 0.1,
     // AQU-408: these v1 retrieval-tuning keys were previously omitted here,
     // so every save silently reset them to their factory defaults (or, when
     // called with only e.g. a systemPrompt override, dropped whatever the

@@ -12,7 +12,8 @@
 // play controls, and that bar mounts this component as it is. Everything it
 // needs arrives as props, and it reaches into nothing.
 //
-// Three states, one shape ("Timing: <choice>" with an (i) beside it):
+// Three states, one shape ("Timing: <choice>" with an (i) beside it; the (i)
+// opens its note on click, AQU-2260):
 //   - changeable: the choice is a dropdown with the two choices and a line each;
 //   - read-only (below project lead): the choice as plain text, the (i) says who
 //     can change it;
@@ -24,7 +25,7 @@
 // muting never moves anything; beside the (i), "16.8 s long" for the current
 // choice. Board 24: a file with nothing to follow (no times, no source audio)
 // greys "Follows source" out with the reason.
-import { ChevronDown, Info, Timer } from "lucide-react"
+import { ChevronDown, Timer } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,7 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -78,27 +79,15 @@ function formatFileLength(t: TFunction, sec: number): string {
   return t("editor.timeline.timingLengthHours", { hours: Math.floor(whole / 3600), minutes: Math.floor((whole % 3600) / 60) })
 }
 
-/** The control's (i): a long explanation on hover or keyboard focus, so the
- *  header itself stays short (Sam, Oct 25). Exported for the timeline's one
- *  (i) about stand-in lines. */
+/** The control's (i): a click opens its explanation in a small note beside it,
+ *  and a second click or a click outside closes it (AQU-2260; it was a hover,
+ *  Sam, Oct 25). The header itself stays short. Exported for the timeline's
+ *  one (i) about stand-in lines. */
 export function TimingInfoButton({ label, text, testId }: { label: string; text: string; testId: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        closeOnClick={false}
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            data-testid={testId}
-            className="inline-flex shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
-          />
-        }
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{text}</TooltipContent>
-    </Tooltip>
+    <InfoNote label={label} testId={testId}>
+      {text}
+    </InfoNote>
   )
 }
 

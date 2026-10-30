@@ -122,9 +122,13 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
     </span>
   )
   const tooltipSide = field ? "top" : "right"
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+  // gutter's avatar is wordless, so it keeps its name; the field shows the
+  // voice in words beside its mark, so it has no hover.
+  const hoverName = field ? null : tooltip
   if (!editable) {
     return (
-      <AppTooltip content={tooltip} side={tooltipSide}>
+      <AppTooltip content={hoverName} side={tooltipSide}>
         <span
           data-testid={field ? "voice-field" : "gutter-voice"}
           data-explicit={String(explicit)}
@@ -139,7 +143,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
   }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content={tooltip} side={tooltipSide}>
+      <AppTooltip content={hoverName} side={tooltipSide}>
         <PopoverTrigger
           render={
             <button

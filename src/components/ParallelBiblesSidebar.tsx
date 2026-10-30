@@ -29,7 +29,6 @@ import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
@@ -282,22 +281,21 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
     return (
-      <AppTooltip content={t("editor.bibles.openTooltip")} side="left">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={t("editor.bibles.show")}
-          className={cn(
-            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
-            className,
-          )}
-        >
-          <BookMarked className="h-4 w-4" />
-          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
-            {t("editor.bibles.edgeTab")}
-          </span>
-        </button>
-      </AppTooltip>
+      // Its word names it: no hover (AQU-2260).
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={t("editor.bibles.show")}
+        className={cn(
+          "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
+          className,
+        )}
+      >
+        <BookMarked className="h-4 w-4" />
+        <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
+          {t("editor.bibles.edgeTab")}
+        </span>
+      </button>
     )
   }
 

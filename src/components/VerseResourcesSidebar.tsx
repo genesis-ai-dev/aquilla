@@ -314,22 +314,21 @@ function VerseResourcesSidebarBody({
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
     return (
-      <AppTooltip content={t("editor.resources.openTooltip")} side="left">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={t("editor.resources.show")}
-          className={cn(
-            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
-            className,
-          )}
-        >
-          <Shapes className="h-4 w-4" />
-          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
-            {t("editor.resources.edgeTab")}
-          </span>
-        </button>
-      </AppTooltip>
+      // Its word names it: no hover (AQU-2260).
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={t("editor.resources.show")}
+        className={cn(
+          "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-l bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
+          className,
+        )}
+      >
+        <Shapes className="h-4 w-4" />
+        <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
+          {t("editor.resources.edgeTab")}
+        </span>
+      </button>
     )
   }
 

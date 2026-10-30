@@ -24,6 +24,26 @@ const CHANGED: StepOutcome = { kind: "skipped", reason: "changed" }
 /** Linking, replacing or clearing a file's film. Null = no film. */
 export interface FilmLinkData { fileId: string; before: string | null; after: string | null }
 
+/** A film written from here that the project read has not answered yet. */
+export interface PendingFilm {
+  url: string | null
+  /** What the read said when it was written. */
+  readBefore: string | null
+}
+
+/**
+ * The film a file has now, as far as this tab knows: the one written here,
+ * until the project read answers. ANY new answer settles it, not only one
+ * spelled exactly as written (the server may tidy the address): otherwise a
+ * collaborator's later film stays hidden behind ours, and an Undo checked
+ * against ours writes over theirs (review, Oct 29). `settled`: forget it.
+ */
+export function filmNow(read: string | null, pending: PendingFilm | undefined): { film: string | null; settled: boolean } {
+  if (!pending) return { film: read, settled: true }
+  if (pending.url === read || read !== pending.readBefore) return { film: read, settled: true }
+  return { film: pending.url, settled: false }
+}
+
 // ── Cue links ───────────────────────────────────────────────────────────────
 
 /** Pairing (or unpairing) a subtitle line with a heard line that performs it. */

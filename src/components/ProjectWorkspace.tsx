@@ -276,7 +276,7 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
@@ -4300,7 +4300,7 @@ export function ProjectWorkspace() {
   const timingAckOwnWriteRef = useRef<{ note(mode: AudioTimingMode): void; clear(): void } | null>(null)
   // Decision 11: the film each file was last given from here, until the
   // project read catches up — so an Undo right after a link sees it.
-  const filmWrittenRef = useRef<Map<string, string | null>>(new Map())
+  const filmWrittenRef = useRef<Map<string, PendingFilm>>(new Map())
   /** Write the open file's film; false when it was refused (said in a toast). */
   const writeFilmLink = useCallback(
     async (url: string | null): Promise<boolean> => {
@@ -4321,7 +4321,7 @@ export function ProjectWorkspace() {
           author: currentUsername,
         })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        filmWrittenRef.current.set(activeFileId, url)
+        filmWrittenRef.current.set(activeFileId, { url, readBefore: activeFile?.coreMediaUrl ?? null })
         refresh()
         return true
       } catch (e) {
@@ -4342,15 +4342,9 @@ export function ProjectWorkspace() {
   const readFilmLink = useCallback(
     (fileId: string): string | null | undefined => {
       if (fileId !== activeFileId || !activeFile) return undefined
-      const read = activeFile.coreMediaUrl ?? null
-      const written = filmWrittenRef.current
-      if (!written.has(fileId)) return read
-      // The project read has caught up with what was written here.
-      if (written.get(fileId) === read) {
-        written.delete(fileId)
-        return read
-      }
-      return written.get(fileId) ?? null
+      const now = filmNow(activeFile.coreMediaUrl ?? null, filmWrittenRef.current.get(fileId))
+      if (now.settled) filmWrittenRef.current.delete(fileId)
+      return now.film
     },
     [activeFileId, activeFile],
   )

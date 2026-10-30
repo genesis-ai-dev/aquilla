@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from "vitest"
 import {
   CastStepBuilder,
+  filmNow,
   mediaStepHandlers,
   voiceEntryChanges,
   voiceSettingsPatch,
@@ -62,6 +63,20 @@ describe("film.link", () => {
     const { handlers } = ctxFor(state)
     expect(await handlers["film.link"].undo({ fileId: "ep2", before: "https://a", after: null })).toEqual({ kind: "done" })
     expect(state.film.ep2).toBe("https://a")
+  })
+})
+
+// Review, Oct 29: the film just written here stands in for the project read
+// until that read answers. Any new answer ends it, not only one spelled
+// exactly as written (the server may tidy the address), or a collaborator's
+// later film would be hidden behind it and an Undo would write over theirs.
+describe("filmNow", () => {
+  it("is the film written here until the read moves, then the read", () => {
+    const pending = { url: "https://films.example/ep2 ", readBefore: "https://films.example/ep1" }
+    expect(filmNow("https://films.example/ep1", pending)).toEqual({ film: "https://films.example/ep2 ", settled: false })
+    expect(filmNow("https://films.example/ep2", pending)).toEqual({ film: "https://films.example/ep2", settled: true })
+    expect(filmNow("https://films.example/ep9", pending)).toEqual({ film: "https://films.example/ep9", settled: true })
+    expect(filmNow("https://films.example/ep1", undefined)).toEqual({ film: "https://films.example/ep1", settled: true })
   })
 })
 

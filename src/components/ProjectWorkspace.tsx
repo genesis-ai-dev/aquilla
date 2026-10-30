@@ -500,6 +500,7 @@ import { mediaFileKind, startingLayout } from "@/components/timeline/media-layou
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
 import { StationPanel } from "@/components/station/StationPanel"
+import { StationMenuItems } from "@/components/station/StationHistory"
 import type { StationHost } from "@/components/station/station-host"
 import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
 import { STATION_PICKS } from "@/lib/station/picks"
@@ -507,7 +508,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
-import { regionControls } from "@/components/timeline/MediaPanelChrome"
+import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -12856,6 +12857,7 @@ export function ProjectWorkspace() {
     const owner = resolveTakeCellRef.current(cellId)
     if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
   }, [])
+  const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
   const stationShowingRef = useRef(false)
   const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
     if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
@@ -17972,7 +17974,10 @@ export function ProjectWorkspace() {
                 style={timelineStacked && !dock.view.bodyOpen ? { overflow: "hidden" } : undefined}
                 className={timelineStacked && dock.view.isOpen("tl") ? "border-t border-border" : undefined}
               >
-                <MediaDockBody dock={dock} stacked={timelineStacked} />
+                {/* AQU-2327: the Station's own items in its area's ⋯ menu (item 2). */}
+                <PanelMenuItemsContext.Provider value={stationMenuItems}>
+                  <MediaDockBody dock={dock} stacked={timelineStacked} />
+                </PanelMenuItemsContext.Provider>
               </ResizablePanel>
               </ResizablePanelGroup>
               {/* Where a host waits while its area is not on screen. */}

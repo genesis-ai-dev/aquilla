@@ -1360,6 +1360,16 @@ export const editor = defineNamespace({
       },
       "count",
     ),
+    "editor.station.insertedMark": "Inserted: {label}",
+    "editor.station.joinMark": "A part was deleted here",
+    "editor.station.loop": "Loop",
+    "editor.station.loopTip": "Play the selection over and over (L)",
+    "editor.station.removeNoise": "Remove noise…",
+    "editor.station.changeVoice": "Change the voice…",
+    "editor.station.makesVersion": "Makes a new version",
+    "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
+    "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
+    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, ⌘Z undoes.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3152,6 +3162,50 @@ export const editor = defineNamespace({
         placeholders: {
           count: "Number of rows.",
         },
+      },
+      "editor.station.insertedMark": {
+        description: "Tooltip on a stretch of inserted audio not yet saved.",
+        placeholders: {
+          label: "What was inserted.",
+        },
+      },
+      "editor.station.joinMark": {
+        description: "Tooltip on the dashed line where a deleted part was.",
+      },
+      "editor.station.loop": {
+        description: "Button after the speed menu: while on, playback repeats the selected part (or the kept part).",
+      },
+      "editor.station.loopTip": {
+        description: "Tooltip of the Loop button; L is its shortcut.",
+      },
+      "editor.station.removeNoise": {
+        description: "Item in the Station's ⋯ menu: clean the recording's background noise.",
+      },
+      "editor.station.changeVoice": {
+        description: "Item in the Station's ⋯ menu: re-voice the recording into another voice.",
+      },
+      "editor.station.makesVersion": {
+        description: "Grey line under Remove noise and Change the voice: the original is kept.",
+      },
+      "editor.station.hDraftDeleted": {
+        description: "History row for an unsaved delete.",
+        placeholders: {
+          n: "Its number.",
+          len: "Length deleted, e.g. '0.50 s'.",
+          time: "Where.",
+        },
+      },
+      "editor.station.hDraftInserted": {
+        description: "History row for an unsaved insert.",
+        placeholders: {
+          n: "Its number.",
+          label: "What was inserted.",
+          len: "Its length.",
+          time: "Where.",
+        },
+      },
+      "editor.station.hint": {
+        description: "One quiet line under the Station's controls when nothing is selected, naming the shortcuts.",
       },
       "editor.dock.film": {
         description:

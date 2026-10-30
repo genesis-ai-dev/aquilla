@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useCallback, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -19,6 +19,10 @@ import { isApplePlatform } from "@/lib/platform"
 import { STATION_PICKS } from "@/lib/station/picks"
 import { useStationTarget, type StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
+import { StationHistory } from "./StationHistory"
+import { StationLane } from "./StationLane"
+import { StationScroll, StationTransport } from "./StationTransport"
+import { useStationEditor } from "./useStationEditor"
 
 /** The Station's tab content: the open recording, or how to open one. */
 export function StationPanel({ host, visible }: { host: StationHost | null; visible: boolean }) {
@@ -112,12 +116,76 @@ interface OpenProps {
   visible: boolean
 }
 
-function StationOpen({ host, take, target }: OpenProps) {
+function StationOpen({ host, take, target, visible }: OpenProps) {
+  const t = useT()
   const [message, setMessage] = useState<string | null>(null)
+  const ed = useStationEditor(host, take, target, visible)
+  const editable = host.editable
+  const [hovering, setHovering] = useState(false)
+  const unsaved = ed.ops.length > 0
+  const calm = ed.sel == null && !hovering && !unsaved
+
+  const approve = () => {
+    const v = host.voteState(target.cellId, target.audioId)
+    if (v.canVote && !v.voted) void host.vote(target.cellId, target.audioId, true)
+  }
+
+  // Item 33: the keys, while the Station has the focus. A text field keeps
+  // its own; ⌘Z stays the project's (Q4) unless the Station has unsaved
+  // edits of its own to take back first (slice 5).
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const el = e.target as HTMLElement | null
+    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    const k = e.key
+    let handled = true
+    if (k === " ") ed.togglePlay()
+    else if (k === "k" || k === "K") void ed.keepSelection()
+    else if (k === "a" || k === "A") approve()
+    else if (k === "=" || k === "+") ed.zoomBy(2)
+    else if (k === "-") ed.zoomBy(0.5)
+    else if (k === "l" || k === "L") ed.toggleLoop()
+    else if (k === "Escape") ed.clearSel()
+    else handled = false
+    if (handled) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
+  }
+
   return (
-    <div data-testid="station" className="flex h-full min-h-0 flex-col outline-none">
+    <div
+      data-testid="station"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      className="flex h-full min-h-0 flex-col overflow-y-auto outline-none"
+    >
       {message ? <StationMessage text={message} onClose={() => setMessage(null)} /> : null}
       <StationHeader host={host} take={take} target={target} onMessage={setMessage} />
+      {ed.status === "error" ? (
+        <StationNote>{t("editor.station.loadFailed")}</StationNote>
+      ) : (
+        <>
+          <StationLane
+            ed={ed}
+            editable={editable}
+            trackVars={host.trackVars(take.fileId, take.att.slot)}
+            generated={Boolean(take.att.voiceId)}
+            onHover={setHovering}
+          />
+          <StationScroll ed={ed} />
+          <StationTransport ed={ed} editable={editable} calm={calm} hint={t("editor.station.hintCalm")} onMessage={setMessage} />
+          <StationHistory
+            host={host}
+            take={take}
+            cellId={target.cellId}
+            audioId={target.audioId}
+            ops={ed.ops}
+            durationSec={ed.pcm?.duration ?? null}
+            refreshKey={`${take.att.trimStartMs}|${take.att.trimEndMs}|${take.att.validatorCount}|${take.att.label}`}
+          />
+        </>
+      )}
     </div>
   )
 }

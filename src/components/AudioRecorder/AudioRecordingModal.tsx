@@ -34,6 +34,7 @@ import { groupSelection, groupTakesByTrack, piecesOf, takeBaseLabel } from "@/li
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { usePreviewTake } from "./usePreviewTake"
 import { cameraLabel } from "@/lib/timeline/cue-character"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -2471,8 +2472,8 @@ export function AudioRecordingModal({
                       // leaves the takes drawer its room (Sam, 2026-09-28).
                       height={40}
                       // AQU-2235: a generated voice carries its sparkle on any
-                      // track, as the takes list reads it (off the take).
-                      kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId || Boolean(readyAtt.voiceId) ? "generated" : "take"}
+                      // track, by the one rule the takes list reads too.
+                      kind={isGeneratedTake({ selectedGeneratedVoiceAudioId: audioEntry?.selectedGeneratedVoiceAudioId }, readyTakeId, readyAtt) ? "generated" : "take"}
                       trackVars={readyTrackVars}
                       strategy="eager"
                       validation={readyBadge === "self" || readyBadge === "full" ? readyBadge : null}

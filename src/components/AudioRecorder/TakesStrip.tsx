@@ -21,6 +21,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
@@ -632,9 +633,9 @@ export function TakesStrip({
             ? pieces.map((p) => ({ startSec: (p.trimStartMs ?? 0) / 1000, endSec: p.trimEndMs == null ? null : p.trimEndMs / 1000 }))
             : undefined
             // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
-    // an added track's single slot holds both kinds. `voiceId` is set by all
-    // three paths that mint a generated voice.
-    const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
+    // an added track's single slot holds both kinds. AQU-2235: the one rule
+    // every surface that draws the sparkle asks.
+    const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.

@@ -43,6 +43,7 @@ import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { laneLanguage } from "@/lib/lanes/lane-display"
 import { saveTranscript } from "@/lib/transcript-cleanup/save"
@@ -259,7 +260,9 @@ function CellTakeBlockView({
   const kept: KeptWindow = piecesWindow
     ? { start: piecesWindow.start, end: piecesWindow.end, kind: "trim" }
     : keptWindowSec(owner, selectedAudioId, attachment)
-  const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
+  // AQU-2235: the one rule the timeline and the takes list ask too — an added
+  // track's AI voice sits in its single slot, known by its `voiceId`.
+  const isGenerated = isGeneratedTake(owner, selectedAudioId, attachment)
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {

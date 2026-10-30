@@ -221,6 +221,17 @@ describe("its colour", () => {
     expect(hue()).toBe("#eba720")
   })
 
+  // AQU-2235: the sparkle is an AI voice's only mark, so every surface asks the
+  // same question. An added track keeps both kinds in its one slot; the TTS
+  // paths stamp `voiceId` on what they make.
+  it("marks an added track's AI voice as one, as the takes list does", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const voiced = { ...owner, attachments: { [id]: { ...owner.attachments![id], slot: "trk-es", voiceId: "v-ana" } } } as unknown as CellData
+    draw({ owner: voiced, project: withFiles({ "trk-es": { kind: "audio", name: "Spanish", order: 4, color: "amber" } }) })
+    expect(screen.getByTestId("cell-take-waveform-generated")).toBeInTheDocument()
+  })
+
   it("is the source row's blue for a source-audio section, drawn as a take with no sparkle", () => {
     const source = "audio-mark-reading-1700000000-src.wav"
     const owner = {

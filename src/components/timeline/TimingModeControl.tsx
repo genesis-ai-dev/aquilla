@@ -12,12 +12,12 @@
 // play controls, and that bar mounts this component as it is. Everything it
 // needs arrives as props, and it reaches into nothing.
 //
-// Three states, one shape ("Timing: <choice>" with an (i) beside it):
+// Two states, one shape ("Timing: <choice>" with an (i) beside it):
 //   - changeable: the choice is a dropdown with the two choices and a line each;
 //   - read-only (below project lead): the choice as plain text, the (i) says who
-//     can change it;
-//   - locked (a file timed to a film): "Follows source" as plain text, the (i)
-//     says the lines are timed to the film.
+//     can change it.
+// Nothing else locks it (Sam, Oct 28): a file with a film only STARTS on
+// "Follows source" (AQU-2227).
 //
 // Board 22 as drawn: the menu opens with "What decides how long each line is",
 // each choice shows how long the file comes out with it, and a last line says

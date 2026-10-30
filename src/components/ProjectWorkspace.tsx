@@ -2925,8 +2925,8 @@ export function ProjectWorkspace() {
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
-  // timing in Project Settings keep it), else "Follows source". AQU-2204: a
-  // file timed to a film always follows its source.
+  // timing in Project Settings keep it), else "Follows source". AQU-2227: a
+  // file timed to a film STARTS on Follows source; its own choice still wins.
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, {
     hasAudioCues: fileHasAudioCues,
     nothingToFollow: timingNothingToFollow,
@@ -13308,10 +13308,10 @@ export function ProjectWorkspace() {
     })
     return durations.length ? Math.max(...durations) : undefined
   }, [videoDurationForTable, audioMergedCells])
-  // Flow A (file-scoped): switching a file that HAS a linked video to Free
-  // timing hides the video — confirm before emitting. Holds the FILE the
-  // warning was raised for, not a bare flag, so the confirm can only ever
-  // apply to that file.
+  // Whether the film shows. A file that follows its recordings hides it, and
+  // the timeline's own notice says why. Nothing asks before that switch: Flow
+  // A's confirm went with the AQU-2204 lock and was not brought back when
+  // AQU-2227 let a lead switch a file with a film.
   const showVideoPane = shouldShowVideoPane({
     timelineStacked,
     coreMediaUrl: activeFile?.coreMediaUrl,

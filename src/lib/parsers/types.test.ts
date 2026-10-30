@@ -244,9 +244,8 @@ describe("resolveFileTimingMode", () => {
     expect(resolveFileTimingMode({ type: "audio", coreMediaUrl: youTube }, { audioTimingMode: "audioFirst" })).toBe("dubbing")
   })
 
-  // AQU-2204 (Sam, Oct 26): a file timed to a film ONLY follows its source —
-  // the Free timing it could once pick through the video-stays-hidden warning
-  // is gone, and a stored choice from then no longer re-flows it.
+  // AQU-2204 (Sam, Oct 26), corrected by AQU-2227: a file timed to a film
+  // STARTS on Follows source, and a choice of its own still stands.
   it("a file with any footage linked STARTS on Follows source, and keeps a choice of its own (AQU-2204, corrected Oct 27)", () => {
     const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     const film = "https://cdn.test/ep1/master.m3u8"

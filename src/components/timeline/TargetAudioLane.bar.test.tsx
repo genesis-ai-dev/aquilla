@@ -9,7 +9,7 @@
 //   it gives way from the right as the clip narrows
 
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { TargetAudioLane, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import { RowMetricsContext } from "./useRowMetrics"
 import { chipHeightPx, chipPadPx, nameBarPx } from "@/lib/timeline/row-metrics"
@@ -211,13 +211,14 @@ describe("the bar's right end", () => {
     render(<TargetAudioLane {...base} items={[approved()]} session={session} onOpenRecording={vi.fn()} takeMenu={menu()} />)
     const check = screen.getByTestId("tl-target-c1-validated")
     const hover = screen.getByTestId("tl-target-c1-bar-hover")
-    // At rest: the check shows, the hover glyphs wait for the pointer.
+    // At rest: the check shows, the hover glyphs wait out of sight for the pointer.
     expect(check.className).toContain("group-hover/chip:hidden")
-    expect(hover.className).toContain("hidden")
-    expect(hover.className).toContain("group-hover/chip:flex")
+    expect(hover.className).toContain("opacity-0")
+    expect(hover.className).toContain("group-hover/chip:opacity-100")
     fireEvent.pointerEnter(screen.getByTestId("tl-target-c1"))
     expect(screen.getByTestId("tl-target-c1-validated").className).toMatch(/(^|\s)hidden(\s|$)/)
     expect(screen.getByTestId("tl-target-c1-bar-hover").className).toMatch(/(^|\s)flex(\s|$)/)
+    expect(screen.getByTestId("tl-target-c1-bar-hover").className).not.toContain("opacity-0")
     const ids = Array.from(screen.getByTestId("tl-target-c1-bar-hover").children).map((c) => c.getAttribute("data-testid"))
     expect(ids).toEqual(["tl-target-c1-record", "tl-target-c1-more"])
   })
@@ -236,6 +237,29 @@ describe("the bar's right end", () => {
     // 2 s = 80px: record and ⋯ only.
     expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
     expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+  })
+
+  // The glyphs sit after the chip in the tab order, so Shift+Tab from the
+  // next take arrives at them while this chip is not hovered: they must not be
+  // display:none then, only out of sight.
+  it("keeps the glyphs in the tab order at rest", () => {
+    render(<TargetAudioLane {...base} items={[item()]} onOpenRecording={vi.fn()} takeMenu={menu()} />)
+    const hover = screen.getByTestId("tl-target-c1-bar-hover")
+    expect(hover.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    for (const id of ["record", "more"]) expect(screen.getByTestId(`tl-target-c1-${id}`).tabIndex, id).toBe(0)
+  })
+
+  it("keeps a glyph that has keyboard focus showing after the pointer leaves", () => {
+    render(<TargetAudioLane {...base} items={[item()]} onOpenRecording={vi.fn()} takeMenu={menu()} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerEnter(chip)
+    const more = screen.getByTestId("tl-target-c1-more")
+    act(() => more.focus())
+    fireEvent.pointerLeave(chip)
+    expect(document.activeElement).toBe(more)
+    const hover = screen.getByTestId("tl-target-c1-bar-hover")
+    expect(hover.className).not.toMatch(/(^|\s)hidden(\s|$)/)
+    expect(hover.className).not.toContain("opacity-0")
   })
 
   it("draws the glyphs bare, with no button around them", () => {

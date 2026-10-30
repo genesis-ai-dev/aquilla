@@ -1195,8 +1195,10 @@ function TargetAudioChip({
         onSeek?.(cell.id)
       }}
       onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => {
-        setHovered(false)
+      onPointerLeave={(e) => {
+        // AQU-2235: a bar glyph with keyboard focus stays showing — hiding it
+        // under the focus would drop the focus with it.
+        if (!e.currentTarget.contains(document.activeElement)) setHovered(false)
         setBladeX(null)
       }}
       onPointerMove={(e) => {
@@ -1510,7 +1512,15 @@ function TargetAudioChip({
           {barHasHover && (
             <span
               data-testid={`tl-target-${testKey}-bar-hover`}
-              className={cn("h-full flex-none items-center gap-0.5", hovered ? "flex" : "hidden group-hover/chip:flex")}
+              // Out of sight at rest, never display:none: the glyphs sit after
+              // the chip in the tab order, so Shift+Tab from the next take
+              // must still reach them. Focus inside the chip counts as hover.
+              className={cn(
+                "flex h-full flex-none items-center gap-0.5",
+                hovered
+                  ? null
+                  : "pointer-events-none absolute right-[5px] top-0 opacity-0 group-hover/chip:pointer-events-auto group-hover/chip:static group-hover/chip:opacity-100",
+              )}
             >
               {barPlay && preview && (
                 <span

@@ -6848,6 +6848,15 @@ function EditorRow({
     if (!session) return
     void settleSourceStep(session, { cellId: cell.id, fileId: cell.fileId })
   }, [sourceEditing, cell.id, cell.fileId])
+  // …and when the row leaves the screen with the editor still open (the list
+  // is virtualized): the saves it made are still that one step (review, Oct 29).
+  const sourceStepWhereRef = useRef({ cellId: cell.id, fileId: cell.fileId })
+  sourceStepWhereRef.current = { cellId: cell.id, fileId: cell.fileId }
+  useEffect(() => () => {
+    const session = sourceStepRef.current
+    sourceStepRef.current = null
+    if (session) void settleSourceStep(session, sourceStepWhereRef.current)
+  }, [])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.

@@ -128,3 +128,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run release-cut.yml --ref dev
+      # The same rule silences notify-help-bot.yml's tag trigger, so the
+      # aquilla-help bot is woken by hand too. The check job deploys only an
+      # untagged branch, so the tag on HEAD is the one tag-release.sh just
+      # pushed. Run on dev so a fix to the ping lands without a release.
+      - name: Wake the help bot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)"
+          test -n "$tag" || { echo "::error::no calver tag on HEAD after the deploy"; exit 1; }
+          gh workflow run notify-help-bot.yml --ref dev -f tag="$tag" -f sha="$(git rev-parse HEAD)"

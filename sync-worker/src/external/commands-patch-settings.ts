@@ -92,6 +92,13 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   // project. Raising them hides more; an agent may never lower them.
   'rosterViewMinRole',
   'memberProgressViewMinRole',
+  // AQU-2305: who may bring a NEW source file into this project. The same
+  // stricter-only key, and it has to be here rather than only in the
+  // auth-worker's write refusal: this path writes project_settings inside
+  // sync-worker, so without the directional guard an agent could lower a floor
+  // an owner set — and then import whatever it liked through the floor it had
+  // just dropped.
+  'importMinRole',
 ]
 
 const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)

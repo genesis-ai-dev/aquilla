@@ -2580,7 +2580,9 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                   the Film button and the timeline's Sources menu — together.
                   Unset, a project of books and documents hides them and any
                   other shows them. Not a permission: nothing on the server
-                  reads it. The long explanation sits behind the (i). */}
+                  reads it. The long explanation sits behind the (i).
+                  AQU-2262: it saves as it is ticked, one Undo step, and Undo
+                  puts "unset" back, so the project's kind decides again. */}
               <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
                   id="film-and-sources"
@@ -2604,6 +2606,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                     <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
                   </InfoReveal>
                 </span>
+                <SaveStatus id="filmAndSources" className="max-w-56 text-right" />
               </div>
             </CardContent>
           </Card>

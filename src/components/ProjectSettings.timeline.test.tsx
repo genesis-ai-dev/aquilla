@@ -19,6 +19,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+import { historyReady, historyView, resetHistoryForTests } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
+import { registerSettingsAccessor } from "@/lib/history/settings-access"
 
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
@@ -327,5 +330,35 @@ describe("ProjectSettings — film and sources (AQU-1758)", () => {
     fireEvent.click(box("settings-film-and-sources"))
     await waitFor(() => expect(sent()).toEqual([{ filmAndSources: true }]))
     expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+  })
+
+  // AQU-2262: like every setting on the page, the change says Saved beside
+  // the box and is one Undo step named for the setting; Undo clears the
+  // project's own choice, so the project's kind decides again.
+  it("says Saved beside it, is one Undo step named for it, and Undo clears the choice", async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    // The server's copy, as the page's writes have left it.
+    const leave = registerSettingsAccessor(PROJECT_ID, {
+      read: () => Object.assign({}, currentSettings, ...sent()),
+      write: async (p) => { await patch(p) },
+    })
+    try {
+      currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+      renderSettings()
+      await historyReady()
+      fireEvent.click(box("settings-film-and-sources"))
+      await waitFor(() => expect(sent()).toEqual([{ filmAndSources: true }]))
+      expect(await screen.findByTestId("save-status-filmAndSources")).toHaveTextContent("Saved")
+      await waitFor(() => expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepChangeSetting"))
+      expect(historyView().nextUndo?.labelParams).toMatchObject({
+        setting: "Show the film and sources tools in the media view",
+        settingKey: "projectSettings.timeline.filmAndSourcesLabel",
+      })
+      await userEvent.click(screen.getByTestId("settings-undo"))
+      await waitFor(() => expect(sent().at(-1)).toEqual({ filmAndSources: null }))
+    } finally {
+      leave()
+    }
   })
 })

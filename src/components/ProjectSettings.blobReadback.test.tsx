@@ -240,6 +240,14 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
     expect(screen.getByTestId("settings-allow-track-editing")).not.toBeChecked()
   })
 
+  // AQU-1758: absent, a project that is not all books shows the tools, so a
+  // stored false must show off.
+  it("filmAndSources", () => {
+    currentSettings = { filmAndSources: false }
+    renderSettings("audio-media")
+    expect(screen.getByTestId("settings-film-and-sources")).not.toBeChecked()
+  })
+
   it("draftContext.precedingTargetCells", () => {
     currentSettings = { draftContext: { precedingTargetCells: 7 } }
     renderSettings("ai")

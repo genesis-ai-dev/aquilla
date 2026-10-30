@@ -26,6 +26,8 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   harmonize_min_role: "projectSettings.harmonization.minRoleLabel",
   timingLocked: "projectSettings.timeline.lockLabel",
   allowTrackEditing: "projectSettings.timeline.trackEditingLabel",
+  // AQU-1758: dev's Film and sources setting, beside track editing.
+  filmAndSources: "projectSettings.timeline.filmAndSourcesLabel",
   draftContext: "projectSettings.draftContext.precedingCellsLabel",
   termMatching: "projectSettings.termMatching.title",
   projectLeadsManageVoices: "projectSettings.voice.leadsManageLabel",

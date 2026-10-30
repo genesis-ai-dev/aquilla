@@ -270,9 +270,33 @@ export const settings = defineNamespace({
     "settings.providerKeys.restrictedNotice":
       "Only org maintainers and owners can set org-level keys. You can still " +
       "save a personal key in your project or personal settings.",
+    // AQU-2263: it said voices use this key; none do yet (see key-in-use.ts),
+    // so it says what the key is for and the line under it says what is used.
     "settings.providerKeys.geminiTtsDescription":
-      "Used by Gemini TTS synthesis for all org members when no project or " +
-      "personal key is present. Precedence: project key > personal key > org key.",
+      "A Gemini key for the whole organization, for voices when a project and the person have no key of their own.",
+    // ── AQU-2263: the one description of "Share usage data", in Preferences
+    // and onboarding alike (ShareUsageDataSetting) ──
+    "settings.shareUsageData.description":
+      "Usage events, like creating a project or exporting, and session recordings that help us diagnose problems. " +
+      "Never the contents of your translations or files.",
+    // ── AQU-2263: which AI key is in use right now (KeyInUseLine) ──
+    // {name} is the platform provider's name, "Aquilla".
+    "settings.keyInUse.platform": "Using {name}. No key needed.",
+    "settings.keyInUse.projectKey": "Using this project's key (this device only).",
+    "settings.keyInUse.personalKey": "Using your own key (saved in this browser).",
+    "settings.keyInUse.preferences": "Using your own key (Preferences).",
+    "settings.keyInUse.preferencesNoKey": "Using your own provider (Preferences), which needs no key.",
+    "settings.keyInUse.noKeyNeeded": "Using this project's provider, which needs no key.",
+    "settings.keyInUse.missing": "No key is in use, and this provider needs one.",
+    "settings.keyInUse.geminiMissing": "No Gemini key yet.",
+    "settings.keyInUse.geminiOrgUnused":
+      "No key is in use. Your organization has a Gemini key, but voices don't use it yet.",
+    "settings.keyInUse.orgGeminiSaved":
+      "Saved, but voices don't use the organization's key yet: each project or person still needs their own.",
+    "settings.keyInUse.orgGeminiNone": "No organization key.",
+    "settings.keyInUse.prefsActive": "In use in every project that doesn't have its own provider.",
+    // {name} is the platform provider's name, "Aquilla".
+    "settings.keyInUse.prefsNone": "Not set. Projects use {name} unless they have their own provider.",
     // "Clear" button → common.clear (identical text)
 
     // ── PersonalProviderSection (Preferences → AI provider keys) ──
@@ -704,6 +728,18 @@ export const settings = defineNamespace({
         description:
           "Body of that dialog. The confirm button clears those projects' own " +
           "number so they follow the organization; the cancel button leaves them alone.",
+      },
+      "settings.keyInUse.platform": {
+        description:
+          "Beside an AI key field or provider choice (Project settings → AI, Preferences, the Set up AI dialog): " +
+          "drafts currently go to the platform's own AI, which needs no key of yours.",
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
+      },
+      "settings.keyInUse.prefsNone": {
+        description:
+          "Under 'AI provider (advanced)' in Preferences → AI provider keys, when the person has saved no provider " +
+          "of their own: projects then use the platform's AI unless the project set its own provider.",
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.overrideStatus.allFollow": {
         description:

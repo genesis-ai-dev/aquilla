@@ -126,7 +126,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
-    "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
@@ -526,9 +525,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",
     "projectSettings.ai.contextWindowLarge": "Large — chapter",
     "projectSettings.ai.contextWindowDescription": "Controls how much surrounding passage context is included.",
-    "projectSettings.ai.assistantLanguageLabel": "Assistant language",
+    // AQU-2263: the team's fallback for the assistant's answers (it was saved
+    // but never read). Each person's own choice in Preferences wins over it.
+    "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
-    "projectSettings.ai.assistantLanguageDescription": "Language the AI assistant uses in chat responses. Independent of the UI locale.",
+    "projectSettings.ai.assistantLanguageDescription":
+      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
     "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +
@@ -670,28 +672,28 @@ export const projectSettings = defineNamespace({
       "Whether chapter headings, section titles and book names count toward " +
       "this project's translation and validation percentages. Leaving them " +
       "out means a book reads 100% once every verse is done.",
-    "projectSettings.structuralCells.inherit": "Organization default",
-    "projectSettings.structuralCells.currentlyCounting":
-      "The organization currently counts them",
-    "projectSettings.structuralCells.currentlyExcluding":
-      "The organization currently leaves them out",
-    "projectSettings.structuralCells.count": "Count them",
-    "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
-    // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
+    // ── ProjectVisibilitySection ── AQU-2263: who sees this project's member
+    // list and each member's progress; a second home for the dashboard badges.
+    "projectSettings.visibility.groupLabel": "Member list and progress",
+    "projectSettings.visibility.groupDescription":
+      "Your organization decides who can see these. A project can make them stricter, never looser.",
+    "projectSettings.visibility.rosterLabel": "Who can see the member list",
+    "projectSettings.visibility.rosterDescription":
+      "The member list and member count, here and on the project's dashboard.",
+    "projectSettings.visibility.progressLabel": "Who can see each member's progress",
+    "projectSettings.visibility.progressDescription":
+      "Each member's progress on the project's dashboard. They also need to see the member list.",
+    // {role} is a plural role name: "Owners".
+    "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
+    // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
       "Whether validating a cell copies its translation into the other cells in " +
       "the same file whose source text is identical. Filled-in cells are left " +
       "unvalidated, and cells someone has already validated are never changed.",
-    "projectSettings.autoPropagateRepetitions.inherit": "Organization default",
-    "projectSettings.autoPropagateRepetitions.currentlyOn":
-      "The organization currently propagates them",
-    "projectSettings.autoPropagateRepetitions.currentlyOff":
-      "The organization currently leaves them alone",
-    "projectSettings.autoPropagateRepetitions.on": "Propagate",
-    "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     // AQU-1768: "(text)", like "Required validators (text)" above it — the
@@ -1719,11 +1721,6 @@ export const projectSettings = defineNamespace({
         description:
           "Placeholder in the second and subsequent target-language boxes of the " +
           "create dialog, where the first box carries the full example placeholder.",
-      },
-      "projectSettings.create.addTargetLanguageAction": {
-        description:
-          "Label of the button under the target-language boxes in the create dialog " +
-          "that appends one more empty box (one per additional target lane).",
       },
       "projectSettings.create.bulkTargetLanguagesHint": {
         description:
@@ -3302,6 +3299,15 @@ export const projectSettings = defineNamespace({
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
           value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.visibility.onlyRoleLoosens": {
+        description:
+          "Under 'Who can see the member list' or 'Who can see each member's progress' in Project settings → Members, " +
+          "when this project set a stricter value than the reader's own role: only people with that role or higher may " +
+          "make it less strict again.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Owners'.",
         },
       },
       "projectSettings.mediaDefaults.cellEditingNobody": {

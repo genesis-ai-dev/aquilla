@@ -98,6 +98,8 @@ describe("Preferences", () => {
     renderAt("/preferences/privacy")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
+    // AQU-2263: the one Share usage data setting, as onboarding shows it.
+    expect(screen.getByTestId("share-usage-data")).toBeInTheDocument()
   })
 
   it("workspace settings use a right-side layout select and confirm switch", () => {
@@ -111,7 +113,8 @@ describe("Preferences", () => {
   it("translator profile renders one settings row per field", () => {
     renderAt("/preferences/profile")
     expect(screen.getByRole("heading", { name: "Translator profile" })).toBeInTheDocument()
-    expect(screen.getByLabelText("Assistant language")).toBeInTheDocument()
+    // AQU-2263: named for what it does, so it no longer shares a name with the project setting.
+    expect(screen.getByLabelText("The assistant answers me in")).toBeInTheDocument()
     expect(screen.getByLabelText("Age")).toBeInTheDocument()
     expect(screen.getByLabelText("Other relevant information")).toBeInTheDocument()
     expect(screen.queryByText("Profile fields")).not.toBeInTheDocument()

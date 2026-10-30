@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { FieldLabel } from "@/components/ui/field"
+import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { ShieldCheck, ChevronLeft } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -28,27 +27,9 @@ export function PrivacyStep({ onNext, onBack }: { onNext: () => void; onBack: ()
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <FieldLabel htmlFor="analytics-consent" className="text-sm font-medium">
-              {t("onboarding.privacy.shareUsageData")}
-            </FieldLabel>
-            <p className="text-xs text-muted-foreground">
-              {t("onboarding.step.privacy.shareDescription")}
-            </p>
-          </div>
-          <Switch
-            id="analytics-consent"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-        </div>
-        {!enabled && (
-          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-            {t("onboarding.privacy.disabledWarning")}
-          </p>
-        )}
+      {/* AQU-2263: the same Share usage data setting as Preferences. */}
+      <div className="rounded-lg border bg-card text-start">
+        <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
       </div>
 
       <div className="space-y-2">

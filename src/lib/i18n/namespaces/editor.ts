@@ -493,11 +493,13 @@ export const editor = defineNamespace({
     "editor.view.footnotesTray": "Bottom tray",
     "editor.view.textDirection": "Text Direction",
     "editor.view.fontSize": "Font Size",
+    // AQU-2263: under the two font size rows. {size} is a number of pixels.
+    "editor.view.fontSizeDefault": "Default from Preferences: {size}px",
+    "editor.view.fontSizeReset": "Reset to default",
     "editor.view.directionAuto": "Auto",
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
-    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -4768,6 +4770,12 @@ export const editor = defineNamespace({
           "is a section heading.",
         maxLength: 22,
       },
+      "editor.view.fontSizeDefault": {
+        description:
+          "Under the Source and Target font size rows in a file's Editor settings: the size an untouched file uses, " +
+          "which comes from the app font size in Preferences.",
+        placeholders: { size: "A whole number of pixels, e.g. 14." },
+      },
       "editor.view.fontSize": {
         description:
           "Section heading in the view-settings popover for the per-column text " +
@@ -4804,17 +4812,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
-        placeholders: {
-          side:
-            "Which column, lower-cased by the app from editor.column.source / " +
-            "editor.column.target.",
-        },
-      },
-      "editor.view.useAppFontSize": {
-        description:
-          "Tooltip and screen-reader name of the button that drops a column's " +
-          "custom size so it follows the app-wide font size again. Shown only " +
-          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +

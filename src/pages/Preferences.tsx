@@ -33,6 +33,7 @@ import { PersonalProviderSection } from "@/components/settings/PersonalProviderS
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { LocalLlmSection } from "@/components/settings/LocalLlmSection"
 import { UsageSection } from "@/components/settings/UsageSection"
+import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { CommentNotificationsSection } from "@/components/settings/CommentNotificationsSection"
 import {
@@ -309,27 +310,8 @@ function GeneralSection({
           }
         />
       </div>
-      <SettingsRow
-        label={t("onboarding.privacy.shareUsageData")}
-        description={
-          <>
-            {t("onboarding.preferences.privacy.rowDescription")}
-            {!enabled ? (
-              <span className="mt-1 block text-amber-600 dark:text-amber-400">
-                {t("onboarding.privacy.disabledWarning")}
-              </span>
-            ) : null}
-          </>
-        }
-        control={
-          <Switch
-            id="analytics-consent"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-            aria-label={t("onboarding.privacy.shareUsageData")}
-          />
-        }
-      />
+      {/* AQU-2263: the one Share usage data setting, as onboarding shows it. */}
+      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
       <NavRow
         to="/preferences/workspace"
         state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}

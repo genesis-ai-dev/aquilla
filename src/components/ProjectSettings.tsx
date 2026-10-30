@@ -132,6 +132,10 @@ import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSec
 import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -837,6 +841,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
   const [geminiApiKey, setGeminiApiKey] = useState("")
+  // AQU-2263: which key drafts and voices use right now — from what is SAVED
+  // (the baseline), the Preferences override and this browser's own keys.
+  const providerOverride = useUserProviderOverride()
+  const completionInUse = completionKeyInUse({
+    settings: baseline ? { provider: baseline.provider, endpoint: baseline.endpoint, apiKey: baseline.apiKey } : undefined,
+    override: providerOverride,
+    personalKey: completionUserKey,
+  })
+  const geminiInUse = geminiKeyInUse({
+    projectKey: baseline?.geminiApiKey,
+    personalKey: geminiUserKey,
+    orgHasKey: Boolean(orgSettingsForProject.orgProviderKeys?.["gemini-tts"]),
+  })
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -1614,7 +1631,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     // AQU-2259: only the "this setting moved" note is left here, until it expires.
     { id: "section-user", label: "User", keywords: ["username", "author"], visible: settingMovedNotesShowing() },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
@@ -2350,7 +2367,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared || cellEditingFloor == null}
+                      disabled={!canEditShared}
                       value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
                         setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)
@@ -2479,6 +2496,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+        {/* AQU-2263: who sees the member list and each member's progress. The
+            organization's policy, which a project may only make stricter; a
+            second home beside the dashboard's badges, which stay. */}
+        {id && isCloudProject && projectPolicy.ready && sectionsToRender.some((s) => s.id === "section-members") && (
+          <div id="section-member-visibility">
+            <ProjectVisibilitySection
+              roster={projectPolicy.rosterViewMinRole}
+              progress={projectPolicy.memberProgressViewMinRole}
+              roleLevel={project?.syncRole?.level ?? 0}
+              canEdit={canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
+          </div>
         )}
 
         {/* AQU-1672: a direct, first-class entry to the translation brief.
@@ -2716,7 +2748,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </span>
               }
             >
-              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
+              <SettingsRow
+                label={t("projectSettings.advancedLlm.providerLabel")}
+                description={<KeyInUseLine purpose="completion" kind={completionInUse} testId="completion-key-in-use" />}
+                block
+              >
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -2968,6 +3004,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   <>
                     {t("projectSettings.voice.geminiKeyHelp")}
                     <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                    <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="gemini-key-in-use" />
                   </>
                 }
                 block

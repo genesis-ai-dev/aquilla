@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info, Plus, X } from "lucide-react"
+import { Info, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
@@ -1722,19 +1723,13 @@ function TargetLanguageInputs({
         </div>
       ) : (
         <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
+          <AddLanguageButton
             disabled={disabled || !canAddMore}
-            data-testid="create-add-target-lang"
+            testId="create-add-target-lang"
             onClick={() =>
               sync([...lanes, { id: nextLaneId.current++, value: "", delivers: "text" }], bulk)
             }
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            {t("projectSettings.create.addTargetLanguageAction")}
-          </Button>
+          />
         </div>
       )}
     </div>

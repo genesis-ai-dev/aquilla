@@ -146,3 +146,23 @@ export function slotAudible(
   if (isDefaultTrackSlot(slot)) return state.target
   return state.bySlot?.[slot] !== false
 }
+
+/**
+ * AQU-2252 (Sam, Oct 29): what laying a file out FOLLOWING ITS RECORDINGS
+ * needs to know about its tracks — every added audio track's slot (its takes
+ * are laid in beside the main track's), and which of those tracks were made
+ * layers (their takes set no line's length; every other track's do).
+ *
+ * The ONE answer the timeline, the transport and the play strip all pass to
+ * the programme, so none of them can count a line at a different length.
+ * Structural, so this leaf stays free of the track module.
+ */
+export function programmeTrackSlots(
+  tracks: readonly { id: string; kind: string; setsLineLengths?: boolean }[],
+): { layerSlots: string[]; layerTrackSlots: string[] } {
+  const added = tracks.filter((tr) => tr.kind === "audio")
+  return {
+    layerSlots: added.map((tr) => slotForTrack(tr.id)),
+    layerTrackSlots: added.filter((tr) => tr.setsLineLengths === false).map((tr) => slotForTrack(tr.id)),
+  }
+}

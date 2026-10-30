@@ -12,6 +12,7 @@ import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
+import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 
@@ -579,6 +580,90 @@ describe("TimelineEditor", () => {
     expect(item()).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
     localStorage.removeItem("aquilla:timelineSnap")
+  })
+
+  // AQU-2251 (Sam, Oct 28): a playback setting, on by default.
+  it("Skip lines with nothing to play is on by default, toggles, and is remembered on this device", () => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies={() => true}
+        />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveTextContent("Skip lines with nothing to play")
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBe("off")
+      expect(getSkipSilentLinesPref()).toBe(false)
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
+  })
+
+  // AQU-2251 (Sam, Oct 29): the row is shown only where it can change
+  // something — the workspace works that out from the whole file, under its
+  // timing (lib/timeline/silent-lines `skipSilentLinesCanChange`).
+  it("Skip lines with nothing to play is shown only where the file has a line with nothing to play", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    // The ⋯ is open (its quality row is there), and the row is not in it.
+    expect(inTimelineSettings(() => screen.getByTestId("tl-quality-toggle"))).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-skip-silent-toggle")).toBeNull()
+    expect(screen.queryByText("Skip lines with nothing to play")).toBeNull()
+
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies={() => true}
+      />,
+    )
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toHaveTextContent(
+      "Skip lines with nothing to play",
+    )
+  })
+
+  // Review finding (Oct 29): the answer lays out every chapter of a book, so
+  // the workspace worked it out again on every edit. It is asked only when the
+  // ⋯ opens.
+  it("asks whether Skip lines with nothing to play applies only when the ⋯ opens", () => {
+    const applies = vi.fn(() => true)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies={applies}
+      />,
+    )
+    expect(applies).not.toHaveBeenCalled()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toBeInTheDocument()
+    expect(applies).toHaveBeenCalled()
+  })
+
+  it("Skip lines with nothing to play reads back off after a reload", () => {
+    localStorage.setItem("aq.skip-silent-lines.v1", "off")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies={() => true}
+        />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBeNull()
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
   })
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {
@@ -1527,6 +1612,149 @@ describe("TimelineEditor — audio-first mode", () => {
     const perSec = px(take, "width") / 2
     expect(px(take, "left")).toBeCloseTo(0.5 * perSec, 0)
     expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
+  })
+
+  // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
+  // move a recorded take around in the timeline." Following the recordings a
+  // take is NOT locked to the front of its line — dragging it right leaves a
+  // pause before it, dragging it left shortens that pause back to none. What
+  // is stored is the pause, measured from the line's own start, never the
+  // programme second the chip was dropped on.
+  describe("following the recordings, a take still moves inside its line (AQU-2215)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placedCell = (offsetMs?: number) =>
+      cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: {
+            type: "audio", url: "frontier-audio://take", durationMs: 2_000,
+            ...(offsetMs != null ? { targetOffsetMs: offsetMs } : {}),
+          },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+
+    const renderOne = (offsetMs: number | undefined, onRetimeTarget: () => void) =>
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[placedCell(offsetMs)]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+
+    /** The chip's own px/s, so the drag does not depend on the default zoom. */
+    const chipPxPerSec = (chip: Element) => px(chip, "width") / 2
+
+    it("dragging the take right stores the pause it leaves before its line", () => {
+      const onRetimeTarget = vi.fn()
+      renderOne(undefined, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 + perSec })
+      fireEvent.pointerUp(window, { clientX: 400 + perSec })
+      // Dragged 1 s right on a line starting at file second 0 → a 1 s pause,
+      // so the anchor stored is 1. Before this, the handler was withheld
+      // entirely in this mode and the chip could not be dragged at all.
+      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+      const [cellId, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      expect(cellId).toBe("p1")
+      expect(anchorSec).toBeCloseTo(1, 2)
+    })
+
+    it("dragging it back past the line's start shortens the pause to none, never below", () => {
+      const onRetimeTarget = vi.fn()
+      // Starts with a 1.5 s pause already.
+      renderOne(1_500, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 - perSec * 5 })
+      fireEvent.pointerUp(window, { clientX: 400 - perSec * 5 })
+      const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      // The line's own start — a take never begins before the line it performs.
+      expect(anchorSec).toBeCloseTo(0, 2)
+    })
+
+    it("a take of unknown length stays locked — there is no pause it could hold", () => {
+      const onRetimeTarget = vi.fn()
+      const vague = cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: { type: "audio", url: "frontier-audio://take" },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[vague]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+      const chip = screen.getByTestId("tl-target-p1")
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 500 })
+      fireEvent.pointerUp(window, { clientX: 500 })
+      // A placement the programme would not read back must not be stored: the
+      // chip would simply spring straight back to the front of its line.
+      expect(onRetimeTarget).not.toHaveBeenCalled()
+    })
+  })
+
+  // AQU-2267 (Sam, Oct 29: "B makes the most sense"): a move moves a take by
+  // the same distance in both timings. The LOTE sermon's line 2 take sits
+  // 1.0 s before its line following the source; following the recordings it
+  // starts on its line. Dragged 0.2 s right there, it must be stored at −0.8 s
+  // following the source and +0.2 s following the recordings — before, the
+  // one place it had became "line start + 0.2" in both.
+  describe("a move carries across both timings (AQU-2267)", () => {
+    const sermonTake = (id: string) => `audio-${id}-1700000000-take.webm`
+    const sermonLine = (id: string, startTime: number, endTime: number, take: Record<string, number>) =>
+      cell({
+        id, medium: "media", startTime, endTime, original: id, selectedAudioId: sermonTake(id),
+        attachments: {
+          [sermonTake(id)]: { type: "audio", url: "frontier-audio://take", slot: "recording", ...take },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+    const sermon = () => [
+      sermonLine("l1", 0, 3.2, { durationMs: 2_600 }),
+      sermonLine("l2", 3.4, 7, { durationMs: 4_600, targetOffsetMs: -1_000 }),
+      sermonLine("l3", 7.3, 8.4, { durationMs: 1_700, targetOffsetMs: 203 }),
+    ]
+    const renderSermon = (mode: "dubbing" | "audioFirst", onRetimeTarget: () => void) =>
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="lote" coreMediaUrl={null} editable cells={sermon()} timingMode={mode}
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+    const dragBy = (chip: Element, sec: number) => {
+      // Measured off line 1's take (2.6 s, drawn whole): line 2's leads into
+      // it following the source, so it is drawn short at rest.
+      const perSec = px(screen.getByTestId("tl-target-l1"), "width") / 2.6
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 + perSec * sec })
+      fireEvent.pointerUp(window, { clientX: 400 + perSec * sec })
+    }
+
+    it("0.2 s right following the recordings: −0.8 s following the source, +0.2 s following the recordings", () => {
+      const onRetimeTarget = vi.fn()
+      renderSermon("audioFirst", onRetimeTarget)
+      dragBy(screen.getByTestId("tl-target-l2"), 0.2)
+      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+      const [cellId, , audioId, place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
+      expect([cellId, audioId]).toEqual(["l2", sermonTake("l2")])
+      expect(place).toEqual({ targetOffsetMs: -800, recordingsOffsetMs: 200 })
+    })
+
+    it("0.5 s left following the source: −1.5 s there, and following the recordings no further than its line's start", () => {
+      const onRetimeTarget = vi.fn()
+      renderSermon("dubbing", onRetimeTarget)
+      dragBy(screen.getByTestId("tl-target-l2"), -0.5)
+      const [, , , place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
+      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
+    })
   })
 
   it("picking a choice closes the menu (AQU-2204)", async () => {
@@ -2819,6 +3047,88 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.getByTestId("tl-delete-track-dialog")).toHaveTextContent("Spanish")
     fireEvent.click(screen.getByTestId("tl-delete-track-confirm"))
     expect(editing.onDelete).toHaveBeenCalledWith(["trk-es"])
+  })
+
+  // ── AQU-2252 (Sam, Oct 29): a track can be made a layer ─────────────────
+  describe("Sets line lengths (AQU-2252)", () => {
+    const voiced = (music: { setsLineLengths?: false } = {}) => deriveTracksForFile({
+      trackOverrides: {
+        boaz: { kind: "audio", name: "Boaz", order: 5 },
+        music: { kind: "audio", name: "Music", order: 6, ...music },
+      },
+    })
+    const rowOf = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")].find((r) => r.textContent?.includes(name))!
+
+    it("is a checkable item on an added track's menu, following the recordings, and switching it says which way", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Boaz"))
+      const item = screen.getByRole("menuitemcheckbox", { name: "Sets line lengths" })
+      expect(item.getAttribute("aria-checked")).toBe("true")
+      fireEvent.click(item)
+      expect(editing.onSetLineLengths).toHaveBeenCalledWith(["boaz"], false)
+    })
+
+    it("is unticked on a track made a layer, and ticking it makes the track set lengths again", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Music"))
+      const item = screen.getByRole("menuitemcheckbox", { name: "Sets line lengths" })
+      expect(item.getAttribute("aria-checked")).toBe("false")
+      fireEvent.click(item)
+      expect(editing.onSetLineLengths).toHaveBeenCalledWith(["music"], true)
+    })
+
+    it("a layer track's subtitle says so in words, following the recordings", () => {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced({ setsLineLengths: false })} onReorderTrack={vi.fn()}
+        />,
+      )
+      expect(rowOf("Music")).toHaveTextContent("layer · doesn't set line lengths")
+      expect(rowOf("Boaz")).toHaveTextContent("takes · generated")
+    })
+
+    it("following the source, neither the item nor the words are there: nothing sets a line's length", () => {
+      const editing = { ...editingActions(), onSetLineLengths: vi.fn() }
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="dubbing" tracks={voiced({ setsLineLengths: false })}
+          onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+        />,
+      )
+      expect(rowOf("Music")).toHaveTextContent("takes · generated")
+      fireEvent.contextMenu(rowOf("Music"))
+      expect(screen.getByText("Rename")).toBeTruthy()
+      expect(screen.queryByRole("menuitemcheckbox", { name: "Sets line lengths" })).toBeNull()
+    })
+
+    it("is not offered without track editing", () => {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+          timingMode="audioFirst" tracks={voiced()} onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+        />,
+      )
+      fireEvent.contextMenu(rowOf("Boaz"))
+      expect(screen.getByText("Rename")).toBeTruthy()
+      expect(screen.queryByRole("menuitemcheckbox", { name: "Sets line lengths" })).toBeNull()
+    })
   })
 
   // ── AQU-646 stage 6D ───────────────────────────────────────────────────────

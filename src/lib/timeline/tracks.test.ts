@@ -393,6 +393,28 @@ describe("mergeTrackOverrides — the kinds a user makes (stage 2)", () => {
     expect(tracks[2].sourceTrackId).toBeUndefined()
   })
 
+  // AQU-2252 (Sam, Oct 29): every track sets its lines' lengths unless it was
+  // made a layer, which is the only thing stored.
+  it("carries an added audio track made a layer", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", name: "Music", setsLineLengths: false } })
+    expect(tracks[3]).toMatchObject({ id: "trk-a", setsLineLengths: false })
+  })
+
+  it("leaves an added audio track setting lengths by default — absent, not invented", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", name: "Boaz" } })
+    expect(tracks[3].setsLineLengths).toBeUndefined()
+  })
+
+  it("ignores the switch on the main track, which always sets its lines' lengths", () => {
+    const tracks = merge({ "target-audio": { setsLineLengths: false } as never })
+    expect(tracks[2].setsLineLengths).toBeUndefined()
+  })
+
+  it("ignores the switch on a folder, which holds no takes", () => {
+    const tracks = merge({ grp: { kind: "folder", name: "Dubs", setsLineLengths: false } })
+    expect(tracks.find((t) => t.id === "grp")!.setsLineLengths).toBeUndefined()
+  })
+
   // The palette is this build's rendering, not the contract — see
   // PersistedTrackPatch.color. An id from a newer client has to survive the
   // merge intact so the renderer is the one that decides to fall back.

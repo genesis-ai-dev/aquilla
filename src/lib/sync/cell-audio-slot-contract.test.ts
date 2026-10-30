@@ -44,6 +44,7 @@ interface Row {
   trim_start_ms: number | null
   trim_end_ms: number | null
   target_offset_ms: number | null
+  recordings_offset_ms?: number | null
   timings_json: string | null
   selected: number
   created_ts: number
@@ -168,5 +169,32 @@ describe("what ASR heard reaches the Transcribe lens", () => {
     const r = transcriptRowOf(cell)
     expect(r).toEqual(expect.objectContaining({ heard: "eema", transcript: "Yesu", aiCleaned: true }))
     expect(cell.attachments?.[DEFAULT_TAKE]?.asrModel).toBe("omni-ctc")
+  })
+})
+
+// AQU-2267 (Sam, Oct 29): a take keeps its place in each timing — following the
+// source (`target_offset_ms`) and following the recordings
+// (`recordings_offset_ms`). The merge rebuilds every attachment field by field,
+// so a column the route returns and the merge does not list never reaches the
+// timeline: the take would read one place in both timings again.
+describe("a take's place in both timings reaches the timeline (AQU-2267)", () => {
+  it("collapse → merge carries both places, zero included", () => {
+    const cell = cellFor([
+      { ...row({ audio_id: DEFAULT_TAKE, slot: "recording", selected: 1 }), target_offset_ms: -800, recordings_offset_ms: 200 } as Row,
+    ])
+    expect(cell.attachments?.[DEFAULT_TAKE]?.targetOffsetMs).toBe(-800)
+    expect(cell.attachments?.[DEFAULT_TAKE]?.recordingsOffsetMs).toBe(200)
+    const zero = cellFor([
+      { ...row({ audio_id: DEFAULT_TAKE, slot: "recording", selected: 1 }), target_offset_ms: -800, recordings_offset_ms: 0 } as Row,
+    ])
+    expect(zero.attachments?.[DEFAULT_TAKE]?.recordingsOffsetMs).toBe(0)
+  })
+
+  it("a take with no place of its own following the recordings carries none", () => {
+    const cell = cellFor([
+      { ...row({ audio_id: DEFAULT_TAKE, slot: "recording", selected: 1 }), target_offset_ms: -1000 } as Row,
+    ])
+    expect(cell.attachments?.[DEFAULT_TAKE]?.targetOffsetMs).toBe(-1000)
+    expect(cell.attachments?.[DEFAULT_TAKE]?.recordingsOffsetMs).toBeUndefined()
   })
 })

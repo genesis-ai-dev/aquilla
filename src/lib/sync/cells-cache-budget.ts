@@ -69,16 +69,6 @@ export interface CellsCacheEntryMeta {
   lastAccessAt: number
 }
 
-/** Record a snapshot's size + access time. Call inside the snapshot's own tx. */
-export function putEntryMeta(store: IDBObjectStore, meta: CellsCacheEntryMeta): void {
-  store.put(meta)
-}
-
-/** Forget a snapshot's meta row. Call inside the snapshot's own delete tx. */
-export function deleteEntryMeta(store: IDBObjectStore, key: string): void {
-  store.delete(key)
-}
-
 function readAllMeta(db: IDBDatabase): Promise<CellsCacheEntryMeta[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(META_STORE, "readonly")

@@ -362,10 +362,13 @@ describe("cell-audio projection", () => {
     )
     expect(touches).toEqual(["cell_audio"])
     expect(stmts).toHaveLength(1)
-    expect(recorded[0].sql).toContain("SET target_offset_ms = ?")
+    // AQU-2267: beside its place following the recordings, which this event
+    // (like every event from before that) does not name — so NULL, and that
+    // timing reads the one place given here.
+    expect(recorded[0].sql).toContain("SET target_offset_ms = ?, recordings_offset_ms = ?")
     // Addressed by audio_id alone — it is part of the primary key, so naming
     // the take names the row and a slot term could only disagree with itself.
-    expect(recorded[0].args).toEqual([-250, "p1", "f1", "c1", "audio-z.wav"])
+    expect(recorded[0].args).toEqual([-250, null, "p1", "f1", "c1", "audio-z.wav"])
     // It touches nothing else: not selection, not trims, not the cell.
     expect(recorded[0].sql).not.toContain("selected")
     expect(recorded[0].sql).not.toContain("trim_")

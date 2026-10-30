@@ -5,7 +5,7 @@
  * volume) and that play-all is disabled when no line has voiced audio.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
@@ -266,6 +266,41 @@ describe("VoicePlaybackBar — playback speed", () => {
   })
 })
 
+// AQU-2251 (Sam, Oct 29): following the source on a file with a film, a hidden
+// line is passed through, not jumped — the film and its sound play on across
+// it. Next and previous line step to it like any other line.
+describe("VoicePlaybackBar — a hidden line on a film's clock", () => {
+  const seek = vi.fn()
+  const cells = [
+    cell({ id: "a", startTime: 0, endTime: 2 } as Partial<CellData>),
+    cell({ id: "b", startTime: 3, endTime: 5, hidden: true } as Partial<CellData>),
+    cell({ id: "c", startTime: 6, endTime: 8 } as Partial<CellData>),
+  ]
+  beforeEach(() => {
+    transportSource.value = "video"
+    seek.mockClear()
+    ;(videoController as unknown as { seek: typeof seek }).seek = seek
+  })
+  afterEach(() => {
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("next line goes to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Next line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
+  })
+
+  it("previous line goes back to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 6.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
+  })
+})
+
 // AQU-1565 follow-up. WHY: on a YouTube file with an uploaded recording the bar
 // must drive the same engine the pane is sounding, which is the video's own
 // sound until the person picks the recording. The bar reads that choice from
@@ -388,5 +423,26 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
   it("keeps a file that follows its source as it was before play", () => {
     render(<VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} />)
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
+  })
+
+  // Found in the browser, Oct 29: with the last line hidden, the strip read
+  // 0:18 while it played and 0:20 after a reload, because before play it laid
+  // the lines out with the hidden line's music still running on past its end.
+  it("before play, leaves out what a hidden line would play, as the queue does (AQU-2252)", () => {
+    const TRACK = "01a17e67-ef58-74f7-a093-be935876197b"
+    const music = `audio-v3-1700000500-music.wav`
+    const v3 = {
+      ...take("v3", 2_900),
+      hidden: true,
+      selectedBySlot: { [TRACK]: music },
+    } as CellData
+    v3.attachments = { ...v3.attachments, [music]: { type: "audio", url: "frontier-audio://music", slot: TRACK, durationMs: 30_000, targetOffsetMs: 0 } } as never
+    const cells = [...BOOK, v3]
+    const tracks = { layerTrackSlots: [TRACK] }
+    // Laid out as drawn, v3's 30 s of music runs on to 1:58; played, v3 is
+    // hidden and its music with it, so the chapter ends with v3's own line.
+    expect(layOutProgramme(cells, tracks).programme.totalSec).toBeCloseTo(117.94, 2)
+    render(<VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={null} settings={undefined} freeTiming programmeTracks={tracks} />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:31")
   })
 })

@@ -1116,6 +1116,7 @@ export const editor = defineNamespace({
     "editor.history.stepGenerateVoice": "Generate a voice",
     "editor.history.stepChangeVoice": "Change the voice",
     "editor.history.stepRemoveNoise": "Remove noise",
+    "editor.history.stepStationVersion": "Save a new version",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
     "editor.history.stepLinkFilm": "Link film",
@@ -1370,6 +1371,35 @@ export const editor = defineNamespace({
     "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
     "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
     "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, ⌘Z undoes.",
+    "editor.station.fromLibrary": "From the library",
+    "editor.station.libraryEmpty": "No other recordings in this file yet.",
+    "editor.station.fromFile": "From a file…",
+    "editor.station.recordNow": "Record now",
+    "editor.station.recordLater": "Recording straight into an insert comes next.",
+    "editor.station.kindDeleted": "a part deleted",
+    "editor.station.kindInserted": "audio inserted",
+    "editor.station.kindNoise": "noise removed",
+    "editor.station.changed": "Changed: {what}.",
+    "editor.station.applyTo": "Apply the change to",
+    "editor.station.clipOnly": "Use for this clip only",
+    "editor.station.everywhere": "Update everywhere",
+    "editor.station.placesCount": plural(
+      {
+        one: "{count} place",
+        other: "{count} places",
+      },
+      "count",
+    ),
+    "editor.station.save": "Save as new version",
+    "editor.station.saveTip": "Save as a new version; the original stays ({keys})",
+    "editor.station.saving": "Saving…",
+    "editor.station.saved": "Saved as version {n}, used on {line}. The original recording is kept.",
+    "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
+    "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
+    "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
+    "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
+    "editor.station.undoUnsaved": "Undo the last unsaved change",
+    "editor.station.fileLabel": "the file “{name}”",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3206,6 +3236,104 @@ export const editor = defineNamespace({
       },
       "editor.station.hint": {
         description: "One quiet line under the Station's controls when nothing is selected, naming the shortcuts.",
+      },
+      "editor.station.fromLibrary": {
+        description: "First choice in the Insert menu: insert another recording. Until the project has a recordings library it lists this file's other recordings.",
+      },
+      "editor.station.libraryEmpty": {
+        description: "Shown under 'From the library' when there is nothing to insert.",
+      },
+      "editor.station.fromFile": {
+        description: "Choice in the Insert menu: pick an audio file from the computer.",
+      },
+      "editor.station.recordNow": {
+        description: "Choice in the Insert menu: record something and insert it at the cursor.",
+      },
+      "editor.station.recordLater": {
+        description: "Grey line under the greyed 'Record now' while it is not available yet.",
+      },
+      "editor.station.kindDeleted": {
+        description: "What changed, in the notice 'Changed: …'. Lowercase; joined by commas with the others.",
+      },
+      "editor.station.kindInserted": {
+        description: "What changed, in the notice 'Changed: …'. Lowercase.",
+      },
+      "editor.station.kindNoise": {
+        description: "What changed, in the notice 'Changed: …'. Lowercase.",
+      },
+      "editor.station.changed": {
+        description: "Title of the notice that appears after a change to a recording's sound that is not saved yet.",
+        placeholders: {
+          what: "What changed, e.g. 'a part deleted, audio inserted'.",
+        },
+      },
+      "editor.station.applyTo": {
+        description: "Screen-reader name of the choice between this clip only and everywhere the recording is used.",
+      },
+      "editor.station.clipOnly": {
+        description: "Choice: the new version is used only where the Station opened the recording.",
+      },
+      "editor.station.everywhere": {
+        description: "Choice: the new version is used on every line the recording is placed on.",
+      },
+      "editor.station.placesCount": {
+        description: "After 'Update everywhere': how many lines use the recording.",
+        placeholders: {
+          count: "Number of lines.",
+        },
+      },
+      "editor.station.save": {
+        description: "Button in the notice: save the edited recording as a new version; the original is kept.",
+      },
+      "editor.station.saveTip": {
+        description: "Tooltip of Save as new version.",
+        placeholders: {
+          keys: "The shortcut, e.g. ⌘S.",
+        },
+      },
+      "editor.station.saving": {
+        description: "The Save button while the new version uploads.",
+      },
+      "editor.station.saved": {
+        description: "Message after saving a new version used on one line.",
+        placeholders: {
+          n: "The version number.",
+          line: "The line it is used on.",
+        },
+      },
+      "editor.station.savedEverywhere": {
+        description: "Message after saving a new version used on every line it was placed on.",
+        placeholders: {
+          n: "The version number.",
+          lines: "The lines, e.g. 'line 316 and line 329'.",
+        },
+      },
+      "editor.station.saveFailed": {
+        description: "Message when saving a new version fails; nothing was changed.",
+        placeholders: {
+          message: "The reason.",
+        },
+      },
+      "editor.station.notAudio": {
+        description: "Message when a file picked for inserting cannot be read as audio.",
+        placeholders: {
+          name: "The file's name.",
+        },
+      },
+      "editor.station.keptForLater": {
+        description: "Message when switching away from a recording with unsaved changes.",
+        placeholders: {
+          name: "The recording, e.g. 'Take 2 · line 331'.",
+        },
+      },
+      "editor.station.undoUnsaved": {
+        description: "Tooltip of the Station's Undo button while there are unsaved changes to the sound.",
+      },
+      "editor.station.fileLabel": {
+        description: "How an inserted file is named in the History row and the inserted mark's tooltip.",
+        placeholders: {
+          name: "The file's name without its extension.",
+        },
       },
       "editor.dock.film": {
         description:
@@ -7282,6 +7410,7 @@ export const editor = defineNamespace({
       "editor.history.stepUploadTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio file was uploaded as a line's take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepGenerateVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a voice (text-to-speech take) was generated for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepLinesFromRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was split into new lines (rows) of the open file, with their transcripts. A short verb phrase.", maxLength: 40 },
       "editor.history.stepImportRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was imported as a new file of lines. Undo moves the new file to Recently deleted. A short verb phrase.", maxLength: 40 },

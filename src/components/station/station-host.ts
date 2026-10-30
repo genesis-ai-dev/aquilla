@@ -7,6 +7,7 @@ import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { HistoryResult } from "@/lib/history/history"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { InsertChoice } from "./StationEdits"
 
 export interface StationTake {
   /** The file that holds the take (a cue sibling for a linked take). */
@@ -38,4 +39,16 @@ export interface StationHost {
   pauseOtherPlayback(): void
   /** Say what Undo did, as the top bar's History does. */
   reportHistory(which: "undo" | "redo", result: HistoryResult): void
+  /** The language the person is working in (a take's lane), if not the default. */
+  lane?: string
+  /** The take that plays in a slot of a line now (a split take's first piece). */
+  selectedIn(cellId: string, slot: string): string | null
+  /** A file's name, for the Undo step. */
+  fileName(fileId: string): string | null
+  /** Q3: what "From the library" offers — this file's other recordings, the
+   *  open line's own first. */
+  insertChoices(fileId: string, cellId: string, exceptUrl: string): InsertChoice[]
+  /** Every live take in the file that plays the same stored recording, the
+   *  open one included: where it is "placed" (slice 6). */
+  placementsOf(fileId: string, url: string): StationTake[]
 }

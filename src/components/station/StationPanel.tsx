@@ -17,8 +17,23 @@ import { historyView, newestStepMatches, subscribeHistory, undoLast } from "@/li
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
 import { STATION_PICKS } from "@/lib/station/picks"
-import { useStationTarget, type StationTarget } from "@/lib/station/target"
+import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
+import { decodeToMono48k } from "@/lib/audio/decode-mono"
+import { draftKey, readDraft } from "@/lib/station/drafts"
+import { mapWindow } from "@/lib/station/edit-list"
+import { loadStationPcm, pcmKey, putStationPcm } from "@/lib/station/load"
+import { renderSegments } from "@/lib/station/render"
+import { saveStationVersion, type VersionPlacement } from "@/lib/station/save"
+import {
+  clearStationMessage,
+  openInStation,
+  sameTarget,
+  useStationMessage,
+  useStationTarget,
+  type StationTarget,
+} from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
+import { changedKinds, StationInsertMenu, StationNotice, type InsertChoice } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
 import { StationScroll, StationTransport } from "./StationTransport"
@@ -26,7 +41,23 @@ import { useStationEditor } from "./useStationEditor"
 
 /** The Station's tab content: the open recording, or how to open one. */
 export function StationPanel({ host, visible }: { host: StationHost | null; visible: boolean }) {
+  const t = useT()
   const target = useStationTarget()
+  const stored = useStationMessage()
+  // Q5: leaving a recording with unsaved changes keeps them, and says so.
+  const [prev, setPrev] = useState<StationTarget | null>(target)
+  const [kept, setKept] = useState<string | null>(null)
+  if (!sameTarget(prev, target)) {
+    setPrev(target)
+    const old = prev && host ? host.readTake(prev.cellId, prev.audioId) : null
+    setKept(
+      prev && old && readDraft(draftKey(prev))
+        ? t("editor.station.keptForLater", {
+            name: t("editor.station.nameOnLine", { take: old.att.label ?? t("audio.takesStrip.takeFallback"), line: host!.lineName(prev.cellId) }),
+          })
+        : null,
+    )
+  }
   const take = target && host ? host.readTake(target.cellId, target.audioId) : null
   if (!target || !host) return <StationEmpty />
   if (!take) return <StationNote>{<GoneText />}</StationNote>
@@ -37,6 +68,7 @@ export function StationPanel({ host, visible }: { host: StationHost | null; visi
       take={take}
       target={target}
       visible={visible}
+      initialMessage={stored ?? kept}
     />
   )
 }
@@ -114,39 +146,140 @@ interface OpenProps {
   take: StationTake
   target: StationTarget
   visible: boolean
+  initialMessage?: string | null
 }
 
-function StationOpen({ host, take, target, visible }: OpenProps) {
+function StationOpen({ host, take, target, visible, initialMessage }: OpenProps) {
   const t = useT()
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(initialMessage ?? null)
   const ed = useStationEditor(host, take, target, visible)
   const editable = host.editable
   const [hovering, setHovering] = useState(false)
+  const [insertOpen, setInsertOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
   const unsaved = ed.ops.length > 0
   const calm = ed.sel == null && !hovering && !unsaved
+  const line = host.lineName(target.cellId)
+  const places = host.placementsOf(take.fileId, take.att.url)
+  const placeLines = places.length > 1 ? places.map((p) => host.lineName(p.cell.id)) : [line]
 
   const approve = () => {
     const v = host.voteState(target.cellId, target.audioId)
     if (v.canVote && !v.voted) void host.vote(target.cellId, target.audioId, true)
   }
 
+  // Item 18: the audio to insert — another recording, or a file.
+  const insertChoice = (c: InsertChoice) => {
+    setInsertOpen(false)
+    void loadStationPcm({ url: c.url, projectId: host.project.id, fileId: c.fileId, getSyncToken: host.getSyncToken })
+      .then((pcm) => ed.insertAudio(pcmKey(c.url), pcm, { kind: "take", url: c.url, fileId: c.fileId, label: c.label }))
+      .catch(() => setMessage(t("editor.station.loadFailed")))
+  }
+  const insertFile = (file: File) => {
+    setInsertOpen(false)
+    const name = file.name.replace(/\.[^.]+$/, "")
+    const ext = (file.name.match(/\.([a-z0-9]+)$/i)?.[1] ?? "bin").toLowerCase()
+    const cacheId = `station-insert-${Date.now().toString(36)}`
+    void file
+      .arrayBuffer()
+      .then((ab) => decodeToMono48k(new Uint8Array(ab)))
+      .then((data) => {
+        void audioCachePutBlob(cacheId, ext, file)
+        const pcm = putStationPcm(cacheId, data)
+        ed.insertAudio(cacheId, pcm, { kind: "file", cacheId, ext, label: t("editor.station.fileLabel", { name }) })
+      })
+      .catch(() => setMessage(t("editor.station.notAudio", { name: file.name })))
+  }
+
+  // Item 35: render the edited recording and save it as a new version, on
+  // this line only or everywhere it is placed (slice 6).
+  const save = async () => {
+    if (!ed.pcm || !unsaved || saving) return
+    setSaving(true)
+    ed.pause()
+    try {
+      const samples = renderSegments(ed.placed, ed.lookup, ed.pcm.rate)
+      const L = samples.length / ed.pcm.rate
+      const everywhere = ed.draft.scope === "all" && places.length > 1
+      const targets = everywhere ? places.map((p) => (p.cell.id === target.cellId ? take : p)) : [take]
+      // Q6: a piece of a split take is replaced in place, as a piece.
+      const atts = take.cell.attachments ?? {}
+      const isPiece = Boolean(take.att.pieceOf) || Object.values(atts).some((a) => !a.isDeleted && a.pieceOf === target.audioId)
+      const pieceRoot = take.att.pieceOf ?? target.audioId
+      const placements: VersionPlacement[] = targets.map((p) => {
+        const isOpen = p.cell.id === target.cellId
+        // The open clip keeps the kept part as edited; another placement keeps
+        // exactly the sound it had (its own window, carried through the edits).
+        const w = isOpen
+          ? { start: ed.trimA, end: ed.trimB }
+          : mapWindow(
+              { start: (p.att.trimStartMs ?? 0) / 1000, end: p.att.trimEndMs != null ? p.att.trimEndMs / 1000 : ed.pcm!.duration },
+              ed.ops,
+            )
+        const slot = p.att.slot ?? "recording"
+        const fromAudioId = Object.entries(p.cell.attachments ?? {}).find(([, a]) => a === p.att)?.[0] ?? target.audioId
+        return {
+          fileId: p.fileId,
+          cellId: p.cell.id,
+          fromAudioId: isOpen ? target.audioId : fromAudioId,
+          slot,
+          label: p.att.label ?? null,
+          trimStartMs: w.start > 0.0005 ? Math.round(w.start * 1000) : null,
+          trimEndMs: w.end < L - 0.0005 ? Math.round(w.end * 1000) : null,
+          targetOffsetMs: p.att.targetOffsetMs ?? null,
+          recordingsOffsetMs: p.att.recordingsOffsetMs ?? null,
+          selectedBefore: host.selectedIn(p.cell.id, slot),
+          ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
+        }
+      })
+      const res = await saveStationVersion({
+        projectId: host.project.id,
+        samples,
+        rate: ed.pcm.rate,
+        placements,
+        author: host.username,
+        ...(host.lane ? { targetLang: host.lane } : {}),
+        getSyncToken: host.getSyncToken,
+        where: { fileId: take.fileId, fileName: host.fileName(take.fileId) },
+      })
+      const n = versionOf(take) + 1
+      ed.clearDraft()
+      const text = everywhere
+        ? t("editor.station.savedEverywhere", { n, lines: placeLines.join(", ") })
+        : t("editor.station.saved", { n, line })
+      const openIdx = targets.findIndex((p) => p.cell.id === target.cellId)
+      openInStation({ fileId: take.fileId, cellId: target.cellId, audioId: res.audioIds[Math.max(0, openIdx)] }, { message: text })
+    } catch (e) {
+      setMessage(t("editor.station.saveFailed", { message: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   // Item 33: the keys, while the Station has the focus. A text field keeps
-  // its own; ⌘Z stays the project's (Q4) unless the Station has unsaved
-  // edits of its own to take back first (slice 5).
+  // its own. ⌘Z takes back an unsaved edit first; otherwise it is the
+  // project's own Undo (Q4), which the window's shortcut runs.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement | null
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
-    if (e.metaKey || e.ctrlKey || e.altKey) return
     const k = e.key
+    const mod = e.metaKey || e.ctrlKey
     let handled = true
-    if (k === " ") ed.togglePlay()
+    if (mod && !e.shiftKey && (k === "z" || k === "Z")) handled = ed.undoUnsaved()
+    else if (mod && (k === "s" || k === "S")) void save()
+    else if (mod || e.altKey) handled = false
+    else if (k === " ") ed.togglePlay()
     else if (k === "k" || k === "K") void ed.keepSelection()
+    else if ((k === "Backspace" || k === "Delete") && editable) ed.deleteSelection()
+    else if ((k === "i" || k === "I") && editable && ed.sel) setInsertOpen(true)
     else if (k === "a" || k === "A") approve()
     else if (k === "=" || k === "+") ed.zoomBy(2)
     else if (k === "-") ed.zoomBy(0.5)
     else if (k === "l" || k === "L") ed.toggleLoop()
-    else if (k === "Escape") ed.clearSel()
-    else handled = false
+    else if (k === "Escape") {
+      ed.clearSel()
+      setInsertOpen(false)
+    } else handled = false
     if (handled) {
       e.preventDefault()
       e.stopPropagation()
@@ -160,8 +293,27 @@ function StationOpen({ host, take, target, visible }: OpenProps) {
       onKeyDown={onKeyDown}
       className="flex h-full min-h-0 flex-col overflow-y-auto outline-none"
     >
-      {message ? <StationMessage text={message} onClose={() => setMessage(null)} /> : null}
-      <StationHeader host={host} take={take} target={target} onMessage={setMessage} />
+      {message ? (
+        <StationMessage
+          text={message}
+          onClose={() => {
+            setMessage(null)
+            clearStationMessage()
+          }}
+        />
+      ) : null}
+      <StationHeader host={host} take={take} target={target} places={placeLines} unsaved={unsaved} undoUnsaved={ed.undoUnsaved} />
+      {unsaved ? (
+        <StationNotice
+          kinds={changedKinds(ed.ops)}
+          places={placeLines}
+          scope={ed.draft.scope}
+          onScope={ed.setScope}
+          openLine={line}
+          saving={saving}
+          onSave={() => void save()}
+        />
+      ) : null}
       {ed.status === "error" ? (
         <StationNote>{t("editor.station.loadFailed")}</StationNote>
       ) : (
@@ -172,9 +324,30 @@ function StationOpen({ host, take, target, visible }: OpenProps) {
             trackVars={host.trackVars(take.fileId, take.att.slot)}
             generated={Boolean(take.att.voiceId)}
             onHover={setHovering}
+            {...(editable
+              ? {
+                  onDelete: ed.deleteSelection,
+                  onInsert: () => setInsertOpen((o) => !o),
+                  insertOpen: insertOpen && ed.sel != null,
+                  insertMenu: (
+                    <StationInsertMenu
+                      choices={host.insertChoices(take.fileId, target.cellId, take.att.url)}
+                      onPick={insertChoice}
+                      onFile={insertFile}
+                      recordNote={t("editor.station.recordLater")}
+                    />
+                  ),
+                }
+              : {})}
           />
           <StationScroll ed={ed} />
-          <StationTransport ed={ed} editable={editable} calm={calm} hint={t("editor.station.hintCalm")} onMessage={setMessage} />
+          <StationTransport
+            ed={ed}
+            editable={editable}
+            calm={calm}
+            hint={editable ? t("editor.station.hint") : t("editor.station.hintCalm")}
+            onMessage={setMessage}
+          />
           <StationHistory
             host={host}
             take={take}
@@ -196,11 +369,18 @@ export function StationHeader({
   host,
   take,
   target,
+  places,
+  unsaved = false,
+  undoUnsaved,
 }: {
   host: StationHost
   take: StationTake
   target: StationTarget
-  onMessage?(text: string): void
+  /** The lines it is placed on (slice 6); the open one when only one. */
+  places?: readonly string[]
+  /** Unsaved sound edits: it waits again (40b), and Undo takes them back first. */
+  unsaved?: boolean
+  undoUnsaved?(): boolean
 }) {
   const t = useT()
   const { cellId, audioId } = target
@@ -208,7 +388,16 @@ export function StationHeader({
   const name = take.att.label ?? t("audio.takesStrip.takeFallback")
   const character = castNameOf(take.cell)
   const vars = host.trackVars(take.fileId, take.att.slot)
-  const { approved, count } = approvalState(take.att, host.approvalsNeeded)
+  const counted = approvalState(take.att, host.approvalsNeeded)
+  const approved = counted.approved && !unsaved
+  const count = unsaved ? 0 : counted.count
+  const lines = places && places.length > 0 ? places : [line]
+  const placedText =
+    lines.length > 2
+      ? t("editor.station.placedOnMany", { count: lines.length, open: line })
+      : lines.length === 2
+        ? t("editor.station.placedOnTwo", { a: lines[0], b: lines[1], open: line })
+        : t("editor.station.placedOn", { line })
   const version = versionOf(take)
   const vote = host.voteState(cellId, audioId)
   const statusText = approved
@@ -227,13 +416,16 @@ export function StationHeader({
     },
     [cellId, audioId],
   )
-  const canUndo = view.canUndo && (STATION_PICKS.undoButton === "project" || newestStepMatches(mine))
-  const undoTip = canUndo
-    ? t("editor.station.undoTip", { keys: isApplePlatform() ? "⌘Z" : "Ctrl+Z" })
-    : view.canUndo
-      ? t("editor.station.undoElsewhere")
-      : t("editor.station.nothingToUndo")
+  const canUndo = unsaved || (view.canUndo && (STATION_PICKS.undoButton === "project" || newestStepMatches(mine)))
+  const undoTip = unsaved
+    ? t("editor.station.undoUnsaved")
+    : canUndo
+      ? t("editor.station.undoTip", { keys: isApplePlatform() ? "⌘Z" : "Ctrl+Z" })
+      : view.canUndo
+        ? t("editor.station.undoElsewhere")
+        : t("editor.station.nothingToUndo")
   const undo = () => {
+    if (unsaved && undoUnsaved?.()) return
     if (!canUndo) return
     void undoLast().then((r) => {
       if (r) host.reportHistory("undo", r)
@@ -255,7 +447,7 @@ export function StationHeader({
               {" · "}
             </>
           ) : null}
-          {t("editor.station.placedOn", { line })}
+          {placedText}
           {" · "}
           <span
             data-testid="station-status"

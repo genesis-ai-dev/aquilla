@@ -327,6 +327,8 @@ export const TAKE_ADD_LABELS = {
   generate: "editor.history.stepGenerateVoice",
   changeVoice: "editor.history.stepChangeVoice",
   denoise: "editor.history.stepRemoveNoise",
+  // AQU-2327: the Station saved an edited recording as a new version.
+  station: "editor.history.stepStationVersion",
 } as const
 
 /**

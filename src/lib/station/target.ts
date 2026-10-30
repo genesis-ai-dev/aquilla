@@ -48,13 +48,27 @@ export function sameTarget(a: StationTarget | null, b: StationTarget | null): bo
   return a === b || (a != null && b != null && a.fileId === b.fileId && a.cellId === b.cellId && a.audioId === b.audioId)
 }
 
-/** Open a take in the Station; `show` also brings its tab forward. */
-export function openInStation(next: StationTarget | null, opts: { show?: boolean } = {}): void {
-  if (!sameTarget(target, next)) {
+let message: string | null = null
+
+/** Open a take in the Station; `show` also brings its tab forward, and
+ *  `message` is said on the message line when it opens (item 3). */
+export function openInStation(next: StationTarget | null, opts: { show?: boolean; message?: string } = {}): void {
+  if (!sameTarget(target, next) || opts.message !== undefined) {
     target = next
+    message = opts.message ?? null
     notify()
   }
   if (opts.show) for (const l of showListeners) l()
+}
+
+export function useStationMessage(): string | null {
+  return useSyncExternalStore(subscribe, () => message, () => null)
+}
+
+export function clearStationMessage(): void {
+  if (message === null) return
+  message = null
+  notify()
 }
 
 /** The workspace listens, and shows the Station's tab. */
@@ -78,6 +92,7 @@ export function useStationTarget(): StationTarget | null {
 
 export function __resetStationTargetForTests(): void {
   target = null
+  message = null
   available = false
   listeners.clear()
   showListeners.clear()

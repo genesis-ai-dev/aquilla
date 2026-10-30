@@ -8,15 +8,21 @@ import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from
 import {
   clampTrim,
   lengthOf,
+  mapWindow,
   MIN_KEPT_SEC,
   placeSegments,
+  round3,
+  shiftTime,
   round2,
   segmentsOf,
   type ClipMix,
   type EditOp,
   type PlacedSegment,
 } from "@/lib/station/edit-list"
-import { loadStationPcm, type StationPcm } from "@/lib/station/load"
+import { audioCacheGet } from "@/lib/audio/bytes-cache"
+import { decodeToMono48k } from "@/lib/audio/decode-mono"
+import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
+import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
 import { StationPreview } from "@/lib/station/preview"
 import { renderSegments, type PcmSource } from "@/lib/station/render"
 import type { StationTarget } from "@/lib/station/target"
@@ -32,6 +38,13 @@ export interface Selection {
 }
 
 export const isRange = (s: Selection | null): s is Selection => s != null && s.b - s.a > 0.005
+
+/** The kept part after one edit, keeping its sound (40b). null = the stored
+ *  trim carried through, when End was still at the recording's edge. */
+export function shiftTrim(op: EditOp, trimA: number, trimB: number, endAtEdge: boolean): { a: number; b: number } | null {
+  if (endAtEdge && trimA === 0) return null
+  return { a: round2(shiftTime(trimA, op)), b: endAtEdge ? -1 : round2(shiftTime(trimB, op)) }
+}
 
 export function useStationEditor(host: StationHost, take: StationTake, target: StationTarget, visible: boolean) {
   const { project, getSyncToken } = host
@@ -52,33 +65,74 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     }
   }, [url, project.id, take.fileId, getSyncToken])
 
-  // Inserted audio's samples, by the key its operation names (slice 5).
+  // ——— Unsaved sound edits (deletes and inserts), kept per recording in
+  // this browser until saved or undone (Q5, lib/station/drafts.ts).
+  const key = draftKey(target)
+  const [draft, setDraftState] = useState<StationDraft>(() => readDraft(key) ?? EMPTY_DRAFT)
+  const setDraft = useCallback(
+    (d: StationDraft) => {
+      setDraftState(d)
+      writeDraft(key, d)
+    },
+    [key],
+  )
+  const ops = draft.ops
+
+  // Inserted audio's samples, by the key its operation names.
   const [sources, setSources] = useState<Record<string, PcmSource>>({})
   const lookup = useCallback(
     (src: string): PcmSource | null => (src === BASE_SRC ? pcm : (sources[src] ?? null)),
     [pcm, sources],
   )
+  // A draft brought back after a reload: load its inserted audio again.
+  const restoring = useRef(new Set<string>())
+  useEffect(() => {
+    for (const [id, meta] of Object.entries(draft.sources)) {
+      if (sources[id] || restoring.current.has(id)) continue
+      restoring.current.add(id)
+      const done = (p: PcmSource | null) => {
+        if (p) setSources((m) => ({ ...m, [id]: p }))
+      }
+      if (meta.kind === "take") {
+        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then(done, () => {})
+      } else {
+        void audioCacheGet(meta.cacheId, meta.ext)
+          .then((bytes) => (bytes ? decodeToMono48k(bytes) : null))
+          .then((data) => done(data ? putStationPcm(id, data) : null), () => {})
+      }
+    }
+  }, [draft.sources, sources, project.id, getSyncToken])
 
-  // ——— The edit list (deletes and inserts; saved as a new version)
-  const [ops, setOps] = useState<EditOp[]>([])
   const placed: PlacedSegment[] = useMemo(
     () => placeSegments(segmentsOf(BASE_SRC, pcm?.duration ?? 0, ops)),
     [pcm, ops],
   )
   const length = useMemo(() => Math.max(MIN_KEPT_SEC, lengthOf(placed)), [placed])
 
-  // ——— The kept part: the take's stored trim, or the edge being dragged.
+  // ——— The kept part: the take's stored trim (carried through any unsaved
+  // edits so it keeps its sound), or the draft's own, or the edge being dragged.
   const storedA = (take.att.trimStartMs ?? 0) / 1000
   const storedB = take.att.trimEndMs != null ? take.att.trimEndMs / 1000 : -1
+  const baseTrim = useMemo(() => {
+    if (ops.length === 0) return { a: storedA, b: storedB }
+    if (draft.trim) return draft.trim
+    const w = mapWindow({ start: storedA, end: storedB < 0 ? (pcm?.duration ?? 0) : storedB }, ops)
+    return { a: w.start, b: storedB < 0 ? -1 : w.end }
+  }, [ops, draft.trim, storedA, storedB, pcm])
   const [liveTrim, setLiveTrim] = useState<{ a: number; b: number } | null>(null)
-  const { trimA, trimB } = clampTrim(liveTrim?.a ?? storedA, liveTrim?.b ?? storedB, length)
+  const { trimA, trimB } = clampTrim(liveTrim?.a ?? baseTrim.a, liveTrim?.b ?? baseTrim.b, length)
   const clip: ClipMix = useMemo(() => ({ trimA, trimB, fadeIn: 0, fadeOut: 0, gainDb: 0 }), [trimA, trimB])
 
-  /** Save a trim as one Undo step; null on an end = back to the edge. */
+  /** Save a trim as one Undo step; null on an end = back to the edge. While
+   *  sound edits are unsaved, the trim waits with them for the new version. */
   const commitTrim = useCallback(
     async (a: number, b: number) => {
       const c = clampTrim(a, b, length)
       setLiveTrim(null)
+      if (ops.length > 0) {
+        setDraft(pushDraft(draft, { trim: { a: c.trimA, b: c.trimB } }))
+        return
+      }
       const startMs = c.trimA > 0.0005 ? Math.round(c.trimA * 1000) : undefined
       const endMs = c.trimB < length - 0.0005 ? Math.round(c.trimB * 1000) : undefined
       const curStart = take.att.trimStartMs ?? undefined
@@ -86,7 +140,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       if ((curStart ?? 0) === (startMs ?? 0) && curEnd === endMs) return
       await host.trim(target.cellId, target.audioId, { trimStartMs: startMs, trimEndMs: endMs })
     },
-    [host, length, take.att.trimEndMs, take.att.trimStartMs, target.audioId, target.cellId],
+    [draft, host, length, ops.length, setDraft, take.att.trimEndMs, take.att.trimStartMs, target.audioId, target.cellId],
   )
 
   // ——— Selection
@@ -225,12 +279,59 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     await commitTrim(a, b)
   }, [commitTrim, pause, sel])
 
+  // ——— Delete this / Insert audio here (items 17–18): unsaved until a new
+  // version is saved. The trim keeps its place in the sound (40b).
+  // An End still at the recording's own edge stays at the edge.
+  const atEdge = trimB >= length - 1e-6 && storedB < 0 && draft.trim == null
+  const deleteSelection = useCallback(() => {
+    if (!isRange(sel)) return
+    pause()
+    const op: EditOp = { kind: "del", a: round3(sel.a), b: round3(sel.b) }
+    const tr = shiftTrim(op, trimA, trimB, atEdge)
+    setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr }))
+    setSel({ a: op.a, b: op.a })
+  }, [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB])
+
+  const insertAudio = useCallback(
+    (id: string, src: PcmSource & { duration?: number }, meta: DraftSource) => {
+      if (!sel) return
+      pause()
+      const len = round3(src.data.length / src.rate)
+      const op: EditOp = { kind: "ins", at: round3(sel.a), src: id, len, label: meta.label }
+      setSources((m) => ({ ...m, [id]: src }))
+      const tr = shiftTrim(op, trimA, trimB, atEdge)
+      setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, sources: { ...draft.sources, [id]: meta } }))
+      setSel({ a: op.at, b: op.at + len })
+    },
+    [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB],
+  )
+
+  /** Undo the newest unsaved edit; false when there is none (Q4: then the
+   *  project's Undo is the one to use). */
+  const undoUnsaved = useCallback((): boolean => {
+    const prev = undoDraft(draft)
+    if (!prev) return false
+    pause()
+    setDraft(prev)
+    setSel(null)
+    return true
+  }, [draft, pause, setDraft])
+
+  const setScope = useCallback((scope: "clip" | "all") => setDraft({ ...draft, scope }), [draft, setDraft])
+  /** After a save: the edits are in the new version now. */
+  const clearDraft = useCallback(() => setDraft(EMPTY_DRAFT), [setDraft])
+
   return {
+    draft,
+    deleteSelection,
+    insertAudio,
+    undoUnsaved,
+    setScope,
+    clearDraft,
     status: error ? ("error" as const) : pcm ? ("ready" as const) : ("loading" as const),
     pcm,
     lookup,
     ops,
-    setOps,
     sources,
     setSources,
     placed,

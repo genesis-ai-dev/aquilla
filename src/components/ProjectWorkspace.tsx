@@ -501,7 +501,8 @@ import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
 import { StationPanel } from "@/components/station/StationPanel"
 import { StationMenuItems } from "@/components/station/StationHistory"
-import type { StationHost } from "@/components/station/station-host"
+import type { StationHost, StationTake } from "@/components/station/station-host"
+import type { InsertChoice } from "@/components/station/StationEdits"
 import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -12820,50 +12821,6 @@ export function ProjectWorkspace() {
     },
     [project, activeFileId, myScopes, activeLane, readTake, currentUsername, getTokenForProjectFile, t],
   )
-  // AQU-2327: what the Station needs — the same reads and writes the timeline
-  // uses, so a trim or a vote in the Station is the timeline's own.
-  const stationHost = useMemo<StationHost | null>(() => {
-    if (!project) return null
-    const lineName = (cellId: string) => {
-      const owner = resolveTakeCellRef.current(cellId)
-      const label = owner?.cell.cellLabel?.trim()
-      if (label && /^\d+$/.test(label)) return t("editor.station.lineNumber", { n: label })
-      if (label) return label
-      const index = getActiveCells().findIndex((c) => c.id === cellId)
-      return index >= 0 ? t("editor.station.lineNumber", { n: index + 1 }) : ""
-    }
-    return {
-      project,
-      username: currentUsername,
-      editable: canPerform("cell.audio.trim", project.syncRole?.level ?? null),
-      getSyncToken: audioSyncTokenFetcherForSession(frontierSession ?? null),
-      readTake: (cellId, audioId) => {
-        const r = readTake(cellId, audioId)
-        return r ? { fileId: r.owner.fileId, cell: r.owner.cell, att: r.att } : null
-      },
-      lineName,
-      trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
-      voteState: timelineVoteState,
-      vote: handleVoteTimelineTake,
-      trim: handleTrimTarget,
-      approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
-      pauseOtherPlayback: () => pauseAllTransports(),
-      reportHistory,
-    }
-  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, reportHistory, t])
-  // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
-  // and — while the Station's tab shows — follow the take you click.
-  const handleEditInStation = useCallback((cellId: string, audioId: string) => {
-    const owner = resolveTakeCellRef.current(cellId)
-    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
-  }, [])
-  const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
-  const stationShowingRef = useRef(false)
-  const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
-    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
-    const owner = resolveTakeCellRef.current(cellId)
-    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
-  }, [])
   const handleRegenerateTimelineVoice = useCallback(
     async (cellId: string, slot: string, opts?: { voiceId?: string }) => {
       if (!project || !frontierSession) return
@@ -13142,6 +13099,98 @@ export function ProjectWorkspace() {
     () => (audioCueCells && audioCueCells.length > 0 ? [...audioMergedCells, ...audioCueCells] : audioMergedCells),
     [audioMergedCells, audioCueCells],
   )
+  // AQU-2327: what the Station needs — the same reads and writes the timeline
+  // uses, so a trim or a vote in the Station is the timeline's own.
+  const stationCells = cloneVoiceCells
+  const stationHost = useMemo<StationHost | null>(() => {
+    if (!project) return null
+    const lineName = (cellId: string) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      const label = owner?.cell.cellLabel?.trim()
+      if (label && /^\d+$/.test(label)) return t("editor.station.lineNumber", { n: label })
+      if (label) return label
+      const index = getActiveCells().findIndex((c) => c.id === cellId)
+      return index >= 0 ? t("editor.station.lineNumber", { n: index + 1 }) : ""
+    }
+    const fileOf = (id: string, fallback: string) =>
+      audioCueCells?.some((c) => c.id === id) && audioCueSibling ? audioCueSibling.id : (activeFileId ?? fallback)
+    return {
+      project,
+      username: currentUsername,
+      editable: canPerform("cell.audio.trim", project.syncRole?.level ?? null),
+      getSyncToken: audioSyncTokenFetcherForSession(frontierSession ?? null),
+      readTake: (cellId, audioId) => {
+        const r = readTake(cellId, audioId)
+        return r ? { fileId: r.owner.fileId, cell: r.owner.cell, att: r.att } : null
+      },
+      lineName,
+      trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      voteState: timelineVoteState,
+      vote: handleVoteTimelineTake,
+      trim: handleTrimTarget,
+      approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
+      pauseOtherPlayback: () => pauseAllTransports(),
+      reportHistory,
+      ...(activeLane ? { lane: activeLane } : {}),
+      selectedIn: (cellId, slot) => {
+        const owner = resolveTakeCellRef.current(cellId)
+        if (!owner) return null
+        return slotSelections({
+          selectedBySlot: owner.cell.selectedBySlot,
+          selectedAudioId: owner.cell.selectedAudioId ?? null,
+          selectedGeneratedVoiceAudioId: owner.cell.selectedGeneratedVoiceAudioId ?? null,
+        })[slot] ?? null
+      },
+      fileName: (fileId) => project.files?.find((f) => f.id === fileId)?.name ?? null,
+      // Q3: until there is a recordings library, this file's other takes —
+      // the open line's own first, then the rest, newest first.
+      insertChoices: (fileId, cellId, exceptUrl) => {
+        const items: Array<InsertChoice & { own: boolean; at: number }> = []
+        const seen = new Set<string>([exceptUrl])
+        for (const cell of stationCells) {
+          for (const att of Object.values(cell.attachments ?? {})) {
+            if (att.isDeleted || att.role === "source" || !att.url.startsWith("frontier-audio://") || seen.has(att.url)) continue
+            seen.add(att.url)
+            items.push({
+              id: att.url,
+              url: att.url,
+              fileId: fileOf(cell.id, fileId),
+              label: `${att.label ?? t("audio.takesStrip.takeFallback")} · ${lineName(cell.id)}`,
+              durationSec: att.durationMs != null ? att.durationMs / 1000 : null,
+              own: cell.id === cellId,
+              at: att.createdAt ?? 0,
+            })
+          }
+        }
+        items.sort((a, b) => Number(b.own) - Number(a.own) || b.at - a.at)
+        return items.slice(0, 40).map(({ own: _own, at: _at, ...c }) => c)
+      },
+      placementsOf: (fileId, url) => {
+        // One per LINE: the pieces of a split take share their recording on
+        // one line, and that is one place, not several.
+        const out: StationTake[] = []
+        for (const cell of stationCells) {
+          const atts = Object.values(cell.attachments ?? {}).filter((att) => !att.isDeleted && att.url === url && att.role !== "source")
+          const att = atts.find((a) => !a.pieceOf) ?? atts[0]
+          if (att) out.push({ fileId: fileOf(cell.id, fileId), cell, att })
+        }
+        return out
+      },
+    }
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
+  // and — while the Station's tab shows — follow the take you click.
+  const handleEditInStation = useCallback((cellId: string, audioId: string) => {
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
+  }, [])
+  const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
+  const stationShowingRef = useRef(false)
+  const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
+    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
+  }, [])
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the

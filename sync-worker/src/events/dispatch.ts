@@ -23,6 +23,10 @@ import { handleFileCorpusSet } from './handlers/file-corpus-set'
 import { handleFileReorder } from './handlers/file-reorder'
 import { handleFileExtensionSet } from './handlers/file-extension-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
+import {
+  handleFileMilestoneRemove,
+  handleFileMilestoneSet,
+} from './handlers/file-milestone-events'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleTermEvent, type TermEventKind } from './handlers/term-events'
@@ -217,6 +221,25 @@ export function dispatchEvent(
       return handleFileTrackSet(
         db,
         authed as AuthorizedEvent<'file.track.set'>,
+        serverTs,
+        opts.serverSeq,
+      )
+
+    case 'file.milestone.set':
+      // AQU-2308. Like file.track.set, these two validate their payload and so
+      // return the outcome themselves: a blank name or an unusable id must come
+      // back as a per-event refusal, not a throw that 500s the whole POST.
+      return handleFileMilestoneSet(
+        db,
+        authed as AuthorizedEvent<'file.milestone.set'>,
+        serverTs,
+        opts.serverSeq,
+      )
+
+    case 'file.milestone.remove':
+      return handleFileMilestoneRemove(
+        db,
+        authed as AuthorizedEvent<'file.milestone.remove'>,
         serverTs,
         opts.serverSeq,
       )

@@ -216,6 +216,13 @@ export const IMPORT_MILESTONE_KINDS = [
   // guess can filter it out, without a parallel boolean that older persisted
   // envelopes would be missing.
   "ai-section",
+  // AQU-2308: a division a person set by hand, from a `file_milestones`
+  // record rather than from the imported file. Unlike every other kind here
+  // it is NOT carried in a cell's import envelope — a re-import replaces that
+  // envelope wholesale — so it never appears in persisted import metadata.
+  // It is assembled at read time by the navigator derivation, which is why it
+  // belongs in this union even though no importer ever emits it.
+  "user",
 ] as const
 
 export type ImportMilestoneKind = (typeof IMPORT_MILESTONE_KINDS)[number]

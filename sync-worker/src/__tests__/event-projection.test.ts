@@ -1070,6 +1070,8 @@ describe('isChainMutatingKind', () => {
     // AQU-1569: a reorder writes one files.meta key; no cell chain is involved.
     'file.reorder': false,
     'file.track.set': false,
+    'file.milestone.set': false,
+    'file.milestone.remove': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,

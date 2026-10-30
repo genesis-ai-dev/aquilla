@@ -84,6 +84,10 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.extension.set': { extension: { kind: 'reference', tags: ['uw'] } },
     'file.reorder': { sortIndex: 1024 },
     'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
+    'file.milestone.set': {
+      milestoneId: 'ms-1', name: 'The storm', startCellId: 'cell-1', endCellId: 'cell-2',
+    },
+    'file.milestone.remove': { milestoneId: 'ms-1' },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },

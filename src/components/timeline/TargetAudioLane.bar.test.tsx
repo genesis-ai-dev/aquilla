@@ -192,6 +192,21 @@ describe("the bar's right end", () => {
     expect(check.className).toContain("text-green-700")
   })
 
+  // Before the bar, a validated take's corner tick showed at every width. A
+  // narrow take (or one drawn short where it collides) must still say so.
+  it("carries the check on a take of any width, before the sparkle where both can't fit", () => {
+    const narrow = (durationMs: number, kind: "take" | "generated" = "take") =>
+      item({ validatorCount: 1, validators: ["sam"], durationMs }, kind)
+    // 0.6 s at 40 px/s = 24px.
+    const { unmount } = render(<TargetAudioLane {...base} items={[narrow(600)]} session={session} />)
+    expect(bar()!.contains(screen.getByTestId("tl-target-c1-validated"))).toBe(true)
+    unmount()
+    // A 30px AI voice: the check is a state, the sparkle an identity — state wins.
+    render(<TargetAudioLane {...base} items={[narrow(750, "generated")]} session={session} />)
+    expect(screen.getByTestId("tl-target-c1-validated")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+
   it("swaps the check for the record button and the ⋯ on hover", () => {
     render(<TargetAudioLane {...base} items={[approved()]} session={session} onOpenRecording={vi.fn()} takeMenu={menu()} />)
     const check = screen.getByTestId("tl-target-c1-validated")

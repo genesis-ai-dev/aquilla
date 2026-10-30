@@ -222,8 +222,6 @@ export function nameBarPx(chipH: number): number {
  *  54): the voice first, then the name, leaving the sparkle and the colour. */
 export const NAME_BAR_VOICE_MIN_W_PX = 150
 export const NAME_BAR_NAME_MIN_W_PX = 44
-/** The approval check at the right end. */
-export const NAME_BAR_CHECK_MIN_W_PX = 28
 
 // ── What fits in the bar, by what is actually in it ────────────────────────
 //
@@ -268,6 +266,10 @@ export interface NameBarWants {
 }
 
 export interface NameBarFit {
+  /** An AI voice's sparkle gives way to the check where both can't fit: the
+   *  check is a state, the sparkle an identity — state wins, as it always has
+   *  on these clips. */
+  sparkle: boolean
   name: boolean
   voice: boolean
   play: boolean
@@ -279,9 +281,10 @@ export interface NameBarFit {
 /** What a bar this wide shows of what its take wants (see above). */
 export function fitNameBar(paintedPx: number, want: NameBarWants): NameBarFit {
   const inner = paintedPx - BAR_EDGES_PX
-  const left =
-    (want.sparkle ? BAR_ICON_PX + BAR_GAP_PX : 0) + (want.unknownLength ? BAR_GAP_PX + BAR_UNKNOWN_PX : 0)
   const icon = BAR_GAP_PX + BAR_ICON_PX
+  const sparkle = want.sparkle && (!want.check || inner >= BAR_ICON_PX + icon)
+  const left =
+    (sparkle ? BAR_ICON_PX + BAR_GAP_PX : 0) + (want.unknownLength ? BAR_GAP_PX + BAR_UNKNOWN_PX : 0)
   const glyphs = (n: number) => (n > 0 ? BAR_GAP_PX + n * BAR_GLYPH_PX + (n - 1) * BAR_GLYPH_GAP_PX : 0)
   // The name's room in its tighter state: at rest beside the check, on hover
   // beside the glyphs that take the check's place.
@@ -308,7 +311,7 @@ export function fitNameBar(paintedPx: number, want: NameBarWants): NameBarFit {
     name &&
     paintedPx >= NAME_BAR_VOICE_MIN_W_PX &&
     room(hover, glyph) >= NAME_BAR_NAME_ROOM_PX + BAR_GAP_PX + NAME_BAR_VOICE_ROOM_PX
-  return { name, voice, play, record, more, passingGlyph }
+  return { sparkle, name, voice, play, record, more, passingGlyph }
 }
 
 export const TL_ROW_H_CLASS = "h-[var(--tl-row-h,66px)]"

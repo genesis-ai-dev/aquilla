@@ -46,7 +46,6 @@ import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
   MIN_CHIP_META_H_PX,
-  NAME_BAR_CHECK_MIN_W_PX,
   fitNameBar,
   nameBarPx,
   slotButtonPx,
@@ -943,7 +942,10 @@ function TargetAudioChip({
     : takeName
   const voiceName = takeVoice ? (takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")) : null
   const validatedState = chipValidationState === "self" || chipValidationState === "full" ? chipValidationState : null
-  const barCheck = validatedState != null && paintedPx >= NAME_BAR_CHECK_MIN_W_PX
+  // The check shows at any width, as the corner tick before the bar did: a
+  // narrow take, or one drawn short where it collides, still says it is
+  // validated. The name gives way to it.
+  const barCheck = validatedState != null
   // What the bar holds gives way from the right as the clip narrows (board
   // 54): the voice, then the name. On hover the record button and the ⋯ take
   // the check's place, and the play button joins them, each only where the
@@ -1429,7 +1431,7 @@ function TargetAudioChip({
         >
           <span className="flex min-w-0 flex-1 items-center gap-[5px]">
             {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
-            {chip.item.kind === "generated" && paintedPx >= 18 && (
+            {barFit.sparkle && (
               // Still the only mark of an AI voice; it leads the bar.
               <span aria-hidden data-testid={`tl-target-${testKey}-generated`} className="flex flex-none">
                 <Sparkles className={barH >= 14 ? "h-2.5 w-2.5" : "h-[9px] w-[9px]"} />

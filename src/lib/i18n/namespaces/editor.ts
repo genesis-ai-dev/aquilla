@@ -117,6 +117,7 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
     "editor.reimport.sourceReview": "The source text changed in a re-import. The translation was kept. Validating this cell clears the highlight.",
+    "editor.reimport.sourceReviewInfo": "Why this line is highlighted",
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
@@ -493,11 +494,13 @@ export const editor = defineNamespace({
     "editor.view.footnotesTray": "Bottom tray",
     "editor.view.textDirection": "Text Direction",
     "editor.view.fontSize": "Font Size",
+    // AQU-2263: under the two font size rows. {size} is a number of pixels.
+    "editor.view.fontSizeDefault": "Default from Preferences: {size}px",
+    "editor.view.fontSizeReset": "Reset to default",
     "editor.view.directionAuto": "Auto",
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
-    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -506,7 +509,6 @@ export const editor = defineNamespace({
     "editor.view.dirMixed": "mixed",
 
     // — Parallel-bibles reference sidebar ————————————————————————————
-    "editor.bibles.openTooltip": "Parallel bibles: see this verse in other versions",
     "editor.bibles.show": "Show parallel bibles",
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
@@ -534,8 +536,6 @@ export const editor = defineNamespace({
     "editor.bibles.attribution": "Text from the",
 
     // — Verse-resources reference sidebar (AQU-461) ————————————————————
-    "editor.resources.openTooltip":
-      "Verse resources: the people, places and terms this verse mentions",
     "editor.resources.show": "Show verse resources",
     "editor.resources.hide": "Hide verse resources",
     "editor.resources.edgeTab": "Helps",
@@ -694,13 +694,8 @@ export const editor = defineNamespace({
     "editor.selection.translateNoPermission":
       "You need contributor role to draft translations",
     "editor.selection.allTranslated": "All selected cells already have translations",
-    "editor.selection.translateTooltip": "Translate {count} missing",
     "editor.selection.validate": "Validate",
     "editor.selection.validateText": "Validate text",
-    "editor.selection.validateTooltip": plural({
-      one: "Validate {count} cell",
-      other: "Validate {count} cells",
-    }),
     "editor.selection.validatePartial": plural({
       one: "Validate {count} of {total} selected cells",
       other: "Validate {count} of {total} selected cells",
@@ -732,19 +727,11 @@ export const editor = defineNamespace({
     "editor.selection.validateNothingEligible": "Nothing eligible to validate",
     "editor.selection.removeMyValidations": "Remove my text validations",
     "editor.selection.validateAudio": "Validate audio",
-    "editor.selection.validateAudioTooltip": plural({
-      one: "Validate {count} take in the selection",
-      other: "Validate {count} takes in the selection",
-    }),
     "editor.selection.validateAudioNoTakes": "Nothing recorded in the selection",
     "editor.selection.validateAudioAllMine": "You have validated every take in the selection",
     "editor.selection.validateAudioNothingEligible": "No takes here are yours to validate",
     "editor.selection.removeMyAudioValidations": "Remove my audio validations",
     "editor.selection.noAudioValidations": "You have not validated any take here",
-    "editor.selection.unvalidateAudioTooltip": plural({
-      one: "Remove your validation from {count} take",
-      other: "Remove your validation from {count} takes",
-    }),
     "editor.selection.unvalidatedAudioToast": plural({
       one: "Removed your validation from {count} take",
       other: "Removed your validation from {count} takes",
@@ -754,17 +741,9 @@ export const editor = defineNamespace({
       other: "Validated {count} takes",
     }),
     "editor.selection.noValidations": "No cells have your validation",
-    "editor.selection.unvalidateTooltip": plural({
-      one: "Remove your validation from {count} cell",
-      other: "Remove your validation from {count} cells",
-    }),
     "editor.selection.harmonize": "Harmonize…",
     "editor.selection.harmonizeNeedLead":
       "You need project lead role to run a harmonization sweep",
-    "editor.selection.harmonizeTooltip": plural({
-      one: "Open harmonize sweep for {count} selected cell",
-      other: "Open harmonize sweep for {count} selected cells",
-    }),
     "editor.selection.clearTooltip": "Clear selection (Esc)",
     "editor.selection.clear": "Clear selection",
     "editor.selection.validatedToast": plural({
@@ -977,10 +956,6 @@ export const editor = defineNamespace({
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
     // back in whatever format it was actually recorded in.
-    "editor.timeline.qualityOriginalTooltip":
-      "Original quality (WAV) for generated voices — larger downloads. Recorded takes always play in the format they were captured.",
-    "editor.timeline.qualityCompressedTooltip":
-      "Compressed playback (smaller, faster). Toggle for original-quality generated voices.",
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
     "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
     "editor.timeline.snapOffTooltip": "Snapping off",
@@ -1098,7 +1073,6 @@ export const editor = defineNamespace({
     // Not "Edit history": that is the name of each line's own history drawer
     // (editor.history.title), and two buttons may not share one name.
     "editor.history.panelAria": "Undo history",
-    "editor.history.panelTooltip": "History: undo any of your recent steps",
     "editor.history.undoSection": "Can undo",
     "editor.history.redoSection": "Can redo",
     "editor.history.skippedSection": "Not undone or redone",
@@ -1158,8 +1132,6 @@ export const editor = defineNamespace({
     "editor.timeline.transcribeSelectionClear": "Clear selection",
     "editor.timeline.transcribeSelectionHint":
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
-    "editor.timeline.transcribeSelectionTooltip":
-      "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
     "editor.timeline.transcribeSelectionSharedTooltip": plural({
       one: "Some of these sections are performed by the same heard line, so this runs {count} transcription covering all of them.",
       other: "Some of these sections are performed by the same heard line, so this runs {count} transcriptions covering all of them.",
@@ -1236,8 +1208,10 @@ export const editor = defineNamespace({
     // The link-video dialog and the chip strip's field labels.
     "editor.timeline.linkVideoTitleChange": "Change the linked video",
     "editor.timeline.linkVideoTitleNew": "Link a video",
+    // AQU-2259: it used to say the video always plays muted. It is muted only
+    // while the file's uploaded recording is what plays (MediaVideoPane).
     "editor.timeline.linkVideoDescription":
-      "Paste the address of the video this file was dubbed from. It plays beside the text, muted and in step with the audio — the recording you hear is always the one on the timeline.",
+      "Paste the address of the video this file was dubbed from. It plays beside the text, in step with the timeline. When the file has an uploaded recording, you hear that recording and the video is muted; a YouTube video keeps its own sound until you pick the recording from its Sound menu.",
     "editor.timeline.linkVideoAddressLabel": "Video address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
@@ -1409,9 +1383,20 @@ export const editor = defineNamespace({
     "editor.timeline.rowsTallerTooltip": "Taller rows (⌘ + scroll)",
     "editor.timeline.timingsUnlocked": "Timings unlocked",
     "editor.timeline.pairingsFailed": "The pairings couldn't be loaded — what's shown may be incomplete.",
+    // AQU-2259: the audio VTT dialog has no such checkbox. The notice shows
+    // with the Pairings drawer open, whose button does the pairing.
     "editor.timeline.neverPaired":
-      'These cues have never been paired with the subtitles — re-import the audio VTT and tick "work out the subtitle pairings".',
+      'These cues have never been paired with the subtitles. Choose "{repairAll}" to work out the pairings.',
     "editor.timeline.badgePairing": "pairing…",
+    // AQU-2259: the Sources and Check menu rows, hard-coded English before.
+    "editor.timeline.menuCheckLinks": "Check links",
+    "editor.timeline.menuStopLinking": "Stop linking",
+    "editor.timeline.menuCheckCharacters": "Check characters",
+    "editor.timeline.menuFilm": "Film",
+    "editor.timeline.menuAudioCues": "Audio cues",
+    "editor.timeline.badgeCharactersSubtitle": "{count} subtitle",
+    "editor.timeline.badgeCharactersHeard": "{count} heard",
+    "editor.timeline.badgeCharactersBoth": "{subtitle} + {heard}",
     // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
     // It differed only in case, and a case-only split is pure duplicate work:
     // three of the four target locales have no letter case at all. The badge
@@ -1543,7 +1528,6 @@ export const editor = defineNamespace({
     // Deliberately NOT plural()-wrapped: "hidden" does not inflect, and the
     // indicator sits in a crowded toolbar where the shortest true string wins.
     "editor.hiddenCells.indicator": "{count} hidden",
-    "editor.hiddenCells.toggle": "Show hidden cells",
     "editor.hiddenCells.indicatorTooltip": plural({
       one:
         "{count} cell in this file is hidden: translators do not see it and exports " +
@@ -1872,7 +1856,6 @@ export const editor = defineNamespace({
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
     // Sam, 2026-09-28: the Audio view card — the take, then a row with its voice.
     "editor.voice.generateWith": "Generate · {voice}",
-    "editor.voice.generateDefaultTooltip": "Nobody chose a character for this line, so it uses the default voice",
     "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
     "editor.voice.generatingAs": "Generating as {voice}…",
     "editor.voice.tryAgain": "Try again",
@@ -2035,8 +2018,6 @@ export const editor = defineNamespace({
     "editor.row.rowFallbackRef": "row {index}",
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.translationAria": "Translation for {ref}: {source} — {state}",
-    "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
-    "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
     // AQU-1163: why a target cell will not take your text — shown as the
     // locked cell's tooltip and appended to its accessible name.
     "editor.row.lockedBy": "Locked — {name} is editing this cell",
@@ -2250,7 +2231,6 @@ export const editor = defineNamespace({
 
     // — Recording tab: the take that plays, and the others (2026-09-29) ————
     "editor.recordingTab.newTake": "New take",
-    "editor.recordingTab.newTakeTooltip": "Open the recorder to record, upload or generate a take",
     "editor.recordingTab.otherTakes": plural({
       one: "{count} other take",
       other: "{count} other takes",
@@ -3227,8 +3207,13 @@ export const editor = defineNamespace({
       },
       "editor.reimport.sourceReview": {
         description:
-          "Tooltip on a cell outlined in yellow after a sidebar re-import changed its source " +
+          "Note that opens from the small (i) on a cell outlined in yellow after a sidebar re-import changed its source " +
           "text. Explains that the translation was kept and that validating the cell removes the outline.",
+      },
+      "editor.reimport.sourceReviewInfo": {
+        description:
+          "Screen-reader name of the small (i) button in the corner of a cell outlined in yellow after a re-import " +
+          "changed its source text. Clicking it opens the explanation.",
       },
       "editor.rail.moreActions": {
         description:
@@ -3965,6 +3950,44 @@ export const editor = defineNamespace({
         description:
           "Error shown in that confirmation when the change could not be saved " +
           "(for example the track changed meanwhile). The dialog stays open.",
+      },
+      "editor.timeline.menuCheckLinks": {
+        description: "Check menu row (timeline toolbar) that turns on the mode for checking which audio cue pairs with which subtitle.",
+      },
+      "editor.timeline.menuStopLinking": {
+        description: "The same Check menu row while that pairing mode is on: turns it off.",
+      },
+      "editor.timeline.menuCheckCharacters": {
+        description: "Check menu row that opens the review of lines whose speaking character disagrees between sources.",
+      },
+      "editor.timeline.menuFilm": {
+        description: "Sources menu row for the film (video) linked to this file; its badge says Linked or Not linked.",
+      },
+      "editor.timeline.menuAudioCues": {
+        description: "Sources menu row for the file's audio cues (imported from an audio VTT); its badge says how many.",
+      },
+      "editor.timeline.badgeCharactersSubtitle": {
+        description: "Badge on the Characters row: how many characters came from the subtitles. Short; 'subtitle' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '12'." },
+      },
+      "editor.timeline.badgeCharactersHeard": {
+        description: "Badge on the Characters row: how many characters were heard in the audio. Short; 'heard' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '3'." },
+      },
+      "editor.timeline.badgeCharactersBoth": {
+        description: "Badge on the Characters row when both kinds exist: the two counts side by side.",
+        placeholders: {
+          subtitle: "editor.timeline.badgeCharactersSubtitle, already filled in, e.g. '12 subtitle'.",
+          heard: "editor.timeline.badgeCharactersHeard, already filled in, e.g. '3 heard'.",
+        },
+      },
+      "editor.timeline.neverPaired": {
+        description:
+          "Notice in the timeline's pairing mode when a file's audio cues have never been paired " +
+          "with its subtitles. Shown while the Pairings drawer is open.",
+        placeholders: {
+          repairAll: "The label of the drawer's button, exactly as translated: editor.timeline.cueLinkRepairAll ('Re-pair everything').",
+        },
       },
       "editor.timeline.soundSourceTrigger": {
         description:
@@ -4936,6 +4959,12 @@ export const editor = defineNamespace({
           "is a section heading.",
         maxLength: 22,
       },
+      "editor.view.fontSizeDefault": {
+        description:
+          "Under the Source and Target font size rows in a file's Editor settings: the size an untouched file uses, " +
+          "which comes from the app font size in Preferences.",
+        placeholders: { size: "A whole number of pixels, e.g. 14." },
+      },
       "editor.view.fontSize": {
         description:
           "Section heading in the view-settings popover for the per-column text " +
@@ -4972,17 +5001,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
-        placeholders: {
-          side:
-            "Which column, lower-cased by the app from editor.column.source / " +
-            "editor.column.target.",
-        },
-      },
-      "editor.view.useAppFontSize": {
-        description:
-          "Tooltip and screen-reader name of the button that drops a column's " +
-          "custom size so it follows the app-wide font size again. Shown only " +
-          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +
@@ -5032,12 +5050,6 @@ export const editor = defineNamespace({
           "runs both ways, so no single direction was detected. Lower-case, " +
           "mid-sentence.",
         maxLength: 14,
-      },
-      "editor.bibles.openTooltip": {
-        description:
-          "Tooltip on the collapsed right-edge tab that opens the parallel-bibles " +
-          "sidebar. Two halves: the feature's name, then what it does. 'Versions' " +
-          "here means published Bible translations, not document revisions.",
       },
       "editor.bibles.show": {
         description:
@@ -5173,13 +5185,6 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
-      },
-      "editor.resources.openTooltip": {
-        description:
-          "Tooltip on the collapsed right-edge tab that opens the verse-resources " +
-          "sidebar. Two halves: the feature's name, then what it shows. 'Resources' " +
-          "here means published reference articles about the things the verse names " +
-          "(a person, a town, a key term), not files or project assets.",
       },
       "editor.resources.show": {
         description:
@@ -5835,27 +5840,12 @@ export const editor = defineNamespace({
           "Tooltip when the bulk-translate button is disabled because every " +
           "selected cell already has a translation, so there is nothing to draft.",
       },
-      "editor.selection.translateTooltip": {
-        description:
-          "Tooltip on the enabled bulk-translate button. 'Missing' means cells with " +
-          "no translation yet.",
-        placeholders: { count: "Number of empty cells that would be drafted." },
-      },
       "editor.selection.validate": {
         description:
           "Button in the selection toolbar that records the current user's sign-off " +
           "on the selected translations. Imperative verb; a count badge follows, so " +
           "keep the word alone short. It approves work, it does not check syntax.",
         maxLength: 16,
-      },
-      "editor.selection.validateTooltip": {
-        description:
-          "Tooltip on the enabled bulk-validate button, stating how many cells the click " +
-          "would sign off.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.validatePartial": {
         description:
@@ -5986,13 +5976,6 @@ export const editor = defineNamespace({
           + "validated any take in the selection.",
         maxLength: 60,
       },
-      "editor.selection.unvalidateAudioTooltip": {
-        description:
-          "Tooltip on the button that withdraws the reader's own validation "
-          + "from the selected recordings. Counts TAKES, not lines — a line "
-          + "with two tracks holds two.",
-        placeholders: { count: "How many takes the reader's vote comes off." },
-      },
       "editor.selection.unvalidatedAudioToast": {
         description:
           "Toast after withdrawing the reader's own validation from the "
@@ -6007,10 +5990,6 @@ export const editor = defineNamespace({
           + "recording. The word is 'validate', never 'approve'.",
         maxLength: 26,
       },
-      "editor.selection.validateAudioTooltip": {
-        description: "Tooltip for the button above, with the number of recordings it would sign off.",
-        placeholders: { count: "How many recordings the selection holds that this user can still validate." },
-      },
       "editor.selection.validatedAudioToast": {
         description: "Confirmation after the bulk recording validation above ran.",
         placeholders: { count: "How many recordings were validated." },
@@ -6019,15 +5998,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the remove-my-validations button is disabled because none of " +
           "the selected cells carries this user's sign-off.",
-      },
-      "editor.selection.unvalidateTooltip": {
-        description:
-          "Tooltip on the enabled remove-my-validations button, stating the scope. 'Your' " +
-          "keeps it clear that other reviewers are untouched.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.harmonize": {
         description:
@@ -6041,15 +6011,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip when the harmonize button is disabled because the user's project " +
           "role is below lead. 'Project lead' is a role name in this app.",
-      },
-      "editor.selection.harmonizeTooltip": {
-        description:
-          "Tooltip on the enabled harmonize button, stating the scope of the sweep it " +
-          "opens.",
-        placeholders: {
-          count:
-            "The number the sentence counts; it also selects which plural form is used.",
-        },
       },
       "editor.selection.clearTooltip": {
         description:
@@ -6633,18 +6594,6 @@ export const editor = defineNamespace({
           "are downloaded for playback — pressed means the larger original-quality " +
           "audio. Never visible.",
       },
-      "editor.timeline.qualityOriginalTooltip": {
-        description:
-          "Tooltip of that toggle while original quality is on. 'WAV' is the " +
-          "uncompressed audio file format — keep it as the file-format name. The last " +
-          "sentence warns that microphone recordings have no uncompressed form, so " +
-          "the setting does not affect them.",
-      },
-      "editor.timeline.qualityCompressedTooltip": {
-        description:
-          "Tooltip of the same toggle while compressed playback is on, naming the " +
-          "trade-off (smaller and faster) and what clicking switches to.",
-      },
       "editor.timeline.snapToggleAria": {
         description:
           "Accessible name of the toolbar toggle for snapping: while it is on, " +
@@ -6829,7 +6778,6 @@ export const editor = defineNamespace({
       "editor.history.redonePartly": { description: "Toast after Redo of a step made of several parts where some parts were changed since and were left alone.", placeholders: { step: "The step's name.", count: "How many parts were left alone." } },
       "editor.history.panelTitle": { description: "Title of the History panel, which lists the user's recent steps they can undo." },
       "editor.history.panelAria": { description: "Accessible name of the button that opens the History panel." },
-      "editor.history.panelTooltip": { description: "Tooltip of the button that opens the History panel." },
       "editor.history.undoSection": { description: "Heading over the list of steps that can be undone (newest first)." },
       "editor.history.redoSection": { description: "Heading over the list of steps that were undone and can be redone." },
       "editor.history.skippedSection": { description: "Heading over recent undos/redos that did not happen, each with the reason." },
@@ -7089,11 +7037,6 @@ export const editor = defineNamespace({
           "the named voice (the line's character, or the project's default voice).",
         placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
         maxLength: 32,
-      },
-      "editor.voice.generateDefaultTooltip": {
-        description:
-          "Tooltip on that Generate button when nobody has chosen a character for the " +
-          "line, so it will use the project's default voice.",
       },
       "editor.voice.nothingToReadTooltip": {
         description:
@@ -7878,24 +7821,13 @@ export const editor = defineNamespace({
       },
       "editor.row.lockedBy": {
         description:
-          "Tooltip on a target cell that another person currently holds the edit " +
+          "Note that opens when you click a target cell another person currently holds the edit " +
           "lease on, and the suffix appended to that cell's accessible name. It " +
           "answers \"why can't I type here?\" — the cell is read-only for now, not " +
           "broken, and frees up when that person moves on.",
         placeholders: {
           name: "Display name of the collaborator holding the edit lease.",
         },
-      },
-      "editor.row.selectedTooltip": {
-        description:
-          "Tooltip on a row's selection checkbox when the row IS selected, " +
-          "explaining the drag gesture that extends the selection to neighbouring " +
-          "rows.",
-      },
-      "editor.row.selectTooltip": {
-        description:
-          "Tooltip on the selection checkbox when the row is NOT selected: what a " +
-          "click does, then what a drag does.",
       },
       "editor.presence.viewing": {
         description:
@@ -8753,9 +8685,6 @@ export const editor = defineNamespace({
           "recorded, uploaded or generated. 'Take' as in one recording of a line.",
         maxLength: 14,
       },
-      "editor.recordingTab.newTakeTooltip": {
-        description: "Tooltip of the New take button: what the recorder it opens can do.",
-      },
       "editor.recordingTab.otherTakes": {
         description:
           "Heading over the list of a line's takes other than the one that plays, in " +
@@ -9029,13 +8958,6 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many cells in this file are hidden. Always one or more.",
         },
-      },
-      "editor.hiddenCells.toggle": {
-        description:
-          "Label of the switch beside the hidden-cell count. On, the parked cells are " +
-          "drawn dimmed instead of dropped from the list — it reveals them on this " +
-          "screen only and un-hides nothing for anyone else. Imperative.",
-        maxLength: 24,
       },
       "editor.issues.none": {
         description:

@@ -29,6 +29,7 @@ export function OrgSettingsProjectDefaults() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES["project-defaults"]}
+      page="project-defaults"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS["project-defaults"]}
     >
       {/* Label-less: the page title already says "Project defaults" and a

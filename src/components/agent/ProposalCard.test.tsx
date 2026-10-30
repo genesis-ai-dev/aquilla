@@ -13,6 +13,7 @@ import type { TranslationRule } from "@/lib/parsers/types"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import type { CellData } from "@/hooks/useCells"
 import { ROLE } from "@/lib/agent/role-floors"
+import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 import { ProposalCard } from "./ProposalCard"
 
 vi.mock("@/lib/agent/apply", () => ({
@@ -182,10 +183,12 @@ describe("rendering", () => {
 })
 
 describe("role gate", () => {
-  it("disables Apply with a reason when the role is below the kind's floor", () => {
-    render(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} roleLevel={ROLE.REVIEWER} />)
+  it("disables Apply with a reason when the role is below the kind's floor", async () => {
+    renderWithTooltips(<ProposalCard {...BASE_PROPS} proposal={makeProposal()} roleLevel={ROLE.REVIEWER} />)
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
     expect(screen.getByText("Requires Contributor role or higher")).toBeInTheDocument()
+    // AQU-2260: the reason opens on click of the greyed button, never on hover.
+    await expectDisabledNote(screen.getByRole("button", { name: "Apply" }), "Requires Contributor role or higher")
   })
 
   it("enables Apply at the floor and fails open when the role is unknown", () => {
@@ -271,6 +274,26 @@ describe("destination file (AQU-846)", () => {
     )
     expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
     expect(screen.getByText("Mark.usfm")).toBeInTheDocument()
+  })
+
+  // AQU-2260 (Sam, Oct 29): the file badge says where the change lands on a
+  // click, never on hover.
+  it("says on click which file a change lands in", async () => {
+    renderWithTooltips(
+      <ProposalCard
+        {...BASE_PROPS}
+        proposal={makeProposal({
+          events: [{
+            kind: "target.cell.commit",
+            fileId: "f-gen",
+            cellId: "c-1",
+            payload: { value: "En el principio" },
+            display: { canonicalRef: "GEN 1:1", fileName: "Genesis.usfm", after: "En el principio" },
+          }],
+        })}
+      />,
+    )
+    await expectClickNote(screen.getByText("Genesis.usfm").closest("button")!, "This change lands in Genesis.usfm")
   })
 
   it("omits the file badge rather than guessing when the server sent no name", () => {

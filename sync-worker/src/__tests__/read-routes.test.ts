@@ -139,6 +139,7 @@ describe('GET /cells/audit-stats', () => {
         lastEditEventId: string
         sourceEventId: string | null
         activeValidators: string[]
+        validatorDecidedTs: Record<string, number>
       }[]
     }
     const c1 = body.cells.find((c) => c.cellId === 'c1')!
@@ -146,11 +147,17 @@ describe('GET /cells/audit-stats', () => {
     expect(c1.lastEditEventId).toBe('ev-current')
     expect(c1.sourceEventId).toBe('src-current-1')
     expect(new Set(c1.activeValidators)).toEqual(new Set(['alice', 'bob']))
+    // AQU-2296: WHEN each of them voted, for the date under their name in the
+    // "Text validated by" popover. Keyed by username, and scoped to the
+    // current head exactly as the name list is — carol's vote on `ev-old` is
+    // no more current than her name is.
+    expect(c1.validatorDecidedTs).toEqual({ alice: 1750, bob: 1751 })
 
     const c2 = body.cells.find((c) => c.cellId === 'c2')!
     expect(c2.side).toBe('source')
     expect(c2.sourceEventId).toBe(null)
     expect(c2.activeValidators).toEqual([])
+    expect(c2.validatorDecidedTs).toEqual({})
   })
 
   it('scopes to a single cell when cellId is passed, so a single-cell commit does not have to pull the whole file', async () => {

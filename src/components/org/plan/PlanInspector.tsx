@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
 import { X, ChevronUp, ChevronDown, ArrowRight } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoLabel } from "@/components/ui/info-label"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
@@ -323,17 +324,16 @@ export function PlanInspector({
             {onOpenUnit ? (
               // Styled as the board's other links are: the words as they were,
               // a dotted underline on hover and focus, so the title still reads
-              // as a title until the pointer asks it what it does.
-              <AppTooltip content={t("org.projectOverview.plan.openInEditor")}>
-                <button
-                  type="button"
-                  data-testid="plan-inspector-open-file"
-                  onClick={onOpenUnit}
-                  className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                >
-                  {planUnitLabel(unit)}
-                </button>
-              </AppTooltip>
+              // as a title until the pointer asks it what it does. AQU-2260:
+              // a labelled button, so no hover text.
+              <button
+                type="button"
+                data-testid="plan-inspector-open-file"
+                onClick={onOpenUnit}
+                className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                {planUnitLabel(unit)}
+              </button>
             ) : planUnitLabel(unit)}
           </h3>
           <p className="mt-0.5 text-[11.5px] text-muted-foreground" data-testid="plan-inspector-meta">
@@ -416,6 +416,7 @@ export function PlanInspector({
                   translated: planPct(unit.filledCount, unit.totalCount),
                   validated: validatedPct,
                 })}
+                showCounts
                 tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
               />
             )}
@@ -430,6 +431,7 @@ export function PlanInspector({
                   recorded: planPct(unit.audioCount, audioTotal),
                   validated: planPct(unit.audioValidatedCount, audioTotal),
                 })}
+                showCounts
                 tips={readoutTips("audio", unit.audioCount, unit.audioValidatedCount, audioTotal)}
               />
             )}
@@ -679,17 +681,21 @@ export function PlanInspector({
                     {t("org.projectOverview.plan.nothingLeft")}
                   </p>
                 )}
-                {/* AQU-1494: the reassurance that this can be reversed lives in
-                    a tooltip. Printed beside the button as "Undoable." it read
-                    as "cannot be undone" (Joel, 2026-09-29). */}
-                <div className="flex items-center gap-2">
-                  <AppTooltip content={t("org.projectOverview.plan.markDoneTooltip")}>
-                    <Button size="sm" disabled={busy} data-testid="plan-mark-done"
-                      onClick={() => (validatedShort ? setConfirmingDone(true) : markDone())}>
-                      {t("org.projectOverview.plan.markDone")}
-                    </Button>
-                  </AppTooltip>
-                </div>
+                {/* AQU-1494: printed beside the button as "Undoable." the
+                    reassurance read as "cannot be undone" (Joel, 2026-09-29).
+                    AQU-2260 (Sam, Oct 29): nor may it be a hover, so it opens
+                    in place under the button on a click of its (i). */}
+                <InfoLabel
+                  info={t("org.projectOverview.plan.markDoneTooltip")}
+                  label={t("common.aboutAria", { name: t("org.projectOverview.plan.markDone") })}
+                  testId="plan-mark-done-info"
+                  rowClassName="gap-2"
+                >
+                  <Button size="sm" disabled={busy} data-testid="plan-mark-done"
+                    onClick={() => (validatedShort ? setConfirmingDone(true) : markDone())}>
+                    {t("org.projectOverview.plan.markDone")}
+                  </Button>
+                </InfoLabel>
               </>
             )}
           </div>
@@ -817,17 +823,16 @@ function PlanChapterCard({
     >
       <div className="flex items-baseline justify-between gap-2">
         <span className="min-w-0 text-[12.5px] font-semibold" data-testid="plan-chapter-detail-title">
+          {/* AQU-2260: a labelled button, so no hover text. */}
           {firstCellId && onOpenCell ? (
-            <AppTooltip content={t("org.projectOverview.plan.openInEditor")}>
-              <button
-                type="button"
-                data-testid="plan-chapter-open"
-                onClick={() => onOpenCell(firstCellId)}
-                className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              >
-                {title}
-              </button>
-            </AppTooltip>
+            <button
+              type="button"
+              data-testid="plan-chapter-open"
+              onClick={() => onOpenCell(firstCellId)}
+              className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              {title}
+            </button>
           ) : title}
         </span>
         {outstandingLabel && (
@@ -851,10 +856,11 @@ function PlanChapterCard({
             translated: planPct(section.filledCount, section.totalCount),
             validated: planPct(section.validatedCount, section.totalCount),
           })}
-          // Percentages like every other bar, the counts one hover away (Sam,
-          // 2026-09-17, for consistency). "20 of 20 translated · 18 of 20
-          // validated" is what the hover says; the card's own header still
-          // says "2 cells not yet validated" in print.
+          // Percentages like every other bar (Sam, 2026-09-17, for
+          // consistency), and "20 of 20 translated · 18 of 20 validated"
+          // printed under it (AQU-2260: it was a hover). The card's own header
+          // still says "2 cells not yet validated".
+          showCounts
           tips={readoutTips("text", section.filledCount, section.validatedCount, section.totalCount)}
         />
       )}
@@ -868,6 +874,7 @@ function PlanChapterCard({
             recorded: planPct(section.audioCount, section.totalCount),
             validated: planPct(section.audioValidatedCount, section.totalCount),
           })}
+          showCounts
           tips={readoutTips("audio", section.audioCount, section.audioValidatedCount, section.totalCount)}
         />
       )}

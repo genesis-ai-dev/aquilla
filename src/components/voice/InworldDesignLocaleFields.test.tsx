@@ -7,7 +7,7 @@ import { listInworldSupportedLanguages } from "@/lib/sync/tts"
 import { __resetInworldSupportedLanguagesCacheForTests } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { InworldSupportedLanguage } from "@/lib/audio/inworld-supported-languages"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("@/lib/sync/tts", () => ({
   listInworldVoices: vi.fn(),
@@ -176,14 +176,15 @@ describe("InworldDesignLocaleFields", () => {
     expect(onLanguageChange).toHaveBeenCalledWith("en")
   })
 
+  // AQU-2260: the (i)s open on click (VoiceInfoTip is an InfoNote now).
   it("explains language and accent behind info icons", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     renderLocales("en-US")
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the language" }),
       /language this designed voice will speak/i,
     )
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the accent" }),
       /Default is just en/i,
     )
@@ -192,11 +193,11 @@ describe("InworldDesignLocaleFields", () => {
   it("explains catalog language copy on prebuilt", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     renderLocales("en-US", "catalog", true)
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the language" }),
       /already has speakers/i,
     )
-    await expectTooltip(
+    await expectClickNote(
       screen.getByRole("button", { name: "About the accent" }),
       /matching stock voices/i,
     )

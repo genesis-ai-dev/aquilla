@@ -33,7 +33,6 @@ import {
   FolderInput,
   FolderPlus,
   GripVertical,
-  Info,
   Link2,
   LocateFixed,
   Magnet,
@@ -71,7 +70,6 @@ import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
 import { RenameTakeDialog } from "./RenameTakeDialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -89,6 +87,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { InfoNote } from "@/components/ui/info-note"
 import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
@@ -151,7 +150,8 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
 import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
-import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
+import { usePersonPref } from "@/lib/prefs/person-prefs"
+import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtual-clock"
@@ -302,7 +302,7 @@ export interface TimelineEditorProps {
   canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
-  /** False disables the control — `file.video.set` needs contributor access,
+  /** False disables the control — `file.video.set` needs project lead access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
   /** AQU-646 stage 2: open the audio-VTT import dialog. It lives up in the
@@ -1296,7 +1296,9 @@ export function TimelineEditor({
   // with the video pane's header button. This is a read; every write goes
   // through toggleAudibility, which merges against the store.
   const audibility = useQueueAudibility()
-  const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  // AQU-2264: a preference that follows the person, shared with
+  // Preferences → Recording, so a change in either place shows in both.
+  const snapOn = usePersonPref(timelineSnapPref)
   // AQU-1767: the blade. Personal and per-session — a tool in your hand, not a
   // setting — and off whenever cutting is not possible here.
   const [bladeOn, setBladeOn] = useState(false)
@@ -1656,7 +1658,15 @@ export function TimelineEditor({
   const [extraIds, setExtraIds] = useState<readonly string[]>([])
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
-  const [follow, setFollow] = useState(true)
+  // Follow playhead (AQU-2264): the button is a preference that follows the
+  // person, remembered and shared with Preferences → Recording. A manual scroll
+  // during playback lets go of the playhead for a while (`followReleased`);
+  // starting playback or a deliberate jump takes it back — but only when the
+  // preference is on. (It used to be one useState(true): reset on reload, and
+  // turned back on by every press of play even after you turned it off.)
+  const followPref = usePersonPref(timelineFollowPlayheadPref)
+  const [followReleased, setFollowReleased] = useState(false)
+  const follow = followPref && !followReleased
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The clipped label column, and the div inside it that carries the vertical
    *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
@@ -1900,7 +1910,7 @@ export function TimelineEditor({
     // or jumped, follow was released for good and pressing play never took it
     // back. The follow SCROLL below was already video-aware; only its
     // re-engagement was not, which is why the track looked half-fixed.
-    if (queueRunning || videoPlaying) setFollow(true)
+    if (queueRunning || videoPlaying) setFollowReleased(false)
   }, [queueRunning, videoPlaying])
 
   // Measure the scroll viewport before first paint + on resizes — the
@@ -1988,7 +1998,7 @@ export function TimelineEditor({
           el.scrollLeft = 0
           setScrollLeft(0)
         }
-        setFollow(true)
+        setFollowReleased(false)
       }
     }
     document.addEventListener("keydown", onKeyDown)
@@ -2239,7 +2249,7 @@ export function TimelineEditor({
   // Each row states what the file HAS, and opens the dialog that owns that
   // source's verbs — so no row needs two actions. Permission is per row rather
   // than per button, which is strictly better than the buttons were: linking a
-  // film is contributor-level, while both cell-writing imports sit at the
+  // film is project-lead-level, while both cell-writing imports sit at the
   // source.cell.create floor.
   /**
    * The CHECK menu — reviewing, as against Sources' importing. (Sam,
@@ -2256,7 +2266,7 @@ export function TimelineEditor({
     if (linkingAvailable) {
       items.push({
         id: "check-links",
-        label: linkingMode ? "Stop linking" : "Check links",
+        label: linkingMode ? t("editor.timeline.menuStopLinking") : t("editor.timeline.menuCheckLinks"),
         icon: Link2,
         badge: cueLinksPending ? (
           <span className="text-[11px] text-muted-foreground">{t("editor.timeline.badgePairing")}</span>
@@ -2271,7 +2281,7 @@ export function TimelineEditor({
     if (onReviewCharacterDisagreements && canCheck) {
       items.push({
         id: "check-characters",
-        label: "Check characters",
+        label: t("editor.timeline.menuCheckCharacters"),
         icon: Users,
         badge:
           characterDisagreements > 0 ? (
@@ -2314,7 +2324,7 @@ export function TimelineEditor({
     } else if (onRequestLinkVideo) {
       items.push({
         id: "film",
-        label: "Film",
+        label: t("editor.timeline.menuFilm"),
         icon: Film,
         disabled: !canLinkVideo,
         badge: (
@@ -2328,7 +2338,7 @@ export function TimelineEditor({
     if (onRequestImportAudioVtt) {
       items.push({
         id: "audio-cues",
-        label: "Audio cues",
+        label: t("editor.timeline.menuAudioCues"),
         icon: AudioLines,
         disabled: !canImportAudioVtt,
         badge: (
@@ -2364,7 +2374,7 @@ export function TimelineEditor({
     if (onRequestExtractSubtitles) {
       items.push({
         id: "subtitles",
-        label: "Subtitles",
+        label: t("editor.timeline.laneSubtitle"),
         icon: Captions,
         disabled: !canExtractSubtitles || subtitleCueCount > 0,
         badge: (
@@ -2380,7 +2390,7 @@ export function TimelineEditor({
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
-        label: "Characters",
+        label: t("editor.timeline.charactersTitle"),
         icon: Users,
         disabled: !canImportCharacters,
         badge: charactersWriting ? (
@@ -2391,12 +2401,14 @@ export function TimelineEditor({
           <span className="text-[11px] text-muted-foreground">
             {characterCount === 0 && audioCharacterCount === 0
               ? t("editor.timeline.badgeNotImported")
-              : [
-                  characterCount > 0 ? `${characterCount} subtitle` : null,
-                  audioCharacterCount > 0 ? `${audioCharacterCount} heard` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" + ")}
+              : characterCount > 0 && audioCharacterCount > 0
+                ? t("editor.timeline.badgeCharactersBoth", {
+                    subtitle: t("editor.timeline.badgeCharactersSubtitle", { count: characterCount }),
+                    heard: t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount }),
+                  })
+                : characterCount > 0
+                  ? t("editor.timeline.badgeCharactersSubtitle", { count: characterCount })
+                  : t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount })}
           </span>
         ),
         onClick: onRequestImportCharacters,
@@ -2987,7 +2999,7 @@ export function TimelineEditor({
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
     if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
-      setFollow(false)
+      setFollowReleased(true)
     }
   }
 
@@ -3649,7 +3661,7 @@ export function TimelineEditor({
     // the queue legitimately drops some seeks (no session, a gap no section
     // owns) and the picture must move regardless.
     send?.(Math.max(0, sec))
-    setFollow(true)
+    setFollowReleased(false)
   }
 
   // Mirror every selection change up — one effect catches the lanes' onSelect
@@ -4380,12 +4392,13 @@ export function TimelineEditor({
     <>
       {/* Meeting 2026-08-05: generated voices default to compressed
           playback; fast connections can opt into the original WAV. Mic
-          recordings have no lossless form — the description says so. */}
+          recordings have no lossless form. AQU-2260 (Sam, Oct 29): nothing
+          explains the row on hover — its words name it, its tick is its
+          state. */}
       <DropdownMenuCheckboxItem
         checked={audioQuality === "original"}
         onCheckedChange={(on) => setAudioQualityPref(on ? "original" : "compressed")}
         data-testid="tl-quality-toggle"
-        title={audioQuality === "original" ? t("editor.timeline.qualityOriginalTooltip") : t("editor.timeline.qualityCompressedTooltip")}
       >
         <AudioLines />
         {t("editor.timeline.qualityToggleAria")}
@@ -4394,10 +4407,7 @@ export function TimelineEditor({
       {!audioFirst && (
         <DropdownMenuCheckboxItem
           checked={snapOn}
-          onCheckedChange={(on) => {
-            setSnapOn(on)
-            saveSnapEnabled(on)
-          }}
+          onCheckedChange={(on) => timelineSnapPref.set(on)}
           data-testid="tl-snap-toggle"
         >
           <Magnet />
@@ -4407,7 +4417,14 @@ export function TimelineEditor({
       <DropdownMenuCheckboxItem
         checked={follow}
         onCheckedChange={(next) => {
-          setFollow(next)
+          // AQU-2264: off turns the preference off. On takes the playhead
+          // back: after a manual scroll that is all it does; when the
+          // preference was off, it turns it on.
+          if (!next) timelineFollowPlayheadPref.set(false)
+          else {
+            setFollowReleased(false)
+            if (!followPref) timelineFollowPlayheadPref.set(true)
+          }
           if (next) {
             const el = scrollRef.current
             if (el) {
@@ -4664,32 +4681,25 @@ export function TimelineEditor({
           browser reports, so this does NOT say "there is latency" — it says
           the part we cannot measure is still there. Shown only on a path
           slow enough that the reading is untrustworthy, which in practice
-          means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
+          means Bluetooth. Sam, 2026-10-15: a short amber word beside the
           heading (after the timing switch, when there is one), the full
-          message behind its info button — it was a full-width line. */}
+          message behind its info button — it was a full-width line.
+          AQU-2260 (Sam, Oct 29): plain amber text, never a pill. */}
       {outputLatencySec >= HIGH_LATENCY_SEC && (
         <span
           data-testid="tl-output-latency-note"
-          className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+          className="ms-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
         >
           {t("editor.timeline.bluetoothPill")}
-          <Popover>
-            <PopoverTrigger
-              render={
-                <button
-                  type="button"
-                  data-testid="tl-output-latency-info"
-                  aria-label={t("editor.timeline.bluetoothPillInfo")}
-                  className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
-                />
-              }
-            >
-              <Info className="h-3 w-3" />
-            </PopoverTrigger>
-            <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
-              {t("editor.timeline.outputLatencyNote")}
-            </PopoverContent>
-          </Popover>
+          {/* AQU-2260: the same click-open note as every toolbar (i). */}
+          <InfoNote
+            label={t("editor.timeline.bluetoothPillInfo")}
+            testId="tl-output-latency-info"
+            className="rounded-full p-0 text-amber-700/80 hover:text-amber-800 aria-expanded:text-amber-800 dark:text-amber-300/80 dark:hover:text-amber-200"
+            iconClassName="h-3 w-3"
+          >
+            {t("editor.timeline.outputLatencyNote")}
+          </InfoNote>
         </span>
       )}
       {/* The two states in which the overlay would otherwise lie by
@@ -4705,7 +4715,7 @@ export function TimelineEditor({
       )}
       {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
         <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
-          {t("editor.timeline.neverPaired")}
+          {t("editor.timeline.neverPaired", { repairAll: t("editor.timeline.cueLinkRepairAll") })}
         </span>
       )}
     </>
@@ -4782,13 +4792,15 @@ export function TimelineEditor({
           <span className="min-w-0 flex-1">
             {t("editor.timeline.measureNote", { count: legacyMeasure.count })}
           </span>
+          {/* Its words name it; why it is greyed out opens on a click on it,
+              and what it does is behind the (i) beside it (AQU-2260). */}
           <AppTooltip
             content={
               !online
                 ? t("editor.timeline.measureOfflineTooltip")
                 : batchProgress != null
                   ? t("editor.timeline.measureBusyTooltip")
-                  : t("editor.timeline.measureTooltip")
+                  : null
             }
           >
             <button
@@ -4801,6 +4813,9 @@ export function TimelineEditor({
               {t("editor.timeline.measureNow")}
             </button>
           </AppTooltip>
+          <InfoNote label={t("common.aboutAria", { name: t("editor.timeline.measureNow") })} align="end">
+            {t("editor.timeline.measureTooltip")}
+          </InfoNote>
           <button
             type="button"
             aria-label={t("editor.timeline.measureDismiss")}

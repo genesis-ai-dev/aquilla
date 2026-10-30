@@ -13,6 +13,7 @@
  * edits only the active lane's slice, then merges that slice back so a
  * save cannot wipe another lane.
  */
+import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus, Merge } from "lucide-react"
@@ -58,6 +59,7 @@ import {
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
 import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
+import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { emitConceptDelta } from "@/lib/terminology/events-delta"
 import type { PredictedEquivalent } from "@/lib/terminology/equivalents"
 import { exportConceptsCsv } from "@/lib/terminology/csv"
@@ -144,6 +146,7 @@ export function GlossaryEditor({
   const project = workspaceProject ?? ownedProject.project
   const loading = workspaceProject == null && ownedProject.loading
   const { session: frontierSession } = useFrontierSession()
+  const localAuthorName = useLocalAuthorName()
   const importInputRef = useRef<HTMLInputElement>(null)
 
   // File-scoped sync token for the occurrence page and the project scans.
@@ -262,6 +265,9 @@ export function GlossaryEditor({
   const addTermDenial =
     suggestDenial ??
     (termbaseUnknown ? t("terminology.editor.loadFailedDisabledTooltip") : null)
+  // AQU-2260: each distinct reason the toolbar's buttons are locked, said
+  // once in a line under the toolbar.
+  const toolbarLocks = [...new Set([termbaseWriteDenial, addTermDenial].filter((r): r is string => !!r))]
 
   const { active, suggested, archived } = useMemo(
     () => partitionConcepts(visibleConcepts),
@@ -689,7 +695,7 @@ export function GlossaryEditor({
         canEdit={canEditCells}
         projectId={id!}
         activeLane={activeLane}
-        username={frontierSession?.username ?? project?.username ?? "local"}
+        username={authorNameFor(frontierSession?.username, project?.username, localAuthorName)}
         onClose={handleCloseDetails}
         onCellCommitted={occurrences.revalidate}
         onOptimisticEdit={occurrences.applyOptimisticTargetEdit}
@@ -720,6 +726,9 @@ export function GlossaryEditor({
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {/* Header / toolbar */}
+      {/* AQU-2260: why the toolbar's buttons are locked, said once under it
+          rather than on a hover over each. */}
+      <LockedSection reason={[termbaseWriteDenial, addTermDenial, termbaseDenial]}>
       <header className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
         <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
@@ -820,6 +829,14 @@ export function GlossaryEditor({
           </DisabledFieldTooltip>
         )}
       </header>
+      </LockedSection>
+      {toolbarLocks.length > 0 && (
+        <div data-testid="terminology-locked" className="flex flex-col gap-1 border-b px-4 py-2">
+          {toolbarLocks.map((r) => (
+            <LockedNote key={r} placement="section">{r}</LockedNote>
+          ))}
+        </div>
+      )}
 
       <Dialog open={addOpen} onOpenChange={handleAddOpenChange}>
         <DialogContent>

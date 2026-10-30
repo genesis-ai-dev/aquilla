@@ -2,10 +2,10 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { ProjectTable, activityStatus, OrgHome } from "./OrgHome"
+import { activityStatus, OrgHome } from "./OrgHome"
 import { OrgOverview } from "./OrgOverview"
 import { OrgProjectsPage } from "./OrgProjectsPage"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 import { summarizePortfoliosByOrg } from "@/lib/frontier/portfolio-metrics"
 
@@ -189,6 +189,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
+  autoPropagateRepetitionsOverrides: 0,
+  resetAutoPropagateRepetitionsOverrides: vi.fn(),
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -317,17 +319,6 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "clientWidth")
 })
 
-function mockProjectNameOverflow(overflowing: boolean) {
-  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-    configurable: true,
-    get: () => (overflowing ? 400 : 80),
-  })
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-    configurable: true,
-    get: () => 128,
-  })
-}
-
 describe("OrgHome loading template", () => {
   it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
     mockUseFrontierSession.mockReturnValue({
@@ -345,158 +336,6 @@ describe("OrgHome loading template", () => {
     const header = document.querySelector("[data-slot='app-shell-header']")
     expect(header).not.toBeNull()
     expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
-  })
-})
-
-describe("ProjectTable", () => {
-  const project: PortfolioProject & { orgName: string } = {
-    id: "long-project",
-    name: "A project name that must remain readable beside its organization",
-    orgName: "Come and See Foundation International",
-    totalCells: 100,
-    filledCells: 40,
-    validatedCells: 20,
-    aiDraftedCells: 0,
-    lastEditAt: Date.now(),
-    audioCells: 10,
-    validatedAudioCells: 0,
-    recordedMs: 0,
-    deadlineAt: "2020-01-01",
-    sourceLanguage: "English",
-    targetLanguage: "French",
-  }
-
-  it("keeps the organization secondary while preserving a compact project identity", async () => {
-    mockProjectNameOverflow(true)
-    renderWithTooltips(
-      <MemoryRouter>
-        <ProjectTable
-          projects={[project]}
-          now={Date.now()}
-          showOrg
-          // AQU-606: this map is only the per-file *hint*; the project's own
-          // targetLanguage ("French") takes precedence for the '' lane chip.
-        />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByText("Project")).toBeInTheDocument()
-    expect(screen.getByText("Org")).toBeInTheDocument()
-    const identity = screen.getByTestId("project-table-identity")
-    const projectName = screen.getByTestId("project-table-name")
-    const expandedProjectName = screen.getByTestId("project-table-name-expanded")
-    const organization = screen.getByTestId("project-table-organization")
-    const metadata = screen.getByTestId("project-table-metadata")
-    const deadlineTrigger = screen.getByTestId("project-table-deadline-trigger")
-    const deadlineStatus = screen.getByTestId("project-table-deadline-status")
-    expect(projectName).toHaveTextContent(project.name)
-    expect(projectName).toHaveClass("overflow-hidden", "whitespace-nowrap", "text-clip")
-    expect(projectName).not.toHaveClass("truncate", "text-ellipsis")
-    expect(organization).toHaveTextContent(project.orgName)
-    expect(identity).toContainElement(projectName)
-    expect(identity).toContainElement(organization)
-    expect(projectName).not.toHaveAttribute("title")
-    expect(
-      [...(projectName.closest("a")?.querySelectorAll("[title]") ?? [])].filter(
-        (element) => element.getAttribute("title") === project.name,
-      ),
-    ).toHaveLength(0)
-    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
-    expect(expandedProjectName).toHaveTextContent(project.name)
-    expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
-    expect(expandedProjectName).toHaveClass("z-50", "-start-2", "px-2", "py-1", "bg-popover", "shadow-md")
-    expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
-    expect(organization).toHaveClass("relative", "h-5", "w-full")
-    expect(organization).toHaveAttribute("data-org-name", project.orgName)
-    expect(organization.querySelectorAll('[data-slot="badge"]')).toHaveLength(1)
-    expect(metadata).toHaveTextContent("English → French")
-    expect(identity).toContainElement(deadlineTrigger)
-    expect(deadlineTrigger).toContainElement(deadlineStatus)
-    expect(deadlineStatus).toHaveTextContent("Overdue")
-    expect(deadlineStatus).toHaveClass("[&>span:last-child]:sr-only")
-    expect(metadata).not.toContainElement(deadlineStatus)
-    expect(organization).not.toContainElement(deadlineStatus)
-    expect(screen.getByTestId("project-table")).toHaveClass("overflow-hidden")
-    expect(screen.getByTestId("project-table")).not.toHaveClass("overflow-x-auto")
-    const languages = screen.getByTestId("project-table-languages")
-    const languageChip = screen.getByTestId(`lane-chip-${project.id}-`)
-    expect(languages).toHaveClass("min-w-0", "overflow-hidden")
-    expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
-    expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
-    expect(within(languageChip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
-    expect(languageChip).toHaveAccessibleName("French: 40% translated")
-    // The (potentially truncated) label's full text stays recoverable on hover.
-    await expectTooltip(languageChip, "French — 40% translated")
-    expect(screen.getByText("Language")).toBeInTheDocument()
-    expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
-    expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
-    expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-start")
-    expect(screen.queryByText("Role")).not.toBeInTheDocument()
-    expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
-    expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
-  })
-
-  it("labels the default lane from the project's target language with no per-file hint (AQU-606)", async () => {
-    // The all-orgs table passes an empty hint map, and a lanes-migrated project
-    // carries no per-file targetLanguage — the chip used to read "Default".
-    renderWithTooltips(
-      <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg />
-      </MemoryRouter>,
-    )
-
-    const chip = screen.getByTestId(`lane-chip-${project.id}-`)
-    expect(chip).toHaveTextContent("French")
-    expect(chip).not.toHaveTextContent("Default")
-    // A long target language still truncates but stays recoverable on hover.
-    expect(within(chip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
-    await expectTooltip(chip, "French — 40% translated")
-  })
-
-  it("falls back to the neutral placeholder when no target language is set (AQU-606)", () => {
-    render(
-      <MemoryRouter>
-        <ProjectTable
-          projects={[{ ...project, id: "untargeted", targetLanguage: null }]}
-          now={Date.now()}
-          showOrg
-        />
-      </MemoryRouter>,
-    )
-
-    expect(screen.getByTestId("lane-chip-untargeted-")).toHaveTextContent("Default")
-  })
-
-  it("omits the redundant organization column in a single-organization view", () => {
-    render(
-      <MemoryRouter>
-        <ProjectTable projects={[project]} now={Date.now()} showOrg={false} />
-      </MemoryRouter>,
-    )
-
-    expect(screen.queryByTestId("project-table-organization")).not.toBeInTheDocument()
-    expect(screen.getByTestId("project-table-name")).toHaveTextContent(project.name)
-  })
-
-  it("does not reveal or tooltip a project name that fits", () => {
-    mockProjectNameOverflow(false)
-    render(
-      <MemoryRouter>
-        <ProjectTable projects={[{ ...project, id: "exodus", name: "Exodus" }]} now={Date.now()} showOrg />
-      </MemoryRouter>,
-    )
-
-    const projectName = screen.getByTestId("project-table-name")
-    expect(projectName).toHaveTextContent("Exodus")
-    expect(projectName).not.toHaveAttribute("title")
-    expect(projectName).not.toHaveAttribute("data-slot", "tooltip-trigger")
-    expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "false")
-    expect(screen.queryByTestId("project-table-name-expanded")).not.toBeInTheDocument()
   })
 })
 

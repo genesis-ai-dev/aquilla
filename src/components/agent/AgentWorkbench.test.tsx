@@ -544,7 +544,7 @@ describe("AgentWorkbench review loop", () => {
     await waitFor(() => expect(screen.getAllByText("✓ accepted")).toHaveLength(2))
 
     fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
-    fireEvent.click(await screen.findByRole("button", { name: /Undo applied/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /^Undo applied$/ }))
     fireEvent.click(screen.getByRole("tab", { name: "Review drafts" }))
     await waitFor(() => expect(screen.getAllByText("↩ undone")).toHaveLength(2))
     // Pre-draft value was empty → the drafted text is gone from the rows.

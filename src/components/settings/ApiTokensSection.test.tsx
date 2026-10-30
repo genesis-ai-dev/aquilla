@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { pickSelectOption } from "@/test-utils/select"
+import { pickComboboxOption } from "@/test-utils/combobox"
 import { ApiTokensSection } from "./ApiTokensSection"
 import type { ApiCredential, MintCredentialResult } from "@/lib/sync/credentials"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -591,6 +592,23 @@ describe("ApiTokensSection", () => {
       const project = await pickSelectOption(/^Project$/i, /^Maintainer Project$/)
       expect(project).toHaveTextContent("Maintainer Project")
       expect(project).not.toHaveTextContent(PROJECT_MAINTAINER.id)
+    })
+
+    // AQU-2232 / AQU-2260: someone in many projects could only scroll for the
+    // one to scope a token to. The Project list now has a search box.
+    it("the Project list has a search box that narrows it to matching projects", async () => {
+      mockFetchAccessibleProjects.mockResolvedValue({
+        ok: true,
+        projects: [PROJECT_MAINTAINER, PROJECT_OTHER_ORG],
+      })
+      await openMintDialog()
+      const project = await pickComboboxOption(/^Project$/i, /^Other Org Project$/, { search: "other", searchName: "Search the list" })
+      expect(project).toHaveTextContent("Other Org Project")
+      fireEvent.click(project)
+      const search = await screen.findByRole("combobox", { name: "Search the list" })
+      fireEvent.change(search, { target: { value: "maint" } })
+      expect(await screen.findByRole("option", { name: "Maintainer Project" })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: "Other Org Project" })).toBeNull()
     })
 
     it("falls back to the org-id label for a nameless org, matching its option text", async () => {

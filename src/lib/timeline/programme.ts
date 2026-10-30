@@ -389,6 +389,16 @@ function splitWindows(
  * `cells` must already be the dialogue lane, time-sorted (deriveLanes does
  * both) — the programme's order IS the cells' order.
  */
+/** AQU-2252: where a line's last take on another track stops sounding, on the
+ *  programme clock (0 with none) — what the file's length reaches to. */
+function layersReachSec(lineStartSec: number, layers: readonly ProgrammeLayer[] | undefined): number {
+  let reach = 0
+  for (const l of layers ?? []) {
+    if (l.window) reach = Math.max(reach, lineStartSec + l.atSec + (l.window.end - l.window.start))
+  }
+  return reach
+}
+
 export function buildProgramme(cells: readonly CellData[], opts?: BuildProgrammeOptions): Programme {
   if (cells.length === 0) return EMPTY
   const slots: ProgrammeSlot[] = []
@@ -483,9 +493,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     for (const slot of extraSlots) {
       if (layerTracks.has(slot)) layers.push(...layerTrackLayers(slot, cell, untimed, cursor))
     }
-    for (const l of layers) {
-      if (l.window) reachSec = Math.max(reachSec, cursor + l.atSec + (l.window.end - l.window.start))
-    }
+    reachSec = Math.max(reachSec, layersReachSec(cursor, layers))
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -566,7 +574,11 @@ export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<s
     byCellId.set(out.cellId, out)
     return out
   })
-  return { ...prog, slots, byCellId }
+  // …and so does how far past the last line they reached: a hidden last
+  // line's layer that ran on would leave seconds on the play strip that can
+  // never play.
+  const totalSec = slots.reduce((t, s) => Math.max(t, s.startSec + s.slotLenSec, layersReachSec(s.startSec, s.layers)), 0)
+  return { ...prog, slots, byCellId, totalSec }
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

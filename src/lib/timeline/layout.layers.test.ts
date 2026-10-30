@@ -368,6 +368,16 @@ describe("the programme's takes on added tracks (AQU-2252)", () => {
     expect(prog.byCellId.get("l2")!.slotLenSec).toBeCloseTo(3.055, 5)
   })
 
+  it("a hidden last line's layer that ran on past it no longer lengthens the file", () => {
+    // l2 is the last line (2–4 s); its layer runs 20 s from its start, to 22 s.
+    const cells = [bookLine("l1", { durationMs: 2000 }), bookLine("l2", { durationMs: 2000 }, { durationMs: 20000, targetOffsetMs: 0 })]
+    expect(buildProgramme(cells, AS_LAYER).totalSec).toBeCloseTo(22, 5)
+    // Hidden, it plays nothing past its own end, so the file ends there.
+    expect(withoutHiddenTakes(buildProgramme(cells, AS_LAYER), new Set(["l2"])).totalSec).toBeCloseTo(4, 5)
+    // A line hidden elsewhere leaves the reach of the others' layers alone.
+    expect(withoutHiddenTakes(buildProgramme(cells, AS_LAYER), new Set(["l1"])).totalSec).toBeCloseTo(22, 5)
+  })
+
   it("a line whose only take is on an added track has something of its own to play, whatever the track", () => {
     const cells = [bookLine("l1", { durationMs: 2000 }), bookLine("l2", undefined, { durationMs: 3000 }), bookLine("l3")]
     for (const opts of [STAND_IN, AS_LAYER]) {

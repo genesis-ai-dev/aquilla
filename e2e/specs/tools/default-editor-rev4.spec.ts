@@ -114,7 +114,9 @@ test("the extension editor carries the source toolbar, the source menu, the foot
   await expect(audioVote).toHaveAttribute("data-state", "full", { timeout: 15_000 })
 
   // ── Audio lens: the take's waveform, play and the voice picker.
-  await alice.locator("button, [role=radio], [role=tab]").filter({ hasText: /^\s*Audio\s*$/ }).first().click()
+  // The view switch names its views by their tabs' accessible names: only
+  // the open view shows its label beside its icon (AQU-2196, board 55).
+  await alice.getByRole("tab", { name: "Audio", exact: true }).click()
   await expect(row("MAT 1:1").getByTestId("voice-waveform")).toBeVisible({ timeout: 20_000 })
   await expect(row("MAT 1:1").getByRole("button", { name: /Play/ })).toBeVisible()
 })

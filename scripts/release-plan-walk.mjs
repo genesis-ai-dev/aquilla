@@ -2,6 +2,8 @@
 // Kept apart from release-plan.mjs on purpose: this is the only part of the
 // planner that calls the GitHub API, so a lookup bug can't hide inside the
 // slicing logic, and the slicing logic stays testable with no network.
+import { APPROVED_LABEL, AREA_GATES } from "./release-risk.mjs"
+
 const REPO = "genesis-ai-dev/aquilla"
 
 // PR-BOT.md's heading and verdict line: "## Bot walk — PR <n> @ <sha>"
@@ -59,12 +61,15 @@ async function listComments(prNumber, opts) {
   return comments
 }
 
-// Resolves one dev-branch merge commit to the walk verdict for the PR it
-// closed. `unknown` covers every case where that isn't possible yet: no
-// associated PR, no matching comment, or a comment whose sha is stale
-// because the walk ran before a later push. When several walks name the
-// head sha (a re-walk after a fixture change, say), the newest one wins.
-export async function lookupWalk({ mergeSha, repo = REPO, token, fetchImpl = fetch }) {
+// Resolves one dev-branch merge commit to the PR it closed: its walk
+// verdict and whether a person signed it off for release. `walk` is
+// `unknown` in every case where a verdict isn't possible yet: no associated
+// PR, no matching comment, or a comment whose sha is stale because the walk
+// ran before a later push. When several walks name the head sha (a re-walk
+// after a fixture change, say), the newest one wins. `approved` is the
+// `release:approved` label (release-risk.mjs): the manual QA path's
+// sign-off, read off the same /pulls response so it costs no extra call.
+export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch }) {
   const opts = { repo, token, fetchImpl }
   // The commit subject often carries the PR number too, but not reliably for
   // a squash merge; this endpoint is what actually resolves it, along with
@@ -72,24 +77,64 @@ export async function lookupWalk({ mergeSha, repo = REPO, token, fetchImpl = fet
   const associated = await githubApi(`/commits/${mergeSha}/pulls`, opts)
   const candidates = Array.isArray(associated) ? associated : []
   const pr = candidates.find((candidate) => candidate.merge_commit_sha === mergeSha) ?? candidates[0]
-  if (!pr?.number || !pr.head?.sha) return "unknown"
+  if (!pr?.number || !pr.head?.sha) return { walk: "unknown", approved: false, gates: [] }
+  const labels = Array.isArray(pr.labels) ? pr.labels.map((label) => label?.name) : []
+  const approved = labels.includes(APPROVED_LABEL)
 
   let latest = null
   for (const comment of await listComments(pr.number, opts)) {
     const parsed = parseWalkComment(comment.body)
     if (parsed && parsed.prNumber === pr.number && pr.head.sha.startsWith(parsed.sha)) latest = parsed
   }
-  return latest ? normalizeVerdict(latest.verdict) : "unknown"
+  const gates = await passedGates(pr.head.sha, opts)
+  return { walk: latest ? normalizeVerdict(latest.verdict) : "unknown", approved, gates }
 }
 
-// Fills `walk` for every PR still "unknown" (a docs/test-only PR is already
-// "none" from isDocsOrTestOnly and needs no lookup). One PR's lookup failing
-// never blocks the others; it just stays "unknown", which holds.
+// The areas whose gate check (release-risk.mjs AREA_GATES) concluded
+// `success` on the PR's head sha. The check-runs API lists newest first, so
+// the first run seen per name is the one that counts; a re-run that failed
+// after an earlier pass does not pass. Read from the head sha, never the
+// merge commit: the gate ran on the PR, and that is the code that merged.
+//
+// Only a run GitHub Actions itself produced counts (`app.slug`): any other
+// GitHub App with checks:write on the repo could post a check named
+// `replay-gate`. The workflow that produced it is read from base
+// (risk-label.yml checks out the base sha for the classifier) and the
+// gate's own files are a holding area with no gate (release-risk.mjs
+// GATE_MACHINERY), so a PR cannot edit the harness and pass itself.
+export const GATE_PRODUCER = "github-actions"
+
+export async function passedGates(headSha, opts) {
+  const names = new Map(Object.entries(AREA_GATES).map(([area, name]) => [name, area]))
+  const latest = new Map()
+  for (let page = 1; page <= 5; page++) {
+    const body = await githubApi(`/commits/${headSha}/check-runs?per_page=100&page=${page}`, opts)
+    const runs = Array.isArray(body?.check_runs) ? body.check_runs : []
+    for (const run of runs) {
+      if (!names.has(run?.name) || latest.has(run.name)) continue
+      latest.set(run.name, run.app?.slug === GATE_PRODUCER ? run.conclusion : "untrusted-producer")
+    }
+    if (runs.length < 100) break
+  }
+  const passed = []
+  for (const [name, area] of names) if (latest.get(name) === "success") passed.push(area)
+  return passed
+}
+
+export async function lookupWalk(options) {
+  return (await lookupPr(options)).walk
+}
+
+// Fills `walk` and `approved` for every PR. A docs/test-only PR is already
+// "none" from isDocsOrTestOnly, but its label still has to be read (a
+// person can approve anything), so every PR gets the one lookup. One PR's
+// lookup failing never blocks the others; it just stays "unknown", which
+// holds.
 export async function fillWalks(prs, opts) {
   return Promise.all(prs.map(async (pr) => {
-    if (pr.walk !== "unknown") return pr
     try {
-      return { ...pr, walk: await lookupWalk({ ...opts, mergeSha: pr.sha }) }
+      const { walk, approved, gates } = await lookupPr({ ...opts, mergeSha: pr.sha })
+      return { ...pr, walk: pr.walk === "none" ? "none" : walk, approved, gates }
     } catch {
       return pr
     }

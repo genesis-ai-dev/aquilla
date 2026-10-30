@@ -307,17 +307,22 @@ on one environment does nothing for the other.
 branches cut from `dev`; `main` is retired.
 
 1. `node scripts/release-plan.mjs` decides whether to cut, and names the
-   branch and the `dev` sha to cut it from — not necessarily the tip of `dev`
-   at cut time, and never below what production already runs (it reads the
-   cherry-picks on the newest calver tag, which is not on `dev`, to learn
-   which `dev` PRs shipped). A release branch may carry the plain cut date,
-   `release/YYYY/MM/DD`, or a same-day `-NN` suffix for the Nth slice cut that
-   date; both are production branches (see `e2e/journeys/QA-BOT-REGIMEN.md`
-   for how a slice is built). The **Release cut** workflow runs the plan and
-   pushes the branch after every production deploy's tag push, or when a
-   person presses its button (`e2e/journeys/RELEASE-CUT.md`).
-2. QA tests the branch's preview.
-3. From a clean checkout of that branch, checked out by name (not a detached
+   branch, the base (the newest calver tag, which is not on `dev`: it reads
+   the tag's cherry-picks to learn which `dev` PRs shipped) and the ready
+   PRs to pick onto it, in `dev` order. A PR whose files touch a holding
+   risk area, or whose walk is not proven, is skipped until a person adds
+   `release:approved` (`docs/RELEASE-RISK-GATES.md`). A release branch may
+   carry the plain cut date, `release/YYYY/MM/DD`, or a same-day `-NN`
+   suffix for the Nth slice cut that date; both are production branches.
+   The **Release cut** workflow runs the plan, builds the branch by
+   `git cherry-pick -x` and pushes it on the hour, after every production
+   deploy's tag push, or when a person presses its button
+   (`e2e/journeys/RELEASE-CUT.md`).
+2. The push runs `release-verify` (the full suite) and smart Jev on the
+   branch; QA reads the branch's preview as needed.
+3. With `HOURLY_RELEASE` on, `release-deploy.yml` runs the step below at
+   `:45` once both reported on the branch HEAD with no FAIL. By hand: from
+   a clean checkout of that branch, checked out by name (not a detached
    HEAD — the branch guard and the tag script both need it), run
    `pnpm run deploy:aquilla`. After the live checks pass,
    `scripts/tag-release.sh` tags HEAD `YYYY.MM.DD.NN` and pushes the tag. The
@@ -338,10 +343,16 @@ closed on a pending migration, and nothing publishes until it passes.
 
 ## Deployment ownership
 
-Live Aquilla deployments require an explicit human/operator action. No push to
-GitHub and no Cloudflare Git integration is authorized to deploy live traffic.
-The canonical full-environment entrypoints are the local commands above, run from
-a clean checkout whose HEAD exactly matches the corresponding remote branch:
+Live Aquilla deployments require an explicit human/operator action or one of
+the two gated workflows below, and run through the guarded commands above and
+nothing else: no Cloudflare Git integration deploys live traffic. Since 2026-10-30
+(`docs/RELEASE-RISK-GATES.md`) two workflows may run those same commands
+without a person, each only while its repository variable is `on`:
+`release-deploy.yml` (`HOURLY_RELEASE`) deploys the verified release branch
+on the hour and tags it; `dev-deploy.yml` (`AUTO_DEV_DEPLOY`) deploys `dev`
+on every merge after applying dev migrations. With the variables off, or
+at any other time, a person runs the local commands from a clean checkout
+whose HEAD exactly matches the corresponding remote branch:
 
 - `release/YYYY/MM/DD` -> `production`
 - `dev` -> `development`

@@ -1,160 +1,50 @@
 // AQU-2302: when none of AQU-981's own readings fits a folder's names, the
-// assistant is asked ONCE what the naming means, and answers with a small rule
+// assistant may be asked what the naming means, and answers with a small rule
 // — never with assignments. The app applies the rule itself: each name the rule
 // fits is rewritten into a name AQU-981's matcher already reads ("MAT 19:1",
 // "MAT_1_LN619", "line 12"), and the whole folder then goes through the same
-// matching, line landing and duplicate checks as any other upload. So a wrong
-// rule can only produce names the matcher refuses, never a silent misplacement
-// the matcher would have caught.
+// matching, line landing and duplicate checks as any other upload.
+//
+// That keeps the matcher's own refusals (a verse the book lacks, another book's
+// name, a range backwards), but it does NOT make a wrong rule harmless: a rule
+// that reads the numbers in the wrong order makes names the matcher reads
+// perfectly well ("MAT 5:1 take 2" for what was verse 2). So the preview shows
+// every row "by the assistant's rule", nothing is saved until the person
+// confirms, and a rule is kept for the team only when `judgeRule` finds it
+// placed every name by reading it, put no two files on one line, and leans on
+// no book, chapter or file it was told (review, Oct 30).
 //
 // Sam, Oct 29: "uses as little API usage as possible but does the task
-// accurately and consistently". One call per new naming, a bounded sample of
-// names (never the audio), a fixed answer format, at most one retry with only
-// the names that failed, and the rule kept for the team under the names' shape
-// so the next upload in the same naming makes no call at all.
-import { BOOK_CODES, englishBookName } from "./book-names"
+// accurately and consistently". At most two calls per folder, a bounded sample
+// of names (never the audio), a fixed answer format, the retry with only the
+// names that failed, and the rule kept for the team under the names' shape so
+// the next upload in the same naming makes no call at all.
+//
+// The rule's format and its checks live in shared/recording-naming-rule.ts,
+// which the auth worker uses too.
+import {
+  bookForWord,
+  compileRule,
+  isSavableRule,
+  MAX_OUTLINE_CHARS,
+  normalizeName,
+  type NamingRule,
+  type Placeholder,
+} from "../../../../shared/recording-naming-rule"
+import { englishBookName } from "./book-names"
 import { LAST_VERSES } from "./verse-counts"
-import type { ProjectFileInfo } from "./match"
+import type { Assignment, ProjectFileInfo, UnmatchedReason } from "./match"
 
-/** One way the names are written. `pattern` is matched against the file name
- *  without its extension; `folder`, when set, against the folder it sits in. */
-export interface NameTemplate {
-  pattern: string
-  folder?: string
-}
-
-export interface NamingRule {
-  version: 1
-  /** One template, or two when the folder mixes two namings. */
-  templates: NameTemplate[]
-  /** What the `{book}` text means, when it isn't a book name the app knows:
-   *  "Mt" → "MAT". Keys are compared without case. */
-  books?: Record<string, string>
-  /** The book every file is for, when the names don't say it. */
-  book?: string
-  /** The chapter every file is for, when the names don't say it. */
-  chapter?: number
-  /** The project file every file is for, when it isn't a Bible book. */
-  file?: string
-  /** One plain sentence the person sees: what the assistant read. */
-  explanation?: string
-}
-
-/** The placeholders a template may use, and what each one captures. */
-const PLACEHOLDERS = {
-  book: "([1-3]?\\s?[\\p{L}][\\p{L}.']{0,29}?)",
-  chapter: "(\\d{1,3})",
-  verse: "(\\d{1,3})",
-  verseInBook: "(\\d{1,5})",
-  line: "(\\d{1,5})",
-  take: "(\\d{1,2})",
-  part: "(\\d{1,2}|[a-h])",
-  any: "(.*?)",
-} as const
-export type Placeholder = keyof typeof PLACEHOLDERS
-
-const MAX_PATTERN = 120
-const MAX_PLACEHOLDERS = 6
-
-export interface CompiledTemplate {
-  re: RegExp
-  folderRe: RegExp | null
-  /** Placeholder names in capture order, for the name then the folder. */
-  names: Placeholder[]
-  folderNames: Placeholder[]
-}
-
-function escapeLiteral(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-/**
- * A template becomes a fixed, anchored expression built only from escaped
- * literal text and the placeholder classes above — the assistant never
- * supplies a regular expression of its own. Two placeholders of the same kind
- * side by side ("{chapter}{verse}") are refused: nothing could tell where one
- * ends.
- */
-function compilePart(pattern: string): { re: RegExp; names: Placeholder[] } | null {
-  if (pattern.length === 0 || pattern.length > MAX_PATTERN) return null
-  const names: Placeholder[] = []
-  let source = ""
-  let last: "literal" | "letters" | "digits" | "any" | null = null
-  let rest = pattern
-  while (rest.length > 0) {
-    const m = /^\{([a-zA-Z]+)\}/.exec(rest)
-    if (m) {
-      const name = m[1] as Placeholder
-      if (!(name in PLACEHOLDERS)) return null
-      const kind = name === "book" ? "letters" : name === "any" ? "any" : name === "part" ? "part" : "digits"
-      const touching = last !== null && last !== "literal"
-      if (touching && (last === kind || kind === "any" || last === "any" || (kind === "part" && last === "letters"))) return null
-      names.push(name)
-      // A part run straight on to a number can only be its letter ("4a"):
-      // "121" must never split into verse 12, part 1.
-      source += kind === "part" && last === "digits" ? "([a-h])" : PLACEHOLDERS[name]
-      last = kind === "part" ? "letters" : kind
-      rest = rest.slice(m[0].length)
-      continue
-    }
-    const next = rest.search(/\{[a-zA-Z]+\}/)
-    const literal = next < 0 ? rest : rest.slice(0, next)
-    if (literal.includes("{") || literal.includes("}")) return null
-    source += escapeLiteral(literal)
-    last = "literal"
-    rest = rest.slice(literal.length)
-  }
-  if (names.length === 0 || names.length > MAX_PLACEHOLDERS) return null
-  return { re: new RegExp(`^${source}$`, "iu"), names }
-}
-
-export function compileTemplate(template: NameTemplate): CompiledTemplate | null {
-  const name = compilePart(template.pattern)
-  if (!name) return null
-  const folder = template.folder ? compilePart(template.folder) : null
-  if (template.folder && !folder) return null
-  return { re: name.re, names: name.names, folderRe: folder?.re ?? null, folderNames: folder?.names ?? [] }
-}
-
-/** The answer as the rule the app runs, or null when any part of it is unusable. */
-export function parseNamingRule(value: unknown): NamingRule | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  const v = value as Record<string, unknown>
-  if (!Array.isArray(v.templates) || v.templates.length < 1 || v.templates.length > 2) return null
-  const templates: NameTemplate[] = []
-  for (const t of v.templates) {
-    if (!t || typeof t !== "object") return null
-    const { pattern, folder } = t as Record<string, unknown>
-    if (typeof pattern !== "string" || (folder !== undefined && typeof folder !== "string")) return null
-    const template: NameTemplate = folder ? { pattern, folder } : { pattern }
-    if (!compileTemplate(template)) return null
-    templates.push(template)
-  }
-  const rule: NamingRule = { version: 1, templates }
-  if (v.books !== undefined) {
-    if (!v.books || typeof v.books !== "object" || Array.isArray(v.books)) return null
-    const books: Record<string, string> = {}
-    for (const [k, code] of Object.entries(v.books as Record<string, unknown>)) {
-      if (typeof code !== "string" || !BOOK_CODES.includes(code.toUpperCase()) || k.length > 30) return null
-      books[k.toLowerCase()] = code.toUpperCase()
-    }
-    if (Object.keys(books).length > 0) rule.books = books
-  }
-  if (v.book !== undefined && v.book !== null) {
-    if (typeof v.book !== "string" || !BOOK_CODES.includes(v.book.toUpperCase())) return null
-    rule.book = v.book.toUpperCase()
-  }
-  if (v.chapter !== undefined && v.chapter !== null) {
-    if (typeof v.chapter !== "number" || !Number.isInteger(v.chapter) || v.chapter < 1 || v.chapter > 200) return null
-    rule.chapter = v.chapter
-  }
-  if (v.file !== undefined && v.file !== null) {
-    if (typeof v.file !== "string" || v.file.trim().length === 0 || v.file.length > 255) return null
-    rule.file = v.file.trim()
-  }
-  if (typeof v.explanation === "string" && v.explanation.trim()) rule.explanation = v.explanation.trim().slice(0, 300)
-  return rule
-}
+export {
+  compileRule,
+  compileTemplate,
+  isSavableRule,
+  parseNamingRule,
+  type CompiledTemplate,
+  type NameTemplate,
+  type NamingRule,
+  type Placeholder,
+} from "../../../../shared/recording-naming-rule"
 
 function extension(name: string): string {
   const m = /(\.[A-Za-z][A-Za-z0-9]{1,4})$/.exec(name)
@@ -180,19 +70,21 @@ function capture(re: RegExp, names: readonly Placeholder[], text: string): Parti
  * matcher's own format checks still apply.
  */
 export function applyNamingRule(rule: NamingRule, fileName: string, folderName = ""): string | null {
-  const stem = stemOf(fileName)
-  for (const template of rule.templates) {
-    const compiled = compileTemplate(template)
-    if (!compiled) continue
+  // One Unicode form for every name: "versículo" typed on a Mac (decomposed)
+  // reads like the same word typed anywhere else, and "１２" like "12".
+  const name = normalizeName(fileName)
+  const folder = normalizeName(folderName)
+  const stem = stemOf(name)
+  for (const compiled of compileRule(rule)) {
     const values = capture(compiled.re, compiled.names, stem)
     if (!values) continue
     if (compiled.folderRe) {
-      const fromFolder = capture(compiled.folderRe, compiled.folderNames, folderName)
+      const fromFolder = capture(compiled.folderRe, compiled.folderNames, folder)
       if (!fromFolder) continue
       for (const [k, val] of Object.entries(fromFolder)) values[k as Placeholder] ??= val
     }
     const bookText = values.book?.trim()
-    const code = bookText ? (rule.books?.[bookText.toLowerCase()] ?? bookText) : rule.book
+    const code = bookText ? (bookForWord(rule, bookText) ?? bookText) : rule.book
     const chapter = values.chapter ?? (rule.chapter != null ? String(rule.chapter) : undefined)
     const suffix = [
       values.part != null ? ` part ${values.part}` : "",
@@ -208,7 +100,7 @@ export function applyNamingRule(rule: NamingRule, fileName: string, folderName =
     } else if (values.line != null) {
       made = rule.file ? `${rule.file} line ${Number(values.line)}` : `line ${Number(values.line)}`
     }
-    if (made) return `${made}${suffix}${extension(fileName)}`
+    if (made) return `${made}${suffix}${extension(name)}`
   }
   return null
 }
@@ -267,15 +159,24 @@ export function sampleNames(names: readonly string[], size = SAMPLE_SIZE): strin
  */
 export function projectOutline(files: readonly ProjectFileInfo[]): string {
   const lines: string[] = []
+  let size = 0
   for (const f of files) {
+    if (lines.length >= 80) break
+    let line: string
     if (f.bookCode) {
       const counts = LAST_VERSES[f.bookCode]
-      lines.push(`${f.bookCode} (${englishBookName(f.bookCode)}): ${counts ? `verses per chapter ${counts.join(",")}` : "verse counts unknown"}`)
+      line = `${f.bookCode} (${englishBookName(f.bookCode)}): ${counts ? `verses per chapter ${counts.join(",")}` : "verse counts unknown"}`
     } else {
-      lines.push(`File: ${JSON.stringify(f.name)}`)
+      line = `File: ${JSON.stringify(f.name)}`
     }
+    // Whole lines only, and never past what the server takes: a line that
+    // doesn't fit is left out, and shorter ones after it may still go.
+    const grows = line.length + (lines.length > 0 ? 1 : 0)
+    if (size + grows > MAX_OUTLINE_CHARS) continue
+    lines.push(line)
+    size += grows
   }
-  return lines.slice(0, 80).join("\n")
+  return lines.join("\n")
 }
 
 /** A name the rule failed on, and why the matcher refused what it made. */
@@ -283,4 +184,69 @@ export interface RuleFailure {
   name: string
   made: string | null
   reason: string
+}
+
+/** What the person or the file itself decided, which no rule may rewrite:
+ *  981's deliberate refusals, a file the person skipped, and anything that
+ *  isn't a recording at all. */
+const NOT_FOR_RULE: ReadonlySet<UnmatchedReason["code"]> = new Set([
+  "notAudio", "unplayableFormat", "systemFile", "empty", "tooLarge",
+  "noSuchVerse", "noSuchBookVerse", "otherBook", "duplicate", "bookVerseDisagree", "rangeBackwards", "rangeOnTimedFile",
+  "skipped",
+])
+
+/** True when this file's name may go to the assistant and be rewritten by its
+ *  rule: 981 placed it nowhere, because it couldn't read the name. */
+export function ruleEligible(a: Assignment): boolean {
+  if (a.cellIds && a.cellIds.length > 0) return false
+  return !a.reason || !NOT_FOR_RULE.has(a.reason.code)
+}
+
+export interface RuleJudgement {
+  /** The names the matcher placed by reading the rule's name for them. */
+  placed: ReadonlySet<number>
+  /** The names it was asked about and didn't place, leaving out what the
+   *  person chose or skipped by hand: what the one retry sends back. */
+  failures: RuleFailure[]
+  /** True when the team may keep the rule for the next folder named this way. */
+  keep: boolean
+}
+
+/**
+ * How a rule did on the names it was asked about, after the matcher read them.
+ * A name counts as placed only when the matcher placed it by reading the
+ * rule's name, never by folder order, and not when the person chose or
+ * corrected its line by hand. The rule is kept only when every name was placed
+ * that way, no two files share a line (a rule with the take and the verse
+ * swapped stacks every file on one verse as takes), and it leans on no
+ * constant (`isSavableRule`).
+ */
+export function judgeRule(
+  rule: NamingRule,
+  eligible: ReadonlySet<number>,
+  made: ReadonlyMap<number, string>,
+  assignments: readonly Assignment[],
+  nameOf: (index: number) => string,
+): RuleJudgement {
+  const byIndex = new Map(assignments.map((a) => [a.index, a]))
+  const placed = new Set<number>()
+  const failures: RuleFailure[] = []
+  const lines = new Set<string>()
+  let shared = false
+  for (const index of eligible) {
+    const a = byIndex.get(index)
+    if (a?.cellIds?.length && !a.chosen && a.method !== "order" && made.has(index)) {
+      placed.add(index)
+      for (const cellId of a.cellIds) {
+        const key = `${a.fileId}\u0000${cellId}`
+        if (lines.has(key)) shared = true
+        lines.add(key)
+      }
+      continue
+    }
+    if (a?.chosen || a?.reason?.code === "skipped") continue
+    failures.push({ name: nameOf(index), made: made.get(index) ?? null, reason: a?.method === "order" ? "byOrder" : a?.reason?.code ?? "noTemplate" })
+  }
+  const keep = eligible.size > 0 && placed.size === eligible.size && !shared && isSavableRule(rule)
+  return { placed, failures, keep }
 }

@@ -26,7 +26,8 @@
 // that heading, and the note about stand-in lines (`standInInfo`) to the
 // menu's foot. Board 24: a file with nothing to follow (no times, no source
 // audio) greys "Follows source" out with the reason.
-import { ChevronDown, Info, Timer } from "lucide-react"
+import { useId, type ReactNode } from "react"
+import { ChevronDown, Timer } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,7 +36,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { AudioTimingMode } from "@/lib/parsers/types"
@@ -85,27 +87,30 @@ function formatFileLength(t: TFunction, sec: number): string {
   return t("editor.timeline.timingLengthHours", { hours: Math.floor(whole / 3600), minutes: Math.floor((whole % 3600) / 60) })
 }
 
-/** The control's (i): a long explanation on hover or keyboard focus, so the
- *  header itself stays short (Sam, Oct 25). Exported for the timeline's one
- *  (i) about stand-in lines. */
-export function TimingInfoButton({ label, text, testId }: { label: string; text: string; testId: string }) {
+/** A line of the Timing menu with its (i). The (i) opens its explanation in
+ *  place, under the line, and a second click shuts it: an (i) is a click,
+ *  never a hover (Sam, Oct 28), and a menu has room for the text where it is.
+ *  The line stays short until someone asks (Sam, Oct 25). */
+function TimingMenuInfoLine({ children, label, text, testId, lineTestId, className }: {
+  children: ReactNode
+  label: string
+  text: string
+  testId: string
+  lineTestId?: string
+  className?: string
+}) {
+  const [open, toggle] = useInfoOpen()
+  const id = useId()
   return (
-    <Tooltip>
-      <TooltipTrigger
-        closeOnClick={false}
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            data-testid={testId}
-            className="inline-flex shrink-0 rounded-sm p-0.5 text-muted-foreground hover:text-foreground"
-          />
-        }
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">{text}</TooltipContent>
-    </Tooltip>
+    <div className={className}>
+      <div data-testid={lineTestId} className="flex items-center gap-1">
+        {children}
+        <InfoToggle open={open} onToggle={toggle} label={label} controls={id} testId={testId} />
+      </div>
+      <InfoReveal open={open} id={id} testId={`${testId}-text`} className="font-normal leading-snug">
+        {text}
+      </InfoReveal>
+    </div>
   )
 }
 
@@ -156,10 +161,15 @@ export function TimingModeControl({
             </DropdownMenuTrigger>
           </AppTooltip>
           <DropdownMenuContent align="start" className="w-80 min-w-80">
-            <div data-testid="tl-timing-menu-heading" className="flex items-center gap-1 px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
+            <TimingMenuInfoLine
+              lineTestId="tl-timing-menu-heading"
+              label={t("editor.timeline.timingInfoAria")}
+              text={infoText}
+              testId="tl-timing-mode-info"
+              className="px-2 pt-1.5 pb-1 text-[11px] font-medium text-muted-foreground"
+            >
               {t("editor.timeline.timingMenuHeading")}
-              <TimingInfoButton label={t("editor.timeline.timingInfoAria")} text={infoText} testId="tl-timing-mode-info" />
-            </div>
+            </TimingMenuInfoLine>
             <DropdownMenuRadioGroup
               value={shown}
               onValueChange={(next) => {
@@ -201,10 +211,14 @@ export function TimingModeControl({
               {t("editor.timeline.timingMenuMuteNote")}
             </div>
             {standInInfo && (
-              <div className="flex items-center gap-1 px-2 pb-1.5 text-[11px] leading-snug text-muted-foreground">
+              <TimingMenuInfoLine
+                label={t("editor.timeline.standInInfoAria")}
+                text={standInInfo}
+                testId="tl-stand-in-info"
+                className="px-2 pb-1.5 text-[11px] leading-snug text-muted-foreground"
+              >
                 {t("editor.timeline.standInInfoAria")}
-                <TimingInfoButton label={t("editor.timeline.standInInfoAria")} text={standInInfo} testId="tl-stand-in-info" />
-              </div>
+              </TimingMenuInfoLine>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

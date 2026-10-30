@@ -40,10 +40,19 @@ function isOwnedLegacyKey(key: string): boolean {
 
 export function ownerScopedLocalStorageKey(legacyKey: string): string {
   if (activeOwnerKey === undefined) return legacyKey
-  const owner = activeOwnerKey === null
-    ? "local"
-    : `account:${encodeURIComponent(activeOwnerKey)}`
+  return localStorageKeyForOwner(activeOwnerKey, legacyKey)
+}
+
+/** The key `legacyKey` lives under for one owner (`null` = local-only mode). */
+export function localStorageKeyForOwner(ownerKey: string | null, legacyKey: string): string {
+  const owner = ownerKey === null ? "local" : `account:${encodeURIComponent(ownerKey)}`
   return `owner:${owner}:${legacyKey}`
+}
+
+/** The account whose browser-local values are in force: a username, `null`
+ *  in local-only mode, `undefined` before the account boundary resolves. */
+export function getClientLocalStorageOwner(): string | null | undefined {
+  return activeOwnerKey
 }
 
 /** Set synchronously before React publishes the matching account identity. */
@@ -74,8 +83,7 @@ export function claimLegacyClientLocalStorage(ownerKey: string | null): void {
 
     for (const legacyKey of legacyKeys) {
       const value = localStorage.getItem(legacyKey)
-      const owner = ownerKey === null ? "local" : `account:${encodeURIComponent(ownerKey)}`
-      const targetKey = `owner:${owner}:${legacyKey}`
+      const targetKey = localStorageKeyForOwner(ownerKey, legacyKey)
       if (value !== null && localStorage.getItem(targetKey) === null) {
         localStorage.setItem(targetKey, value)
       }

@@ -51,6 +51,8 @@ function renderDialog(project: ProjectRecord) {
                 onOpenChange={onOpenChange}
                 project={project}
                 onUpdated={onUpdated}
+                patchSettings={patchSettings}
+                canEditShared
               />
             }
           />
@@ -61,7 +63,10 @@ function renderDialog(project: ProjectRecord) {
   return { onOpenChange, onUpdated }
 }
 
+const patchSettings = vi.fn(async () => ({ kind: "ok" as const }))
+
 beforeEach(async () => {
+  patchSettings.mockClear()
   await _resetDbForTesting()
 })
 
@@ -77,8 +82,11 @@ describe("AiSetupDialog persist (thin client, no IDB row)", () => {
 
     await waitFor(() => expect(onUpdated).toHaveBeenCalled())
     const row = await getProject(project.id)
-    expect(row?.completionSettings?.provider).toBe("custom")
-    expect(row?.completionSettings?.endpoint).toBe("https://openrouter.ai/api/v1")
+    // AQU-2259: the provider and endpoint are the team's, so they go to the
+    // shared settings; only the key is kept on this device.
+    expect(patchSettings).toHaveBeenCalledWith({
+      draftingSettings: expect.objectContaining({ provider: "custom", endpoint: "https://openrouter.ai/api/v1" }),
+    })
     expect(row?.completionSettings?.apiKey).toBe("sk-or-user")
     expect(row?.aiProviderChosen).toBe(true)
     expect(shouldPromptAiSetup(row?.aiProviderChosen)).toBe(false)

@@ -17,66 +17,29 @@
  * every take.
  *
  * Key schema: `aq.recording-film-audible.v1` (value `"on"`; absent means muted).
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
+import { recorderFilmAudiblePref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
-const STORAGE_KEY = "aq.recording-film-audible.v1"
-
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: boolean | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): boolean {
-  if (typeof localStorage === "undefined") return false
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "on"
-  } catch {
-    return false
-  }
-}
-
-function peek(): boolean {
-  if (cached === undefined) cached = read()
-  return cached
-}
-
-/** True when the film in the recording modal should play with sound. */
 export function getRecordingFilmAudible(): boolean {
-  return peek()
+  return recorderFilmAudiblePref.get()
 }
 
 export function setRecordingFilmAudible(audible: boolean): void {
-  cached = audible
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (audible) localStorage.setItem(STORAGE_KEY, "on")
-      else localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
+  recorderFilmAudiblePref.set(audible)
 }
 
 /** Reactive read of the film-audible preference. */
 export function useRecordingFilmAudible(): boolean {
-  return useSyncExternalStore(subscribe, peek, () => false)
+  return usePersonPref(recorderFilmAudiblePref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingFilmAudibleCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

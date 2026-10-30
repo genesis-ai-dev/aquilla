@@ -129,6 +129,8 @@ describe("AQU-1938: the projects behind the Project defaults counts", () => {
       cellEditingFloor: { total: 0, projects: [] },
       allowSelfValidationAudio: { total: 0, projects: [] },
       validationRoleFloorAudio: { total: 0, projects: [] },
+      // AQU-2263: and the repetition default.
+      autoPropagateRepetitions: { total: 0, projects: [] },
     })
   })
 

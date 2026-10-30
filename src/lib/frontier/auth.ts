@@ -376,6 +376,19 @@ export function isJwtExpired(token: string | null | undefined, skewSeconds = 30)
   }
 }
 
+/**
+ * AQU-2259: save the account's display name — the name shown where the app
+ * reads COALESCE(display_name, username). Empty clears it. Throws on refusal.
+ */
+export async function updateMyDisplayName(jwt: string, displayName: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/me`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  if (!res.ok) throw new Error(`saving the display name failed (${res.status})`);
+}
+
 /** Best-effort email from GET /auth/me — JWTs only carry `sub` today. */
 async function resolveAccountEmail(jwt: string): Promise<string | undefined> {
   try {

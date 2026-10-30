@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils"
 import { WAV_SAMPLE_RATE } from "@/lib/audio/recording-limits"
 import { VERTICAL_INSET_PX } from "@/lib/audio/waveform-shape"
 import { columnPeaks, LIVE_PEAK_FLOOR, liveSpanSec } from "@/lib/audio/live-take-shape"
-import { NEUTRAL_TRACK_VARS, WAVE_LOOK, trackChipClass, trackChipPlayingClass } from "@/lib/timeline/track-colors"
+import { NEUTRAL_TRACK_VARS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, WAVE_LOOK } from "@/lib/timeline/track-colors"
 
 interface Props {
   stream: MediaStream | null
@@ -242,8 +242,8 @@ export function AudioWaveform({
         // the recorded part at the body's own strength, the rest not yet.
         "relative overflow-hidden border",
         height < 24 ? "rounded-[4px]" : "rounded-[6px]",
-        trackChipClass("take"),
-        trackChipPlayingClass("take"),
+        TRACK_CHIP_CLASS,
+        TRACK_CHIP_PLAYING_CLASS,
         className,
       )}
       style={{ ...trackVars, height, "--tl-play-x": "0%" } as CSSProperties}

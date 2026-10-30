@@ -74,7 +74,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { TRACK_BAR_CLASS, trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
+import { TRACK_BAR_CLASS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, trackHueVars } from "@/lib/timeline/track-colors"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
@@ -852,7 +852,6 @@ function TargetAudioChip({
   // (an action, not a label) and stays.
   const overflowSec = span.end - section.end
   const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
-  const fullPx = secToPx(geom.end - geom.start, pxPerSec)
   // AQU-646: the waveform's window into this clip. Computed from the PAINTED
   // edges, so a chip cut short by the at-fault rule shows exactly the audio it
   // is drawn over — and hovering, which restores the true edges, widens the
@@ -906,7 +905,6 @@ function TargetAudioChip({
   // nor take a new recording from here.
   const hiddenLine = isHiddenCell(cell)
   const canPlayHere = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges
-  const showPlayButton = canPlayHere && fullPx >= 28
   // AQU-1758 (Sam, decision 4): the take's menu from a ⋯ in its top-right
   // corner, on hover — the same menu a right-click opens. Like the other
   // corner buttons it is one fixed size whatever the take's width, so a
@@ -1253,15 +1251,14 @@ function TargetAudioChip({
         // colour by sitting after it. Injecting the palette anywhere else, or
         // letting a palette entry introduce a group the warnings do not also
         // set, would let a colour quietly win over an alarm.
-        trackChipClass(chip.item.kind),
+        TRACK_CHIP_CLASS,
         // 2026-08-27 (Sam): the preview PROGRESS FILL rides the identity slot
         // — played side at the chip's own rung, unplayed side at the hover
         // rung, split at `--tl-play-x`. Gated off the red at-fault body (a
         // warning still beats playback paint; amber needs no gate, it is
         // border-only) and off fallback chips (a guessed width has no honest
         // progress to draw).
-        previewing && !geom.usingFallback && overflow !== "overlap" &&
-          trackChipPlayingClass(chip.item.kind),
+        previewing && !geom.usingFallback && overflow !== "overlap" && TRACK_CHIP_PLAYING_CLASS,
         // An unmeasurable clip spans its section, so say so rather than
         // letting a placeholder width pass for the real thing.
         geom.usingFallback && "border-dashed",
@@ -1349,27 +1346,20 @@ function TargetAudioChip({
           both themes and turns red with the body when this chip is the one at
           fault.
 
-          WITHHELD WHEN THE CORNER GLYPH IS SHOWING, because they occupy the
-          same pixels: the badge sits at left-1.5/top-1 and is 14px tall, so at
-          any height where it renders at all it covers the vertical centre. A
-          missing take or a parked transport is a state; "this one is
-          synthetic" is an identity the chip's colour still carries. State wins.
+          It used to give way to the corner state glyph, which sat on the same
+          pixels. AQU-2235 moved that glyph into the name bar, so on a clip too
+          short for a bar there is nothing left for it to give way to.
           No recorded-take glyph either way: recorded is the default, generated
           is the exception worth marking. */}
       {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
       {/* AQU-2235: with a name bar the sparkle leads the bar instead. */}
-      {chip.item.kind === "generated" && !hasBar && !showLeftGlyph && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
+      {chip.item.kind === "generated" && !hasBar && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
         <span
           aria-hidden
           data-testid={`tl-target-${testKey}-generated`}
-                  // AQU-646 stage 5: the play button wants this side too. The sparkle
-            // is decorative and the button is an action, so on hover the
-            // action wins — the same reason the sparkle already gives way to a
-            // corner state badge.
-            className={cn(
-              "pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2",
-              showPlayButton && "transition-opacity group-hover/chip:opacity-0",
-            )}
+          // AQU-2235: only a clip too short for the bar lands here, and none of
+          // the corner buttons or state glyphs fit one, so nothing contests it.
+          className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2"
         >
           {/* THE SAME GLYPH THAT USED TO SIT DEAD CENTRE, byte for byte
               (Sam, 2026-08-24) — same lucide icon, same 3.5 size, same outline

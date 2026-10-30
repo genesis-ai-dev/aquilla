@@ -451,11 +451,9 @@ export const TRACK_LANE_TINT_CLASS = ""
 // AQU-2235 (Sam, Oct 25): THAT EDGE IS NOW FAINT — the frame is the hue at 26%
 // over a 12% ground — and a generated voice wears exactly what a recorded take
 // does; only its sparkle marks it. See WAVE_LOOK.
-/** A recorded take: the hue at 12% in a 1 px frame at 26%. */
-export const TRACK_CHIP_TAKE_CLASS =
-  "border-[color:var(--tl-track-frame)] bg-[color:var(--tl-track-ground)] text-foreground"
-/** A generated voice: the same as a recorded take (AQU-2235). */
-export const TRACK_CHIP_GENERATED_CLASS =
+/** An audio clip, recorded or generated alike (AQU-2235): the hue at 12% in a
+ *  1 px frame at 26%. */
+export const TRACK_CHIP_CLASS =
   "border-[color:var(--tl-track-frame)] bg-[color:var(--tl-track-ground)] text-foreground"
 /** The waveform's fill: its track 0.167 darker (track-oklch). Opacity is the caller's
  *  (`WAVE_LOOK.wave`, or `unplayed` on the part not yet played). */
@@ -514,11 +512,6 @@ export const NEUTRAL_TRACK_VARS: Record<string, string> = {
   "--tl-track-strip": "color-mix(in oklab, var(--foreground) 24%, var(--background))",
 }
 
-/** The chip's identity classes for one clip. */
-export function trackChipClass(kind: "take" | "generated"): string {
-  return kind === "take" ? TRACK_CHIP_TAKE_CLASS : TRACK_CHIP_GENERATED_CLASS
-}
-
 // 2026-08-27 (Sam): the preview PROGRESS FILL. While a chip's own preview
 // plays, its fill becomes a hard-split gradient at the playhead — played side
 // at the chip's normal rung, unplayed side down at the hover rung ("not yet").
@@ -534,14 +527,9 @@ export function trackChipClass(kind: "take" | "generated"): string {
 // 27% against the resting 12% — and the waveform does the rest of the work:
 // full strength where it has played, 30% where it has not (the caller draws
 // that split). One gradient for both kinds, as they now look the same.
-export const TRACK_CHIP_PLAYING_TAKE_CLASS =
-  "bg-transparent bg-[image:linear-gradient(to_right,var(--tl-track-played)_var(--tl-play-x,0px),var(--tl-track-ground)_var(--tl-play-x,0px))]"
-export const TRACK_CHIP_PLAYING_GENERATED_CLASS = TRACK_CHIP_PLAYING_TAKE_CLASS
-
 /** The playing chip's fill — a progress split in the chip's own two rungs. */
-export function trackChipPlayingClass(kind: "take" | "generated"): string {
-  return kind === "take" ? TRACK_CHIP_PLAYING_TAKE_CLASS : TRACK_CHIP_PLAYING_GENERATED_CLASS
-}
+export const TRACK_CHIP_PLAYING_CLASS =
+  "bg-transparent bg-[image:linear-gradient(to_right,var(--tl-track-played)_var(--tl-play-x,0px),var(--tl-track-ground)_var(--tl-play-x,0px))]"
 
 /** Whether a track of this KIND may be recoloured at all.
  *

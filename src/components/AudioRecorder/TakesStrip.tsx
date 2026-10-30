@@ -699,20 +699,18 @@ export function TakesStrip({
               {/* AQU-2235 (Sam's board 52): every takes list carries the take's
                   56 × 20 shape — the recording window's too, not only the
                   Recording tab's. */}
-              {(
-                <TakeRowWave
-                  projectId={projectId}
-                  fileId={fileId}
-                  // A split take's shape runs from its first piece to its last.
-                  att={isSplit
-                    ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
-                    : att}
-                  session={session}
-                  strategy={project.audioMediaStrategy}
-                  generated={isGenerated}
-                  trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
-                />
-              )}
+              <TakeRowWave
+                projectId={projectId}
+                fileId={fileId}
+                // A split take's shape runs from its first piece to its last.
+                att={isSplit
+                  ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
+                  : att}
+                session={session}
+                strategy={project.audioMediaStrategy}
+                generated={isGenerated}
+                trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
+              />
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
                 {/* AQU-2235: no second star beside the name — the one in the

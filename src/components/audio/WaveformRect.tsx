@@ -52,8 +52,8 @@ import {
   NEUTRAL_TRACK_VARS,
   TRACK_WAVE_FILL_CLASS,
   WAVE_LOOK,
-  trackChipClass,
-  trackChipPlayingClass,
+  TRACK_CHIP_CLASS,
+  TRACK_CHIP_PLAYING_CLASS,
 } from "@/lib/timeline/track-colors"
 import { WAVE_OVERLAY_CLASS, chipPlaylineClass } from "./chip-classes"
 import { ChipCornerButton, TakeValidatedBadge } from "./chip-parts"
@@ -269,8 +269,8 @@ export function WaveformRect({
         // The chip's own body, in its track's colour ladder.
         "group/wave relative touch-none select-none overflow-hidden border",
         height < 24 ? "rounded-[4px]" : "rounded-[6px]",
-        trackChipClass(kind),
-        showProgress && trackChipPlayingClass(kind),
+        TRACK_CHIP_CLASS,
+        showProgress && TRACK_CHIP_PLAYING_CLASS,
         className,
       )}
       style={{

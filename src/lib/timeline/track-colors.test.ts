@@ -7,8 +7,8 @@ import {
   ALPHA,
   DEFAULT_HUE,
   TRACK_ACCENT_CLASS,
-  TRACK_CHIP_GENERATED_CLASS,
-  TRACK_CHIP_TAKE_CLASS,
+  TRACK_CHIP_CLASS,
+  TRACK_CHIP_PLAYING_CLASS,
   TRACK_DASH_CLASS,
   TRACK_DOT_CLASS,
   TRACK_HOVER_CLASS,
@@ -21,8 +21,6 @@ import {
   isColorableKind,
   hueForTrack,
   parseTrackHue,
-  trackChipClass,
-  trackChipPlayingClass,
   trackHueVars,
   trackHueVarsFor,
 } from "./track-colors"
@@ -160,7 +158,7 @@ describe("the class vocabulary", () => {
   // and looking exactly like a data problem.
   it("holds no template interpolation anywhere", () => {
     const all = [
-      TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS,
+      TRACK_CHIP_CLASS,
       TRACK_ACCENT_CLASS, TRACK_DOT_CLASS,
       TRACK_BAR_CLASS, TRACK_WAVE_FILL_CLASS,
     ]
@@ -173,42 +171,30 @@ describe("the class vocabulary", () => {
   // AQU-2235 (Sam, Oct 25, board 51): the solid outline of 2026-08-27 becomes
   // a really faint frame — the hue at 26% — over a 12% ground.
   it("frames both audio chips faintly, on the 12% ground", () => {
-    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
-      expect(cls).toContain("border-[color:var(--tl-track-frame)]")
-      expect(cls).toContain("bg-[color:var(--tl-track-ground)]")
-      expect(cls).not.toContain("--tl-track-hue")
-    }
-  })
-
-  // "Make the only distinction between AI and non-AI the little star in the
-  // corner" (Sam, Oct 25): the two kinds wear the same body.
-  it("draws a generated voice exactly like a recorded take", () => {
-    expect(trackChipClass("take")).toBe(TRACK_CHIP_TAKE_CLASS)
-    expect(trackChipClass("generated")).toBe(TRACK_CHIP_GENERATED_CLASS)
-    expect(TRACK_CHIP_GENERATED_CLASS).toBe(TRACK_CHIP_TAKE_CLASS)
-    expect(trackChipPlayingClass("generated")).toBe(trackChipPlayingClass("take"))
+    const cls = TRACK_CHIP_CLASS
+    expect(cls).toContain("border-[color:var(--tl-track-frame)]")
+    expect(cls).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(cls).not.toContain("--tl-track-hue")
   })
 
   // Both chips are washes now — most of what you read against is the page — so
   // the theme's own foreground is right in both themes, and ink chosen against
   // the hue would be wrong.
   it("inks both chips against the theme, not against the hue", () => {
-    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
-      expect(cls).toContain("text-foreground")
-      expect(cls).not.toContain("--tl-track-ink")
-    }
+    const cls = TRACK_CHIP_CLASS
+    expect(cls).toContain("text-foreground")
+    expect(cls).not.toContain("--tl-track-ink")
   })
 
   // THE INVARIANT THE WHOLE SCHEME RESTS ON: the identity classes may only set
   // groups the state layers also set, so a warning can override them. A `ring-`
   // or an `opacity-` here would be a tint the alarm vocabulary cannot beat.
   it("introduces no utility group the state layers cannot override", () => {
-    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
-      expect(cls).not.toMatch(/(^|\s)ring-/)
-      expect(cls).not.toMatch(/(^|\s)opacity-/)
-      expect(cls).not.toMatch(/(^|\s)border-[lrtbxy]-/)
-      expect(cls).not.toMatch(/(^|\s)shadow-/)
-    }
+    const cls = TRACK_CHIP_CLASS
+    expect(cls).not.toMatch(/(^|\s)ring-/)
+    expect(cls).not.toMatch(/(^|\s)opacity-/)
+    expect(cls).not.toMatch(/(^|\s)border-[lrtbxy]-/)
+    expect(cls).not.toMatch(/(^|\s)shadow-/)
   })
 })
 
@@ -335,16 +321,12 @@ describe("the preview progress fill (2026-08-27)", () => {
   // AQU-2235 (Sam, Oct 25): the played side one rung UP (27%), the rest on
   // the resting 12% ground; the waveform carries the rest of the contrast.
   it("splits the fill at the playhead: played at 27%, not yet at the 12% ground", () => {
-    for (const kind of ["take", "generated"] as const) {
-      const cls = trackChipPlayingClass(kind)
-      expect(cls).toContain("var(--tl-track-played)_var(--tl-play-x")
-      expect(cls).toContain("var(--tl-track-ground)_var(--tl-play-x")
-    }
+    expect(TRACK_CHIP_PLAYING_CLASS).toContain("var(--tl-track-played)_var(--tl-play-x")
+    expect(TRACK_CHIP_PLAYING_CLASS).toContain("var(--tl-track-ground)_var(--tl-play-x")
   })
 
   it("mutes the identity colour underneath — the gradient's washes must not stack on it", () => {
-    expect(trackChipPlayingClass("take")).toContain("bg-transparent")
-    expect(trackChipPlayingClass("generated")).toContain("bg-transparent")
+    expect(TRACK_CHIP_PLAYING_CLASS).toContain("bg-transparent")
   })
 })
 

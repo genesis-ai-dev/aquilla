@@ -16,16 +16,8 @@ import { fetchProjectList } from "@/lib/sync/projects-read"
 import { grantableAtInstall } from "@/lib/tools/permissions"
 import { copyTool, fetchToolSource, type ToolSummary } from "@/lib/tools/tools-api"
 import type { ToolScope } from "../../../shared/tools/manifest"
-import { useScopeLabel } from "./scope-label"
 import { ToolActivityPanel } from "./ToolActivityPanel"
 import { PERM, usePermLabel } from "./builder/ExtensionFacts"
-
-/** "Can edit translations" — a scope as a short, plain sentence. */
-export function useScopeSentence(): (scope: ToolScope) => string {
-  const t = useT()
-  const label = useScopeLabel()
-  return (scope) => t("extensions.can", { scope: label(scope) })
-}
 
 /** The permission switches (dialog, and the page's Permissions tab). */
 export function PermissionsList({

@@ -445,10 +445,6 @@ export function setQueueLayerTrackSlots(slots: readonly string[]): void {
   if (timingMode === "audioFirst" && progIndex >= 0 && activeContext) updateQueueCells(activeContext.cells)
 }
 
-export function getQueueLayerTrackSlots(): readonly string[] {
-  return layerTrackSlots
-}
-
 /** Three slots per sounding track. With one track this is the 3 that shipped;
  *  with N it is what stops N tracks evicting each other on every line. */
 function overlayCapacity(): number {

@@ -1,12 +1,13 @@
 // AQU-1767 (Sam, 2026-10-14): a take's right-click menu.
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
 import { CHANGE_VOICE_QUALITIES, type ChangeVoiceQuality } from "@/lib/audio/change-voice"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
 const TAKE = "audio-c1-1700000000-take.wav"
@@ -381,7 +382,7 @@ describe("TargetAudioLane — make a character from a take (AQU-1758)", () => {
 })
 
 describe("TargetAudioLane — a take's voice on its clip (AQU-1758)", () => {
-  it("names the take's voice when it is not the line's, with the reason on hover", async () => {
+  it("names the take's voice when it is not the line's, with the reason in its right-click details (AQU-2260)", async () => {
     renderWithTooltips(
       <TargetAudioLane
         {...base}
@@ -390,7 +391,13 @@ describe("TargetAudioLane — a take's voice on its clip (AQU-1758)", () => {
       />,
     )
     expect(screen.getByTestId("tl-target-c1-take-voice")).toHaveTextContent("Narrator")
-    await expectTooltip(screen.getByTestId("tl-target-c1"), "This take was voiced by Narrator. The line’s voice is now Naomi.")
+    // AQU-2260: hovering the clip shows nothing; the sentence is at the top
+    // of its right-click menu, among the take's details.
+    await userEvent.setup().hover(screen.getByTestId("tl-target-c1"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.contextMenu(screen.getByTestId("tl-target-c1"), { button: 2 })
+    expect((await screen.findByTestId("tl-take-details-c1")).textContent)
+      .toContain("This take was voiced by Narrator. The line’s voice is now Naomi.")
   })
 
   it("says the voice was removed when it is no longer in the project", () => {

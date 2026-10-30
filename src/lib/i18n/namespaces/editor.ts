@@ -1120,6 +1120,7 @@ export const editor = defineNamespace({
     }),
     "editor.history.stepEditSource": "Edit the source text",
     "editor.history.stepChangeSetting": "Change: {setting}",
+    "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
     "editor.timeline.videoHiddenNote":
       "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
       "recordings.",
@@ -6648,6 +6649,7 @@ export const editor = defineNamespace({
       "editor.history.stepRepairCues": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): every subtitle line was paired with its heard lines again from scratch ('Re-pair'). A short verb phrase.", maxLength: 40 },
       "editor.history.stepCharacters": { description: "Name of one history step: the character (speaker) of one or more lines was set, changed or cleared. {count} is how many lines.", placeholders: { count: "A number." } },
       "editor.history.stepEditSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the source text of a line was edited (one editing session). A short verb phrase.", maxLength: 40 },
+      "editor.history.stepUnknown": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel) when the step was made on another of the person's devices running a newer version of the app, so this version has no name for it.", maxLength: 60 },
       "editor.history.stepChangeSetting": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): one project setting was changed. {setting} is the setting's own name as Project settings shows it, for example 'Who can export'.", placeholders: { setting: "The name of the setting that was changed." }, maxLength: 60 },
       "editor.timeline.videoHiddenNote": {
         description:

@@ -96,12 +96,28 @@ describe("a setting kept only on this device", () => {
 
 describe("a step's name", () => {
   const t = (key: string, params?: Record<string, unknown>) =>
-    key === "editor.history.stepChangeSetting" ? `Change: ${String(params?.setting)}` : key === "projectSettings.field.exportFloor" ? "Who can export" : key
+    key === "editor.history.stepChangeSetting" ? `Change: ${String(params?.setting)}` : key === "projectSettings.info.smartQuotesLabel" ? "Smart quotes" : key
   it("names the setting in the language shown now, not the one it was recorded in", () => {
     expect(
       stepLabel(t as never, {
         labelKey: "editor.history.stepChangeSetting",
-        labelParams: { setting: "Qui peut exporter", settingKey: "projectSettings.field.exportFloor" },
+        labelParams: { setting: "Guillemets typographiques", settingKey: "projectSettings.info.smartQuotesLabel" },
+      }),
+    ).toBe("Change: Smart quotes")
+  })
+
+  // The history follows the person to their other devices, which may run
+  // another version of the app: a step a newer one recorded can name a
+  // message this one does not have. It still gets a name, never a crash.
+  it("names a step this version has no message for, instead of failing", () => {
+    expect(stepLabel(t as never, { labelKey: "editor.history.stepFromALaterVersion" })).toBe("editor.history.stepUnknown")
+  })
+
+  it("keeps the recorded setting name when this version has no message for the setting", () => {
+    expect(
+      stepLabel(t as never, {
+        labelKey: "editor.history.stepChangeSetting",
+        labelParams: { setting: "Who can export", settingKey: "projectSettings.field.fromALaterVersion" },
       }),
     ).toBe("Change: Who can export")
   })

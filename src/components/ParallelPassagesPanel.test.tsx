@@ -12,6 +12,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ParallelPassagesPanel, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { toast } from "@/components/ui/toast"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 
@@ -464,6 +465,12 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     })
 
     expect(getApplyButton()).toBeDisabled()
+  })
+
+  // AQU-2260 (Sam, Oct 29): why it is greyed out opens on a click, never a hover.
+  it("says why it is greyed out on a click when the files are read-only", async () => {
+    render(<ParallelPassagesPanel {...baseProps({ isReadOnly: true })} />)
+    await expectDisabledNote(getApplyButton(), "Replace requires contributor access on these files")
   })
 
   it("calls onReplaceAll with diffs including correct before/after values", async () => {

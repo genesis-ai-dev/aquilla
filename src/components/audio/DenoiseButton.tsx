@@ -154,28 +154,25 @@ export function DenoiseButton(props: Props) {
   if (isDenoised) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <AppTooltip content={t("workspace.denoise.removedTooltip")}>
-          <Badge
-            variant="outline"
-            className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-          >
-            <Check className="h-3 w-3" />
-            {t("workspace.denoise.removedBadge")}
-          </Badge>
-        </AppTooltip>
+        {/* The badge and the button carry their own words: no hover (AQU-2260). */}
+        <Badge
+          variant="outline"
+          className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+        >
+          <Check className="h-3 w-3" />
+          {t("workspace.denoise.removedBadge")}
+        </Badge>
         {referenceAudioId && (
-          <AppTooltip content={t("workspace.denoise.revertTooltip")}>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              onClick={() => void handleRevert()}
-              disabled={!editable || reverting || !session?.jwt}
-            >
-              {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
-              {t("workspace.denoise.revertButton")}
-            </Button>
-          </AppTooltip>
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => void handleRevert()}
+            disabled={!editable || reverting || !session?.jwt}
+          >
+            {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
+            {t("workspace.denoise.revertButton")}
+          </Button>
         )}
         {error && <span className="text-[11px] text-destructive">{error}</span>}
       </div>
@@ -184,11 +181,9 @@ export function DenoiseButton(props: Props) {
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <AppTooltip content={
-        !supported
-          ? "Noise removal isn't supported in this browser"
-          : "Remove background noise (on-device) — adds a cleaned take"
-      }>
+      {/* Its words name it; where this browser cannot run it, why opens on a
+          click on it (AQU-2260). */}
+      <AppTooltip content={!supported ? "Noise removal isn't supported in this browser" : null}>
         <Button
           type="button"
           size="xs"

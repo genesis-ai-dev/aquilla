@@ -14,7 +14,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { Switch } from "@/components/ui/switch"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetChipGeom, type ChipAtt } from "@/lib/timeline/lane-timing"
@@ -252,29 +254,60 @@ const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
  *  type size for it rather than the drawer vanishing — on a five-line verse
  *  the ready screen's take strip had squeezed the drawer to nothing. */
 const TAKES_DRAWER_FLOOR_PX = 56
+/** The countdown's name and its (i) (AQU-2260): what the four speeds do opens
+ *  under it on click, and starts shut each time the settings open. */
+function CountdownTitle({ on }: { on: boolean }) {
+  const t = useT()
+  const [open, toggle] = useInfoOpen()
+  const title = t("audio.recordingModal.countdownTitle")
+  return (
+    <>
+      <span className="flex items-center gap-2.5">
+        {on
+          ? <Timer className="h-4 w-4 shrink-0 text-muted-foreground" />
+          : <TimerOff className="h-4 w-4 shrink-0 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 text-xs font-medium">{title}</span>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("common.aboutAria", { name: title })}
+          controls="rec-countdown-info"
+          testId="rec-countdown-info-toggle"
+        />
+      </span>
+      <InfoReveal open={open} id="rec-countdown-info" className="text-[11px] leading-snug text-muted-foreground">
+        {t("audio.recordingModal.countdownInfo")}
+      </InfoReveal>
+    </>
+  )
+}
+
 /**
- * One recorder setting: its icon, its name, and a real switch — the whole row
- * toggles it, and what it does is said on hover (Sam, 2026-09-28).
+ * One recorder setting: its icon, its name, an (i), and a real switch — the
+ * whole row toggles it (Sam, 2026-09-28). AQU-2260 (Sam, Oct 29): what the row
+ * does opens under it from the (i), on click; it used to be a hover tip, and
+ * hovers open nothing now.
  */
 function SettingSwitch({
-  testId, icon, title, tip, checked, disabled = false, onCheckedChange,
+  testId, icon, title, info, checked, disabled = false, onCheckedChange,
 }: {
   testId: string
   icon: React.ReactElement<{ className?: string }>
   title: string
-  tip: string
+  info: string
   checked: boolean
   disabled?: boolean
   onCheckedChange: (next: boolean) => void
 }) {
+  const t = useT()
+  const [open, toggle] = useInfoOpen()
+  const infoId = `${testId}-info`
   return (
-    // To the LEFT: the menu opens at the recorder's right edge, and below a
-    // row the tip would cover the next row's switch — the first row's tip
-    // opens on its own as the menu takes focus.
-    <AppTooltip content={tip} side="left">
+    <div className="w-full">
       {/* Not a <label>: the switch keeps a hidden checkbox, and a label passes
           a click on the switch to it as well — two toggles, no change. The
-          row toggles itself for a click anywhere but the switch. */}
+          row toggles itself for a click anywhere but the switch or the (i)
+          (the (i) stops its own click). */}
       <div
         onClick={(e) => {
           if (disabled || (e.target as HTMLElement).closest("[role=switch]")) return
@@ -282,11 +315,18 @@ function SettingSwitch({
         }}
         className={cn(
           "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted",
-          disabled && "cursor-default opacity-50 hover:bg-transparent",
+          disabled && "cursor-default hover:bg-transparent",
         )}
       >
-        {cloneElement(icon, { className: "h-4 w-4 shrink-0 text-muted-foreground" })}
-        <span className="min-w-0 flex-1 text-xs font-medium">{title}</span>
+        {cloneElement(icon, { className: cn("h-4 w-4 shrink-0 text-muted-foreground", disabled && "opacity-50") })}
+        <span className={cn("min-w-0 flex-1 text-xs font-medium", disabled && "opacity-50")}>{title}</span>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("common.aboutAria", { name: title })}
+          controls={infoId}
+          testId={`${testId}-info-toggle`}
+        />
         <Switch
           data-testid={testId}
           size="sm"
@@ -294,9 +334,13 @@ function SettingSwitch({
           disabled={disabled}
           onCheckedChange={(next) => onCheckedChange(next)}
           aria-label={title}
+          aria-describedby={infoId}
         />
       </div>
-    </AppTooltip>
+      <InfoReveal open={open} id={infoId} className="px-2 text-[11px] leading-snug text-muted-foreground">
+        <span className="block pb-1.5">{info}</span>
+      </InfoReveal>
+    </div>
   )
 }
 
@@ -1942,19 +1986,18 @@ export function AudioRecordingModal({
               leadIn={leadIn}
               follow={filmFollowTarget}
             />
-            <AppTooltip content={t("audio.recordingModal.collapseFilmTooltip")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                data-testid="rec-collapse-video"
-                onClick={() => setRecordingVideoCollapsed(true)}
-                aria-label={t("audio.recordingModal.collapseFilmAriaLabel")}
-                className="absolute top-3 right-3 z-10 h-7 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
-              >
-                <Minimize2 className="h-3.5 w-3.5" /> {t("audio.recordingModal.collapseFilmButton")}
-              </Button>
-            </AppTooltip>
+            {/* Its own words name it: no hover (AQU-2260). */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="rec-collapse-video"
+              onClick={() => setRecordingVideoCollapsed(true)}
+              aria-label={t("audio.recordingModal.collapseFilmAriaLabel")}
+              className="absolute top-3 right-3 z-10 h-7 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
+            >
+              <Minimize2 className="h-3.5 w-3.5" /> {t("audio.recordingModal.collapseFilmButton")}
+            </Button>
           </div>
         )}
 
@@ -1973,19 +2016,17 @@ export function AudioRecordingModal({
               {/* Only when a film EXISTS but is collapsed — a line without one
                   never offers to show a picture it does not have. */}
               {filmUrl && videoCollapsed && (
-                <AppTooltip content={t("audio.recordingModal.expandFilmTooltip")}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    data-testid="rec-expand-video"
-                    onClick={() => setRecordingVideoCollapsed(false)}
-                    aria-label={t("audio.recordingModal.expandFilmAriaLabel")}
-                    className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
-                  >
-                    <Maximize2 className="h-3.5 w-3.5" /> {t("editor.timeline.videoPaneTitle")}
-                  </Button>
-                </AppTooltip>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  data-testid="rec-expand-video"
+                  onClick={() => setRecordingVideoCollapsed(false)}
+                  aria-label={t("audio.recordingModal.expandFilmAriaLabel")}
+                  className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" /> {t("editor.timeline.videoPaneTitle")}
+                </Button>
               )}
               <AppTooltip content={t("audio.recordingModal.closeTooltip")}>
                 <Button
@@ -2018,6 +2059,15 @@ export function AudioRecordingModal({
                   <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
               </AppTooltip>
+              {/* A very short window says why on a click (AQU-2260); the
+                  counter is plain text otherwise. */}
+              <NoteOnClick
+                note={
+                  targetSec != null && targetSec < MIN_USEFUL_REGION_SEC
+                    ? t("audio.recordingModal.veryShortWindowTitle")
+                    : null
+                }
+              >
               <span
                 data-testid="recorder-window"
                 className={cn(
@@ -2029,11 +2079,6 @@ export function AudioRecordingModal({
                     ? "text-amber-600 dark:text-amber-400"
                     : "text-muted-foreground",
                 )}
-                title={
-                  targetSec != null && targetSec < MIN_USEFUL_REGION_SEC
-                    ? t("audio.recordingModal.veryShortWindowTitle")
-                    : undefined
-                }
               >
                 {targetSec == null
                   ? t("audio.recordingModal.lineCounter", {
@@ -2052,6 +2097,7 @@ export function AudioRecordingModal({
                         seconds: targetSec.toFixed(2),
                       })}
               </span>
+              </NoteOnClick>
               <AppTooltip content={t("audio.recordingModal.nextLineTooltip")}>
                 <Button
                   type="button"
@@ -2469,20 +2515,19 @@ export function AudioRecordingModal({
                         // with the Recording tab (take-length.ts).
                         seconds: formatTakeSeconds(readyKeptMs ?? 0),
                       })}
-                      {/* No window to judge against: said on hover, beside the
-                          take, rather than as a line of its own (Sam,
-                          2026-09-28 — the room went to the takes drawer). */}
+                      {/* No window to judge against: said beside the take, on
+                          a click of its mark, rather than as a line of its own
+                          (Sam, 2026-09-28 — the room went to the takes drawer;
+                          AQU-2260 — never a hover). */}
                       {targetSec == null && (
-                        <AppTooltip content={t("audio.recordingModal.noTimedWindow")}>
-                          <span
-                            role="img"
-                            aria-label={t("audio.recordingModal.noTimedWindow")}
-                            data-testid="rec-no-window"
-                            className="inline-flex"
-                          >
-                            <TimerOff className="h-3.5 w-3.5 text-muted-foreground/70" />
+                        <NoteOnClick
+                          note={t("audio.recordingModal.noTimedWindow")}
+                          label={t("audio.recordingModal.noTimedWindow")}
+                        >
+                          <span data-testid="rec-no-window" className="inline-flex">
+                            <TimerOff className="h-3.5 w-3.5 text-muted-foreground/70" aria-hidden="true" />
                           </span>
-                        </AppTooltip>
+                        </NoteOnClick>
                       )}
                     </p>
                     <TakeWaveform
@@ -2540,17 +2585,17 @@ export function AudioRecordingModal({
                 >
                   <RefreshCw className="mr-1.5 h-4 w-4" /> {t("audio.recordingModal.retakeButton")}
                 </Button>
-                <AppTooltip content={online ? t("audio.recordingModal.saveTooltip") : OFFLINE_MESSAGE}>
-                  <span className="inline-flex flex-1">
-                    <Button
-                      data-testid="rec-save"
-                      disabled={!online}
-                      onClick={save}
-                      className="h-[52px] w-full text-sm font-semibold"
-                    >
-                      {t("common.save")} <span className="ml-1.5 opacity-60">· ENTER</span>
-                    </Button>
-                  </span>
+                {/* Its words and its key are on it: no hover. Offline, why it
+                    is greyed out opens on a click (AQU-2260). */}
+                <AppTooltip content={online ? null : OFFLINE_MESSAGE} disabledTriggerClassName="flex-1">
+                  <Button
+                    data-testid="rec-save"
+                    disabled={!online}
+                    onClick={save}
+                    className="h-[52px] w-full flex-1 text-sm font-semibold"
+                  >
+                    {t("common.save")} <span className="ml-1.5 opacity-60">· ENTER</span>
+                  </Button>
                 </AppTooltip>
               </div>
             ) : displayPhase === "recording" ? (
@@ -2571,17 +2616,15 @@ export function AudioRecordingModal({
                 {t("common.cancel")} <span className="ml-1.5 opacity-60">· ESC</span>
               </Button>
             ) : (
-              <AppTooltip content={online ? t("audio.recordingModal.startTooltip") : OFFLINE_MESSAGE}>
-                <span className="inline-flex w-full">
-                  <Button
-                    data-testid="rec-start"
-                    disabled={!online || displayPhase === "uploading"}
-                    onClick={startFlow}
-                    className="h-[52px] w-full text-sm font-semibold"
-                  >
-                    <Mic className="mr-2 h-4 w-4" /> {t("editor.audio.recordShort")} <span className="ml-1.5 opacity-60">· SPACE</span>
-                  </Button>
-                </span>
+              <AppTooltip content={online ? null : OFFLINE_MESSAGE} disabledTriggerClassName="w-full">
+                <Button
+                  data-testid="rec-start"
+                  disabled={!online || displayPhase === "uploading"}
+                  onClick={startFlow}
+                  className="h-[52px] w-full text-sm font-semibold"
+                >
+                  <Mic className="mr-2 h-4 w-4" /> {t("editor.audio.recordShort")} <span className="ml-1.5 opacity-60">· SPACE</span>
+                </Button>
               </AppTooltip>
             )}
 
@@ -2599,6 +2642,9 @@ export function AudioRecordingModal({
               <div className="space-y-1.5">
               <div className="flex gap-2">
                 {!deliversAudioOnly && (
+                // Only why it is greyed out, on a click (AQU-2260): enabled, its
+                // words name it. The verbatim failure text is behind the (i) at
+                // the end of the reason line below.
                 <AppTooltip
                   content={
                     !online
@@ -2607,18 +2653,10 @@ export function AudioRecordingModal({
                         ? t("audio.recordingModal.ttsNoLinkedLine")
                         : !ttsText
                           ? t("audio.recordingModal.ttsNeedsTranslation")
-                          : ttsShowFailure && ttsFailure
-                            ? // The verbatim text, which the line below
-                              // deliberately does not show: the sentence there
-                              // is for the user, this is for whoever they end
-                              // up sending it to.
-                              t("audio.recordingModal.ttsFailedTooltip", { error: ttsFailure.raw })
-                            : ttsDone
-                              ? t("audio.recordingModal.ttsDoneTooltip")
-                              : t("audio.recordingModal.ttsTooltip")
+                          : null
                   }
+                  disabledTriggerClassName="min-w-0 flex-1"
                 >
-                  <span className="inline-flex min-w-0 flex-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -2629,7 +2667,7 @@ export function AudioRecordingModal({
                       disabled={!online || !ttsText || ttsWorking}
                       onClick={() => void generateTts()}
                       className={cn(
-                        "h-9 w-full text-xs font-normal",
+                        "h-9 w-full min-w-0 flex-1 text-xs font-normal",
                         // No `outline`+`destructive` variant exists, so the tone
                         // is overridden here; `cn` is tailwind-merge, so these
                         // win over the resting pair rather than fighting it.
@@ -2661,7 +2699,6 @@ export function AudioRecordingModal({
                             : t("audio.recordingModal.generateButton")}
                       </span>
                     </Button>
-                  </span>
                 </AppTooltip>
                 )}
                 <input
@@ -2677,20 +2714,18 @@ export function AudioRecordingModal({
                   // the accessible name and the click.
                   tabIndex={-1}
                 />
-                <AppTooltip content={online ? t("audio.recordingModal.uploadTooltip") : OFFLINE_MESSAGE}>
-                  <span className="inline-flex min-w-0 flex-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      data-testid="rec-upload"
-                      disabled={!online}
-                      onClick={() => { stayOnThisLine(); uploadInputRef.current?.click() }}
-                      className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
-                    >
-                      <Upload className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">{t("audio.recordingModal.uploadButton")}</span>
-                    </Button>
-                  </span>
+                <AppTooltip content={online ? null : OFFLINE_MESSAGE} disabledTriggerClassName="min-w-0 flex-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    data-testid="rec-upload"
+                    disabled={!online}
+                    onClick={() => { stayOnThisLine(); uploadInputRef.current?.click() }}
+                    className="h-9 w-full min-w-0 flex-1 bg-muted/30 text-xs font-normal text-muted-foreground"
+                  >
+                    <Upload className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{t("audio.recordingModal.uploadButton")}</span>
+                  </Button>
                 </AppTooltip>
               </div>
               {/* THE REASON, WRITTEN OUT (Sam, 2026-08-26). Full panel width,
@@ -2711,6 +2746,17 @@ export function AudioRecordingModal({
               {ttsShowFailure && ttsFailureLine && (
                 <p data-testid="rec-tts-error" className="text-xs font-medium text-destructive">
                   {ttsFailureLine}
+                  {/* The verbatim server text, for whoever they end up
+                      sending it to — on a click, never a hover (AQU-2260). */}
+                  {ttsFailure && (
+                    <InfoNote
+                      label={t("common.aboutAria", { name: t("audio.recordingModal.ttsFailedButton") })}
+                      className="ms-1 align-middle text-destructive/70 hover:text-destructive"
+                      iconClassName="h-3 w-3"
+                    >
+                      <span className="break-words">{t("audio.recordingModal.ttsFailedTooltip", { error: ttsFailure.raw })}</span>
+                    </InfoNote>
+                  )}
                 </p>
               )}
               </div>
@@ -2772,16 +2818,11 @@ export function AudioRecordingModal({
               {/* The format lives HERE, not in the header: it describes the
                   bytes of the takes listed under it, and once a take is in hand
                   it is a statement about that take rather than a choice. */}
-              <AppTooltip
-                content={
-                  takeInHand
-                    ? t("audio.recordingModal.formatLockedTooltip")
-                    : recordingFormat === "wav"
-                      ? t("audio.recordingModal.formatWavTooltip")
-                      : t("audio.recordingModal.formatCompressedTooltip")
-                }
-              >
-                <span className="ml-auto inline-flex shrink-0">
+              {/* What each format costs is behind the (i) beside it; with a
+                  take in hand, why it is locked opens on a click on it
+                  (AQU-2260 — never a hover). */}
+              <span className="ml-auto inline-flex shrink-0 items-center">
+              <AppTooltip content={takeInHand ? t("audio.recordingModal.formatLockedTooltip") : null}>
                   <Button
                     type="button"
                     variant="ghost"
@@ -2800,8 +2841,21 @@ export function AudioRecordingModal({
                     {recordingFormat === "wav" ? "WAV" : "COMPRESSED"}
                     {takeInHand && <Lock className="h-3 w-3" />}
                   </Button>
-                </span>
               </AppTooltip>
+              {!takeInHand && (
+                <InfoNote
+                  label={t("common.aboutAria", { name: t("importExport.dialog.formatLegend") })}
+                  testId="rec-format-info"
+                  className="text-muted-foreground/70"
+                  iconClassName="h-3 w-3"
+                  align="end"
+                >
+                  {recordingFormat === "wav"
+                    ? t("audio.recordingModal.formatWavTooltip")
+                    : t("audio.recordingModal.formatCompressedTooltip")}
+                </InfoNote>
+              )}
+              </span>
 
               {/* Auto-advance, the countdown and its beep: consulted rarely,
                   and out of the header entirely so it can be identity and
@@ -2830,23 +2884,7 @@ export function AudioRecordingModal({
                       one four-way choice — Off, Fast, Normal, Slow — where the
                       on/off switch was. */}
                   <div data-testid="rec-countdown" data-speed={countdownSpeed} className="w-full space-y-1 rounded-md px-2 pb-1 pt-1.5">
-                    <AppTooltip
-                      side="left"
-                      content={countdownSpeed === "off"
-                        ? t("audio.recordingModal.countdownOffDescription")
-                        : countdownSpeed === "fast"
-                          ? t("audio.recordingModal.countdownFastDescription")
-                          : countdownSpeed === "slow"
-                            ? t("audio.recordingModal.countdownSlowDescription")
-                            : t("audio.recordingModal.countdownNormalDescription")}
-                    >
-                      <span className="flex items-center gap-2.5">
-                        {countdownEnabled
-                          ? <Timer className="h-4 w-4 shrink-0 text-muted-foreground" />
-                          : <TimerOff className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                        <span className="text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
-                      </span>
-                    </AppTooltip>
+                    <CountdownTitle on={countdownEnabled} />
                     <SegmentTabs<CountdownSpeed>
                       value={countdownSpeed}
                       onValueChange={setRecordingCountdownSpeed}
@@ -2871,25 +2909,19 @@ export function AudioRecordingModal({
                     testId="rec-beep"
                     icon={beepEnabled ? <Volume2 /> : <VolumeX />}
                     title={t("audio.recordingModal.beepTitle")}
-                    tip={!countdownEnabled
-                      ? t("audio.recordingModal.beepNotApplicableDescription")
-                      : beepEnabled
-                        ? t("audio.recordingModal.beepOnDescription")
-                        : t("audio.recordingModal.beepOffDescription")}
+                    info={t("audio.recordingModal.beepInfo")}
                     checked={beepEnabled}
                     disabled={!countdownEnabled}
                     onCheckedChange={setBeepEnabled}
                   />
                   {/* Sam, 2026-09-28: every setting but the countdown's speed is
-                      a real switch, and what it does is said on hover rather
-                      than in a line of its own. */}
+                      a real switch. What it does is behind its (i), on click
+                      (AQU-2260), rather than in a line always on show. */}
                   <SettingSwitch
                     testId="rec-auto-advance"
                     icon={<ChevronsRight />}
                     title={t("audio.recordingModal.autoAdvanceTitle")}
-                    tip={autoAdvance
-                      ? t("audio.recordingModal.autoAdvanceOnDescription")
-                      : t("audio.recordingModal.autoAdvanceOffDescription")}
+                    info={t("audio.recordingModal.autoAdvanceInfo")}
                     checked={autoAdvance}
                     onCheckedChange={setRecordingAutoAdvance}
                   />
@@ -2897,9 +2929,7 @@ export function AudioRecordingModal({
                     testId="rec-takes-drawer-open"
                     icon={<PanelBottom />}
                     title={t("audio.recordingModal.takesDrawerTitle")}
-                    tip={takesDrawerOpen
-                      ? t("audio.recordingModal.takesDrawerOnDescription")
-                      : t("audio.recordingModal.takesDrawerOffDescription")}
+                    info={t("audio.recordingModal.takesDrawerInfo")}
                     checked={takesDrawerOpen}
                     onCheckedChange={(next) => { setTakesOpen(false); setRecordingTakesDrawerOpen(next) }}
                   />

@@ -10,6 +10,7 @@
 import { ExtensionFrame } from "./ExtensionFrame"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
@@ -280,9 +281,13 @@ export function ExtensionImportPanel({
         ) : result?.ok ? (
           <Button onClick={onDone} data-testid="extension-import-close">{t("common.close")}</Button>
         ) : (
-          <Button disabled={missing !== null} onClick={start} data-testid="extension-import-run" title={missing ? t("extensions.import.missing", { field: missing }) : undefined}>
-            {result ? t("extensions.import.retry") : t("extensions.import.run")}
-          </Button>
+          // AQU-2260: greyed out, it says why on click (AppTooltip on the
+          // disabled button), never as a hover title.
+          <AppTooltip content={missing ? t("extensions.import.missing", { field: missing }) : undefined}>
+            <Button disabled={missing !== null} onClick={start} data-testid="extension-import-run">
+              {result ? t("extensions.import.retry") : t("extensions.import.run")}
+            </Button>
+          </AppTooltip>
         )}
       </div>
     </div>

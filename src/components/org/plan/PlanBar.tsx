@@ -16,13 +16,13 @@
 // Plan units carry no AI-draft count, so the text bar has no striped part.
 
 import type { ReactNode } from "react"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { ProgressSplitBar } from "@/components/progress/ProgressSplitBar"
 import { audioProgressSegments, textProgressSegments } from "@/lib/progress/progress-palette"
 
 export type PlanBarTone = "text" | "audio"
 
-export function PlanBar({ label, outer, inner, tone, aria, tips }: {
+export function PlanBar({ label, outer, inner, tone, aria, tips, showCounts = false }: {
   /** Omitted where the caller supplies its own leading gutter (a chapter number). */
   label?: string
   /** Percentage 0–100 of the containing measure. */
@@ -33,20 +33,27 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
   aria: string
   /**
    * AQU-1278, round 7 (Sam, 2026-09-17): what each percentage STANDS FOR, as
-   * a sentence — "1,530 of 1,533 validated" — shown on hover and read by a
-   * screen reader in its place. Percentages stay in print everywhere, and the
-   * count with its "of" lives here, one hover away, because on a dubbing
+   * a sentence — "1,530 of 1,533 validated" — read by a screen reader in its
+   * place, and printed under the bar in the details panel (`showCounts`).
+   * Percentages stay in print everywhere, and the count with its "of" lives
+   * there, one click away, because on a dubbing
    * project the audio bar's total is the cue sheet's and not the file's, and
    * printing that on every bar was more than the panel could carry.
    */
   tips?: { outer: string; inner: string }
+  /**
+   * AQU-2260 (Sam, Oct 29, third pass): print the counts under the bar, as a
+   * plain line. The details panel does; the board's rows do not, and nothing
+   * shows them on hover any more.
+   */
+  showCounts?: boolean
 }) {
   // The two percentages the readout prints, so the bar and the numbers beside
   // it can never disagree.
   const segments = tone === "text"
     ? textProgressSegments({ validated: inner, translated: outer, total: 100 })
     : audioProgressSegments({ validated: inner, recorded: outer, total: 100 })
-  return (
+  const bar = (
     // No `title`: the bar used to repeat its two percentages in a sentence on
     // hover, and the numbers now say more than that sentence did.
     <span className="flex items-center gap-2" aria-label={aria}>
@@ -63,6 +70,18 @@ export function PlanBar({ label, outer, inner, tone, aria, tips }: {
           `Readout` inside can pin its divider to the slot's centre. */}
       <span className="flex w-[72px] shrink-0 items-center text-[11px] tabular-nums text-muted-foreground">
         <Readout left={`${outer}%`} right={`${inner}%`} leftTip={tips?.outer} rightTip={tips?.inner} />
+      </span>
+    </span>
+  )
+  if (!showCounts || !tips) return bar
+  return (
+    <span className="flex flex-col gap-0.5">
+      {bar}
+      <span
+        data-testid={`plan-bar-counts-${tone}`}
+        className={cn("text-[11px] tabular-nums text-muted-foreground", label != null && "ps-8")}
+      >
+        {tips.outer} · {tips.inner}
       </span>
     </span>
   )
@@ -128,8 +147,8 @@ export function PlanRule({ className = "" }: { className?: string }) {
 }
 
 /**
- * One figure of a readout: a hover target that says what the figure stands
- * for. Without a `tip` it is the bare figure.
+ * One figure of a readout, named for a screen reader by what it stands for.
+ * Without a `tip` it is the bare figure.
  *
  * NOT A TAB STOP (Sam, 2026-09-17). It carried `tabIndex={0}` so a keyboard
  * could reach the tooltip, and the cost was out of all proportion: four of
@@ -143,15 +162,11 @@ export function PlanRule({ className = "" }: { className?: string }) {
  */
 function ReadoutFigure({ tip, children }: { tip?: string; children: ReactNode }) {
   if (!tip) return <>{children}</>
+  // AQU-2260: no hover. The sentence is the figure's name for a screen
+  // reader; the details panel prints the counts for everyone.
   return (
-    <AppTooltip content={tip}>
-      <span
-        aria-label={tip}
-        data-testid="plan-readout-figure"
-        className="cursor-default rounded-sm underline-offset-[3px] decoration-dotted hover:underline"
-      >
-        {children}
-      </span>
-    </AppTooltip>
+    <span aria-label={tip} data-testid="plan-readout-figure">
+      {children}
+    </span>
   )
 }

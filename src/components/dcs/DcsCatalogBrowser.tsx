@@ -271,15 +271,14 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
               const supported = isSupportedCatalogEntry(entry)
               const unsupportedReason = t("importExport.dcs.unsupportedResourceTooltip")
               return (
-                <AppTooltip
-                  key={`${entry.fullName}@${entry.ref}`}
-                  content={supported ? undefined : unsupportedReason}
-                  disabled={supported}
-                >
-                <li
-                  // Tooltip on wrapper — disabled buttons swallow pointer events in some browsers.
-                  className="list-none"
-                >
+                <li key={`${entry.fullName}@${entry.ref}`} className="list-none">
+                  {/* AQU-2260: the greyed row says why on click. AppTooltip
+                      wraps the disabled button itself, so the reason opens in
+                      a note on click and nothing shows on hover. */}
+                  <AppTooltip
+                    content={supported ? undefined : unsupportedReason}
+                    disabledTriggerClassName="flex w-full"
+                  >
                   <button
                     type="button"
                     disabled={!supported}
@@ -313,8 +312,8 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                       )}
                     </div>
                   </button>
+                  </AppTooltip>
                 </li>
-                </AppTooltip>
               )
             })}
           </ul>

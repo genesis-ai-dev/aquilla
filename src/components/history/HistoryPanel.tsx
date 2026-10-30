@@ -77,7 +77,8 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <AppTooltip content={t("editor.history.panelTooltip")}>
+      {/* The hover names it (AQU-2260); what it does is the panel itself. */}
+      <AppTooltip content={t("editor.history.panelAria")}>
         <PopoverTrigger
           render={
             <button

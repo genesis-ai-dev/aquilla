@@ -342,7 +342,9 @@ describe("AppShell main-content error containment", () => {
     // Removing Feedback must not let Help or localization drift up into it.
     expect(releaseRow).not.toContainElement(help)
     expect(releaseRow).not.toContainElement(language)
-    expect(releaseRow?.querySelectorAll("button")).toHaveLength(1)
+    // The environment badge beside the build label has always lived here; since
+    // AQU-2260 it opens its note on click, so it is a button too. Count the rest.
+    expect(releaseRow?.querySelectorAll('button:not([data-slot="note-on-click"])')).toHaveLength(1)
     expect(utilityRow).toContainElement(language)
 
     // Two rows now: account row (end of the sidebar content) → build label →

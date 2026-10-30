@@ -11,6 +11,7 @@ import { AlertCircle, Pause, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { toast } from "@/components/ui/toast"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
@@ -446,25 +447,30 @@ export function CellTtsButton({
   const engineName = providerInfo(provider).shortTitle
   // Playing an attached clip may still work offline (on-device cache).
   const offlineBlocked = offlineGate.kind === "blocked" && !playableAttachId
+  // What the button does — the only thing its hover says (AQU-2260).
+  const name = isPlaying
+    ? "Pause"
+    : playableAttachId
+      ? `Play generated voice (${voice.name})`
+      : `Generate & play (${voice.name} — ${engineName})`
+  // Why it is greyed out: opens on a click on the greyed-out button.
   const tooltip = noText
     ? "Translate this line first to generate voice"
     : offlineBlocked
       ? offlineGate.suggestLocal
         ? t("audio.tts.offlineSuggestLocal", { engine: engineName })
         : t("audio.tts.offlineBlocked", { engine: engineName })
-    : offlineGate.kind === "previewOnly" && !playableAttachId && !isError && !isLoadingModel && !isSynthesizing && !isPlaying
-      ? t("audio.tts.offlinePreviewOnly")
-    : isError
-      ? t("audio.tts.failedTooltip", { reason: status.message })
       : isLoadingModel
         ? pct != null ? `Downloading voice model (${pct}%)…` : "Loading voice model…"
         : isSynthesizing
           ? "Synthesizing speech…"
-          : isPlaying
-            ? "Pause"
-            : playableAttachId
-              ? `Play generated voice (${voice.name})`
-              : `Generate & play (${voice.name} — ${engineName})`
+          : name
+  // An explanation of an enabled button: behind an (i) beside it, on a click.
+  const note = isError
+    ? t("audio.tts.failedTooltip", { reason: status.kind === "error" ? status.message : "" })
+    : offlineGate.kind === "previewOnly" && !playableAttachId && !isLoadingModel && !isSynthesizing && !isPlaying
+      ? t("audio.tts.offlinePreviewOnly")
+      : null
 
   const button = (
     <Button
@@ -500,10 +506,26 @@ export function CellTtsButton({
     </Button>
   )
 
+  if (!note) {
+    return (
+      <AppTooltip content={tooltip}>
+        {button}
+      </AppTooltip>
+    )
+  }
   return (
-    <AppTooltip content={tooltip}>
-      {button}
-    </AppTooltip>
+    <span className="inline-flex items-center">
+      <AppTooltip content={tooltip}>
+        {button}
+      </AppTooltip>
+      <InfoNote
+        label={t("common.aboutAria", { name })}
+        className={isError ? "text-destructive/70 hover:text-destructive" : undefined}
+        iconClassName="h-3 w-3"
+      >
+        {note}
+      </InfoNote>
+    </span>
   )
 }
 

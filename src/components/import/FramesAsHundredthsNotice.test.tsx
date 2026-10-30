@@ -93,3 +93,23 @@ describe("the rate the fix converts at (AQU-2197)", () => {
     expect(sampleStart()).toBeCloseTo(SAMPLE_CUE.startAt25, 6)
   })
 })
+
+// AQU-2260 (Sam, Oct 29): nothing explains itself on hover. There is room in
+// the notice, so why the times look wrong opens in place, under the warning,
+// on a click of its (i), and shuts on a second one.
+describe("why the times look wrong (AQU-2260)", () => {
+  it("opens in place under the warning on a click, never on a hover", async () => {
+    render(<Harness cues={FLAGGED} />)
+    const info = screen.getByRole("button", { name: "Why these times look wrong" })
+    await userEvent.setup().hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const reveal = document.getElementById(info.getAttribute("aria-controls") ?? "")
+    expect(reveal).not.toBeNull()
+    expect(reveal).toHaveAttribute("data-open", "false")
+    await userEvent.setup().click(info)
+    expect(reveal).toHaveAttribute("data-open", "true")
+    expect(reveal).toHaveTextContent("frame number")
+    await userEvent.setup().click(info)
+    expect(reveal).toHaveAttribute("data-open", "false")
+  })
+})

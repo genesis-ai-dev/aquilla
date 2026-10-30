@@ -117,27 +117,27 @@ export function DescribeStep({
         {EXAMPLE_PROMPTS.map((ex, i) => {
           const Icon = SUGGESTION_ICON[i] ?? Sparkles
           return (
+            // AQU-2260: a labelled button; a click puts its whole prompt in
+            // the box, so it says nothing on hover.
             <li key={ex.prompt}>
-              <AppTooltip content={t(ex.prompt)}>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    onChange(t(ex.prompt))
-                    onWhereChange(ex.where)
-                    box.current?.focus()
-                  }}
-                  className={cn(
-                    "inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[13px] text-muted-foreground",
-                    "transition-[background-color,color,border-color,transform] duration-150 ease-out hover:border-foreground/15 hover:text-foreground active:scale-[0.97]",
-                    "focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none disabled:opacity-50 motion-reduce:active:scale-100 dark:bg-transparent",
-                  )}
-                  data-testid="builder-example"
-                >
-                  <Icon className="size-3.5" aria-hidden />
-                  {t(ex.title)}
-                </button>
-              </AppTooltip>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  onChange(t(ex.prompt))
+                  onWhereChange(ex.where)
+                  box.current?.focus()
+                }}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[13px] text-muted-foreground",
+                  "transition-[background-color,color,border-color,transform] duration-150 ease-out hover:border-foreground/15 hover:text-foreground active:scale-[0.97]",
+                  "focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:outline-none disabled:opacity-50 motion-reduce:active:scale-100 dark:bg-transparent",
+                )}
+                data-testid="builder-example"
+              >
+                <Icon className="size-3.5" aria-hidden />
+                {t(ex.title)}
+              </button>
             </li>
           )
         })}

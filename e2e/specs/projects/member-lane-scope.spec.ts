@@ -184,14 +184,14 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   // Alice's own translation auto-validates on commit. Bob's validation of the
   // other lane must not be what this button is reporting, and it must not
   // count as Alice's validation once she switches.
-  const aliceValidation = aliceWs.cellRow(0).getByRole("button", { name: /Validate|Validated/i }).first()
+  const aliceValidation = aliceWs.validationToggle(0)
   await aliceWs.cellRow(0).hover()
   await expect(aliceValidation).toHaveAttribute("aria-pressed", "true")
   await expect(aliceValidation).toHaveAttribute("aria-label", /Validated by you/i)
   await aliceWs.switchLane("es")
   await expect(aliceWs.cellRow(0)).toContainText(spanishText, { timeout: 10_000 })
   expect(await aliceWs.readTargetText(0)).not.toContain(frenchText)
-  const esValidation = aliceWs.cellRow(0).getByRole("button", { name: /Validate|Validated/i }).first()
+  const esValidation = aliceWs.validationToggle(0)
   await aliceWs.cellRow(0).hover()
   await expect(esValidation).toHaveAttribute("aria-pressed", "false")
 

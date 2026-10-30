@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info, X } from "lucide-react"
+import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -24,11 +24,7 @@ import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -776,10 +772,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                     const invalid = isFieldInvalid(field)
                     return (
                       <Field data-invalid={invalid}>
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="project-create-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
-                          <LanguageFieldHint />
-                        </div>
+                        <LanguageFieldLabel htmlFor="project-create-source" infoId="project-create-source-info">
+                          {t("projectSettings.info.sourceLanguageLabel")}
+                        </LanguageFieldLabel>
                         <LanguageComboboxInput
                           id="project-create-source"
                           name="aquilla-project-source-language"
@@ -807,12 +802,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                     const invalid = isFieldInvalid(field)
                     return (
                       <Field data-invalid={invalid}>
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="project-create-target">
-                            {t("projectSettings.create.targetLanguagesLabel")}
-                          </FieldLabel>
-                          <LanguageFieldHint />
-                        </div>
+                        <LanguageFieldLabel htmlFor="project-create-target" infoId="project-create-target-info">
+                          {t("projectSettings.create.targetLanguagesLabel")}
+                        </LanguageFieldLabel>
                         <form.Field
                           name="extraLanguages"
                           children={(extrasField) => (
@@ -1736,24 +1728,26 @@ function TargetLanguageInputs({
   )
 }
 
-function LanguageFieldHint() {
+/** A language field's label with its (i): a click opens what you can enter
+ *  in place, under the label, and a second click shuts it (AQU-2260; it was
+ *  a hover). */
+function LanguageFieldLabel({ htmlFor, infoId, children }: { htmlFor: string; infoId: string; children: ReactNode }) {
   const t = useT()
+  const [open, toggle] = useInfoOpen()
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={t("projectSettings.create.languageHintAriaLabel")}
-            className="text-muted-foreground hover:text-foreground"
-          />
-        }
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
+    <div className="flex flex-col">
+      <div className="flex items-center gap-1.5">
+        <FieldLabel htmlFor={htmlFor}>{children}</FieldLabel>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("projectSettings.create.languageHintAriaLabel")}
+          controls={infoId}
+        />
+      </div>
+      <InfoReveal open={open} id={infoId} className="text-xs text-muted-foreground">
         {t("projectSettings.create.languageHintTooltip")}
-      </TooltipContent>
-    </Tooltip>
+      </InfoReveal>
+    </div>
   )
 }

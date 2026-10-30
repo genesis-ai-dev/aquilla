@@ -103,6 +103,10 @@ describe("holdingAreas", () => {
     expect(holdingAreas(["sync"], ["events"])).toEqual([])
   })
 
+  it("gates events and auth, by the check names the workflow jobs carry", () => {
+    expect(AREA_GATES).toEqual({ events: "replay-gate", auth: "auth-matrix" })
+  })
+
   it("names a check for every gated area, and gates only holding areas", () => {
     for (const [area, check] of Object.entries(AREA_GATES)) {
       expect(HOLDING_AREAS.has(area)).toBe(true)
@@ -128,6 +132,18 @@ describe("gate machinery holds as infra", () => {
     "sync-worker/vitest.config.ts",
     "sync-worker/package.json",
     "sync-worker/pnpm-lock.yaml",
+    // The auth matrix's own chain, on both workers.
+    "auth-worker/permission-matrix/golden.json",
+    "sync-worker/permission-matrix/golden.json",
+    "auth-worker/src/__tests__/permission-matrix.test.ts",
+    "sync-worker/src/__tests__/permission-matrix.test.ts",
+    "auth-worker/src/__tests__/helpers/access-fixture.ts",
+    "auth-worker/src/__tests__/helpers/pg-test-env.ts",
+    "auth-worker/src/__tests__/setup-migrations.ts",
+    "auth-worker/vitest.config.ts",
+    "auth-worker/package.json",
+    "auth-worker/pnpm-lock.yaml",
+    "db/shared/test-lane-fill.ts",
   ])("%s", (file) => {
     const { areas, pathHolds } = classifyFiles([file])
     expect(areas).toContain("infra")
@@ -135,7 +151,8 @@ describe("gate machinery holds as infra", () => {
     expect(AREA_GATES).not.toHaveProperty("infra")
   })
 
-  it("still ignores an ordinary sync-worker test", () => {
+  it("still ignores an ordinary sync-worker or auth-worker test", () => {
     expect(classifyFiles(["sync-worker/src/__tests__/rebuild.test.ts"]).areas).toEqual([])
+    expect(classifyFiles(["auth-worker/src/__tests__/auth-routes.test.ts"]).areas).toEqual([])
   })
 })

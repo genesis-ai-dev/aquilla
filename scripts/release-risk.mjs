@@ -74,7 +74,14 @@ const TEST_FILE = /\.test\.[jt]sx?$|^e2e\/|^sync-worker\/src\/__tests__\//
 // "Executes" is the whole chain: the harness, every shared test helper it
 // runs through (the PGlite seed is one), the sync-worker test config and
 // dependency set, and the corpus tooling.
-const GATE_MACHINERY = /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts$|helpers\/)|^sync-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|package\.json|pnpm-lock\.yaml)$|^scripts\/replay-corpus/
+//
+// The auth matrix (auth-worker + sync-worker permission-matrix/) runs through
+// the same sync-worker chain plus auth-worker's own: its PGlite env, the
+// shared access fixture, the setup file, and the vitest/tsconfig/dependency
+// set. db/shared/test-lane-fill.ts is the lane trigger both harness
+// databases install.
+const GATE_MACHINERY =
+  /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts$|permission-matrix\.test\.ts$|helpers\/)|^sync-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|package\.json|pnpm-lock\.yaml)$|^scripts\/replay-corpus|^(auth-worker|sync-worker)\/permission-matrix\/|^auth-worker\/src\/__tests__\/(permission-matrix\.test\.ts$|setup-migrations\.ts$|helpers\/)|^auth-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|package\.json|pnpm-lock\.yaml)$|^db\/shared\/test-lane-fill\.ts$/
 
 export function classifyFiles(files) {
   const areas = new Set()
@@ -99,7 +106,13 @@ export function classifyFiles(files) {
 //            to the committed golden projection (sync-worker/replay-corpus).
 //            The job also fails when golden.json changes in the PR, so an
 //            intentional projection change still goes to a person.
-export const AREA_GATES = { events: "replay-gate" }
+//   auth   → auth-matrix (risk-label.yml): every (principal × guarded route)
+//            request through both workers' handlers answers the status the
+//            committed goldens pin (auth-worker/ and sync-worker/
+//            permission-matrix/golden.json). The job also fails when either
+//            golden changes in the PR, so an intentional permission change
+//            still goes to a person.
+export const AREA_GATES = { events: "replay-gate", auth: "auth-matrix" }
 
 // The areas of `areas` that still hold once the gates in `passedGates` (area
 // names) are taken off the list.

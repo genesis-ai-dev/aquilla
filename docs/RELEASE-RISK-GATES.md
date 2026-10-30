@@ -164,7 +164,44 @@ today:
   `__tests__`, `scripts/replay-corpus.mjs`, the workflow) is classified
   as `infra`, which holds with no gate, so a PR cannot edit the harness
   or the golden and pass itself.
-- **`auth` → permission matrix**: not built (open items).
+- **`auth` → `auth-matrix`** (`risk-label.yml`, only for PRs touching the
+  auth area). A table-driven permission matrix in two halves, one per
+  worker, each a test that sends real requests through the worker's
+  handlers against a PGlite fixture and compares every answer to a
+  committed golden (`auth-worker/permission-matrix/golden.json`,
+  `sync-worker/permission-matrix/golden.json`; harness
+  `auth-worker/src/__tests__/permission-matrix.test.ts`,
+  `sync-worker/src/__tests__/permission-matrix.test.ts`). The auth-worker
+  half drives the session routes with the shared access fixture
+  (`helpers/access-fixture.ts`: one org with every membership shape, a
+  second personal org as the cross-org target, a platform admin, a removed
+  member, an anonymous caller) over project reads and writes, member
+  management, invites, sync-token mint, PAT mint, org and user access, and
+  `/admin/*`. The sync-worker half drives sync tokens (contributor, viewer,
+  lead, platform, wrong project, removed member with a still-valid token,
+  missing project row, expired, wrong secret), Agent API credentials
+  (unscoped, org-scoped, cross-org, cross-project, read-only, revoked, a
+  user with no grant) and the admin bearer over project reads, `POST
+  /events`, the external reads, changeset prepare, export and `/admin/*`.
+  The golden row is the status, plus the ids returned for list routes and
+  accepted/rejected for the event write, so "sees another org's data" is a
+  diff and not a guess. `UPDATE_AUTH_MATRIX=1` regenerates; the job fails
+  when either golden changed in the PR, so an intentional permission
+  change is the case that goes to a person, with the golden diff as what
+  they review. Same honesty rules as the replay gate: GitHub Actions runs
+  only, and the matrix's own chain (both `permission-matrix/`, both
+  harnesses, auth-worker's test helpers, setup file and vitest/tsconfig/
+  dependency set, `db/shared/test-lane-fill.ts`) is `infra`.
+
+  **`events/membership.ts` fails open on purpose, and the matrix pins it.**
+  The write-perimeter re-check reports `ok` for a project with no row and
+  for a thrown query (its header comment). Decision: keep both. The
+  sync-token route 403s an unknown `projectId` (AQU-299), so no live token
+  exists for a project without a row and closing that case would only break
+  fixtures; the thrown-query case degrades to the 15-minute token TTL
+  rather than 500ing every write in a partial outage. Both are golden rows
+  (`membership-fail-open …`, and `token_missing_project POST /events`), so
+  a PR that changes either flips the golden and goes to a person.
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
 `git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
@@ -205,7 +242,8 @@ self-heal through `chunk-reload.ts` as before.
 2. It merges to dev like any other (ci.yml, walk, review agent).
 3. Every hourly cut skips it and lists it under **Held, not in this
    release** with the reason. An events-only PR whose `replay-gate` check
-   is green is not held at all: it never reaches this list.
+   is green, or an auth-only PR whose `auth-matrix` check is green, is not
+   held at all: it never reaches this list.
 4. Manual QA as today (the dev deploy carries it). When satisfied, a
    person adds `release:approved` to the PR.
 5. The next cut picks it. If the manual QA finds a problem, the fix is a
@@ -226,15 +264,11 @@ nothing, and `release:approved` is the one label the planner reads.
   projects are in, the gate proves the harness and the chain rules it
   pins, not production shapes. The `fetch` step in `risk-label.yml` needs
   `CLOUDFLARE_API_TOKEN` with R2 read on `aquilla-snapshots`.
-- **Permission matrix for `auth` PRs** (meeting: "send requests to the
-  auth API and record what it does"). Candidates to grow into the
-  table-driven gate: `auth-worker/src/__tests__/access-attacks-parity`,
-  `access-characterization`, `members-matrix-batched`,
-  `permission-semantics`; sync-worker `foreign-role-enforcement`,
-  `external-project-reads`, `member-removed`. Not confirmed table-driven
-  in this pass. The gap found while mapping: `events/membership.ts` fails
-  open on a missing project row and on a thrown error (by design, with a
-  comment); worth a deliberate decision.
+- **Auth matrix: breadth.** The gate runs (section 3) over the route
+  families named there. Not yet in the table: member-scopes writes,
+  access-links, changeset approvals, the MCP tools/call adapter, and the
+  lane read wall (`LANE_READ_WALL=1`). Each is one more probe row; add it
+  and regenerate the golden in a PR of its own so the diff is the review.
 - **Automatic rollback on error-rate rise.** `cloudflare-version-deploy.mjs`
   promotes `${versionId}@100%` and keeps no previous version id; there is
   no rollback script. Design: record the previous Worker version id per

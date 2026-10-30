@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useCallback, useEffect, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -190,11 +190,16 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     if (v.canVote && !v.voted) void host.vote(target.cellId, target.audioId, true)
   }
 
-  // Item 18: the audio to insert — another recording, or a file.
+  // Item 18: the audio to insert — another recording, a file, or one made now.
+  // Each arrives later, so it goes into the edit list as it stands THEN.
+  const edRef = useRef(ed)
+  useEffect(() => {
+    edRef.current = ed
+  })
   const insertChoice = (c: InsertChoice) => {
     setInsertOpen(false)
     void loadStationPcm({ url: c.url, projectId: host.project.id, fileId: c.fileId, getSyncToken: host.getSyncToken })
-      .then((pcm) => ed.insertAudio(pcmKey(c.url), pcm, { kind: "take", url: c.url, fileId: c.fileId, label: c.label }))
+      .then((pcm) => edRef.current.insertAudio(pcmKey(c.url), pcm, { kind: "take", url: c.url, fileId: c.fileId, label: c.label }))
       .catch(() => setMessage(t("editor.station.loadFailed")))
   }
   const insertFile = (file: File) => {
@@ -208,9 +213,25 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       .then((data) => {
         void audioCachePutBlob(cacheId, ext, file)
         const pcm = putStationPcm(cacheId, data)
-        ed.insertAudio(cacheId, pcm, { kind: "file", cacheId, ext, label: t("editor.station.fileLabel", { name }) })
+        edRef.current.insertAudio(cacheId, pcm, { kind: "file", cacheId, ext, label: t("editor.station.fileLabel", { name }) })
       })
       .catch(() => setMessage(t("editor.station.notAudio", { name: file.name })))
+  }
+  // Slice 10: Record now — the recorder opens on this line and hands its
+  // recording back; it goes in at the cursor.
+  const insertRecording = () => {
+    setInsertOpen(false)
+    void host.recordInsert(target.cellId).then(async (r) => {
+      if (!r) return
+      const cacheId = `station-rec-${Date.now().toString(36)}`
+      try {
+        const data = await decodeToMono48k(new Uint8Array(await r.blob.arrayBuffer()))
+        void audioCachePutBlob(cacheId, r.ext, r.blob)
+        edRef.current.insertAudio(cacheId, putStationPcm(cacheId, data), { kind: "recording", cacheId, ext: r.ext, label: t("editor.station.recordedInsert") })
+      } catch {
+        setMessage(t("editor.station.loadFailed"))
+      }
+    })
   }
 
   // Item 35: render the edited recording and save it as a new version, on
@@ -361,7 +382,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                       choices={host.insertChoices(take.fileId, target.cellId, take.att.url)}
                       onPick={insertChoice}
                       onFile={insertFile}
-                      recordNote={t("editor.station.recordLater")}
+                      onRecord={insertRecording}
                     />
                   ),
                 }

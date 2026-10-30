@@ -1571,6 +1571,10 @@ export function ProjectWorkspace() {
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  // AQU-2327: the Station's "Record now" opens the recorder to hand a
+  // recording back (not to save a take); this is who gets it.
+  const stationCaptureRef = useRef<((r: { blob: Blob; ext: string } | null) => void) | null>(null)
+  const [stationCapturing, setStationCapturing] = useState(false)
   /**
    * AQU-646 stage 3: WHICH TRACK the recorder is recording into.
    *
@@ -13196,6 +13200,12 @@ export function ProjectWorkspace() {
             })
         return res.audioId
       },
+      recordInsert: (cellId) =>
+        new Promise<{ blob: Blob; ext: string } | null>((resolve) => {
+          stationCaptureRef.current = resolve
+          setStationCapturing(true)
+          setRecordingCellId(cellId)
+        }),
       changeVoice: (cellId) => {
         const state = timelineChangeVoiceState(cellId)
         if (!state) return t("editor.station.voiceUnavailable")
@@ -18890,7 +18900,23 @@ export function ProjectWorkspace() {
               if (editor && !editor.focusCellEditorId(rowId)) editor.scrollToCellId(rowId, { flash: true })
             })
           }}
-          onClose={() => setRecordingCellId(null)}
+          onClose={() => {
+            // AQU-2327: closed without recording — the Station's insert gets nothing.
+            stationCaptureRef.current?.(null)
+            stationCaptureRef.current = null
+            setStationCapturing(false)
+            setRecordingCellId(null)
+          }}
+          {...(stationCapturing
+            ? {
+                onCaptured: (blob: Blob, ext: string) => {
+                  stationCaptureRef.current?.({ blob, ext })
+                  stationCaptureRef.current = null
+                  setStationCapturing(false)
+                  setRecordingCellId(null)
+                },
+              }
+            : {})}
         />
       )}
       {/* Manual boundary editor for a "Voice together" combined clip. */}

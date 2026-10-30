@@ -1416,6 +1416,7 @@ export const editor = defineNamespace({
     "editor.station.noiseDone": "Noise removed: saved as version {n}, used on {line}. The original recording is kept.",
     "editor.station.voiceStarted": "Changing the voice. The new version appears on the line when it’s ready.",
     "editor.station.voiceUnavailable": "This line’s voice can’t be changed here.",
+    "editor.station.recordedInsert": "a recording made here",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3413,6 +3414,9 @@ export const editor = defineNamespace({
       },
       "editor.station.voiceUnavailable": {
         description: "Message when the voice change is not possible for this line.",
+      },
+      "editor.station.recordedInsert": {
+        description: "How audio recorded with 'Record now' is named in the History row and its mark's tooltip.",
       },
       "editor.dock.film": {
         description:

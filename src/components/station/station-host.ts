@@ -42,6 +42,9 @@ export interface StationHost {
   /** Item 2 / slice 9: change the line's voice into a new version; a reason
    *  when it can't, else null. */
   changeVoice(cellId: string): string | null
+  /** Slice 10: open the recorder on the line and hand its recording back (null
+   *  when closed without one) — the Insert menu's "Record now". */
+  recordInsert(cellId: string): Promise<{ blob: Blob; ext: string } | null>
   /** How many approvals a recording needs in this project. */
   approvalsNeeded: number
   /** Stop the timeline and any other player before the Station plays. */

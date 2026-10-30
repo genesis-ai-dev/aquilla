@@ -211,6 +211,11 @@ interface Props {
    */
   onEditText?: (cellId: string) => void
   onClose: () => void
+  /**
+   * AQU-2327: hand the recording back instead of saving it as a take — the
+   * Station's "Record now" inserts it at its cursor.
+   */
+  onCaptured?: (blob: Blob, ext: string) => void
 }
 
 // There is deliberately NO "saved" phase (Sam, 2026-08-13). Saving a take is
@@ -434,6 +439,7 @@ export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onEditText, onClose,
   deliversAudioOnly = false,
+  onCaptured,
 }: Props) {
   const t = useT()
   // Sam's decision (hidden lines on the timeline): Next, Previous, the
@@ -1338,6 +1344,13 @@ export function AudioRecordingModal({
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
+      // AQU-2327: "Record now" from the Station's Insert menu — the recording
+      // goes back to the Station, to be inserted at its cursor. No take.
+      if (onCaptured) {
+        onCaptured(blob, ext)
+        setPhase("idle")
+        return
+      }
       // The armed recorder keeps ~200ms of the countdown as the take's head so
       // an early entrance — the count-in working — is IN the file. Read here,
       // used after the attach to anchor the take that much before its line.
@@ -1624,7 +1637,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot, onCaptured])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //

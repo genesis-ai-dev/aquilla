@@ -324,7 +324,9 @@ describe("word tints on a Greek source", () => {
     expect(litMentions()).toEqual([])
   })
 
-  it("lights the same thread on keyboard focus, and opens the popover with who it is", async () => {
+  // AQU-2260 (Oct 29, fourth pass): focus and hover still light the thread,
+  // but the popover opens only on a click (Enter or Space from the keyboard).
+  it("lights the same thread on keyboard focus, and a click opens the popover with who it is", async () => {
     renderTable(makeProject())
     await mentionsLoaded()
     const auton = mentionWord(cellIdFor("4:10"), "αὐτὸν")
@@ -332,6 +334,10 @@ describe("word tints on a Greek source", () => {
 
     act(() => auton.focus())
     await litThread(JESUS)
+    fireEvent.pointerEnter(auton)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.queryByTestId("mention-details")).toBeNull()
+    fireEvent.click(auton)
     const details = await screen.findByTestId("mention-details")
     expect(visible(within(details).getByRole("heading").textContent)).toBe("Jesus")
     expect(visible(details.textContent)).toContain("First mention in this passage: JHN 4:1")
@@ -352,7 +358,7 @@ describe("word tints on a Greek source", () => {
     renderTable(makeProject())
     await mentionsLoaded()
     // αὐτοῦ in 4:8 is Jesus; the next verse that mentions him is 4:9.
-    act(() => mentionWord(cellIdFor("4:8"), "αὐτοῦ").focus())
+    fireEvent.click(mentionWord(cellIdFor("4:8"), "αὐτοῦ"))
     const details = await screen.findByTestId("mention-details")
     fireEvent.click(within(details).getByRole("button", { name: /^Next mention of/ }))
 
@@ -410,7 +416,7 @@ describe("add to terminology from the mention popover", () => {
     const add = vi.fn()
     const view = renderTable(makeProject(), greekSource, makeRows(greekSource), true, { onAddConceptFromSelection: add })
     await mentionsLoaded()
-    act(() => mentionWord(cellIdFor(verse), word).focus())
+    fireEvent.click(mentionWord(cellIdFor(verse), word))
     const details = await screen.findByTestId("mention-details")
     fireEvent.click(within(details).getByRole("button", { name: /Add .*Jesus.* to terminology/ }))
     view.unmount()
@@ -486,7 +492,7 @@ describe("cells that mention a participant", () => {
     // ἀγοράσωσιν in 4:8 is the disciples, who appear in no other verse here.
     const disciples = mentionsIn(cellIdFor("4:8")).find((el) => el.textContent === "μαθηταὶ")
     if (!disciples) throw new Error("no μαθηταί")
-    act(() => disciples.focus())
+    fireEvent.click(disciples)
     const details = await screen.findByTestId("mention-details")
     fireEvent.click(within(details).getByRole("button", { name: /^Show cells that mention/ }))
 

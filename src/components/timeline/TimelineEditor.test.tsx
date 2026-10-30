@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import { MediaTopBar } from "./MediaTopBar"
 import type { CellData } from "@/hooks/useCells"
@@ -130,6 +130,7 @@ function armLinking() {
   fireEvent.click(screen.getByTestId("tl-check-menu"))
   fireEvent.click(screen.getByText("Check links"))
 }
+
 
 describe("TimelineEditor", () => {
   // The timeline is the innermost shortcut claimant unless a test says otherwise.
@@ -1395,7 +1396,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip = screen.getByTestId("tl-target-v1")
     expect(chip).toHaveAttribute("data-overflow", "none")
     expect(chip).toHaveAttribute("data-ratio", (11 / 6).toFixed(2))
-    await expectTooltip(chip, /11\.0s — 1\.8× the original/)
+    // AQU-2260: the take's details are at the top of its right-click menu.
+    fireEvent.contextMenu(chip, { button: 2 })
+    expect((await screen.findByTestId("tl-take-details-v1")).textContent).toMatch(/11\.0s — 1\.8× the original/)
     // The same take in dubbing mode is still flagged for running past its verse.
     renderAt("dubbing")
     expect(screen.getAllByTestId("tl-target-v1")[1]).toHaveAttribute("data-overflow", "overlap")
@@ -1428,7 +1431,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-timing-mode-info")).toBeNull()
     // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
-    await expectTooltip(label, /^Timing · .*Only a project lead or above can change/)
+    await expectClickNote(label, /Only a project lead or above can change/)
   })
 
   it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
@@ -1525,6 +1528,26 @@ describe("TimelineEditor — audio-first mode", () => {
     const perSec = px(take, "width") / 2
     expect(px(take, "left")).toBeCloseTo(0.5 * perSec, 0)
     expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
+  })
+
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
+  // what it is on a click of it.
+  it("the pause before a take says what it is on a click, not a hover", async () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
   })
 
   // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
@@ -1682,17 +1705,20 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(control).toHaveAttribute("data-locked", "film")
     expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent(/^Follows source$/)
-    await expectTooltip(screen.getByTestId("tl-timing-mode-dubbing"), /timed to the film, so it always follows its source/)
+    await expectClickNote(screen.getByTestId("tl-timing-mode-dubbing"), /timed to the film, so it always follows its source/)
   })
 
-  // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
-  // timing switch, its explanation behind an info button — not a full line.
-  it("says Bluetooth in a pill after the timing switch, the full message behind its info button", async () => {
+  // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its
+  // explanation behind an info button — not a full line. AQU-2260 (Oct 29):
+  // plain amber text, not a pill (no border, no fill), the (i) a click note.
+  it("says Bluetooth in plain amber text after the timing switch, the full message behind its (i)", async () => {
     mockOutputLatencySec = 0.178
     try {
       renderAt("dubbing", { onChangeTimingMode: vi.fn() })
       const pill = screen.getByTestId("tl-output-latency-note")
       expect(pill).toHaveTextContent(/^Bluetooth$/)
+      expect(pill.className).not.toMatch(/\bborder\b|\bbg-|rounded-md|px-1\.5/)
+      expect(pill.className).toMatch(/text-amber-700/)
       const switchEl = screen.getByTestId("tl-timing-mode")
       expect(switchEl.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(switchEl.parentElement).toBe(pill.parentElement)
@@ -1704,7 +1730,7 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("shows no Bluetooth pill on a wired or measured output", () => {
+  it("shows no Bluetooth note on a wired or measured output", () => {
     renderAt("dubbing", { onChangeTimingMode: vi.fn() })
     expect(screen.queryByTestId("tl-output-latency-note")).toBeNull()
   })
@@ -5080,6 +5106,271 @@ describe("TimelineEditor — a focus-driven gutter scroll keeps the columns in s
   })
 })
 
+// ── AQU-2236: the track names pass UNDER the Tracks header ──────────────────
+//
+// The header sits over the names now (z-40 over their z-30), as the ruler sits
+// over the chips. These pin what that must not cost: the header's layers stay
+// inside the column, the divider sits on the edge the lanes are on in either
+// direction, a drag still shows where it lands, and a focused row never stays
+// hidden under the strip. Paint order and geometry are the browser's, so what
+// is pinned here is the markup that decides them and the scroll the editor
+// writes; happy-dom has no layout, so the rects are stubbed.
+describe("TimelineEditor — the track names pass under the Tracks header (AQU-2236)", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const props = {
+    fileId: "f1", coreMediaUrl: null, editable: true, cells: rowCells,
+    onRetimeSubtitle: () => {},
+  }
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  /** Found through its corner cell: the gutter deliberately carries no testids.
+   *  (The layout took the « » toggle out of the header; it is a setting now.) */
+  const header = () => screen.getByTestId("tl-corner").parentElement as HTMLElement
+  /** The div `handleTrackScroll` transforms; `role="list"` while rows can move. */
+  const inner = () => gutter().querySelector('[role="list"]') as HTMLElement
+  const rows = () => Array.from(gutter().querySelectorAll<HTMLElement>("[data-tl-track-row]"))
+  const stubRect = (el: Element, top: number, height: number) =>
+    vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+      top, bottom: top + height, left: 0, right: 240, width: 240, height, x: 0, y: top,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+  // Without `isolate` the column's numbers ranked in the workspace's own
+  // stacking context, where 40 is the menus' tier (AppShell's z-scale): the
+  // header and the names drew over the expanded search results (z-20) that are
+  // meant to cover the editor.
+  it("keeps the header, the names and the divider ranked inside the column", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(gutter().classList).toContain("isolate")
+    expect(header().classList).toContain("z-40")
+    expect(inner().classList).toContain("z-30")
+    expect(screen.getByTestId("tl-gutter-rule").classList).toContain("z-20")
+  })
+
+  // Arabic and Urdu flip `<html dir>`, and the grid with it: the column goes on
+  // the right, and the edge it shares with the lanes is its LEFT one.
+  it("puts the divider and the rule on the lanes' edge in either direction", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    expect(header().classList).toContain("border-e")
+    expect(header().classList).not.toContain("border-r")
+    const rule = screen.getByTestId("tl-gutter-rule")
+    expect(rule.classList).toContain("end-0")
+    expect(rule.classList).not.toContain("right-0")
+  })
+
+  // The lane half of the drop line already crosses the ruler (z-30 over its
+  // z-20). Mid-drag the names must cross the header too, the way a dragged
+  // chip's lane crosses the ruler, or near the top the gutter half of the line
+  // and the row in the air vanish under the header while the lane half shows.
+  it("lifts the names over the header while a row is dragged, and only then", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const raised = () => inner().classList.contains("z-50")
+    fireEvent.pointerDown(rows()[1], { button: 0, pointerId: 1, clientX: 8, clientY: 50 })
+    // A press is not a drag: under the 3px threshold nothing should pop.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 52 })
+    expect(raised()).toBe(false)
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 10 })
+    expect(raised()).toBe(true)
+    // Back over its own slot it is still a drag, and must not flicker.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(true)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 50 })
+    expect(raised()).toBe(false)
+    expect(inner().classList).toContain("z-30")
+  })
+
+  // The browser pass on the demo: dragging a track to the top of a scrolled
+  // list drew the line on the top row's upper edge, which was scrolled up out
+  // of the column, so the drop that matters most up there showed no line at
+  // all. The line is the whole readout of a drag, so it stays where it can be
+  // seen: just under the header, or just above the column's foot.
+  describe("the drop line stays in sight", () => {
+    /** Three 40px rows under the 28px header, the column scrolled up 30px:
+     *  the top row's upper edge is 2px above the column. */
+    const setUp = (gutterHeight: number) => {
+      render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+      const scroll = screen.getByTestId("tl-scroll")
+      scroll.scrollTop = 30
+      fireEvent.scroll(scroll)
+      stubRect(gutter(), 0, gutterHeight)
+      stubRect(header(), 0, 28)
+      rows().forEach((row, i) => stubRect(row, 28 + i * 40 - 30, 40))
+    }
+    /** Where the gutter half is drawn, in px from the column's top. */
+    const gutterLineTop = () => {
+      const line = screen.getByTestId("tl-track-drop-line")
+      const rowTop = line.closest("[data-tl-track-row]")!.getBoundingClientRect().top
+      const own = line.style.top ? parseFloat(line.style.top) : line.classList.contains("bottom-0") ? 38 : 0
+      return rowTop + own
+    }
+    const laneLineTop = () => screen.getByTestId("tl-track-drop-line-lane").style.top
+
+    it("at the top of the list, just under the header, in both columns", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[2], { button: 0, pointerId: 1, clientX: 8, clientY: 98 })
+      // Up into the header band, over the top row's upper half.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 5 })
+      expect(gutterLineTop()).toBe(28)
+      // Content pixels: the header's 28 plus the 30 scrolled.
+      expect(laneLineTop()).toBe("58px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 5 })
+    })
+
+    it("past the last row below the column's foot, just above the foot", () => {
+      // A 100px column shows rows 0 and 1 and the top of row 2; row 2's lower
+      // edge, 118px down, is below the foot.
+      setUp(100)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 130 })
+      expect(gutterLineTop()).toBe(98)
+      expect(laneLineTop()).toBe("128px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 130 })
+    })
+
+    it("leaves a line that is already in sight where it is", () => {
+      setUp(200)
+      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+      // Into row 1's lower half: the line goes on the boundary between rows 1
+      // and 2, 78px down — in sight, so drawn on the row's own edge as before.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
+      expect(screen.getByTestId("tl-track-drop-line").style.top).toBe("")
+      expect(laneLineTop()).toBe("108px")
+      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 70 })
+    })
+  })
+
+  // The browser counts the strip under the header as on screen, so focusing a
+  // row there scrolls nothing — and it could not scroll the gutter up anyway,
+  // which is held at 0. The track column, which owns the offset, has to.
+  it("scrolls a row that takes focus under the header back out from under it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 10, 40) // 18px of it under the header
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(42)
+    // The names follow at once, so a second look in the same frame (the
+    // browser's own, or the next reveal) sees where the row really is.
+    expect(inner().style.transform).toBe("translateY(-42px)")
+  })
+
+  it("reveals the whole row when a control inside it takes focus", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, -4, 40)
+    const menu = within(row).getByTestId("tl-track-menu-source-audio")
+    // The ⋯ itself would be clear of the header; the row's top edge is not.
+    stubRect(menu, 8, 20)
+
+    act(() => menu.focus())
+    expect(scroll.scrollTop).toBe(28)
+  })
+
+  // The menu hands focus back to the row, and then the rename field takes it:
+  // two reveals in a row. The row's rect here moves as the column scrolls,
+  // the way the real one does, so the second must find nothing left to do.
+  it("brings the rename field out from under the header, scrolling once", async () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} onRenameTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    fireEvent.scroll(scroll)
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    const top = () => 10 + (60 - scroll.scrollTop)
+    vi.spyOn(row, "getBoundingClientRect").mockImplementation(() => ({
+      top: top(), bottom: top() + 40, left: 0, right: 240, width: 240, height: 40, x: 0, y: top(),
+      toJSON: () => ({}),
+    } as DOMRect))
+
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText("Rename"))
+    const input = await screen.findByTestId("tl-track-rename-source-audio")
+    await waitFor(() => expect(document.activeElement).toBe(input))
+    expect(scroll.scrollTop).toBe(42)
+  })
+
+  it("leaves a focused row alone when the header covers none of it", () => {
+    render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 28, 40)
+
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+  })
+
+  // A keyboard move keeps the row's focus (React moves the DOM node, or its
+  // neighbour), so no focus event comes to reveal it where it lands.
+  it("brings a row moved up with Alt+ArrowUp back out from under the header", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    const row = rows()[1]
+    stubRect(row, 30, 40)
+    act(() => row.focus())
+    expect(scroll.scrollTop).toBe(60)
+
+    fireEvent.keyDown(row, { key: "ArrowUp", altKey: true })
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    expect(trackId).toBe("source-audio")
+    // The workspace lands the move; the row is one place up, partly under the header.
+    stubRect(row, -10, 40)
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[0]).toBe(row)
+    expect(document.activeElement).toBe(row)
+    expect(scroll.scrollTop).toBe(22)
+  })
+
+  it("brings a row moved down with Alt+ArrowDown back up from below the fold", () => {
+    const onReorderTrack = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor {...props} tracks={deriveTracksForFile(null)} onReorderTrack={onReorderTrack} />,
+    )
+    const scroll = screen.getByTestId("tl-scroll")
+    scroll.scrollTop = 60
+    stubRect(header(), 0, 28)
+    stubRect(gutter(), 0, 120)
+    const row = rows()[1]
+    stubRect(row, 60, 40)
+    act(() => row.focus())
+
+    fireEvent.keyDown(row, { key: "ArrowDown", altKey: true })
+    const [trackId, order] = onReorderTrack.mock.calls[0]
+    stubRect(row, 100, 40) // 20px of it past the column's bottom edge
+    rerender(
+      <TimelineEditor
+        {...props} onReorderTrack={onReorderTrack}
+        tracks={deriveTracksForFile({ trackOverrides: { [trackId]: { order } } })}
+      />,
+    )
+    expect(rows()[2]).toBe(row)
+    expect(scroll.scrollTop).toBe(80)
+  })
+})
+
 // ── AQU-1566 (Sam's option b): a linked video with no rows ──────────────────
 //
 // The workspace decides WHEN these are on offer (a maintainer, a linked video,
@@ -5155,12 +5446,18 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     const item = screen.getByRole("menuitem", { name: "Attach captions" })
     expect(item).toHaveAttribute("data-disabled")
     // Just greyed out, with nothing beside the label (Sam, Oct 5); the reason
-    // is the row's hover text and its accessible description.
+    // is behind the row's (i) — a click opens it in place (AQU-2260) — and is
+    // its accessible description.
     expect(within(item).queryByText("track editing off")).toBeNull()
     expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
-    // The row is disabled, so its content has to take the pointer itself for
-    // the hover text to open.
-    expect(within(item).getByText("Attach captions").parentElement!.className).toMatch(/pointer-events-auto/)
+    const info = within(item).getByRole("button", { name: "About Attach captions" })
+    // The row is disabled, so its (i) has to take the pointer back itself.
+    expect(info.parentElement!.className).toMatch(/pointer-events-auto/)
+    const reason = document.getElementById(info.getAttribute("aria-controls")!)!
+    expect(reason).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(reason).toHaveAttribute("data-open", "true")
+    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project Settings.")
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
@@ -5700,5 +5997,35 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     fireEvent.click(standIn)
     expect(standInText).toHaveAttribute("data-open", "true")
     expect(standInText).toHaveTextContent(/at a stand-in length worked out from its text/)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+// quality toggle moved into the timeline's corner ⋯ with the layout (board
+// 55): there its words name it, so it has no hover at all.
+describe("TimelineEditor — the timeline's controls explain nothing on hover", () => {
+  it("the quality setting in the corner ⋯ has no hover; its words name it", async () => {
+    renderWithTooltips(
+      <TimelineEditor fileId="q1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]} onRetimeSubtitle={() => {}} />,
+    )
+    const item = inTimelineSettings(() => screen.getByTestId("tl-quality-toggle"))
+    expect(item).toHaveTextContent("Play generated voices at original quality")
+    expect(item).not.toHaveAttribute("title")
+    await userEvent.setup().hover(item)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("Measure now has no hover; what it does is behind its (i)", async () => {
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="m1" coreMediaUrl={null} editable cells={[cell({ id: "c1", startTime: 0, endTime: 2 })]}
+        onRetimeSubtitle={() => {}} legacyMeasure={{ count: 2, onMeasure: vi.fn() }}
+      />,
+    )
+    await userEvent.setup().hover(screen.getByTestId("tl-measure-run"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Measure now" }), "Nothing else about the takes changes")
   })
 })

@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { AdminCreditsSection } from "./AdminCreditsSection"
 import type { AdminOrgCredits } from "@/lib/sync/credits"
 
@@ -303,16 +303,24 @@ describe("AdminCreditsSection — AQU-688: the control captions explain themselv
   // WHY: "Enforce" and "Show org" are two words of platform jargon sitting in a
   // dense table, and the ticket was filed because the person who owns the
   // console could not recall what "Show org" did. The explanation has to be
-  // reachable from the UI, not only from the source — so assert the caption is
-  // a tooltip trigger carrying the behaviour, not merely that a title
-  // attribute exists somewhere (AppTooltip strips `title` on purpose).
-  it("explains what Enforce and Show org do on hover", async () => {
+  // reachable from the UI, not only from the source.
+  // AQU-2260 (Sam, Oct 29): it opens on CLICK of the caption, never on hover.
+  it("explains what Enforce and Show org do when the caption is clicked", async () => {
     mockList.mockResolvedValue([ORG_A])
     renderWithTooltips(<AdminCreditsSection jwt="admin-jwt" />)
     await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
 
-    await expectTooltip(screen.getByText("Enforce"), /refused with a 429/)
-    await expectTooltip(screen.getByText("Show org"), /maintainers can see its AI-credit usage/)
+    await expectClickNote(screen.getByRole("button", { name: "Enforce" }), /refused with a 429/)
+    await expectClickNote(screen.getByRole("button", { name: "Show org" }), /maintainers can see its AI-credit usage/)
+  })
+
+  it("explains the Today and This week columns on click, never on hover", async () => {
+    mockList.mockResolvedValue([ORG_A])
+    renderWithTooltips(<AdminCreditsSection jwt="admin-jwt" />)
+    await waitFor(() => expect(screen.getByTestId("admin-credits-table")).toBeInTheDocument())
+
+    await expectClickNote(screen.getByRole("button", { name: "Today" }), /Total spend today across all rails/)
+    await expectClickNote(screen.getByRole("button", { name: "This week" }), /Total spend this week across all rails/)
   })
 
   it("carries the same explanation to assistive tech, where there is no hover", async () => {

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react"
 import { CellIssueLines } from "@/components/cell/CellIssueLines"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
 import {
   healthRibbonColor,
   healthRibbonOpacity,
@@ -122,29 +123,39 @@ export function HealthRibbon({
         backgroundImage: `linear-gradient(to bottom, ${healthRibbonColor(point.topScore ?? score, point.topOpacity ?? opacity)} 0%, ${healthRibbonColor(score, opacity)} 42%, ${healthRibbonColor(score, opacity)} 58%, ${healthRibbonColor(point.bottomScore ?? score, point.bottomOpacity ?? opacity)} 100%)`,
       }
 
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The ribbon is
+  // its own trigger: a click (or Enter / Space) opens what its colour means in
+  // a note anchored to it, and a second click shuts it. The click stops here,
+  // so it never selects the cell under it.
   return (
-    <AppTooltip content={tooltipContent(point, genericLabel || issueHint || "", issues, t)} side="right" delay={200} className="max-w-xs">
-      <span
-        data-showcase="cell.health"
-        data-testid={testId}
-        data-health-stage={point.stage}
-        data-health-score={score === undefined ? undefined : Math.round(score)}
-        data-health-opacity={opacity.toFixed(2)}
-        aria-label={label}
-        role="img"
-        tabIndex={0}
-        className={cn(
-          "pointer-events-auto absolute -bottom-2 -top-2 left-0 z-10 w-3 cursor-help focus-visible:outline-none",
-          className,
-        )}
-        onClick={(event) => event.stopPropagation()}
+    <Popover>
+      <PopoverTrigger
+        nativeButton={false}
+        render={
+          <span
+            data-showcase="cell.health"
+            data-testid={testId}
+            data-health-stage={point.stage}
+            data-health-score={score === undefined ? undefined : Math.round(score)}
+            data-health-opacity={opacity.toFixed(2)}
+            aria-label={label}
+            className={cn(
+              "pointer-events-auto absolute -bottom-2 -top-2 left-0 z-10 w-3 cursor-pointer focus-visible:outline-none",
+              className,
+            )}
+            onClick={(event) => event.stopPropagation()}
+          />
+        }
       >
         <span
           aria-hidden="true"
           className="absolute bottom-0 left-0 top-0 w-[2px] transition-opacity duration-500"
           style={lineStyle}
         />
-      </span>
-    </AppTooltip>
+      </PopoverTrigger>
+      <PopoverContent side="right" sideOffset={6} className={cn(NOTE_CONTENT_CLASS, "max-w-xs")}>
+        {tooltipContent(point, genericLabel || issueHint || "", issues, t)}
+      </PopoverContent>
+    </Popover>
   )
 }

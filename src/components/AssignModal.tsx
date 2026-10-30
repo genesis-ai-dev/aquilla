@@ -56,6 +56,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { DatePicker, dateToDeadlineString } from "@/components/ui/date-picker"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignKindField } from "@/components/AssignKindField"
@@ -913,39 +914,29 @@ export function AssignModal({
 
           <Field>
             <FieldLabel htmlFor="assign-modal-assignee">{t("dialog.assign.assigneeLabel")}</FieldLabel>
-            <Select
-              items={assigneeItems}
+            {/* AQU-2260: a search box, since the people list grows with the team. */}
+            <SearchSelect
+              id="assign-modal-assignee"
+              options={assigneeItems}
               value={selectedMemberId}
-              onValueChange={(v) => setSelectedMemberId(v ?? "")}
+              onValueChange={setSelectedMemberId}
               disabled={isSelfAssignMode}
-            >
-              <SelectTrigger id="assign-modal-assignee">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {assigneeItems.map((item) => {
-                    const member = members.find((m) => String(m.userId) === item.value)
-                    return (
-                      <SelectItem key={item.value || "empty"} value={item.value}>
-                        {member ? (
-                          <UsernameWithAvatar
-                            userId={member.userId}
-                            username={member.username}
-                            label={item.label}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        ) : (
-                          item.label
-                        )}
-                      </SelectItem>
-                    )
-                  })}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              renderOption={(item) => {
+                const member = members.find((m) => String(m.userId) === item.value)
+                return member ? (
+                  <UsernameWithAvatar
+                    userId={member.userId}
+                    username={member.username}
+                    label={item.label}
+                    size="xs"
+                    menuSafe
+                    nameClassName="text-sm font-normal"
+                  />
+                ) : (
+                  item.label
+                )
+              }}
+            />
             {isSelfAssignMode && (
               <FieldDescription>{t("dialog.assign.selfAssignDescription")}</FieldDescription>
             )}

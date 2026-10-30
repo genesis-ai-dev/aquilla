@@ -455,8 +455,6 @@ export const terminology = defineNamespace({
     }),
 
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
-    "terminology.equivalents.promoteTooltip":
-      "Add this suggestion as an approved translation",
     "terminology.equivalents.promoteButton": "Add",
     "terminology.equivalents.approvedHeading": "Approved translations",
     "terminology.equivalents.noManagedRenderings": "No approved translations yet for “{term}”.",

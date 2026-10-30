@@ -421,7 +421,8 @@ export const PlanRow = memo(function PlanRow({
     // fact; that it is also a way to the first unrecorded take is not obvious
     // from the words, and the aria-label above is for readers who cannot see
     // the pointer change (Sam, 2026-09-17). Only an openable node gets one —
-    // "Nothing left" goes nowhere and should not promise to.
+    // "Nothing left" goes nowhere and should not promise to. AQU-2260 keeps
+    // it: the hover NAMES what the click does, which a hover may do.
     return openable && openDestination
       ? <AppTooltip content={openDestination}>{node}</AppTooltip>
       : node

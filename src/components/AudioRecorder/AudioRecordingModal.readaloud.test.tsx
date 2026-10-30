@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { ComponentProps } from "react"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectDisabledNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -343,19 +343,20 @@ describe("generating a voice for a cue", () => {
   })
 
   // Two different problems with two different fixes, which used to wear one
-  // string. Sam asked for the explanation to be a tooltip.
+  // string. Sam asked for the explanation to be a tooltip; since AQU-2260 it
+  // opens on a click on the greyed-out button.
   it("says the subtitle is untranslated when one is linked but empty", async () => {
     renderModal(() => ({ text: "", reference: "Sit down.", linkedCount: 1, voiceCellId: "sub-7" }))
     const button = screen.getByTestId("rec-generate-tts")
     expect(button).toBeDisabled()
-    await expectTooltip(button, /Translate this line first/i)
+    await expectDisabledNote(button, /Translate this line first/i)
   })
 
   it("says nothing is linked when nothing is", async () => {
     renderModal(() => ({ text: "", reference: "Sit down.", linkedCount: 0, voiceCellId: null }))
     const button = screen.getByTestId("rec-generate-tts")
     expect(button).toBeDisabled()
-    await expectTooltip(button, /No subtitle is linked to this heard line/i)
+    await expectDisabledNote(button, /No subtitle is linked to this heard line/i)
   })
 })
 

@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/empty"
+import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { cn } from "@/lib/utils"
 
 /**
@@ -260,17 +261,22 @@ function StatTile({
 function SettingsGroup({
   label,
   description,
+  locked,
   className,
   children,
 }: {
   label?: React.ReactNode
   description?: React.ReactNode
+  /** Why the whole card is locked for you (AQU-2260): one line under its
+   *  heading. Controls inside given this same reason say nothing more; one
+   *  locked for another reason still says its own. Null when you can edit. */
+  locked?: React.ReactNode
   className?: string
   children: React.ReactNode
 }) {
   return (
     <div className={cn("space-y-2", className)}>
-      {label || description ? (
+      {label || description || locked ? (
         <div className="space-y-1 pl-4">
           {label ? (
             <p className="font-heading text-base font-medium tracking-tight text-foreground">
@@ -280,10 +286,15 @@ function SettingsGroup({
           {description ? (
             <p className="text-sm text-muted-foreground">{description}</p>
           ) : null}
+          {locked ? (
+            <LockedNote placement="section" testId="settings-group-locked">
+              {locked}
+            </LockedNote>
+          ) : null}
         </div>
       ) : null}
       <div data-slot="settings-card" className="divide-y overflow-hidden rounded-lg border bg-card">
-        {children}
+        <LockedSection reason={locked}>{children}</LockedSection>
       </div>
     </div>
   )

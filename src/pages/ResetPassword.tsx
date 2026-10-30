@@ -1,3 +1,4 @@
+import { orgInviteReturnTo } from "../../shared/org-invite-return-to"
 /**
  * AQU-270: /reset-password page
  *
@@ -99,7 +100,7 @@ function PasswordChecklist({ password }: { password: string }) {
 // ---------------------------------------------------------------------------
 // Recovery form — shown when the token is invalid/expired.
 // ---------------------------------------------------------------------------
-function TokenExpiredView({ username }: { username: string }) {
+function TokenExpiredView({ username, returnTo }: { username: string; returnTo?: string }) {
   const t = useT()
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -118,7 +119,7 @@ function TokenExpiredView({ username }: { username: string }) {
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await requestPasswordReset(value.email.trim())
+        await requestPasswordReset(value.email.trim(), returnTo)
         setSentEmail(value.email.trim())
       } catch (err) {
         setSubmitError(
@@ -136,7 +137,7 @@ function TokenExpiredView({ username }: { username: string }) {
           <span className="font-medium">{sentEmail}</span>. {t("auth.resetPassword.sentSuffix")}
         </p>
         <a
-          href="/"
+          href={returnTo ?? "/"}
           className="inline-flex w-full items-center justify-center rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-muted"
         >
           {t("auth.resetPassword.backToApp")}
@@ -198,7 +199,7 @@ function TokenExpiredView({ username }: { username: string }) {
             : t("auth.resetPassword.requestNewLink")}
         </Button>
         <a
-          href="/"
+          href={returnTo ?? "/"}
           className="inline-flex w-full items-center justify-center text-sm text-muted-foreground hover:underline underline-offset-4"
         >
           {t("auth.resetPassword.backToApp")}
@@ -221,6 +222,7 @@ export function ResetPassword() {
 
   const token = searchParams.get("token") ?? ""
   const username = searchParams.get("username") ?? ""
+  const returnTo = orgInviteReturnTo(searchParams.get("returnTo"))
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -237,7 +239,7 @@ export function ResetPassword() {
       try {
         await resetPassword(token, username, value.password)
         await login(username, value.password)
-        navigate("/", { replace: true })
+        navigate(returnTo ?? "/", { replace: true })
       } catch (err) {
         setSubmitError(
           err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToReset"),
@@ -285,7 +287,7 @@ export function ResetPassword() {
           </p>
         )}
 
-        {verifyState === "invalid" && <TokenExpiredView username={username} />}
+        {verifyState === "invalid" && <TokenExpiredView username={username} returnTo={returnTo} />}
 
         {verifyState === "valid" && (
           <form

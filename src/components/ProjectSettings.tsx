@@ -768,6 +768,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const commit = useSettingsCommit({
     projectId: id ?? null,
     project: project ?? null,
+    onRenamed: refresh,
     username: historyUser,
     isCloudProject,
     settings: sharedSettingsBlob ?? {},
@@ -799,7 +800,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     if (!id) return
     return holdHistoryScope(id, historyUser, () => httpHistoryRemote(() => historyJwtRef.current))
   }, [id, historyUser])
-  useSettingsStepKinds(id ?? null)
+  useSettingsStepKinds(id ?? null, { project, onRenamed: refresh })
   const reportHistory = useHistoryReporter()
   useHistoryShortcuts(reportHistory)
 

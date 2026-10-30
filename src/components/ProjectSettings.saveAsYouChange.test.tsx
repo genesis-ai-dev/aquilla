@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event"
 import { ProjectSettings } from "./ProjectSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderWithTooltips } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { historyReady, historyView, resetHistoryForTests } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
@@ -33,8 +34,9 @@ const patchSpy = vi.fn()
 let currentProject: ProjectRecord = makeProject()
 let currentSettings: Record<string, unknown> = {}
 
+const refreshProject = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/useProject", () => ({
-  useProject: () => ({ project: currentProject, loading: false, refresh: vi.fn() }),
+  useProject: () => ({ project: currentProject, loading: false, refresh: refreshProject }),
 }))
 vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
@@ -93,14 +95,16 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   return { ...actual, renameProject }
 })
 
+const settingsTree = (section: string) => (
+  <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/${section}`]}>
+    <Routes>
+      <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+    </Routes>
+  </MemoryRouter>
+)
+
 function renderSettings(section: string) {
-  return renderWithTooltips(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings/${section}`]}>
-      <Routes>
-        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
-      </Routes>
-    </MemoryRouter>,
-  )
+  return renderWithTooltips(settingsTree(section))
 }
 
 beforeEach(async () => {
@@ -193,6 +197,32 @@ describe("Project settings save as you change them", () => {
     expect(renameProject).toHaveBeenCalledTimes(1)
     expect(renameProject).toHaveBeenCalledWith("tok", PROJECT_ID, "Ruth (draft 2)")
     await waitFor(() => expect(historyView().nextUndo?.labelParams).toMatchObject({ setting: "Project name" }))
+  })
+
+  // The page shows the project as the server has it, so after the name is
+  // saved, or put back by Undo, it reads the project again: the field shows
+  // the name now in force, not the one it had before.
+  it("re-reads the project after the name saves and after Undo puts it back, even with no copy here", async () => {
+    const user = userEvent.setup()
+    const view = renderSettings("general")
+    await historyReady()
+    const field = screen.getByRole("textbox", { name: "Project name" })
+    await user.clear(field)
+    await user.type(field, "Ruth (draft 2)")
+    await user.tab()
+    expect(await screen.findByTestId("save-status-name")).toHaveTextContent("Saved")
+    expect(refreshProject).toHaveBeenCalledTimes(1)
+    // The re-read lands with the new name.
+    currentProject = { ...currentProject, name: "Ruth (draft 2)" }
+    view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
+    expect(screen.getByRole("textbox", { name: "Project name" })).toHaveValue("Ruth (draft 2)")
+
+    // Undo from a browser whose copy of the project is gone.
+    store.record = null
+    await waitFor(() => expect(historyView().nextUndo?.labelParams).toMatchObject({ setting: "Project name" }))
+    await user.click(screen.getByTestId("settings-undo"))
+    await waitFor(() => expect(renameProject).toHaveBeenLastCalledWith("tok", PROJECT_ID, "Ruth"))
+    await waitFor(() => expect(refreshProject).toHaveBeenCalledTimes(2))
   })
 
   // A project opened straight at its settings in a browser that has never

@@ -55,6 +55,8 @@ export interface SettingsCommitOptions {
   /** The project as this page shows it: what this browser's copy starts
    *  from when it has none yet (a project opened straight at its settings). */
   project: ProjectRecord | null
+  /** The name changed: the page reads the project again to show it. */
+  onRenamed?: () => void
   /** Whose history the steps go in. */
   username: string
   isCloudProject: boolean
@@ -297,6 +299,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
             }
           }
           await patchLocal(projectId, (p) => ({ ...p, name: next }))
+          ref.current.onRenamed?.()
           return { kind: "saved" }
         })()
         step(write.then((r) => r.kind === "saved", () => false))

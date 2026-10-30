@@ -34,10 +34,20 @@ export function withDeviceSetting(record: ProjectRecord, key: string, value: unk
   return next as unknown as ProjectRecord
 }
 
-export function useSettingsStepKinds(projectId: string | null): void {
+export interface SettingsStepKindsOptions {
+  /** The project as the page shows it, for a browser with no copy of its own
+   *  yet (a project opened straight at its settings). */
+  project?: ProjectRecord | null
+  /** Undo or Redo changed the name: the page reads the project again. */
+  onRenamed?: () => void
+}
+
+export function useSettingsStepKinds(projectId: string | null, options: SettingsStepKindsOptions = {}): void {
   const { session } = useFrontierSession()
   const jwtRef = useRef<string | null>(null)
   jwtRef.current = session?.jwt ?? null
+  const optionsRef = useRef(options)
+  optionsRef.current = options
   useEffect(() => {
     if (!projectId) return
     return registerStepKinds({
@@ -46,9 +56,9 @@ export function useSettingsStepKinds(projectId: string | null): void {
         writeSettings: (patch, opts) => writeProjectSettingsFor(projectId, patch, opts),
       }),
       ...settingsStepHandlers({
-        readName: async () => (await getProject(projectId))?.name ?? null,
+        readName: async () => ((await getProject(projectId)) ?? optionsRef.current.project)?.name ?? null,
         rename: async (name) => {
-          const record = await getProject(projectId)
+          const record = (await getProject(projectId)) ?? optionsRef.current.project
           if (!record) throw new Error("project not found")
           if (record.syncRole) {
             const jwt = jwtRef.current
@@ -56,6 +66,7 @@ export function useSettingsStepKinds(projectId: string | null): void {
             await renameProject(jwt, projectId, name)
           }
           await patchProject(projectId, (p) => ({ ...p, name }))
+          optionsRef.current.onRenamed?.()
         },
         readDevice: async (key) => {
           const record = await getProject(projectId)

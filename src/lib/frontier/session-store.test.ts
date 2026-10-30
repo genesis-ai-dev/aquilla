@@ -32,7 +32,7 @@ import {
   listSessions, addSession, activateSession, removeSession,
   loadActiveSession, sessionKey, subscribeSession, patchSessionEmails,
   loadAccountsSnapshot, publishDataOwner, listStoredSessions,
-  isStoredSessionCurrent,
+  isStoredSessionCurrent, replaceActiveSessionJwt,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -415,6 +415,34 @@ describe("cross-tab reconciliation (FRO-367)", () => {
         configurable: true,
         value: OriginalBroadcastChannel,
       })
+    }
+  })
+})
+
+describe("atomic renewal replacement", () => {
+  beforeEach(async () => { await clearSession() })
+  it.each(["logout", "switch", "new credential", "unchanged"])("preserves the winning session mutation: %s", async (change) => {
+    const alice = mkSession({ username: "alice", jwt: "alice-old", email: "alice@example.test" })
+    const bob = mkSession({ username: "bob", jwt: "bob-current" })
+    await saveSession(alice)
+    await addSession(bob)
+    // Queue the competing mutation immediately before renewal; the atomic
+    // comparison must observe its committed state, not an earlier snapshot.
+    const competing = change === "logout" ? clearSession()
+      : change === "switch" ? activateSession(sessionKey(bob))
+      : change === "new credential" ? saveSession({ ...alice, jwt: "alice-newer" })
+      : Promise.resolve()
+    const renewal = replaceActiveSessionJwt("alice-old", "alice-renewed")
+    await competing
+    expect(await renewal).toBe(change === "unchanged")
+    const active = await loadActiveSession()
+    if (change === "logout") {
+      expect(active).toBeNull()
+      expect(await listSessions()).toHaveLength(0)
+    } else if (change === "switch") {
+      expect(active).toEqual(bob)
+    } else {
+      expect(active).toEqual({ ...alice, jwt: change === "unchanged" ? "alice-renewed" : "alice-newer" })
     }
   })
 })

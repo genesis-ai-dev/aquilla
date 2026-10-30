@@ -392,6 +392,8 @@ export const workspace = defineNamespace({
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
+    "workspace.updateIndicator.short": "Update",
+    "workspace.updateIndicator.tooltip": "A newer build is deployed. Click to reload now, or it loads the next time you leave the editor.",
 
     // -- ProjectWorkspace: legacy-measure batch toast (pre-merge takes with
     // no captured duration; "Measure all" runs a fix-it batch) --
@@ -1785,9 +1787,23 @@ export const workspace = defineNamespace({
 
       "workspace.updateBanner.updateAvailable": {
         description:
-          "Floating pill shown when a new build of the app has been " +
-          "deployed; clicking it reloads the page to pick it up.",
+          "Accessible name of the small mark next to the version string " +
+          "shown when a newer build of the app has been deployed; clicking " +
+          "it reloads the page to pick it up.",
         maxLength: 24,
+      },
+      "workspace.updateIndicator.short": {
+        description:
+          "One-word visible label of that mark, next to a pulsing dot in " +
+          "the version footer. Very little room: keep it short.",
+        maxLength: 12,
+      },
+      "workspace.updateIndicator.tooltip": {
+        description:
+          "Tooltip of the update mark. Says a newer build exists, that a " +
+          "click reloads now, and that otherwise it loads when the user " +
+          "leaves the editor.",
+        maxLength: 140,
       },
       "workspace.legacyMeasure.partialSuccessToast": {
         description:

@@ -4,14 +4,10 @@ export const HOLD_NUDGE_HOURS: number
 // suffix for the Nth slice cut that date (NN starts at 01).
 export function isReleaseBranch(name: string): boolean
 
-/** Path-based risk classification of one PR's changed files. */
-export interface FileClassification {
-  /** Areas touched (e.g. "migration", "sync", "auth", "infra"), sorted. */
-  areas: string[]
-  /** True when the PR touches a migration or the deploy machinery itself. */
-  pathHolds: boolean
-}
+import type { FileClassification } from "./release-risk.mjs"
 
+export type { FileClassification }
+/** Re-exported from release-risk.mjs, where the file map lives. */
 export function classifyFiles(files: Iterable<string>): FileClassification
 
 /** One merged-but-unreleased PR on origin/dev, as listed in the release plan. */
@@ -28,9 +24,17 @@ export interface UnreleasedPr extends FileClassification {
    * floor. Such PRs are always a prefix of the list.
    */
   behindFloor?: boolean
+  /** True when the PR carries the `release:approved` label (a person's sign-off). */
+  approved?: boolean
+  /** Areas whose gate check (release-risk.mjs AREA_GATES) passed on the PR's head. */
+  gates?: string[]
 }
 
-export function prHolds(pr: Pick<UnreleasedPr, "pathHolds" | "walk">): boolean
+/** Off the automatic line: an ungated holding area or an unproven walk, unless a person approved it. */
+export function prHolds(pr: Pick<UnreleasedPr, "areas" | "walk" | "approved" | "gates">): boolean
+
+/** Why a held PR is held, for the notes: "touches <areas>" or "walk <verdict>". */
+export function holdReason(pr: Pick<UnreleasedPr, "walk" | "areas" | "gates">): string
 
 // A PR whose diff touches only docs, only test/journey files, or only
 // allowlisted tooling scripts (release-plan*, qa/, smart-test*, e2e-*) has no
@@ -80,22 +84,27 @@ export function splitReleased<T extends Pick<LogEntry, "sha" | "subject">>(input
  * measured from the newest calver tag (origin/main before the first one).
  * Runs git in `cwd` (the process cwd by default).
  */
-export function unreleasedPrs(opts?: { cwd?: string }): { prs: UnreleasedPr[]; floor: string }
+export function unreleasedPrs(opts?: { cwd?: string }): { prs: UnreleasedPr[]; floor: string; base: string }
+
+/** A held PR as the plan reports it. */
+export type HeldPr = Omit<UnreleasedPr, "pathHolds" | "behindFloor"> & { why: string }
 
 export interface ReleasePlan {
   openReleases: string[]
   prCount: number
-  /** The newest dev commit production already runs; `sha` never falls below it. */
-  floor?: string
+  /** The tagged tip production runs; the cut branch starts here and picks `prs` onto it. */
+  base?: string
   cut: boolean
   reason: string
-  /** True when the cut slice needs a human gate before it deploys. */
-  hold: boolean
   /** Only present when cut is true. */
   branch?: string
+  /** Set by release-cut.mjs once the picks are built; absent in the plan itself. */
   sha?: string
   areas?: string[]
+  /** Ready PRs, oldest first: the ones the cut picks. */
   prs: Omit<UnreleasedPr, "pathHolds" | "behindFloor">[]
+  /** PRs skipped by this cut, with why; they wait for `release:approved`. */
+  held: HeldPr[]
 }
 
 export function planRelease(input: {
@@ -105,6 +114,6 @@ export function planRelease(input: {
   now: string
   /** Same-day suffixes already in use, e.g. ["01", "02"]. */
   usedSuffixesToday?: string[]
-  /** See ReleasePlan.floor. */
-  floor?: string
+  /** See ReleasePlan.base. */
+  base?: string
 }): ReleasePlan

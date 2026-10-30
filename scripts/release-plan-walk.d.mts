@@ -30,14 +30,25 @@ export interface LookupWalkOptions {
   fetchImpl?: FetchImpl
 }
 
+/** The walk verdict, `release:approved` label and passed gate areas of the PR a dev merge closed. */
+export function lookupPr(
+  options: LookupWalkOptions,
+): Promise<{ walk: "PASS" | "fail" | "none" | "unknown"; approved: boolean; gates: string[] }>
+
+/** The only check-run producer a gate is accepted from. */
+export const GATE_PRODUCER: string
+
+/** Areas whose AREA_GATES check, produced by GitHub Actions, concluded success on this head sha (newest run per name). */
+export function passedGates(headSha: string, opts: Omit<LookupWalkOptions, "mergeSha">): Promise<string[]>
+
 // Resolves one dev-branch merge commit to the walk verdict for the PR it
 // closed. Returns "unknown" when that isn't possible yet: no associated PR,
 // no matching comment, or a comment whose sha is stale.
 export function lookupWalk(options: LookupWalkOptions): Promise<"PASS" | "fail" | "none" | "unknown">
 
-// Fills `walk` for every PR still "unknown". One PR's lookup failing never
+// Fills `walk` and `approved` for every PR. One PR's lookup failing never
 // blocks the others; it just stays "unknown", which holds.
 export function fillWalks<T extends { sha: string; walk: string }>(
   prs: T[],
   opts: Omit<LookupWalkOptions, "mergeSha">,
-): Promise<T[]>
+): Promise<(T & { approved?: boolean; gates?: string[] })[]>

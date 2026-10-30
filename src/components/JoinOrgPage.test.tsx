@@ -6,6 +6,12 @@ import { MemoryRouter, Routes, Route, Link } from "react-router-dom"
 import { JoinOrgPage } from "./JoinOrgPage"
 import { acceptOrgInvite } from "@/lib/frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
+import { requestPasswordReset } from "@/lib/frontier/auth"
+
+vi.mock("@/lib/frontier/auth", async (original) => ({
+  ...(await original<typeof import("@/lib/frontier/auth")>()),
+  requestPasswordReset: vi.fn(async () => {}),
+}))
 
 vi.mock("@/lib/frontier/orgs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/frontier/orgs")>()),
@@ -32,12 +38,14 @@ vi.mock("@/components/git-import/FrontierSignupForm", () => ({
   FrontierSignupForm: () => <button>do-signup</button>,
 }))
 vi.mock("@/components/git-import/FrontierLoginForm", () => ({
-  FrontierLoginForm: () => <button>do-login</button>,
+  FrontierLoginForm: ({ onForgotPassword }: { onForgotPassword?: () => void }) => (
+    <><button>do-login</button><button onClick={onForgotPassword}>Forgot password?</button></>
+  ),
 }))
 
-function renderJoinOrg() {
+function renderJoinOrg(token = "tok") {
   return render(
-    <MemoryRouter initialEntries={["/join-org/tok"]}>
+    <MemoryRouter initialEntries={[`/join-org/${token}`]}>
       <Routes>
         <Route path="/join-org/:token" element={<><Link to="/join-org/next">Next invitation</Link><JoinOrgPage /></>} />
       </Routes>
@@ -61,6 +69,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe("JoinOrgPage invite context (AQU-471)", () => {
+  it("offers recovery and keeps the invitation when requesting a reset or returning to login", async () => {
+    renderJoinOrg("invite-token")
+    fireEvent.click(await screen.findByRole("button", { name: "Forgot password?" }))
+    expect(screen.getByText("Come and See")).toBeInTheDocument()
+    expect(screen.queryByText("Need an account? Sign up")).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "alice@example.com" } })
+    fireEvent.submit(document.getElementById("forgot-password-form")!)
+    await waitFor(() => expect(requestPasswordReset).toHaveBeenCalledWith(
+      "alice@example.com", "/join-org/invite-token",
+    ))
+    fireEvent.click(await screen.findByRole("button", { name: /back to login/i }))
+    expect(screen.getByText("do-login")).toBeInTheDocument()
+    expect(acceptOrgInvite).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it("names the org, inviter, and role when signed out", async () => {
     renderJoinOrg()
     expect(await screen.findByText("Come and See")).toBeInTheDocument()

@@ -1,6 +1,6 @@
 import {
   Pencil, FolderInput, Trash2, Download, Info, UserCheck, SplitSquareVertical,
-  ChevronUp, ChevronDown, RefreshCw,
+  ChevronUp, ChevronDown, RefreshCw, AudioLines,
 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -28,6 +28,9 @@ interface FileActionMenuProps {
   onSegmentation?: () => void
   /** Sidebar re-import of this one file. Shown when the caller can import. */
   onReimport?: () => void
+  /** AQU-981: many recordings at once, each onto its line in this file. Shown
+   *  to whoever may upload a recording into the open lane. */
+  onUploadRecordings?: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
   onDelete?: () => void
   /**
@@ -57,7 +60,7 @@ export interface FileReorderActions {
  */
 export function FileActionMenu({
   onShowDetails, onRename, onMove, onExport, onDownloadOriginal, onAssignWork,
-  onSegmentation, onReimport, onDelete, reorder,
+  onSegmentation, onReimport, onUploadRecordings, onDelete, reorder,
 }: FileActionMenuProps) {
   const t = useT()
   return (
@@ -97,6 +100,11 @@ export function FileActionMenu({
         {onReimport && (
           <MenuItem onClick={onReimport}>
             <RefreshCw /> {t("fileDetails.reimport")}
+          </MenuItem>
+        )}
+        {onUploadRecordings && (
+          <MenuItem onClick={onUploadRecordings} data-testid="file-menu-upload-recordings">
+            <AudioLines /> {t("recordingsUpload.menuItem")}
           </MenuItem>
         )}
         {onExport && (

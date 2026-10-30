@@ -214,7 +214,7 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
@@ -286,7 +286,8 @@ import { editStepHandlers } from "@/lib/history/edit-steps"
 import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
-import { takeStepHandlers, type CutRecord } from "@/lib/history/take-steps"
+import { takeStepHandlers, type CutRecord, type StoredTakePlace } from "@/lib/history/take-steps"
+import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
 import { commitAudioValidation } from "@/lib/audio/audio-validation-commit"
@@ -334,7 +335,7 @@ import {
   type RowActionReason,
 } from "@/lib/cell-editing-gate"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import {
   buildLinkedTakes,
@@ -350,7 +351,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -553,6 +554,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
+import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
@@ -1300,6 +1302,8 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  // AQU-981: a file's ⋯ menu → "Upload recordings…" opens Import on that file.
+  const [recordingsTarget, setRecordingsTarget] = useState<{ id: string; name: string } | null>(null)
   const [reimportTarget, setReimportTarget] = useState<{
     fileId: string
     name: string
@@ -3895,10 +3899,15 @@ export function ProjectWorkspace() {
 
   // Round 6: move a section's dub chip. Round 7: applied optimistically first.
   // Round 8: stored RELATIVE to the cell (target_offset_ms) so the take travels
-  // with its line — the callers still hand an absolute anchor, and this is the
-  // one place that converts.
+  // with its line.
+  //
+  // AQU-2267 (Sam, Oct 29): a take has a place in each timing — following the
+  // source (`targetOffsetMs`) and following the recordings
+  // (`recordingsOffsetMs`) — and a move states both, in one event, so it is
+  // one write and one undo step, and every device sees both.
   const applyTakePlace = useCallback(
-    async (cellId: string, audioId: string, targetOffsetMs: number | null) => {
+    async (cellId: string, audioId: string, place: StoredTakePlace) => {
+      const { targetOffsetMs, recordingsOffsetMs } = place
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
@@ -3933,6 +3942,7 @@ export function ProjectWorkspace() {
         cellId,
         audioId,
         targetOffsetMs,
+        recordingsOffsetMs,
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
@@ -3943,6 +3953,7 @@ export function ProjectWorkspace() {
         injectOptimisticAudioPlace(takeFileId, cellId, {
           ...attachmentOutFrom(audioId, att, slot),
           targetOffsetMs,
+          recordingsOffsetMs,
         }, placeP)
       } else if (takeFileId !== activeFileId) {
         // A cue cell is not in this file's store, so the store's optimistic
@@ -3958,23 +3969,31 @@ export function ProjectWorkspace() {
     [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
   )
   const handleRetimeTarget = useCallback(
-    async (cellId: string, anchorSec: number, audioId: string) => {
+    async (cellId: string, _anchorSec: number, audioId: string, after: TakePlace) => {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
-      // targetOffsetMsFor carries the old "never before file zero" floor into
-      // the offset domain; enforced here, at the single persistence point.
-      const targetOffsetMs = targetOffsetMsFor(owner.cell, anchorSec)
-      // AQU-1767: a step, so Undo can move it back. `null` before is a real
-      // value ("never placed by hand"), and undoing to it clears the placement.
-      const was = owner.cell.attachments?.[audioId]?.targetOffsetMs ?? null
+      // AQU-2267: the timeline hands the take's place in BOTH timings
+      // (lib/timeline/take-place), each already held by its timing's limits —
+      // the "never before file zero" floor included (targetOffsetMsFor).
+      // AQU-1767: a step, so Undo can move it back — both places, one step.
+      // `null` before is a real value ("never placed by hand" there), and
+      // undoing to it clears that place.
+      const att = owner.cell.attachments?.[audioId]
       recordStep({
         kind: "take.place",
-        data: { cellId, audioId, before: was, after: targetOffsetMs },
+        data: {
+          cellId,
+          audioId,
+          before: att?.targetOffsetMs ?? null,
+          after: after.targetOffsetMs,
+          recordingsBefore: att?.recordingsOffsetMs ?? null,
+          recordingsAfter: after.recordingsOffsetMs,
+        },
         labelKey: "editor.history.stepMove",
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
       })
-      await applyTakePlace(cellId, audioId, targetOffsetMs)
+      await applyTakePlace(cellId, audioId, after)
     },
     [applyTakePlace, activeFileId],
   )
@@ -4123,6 +4142,7 @@ export function ProjectWorkspace() {
             trimEndMs: cur.att.trimEndMs ?? null,
             label: cur.att.label ?? null,
             targetOffsetMs: cur.att.targetOffsetMs ?? null,
+            recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })
@@ -11621,6 +11641,17 @@ export function ProjectWorkspace() {
       : (project?.files.length ?? 0) === 0
         ? t("importExport.intent.translation.noFilesLead")
         : null
+  // AQU-981: recordings go into the open lane, for whoever may upload a
+  // recording there today — the rail's upload button's own gate (Contributor
+  // up, the lane not archived), mirrored from cell.audio.attach's floor.
+  const canUploadRecordings = canPerform("cell.audio.attach", project?.syncRole?.level ?? null) && !activeLaneLock
+  const recordingsDisabledReason = activeLaneLock
+    ? t("recordingsUpload.intent.laneArchived", { lane: activeLaneLock.label })
+    : !canPerform("cell.audio.attach", project?.syncRole?.level ?? null)
+      ? denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
+      : (project?.files.length ?? 0) === 0
+        ? t("recordingsUpload.intent.noFiles")
+        : null
   // AQU-1365: the files a translation can go into, in sidebar order, so the
   // picker reads like the file list beside it.
   const translationImportFiles = useMemo(
@@ -14155,6 +14186,27 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * AQU-2252 (Sam, Oct 29): whether these added tracks' takes set their lines'
+   * lengths while the file follows its recordings. `false` is stored (the
+   * track becomes a layer); `true` clears the field back to the default.
+   * Track editing, one write for the whole selection, and one undo step.
+   */
+  const handleSetTrackLineLengths = useCallback(
+    (trackIds: readonly string[], sets: boolean) => {
+      const value = sets ? null : false
+      recordTrackChanges(
+        sets ? "editor.history.stepTrackSetsLengths" : "editor.history.stepTrackMadeLayer",
+        trackIds.map((trackId) => ({ trackId, after: { setsLineLengths: value } })),
+      )
+      void applyTrackPatches(
+        trackIds.map((trackId) => ({ trackId, patch: { setsLineLengths: value } })),
+        t("editor.timeline.trackSetsLineLengthsFailed"),
+      )
+    },
+    [applyTrackPatches, recordTrackChanges, t],
+  )
+
+  /**
    * BOTH FIELDS IN ONE PATCH, and this is the one place the one-field-per-verb
    * rule bends — because the two ARE one verb. A track changing scope needs a
    * rank among its new siblings, and its old number is a rank in a different
@@ -14623,7 +14675,7 @@ export function ProjectWorkspace() {
           return owner.cell.attachments?.[id]?.pieceOf ?? id
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
-        applyPlace: (cellId, audioId, offset) => applyTakePlace(cellId, audioId, offset),
+        applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
         uncut: applyTakeUncut,
         newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
@@ -14789,6 +14841,21 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueTargetSlots(targetSlots)
   }, [targetSlots])
+  // AQU-2252 (Sam, Oct 29): …and which of the added tracks are layers, so the
+  // transport lays every line out at the length the timeline draws. The same
+  // answer the timeline and the play strip are handed.
+  // Keyed on the answer (a renamed track is a new tracks array), so the play
+  // strip doesn't lay the file out again for a rename.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(serverTimelineTracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
+  const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
+  useEffect(() => {
+    setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
+  }, [layerTrackSlotsKey])
+
   // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
   // jumps from the end of one line with a take to the start of the next one.
   // Handed these tracks rather than the queue's copy, which the effect above
@@ -14810,8 +14877,10 @@ export function ProjectWorkspace() {
           : [timelineLines],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
+        // AQU-2252: laid out with the tracks the queue plays them with.
+        tracks: programmeTracks,
       }),
-    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots],
+    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -16414,6 +16483,13 @@ export function ProjectWorkspace() {
                     })
                     setImportOpen(true)
                   } : undefined}
+                  onUploadRecordings={canUploadRecordings ? (fileId) => {
+                    const file = project.files.find((entry) => entry.id === fileId)
+                    if (!file) return
+                    setReimportTarget(null)
+                    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
+                    setImportOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -16718,6 +16794,10 @@ export function ProjectWorkspace() {
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
+            </div>
+            {/* AQU-981: bulk recordings upload — progress, then its summary. */}
+            <div className="px-3 py-1 empty:hidden">
+              <RecordingsUploadBanner />
             </div>
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where
@@ -17292,6 +17372,7 @@ export function ProjectWorkspace() {
                             onMoveToScope: handleMoveTrackToScope,
                             onCreateFolderFrom: handleCreateFolderFrom,
                             onDelete: handleDeleteTrack,
+                            onSetLineLengths: handleSetTrackLineLengths,
                           }
                         : undefined
                     }
@@ -17610,6 +17691,7 @@ export function ProjectWorkspace() {
                 virtualSoundingCellId={virtualSoundingCellId}
                 freeTiming={timingMode === "audioFirst"}
                 lane={activeLane}
+                programmeTracks={programmeTracks}
               />
             ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
@@ -17929,6 +18011,7 @@ export function ProjectWorkspace() {
                   virtualSoundingCellId={virtualSoundingCellId}
                   freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
+                  programmeTracks={programmeTracks}
                   below={
                     <>
                       {syncStatus}
@@ -18132,6 +18215,7 @@ export function ProjectWorkspace() {
         <ImportDialog open={importOpen} onOpenChange={(next) => {
             setImportOpen(next)
             if (!next) setReimportTarget(null)
+            if (!next) setRecordingsTarget(null)
             // AQU-693: when an import launched from the setup checklist closes
             // (success, cancel, or error), return the user to the still-live
             // checklist — step 1 now reflects its true state — instead of
@@ -18206,6 +18290,13 @@ export function ProjectWorkspace() {
                     : undefined,
               })
             },
+          }}
+          recordings={{
+            // AQU-981: bulk recordings upload, into the lane the editor is in.
+            files: translationImportFiles,
+            disabledReason: recordingsDisabledReason,
+            languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
+            file: recordingsTarget,
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

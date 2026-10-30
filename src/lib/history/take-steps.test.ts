@@ -14,8 +14,8 @@ function ctxFor(takes: Takes, overrides: Partial<TakeStepContext> = {}) {
     applyTrim: vi.fn(async (_c, id, w) => {
       takes[id] = { ...takes[id], trimStartMs: w.trimStartMs, trimEndMs: w.trimEndMs }
     }),
-    applyPlace: vi.fn(async (_c, id, offset) => {
-      takes[id] = { ...takes[id], targetOffsetMs: offset }
+    applyPlace: vi.fn(async (_c, id, place) => {
+      takes[id] = { ...takes[id], targetOffsetMs: place.targetOffsetMs, recordingsOffsetMs: place.recordingsOffsetMs }
     }),
     cut: vi.fn(async () => true),
     uncut: vi.fn(async () => {}),
@@ -49,6 +49,38 @@ describe("take.window / take.place", () => {
   })
 })
 
+// AQU-2267: a move states the take's place in both timings, and undo takes
+// both back together, in one step.
+describe("take.place in both timings (AQU-2267)", () => {
+  const move = {
+    cellId: "c", audioId: "a",
+    before: -1_000, after: -800,
+    recordingsBefore: null, recordingsAfter: 200,
+  }
+
+  it("undo puts both places back in one step, and redo moves both again", async () => {
+    const takes: Takes = { a: { targetOffsetMs: -800, recordingsOffsetMs: 200 } }
+    const { ctx, handlers } = ctxFor(takes)
+    expect(await handlers["take.place"].undo(move)).toEqual({ kind: "done" })
+    expect(ctx.applyPlace).toHaveBeenCalledTimes(1)
+    expect(ctx.applyPlace).toHaveBeenCalledWith("c", "a", { targetOffsetMs: -1_000, recordingsOffsetMs: null })
+    expect(await handlers["take.place"].redo(move)).toEqual({ kind: "done" })
+    expect(ctx.applyPlace).toHaveBeenLastCalledWith("c", "a", { targetOffsetMs: -800, recordingsOffsetMs: 200 })
+  })
+
+  it("is skipped as changed once someone has moved the take following the recordings since", async () => {
+    const { ctx, handlers } = ctxFor({ a: { targetOffsetMs: -800, recordingsOffsetMs: 600 } })
+    expect(await handlers["take.place"].undo(move)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.applyPlace).not.toHaveBeenCalled()
+  })
+
+  it("a step saved before AQU-2267 names one place: it undoes that one, with no place of its own following the recordings", async () => {
+    const { ctx, handlers } = ctxFor({ a: { targetOffsetMs: 200 } })
+    expect(await handlers["take.place"].undo({ cellId: "c", audioId: "a", before: -1_000, after: 200 })).toEqual({ kind: "done" })
+    expect(ctx.applyPlace).toHaveBeenCalledWith("c", "a", { targetOffsetMs: -1_000, recordingsOffsetMs: null })
+  })
+})
+
 describe("take.cut", () => {
   const record = (): CutRecord => ({
     cellId: "c1", audioId: "a", atMs: 1500, newAudioId: "b",
@@ -64,6 +96,13 @@ describe("take.cut", () => {
 
   it("is skipped once someone has moved or trimmed a piece, and nothing is joined", async () => {
     const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500 }, b: { trimStartMs: 1500, targetOffsetMs: 400, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  // AQU-2267: moved since following the recordings counts as moved.
+  it("is skipped once someone has moved a piece following the recordings", async () => {
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500 }, b: { trimStartMs: 1500, recordingsOffsetMs: 900, pieceOf: "a" } })
     expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
     expect(ctx.uncut).not.toHaveBeenCalled()
   })

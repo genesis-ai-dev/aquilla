@@ -235,6 +235,20 @@ describe('file.track.set — accepted writes', () => {
   // handed that id could never have its kind set, for no reason at all, since
   // nothing DERIVES a folder and there is no row for the delta to collide
   // with. If someone collapses the two sets again, this fails.
+  // AQU-2252 (Sam, Oct 29): an added track can be made a LAYER — its takes
+  // stop setting their lines' lengths while the file follows its recordings.
+  // Stored only when it differs from the default (every track sets them), and
+  // cleared back to that default with null.
+  it('accepts making an added track a layer', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { setsLineLengths: false } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts clearing it back to the default', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { setsLineLengths: null } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
   it("treats 'folder' as an ordinary track id, not a reserved one", async () => {
     const authed = await authorizeTrackSet({ trackId: 'folder', patch: { kind: 'audio' } })
     expect(dispatch(authed).ok).toBe(true)
@@ -353,6 +367,19 @@ describe('file.track.set — rejected writes', () => {
       'a sourceTrackId on a default track',
       { trackId: 'target-audio', patch: { sourceTrackId: 'source-subtitles' } },
       /sets sourceTrackId on default track target-audio/,
+    ],
+    // ── AQU-2252 ──────────────────────────────────────────────────────────
+    [
+      'a non-boolean setsLineLengths',
+      { trackId: 'trk-1', patch: { setsLineLengths: 'no' } },
+      /unusable setsLineLengths/,
+    ],
+    // The Language lane's main track always sets its lines' lengths: it is
+    // what a line's length is measured from when nothing else is.
+    [
+      'setsLineLengths on a default track',
+      { trackId: 'target-audio', patch: { setsLineLengths: false } },
+      /sets setsLineLengths on default track target-audio/,
     ],
   ]
 

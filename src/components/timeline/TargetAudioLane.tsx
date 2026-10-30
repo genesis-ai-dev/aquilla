@@ -62,6 +62,7 @@ import {
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
+import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
@@ -110,6 +111,14 @@ export interface TargetAudioLaneProps {
   /** SUB-53: resolves chip geometry — the frozen file clock in dubbing mode,
    *  the laid-out programme in audio-first. Absent = dubbing. */
   layout?: TimelineLayout
+  /**
+   * AQU-2267: the OTHER timing's layout, built when asked (only a drop
+   * asks). A move moves the take by the same distance there too, held by that
+   * timing's own limits (its line, its neighbours on this track), so a move
+   * states the take's place in both. Absent (this lane's own tests), the
+   * other place moves by the same distance with no limits of its own.
+   */
+  getOtherLayout?: () => TimelineLayout
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
@@ -158,8 +167,12 @@ export interface TargetAudioLaneProps {
    *
    *  AQU-646 stage 3: it also carries the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other.
+   *
+   *  AQU-2267: and `place`, what to store — the take's place in BOTH timings
+   *  after the move (`movedTakePlace`). `anchorSec` stays the anchor in the
+   *  timing the move was made in. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
@@ -245,6 +258,14 @@ interface ChipGeometry {
    *  this instead of the amber/red warnings, because running long is the
    *  expected outcome there, not a defect. Null in dubbing mode. */
   ratio: number | null
+  /**
+   * AQU-2252 (Sam, Oct 29): a take on a track made a LAYER while the file
+   * follows its recordings. Its line does not grow to hold it, so it behaves
+   * the way a take does following the source: measured against its line,
+   * amber running past it, red over the next take on its track, a lead-in
+   * allowed, the move clamp stopping at its neighbours.
+   */
+  layer: boolean
 }
 
 /**
@@ -344,12 +365,19 @@ function TargetAudioChip({
   peaks,
   preview,
   layout,
+  getOtherLayout,
+  track,
 }: {
   chip: ChipGeometry
   /** AQU-2215: the lane's layout, for the one question only it can answer —
    *  what a MOVE on this chip means, and what to store for it. Absent outside
    *  a timeline (this lane's own tests), which is dubbing's own behaviour. */
   layout?: TimelineLayout
+  /** AQU-2267: the other timing's layout, and every take on this track — where
+   *  a move carries the take, by the same distance, held by that timing's
+   *  limits. See `TargetAudioLaneProps.getOtherLayout`. */
+  getOtherLayout?: () => TimelineLayout
+  track: readonly TargetAudioItem[]
   // AQU-646 stage 7: NO `color` PROP. The hue reaches this chip as inherited
   // CSS custom properties set on the lane root, so there is nothing to thread
   // and nothing to keep in step — see `trackHueVars`.
@@ -392,8 +420,9 @@ function TargetAudioChip({
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other. AQU-2267: `place` is the
+   *  take's place in both timings after the move. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
@@ -413,6 +442,10 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
+  // to hold it, so it never runs long and moves only inside its line. Every
+  // take but one on a track made a layer, which keeps following the source's.
+  const freeRules = audioFirst && !chip.layer
   // This chip's own take: its length, its trims and its placement. The geometry
   // and the drag both read it, so it is resolved once here.
   const chipAtt = cell.attachments?.[chip.item.audioId]
@@ -492,6 +525,10 @@ function TargetAudioChip({
     ? pieceTrimLimitsMs(cell.attachments as Parameters<typeof pieceTrimLimitsMs>[0], chip.item.audioId)
     : null
 
+  // A later piece of a take is held to its line as its take is (the take may
+  // not start past the line's end), so it may sit and move past that end.
+  const pieceLead = (chip.item.pieceCount ?? 1) > 1 ? pieceLeadInTakeSec(cell, chip.item.audioId) : 0
+
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
     const thresholdSec = SNAP_THRESHOLD_PX / pxPerSec
@@ -531,13 +568,22 @@ function TargetAudioChip({
       // pause before the take, inside its own line. One bound is left: the
       // line's own start, because a pause cannot be negative (dragging left
       // shortens it back to none and stops).
-      if (audioFirst) {
-        const floor = chip.slot?.startSec ?? start
-        const bounded = Math.max(start, floor)
-        return { start: bounded, end: bounded + len }
-      }
-      start = Math.min(start, maxAudibleStartSec(section), nextChipStartSec ?? Infinity)
-      start = Math.max(start, minAudibleEndSec(section) - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
+      //
+      // AQU-2252: …except a take on a track made a layer, whose line does not
+      // grow to hold it: every bound above applies to it, against its line.
+      //
+      // AQU-2267: the arithmetic is `clampMoveStart`, shared with the move's
+      // other timing, which it carries the take into by the same distance.
+      start = clampMoveStart(start, {
+        free: freeRules,
+        lineStartSec: chip.slot?.startSec ?? null,
+        section,
+        lenSec: len,
+        prevChipStartSec: prevChip?.start ?? null,
+        nextChipStartSec,
+        trimStartSec: geom.trimStartSec,
+        leadInTakeSec: pieceLead,
+      })
       return { start, end: start + len }
     }
     if (mode === "resize-l") {
@@ -558,15 +604,20 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
+      // AQU-2252: following the recordings, never before the start of the
+      // span the layout measures the chip against. That IS `geom.anchor` for a
+      // line's main take; a layer's sample zero can sit before its line, and
+      // its head trim comes back off only as far as the line's start.
       const lo = Math.max(
         geom.anchor,
+        freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
       )
       // Floored at `lo` so the clamp cannot invert on a chip whose end already
       // sits before its section — that chip is already outside the invariant,
       // and pinning its handle is better than sending it further out.
-      const hi = Math.max(Math.min(geom.end - MIN_TARGET_LEN_SEC, maxAudibleStartSec(section)), lo)
+      const hi = Math.max(Math.min(geom.end - MIN_TARGET_LEN_SEC, maxAudibleStartSec(section) + pieceLead), lo)
       start = Math.min(Math.max(start, lo), hi)
       return { start, end: geom.end }
     }
@@ -592,9 +643,10 @@ function TargetAudioChip({
   const span = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : { start: geom.start, end: geom.end }
   // SUB-53: in audio-first every verse owns its own stretch of the track, so
   // there is nothing to run past and nothing to collide with — the warnings
-  // would fire on every single line and mean nothing.
-  const overflow = audioFirst ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
-  const overlaps = audioFirst
+  // would fire on every single line and mean nothing. AQU-2252: a take on a
+  // track made a layer is the exception — its line does not hold it.
+  const overflow = freeRules ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = freeRules
     ? { headSec: null, tailSec: null }
     : chipOverlaps(span, prevChip, nextChipStartSec)
   // Blame the trespasser: a warning belongs to THIS chip only for territory
@@ -603,7 +655,7 @@ function TargetAudioChip({
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const { head: headTrespass, tail: tailTrespass } = audioFirst
+  const { head: headTrespass, tail: tailTrespass } = freeRules
     ? { head: false, tail: false }
     : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
@@ -614,7 +666,7 @@ function TargetAudioChip({
   // length are placed end to end and have nowhere to go, so they keep the
   // locked chip they have always had rather than springing back from a drag.
   const canMove =
-    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt) ?? true)
+    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt, chip.item.audioId) ?? true)
   // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
   // hide one (Sam lost a whole take under one). The logical span is untouched
   // — overflow warnings, trims, snapping and playback all still use the true
@@ -642,7 +694,8 @@ function TargetAudioChip({
   // length — and hovering one of a mutually-offending pair now extends its
   // true edge visibly ACROSS the neighbour's resting cut, so the collision
   // the red warns about can actually be seen.
-  // SUB-53: inert in audio-first (verses are laid out end to end).
+  // SUB-53: inert in audio-first (verses are laid out end to end) — but for a
+  // take on a track made a layer (AQU-2252), which its line does not hold.
   const engaged = hovered || drag !== null
   const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
   const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
@@ -791,17 +844,26 @@ function TargetAudioChip({
         // clock the chip was drawn on — the file clock in dubbing, the
         // programme clock when following the recordings, where what moved is
         // the take's pause before its line. Either way what comes back is the
-        // FILE-clock anchor, which is the only thing stored.
-        const anchor = layout
-          ? layout.retimeAnchorSec(cell, chipAtt, s.start)
-          : s.start - geom.trimStartSec
-        if (anchor == null) return
-        // Compared on the FILE clock for the same reason, so a drag that ends
-        // up asking for the placement the take already has — a nudge under the
-        // pause threshold, say — records no history step at all.
-        const placed = targetChipGeom(cell, chipAtt)
-        if (placed && Math.abs(anchor - placed.anchor) <= 0.0005) return
-        onRetimeTarget?.(cell.id, anchor, chip.item.audioId)
+        // FILE-clock anchor, whose offset from the line's start is stored.
+        //
+        // AQU-2267 (Sam, Oct 29): and the take moves by the same distance in
+        // the OTHER timing, held by that timing's own limits — so the move
+        // states its place in both. A drag that asks for the place the take
+        // already has in this timing — a nudge under the pause threshold, say
+        // — changes nothing and records no history step. (It used to be
+        // compared with the take's place FOLLOWING THE SOURCE, so following
+        // the recordings such a nudge put a take that led its line back on
+        // its line's start.)
+        const moved = movedTakePlace({
+          here: layout,
+          other: getOtherLayout?.(),
+          track,
+          take: chip.item,
+          fromStartSec: geom.start,
+          toStartSec: s.start,
+        })
+        if (!moved) return
+        onRetimeTarget?.(cell.id, moved.anchorSec, chip.item.audioId, moved.place)
         return
       }
       // Resize = trim. Commit the COMPLETE trim state; at-the-edge clears.
@@ -975,7 +1037,7 @@ function TargetAudioChip({
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
   const lengthNote =
-    audioFirst && !geom.usingFallback
+    freeRules && !geom.usingFallback
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
   // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
@@ -1746,6 +1808,7 @@ function TargetAudioChip({
 export function TargetAudioLane({
   items,
   layout,
+  getOtherLayout,
   pxPerSec,
   viewStartSec,
   viewEndSec,
@@ -1786,12 +1849,12 @@ export function TargetAudioLane({
   const chips: ChipGeometry[] = []
   for (const item of items) {
     const att = item.cell.attachments?.[item.audioId]
-    const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
+    const geom = layout ? layout.targetGeom(item.cell, att, item.audioId) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
     // AQU-2204: following its recordings, a line with NO times of its own (a
     // verse in a book with no times) still has its slot in the programme, so
     // its take is drawn there; only the source's clock needs the cell's times.
-    const section = layout?.chipSection(item.cell, att)
+    const section = layout?.chipSection(item.cell, att, item.audioId)
       ?? (typeof startTime === "number" && typeof endTime === "number" ? { start: startTime, end: endTime } : null)
     if (!geom || !section) continue
     const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
@@ -1827,10 +1890,13 @@ export function TargetAudioLane({
       resizable:
         !geom.usingFallback &&
         (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
+      // AQU-2252: a take on another track has its own length, so its line's
+      // ratio (the main take's) is not its.
       ratio:
-        slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+        slot && layout?.takeRole(item.cell, item.audioId) === "main" && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
           : null,
+      layer: layout?.takeRole(item.cell, item.audioId) === "layer",
     })
   }
 
@@ -2070,6 +2136,8 @@ export function TargetAudioLane({
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             layout={layout}
+            getOtherLayout={getOtherLayout}
+            track={items}
             pxPerSec={pxPerSec}
             selected={
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false

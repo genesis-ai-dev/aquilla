@@ -23,7 +23,7 @@
 // surface the reader is looking at.
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -60,12 +60,15 @@ import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { TakesStrip } from "@/components/AudioRecorder/TakesStrip"
+import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
-import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT, slotsForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { formatTakeSeconds, takePlayedMs } from "@/lib/audio/take-length"
 import { useInRouterContext, useNavigate } from "react-router-dom"
 import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { joinTakePieces } from "@/lib/audio/join-pieces"
+import { audioIdSeededWith } from "@/lib/audio/upload"
+import { toUserFacingError } from "@/lib/errors/user-error"
 
 export interface CellTakeBlockProps {
   project: ProjectRecord
@@ -316,6 +319,44 @@ function CellTakeBlockView({
     notifyAudioAttachmentsChanged(owner.fileId)
   }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted, split])
 
+  // AQU-981: "Join into one recording" — a split take (cut, or uploaded in
+  // parts) becomes one new take of its pieces, in order; the pieces stay.
+  const [joining, setJoining] = useState(false)
+  const [joinError, setJoinError] = useState<string | null>(null)
+  const handleJoin = useCallback(async () => {
+    if (!split) return
+    setJoining(true)
+    setJoinError(null)
+    let failed: string | null = null
+    // Sam, Oct 29: the joined take is "Take N", numbered as the recorder
+    // numbers a new take — over this track's takes, a take in pieces counting
+    // once, the source clip (seeded with the file's id) and removed takes left
+    // out.
+    const slot = split[0].slot
+    const ownSlots = new Set(slotsForTrack(trackIdForSlot(slot)))
+    const trackTakes = Object.entries(owner.attachments ?? {})
+      .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
+      .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
+    try {
+      await joinTakePieces({
+        session,
+        projectId: project.id,
+        fileId: owner.fileId,
+        cellId: owner.id,
+        pieces: split,
+        slot,
+        label: nextTakeLabel(trackTakes),
+        ...(targetLang ? { targetLang } : {}),
+        username,
+      })
+    } catch (e) {
+      failed = toUserFacingError(e).message
+    }
+    setJoining(false)
+    if (failed) setJoinError(failed)
+    else await onCommitted?.(owner.id)
+  }, [split, session, project.id, owner.fileId, owner.id, owner.attachments, targetLang, username, onCommitted])
+
   // Deletable even when it is the line's only take (Sam, 2026-09-29) — the
   // same removal as the takes lists. Nothing is chosen in its place: the line
   // plays its generated voice if it has one, and otherwise says no take plays.
@@ -565,6 +606,21 @@ function CellTakeBlockView({
           </span>
         )}
         <span className="ms-auto flex items-center gap-1.5">
+          {split && !isGenerated && (
+            <AppTooltip content={t("recordingsUpload.join.tooltip")}>
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-testid="cell-take-join"
+                onClick={() => void handleJoin()}
+                disabled={!editable || joining}
+              >
+                <Combine className="h-3 w-3" />
+                {joining ? t("recordingsUpload.join.joining") : t("recordingsUpload.join.button")}
+              </Button>
+            </AppTooltip>
+          )}
           {!readOnlyTranscript && !isSection && selectedAudioId && attachment && (
             <DenoiseButton
               projectId={project.id}
@@ -652,6 +708,11 @@ function CellTakeBlockView({
           )}
         </span>
       </div>
+      {joinError && (
+        <p role="alert" data-testid="cell-take-join-error" className="text-[11px] text-destructive">
+          {t("recordingsUpload.join.failed", { message: joinError })}
+        </p>
+      )}
       {/* The take, drawn as its timeline chip (AQU-1217). Play from its
           corner; trim right here. No mic on it: New take, above, is the way
           into the recorder. */}

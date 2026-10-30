@@ -280,7 +280,7 @@ export const settings = defineNamespace({
       "Usage events, like creating a project or exporting, and session recordings that help us diagnose problems. " +
       "Never the contents of your translations or files.",
     // ── AQU-2263: which AI key is in use right now (KeyInUseLine) ──
-    // {name} is the platform provider's name, "Frontier".
+    // {name} is the platform provider's name, "Aquilla".
     "settings.keyInUse.platform": "Using {name}. No key needed.",
     "settings.keyInUse.projectKey": "Using this project's key (this device only).",
     "settings.keyInUse.personalKey": "Using your own key (saved in this browser).",
@@ -295,7 +295,7 @@ export const settings = defineNamespace({
       "Saved, but voices don't use the organization's key yet: each project or person still needs their own.",
     "settings.keyInUse.orgGeminiNone": "No organization key.",
     "settings.keyInUse.prefsActive": "In use in every project that doesn't have its own provider.",
-    // {name} is the platform provider's name, "Frontier".
+    // {name} is the platform provider's name, "Aquilla".
     "settings.keyInUse.prefsNone": "Not set. Projects use {name} unless they have their own provider.",
     // "Clear" button → common.clear (identical text)
 
@@ -733,13 +733,13 @@ export const settings = defineNamespace({
         description:
           "Beside an AI key field or provider choice (Project settings → AI, Preferences, the Set up AI dialog): " +
           "drafts currently go to the platform's own AI, which needs no key of yours.",
-        placeholders: { name: "The platform provider's product name, 'Frontier'. Not translated." },
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.keyInUse.prefsNone": {
         description:
           "Under 'AI provider (advanced)' in Preferences → AI provider keys, when the person has saved no provider " +
           "of their own: projects then use the platform's AI unless the project set its own provider.",
-        placeholders: { name: "The platform provider's product name, 'Frontier'. Not translated." },
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.overrideStatus.allFollow": {
         description:

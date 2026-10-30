@@ -122,10 +122,10 @@ describe("PersonalProviderSection — provider presets (AQU-796)", () => {
 // AQU-2263: the section says which key is in use, in the same words as every
 // other key field.
 describe("PersonalProviderSection — which key is in use", () => {
-  it("not set: projects use Frontier unless they have their own provider", () => {
+  it("not set: projects use Aquilla unless they have their own provider", () => {
     render(<PersonalProviderSection />)
     expect(screen.getByTestId("prefs-key-in-use")).toHaveTextContent(
-      "Not set. Projects use Frontier unless they have their own provider.",
+      "Not set. Projects use Aquilla unless they have their own provider.",
     )
   })
 

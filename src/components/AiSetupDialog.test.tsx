@@ -92,9 +92,9 @@ beforeEach(() => {
 
 describe("AiSetupDialog", () => {
   // AQU-2263: which key drafts use right now, before anything is chosen.
-  it("says drafts use Frontier with no key, for a project that never chose", () => {
+  it("says drafts use Aquilla with no key, for a project that never chose", () => {
     renderDialog()
-    expect(screen.getByTestId("ai-setup-key-in-use")).toHaveTextContent("Using Frontier. No key needed.")
+    expect(screen.getByTestId("ai-setup-key-in-use")).toHaveTextContent("Using Aquilla. No key needed.")
   })
 
   it("says drafts use your own key from Preferences while you have an override", () => {

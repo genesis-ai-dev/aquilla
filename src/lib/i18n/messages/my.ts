@@ -2977,7 +2977,6 @@ export const my: Catalog = {
   "org.accessModelLegend.creator.description": "အရှင်ပြည့်အဆင့်သည် ပရောဂျက်အဆင့်သို့ပြုပြင်ထားသည့်အခါ အကုန်သွားသည်။ ပရောဂျက်ထည့်သွင်းခြင်း → ဝေမျှခြင်းတွင် စီမံခန့်ခွဲပါ။",
   "org.joinOrgPage.organizationLine": "အဖွဲ့အစည်း: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "အမည်မသတ်မှတ်သည့် အဖွဲ့အစည်း",
-  "org.joinOrgPage.genericInviteFallback": "သင်သည် Aquilla တွင် အဖွဲ့အစည်းသို့ ဆန္ဒြန်းဆိုခံရသည်။",
   "org.joinOrgPage.cantJoinTitle": "ပူးပေါင်းထည့်သွင်းမရပါ",
   "org.joinOrgPage.youreInTitle": "သင်သည် ထိုးဝင်သည်",
   "org.joinOrgPage.joinedRedirect": "{org} သို့ ထိုးဝင်သည်။ အနည်းငယ်တွင် ခရီးသည်…",

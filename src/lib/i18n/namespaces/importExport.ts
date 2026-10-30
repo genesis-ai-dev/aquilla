@@ -1591,6 +1591,10 @@ export const importExport = defineNamespace({
       "lane. To import it as that translation, switch to that language lane in the editor, then " +
       "start again from Import.",
     "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
+    // AQU-2304: the same sentence for an org that has reserved source imports
+    // for maintainers. "A project lead needs to…" would tell a project lead to
+    // do the thing their org has just stopped them doing.
+    "importExport.intent.translation.noFilesMaintainer": "A maintainer needs to add a source text first. A translation goes into a file that's already here.",
     "importExport.intent.translation.laneArchived":
       "{lane} has been archived and is read-only. Switch to another language lane to import a " +
       "translation.",
@@ -4900,6 +4904,10 @@ export const importExport = defineNamespace({
       "importExport.intent.translation.noFilesLead": {
         description:
           "Shown to a Contributor (who can import translations but not new source text) when the project has no files yet: as the tooltip of the disabled Import button and of the disabled 'A translation' card. Two short sentences.",
+      },
+      "importExport.intent.translation.noFilesMaintainer": {
+        description:
+          "The same message as noFilesLead, for an organization that has raised its import floor to Maintainer (AQU-2304), so the role named as the one who can add a source text is a maintainer rather than a project lead. Shown to anyone below that floor — a Contributor, and now a project lead too — when the project has no files yet. Two short sentences.",
       },
       "importExport.intent.translation.laneArchived": {
         description:

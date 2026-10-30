@@ -2978,7 +2978,6 @@ export const zh_Hant: Catalog = {
   "org.accessModelLegend.creator.description": "擁有者角色會一直存在，直到專案所有權轉移為止。請在專案的「設定 → 分享」中管理。",
   "org.joinOrgPage.organizationLine": "組織：{name}",
   "org.joinOrgPage.unnamedOrgFallback": "未命名的組織",
-  "org.joinOrgPage.genericInviteFallback": "您受邀加入 Aquilla 上的一個組織。",
   "org.joinOrgPage.cantJoinTitle": "無法加入",
   "org.joinOrgPage.youreInTitle": "您已加入",
   "org.joinOrgPage.joinedRedirect": "已加入 {org}。正在帶您前往…",

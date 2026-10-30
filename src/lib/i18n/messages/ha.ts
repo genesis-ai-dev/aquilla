@@ -3523,7 +3523,6 @@ export const ha: Catalog = {
   "org.accessModelLegend.creator.description": "Rawar Mai mallaka tana dawwama har sai an canza mallakar aiki. Ku kula a Saitunan aikin → Raba.",
   "org.joinOrgPage.organizationLine": "Ƙungiya: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "Ƙungiya babu suna",
-  "org.joinOrgPage.genericInviteFallback": "An gayyace ku ku shiga ƙungiya a Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "Ba za a iya shiga ba",
   "org.joinOrgPage.youreInTitle": "Kun shiga",
   "org.joinOrgPage.joinedRedirect": "Kun shiga {org}. Ana kai ku can…",

@@ -1153,6 +1153,26 @@ CREATE TABLE cell_glosses (
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
+-- AQU-2308: hand-set milestones — a named start→end range of cells in one
+-- file. Its own record, not a label on a cell and not in the cell's import
+-- envelope (a re-import replaces that wholesale). The covered cells are
+-- resolved at read time by walking the file's cell order between the anchors,
+-- so nothing stored can fall out of step with the file.
+CREATE TABLE file_milestones (
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    milestone_id  TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    start_cell_id TEXT NOT NULL,
+    end_cell_id   TEXT NOT NULL,
+    author        TEXT NOT NULL,
+    event_id      TEXT NOT NULL,
+    server_seq    BIGINT,
+    created_at    BIGINT NOT NULL,
+    updated_at    BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, milestone_id)
+);
+
 -- AQU-1296: comment identity is PROJECT-SCOPED. `comment_id` was a global
 -- primary key, but the ids themselves are not globally unique — the Codex
 -- importer namespaces the event id and the file id per project and leaves
@@ -1386,6 +1406,8 @@ CREATE INDEX idx_cell_gloss_cell ON cell_glosses(project_id, file_id, cell_id, c
 CREATE INDEX idx_cell_gloss_file ON cell_glosses(project_id, file_id);
 -- AQU-1408: latest gloss per cell within one lane — the per-file read's shape.
 CREATE INDEX idx_cell_gloss_lane ON cell_glosses(project_id, file_id, cell_id, lane_id, created_at DESC);
+-- AQU-2308: every hand-set milestone of one open file — this table's only read.
+CREATE INDEX idx_file_milestones_file ON file_milestones(project_id, file_id);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
 -- "Which takes have I validated?" — a per-viewer question the editor asks for a
 -- whole file at once, which the primary key's leading columns cannot answer.

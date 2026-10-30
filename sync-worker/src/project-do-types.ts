@@ -32,6 +32,9 @@ export type OutboxEventKind =
   | "cell.audio.validate"
   | "cell.audio.unvalidate"
   | "file.create"
+  // AQU-2308: hand-set milestones (file-scoped, non-chain-mutating).
+  | "file.milestone.set"
+  | "file.milestone.remove"
 
 export interface OutboxRawEvent {
   id: string

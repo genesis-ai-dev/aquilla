@@ -630,7 +630,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'cell_audio_validators' | 'cell_attachments' | 'comments' | 'cell_backtranslations' | 'cell_glosses' | 'cell_links' | 'cell_word_morph' | 'concepts' | 'file_milestones'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -3451,6 +3451,45 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.milestone.set': {
+      // AQU-2308 — rebuild path; the dispatch path
+      // (handlers/file-milestone-events.ts) calls the same shared builder.
+      //
+      // PERMISSIVE, like the file.track.set case above and for the same
+      // reason: rebuild.ts replays already-accepted history through here, so
+      // history the live handler once accepted must never start being
+      // rejected. The name rule lives in the handler, which only ever sees
+      // new writes; here a stored name is taken as given and only a
+      // structurally impossible row is skipped.
+      const p = event.payload as EventPayloads['file.milestone.set']
+      if (!event.fileId) {
+        throw new Error(`file.milestone.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileMilestoneSetStmt(db, event.projectId, event.fileId, event.id, {
+          milestoneId: p.milestoneId,
+          name: p.name,
+          startCellId: p.startCellId,
+          endCellId: p.endCellId,
+          author: event.author,
+          serverTs: event.serverTs,
+          serverSeq: event.serverSeq ?? 0,
+        }),
+      )
+      return ['file_milestones']
+    }
+
+    case 'file.milestone.remove': {
+      const p = event.payload as EventPayloads['file.milestone.remove']
+      if (!event.fileId) {
+        throw new Error(`file.milestone.remove event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileMilestoneRemoveStmt(db, event.projectId, event.fileId, p.milestoneId),
+      )
+      return ['file_milestones']
+    }
+
     case 'source.cell.mirror': {
       // AQU-476: advance a downstream source cell to match the upstream.
       // `upstream.laneId` names the UPSTREAM lane the text came from. The row
@@ -3798,6 +3837,90 @@ export function buildFileCorpusSetStmt(
         WHERE id = ? AND project_id = ?`,
     )
     .bind(usable, eventId, fileId, projectId)
+}
+
+/**
+ * AQU-2308: upsert one hand-set milestone.
+ *
+ * Shared by the live handler and the rebuild/replay arm below, so replaying
+ * the log reproduces exactly the rows the live writes produced.
+ *
+ * Upsert on the record's own id, so re-setting a milestone (a rename, or an
+ * edge moved) is one event rather than a delete and a re-create — the
+ * navigator keeps the same row and nothing flickers. `created_at` is
+ * preserved on conflict: the record's identity does not restart because
+ * someone fixed a typo in its name.
+ *
+ * `server_seq` is the ordering guard. Replay walks the log in order, but two
+ * writers racing on one id can reach here out of order, and the LAST writer
+ * must win rather than whoever's statement lands second. Postgres evaluates
+ * the WHERE on the conflicting row, so an older event is simply dropped.
+ */
+export function buildFileMilestoneSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  record: {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+    author: string
+    serverTs: number
+    serverSeq: number
+  },
+): AquillaStatement {
+  return db
+    .prepare(
+      `INSERT INTO file_milestones (
+          project_id, file_id, milestone_id, name, start_cell_id, end_cell_id,
+          author, event_id, server_seq, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(project_id, file_id, milestone_id) DO UPDATE SET
+          name          = EXCLUDED.name,
+          start_cell_id = EXCLUDED.start_cell_id,
+          end_cell_id   = EXCLUDED.end_cell_id,
+          author        = EXCLUDED.author,
+          event_id      = EXCLUDED.event_id,
+          server_seq    = EXCLUDED.server_seq,
+          updated_at    = EXCLUDED.updated_at
+        WHERE COALESCE(file_milestones.server_seq, 0) <= COALESCE(EXCLUDED.server_seq, 0)`,
+    )
+    .bind(
+      projectId,
+      fileId,
+      record.milestoneId,
+      record.name,
+      record.startCellId,
+      record.endCellId,
+      record.author,
+      eventId,
+      record.serverSeq,
+      record.serverTs,
+      record.serverTs,
+    )
+}
+
+/**
+ * AQU-2308: drop one hand-set milestone by id.
+ *
+ * A plain DELETE rather than a tombstone: a removed division leaves nothing a
+ * reader could want, and the event log is already the history. A no-op when
+ * the row has gone, which is what makes a retried outbox entry harmless.
+ */
+export function buildFileMilestoneRemoveStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  milestoneId: string,
+): AquillaStatement {
+  return db
+    .prepare(
+      `DELETE FROM file_milestones
+        WHERE project_id = ? AND file_id = ? AND milestone_id = ?`,
+    )
+    .bind(projectId, fileId, milestoneId)
 }
 
 /**

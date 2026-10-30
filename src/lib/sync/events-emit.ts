@@ -26,6 +26,10 @@ import {
   type OutboxRawEvent,
   isGenesisKind,
 } from "./outbox-types"
+import {
+  isValidMilestoneId,
+  normalizeMilestoneName,
+} from "../../../db/shared/file-milestones"
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 // AQU-1572: per-gesture validation / audio telemetry. Instrumented here, at
@@ -2085,6 +2089,88 @@ export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+/**
+ * AQU-2308: set (or re-set) one hand-set milestone on a file.
+ *
+ * Upsert by `milestoneId`: the same id with a new name or new anchors is an
+ * edit, a fresh id is a new division. The covered cells are not sent — the
+ * navigator walks the file's live cell order between the anchors — so moving
+ * an edge is one event, not a re-write of a span.
+ *
+ * `parentId: null` and no `cellId`: this is file-scoped and
+ * non-chain-mutating, which is what keeps setting a division from marking any
+ * lane's translation stale.
+ *
+ * The name is normalized (and refused if blank) by the SHARED rule in
+ * db/shared/file-milestones.ts — the same module the server's handler calls,
+ * so the dialog and the perimeter cannot disagree about what is storable.
+ */
+export interface FileMilestoneSetInput {
+  projectId: string
+  fileId: string
+  /** Stable id; re-using one edits that milestone in place. */
+  milestoneId: string
+  /** Shown exactly as typed. Blank or whitespace-only throws. */
+  name: string
+  startCellId: string
+  endCellId: string
+  author: string
+  clientTs?: number
+}
+
+export async function emitFileMilestoneSet(input: FileMilestoneSetInput): Promise<string> {
+  if (!isValidMilestoneId(input.milestoneId)) {
+    throw new Error(`file.milestone.set: unusable milestoneId ${JSON.stringify(input.milestoneId)}`)
+  }
+  const name = normalizeMilestoneName(input.name)
+  if (name === null) {
+    throw new Error("file.milestone.set: a milestone name cannot be blank")
+  }
+  if (!input.startCellId || !input.endCellId) {
+    throw new Error("file.milestone.set: both a start cell and an end cell are required")
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "file.milestone.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      milestoneId: input.milestoneId,
+      name,
+      startCellId: input.startCellId,
+      endCellId: input.endCellId,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileMilestoneRemoveInput {
+  projectId: string
+  fileId: string
+  milestoneId: string
+  author: string
+  clientTs?: number
+}
+
+/** AQU-2308: drop one hand-set milestone. Idempotent on the server. */
+export async function emitFileMilestoneRemove(input: FileMilestoneRemoveInput): Promise<string> {
+  if (!isValidMilestoneId(input.milestoneId)) {
+    throw new Error(`file.milestone.remove: unusable milestoneId ${JSON.stringify(input.milestoneId)}`)
+  }
+  const { eventId } = await enqueueEvent({
+    kind: "file.milestone.remove",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { milestoneId: input.milestoneId },
     clientTs: input.clientTs,
   })
   return eventId

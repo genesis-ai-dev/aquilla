@@ -279,6 +279,7 @@ describe('PROJECTION_TABLES', () => {
       // AQU-1068: a source.cell.delete now clears the cell's morph rows.
       cell_word_morph: true,
       concepts: true,
+      file_milestones: true,
     }
     expect([...PROJECTION_TABLES].sort()).toEqual(Object.keys(ALL).sort())
   })

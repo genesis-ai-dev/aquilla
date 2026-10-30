@@ -87,6 +87,14 @@ export type OutboxEventKind =
   | "file.delete"
   // Restore a soft-deleted file (project_lead+; non-chain-mutating).
   | "file.restore"
+  // AQU-2308: a hand-set milestone — a named start->end range of cells in one
+  // file — upserted by id, and removed by id. File-scoped and
+  // non-chain-mutating: no parentId, and the projection touches only
+  // `file_milestones`, so setting a division marks no lane's translation stale
+  // and advances no cell's head. Maintainer floor (file.track.set's, not
+  // file.rename's — a division relayouts the navigator for everyone).
+  | "file.milestone.set"
+  | "file.milestone.remove"
   // Comments (non-chain-mutating; contributor-level).
   | "comment.create"
   | "comment.edit"
@@ -658,6 +666,23 @@ export interface OutboxEventPayloads {
   // Restore a soft-deleted file (project_lead+). Clears `files.deleted_at`.
   // All cells and audio remain intact. Non-chain-mutating (parentId omitted).
   "file.restore": Record<string, never>
+
+  // AQU-2308: upsert one hand-set milestone by id. The covered cells are NOT
+  // in the payload — only the two anchors are, and the navigator resolves the
+  // run between them from the file's live cell order, so a cell inserted
+  // inside the range is covered without a second write. Non-chain-mutating
+  // (parentId omitted).
+  "file.milestone.set": {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+  }
+  // AQU-2308: drop one hand-set milestone by id. Idempotent, so a retried
+  // outbox entry never wedges behind a record that is already gone.
+  "file.milestone.remove": {
+    milestoneId: string
+  }
 
   // ── Comments (non-chain-mutating) ────────────────────────────────────────
   "comment.create": {

@@ -98,6 +98,7 @@ import { handleConceptOccurrencesRequest } from "./events/concept-occurrences-ro
 import { handleTerminologyScanRequest } from "./events/terminology-scan-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
+import { handleFileMilestonesReadRequest } from "./events/file-milestones-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
@@ -536,6 +537,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const glossReadResponse = await handleCellGlossesReadRequest(request, env)
     if (glossReadResponse) return withCors(glossReadResponse, request)
+    // AQU-2308: every hand-set milestone on one file. Anchors only — the
+    // covered cells are resolved in the browser against the file's live cell
+    // order, so there is no second source of truth to disagree with.
+    const fileMilestonesReadResponse = await handleFileMilestonesReadRequest(request, env)
+    if (fileMilestonesReadResponse) return withCors(fileMilestonesReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
     // AQU-1233: agent-facing comment reads. Its own module (rather than another

@@ -1977,10 +1977,20 @@ export function planAdvance(
   currentTimeSeconds: number,
 ): AdvancePlan {
   let next = findNextPlayable(cells, currentIdx + 1)
+  // AQU-981: one recording shared by several lines (a range uploaded as one
+  // file, "Genesis 1:1-3") is attached whole to each of them. Having just
+  // played it through, the lines after it that play the SAME whole clip were
+  // heard already — skip them instead of replaying it once per line. Only
+  // whole clips: a line that plays its own slice of the clip still opens.
+  const playedWhole = cells[currentIdx] != null && masterWindowForCell(cells[currentIdx]) == null
   while (next >= 0) {
     const url = masterAudioForCell(cells[next])?.url
     const w = trimWindowForCell(cells[next])
     const sameClip = attachmentUrl != null && url === attachmentUrl
+    if (sameClip && playedWhole && !w && masterWindowForCell(cells[next]) == null) {
+      next = findNextPlayable(cells, next + 1)
+      continue
+    }
     if (!sameClip || !w) return { kind: "open", index: next }
     if (w.end > currentTimeSeconds) {
       return w.start < currentTimeSeconds - REWIND_EPSILON_SEC

@@ -185,6 +185,18 @@ describe("the preview names characters with nothing recorded", () => {
     expect(rows[0].clipCount).toBe(1)
     expect(rows[0].totalDurationMs).toBe(4000)
   })
+
+  it("AQU-981: a range uploaded as one file — its own take per line, one url — is ONE clip", () => {
+    const url = "frontier-audio://audio-c1-1700000000-range.wav"
+    const take = (id: string) => ({ selectedAudioId: `audio-${id}-x.wav`, attachments: { [`audio-${id}-x.wav`]: { url, type: "audio/wav", durationMs: 4000 } } })
+    const cells = [timed("c1", 10, take("c1")), timed("c2", 12, take("c2")), timed("c3", 14, take("c3"))]
+    const rows = previewAudioByCharacter(cells, SETTINGS, () => "CROWD")
+    expect(rows[0].clipCount).toBe(1)
+    expect(rows[0].totalDurationMs).toBe(4000)
+    const groups = groupAudioByCharacter(cells, SETTINGS, () => "CROWD")
+    expect(groups[0].clips).toHaveLength(1)
+    expect(groups[0].clips[0].startSec).toBe(10)
+  })
 })
 
 // ── A line nobody cast is not a character called Narrator ───────────────────

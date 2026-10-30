@@ -15,7 +15,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
-export type ImportIntent = "source" | "translation"
+export type ImportIntent = "source" | "translation" | "recordings"
 
 interface ImportIntentChoiceProps {
   value: ImportIntent
@@ -24,6 +24,9 @@ interface ImportIntentChoiceProps {
   sourceDisabledReason: string | null
   /** Why a translation can't be imported here (role, or no files), or null. */
   translationDisabledReason: string | null
+  /** AQU-981: offer "Recordings" — absent leaves the choice at two cards.
+   *  The string is why it can't be used here, or null when it can. */
+  recordingsDisabledReason?: string | null
 }
 
 export function ImportIntentChoice({
@@ -31,6 +34,7 @@ export function ImportIntentChoice({
   onChange,
   sourceDisabledReason,
   translationDisabledReason,
+  recordingsDisabledReason,
 }: ImportIntentChoiceProps) {
   const t = useT()
   const cards: { id: ImportIntent; title: string; description: string; disabledReason: string | null }[] = [
@@ -46,6 +50,15 @@ export function ImportIntentChoice({
       description: t("importExport.intent.translation.description"),
       disabledReason: translationDisabledReason,
     },
+    // AQU-981: recordings for lines already here, matched by their names.
+    ...(recordingsDisabledReason !== undefined
+      ? [{
+          id: "recordings" as const,
+          title: t("recordingsUpload.intent.title"),
+          description: t("recordingsUpload.intent.description"),
+          disabledReason: recordingsDisabledReason,
+        }]
+      : []),
   ]
   return (
     <div className="space-y-2">
@@ -54,7 +67,7 @@ export function ImportIntentChoice({
         value={value}
         onValueChange={(next) => onChange(next as ImportIntent)}
         aria-label={t("importExport.intent.groupLabel")}
-        className="grid-cols-1 sm:grid-cols-2"
+        className={cn("grid-cols-1", cards.length > 2 ? "sm:grid-cols-3" : "sm:grid-cols-2")}
       >
         {cards.map((card) => {
           const disabled = card.disabledReason !== null

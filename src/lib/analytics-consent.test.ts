@@ -12,10 +12,10 @@ afterEach(() => {
 })
 
 describe("isAnalyticsEnabled", () => {
-  it("returns false until an explicit choice is recorded", () => {
-    // No recorded choice must never enable collection.
+  it("returns true when no choice is recorded (production default)", () => {
+    // Match production: users can switch sharing off.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
-    expect(isAnalyticsEnabled()).toBe(false)
+    expect(isAnalyticsEnabled()).toBe(true)
   })
 
   it("returns true when a stored 'yes' is present", () => {

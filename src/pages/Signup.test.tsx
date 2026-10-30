@@ -36,9 +36,9 @@ it.each([
 ])("registers directly and preserves a safe destination from %s", async (path, destination) => {
   show(path)
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
-  expect(screen.getByRole("switch", { name: /share usage data/i })).not.toBeChecked()
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
   fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
   expect(screen.queryByRole("progressbar")).toBeNull()
   expect(screen.queryByRole("button", { name: /skip for now/i })).toBeNull()
   fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
@@ -74,4 +74,13 @@ it("offers returning users a direct login and respects an existing consent choic
   expect(screen.queryByRole("switch")).toBeNull()
   expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
   expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
+})
+
+it("preserves a saved opt-out and skips the privacy screen", () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "false")
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("switch")).toBeNull()
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
 })

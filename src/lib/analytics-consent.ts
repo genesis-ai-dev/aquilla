@@ -4,12 +4,12 @@ const CHANGE_EVENT = "aquilla:analytics-consent-changed"
 export function isAnalyticsEnabled(): boolean {
   if (typeof window === "undefined") return false
   const raw = window.localStorage.getItem(STORAGE_KEY)
-  return raw === "true"
+  return raw === null ? true : raw === "true"
 }
 
 /**
  * True once the user has made an explicit analytics choice (the key exists in
- * localStorage). Distinct from isAnalyticsEnabled(), which returns false when no choice
+ * localStorage). Distinct from isAnalyticsEnabled(), which returns true when no choice
  * has been recorded yet. Used to skip the onboarding
  * privacy step on subsequent runs.
  */

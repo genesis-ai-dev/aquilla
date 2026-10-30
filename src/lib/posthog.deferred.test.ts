@@ -67,8 +67,8 @@ describe("deferred posthog (AQU-2093)", () => {
   })
 })
 
-it("discards pre-consent events rather than replaying them after opt-in", async () => {
-  localStorage.removeItem("aquilla:analyticsEnabled")
+it("discards events while opted out rather than replaying them after re-enabling", async () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "false")
   vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
   const { default: posthog } = await import("./posthog")
   posthog.capture("before_consent")

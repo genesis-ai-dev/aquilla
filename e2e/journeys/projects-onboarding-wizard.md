@@ -11,7 +11,7 @@ AQU-2300 reduces the eight-step onboarding wizard to three screens. The filename
 
 ## Steps
 
-1. Open `/onboarding` (or `/signup`). On Welcome, choose **Get Started**, then on Help us improve choose whether to share usage data and **Continue**. Sharing defaults off. A previously saved choice skips this privacy screen. Welcome also offers **Sign in** for existing accounts.
+1. Open `/onboarding` (or `/signup`). On Welcome, choose **Get Started**, then on Help us improve choose whether to share usage data and **Continue**. Sharing defaults on; users can switch it off. A previously saved choice skips this privacy screen. Welcome also offers **Sign in** for existing accounts.
 2. Fill **Username**, **Email**, and **Password**, then click **Create account**. This is real registration, not a fixture response.
 3. Wait for `/orgs/...` and the signed-in account menu.
 4. Reload and verify the account menu and app destination remain available.

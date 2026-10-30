@@ -23,8 +23,3 @@ export function loadPericopeIndex(): Promise<PericopeIndex> {
     })
   return indexPromise
 }
-
-/** Drop the memo so a test can load the dataset under fresh conditions. */
-export function resetPericopeIndexForTests(): void {
-  indexPromise = null
-}

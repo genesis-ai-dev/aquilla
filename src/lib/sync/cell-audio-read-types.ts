@@ -32,6 +32,12 @@ export interface AudioAttachmentOut {
    * every take made before this column existed.
    */
   targetOffsetMs?: number | null
+  /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way from its line's start in that layout. NULL = no place of its own there:
+   * that timing reads `targetOffsetMs`, as every take before AQU-2267 does.
+   */
+  recordingsOffsetMs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the
    *  server. Never sent by the server; UI renders a "saving…" hint from it so

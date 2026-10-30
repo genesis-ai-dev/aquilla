@@ -371,6 +371,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
+    "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
+    "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
+    "projectSettings.timeline.filmAndSourcesInfo":
+      "Shows the Sources menu in the media view's top bar. Its first item is the film, for linking a video, and the rest import audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -428,6 +433,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.cellEditingFloor": "who can add and remove cells",
     "projectSettings.field.trackEditing": "timeline track editing",
     "projectSettings.field.timingLock": "the timing lock",
+    "projectSettings.field.filmAndSources": "film and sources",
     "projectSettings.field.bibleData": "Bible data",
     "projectSettings.field.bibleEnrichments": "Bible data enrichments",
     "projectSettings.field.importCellUnit": "import cell unit",
@@ -641,8 +647,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Aquilla.",
-    "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
-    "projectSettings.voice.openStudioButton": "Open Voice Studio",
+    // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
+    // cast are in Media's Voices tab.
+    "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
+    "projectSettings.voice.openVoicesButton": "Open Voices",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
       "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
@@ -1197,7 +1205,6 @@ export const projectSettings = defineNamespace({
       "The standing instructions behind every AI draft — how the AI should write, " +
       "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
-    "projectSettings.voice.studioLabel": "Voice Studio",
     "projectSettings.localModels.onDeviceLabel": "Transcription and voices",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
     "projectSettings.gitSync.minutesAbbrev": "min",
@@ -1593,6 +1600,21 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.timeline.filmAndSourcesLabel": {
+        description:
+          "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +
+          "dubbing tools — the Sources menu in its top bar, whose first item is the film (link a video).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button beside that checkbox, which opens the longer " +
+          "explanation (projectSettings.timeline.filmAndSourcesInfo).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfo": {
+        description:
+          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' is the name " +
+          "of a menu in the media view's top bar, and the film is the first item in that menu.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +

@@ -390,7 +390,12 @@ export function injectOptimisticAudioPlace(
 
   const live = list.find((s) => s.kind === "attach" && s.att.audioId === attachment.audioId)
   if (live && live.kind === "attach") {
-    live.att = { ...live.att, targetOffsetMs: attachment.targetOffsetMs }
+    // AQU-2267: both places — a move states the take's place in each timing.
+    live.att = {
+      ...live.att,
+      targetOffsetMs: attachment.targetOffsetMs,
+      recordingsOffsetMs: attachment.recordingsOffsetMs,
+    }
     attachEventBinding(fileId, live, eventId)
     broadcast(fileId, cellId, live)
     return

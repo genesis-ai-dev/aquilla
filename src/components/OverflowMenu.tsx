@@ -2,6 +2,7 @@ import { Fragment, useId, type ComponentType, type ReactNode, type Ref } from "r
 import type { VariantProps } from "class-variance-authority"
 import { MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
@@ -81,6 +82,12 @@ interface Props {
    *  an item would make the thing you wanted a badge for one click further
    *  away than it already is. */
   triggerBadge?: ReactNode
+  /**
+   * A hover label for an icon-only trigger. The media view's 40 px top bar
+   * draws Sources, Add track and Check as squares (media redesign), so their
+   * names move from the button face to a tooltip.
+   */
+  triggerTooltip?: string
 }
 
 /**
@@ -216,30 +223,34 @@ export function OverflowMenu({
   triggerLabel,
   triggerIcon,
   triggerBadge,
+  triggerTooltip,
 }: Props) {
   if (items.length === 0) return null
 
   const TriggerIcon = triggerIcon ?? MoreHorizontal
 
+  const trigger = (
+    <DropdownMenuTrigger
+      render={
+        <Button
+          ref={triggerRef}
+          variant={triggerVariant}
+          // A labelled trigger cannot be an icon-sized square.
+          size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
+          className={triggerClassName}
+          aria-label={triggerLabel ?? ariaLabel}
+          data-testid={testId}
+        >
+          <TriggerIcon className="h-4 w-4" />
+          {triggerLabel}
+          {triggerBadge}
+        </Button>
+      }
+    />
+  )
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            ref={triggerRef}
-            variant={triggerVariant}
-            // A labelled trigger cannot be an icon-sized square.
-            size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
-            className={triggerClassName}
-            aria-label={triggerLabel ?? ariaLabel}
-            data-testid={testId}
-          >
-            <TriggerIcon className="h-4 w-4" />
-            {triggerLabel}
-            {triggerBadge}
-          </Button>
-        }
-      />
+      {triggerTooltip ? <AppTooltip content={triggerTooltip}>{trigger}</AppTooltip> : trigger}
       <OverflowMenuPanel items={items} />
     </DropdownMenu>
   )

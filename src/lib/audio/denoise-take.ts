@@ -202,8 +202,15 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         author,
       })
       attached += 1
-      const placeP = piece.targetOffsetMs != null
-        ? emitCellAudioPlace({ projectId, fileId, cellId, audioId, targetOffsetMs: piece.targetOffsetMs, ...lane, author })
+      // AQU-2267: in both timings — its place following the recordings is
+      // stated beside its place following the source, so neither moves.
+      const placeP = piece.targetOffsetMs != null || piece.recordingsOffsetMs != null
+        ? emitCellAudioPlace({
+            projectId, fileId, cellId, audioId,
+            targetOffsetMs: piece.targetOffsetMs ?? null,
+            recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
+            ...lane, author,
+          })
         : null
       injectOptimisticAudioAttachment(fileId, cellId, {
         audioId,
@@ -216,6 +223,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         trimStartMs: piece.trimStartMs ?? null,
         trimEndMs: piece.trimEndMs ?? null,
         targetOffsetMs: piece.targetOffsetMs ?? null,
+        recordingsOffsetMs: piece.recordingsOffsetMs ?? null,
         ...(piece.label ? { label: piece.label } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
       }, placeP ?? eventId)

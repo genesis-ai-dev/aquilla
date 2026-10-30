@@ -53,17 +53,48 @@ function parseTakeNumber(label: string | null | undefined): number | null {
   return m ? Number(m[1]) : null
 }
 
-/** The next fresh take name for a cell, given its current takes' labels. */
-export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): string {
+/** What numbering reads of a take: its name, and, for a piece, which take it is. */
+type NumberedTake = Pick<AudioAttachmentOut, "label"> & Partial<Pick<AudioAttachmentOut, "audioId" | "pieceOf" | "trimStartMs">>
+
+/**
+ * A line's takes as the take list counts them. AQU-981 (Sam, 2026-10-29): a
+ * take split into pieces is ONE take. It goes by the name of its first named
+ * piece in clip order, which is the name the list shows ("Take 2 · split in
+ * 2"), whatever its other pieces happen to be named. Returns the highest take
+ * number, and the takes with no name yet (each a list of its pieces, in clip
+ * order), which the backfill numbers after it. A cleaned copy is never named
+ * "Take N", so it is not counted.
+ */
+function takeNumbering<T extends NumberedTake>(takes: readonly T[]): { max: number; unnamed: Array<{ key: string; pieces: T[] }> } {
+  const groups = new Map<string, T[]>()
+  takes.forEach((t, i) => {
+    const key = t.pieceOf ?? t.audioId ?? `#${i}`
+    const list = groups.get(key)
+    if (list) list.push(t)
+    else groups.set(key, [t])
+  })
   let max = 0
-  for (const t of takes) {
-    const n = parseTakeNumber(t.label)
-    if (n != null && n > max) max = n
+  const unnamed: Array<{ key: string; pieces: T[] }> = []
+  for (const [key, list] of groups) {
+    const pieces = [...list].sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0) || (a.audioId ?? "").localeCompare(b.audioId ?? ""))
+    const named = pieces.find((p) => p.label)
+    if (named) {
+      const n = parseTakeNumber(takeBaseLabel(named.label))
+      if (n != null && n > max) max = n
+    } else if (!pieces.every((p) => p.audioId && isDenoisedAudioId(p.audioId))) {
+      unnamed.push({ key, pieces })
+    }
   }
-  // Unlabeled legacy takes still occupy numbers once backfilled; count them
-  // in so a fresh recording never collides with a pending backfill.
-  const unlabeled = takes.filter((t) => !t.label).length
-  return `Take ${Math.max(max, unlabeled) + 1}`
+  unnamed.sort((a, b) => a.key.localeCompare(b.key))
+  return { max, unnamed }
+}
+
+/** The next fresh take name for a cell, given its current takes. */
+export function nextTakeLabel(takes: readonly NumberedTake[]): string {
+  // A take with no name yet takes a number once the list names it (after the
+  // highest), so a fresh recording counts it in and never collides with it.
+  const { max, unnamed } = takeNumbering(takes)
+  return `Take ${max + unnamed.length + 1}`
 }
 
 interface Props {
@@ -551,33 +582,40 @@ export function TakesStrip({
   useEffect(() => {
     // Not for someone who may not rename: every backfilled name would be
     // refused by the server.
-    if (backfilledRef.current || !session?.jwt || readOnly) return
-    const unlabeled = takes.filter((t) => !t.label && !isDenoisedAudioId(t.audioId) && !labelOverrides.has(t.audioId))
-    if (unlabeled.length === 0) return
+    // The pieces list sees one take's pieces and none of the line's other
+    // takes, so it can't number anything: the line's own list does.
+    if (backfilledRef.current || !session?.jwt || readOnly || piecesList) return
+    // AQU-981 (Sam, 2026-10-29): one number per TAKE. A take in pieces gets one
+    // number, and its pieces are named as a cut names them: "Take 2 · 1",
+    // "Take 2 · 2". Naming each piece as its own take made the line read
+    // "Take 1", "Take 2 · split in 2", then "Take 4".
+    const { max, unnamed } = takeNumbering(takes.map((t) => ({ ...t, label: labelOverrides.get(t.audioId) ?? t.label })))
+    if (unnamed.length === 0) return
     backfilledRef.current = true
-    let n = 0
-    for (const t of takes) {
-      const parsed = parseTakeNumber(t.label)
-      if (parsed != null && parsed > n) n = parsed
-    }
-    const sorted = [...unlabeled].sort((a, b) => a.audioId.localeCompare(b.audioId))
     void (async () => {
-      for (const t of sorted) {
+      let n = max
+      for (const take of unnamed) {
         n += 1
-        const label = `Take ${n}`
-        setLabelOverrides((prev) => new Map(prev).set(t.audioId, label))
-        try {
-          await emitCellAudioRename({
-            projectId, fileId, cellId, audioId: t.audioId, label, author,
-            ...(targetLang ? { targetLang } : {}),
-          })
-        } catch {
-          /* backfill is best-effort; next mount retries */
+        const names = take.pieces.map((p, i) => [p.audioId, take.pieces.length > 1 ? `Take ${n} · ${i + 1}` : `Take ${n}`] as const)
+        setLabelOverrides((prev) => {
+          const next = new Map(prev)
+          for (const [audioId, label] of names) next.set(audioId, label)
+          return next
+        })
+        for (const [audioId, label] of names) {
+          try {
+            await emitCellAudioRename({
+              projectId, fileId, cellId, audioId, label, author,
+              ...(targetLang ? { targetLang } : {}),
+            })
+          } catch {
+            /* backfill is best-effort; next mount retries */
+          }
         }
       }
       notifyAudioAttachmentsChanged(fileId)
     })()
-  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly])
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly, piecesList])
 
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   // AQU-1767: a split take is one row (its first piece stands for it), named

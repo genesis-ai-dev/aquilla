@@ -83,7 +83,16 @@ const TRACK_KINDS = new Set([
  */
 const RESERVED_SLOT_IDS = new Set(['recording', 'generatedVoice'])
 
-const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId', 'contentFileId'])
+const PATCH_KEYS = new Set([
+  'kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId', 'contentFileId',
+  // AQU-2252 (Sam, Oct 29): `false` makes an added track a LAYER — while the
+  // file follows its recordings its takes no longer set their lines' lengths.
+  // Every track sets them by default, so only `false` means anything; null
+  // clears it back. HAND-MIRRORED with PersistedTrackPatch.setsLineLengths in
+  // src/lib/timeline/tracks.ts. Gated like every key outside {name, order,
+  // color}: it changes what the timeline holds, not how a track looks.
+  'setsLineLengths',
+])
 
 /**
  * A palette ID, and validated as a SHAPE rather than against a list of the ids
@@ -276,6 +285,27 @@ export function handleFileTrackSet(
           status: 400,
           reason: `file.track.set event ${event.id} sets sourceTrackId on default track ${trackId}`,
         }
+      }
+    }
+  }
+
+  if (patch != null && 'setsLineLengths' in patch && patch.setsLineLengths !== null) {
+    const { setsLineLengths } = patch
+    if (typeof setsLineLengths !== 'boolean') {
+      return {
+        ok: false,
+        status: 400,
+        reason: `file.track.set event ${event.id} carries an unusable setsLineLengths: ${String(setsLineLengths)}`,
+      }
+    }
+    // The Language lane's MAIN track always sets its lines' lengths — it is
+    // what a line is measured from — so, like `kind` and `sourceTrackId`, the
+    // switch belongs to added tracks only.
+    if (DEFAULT_TRACK_IDS.has(trackId)) {
+      return {
+        ok: false,
+        status: 400,
+        reason: `file.track.set event ${event.id} sets setsLineLengths on default track ${trackId}`,
       }
     }
   }

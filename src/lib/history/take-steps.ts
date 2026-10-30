@@ -27,13 +27,34 @@ export interface CutRecord {
   atMs: number
   /** The second half's id. A redo mints a fresh one and stores it here. */
   newAudioId: string
-  before: { trimEndMs: number | null; label: string | null; targetOffsetMs: number | null }
+  before: {
+    trimEndMs: number | null
+    label: string | null
+    targetOffsetMs: number | null
+    /** AQU-2267: absent on a cut recorded before it (read as null). */
+    recordingsOffsetMs?: number | null
+  }
   /** Whether the cut renamed the first piece ("Take 3" → "Take 3 · 1"). */
   renamed: boolean
 }
 
 export interface TakeWindowData { cellId: string; audioId: string; before: TakeWindow; after: TakeWindow }
-export interface TakePlaceData { cellId: string; audioId: string; before: number | null; after: number | null }
+/** AQU-2267: a take's place in each timing, as stored (null = not placed there). */
+export interface StoredTakePlace { targetOffsetMs: number | null; recordingsOffsetMs: number | null }
+/**
+ * A move. `before`/`after` are its place following the source — and the only
+ * place a step saved before AQU-2267 names. AQU-2267: `recordingsBefore` /
+ * `recordingsAfter` are its place following the recordings, absent on such an
+ * old step (read as null: the take had no place of its own there then).
+ */
+export interface TakePlaceData {
+  cellId: string
+  audioId: string
+  before: number | null
+  after: number | null
+  recordingsBefore?: number | null
+  recordingsAfter?: number | null
+}
 export interface TakeCutData { cuts: CutRecord[] }
 /** Choosing which take plays in a slot. `before` null = the slot was empty;
  *  `after` null = the choice emptied it (a voice made to sound, decision 11). */
@@ -73,7 +94,8 @@ export interface TakeStepContext {
   /** Which take plays in a slot right now (the group's first piece for a cut take). */
   selectedIn(cellId: string, slot: string): string | null
   applyTrim(cellId: string, audioId: string, w: TakeWindow): Promise<void>
-  applyPlace(cellId: string, audioId: string, offset: number | null): Promise<void>
+  /** AQU-2267: both places, in one write. */
+  applyPlace(cellId: string, audioId: string, place: StoredTakePlace): Promise<void>
   /** Cut `c.audioId` at `c.atMs` into a new piece `newAudioId`. */
   cut(c: CutRecord, newAudioId: string): Promise<boolean>
   /** Join a cut back: remove the second piece, give the first its end (and name) back. */
@@ -105,13 +127,20 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     await ctx.applyTrim(d.cellId, d.audioId, to)
     return DONE
   }
-  const placeFlip = async (d: TakePlaceData, from: number | null, to: number | null): Promise<StepOutcome> => {
+  // AQU-2267: both places together — checked together (a move since, in
+  // either timing, is someone else's change) and put back in one write.
+  const placeFlip = async (d: TakePlaceData, from: StoredTakePlace, to: StoredTakePlace): Promise<StepOutcome> => {
     const att = ctx.readTake(d.cellId, d.audioId)
     if (!att) return GONE
-    if ((att.targetOffsetMs ?? null) !== from) return CHANGED
+    if ((att.targetOffsetMs ?? null) !== from.targetOffsetMs) return CHANGED
+    if ((att.recordingsOffsetMs ?? null) !== from.recordingsOffsetMs) return CHANGED
     await ctx.applyPlace(d.cellId, d.audioId, to)
     return DONE
   }
+  const placeBefore = (d: TakePlaceData): StoredTakePlace =>
+    ({ targetOffsetMs: d.before, recordingsOffsetMs: d.recordingsBefore ?? null })
+  const placeAfter = (d: TakePlaceData): StoredTakePlace =>
+    ({ targetOffsetMs: d.after, recordingsOffsetMs: d.recordingsAfter ?? null })
 
   // A cut can be joined back only while both halves are exactly as the cut
   // left them — the first ends at the cut, the second starts there, runs to
@@ -127,7 +156,8 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       first.trimEndMs === c.atMs &&
       second.trimStartMs === c.atMs &&
       (second.trimEndMs ?? null) === c.before.trimEndMs &&
-      (second.targetOffsetMs ?? null) === c.before.targetOffsetMs
+      (second.targetOffsetMs ?? null) === c.before.targetOffsetMs &&
+      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null)
     )
   }
   const whole = (c: CutRecord): boolean | null => {
@@ -186,8 +216,8 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       redo: (d: TakeWindowData) => windowFlip(d, d.before, d.after),
     } as StepHandler<never>,
     "take.place": {
-      undo: (d: TakePlaceData) => placeFlip(d, d.after, d.before),
-      redo: (d: TakePlaceData) => placeFlip(d, d.before, d.after),
+      undo: (d: TakePlaceData) => placeFlip(d, placeAfter(d), placeBefore(d)),
+      redo: (d: TakePlaceData) => placeFlip(d, placeBefore(d), placeAfter(d)),
     } as StepHandler<never>,
     "take.cut": {
       async undo(d: TakeCutData) {

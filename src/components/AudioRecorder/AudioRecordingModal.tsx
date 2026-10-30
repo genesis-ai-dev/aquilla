@@ -32,7 +32,7 @@ import {
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, piecesOf, takeBaseLabel } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, listedTakeCount as countListedTakes, piecesOf, takeBaseLabel } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -754,10 +754,7 @@ export function AudioRecordingModal({
    * heal, which slot a new take is written to — because those are all
    * per-track. Only "is there anything to show" is about the whole list.
    */
-  const listedTakeCount = useMemo(
-    () => takeGroups.reduce((n, g) => n + g.takes.length, 0),
-    [takeGroups],
-  )
+  const listedTakeCount = useMemo(() => countListedTakes(takeGroups), [takeGroups])
 
   // The source clip itself — the recording slot's "no take" state. Activating
   // a TTS take hands the slot back to it so the generated audio can sound.

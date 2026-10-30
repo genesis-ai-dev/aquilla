@@ -334,10 +334,11 @@ Example: \`{ "kind": "SetTiming", "fileId": "f1", "cellId": "c3", "startMs": 240
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetTrackOverride
-Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
+Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId?, setsLineLengths? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
 Compiles to \`file.track.set\`, merged into \`files.meta.trackOverrides[trackId]\`. Track structure is file structure \u2014 MAINTAINER (600).
 Gotchas:
 - TWO GATES. Restructuring patches (anything beyond \`name\`/\`order\`, and every \`patch: null\` delete) additionally require the project's \`allowTrackEditing\` \u2014 with it off, even an OWNER is refused. Renames and reorders stay ungated. Turn it on with PatchSettings first.
+- \`setsLineLengths: false\` makes an added track a layer (music, effects): while the file follows its recordings, its takes set no line's length. Every track sets them by default; the four derived tracks cannot be changed.
 - \`trackId\` must match /^[A-Za-z0-9_-]{1,64}$/; the four derived ids (source-subtitles, source-audio, target-subtitles, target-audio) are reserved and cannot be given a \`kind\`.
 Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audio", "patch": { "name": "Dub \u2014 ES" } }\``,
   },

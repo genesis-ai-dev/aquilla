@@ -191,6 +191,10 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   // omit it and must not be held hostage to a position they never asserted.
   if (att.targetOffsetMs !== undefined && (server.targetOffsetMs ?? null) !== att.targetOffsetMs)
     return false
+  // AQU-2267: and its place following the recordings, by the same rule. A move
+  // the source's limits held still changes only this one.
+  if (att.recordingsOffsetMs !== undefined && (server.recordingsOffsetMs ?? null) !== att.recordingsOffsetMs)
+    return false
   return true
 }
 
@@ -589,6 +593,8 @@ export function mergeCellsWithAudio(
         // that starts exactly on its line sits, and it must stay
         // distinguishable from "never placed".
         ...(a.targetOffsetMs != null ? { targetOffsetMs: a.targetOffsetMs } : {}),
+        // AQU-2267: its place following the recordings, by the same rule.
+        ...(a.recordingsOffsetMs != null ? { recordingsOffsetMs: a.recordingsOffsetMs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."

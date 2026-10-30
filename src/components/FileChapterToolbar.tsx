@@ -29,12 +29,11 @@ export interface HiddenCellsIndicatorProps {
   onRevealedChange: (revealed: boolean) => void
 }
 
-interface FileChapterToolbarProps {
+export interface FileChapterToolbarProps {
   lens: EditorLens
   onLensChange: (lens: EditorLens) => void
   onAgentSelect?: () => void
   agentActive?: boolean
-  timeOrdered?: boolean
   checkOpen: boolean
   checkRunning: boolean
   checkResult: CheckRunResult | null
@@ -53,6 +52,9 @@ interface FileChapterToolbarProps {
   audioLane?: boolean
   /** AQU-1767 phase 2: the History panel's button, beside the lens switch. */
   historyControl?: ReactNode
+  /** The media view's top bar (canvas board 55): the Panels button, before
+   *  the ⋯. */
+  beforeMenu?: ReactNode
 }
 
 /** Chapter-row right-side controls: mode switch and file-options menu. */
@@ -61,7 +63,6 @@ export function FileChapterToolbar({
   onLensChange,
   onAgentSelect,
   agentActive = false,
-  timeOrdered = false,
   checkOpen,
   checkRunning,
   checkResult,
@@ -76,6 +77,7 @@ export function FileChapterToolbar({
   onTranslateAsReadChange,
   audioLane = false,
   historyControl,
+  beforeMenu,
 }: FileChapterToolbarProps) {
   const t = useT()
 
@@ -187,8 +189,8 @@ export function FileChapterToolbar({
           onChange={onLensChange}
           onAgentSelect={onAgentSelect}
           agentActive={agentActive}
-          timeOrdered={timeOrdered}
         />
+        {beforeMenu}
         <OverflowMenu
           items={overflowItems}
           triggerRef={fileOptionsAnchorRef}

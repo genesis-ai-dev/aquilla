@@ -47,6 +47,9 @@ describe('isGatedTrackPatch — the gated half', () => {
     // A colour does not launder a restructuring field riding with it.
     ['a recolour that also moves the track into a folder', { color: 'cyan', groupId: 'grp-1' }],
     ['setting an alignment', { sourceTrackId: 'source-subtitles' }],
+    // AQU-2252: whether a track's takes set its lines' lengths changes what
+    // the timeline holds, so it is track editing, not presentation.
+    ['making a track a layer', { setsLineLengths: false }],
     ['ejecting a track from its folder', { groupId: null }],
     // THE ONE THAT LOOKS UNGATED AND IS NOT. A folder drop writes both fields
     // in one patch, because a rejected second event would leave the track half

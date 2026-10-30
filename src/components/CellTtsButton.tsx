@@ -316,7 +316,7 @@ export function CellTtsButton({
                 }
               }
               return made
-            })
+            }, { owns: { cells: [cellId, ...(alsoAttachTo ?? []).map((a) => a.cellId)], kinds: ["take."] } })
             blob = gen.blob
             // AQU-646 stage 3g: ONE PRESS, MORE THAN ONE CLIP — say so.
             //

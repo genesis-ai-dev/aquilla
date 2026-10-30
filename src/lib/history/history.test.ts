@@ -276,6 +276,38 @@ describe("groups", () => {
     recordGroup({ labelKey: "bulk" }, [step("a")])
     expect((await undoLast())?.outcome).toEqual({ kind: "skipped", reason: "changed" })
   })
+
+  // Review, Oct 29: two voices generating at once (line 1, then line 2 while
+  // line 1 is still out) are two groups open together, not one inside the
+  // other. Each keeps its own line's steps, and a translation typed meanwhile
+  // is a step of its own.
+  it("groups running at the same time each keep their own lines' steps", async () => {
+    const log: string[] = []
+    registerStepKinds({ "test.log": logKind(log) })
+    const onLine = (cellId: string, name: string) => ({ kind: "test.log", data: { name, cellId }, labelKey: name })
+    let finishA: () => void = () => {}
+    let finishB: () => void = () => {}
+    const a = withGroup({ labelKey: "voice 1" }, async () => {
+      await new Promise<void>((r) => (finishA = r))
+      recordStep(onLine("c1", "take on 1"))
+      recordStep(onLine("c1", "choice on 1"))
+    }, { alwaysGroup: true, owns: { cells: ["c1"], kinds: ["test."] } })
+    const b = withGroup({ labelKey: "voice 2" }, async () => {
+      await new Promise<void>((r) => (finishB = r))
+      recordStep(onLine("c2", "take on 2"))
+      recordStep(onLine("c2", "choice on 2"))
+    }, { alwaysGroup: true, owns: { cells: ["c2"], kinds: ["test."] } })
+    recordStep({ kind: "text.commit", data: { name: "typed", cellId: "c1" }, labelKey: "typed" })
+    finishA()
+    await a
+    finishB()
+    await b
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["typed", "voice 1", "voice 2"])
+    registerStepKinds({ "text.commit": logKind(log) })
+    await undoLast()
+    await undoLast()
+    expect(log).toEqual(["undo choice on 2", "undo take on 2", "undo choice on 1", "undo take on 1"])
+  })
 })
 
 describe("undo to here", () => {

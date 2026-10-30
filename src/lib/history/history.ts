@@ -143,8 +143,18 @@ let laneSwitcher: ((lane: string) => Promise<LaneSwitch>) | null = null
 let remote: HistoryRemote | null = null
 let idCounter = 0
 
-/** Steps recorded while a `withGroup` runs, innermost last. */
-const groupBuffers: StepRecord[][] = []
+/**
+ * The groups running now, newest last. A group that does network work
+ * (generating a voice, validating a chapter) runs for seconds, so two can be
+ * open at once without one being inside the other: each takes in only the
+ * steps it owns (`GroupOwns`), and closes in whatever order its work ends.
+ */
+interface OpenGroup {
+  buffer: StepRecord[]
+  /** Null: it takes in every step recorded while it runs. */
+  owns: ((r: StepRecord) => boolean) | null
+}
+const openGroups: OpenGroup[] = []
 
 /**
  * One history per project and person, whatever language is open (decision 11,
@@ -618,9 +628,9 @@ export function recordStep<D>(
       if (!ok) dropRecord(key, record.id)
     })
   }
-  const buffer = groupBuffers[groupBuffers.length - 1]
-  if (buffer && key === activeScope) {
-    buffer.push(record as StepRecord)
+  const group = key === activeScope ? groupFor(record as StepRecord) : undefined
+  if (group) {
+    group.buffer.push(record as StepRecord)
     return
   }
   pushRecord(record as StepRecord, key)
@@ -654,23 +664,65 @@ function pushRecord(record: StepRecord, key: string): void {
 }
 
 /**
+ * Which steps a group takes in: those on its lines, of its kinds. Anything
+ * else recorded while it runs (a translation typed during a generation,
+ * another line's voice generating at the same time) stays a step of its own
+ * (review, Oct 29).
+ */
+export interface GroupOwns {
+  /** The lines (cell ids) its steps are on. */
+  cells: Iterable<string>
+  /** Step kinds: exact ("vote.text"), or a prefix ending in "." ("take."). */
+  kinds: readonly string[]
+}
+
+function ownsFilter(o: GroupOwns): (r: StepRecord) => boolean {
+  const cells = new Set(o.cells)
+  const kindOk = (kind: string) => o.kinds.some((k) => (k.endsWith(".") ? kind.startsWith(k) : kind === k))
+  const owns = (r: StepRecord): boolean => {
+    if (r.kind === GROUP_KIND) {
+      // An inner group joins this one when all of it is this one's.
+      const parts = (r.data as { steps?: StepRecord[] } | null)?.steps ?? []
+      return parts.length > 0 && parts.every(owns)
+    }
+    const cellId = (r.data as { cellId?: unknown } | null)?.cellId
+    return typeof cellId === "string" && cells.has(cellId) && kindOk(r.kind)
+  }
+  return owns
+}
+
+/** The newest open group that takes this step in, if any. */
+function groupFor(record: StepRecord): OpenGroup | undefined {
+  for (let i = openGroups.length - 1; i >= 0; i -= 1) {
+    const g = openGroups[i]
+    if (!g.owns || g.owns(record)) return g
+  }
+  return undefined
+}
+
+/**
  * Run `fn` and record every step it records as ONE step named `labelKey`. A
  * group of one keeps its own name unless `alwaysGroup` is set (so "Validated
  * 1 line" never replaces the plainer "Validated a line"). Groups nest: an
  * inner group joins the outer one.
+ *
+ * Pass `owns` whenever `fn` waits on the network: without it the group takes
+ * in EVERY step recorded until it ends, whatever line or action it is.
  */
 export async function withGroup<T>(
   label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
   fn: () => Promise<T>,
-  opts?: { alwaysGroup?: boolean },
+  opts?: { alwaysGroup?: boolean; owns?: GroupOwns },
 ): Promise<T> {
-  const buffer: StepRecord[] = []
-  groupBuffers.push(buffer)
+  const group: OpenGroup = { buffer: [], owns: opts?.owns ? ownsFilter(opts.owns) : null }
+  const buffer = group.buffer
+  openGroups.push(group)
   let result: T
   try {
     result = await fn()
   } finally {
-    groupBuffers.pop()
+    // Its own entry, wherever it now sits: groups open together end in any order.
+    openGroups.splice(openGroups.indexOf(group), 1)
   }
   if (buffer.length === 1 && !opts?.alwaysGroup) {
     const { id: _id, lane, ...only } = buffer[0]
@@ -979,7 +1031,7 @@ export function resetHistoryForTests(): void {
   pulls.clear()
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = null
-  groupBuffers.length = 0
+  openGroups.length = 0
   activeScope = null
   activeUser = null
   activeLane = ""

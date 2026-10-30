@@ -11973,7 +11973,7 @@ export function ProjectWorkspace() {
                 })
               }
             },
-            { alwaysGroup: true },
+            { alwaysGroup: true, owns: { cells: summary.validatable.map((cell) => cell.id), kinds: ["vote.text"] } },
           )
           const repetitions = repetitionRun
             ? await repetitionRun.apply(summary.validatable.map((cell) => ({
@@ -12071,7 +12071,7 @@ export function ProjectWorkspace() {
               })
             }
           },
-          { alwaysGroup: true },
+          { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
         )
         await refreshOutboxPending()
         // EVERY file the run touched, not just the open one. On a file with an
@@ -12686,6 +12686,7 @@ export function ProjectWorkspace() {
           fileName: activeFileNameRef.current,
         },
         async () => { for (const id of targets) await voteOne(id) },
+        { owns: { cells: [cellId], kinds: ["vote.audio"] } },
       )
       try {
         await commitAudioValidation([cur.owner.fileId], { getTokenForFile: getTokenForProjectFile })

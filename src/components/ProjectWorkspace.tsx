@@ -13738,6 +13738,10 @@ export function ProjectWorkspace() {
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
   chapterPickRunRef.current = { projectId: project?.id, session: frontierSession }
+  // The file's chapters and lines, for the chapter pick below and for Play
+  // all's run into the next chapter. Declared before both read it: the React
+  // Compiler only treats it as a ref when it sees the useRef first.
+  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
     const run = chapterRunRef.current
@@ -13752,7 +13756,6 @@ export function ProjectWorkspace() {
   }, [])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
-  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
   useLayoutEffect(() => {
     chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
     showChapterOfCellRef.current = (cellId) => {

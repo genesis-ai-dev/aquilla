@@ -243,8 +243,12 @@ export function scriptMockResponse(messages: ChatMessage[]) {
 
   // AQU-2302: a recordings folder's naming. Route on the server-owned system
   // contract, like the importer above. The "brain" reads the first sampled
-  // name: "Mt-ch19_v01" gets the chapter-and-verse rule; anything else gets a
-  // rule that fits nothing, so the retry and the "didn't fit" path can be seen.
+  // name:
+  //   - "Mt-ch19_v01": the chapter-and-verse rule, which the team may keep;
+  //   - "sermon_01": the verse, with Matthew 20 as constants; it places the
+  //     folder but is never kept (a constant book and chapter);
+  //   - "fail-…": a rule that fits nothing, then a retry that fails outright;
+  //   - anything else: a rule that fits nothing, twice ("didn't fit").
   const namesSystemPrompt = messages.some((message) =>
     message.role === "system"
       && typeof message.content === "string"
@@ -254,6 +258,15 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     const first = userText.split("<file-names>\n")[1]?.split("\n")[0] ?? ""
     const retry = userText.includes("<failed-names>")
     console.log(`[mock] recording-names rule${retry ? " (retry)" : ""} for ${first}`)
+    if (/^fail-/i.test(first) && retry) return respond("Sorry, I can't tell.")
+    if (/^sermon_\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "sermon_{verse}" }],
+        book: "MAT",
+        chapter: 20,
+        explanation: "The number is the verse; every recording is Matthew 20.",
+      }))
+    }
     return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
       ? {
           templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],

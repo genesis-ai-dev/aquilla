@@ -153,3 +153,24 @@ describe("scripted local agent", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 })
+
+// AQU-2302: the scripted answers a local walk of the naming assistant needs.
+describe("scripted recordings naming", () => {
+  const ask = (names: string[], retry = false) => message(scriptMockResponse([
+    { role: "system", content: "You work out how a folder of audio recordings is named, so an app can put each recording on its line." },
+    { role: "user", content: ["<file-names>", ...names, "</file-names>", ...(retry ? ["<failed-names>", `${names[0]} → no template fitted (noTemplate)`, "</failed-names>"] : [])].join("\n") },
+  ])).content as string
+
+  it("reads Mt-ch19_v01 as the book, the chapter and the verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })
+  })
+
+  it("reads sermon_01 with a constant book and chapter", () => {
+    expect(JSON.parse(ask(["sermon_01.ogg"]))).toMatchObject({ templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20 })
+  })
+
+  it("answers a fail- folder's retry with no rule at all", () => {
+    expect(JSON.parse(ask(["fail-a.ogg"]))).toMatchObject({ templates: [{ pattern: "rec-{verse}" }] })
+    expect(() => JSON.parse(ask(["fail-a.ogg"], true))).toThrow()
+  })
+})

@@ -86,3 +86,16 @@ describe("AiModelsStep skip (AQU-701)", () => {
     expect(row?.aiSetupSkipped).toBe(false)
   })
 })
+
+// AQU-2263: the Gemini choice says which key voices use right now.
+describe("AiModelsStep — which Gemini key is in use", () => {
+  it("your own key saved in this browser, when the project has none", async () => {
+    const { setUserApiKey } = await import("@/lib/store/user-api-keys")
+    setUserApiKey("gemini-tts", "AIza-mine")
+    render(<AiModelsStep project={makeProject({ ttsSettings: { provider: "gemini" } } as Partial<ProjectRecord>)} onUpdated={vi.fn()} />)
+    fireEvent.click(screen.getByText("Set up transcription & voice"))
+    const line = await screen.findByTestId("setup-gemini-key-in-use")
+    expect(line).toHaveTextContent("Using your own key (saved in this browser).")
+    setUserApiKey("gemini-tts", undefined)
+  })
+})

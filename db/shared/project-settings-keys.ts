@@ -23,6 +23,7 @@ import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
+import { DRAFTING_SETTINGS_TYPE_NAME, draftingSettingsProblem } from './drafting-settings'
 import {
   ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
   ALGORITHMIC_CHECKS_TYPE_NAME,
@@ -128,6 +129,14 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
 
   // Drafting
   systemPrompt: { kind: 'string' },
+  // AQU-2259: the team's AI drafting settings — retrieval tuning, batch sizes,
+  // the model choice and the Health penalty (db/shared/drafting-settings.ts).
+  // Never an AI key: those stay on the device or with the organization.
+  draftingSettings: {
+    kind: 'object',
+    problem: (value) => draftingSettingsProblem(value),
+    typeName: DRAFTING_SETTINGS_TYPE_NAME,
+  },
   draftContext: { kind: 'object' },
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },

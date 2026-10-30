@@ -134,8 +134,6 @@ export const onboarding = defineNamespace({
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
-    "onboarding.step.privacy.shareDescription":
-      "Helps us provide support and improve Aquilla for everyone. Includes usage events and session recordings for diagnosing issues.",
     "onboarding.step.privacy.footer":
       "You can change this anytime in Settings. Read our",
     "onboarding.step.privacy.policyLink": "Privacy Policy",
@@ -383,7 +381,8 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.group.account": "Account",
 
     // — Translator profile fields (was PROFILE_TEXT_FIELDS) —
-    "onboarding.preferences.profile.responseLanguage.label": "Assistant language",
+    // AQU-2263: says what it does; "Assistant language" stays the project-wide one.
+    "onboarding.preferences.profile.responseLanguage.label": "The assistant answers me in",
     "onboarding.preferences.profile.responseLanguage.placeholder":
       "e.g. Tagalog — the AI replies in this language",
     "onboarding.preferences.profile.age.label": "Age",
@@ -430,8 +429,6 @@ export const onboarding = defineNamespace({
 
     // — PrivacySection —
     "onboarding.preferences.privacy.groupLabel": "Analytics",
-    "onboarding.preferences.privacy.rowDescription":
-      "Events like project creation, exports, and AI translations. Never the contents of your translations or files.",
 
     // — TranslatorProfileSection —
     "onboarding.preferences.profileSection.groupLabel": "About you",

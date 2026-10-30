@@ -2104,7 +2104,13 @@ export function TimelineEditor({
   // AQU-2252 (Sam, Oct 29): the file's added tracks, and which of them are
   // layers — the same answer the transport lays the file out from, so the
   // drawing, the Timing menu and the playback agree about every line.
-  const programmeTracks = useMemo(() => programmeTrackSlots(tracks), [tracks])
+  // Keyed on the answer, not on the tracks: renaming or recolouring a track
+  // makes a new tracks array, and must not lay the whole file out again.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(tracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
   const timingLengths = useMemo(() => {
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)

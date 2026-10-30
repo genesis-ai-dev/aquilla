@@ -14808,7 +14808,13 @@ export function ProjectWorkspace() {
   // AQU-2252 (Sam, Oct 29): …and which of the added tracks are layers, so the
   // transport lays every line out at the length the timeline draws. The same
   // answer the timeline and the play strip are handed.
-  const programmeTracks = useMemo(() => programmeTrackSlots(serverTimelineTracks), [serverTimelineTracks])
+  // Keyed on the answer (a renamed track is a new tracks array), so the play
+  // strip doesn't lay the file out again for a rename.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(serverTimelineTracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
   const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
   useEffect(() => {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])

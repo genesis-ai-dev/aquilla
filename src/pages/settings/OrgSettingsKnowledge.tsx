@@ -13,6 +13,7 @@ export function OrgSettingsKnowledge() {
   return (
     <OrgSettingsDetailPage
       title={t("knowledgeBase.title")}
+      page="knowledge"
       description={t("knowledgeBase.orgDescription")}
     >
       {activeOrgId != null ? (

@@ -163,13 +163,8 @@ export function BuiltinChecksList({
           </Badge>
         )}
         {showHarmonize && (
-          <AppTooltip
-            content={
-              !canHarmonize
-                ? t("editor.selection.harmonizeNeedLead")
-                : t("rules.builtinChecks.harmonizeAllTooltip", { count })
-            }
-          >
+          // Its words name it; why it is greyed out opens on a click (AQU-2260).
+          <AppTooltip content={!canHarmonize ? t("editor.selection.harmonizeNeedLead") : null}>
             <Button
               variant="outline"
               disabled={!canHarmonize}
@@ -190,12 +185,12 @@ export function BuiltinChecksList({
             severity: (v ?? rule.severity) as "major" | "minor",
           })}
         >
-          <AppTooltip
-            content={!canManage ? t("rules.builtinChecks.manageNeedsMaintainer") : undefined}
-            disabled={canManage}
-          >
+          {/* Greyed out, so the stand-in AppTooltip draws takes the click and
+              says why (AQU-2260 — never a hover). */}
+          <AppTooltip content={!canManage ? t("rules.builtinChecks.manageNeedsMaintainer") : undefined}>
             <SelectTrigger
               size="sm"
+              disabled={!canManage}
               className="text-xs"
               aria-label={t("rules.builtinChecks.severitySelectAriaLabel", { name })}
             >

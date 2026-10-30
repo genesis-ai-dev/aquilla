@@ -15,6 +15,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
+import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { UserError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
@@ -23,7 +24,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
-type AuthMode = "login" | "signup"
+type AuthMode = "login" | "signup" | "forgot"
 
 /** Which whole-sentence role-line variant to render, mirroring JoinPage's
  * roleLineKey — one key per combination so word order can move freely in
@@ -250,13 +251,24 @@ export function JoinOrgPage() {
       </CardHeader>
       <CardContent className="space-y-4">
         {previewSummary}
-        <p className="text-sm text-muted-foreground">
-          {authMode === "login"
-            ? "Sign in to accept your invitation."
-            : "Create an account to accept your invitation."}
-        </p>
+        {authMode !== "forgot" && (
+          <p className="text-sm text-muted-foreground">
+            {authMode === "login"
+              ? "Sign in to accept your invitation."
+              : "Create an account to accept your invitation."}
+          </p>
+        )}
         {authMode === "login" ? (
-          <FrontierLoginForm onSuccess={() => {}} initialUsername={loginPrefill} />
+          <FrontierLoginForm
+            onSuccess={() => {}}
+            initialUsername={loginPrefill}
+            onForgotPassword={() => setAuthMode("forgot")}
+          />
+        ) : authMode === "forgot" ? (
+          <FrontierForgotPasswordForm
+            onBack={() => setAuthMode("login")}
+            returnTo={`/join-org/${token}`}
+          />
         ) : (
           <FrontierSignupForm
             onSuccess={() => {}}
@@ -266,15 +278,17 @@ export function JoinOrgPage() {
             }}
           />
         )}
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
-        >
-          {authMode === "login"
-            ? "Need an account? Sign up"
-            : "Already have an account? Sign in"}
-        </button>
+        {authMode !== "forgot" && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
+          >
+            {authMode === "login"
+              ? "Need an account? Sign up"
+              : "Already have an account? Sign in"}
+          </button>
+        )}
       </CardContent>
     </JoinOrgShell>
   )

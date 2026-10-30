@@ -1,23 +1,19 @@
-import { Info } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
+import type { ReactNode } from "react"
+import { InfoNote } from "@/components/ui/info-note"
 
-/** Circled-i next to a field label. Hover/focus shows `content`. */
+/** Circled-i next to a field label. A click opens `content` in a small note
+ *  anchored to it, and a second click shuts it (AQU-2260, Sam, Oct 29: an
+ *  explanation never opens on hover). */
 export function VoiceInfoTip({
   content,
   label,
 }: {
-  content: string
+  content: ReactNode
   label: string
 }) {
   return (
-    <AppTooltip content={content} side="top">
-      <button
-        type="button"
-        className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-        aria-label={label}
-      >
-        <Info className="size-3.5" aria-hidden />
-      </button>
-    </AppTooltip>
+    <InfoNote label={label} side="top" align="center" className="size-5 items-center justify-center rounded-full">
+      {content}
+    </InfoNote>
   )
 }

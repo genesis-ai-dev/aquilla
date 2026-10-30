@@ -203,6 +203,23 @@ describe("tracks", () => {
     expect(ctx.removeTakes).toHaveBeenCalledWith(takes)
   })
 
+  // AQU-2252: making a track a layer is one step, undone like any other.
+  it("undoes and redoes making a track a layer", async () => {
+    const { h, state } = tracks({ t1: { kind: "audio", name: "Music", order: 0, setsLineLengths: false } })
+    const d = { changes: [{ trackId: "t1", before: { setsLineLengths: null }, after: { setsLineLengths: false } }] }
+    expect(await h["track.patch"].undo(d)).toEqual({ kind: "done" })
+    expect(state.t1.setsLineLengths ?? null).toBeNull()
+    expect(await h["track.patch"].redo(d)).toEqual({ kind: "done" })
+    expect(state.t1.setsLineLengths).toBe(false)
+  })
+
+  it("trackFieldsOf remembers whether a track sets its lines' lengths", () => {
+    const track = { id: "t", kind: "audio", name: "Music", order: 2, setsLineLengths: false }
+    expect(trackFieldsOf(track, ["setsLineLengths"])).toEqual({ setsLineLengths: false })
+    const voice = { id: "t", kind: "audio", name: "Boaz", order: 2 }
+    expect(trackFieldsOf(voice, ["setsLineLengths"])).toEqual({ setsLineLengths: null })
+  })
+
   it("trackFieldsOf narrows to the fields a verb wrote", () => {
     const track = { id: "t", kind: "audio", name: "Dub", order: 2, color: "amber" }
     expect(trackFieldsOf(track, ["color"])).toEqual({ color: "amber" })

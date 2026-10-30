@@ -352,13 +352,15 @@ describe("speech rails", () => {
   })
 })
 
-describe("details on focus, and 'Show every line by …'", () => {
-  it("opens on keyboard focus with the voice's facts and where each name came from", async () => {
+// AQU-2260 (Oct 29, fourth pass): the details open on a click (Enter or Space
+// from the keyboard), never on hover and never on focus alone.
+describe("details on click, and 'Show every line by …'", () => {
+  it("opens on a click with the voice's facts and where each name came from", async () => {
     renderTable(makeProject())
     await voicesLoaded()
     const chip = chipIn(cellIdFor("4:7"))
     if (!chip) throw new Error("no chip")
-    act(() => chip.focus())
+    fireEvent.click(chip)
 
     const details = await screen.findByTestId("voice-details")
     const text = visible(details.textContent)
@@ -370,42 +372,18 @@ describe("details on focus, and 'Show every line by …'", () => {
     // Where each name came from.
     expect(text).toContain("JesusFrom ACAI")
     expect(text).toContain("Samaritan womanGenerated, not yet reviewed")
-    // Focus stays on the chip: opening on focus does not steal it.
-    expect(document.activeElement).toBe(chip)
   })
 
-  it("closes again when keyboard focus moves on", async () => {
+  it("opens one at a time: a click on the next chip shuts the first", async () => {
     renderTable(makeProject())
     await voicesLoaded()
     const first = chipIn(cellIdFor("4:7"))
     const next = chipIn(cellIdFor("4:9"))
     if (!first || !next) throw new Error("no chip")
-    act(() => first.focus())
+    await userEvent.click(first)
     await screen.findByTestId("voice-details")
 
-    act(() => next.focus())
-    // One popover at a time: the first chip's details are gone, the next one's show.
-    await waitFor(() => expect(screen.getAllByTestId("voice-details")).toHaveLength(1))
-    expect(visible(screen.getByTestId("voice-details").textContent)).toContain("Samaritan woman")
-    act(() => (document.activeElement as HTMLElement | null)?.blur())
-    await waitFor(() => expect(screen.queryByTestId("voice-details")).toBeNull())
-  })
-
-  it("stays open while focus is inside it, and closes when focus leaves it", async () => {
-    renderTable(makeProject())
-    await voicesLoaded()
-    const chip = chipIn(cellIdFor("4:7"))
-    const elsewhere = chipIn(cellIdFor("4:9"))
-    if (!chip || !elsewhere) throw new Error("no chip")
-    act(() => chip.focus())
-    const action = await screen.findByRole("button", { name: /Show every line by.*Jesus/ })
-
-    // Tab into the popover: it stays open.
-    act(() => action.focus())
-    expect(screen.getByTestId("voice-details")).toBeTruthy()
-
-    // Then out of it: it closes, and only the newly focused chip's details show.
-    act(() => elsewhere.focus())
+    await userEvent.click(next)
     await waitFor(() => {
       const open = screen.getAllByTestId("voice-details")
       expect(open).toHaveLength(1)
@@ -413,12 +391,33 @@ describe("details on focus, and 'Show every line by …'", () => {
     })
   })
 
-  it("opens on hover too", async () => {
+  it("shuts on a second click, and on Escape", async () => {
+    renderTable(makeProject())
+    await voicesLoaded()
+    const chip = chipIn(cellIdFor("4:7"))
+    if (!chip) throw new Error("no chip")
+    await userEvent.click(chip)
+    await screen.findByTestId("voice-details")
+    await userEvent.click(chip)
+    await waitFor(() => expect(screen.queryByTestId("voice-details")).toBeNull())
+
+    await userEvent.click(chip)
+    await screen.findByTestId("voice-details")
+    await userEvent.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByTestId("voice-details")).toBeNull())
+  })
+
+  it("does not open on hover or on keyboard focus", async () => {
     renderTable(makeProject())
     await voicesLoaded()
     const chip = chipIn(cellIdFor("4:9"))
     if (!chip) throw new Error("no chip")
     await userEvent.hover(chip)
+    act(() => chip.focus())
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.queryByTestId("voice-details")).toBeNull()
+    // Enter opens it from the keyboard.
+    await userEvent.keyboard("{Enter}")
     const details = await screen.findByTestId("voice-details")
     expect(visible(details.textContent)).toContain("Speaker: 97% sure, from Clear speaker-quotations and Macula")
   })
@@ -428,7 +427,7 @@ describe("details on focus, and 'Show every line by …'", () => {
     await voicesLoaded()
     const chip = chipIn(cellIdFor("4:7"))
     if (!chip) throw new Error("no chip")
-    act(() => chip.focus())
+    fireEvent.click(chip)
     fireEvent.click(await screen.findByRole("button", { name: /Show every line by.*Jesus/ }))
 
     const banner = await screen.findByTestId("voice-filter-banner")
@@ -472,7 +471,7 @@ describe("label language", () => {
 
     const chip = chipIn(cellIdFor("4:7"))
     if (!chip) throw new Error("no chip")
-    act(() => chip.focus())
+    fireEvent.click(chip)
     expect(visible((await screen.findByTestId("voice-details")).textContent)).toContain("YesusFrom your terminology")
   })
 })
@@ -486,7 +485,7 @@ describe("add to terminology from the voice popover", () => {
     await voicesLoaded()
     const chip = chipIn(cellIdFor("4:7"))
     if (!chip) throw new Error("no chip")
-    act(() => chip.focus())
+    fireEvent.click(chip)
     return screen.findByTestId("voice-details")
   }
 

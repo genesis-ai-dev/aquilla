@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { ConnectivityStatusChip } from "./ConnectivityStatusChip"
 
 let tauriRuntime = false
@@ -50,5 +51,17 @@ describe("ConnectivityStatusChip", () => {
     renderChip()
     const chip = screen.getByTestId("connectivity-status-chip")
     expect(chip).toHaveAttribute("data-online", "false")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a status chip explains itself on click, not hover.
+describe("ConnectivityStatusChip explanation", () => {
+  it("says what offline means on click", async () => {
+    tauriRuntime = true
+    connectivity = false
+    renderWithTooltips(<ConnectivityStatusChip />)
+    const chip = screen.getByTestId("connectivity-status-chip")
+    await expectClickNote(chip.closest("button") ?? chip, /./)
+    expect(chip.closest("button")).not.toBeNull()
   })
 })

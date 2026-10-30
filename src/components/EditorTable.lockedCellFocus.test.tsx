@@ -10,8 +10,8 @@
  *
  * A read-only textbox is focusable (only a *disabled* control is not), so the
  * guard here is that a locked cell keeps `tabIndex=0`, still precedes the action
- * rail in the row's tab order, and carries the lock reason on both its tooltip
- * and its accessible name.
+ * rail in the row's tab order, and carries the lock reason in its accessible
+ * name (a click on it opens the reason as a note, AQU-2260).
  */
 
 import { describe, it, expect, afterEach, vi } from "vitest"
@@ -134,10 +134,12 @@ describe("EditorTable — AQU-1163 a lease-locked cell stays a Tab stop", () => 
     expect(surface.getAttribute("aria-readonly")).toBe("true")
   })
 
-  it("explains why the locked cell will not take text, on hover and to a screen reader", async () => {
+  it("explains why the locked cell will not take text, to a screen reader (a click opens the note)", async () => {
     const surface = await renderTable(new Map([["cell-1", "Alice"]]))
     expect(surface.getAttribute("data-target-locked-by")).toBe("Alice")
-    expect(surface.getAttribute("title")).toContain("Alice")
+    // AQU-2260 third pass: no hover title. Clicking the cell opens the reason
+    // (EditorTable.rowNotes.test.tsx).
+    expect(surface.getAttribute("title")).toBeNull()
     // The reason rides the accessible name too, so it is announced on focus
     // rather than only shown to a mouse user.
     expect(surface.getAttribute("aria-label")).toContain("Alice")

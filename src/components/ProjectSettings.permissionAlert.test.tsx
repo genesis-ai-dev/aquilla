@@ -9,11 +9,12 @@
 // local projects do not.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
+import userEvent from "@testing-library/user-event"
 
 const PROJECT_ID = "proj-permission-alert"
 
@@ -199,6 +200,9 @@ beforeEach(() => {
   currentReasonCannotEditCountStructural = "role"
 })
 
+// AQU-2260 (Sam, Oct 29): no hovers. A card locked as a whole says so once
+// under its heading ("Only Maintainers can change these settings."), and a
+// single locked control says so in one line beneath it.
 describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
   it("does not show a page-level permission alert on the settings index", () => {
     renderSettings()
@@ -211,24 +215,32 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const title = screen.getByLabelText(/title/i)
     expect(title).toBeDisabled()
-    await expectTooltip(title, /Only Maintainers can modify/)
-    expect(screen.getByRole("button", { name: /view maintainers/i })).toBeTruthy()
+    const projectInfo = screen.getAllByTestId("settings-group-locked")[0]!
+    expect(projectInfo).toHaveTextContent("Only Maintainers can change these settings.")
+    expect(within(projectInfo).getByRole("button", { name: /view maintainers/i })).toBeTruthy()
+    await userEvent.setup().hover(title)
+    expect(screen.queryByRole("tooltip")).toBeNull()
     expect(screen.queryByRole("link", { name: /view members/i })).toBeNull()
   })
 
   it("contributor on a cloud project sees the same per-control hint", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
-    await expectTooltip(screen.getByLabelText(/title/i), /Only Maintainers can modify/)
+    expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
+    // Said once per card, never under each control of a card it already covers.
+    expect(screen.queryByText("Only Maintainers can change this.")).toBeNull()
   })
 
   it("maintainer+ sees no lock hint", () => {
     currentProject = makeProject({ syncRole: { level: 600, source: "member" } } as Partial<ProjectRecord>)
     currentCanEdit = true
     currentReasonCannotEdit = null
+    currentCanEditLanguages = true
+    currentReasonCannotEditLanguages = null
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/title/i)).not.toBeDisabled()
-    expect(screen.queryByText(/Only Maintainers can modify/)).toBeNull()
+    expect(screen.queryByText(/Only Maintainers can change/)).toBeNull()
+    expect(screen.queryByTestId("settings-group-locked")).toBeNull()
   })
 
   it("unsynced local project (hook reports reason 'role' with null level) shows no page alert", () => {
@@ -254,11 +266,10 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const source = screen.getByLabelText(/source language/i)
     expect(source).toBeDisabled()
-    await expectTooltip(source, /Only Maintainers can modify/)
     // Media redesign: one floor gates the whole card, so the row's ⋯ menu is
-    // locked too, and the card says View only.
+    // locked too, and the card says so once, under its title.
     expect(screen.getByTestId("lane-menu-target-lane")).toBeDisabled()
-    expect(screen.getByTestId("languages-view-only")).toBeTruthy()
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("Only Maintainers can change these settings.")
   })
 
   it("a contributor below the unset default sees the language fields locked, naming Project leads", async () => {
@@ -269,7 +280,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const source = screen.getByLabelText(/source language/i)
     expect(source).toBeDisabled()
-    await expectTooltip(source, /Only Project leads can modify/)
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("Only Project leads can change these settings.")
   })
 
   it("project lead with the floor at 500 can edit the lane language fields", () => {
@@ -298,7 +309,8 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const title = screen.getByLabelText(/title/i)
     expect(title).toBeDisabled()
-    await expectTooltip(title, /Only Maintainers can modify/)
+    expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
+    expect(screen.queryByTestId("languages-view-only")).toBeNull()
   })
 })
 
@@ -306,26 +318,27 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
 // AQU-1083; the page gated the control on the maintainer floor instead.
 describe("ProjectSettings — Count headings follows its own project-lead floor (AQU-1912)", () => {
   const headingsControl = () =>
-    screen.getByRole("combobox", { name: /count headings as translatable content/i })
-  // Locked, the control has ONE hover (AQU-1912): DisabledFieldTooltip's
-  // wrapper, which also says what the organization does.
-  const lockHintTrigger = (control: HTMLElement) => control.closest("span.block")!
+    screen.getByRole("switch", { name: /count headings as translatable content/i })
 
   it("a project lead can change it while the rest of the validation card stays locked", () => {
     currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
     currentCanEditCountStructural = true
     currentReasonCannotEditCountStructural = null
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).not.toBeDisabled()
+    expect(headingsControl()).not.toHaveAttribute("aria-disabled", "true")
     // canEdit (maintainer) stays false — see beforeEach.
-    expect(screen.getByRole("combobox", { name: /auto-propagate repetitions/i })).toBeDisabled()
+    expect(screen.getByRole("switch", { name: /auto-propagate repetitions/i })).toHaveAttribute("aria-disabled", "true")
   })
 
   it("a contributor sees it locked, and the hint names Project leads", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).toBeDisabled()
-    await expectTooltip(lockHintTrigger(headingsControl()), /Only Project leads can modify/)
-    await expectTooltip(lockHintTrigger(headingsControl()), /The organization currently/)
+    expect(headingsControl()).toHaveAttribute("aria-disabled", "true")
+    // The card says Maintainers once; Count headings, locked for another
+    // reason, says its own line beneath it (AQU-2260). What the organization
+    // does is on the menu beside it (AQU-2263).
+    expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
+    expect(screen.getByText("Only Project leads can change this.")).toBeVisible()
+    expect(screen.getByTestId("count-structural-cells-source")).toHaveTextContent(/Organization default/)
   })
 })

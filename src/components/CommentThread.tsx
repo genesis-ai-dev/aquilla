@@ -23,6 +23,7 @@ import {
 import { MenuItem, MenuSeparator, createMenuHandle } from "@/components/ui/menu-parts"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { altClickModifierLabel, isApplePlatform } from "@/lib/platform"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UserChip } from "@/components/UserChip"
@@ -519,12 +520,13 @@ function CommentMessageRow({
                 editedNotice={t("comments.bubble.edited")}
               />
             </span>
+            {/* What it means opens on a click of it, never a hover (AQU-2260). */}
             {stale && (
-              <AppTooltip content={t("comments.stale.tooltip")}>
+              <NoteOnClick note={t("comments.stale.tooltip")}>
                 <span className="flex items-center gap-0.5 text-amber-500">
                   <AlertTriangle className="h-3 w-3" /> {t("comments.stale.badge")}
                 </span>
-              </AppTooltip>
+              </NoteOnClick>
             )}
             <DropdownMenuTrigger
               handle={actionsMenu}

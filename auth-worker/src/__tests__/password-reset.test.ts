@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 
@@ -39,6 +39,41 @@ async function seedToken(username: string, token: string, expiresAt: string): Pr
 }
 
 const soon = () => new Date(Date.now() + 3600_000).toISOString()
+
+describe("password reset — invitation context (AQU-2298)", () => {
+  it.each([
+    ["invited", "/join-org/invite-token", "/join-org/invite-token"],
+    ["ordinary", undefined, null],
+    ["external", "https://example.com/join-org/invite-token", null],
+    ["relativehost", "//example.com/join-org/invite-token", null],
+    ["dotpath", "/join-org/../settings", null],
+    ["encoded", "/join-org/invite%2Ftoken", null],
+    ["query", "/join-org/invite-token?next=/settings", null],
+    ["newline", "/join-org/invite-token\n", null],
+  ])("emits a usable email reset link with safe context: %s", async (suffix, returnTo, expected) => {
+    const username = `recover${suffix}`
+    const email = `${username}@example.com`
+    expect((await register(username, email, "old-password-1")).status).toBe(200)
+    const send = vi.fn(async (_message: { text?: string; html?: string }) => ({ messageId: "test-reset" }))
+    const response = await app.request("/api/v2/auth/password-reset/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, return_to: returnTo }),
+    }, { ...env, EMAIL: { send } })
+    expect(response.status).toBe(200)
+    expect(send).toHaveBeenCalledOnce()
+    const resetLink = send.mock.calls[0][0].text!.match(/https?:\/\/\S+\/reset-password\?\S+/)![0]
+    const url = new URL(resetLink)
+    expect(url.searchParams.get("returnTo")).toBe(expected)
+    expect(url.searchParams.get("username")).toBe(username)
+    const credentials = { username, token: url.searchParams.get("token") }
+    expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(200)
+    expect((await reqJson("/api/v2/auth/password-reset/reset", {
+      ...credentials, new_password: "NewPassword123!",
+    })).status).toBe(200)
+    expect((await reqJson("/api/v2/auth/token", { username, password: "NewPassword123!" })).status).toBe(200)
+  })
+})
 
 // AQU-675 regression guard. Reported live (Biblica ETT sync 2026-07-16):
 // requesting a reset with an email that has NO account silently created a fresh

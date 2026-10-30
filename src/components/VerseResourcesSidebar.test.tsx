@@ -2,7 +2,9 @@
 // a Retry that re-runs the lookup, and a crash that does not escape the panel.
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { VerseResourcesSidebar } from "./VerseResourcesSidebar"
 import { loadEntityDetail, loadPassageEntities } from "@/lib/aquifer/passage-resources"
 
@@ -97,5 +99,23 @@ describe("VerseResourcesSidebar failure recovery (AQU-849)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
     await waitFor(() => expect(screen.getByText("Verse Resources")).toBeInTheDocument())
+  })
+})
+
+/** AQU-2260 (Sam, Oct 29): a control that carries its own words has no hover. */
+async function expectNoHoverTip(el: Element) {
+  await userEvent.setup().hover(el)
+  await act(() => new Promise((r) => setTimeout(r, 30)))
+  expect(screen.queryByRole("tooltip")).toBeNull()
+}
+
+describe("VerseResourcesSidebar — the closed edge tab", () => {
+  it("carries its own word, so it has no hover", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <VerseResourcesSidebar projectId="p1" trackedRef="MAT 2:1" getJwt={() => "jwt"} open={false} onToggle={() => {}} />
+      </TooltipProvider>,
+    )
+    await expectNoHoverTip(screen.getByRole("button", { name: "Show verse resources" }))
   })
 })

@@ -4,6 +4,7 @@ import { Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -94,23 +95,18 @@ function EnvironmentTag({ className }: { className?: string }) {
   const label = t(ENVIRONMENT_LABEL_KEYS[kind])
   const description = t("nav.environment.tooltip", { host: BACKEND.host })
 
+  // AQU-2260 (Sam, Oct 29): what the badge means opens on click, not hover.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Badge
-            className={cn(
-              "shrink-0 border-amber-500/40 bg-amber-500/15 font-mono text-[10px] tracking-wide text-amber-800 uppercase dark:text-amber-300",
-              className,
-            )}
-            aria-label={description}
-          >
-            {label}
-          </Badge>
-        }
-      />
-      <TooltipContent className="max-w-xs">{description}</TooltipContent>
-    </Tooltip>
+    <NoteOnClick note={description} label={description} align="start" className="shrink-0">
+      <Badge
+        className={cn(
+          "shrink-0 border-amber-500/40 bg-amber-500/15 font-mono text-[10px] tracking-wide text-amber-800 uppercase dark:text-amber-300",
+          className,
+        )}
+      >
+        {label}
+      </Badge>
+    </NoteOnClick>
   )
 }
 
@@ -183,8 +179,10 @@ export function VersionTag() {
             </Button>
           }
         />
+        {/* AQU-2260: the hover only shows the build it copies, in full (the
+            label is cut to the rail). The button's own words say "Copied". */}
         <TooltipContent side="right" className="max-w-xs whitespace-pre-wrap font-mono">
-          {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
+          {title}
         </TooltipContent>
       </Tooltip>
     </div>
@@ -240,7 +238,7 @@ export function VersionBadge({ inline = false }: { inline?: boolean }) {
           }
         />
         <TooltipContent className="max-w-xs whitespace-pre-wrap font-mono">
-          {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
+          {title}
         </TooltipContent>
       </Tooltip>
     </div>

@@ -76,6 +76,13 @@ export interface OrgWorkloadAssignment {
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /**
+   * AQU-2294: when the assignment was handed out (epoch ms). OPTIONAL ON THE
+   * WIRE: the SPA and the workers deploy separately, so a page talking to a
+   * worker that predates the field must render the row without an "Assigned"
+   * date rather than break.
+   */
+  createdAt?: number
   /** AQU-1969: absent on older servers, which only had translate assignments. */
   kind?: AssignmentKind
   /** AQU-1969: a validate assignment's own-approval progress. */

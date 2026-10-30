@@ -22,7 +22,7 @@ export function FrontierForgotPasswordForm({
   returnTo,
 }: {
   onBack: (returnTo?: string) => void
-  /** Forwarded back to the login form after returning from the reset flow. */
+  /** Retained on Back; supported invitation paths also travel in the reset email. */
   returnTo?: string
 }) {
   const [sentEmail, setSentEmail] = useState<string | null>(null)
@@ -47,7 +47,7 @@ export function FrontierForgotPasswordForm({
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await requestPasswordReset(value.email.trim())
+        await requestPasswordReset(value.email.trim(), returnTo)
         setSentEmail(value.email.trim())
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToSend"))

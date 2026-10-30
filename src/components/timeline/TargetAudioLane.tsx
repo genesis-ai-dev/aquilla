@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -34,9 +34,10 @@ import {
 } from "@/lib/audio/change-voice"
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
+import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
@@ -61,6 +62,7 @@ import {
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
+import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
@@ -85,6 +87,12 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
+
+/** AQU-1758: the take's-voice label needs a full-height chip (46 px by
+ *  default) to sit under the sparkle, and room for a short name. */
+const TAKE_VOICE_LABEL_MIN_H_PX = 44
+const TAKE_VOICE_LABEL_MIN_W_PX = 56
 
 export interface TargetAudioItem {
   cell: CellData
@@ -103,6 +111,14 @@ export interface TargetAudioLaneProps {
   /** SUB-53: resolves chip geometry — the frozen file clock in dubbing mode,
    *  the laid-out programme in audio-first. Absent = dubbing. */
   layout?: TimelineLayout
+  /**
+   * AQU-2267: the OTHER timing's layout, built when asked (only a drop
+   * asks). A move moves the take by the same distance there too, held by that
+   * timing's own limits (its line, its neighbours on this track), so a move
+   * states the take's place in both. Absent (this lane's own tests), the
+   * other place moves by the same distance with no limits of its own.
+   */
+  getOtherLayout?: () => TimelineLayout
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
@@ -151,8 +167,12 @@ export interface TargetAudioLaneProps {
    *
    *  AQU-646 stage 3: it also carries the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other.
+   *
+   *  AQU-2267: and `place`, what to store — the take's place in BOTH timings
+   *  after the move (`movedTakePlace`). `anchorSec` stays the anchor in the
+   *  timing the move was made in. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
@@ -162,6 +182,11 @@ export interface TargetAudioLaneProps {
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
   takeMenu?: TakeMenuActions
+  /** AQU-1758: a take's voice, when it is not the line's — named on its clip. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
+  /** AQU-1758: where the playhead is on this lane's clock, read when a take's
+   *  ⋯ opens its menu (Split there splits at the playhead). */
+  getPlayheadSec?(): number
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -233,6 +258,14 @@ interface ChipGeometry {
    *  this instead of the amber/red warnings, because running long is the
    *  expected outcome there, not a defect. Null in dubbing mode. */
   ratio: number | null
+  /**
+   * AQU-2252 (Sam, Oct 29): a take on a track made a LAYER while the file
+   * follows its recordings. Its line does not grow to hold it, so it behaves
+   * the way a take does following the source: measured against its line,
+   * amber running past it, red over the next take on its track, a lead-in
+   * allowed, the move clamp stopping at its neighbours.
+   */
+  layer: boolean
 }
 
 /**
@@ -255,6 +288,26 @@ export interface TakeMenuActions {
    * programme audio has nothing of its own to convert).
    */
   changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  /**
+   * AQU-1758: turn this line's take into a character — the New voice dialog,
+   * cloning, seeded with it. (The Audio view's voice card had this.) With
+   * `cloneTake`, it is the one-step clone's More options.
+   */
+  makeCharacter?(cellId: string): void
+  /**
+   * AQU-1758 / AQU-2212: "Make a character from this voice" clones THIS take
+   * in one step — name it, Add to cast — in a popover at the clip.
+   */
+  cloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that popover suggests (who recorded the take). */
+  cloneName?(cellId: string): string
+  /**
+   * AQU-2212: the one-click when the line's voice and its take disagree —
+   * "Change to …" / "Generate · …", first in the menu. Read when the menu
+   * opens; null when they agree.
+   */
+  lineVoice?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  applyLineVoice?(cellId: string): void
   /** Ask for a new name; `current` is the take's own name, if it has one. */
   rename?(cellId: string, audioId: string, current: string | null): void
   /** Delete this take, or this piece of a cut take. */
@@ -304,18 +357,27 @@ function TargetAudioChip({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoice = null,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
   peaks,
   preview,
   layout,
+  getOtherLayout,
+  track,
 }: {
   chip: ChipGeometry
   /** AQU-2215: the lane's layout, for the one question only it can answer —
    *  what a MOVE on this chip means, and what to store for it. Absent outside
    *  a timeline (this lane's own tests), which is dubbing's own behaviour. */
   layout?: TimelineLayout
+  /** AQU-2267: the other timing's layout, and every take on this track — where
+   *  a move carries the take, by the same distance, held by that timing's
+   *  limits. See `TargetAudioLaneProps.getOtherLayout`. */
+  getOtherLayout?: () => TimelineLayout
+  track: readonly TargetAudioItem[]
   // AQU-646 stage 7: NO `color` PROP. The hue reaches this chip as inherited
   // CSS custom properties set on the lane root, so there is nothing to thread
   // and nothing to keep in step — see `trackHueVars`.
@@ -358,12 +420,17 @@ function TargetAudioChip({
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other. AQU-2267: `place` is the
+   *  take's place in both timings after the move. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   takeMenu?: TakeMenuActions
+  /** AQU-1758: the take's voice, when it is not the line's. */
+  takeVoice?: TakeVoiceNote | null
+  /** AQU-1758: the playhead on this lane's clock, for the ⋯ menu's Split. */
+  getPlayheadSec?(): number
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -375,12 +442,18 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
+  // to hold it, so it never runs long and moves only inside its line. Every
+  // take but one on a track made a layer, which keeps following the source's.
+  const freeRules = audioFirst && !chip.layer
   // This chip's own take: its length, its trims and its placement. The geometry
   // and the drag both read it, so it is resolved once here.
   const chipAtt = cell.attachments?.[chip.item.audioId]
   // AQU-1767: the first (or only) piece keeps the chip's historical test id;
   // later pieces add "-p2", "-p3"… so every piece is addressable.
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
+  // AQU-2212: the voice this line is being generated or re-voiced in, if any.
+  const voicingAs = useVoicingAs(cell.id)
   // AQU-1767: where the blade would cut, while it hovers over this chip.
   const [bladeX, setBladeX] = useState<number | null>(null)
   // AQU-1767: where the take was right-clicked, so "Split here" cuts there.
@@ -452,6 +525,10 @@ function TargetAudioChip({
     ? pieceTrimLimitsMs(cell.attachments as Parameters<typeof pieceTrimLimitsMs>[0], chip.item.audioId)
     : null
 
+  // A later piece of a take is held to its line as its take is (the take may
+  // not start past the line's end), so it may sit and move past that end.
+  const pieceLead = (chip.item.pieceCount ?? 1) > 1 ? pieceLeadInTakeSec(cell, chip.item.audioId) : 0
+
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
     const thresholdSec = SNAP_THRESHOLD_PX / pxPerSec
@@ -491,13 +568,22 @@ function TargetAudioChip({
       // pause before the take, inside its own line. One bound is left: the
       // line's own start, because a pause cannot be negative (dragging left
       // shortens it back to none and stops).
-      if (audioFirst) {
-        const floor = chip.slot?.startSec ?? start
-        const bounded = Math.max(start, floor)
-        return { start: bounded, end: bounded + len }
-      }
-      start = Math.min(start, maxAudibleStartSec(section), nextChipStartSec ?? Infinity)
-      start = Math.max(start, minAudibleEndSec(section) - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
+      //
+      // AQU-2252: …except a take on a track made a layer, whose line does not
+      // grow to hold it: every bound above applies to it, against its line.
+      //
+      // AQU-2267: the arithmetic is `clampMoveStart`, shared with the move's
+      // other timing, which it carries the take into by the same distance.
+      start = clampMoveStart(start, {
+        free: freeRules,
+        lineStartSec: chip.slot?.startSec ?? null,
+        section,
+        lenSec: len,
+        prevChipStartSec: prevChip?.start ?? null,
+        nextChipStartSec,
+        trimStartSec: geom.trimStartSec,
+        leadInTakeSec: pieceLead,
+      })
       return { start, end: start + len }
     }
     if (mode === "resize-l") {
@@ -518,15 +604,20 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
+      // AQU-2252: following the recordings, never before the start of the
+      // span the layout measures the chip against. That IS `geom.anchor` for a
+      // line's main take; a layer's sample zero can sit before its line, and
+      // its head trim comes back off only as far as the line's start.
       const lo = Math.max(
         geom.anchor,
+        freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
       )
       // Floored at `lo` so the clamp cannot invert on a chip whose end already
       // sits before its section — that chip is already outside the invariant,
       // and pinning its handle is better than sending it further out.
-      const hi = Math.max(Math.min(geom.end - MIN_TARGET_LEN_SEC, maxAudibleStartSec(section)), lo)
+      const hi = Math.max(Math.min(geom.end - MIN_TARGET_LEN_SEC, maxAudibleStartSec(section) + pieceLead), lo)
       start = Math.min(Math.max(start, lo), hi)
       return { start, end: geom.end }
     }
@@ -552,9 +643,10 @@ function TargetAudioChip({
   const span = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : { start: geom.start, end: geom.end }
   // SUB-53: in audio-first every verse owns its own stretch of the track, so
   // there is nothing to run past and nothing to collide with — the warnings
-  // would fire on every single line and mean nothing.
-  const overflow = audioFirst ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
-  const overlaps = audioFirst
+  // would fire on every single line and mean nothing. AQU-2252: a take on a
+  // track made a layer is the exception — its line does not hold it.
+  const overflow = freeRules ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = freeRules
     ? { headSec: null, tailSec: null }
     : chipOverlaps(span, prevChip, nextChipStartSec)
   // Blame the trespasser: a warning belongs to THIS chip only for territory
@@ -563,7 +655,7 @@ function TargetAudioChip({
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const { head: headTrespass, tail: tailTrespass } = audioFirst
+  const { head: headTrespass, tail: tailTrespass } = freeRules
     ? { head: false, tail: false }
     : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
@@ -574,7 +666,7 @@ function TargetAudioChip({
   // length are placed end to end and have nowhere to go, so they keep the
   // locked chip they have always had rather than springing back from a drag.
   const canMove =
-    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt) ?? true)
+    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt, chip.item.audioId) ?? true)
   // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
   // hide one (Sam lost a whole take under one). The logical span is untouched
   // — overflow warnings, trims, snapping and playback all still use the true
@@ -602,7 +694,8 @@ function TargetAudioChip({
   // length — and hovering one of a mutually-offending pair now extends its
   // true edge visibly ACROSS the neighbour's resting cut, so the collision
   // the red warns about can actually be seen.
-  // SUB-53: inert in audio-first (verses are laid out end to end).
+  // SUB-53: inert in audio-first (verses are laid out end to end) — but for a
+  // take on a track made a layer (AQU-2252), which its line does not hold.
   const engaged = hovered || drag !== null
   const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
   const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
@@ -666,6 +759,30 @@ function TargetAudioChip({
     return { atMs, ok: canCutAt(chipTake, atMs), x }
   }
   const cutRef = useRef(false)
+  // AQU-1758: the menu opened from the ⋯, with Split at the playhead when the
+  // playhead is inside this take (null: Split is offered but cannot cut here).
+  const moreOpenRef = useRef<{ atMs: number | null } | null>(null)
+  const [menuFromMore, setMenuFromMore] = useState(false)
+  // AQU-2212: the line's one-click, read as the menu opens (it resolves the
+  // line's takes, which is too much to do for every clip on every render).
+  const [menuLineVoice, setMenuLineVoice] = useState<{ action: "change" | "generate"; voiceName: string } | null>(null)
+  // AQU-1758 / AQU-2212: the one-step clone, open at this clip.
+  const [cloneOpen, setCloneOpen] = useState(false)
+  function openMenuFromMore(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const sec = getPlayheadSec?.()
+    let atMs: number | null = null
+    if (sec != null && Number.isFinite(sec) && sec > geom.start && sec < geom.end) {
+      const ms = (sec - geom.anchor) * 1000
+      if (canCutAt(chipTake, ms)) atMs = ms
+    }
+    moreOpenRef.current = { atMs }
+    const r = e.currentTarget.getBoundingClientRect()
+    chipRef.current?.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, button: 2, clientX: r.left + r.width / 2, clientY: r.bottom,
+    }))
+  }
   const canResize =
     !blade && editable && Boolean(onTrimTarget) && chip.resizable &&
     chipH >= MIN_CHIP_GRIP_H_PX &&
@@ -727,17 +844,26 @@ function TargetAudioChip({
         // clock the chip was drawn on — the file clock in dubbing, the
         // programme clock when following the recordings, where what moved is
         // the take's pause before its line. Either way what comes back is the
-        // FILE-clock anchor, which is the only thing stored.
-        const anchor = layout
-          ? layout.retimeAnchorSec(cell, chipAtt, s.start)
-          : s.start - geom.trimStartSec
-        if (anchor == null) return
-        // Compared on the FILE clock for the same reason, so a drag that ends
-        // up asking for the placement the take already has — a nudge under the
-        // pause threshold, say — records no history step at all.
-        const placed = targetChipGeom(cell, chipAtt)
-        if (placed && Math.abs(anchor - placed.anchor) <= 0.0005) return
-        onRetimeTarget?.(cell.id, anchor, chip.item.audioId)
+        // FILE-clock anchor, whose offset from the line's start is stored.
+        //
+        // AQU-2267 (Sam, Oct 29): and the take moves by the same distance in
+        // the OTHER timing, held by that timing's own limits — so the move
+        // states its place in both. A drag that asks for the place the take
+        // already has in this timing — a nudge under the pause threshold, say
+        // — changes nothing and records no history step. (It used to be
+        // compared with the take's place FOLLOWING THE SOURCE, so following
+        // the recordings such a nudge put a take that led its line back on
+        // its line's start.)
+        const moved = movedTakePlace({
+          here: layout,
+          other: getOtherLayout?.(),
+          track,
+          take: chip.item,
+          fromStartSec: geom.start,
+          toStartSec: s.start,
+        })
+        if (!moved) return
+        onRetimeTarget?.(cell.id, moved.anchorSec, chip.item.audioId, moved.place)
         return
       }
       // Resize = trim. Commit the COMPLETE trim state; at-the-edge clears.
@@ -826,13 +952,18 @@ function TargetAudioChip({
   // nor take a new recording from here.
   const hiddenLine = isHiddenCell(cell)
   const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  // AQU-1758 (Sam, decision 4): the take's menu from a ⋯ in its top-right
+  // corner, on hover — the same menu a right-click opens. Like the other
+  // corner buttons it is one fixed size whatever the take's width, so a
+  // narrow take gets the same button; only a row too short for badges hides it.
+  const showMoreButton = hasMenu && fitsBadges
   const showRecordButton =
     !hiddenLine &&
     editable &&
     Boolean(onOpenRecording) &&
     fitsBadges &&
-    // Two corners want the width now, not one.
-    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28)
+    // Two corners want the width now, not one — and the ⋯ beside the mic.
+    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28) + (showMoreButton ? 18 : 0)
 
   async function togglePreview() {
     if (previewRef.current) {
@@ -906,12 +1037,12 @@ function TargetAudioChip({
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
   const lengthNote =
-    audioFirst && !geom.usingFallback
+    freeRules && !geom.usingFallback
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
   // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
-  // much of this chip double-sounds — not just prose. Native `title` can't be
-  // styled, hence AppTooltip. Secondary notes keep their SUB-48 wording.
+  // much of this chip double-sounds — not just prose. Secondary notes keep
+  // their SUB-48 wording. They are the take's details in its right-click menu.
   const tipLines: ReactNode[] = []
   if (overflow === "overlap") {
     if (tailTrespass) {
@@ -949,6 +1080,16 @@ function TargetAudioChip({
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
+  // AQU-1758: the take was made in a voice the line no longer has.
+  if (takeVoice) {
+    tipLines.push(
+      <div key="take-voice" data-testid={`tl-target-${testKey}-tip-take-voice`}>
+        {takeVoice.takeVoiceName
+          ? t("editor.voice.takeVoiceDiffers", { takeVoice: takeVoice.takeVoiceName, lineVoice: takeVoice.lineVoiceName })
+          : t("editor.voice.takeVoiceRemoved", { lineVoice: takeVoice.lineVoiceName })}
+      </div>,
+    )
+  }
   // Decision 2026-08-05: a definitively 404'd clip says so, in red.
   if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
   // SUB-48: never let a guessed width read as a measured one.
@@ -971,7 +1112,18 @@ function TargetAudioChip({
       <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
-  const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
+  // AQU-2260 (Sam, Oct 29, third pass): what a take is — its kind and length,
+  // an overlap, a missing or unsaved clip, why it is drawn short — sits at the
+  // top of its right-click menu as plain lines. Hover shows nothing: a click on
+  // the chip moves the playhead, so it cannot open a note.
+  const takeDetails = (
+    <div
+      data-testid={`tl-take-details-${testKey}`}
+      className="flex flex-col gap-0.5 px-2 py-1.5 text-xs text-muted-foreground"
+    >
+      {tipLines}
+    </div>
+  )
 
   const chipButton = (
     <button
@@ -1208,6 +1360,33 @@ function TargetAudioChip({
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
         </span>
       )}
+      {/* AQU-1758: the clip names the take's voice when it is not the line's
+          (a voice picked for the line only assigns it). The same small
+          readout a take's running time uses over a waveform; the sentence is
+          in the tooltip. Bottom left, past the sparkle (only a generated take
+          carries a voice), and only where the chip is tall and wide enough
+          to read it. */}
+      {/* AQU-2212: while the line is being generated or re-voiced, the clip
+          says so in the take-voice label's place ("Voicing as …", the Audio
+          view card's status line). */}
+      {voicingAs && (
+        <span
+          role="status"
+          data-testid={`tl-target-${testKey}-working`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          <Spinner className="size-3 shrink-0" />
+          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+        </span>
+      )}
+      {!voicingAs && takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
+        <span
+          data-testid={`tl-target-${testKey}-take-voice`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          {takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")}
+        </span>
+      )}
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
           the section's width and passing for a measured take. */}
       {geom.usingFallback && fitsBadges && (
@@ -1223,9 +1402,12 @@ function TargetAudioChip({
           AQU-924 sync-failed badge (never reached the server; needs a retry) >
           loading spinner (the readiness gate is parked on this verse) >
           SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
+      {/* AQU-2260: no hover; the glyph is named for a screen reader, and
+          what it means is in the take's right-click menu. */}
       {showLeftGlyph && (
         <span
-          title={
+          role="img"
+          aria-label={
             leftGlyph === "missing"
               ? MISSING_AUDIO_MESSAGE
               : leftGlyph === "syncFailed"
@@ -1311,9 +1493,27 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className={chipCornerButtonClass("right")}
+          className={cn(chipCornerButtonClass("right"), showMoreButton && "right-[1.625rem]")}
         >
           <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {showMoreButton && (
+        <span
+          role="button"
+          tabIndex={0}
+          title={t("editor.rail.moreActions")}
+          aria-label={t("editor.rail.moreActions")}
+          aria-haspopup="menu"
+          data-testid={`tl-target-${testKey}-more`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={openMenuFromMore}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openMenuFromMore(e)
+          }}
+          className={chipCornerButtonClass("right")}
+        >
+          <Ellipsis className="h-2.5 w-2.5" />
         </span>
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
@@ -1389,15 +1589,19 @@ function TargetAudioChip({
     </button>
   )
   if (!hasMenu) {
+    // Nothing to do with the take here, so its menu holds only what it is.
     return (
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        {chipButton}
-      </AppTooltip>
+      <ContextMenu>
+        <ContextMenuTrigger render={chipButton} />
+        <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+          {takeDetails}
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
   // AQU-1767 (Sam, 2026-10-14): a right-click on a take offers what can be
-  // done with it. The menu's root sits outside the tooltip and its trigger
-  // renders the chip itself, so the tooltip and the menu share one element.
+  // done with it, under what it is (AQU-2260). The trigger renders the chip
+  // itself.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
   // AQU-2026: the per-line Change voice. The state is read off the line, not
@@ -1422,19 +1626,43 @@ function TargetAudioChip({
   const isPiece = (chip.item.pieceCount ?? 1) > 1
   const canSplit = Boolean(onCutTarget) && editable
   return (
+    <>
     <ContextMenu
       onOpenChange={(open) => {
         if (!open) return
+        setMenuLineVoice(takeMenu?.applyLineVoice ? takeMenu.lineVoice?.(cell.id) ?? null : null)
+        const fromMore = moreOpenRef.current
+        moreOpenRef.current = null
+        setMenuFromMore(fromMore != null)
+        if (fromMore) {
+          contextXRef.current = null
+          setMenuSplitAtMs(fromMore.atMs)
+          return
+        }
         const x = contextXRef.current
         contextXRef.current = null
         const at = x == null ? null : bladeAt(x)
         setMenuSplitAtMs(at?.ok ? at.atMs : null)
       }}
     >
-      <AppTooltip content={tooltipContent} disabled={drag != null}>
-        <ContextMenuTrigger render={chipButton} />
-      </AppTooltip>
+      <ContextMenuTrigger render={chipButton} />
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
+        {takeDetails}
+        <ContextMenuSeparator />
+        {/* AQU-2212: the line's voice and this take part ways — the one click
+            that brings them back together, first (the Audio view's card put
+            it beside the voice field). */}
+        {menuLineVoice && takeMenu?.applyLineVoice && (
+          <>
+            <ContextMenuItem data-testid="tl-take-menu-apply-voice" onClick={() => takeMenu.applyLineVoice?.(cell.id)}>
+              {menuLineVoice.action === "change" ? <AudioLines className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {menuLineVoice.action === "change"
+                ? t("editor.voice.changeTo", { voice: menuLineVoice.voiceName })
+                : t("editor.voice.generateWith", { voice: menuLineVoice.voiceName })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {canSplit && (
           <ContextMenuItem
             data-testid="tl-take-menu-split"
@@ -1443,8 +1671,10 @@ function TargetAudioChip({
           >
             <Scissors className="h-3.5 w-3.5" />
             {/* No "S" hint: S splits the selected take at the PLAYHEAD; this
-                splits where you right-clicked (Sam, 2026-10-14). */}
-            {t("editor.timeline.takeMenuSplit")}
+                splits where you right-clicked (Sam, 2026-10-14). Opened from
+                the take's ⋯ there is no click point, so it splits at the
+                playhead (AQU-1758). */}
+            {t(menuFromMore ? "editor.timeline.takeMenuSplitAtPlayhead" : "editor.timeline.takeMenuSplit")}
           </ContextMenuItem>
         )}
         {takeMenu?.reRecord && !hiddenLine && (
@@ -1510,6 +1740,22 @@ function TargetAudioChip({
             </ContextMenuSubContent>
           </ContextMenuSub>
         ))}
+        {/* AQU-1758: make a character from this take's voice — the Audio
+            view's voice card had this; the take's menu is its home now. */}
+        {takeMenu?.makeCharacter && !hiddenLine && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-make-character"
+            onClick={() => {
+              // AQU-2212: in one step, at the clip — once the menu has let go
+              // of focus, or it would close the popover as it opens.
+              if (takeMenu.cloneTake) setTimeout(() => setCloneOpen(true), 0)
+              else takeMenu.makeCharacter?.(cell.id)
+            }}
+          >
+            <CopyPlus className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuMakeCharacter")}
+          </ContextMenuItem>
+        )}
         {vote?.canVote && (
           <>
             <ContextMenuSeparator />
@@ -1546,12 +1792,23 @@ function TargetAudioChip({
         )}
       </ContextMenuContent>
     </ContextMenu>
+    {cloneOpen && takeMenu?.cloneTake && (
+      <CloneFromTakeButton
+        anchor={chipRef.current}
+        onClose={() => setCloneOpen(false)}
+        suggestedName={takeMenu.cloneName?.(cell.id) ?? ""}
+        onClone={(name) => takeMenu.cloneTake!(cell.id, audioId, name)}
+        onMoreOptions={() => takeMenu.makeCharacter?.(cell.id)}
+      />
+    )}
+    </>
   )
 }
 
 export function TargetAudioLane({
   items,
   layout,
+  getOtherLayout,
   pxPerSec,
   viewStartSec,
   viewEndSec,
@@ -1570,6 +1827,8 @@ export function TargetAudioLane({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoiceFor,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1590,12 +1849,12 @@ export function TargetAudioLane({
   const chips: ChipGeometry[] = []
   for (const item of items) {
     const att = item.cell.attachments?.[item.audioId]
-    const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
+    const geom = layout ? layout.targetGeom(item.cell, att, item.audioId) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
     // AQU-2204: following its recordings, a line with NO times of its own (a
     // verse in a book with no times) still has its slot in the programme, so
     // its take is drawn there; only the source's clock needs the cell's times.
-    const section = layout?.chipSection(item.cell, att)
+    const section = layout?.chipSection(item.cell, att, item.audioId)
       ?? (typeof startTime === "number" && typeof endTime === "number" ? { start: startTime, end: endTime } : null)
     if (!geom || !section) continue
     const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
@@ -1631,10 +1890,13 @@ export function TargetAudioLane({
       resizable:
         !geom.usingFallback &&
         (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
+      // AQU-2252: a take on another track has its own length, so its line's
+      // ratio (the main take's) is not its.
       ratio:
-        slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+        slot && layout?.takeRole(item.cell, item.audioId) === "main" && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
           : null,
+      layer: layout?.takeRole(item.cell, item.audioId) === "layer",
     })
   }
 
@@ -1709,19 +1971,6 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
-  // AQU-2204: a pause someone left before a take, drawn lightly as part of
-  // its line — following the recordings, the line keeps it (programme
-  // `targetLeadSec`) and the take starts after it.
-  const leadGaps = audioFirst
-    ? [...new Map(chips.flatMap((chip) => {
-        const slot = layout?.programme?.byCellId.get(chip.item.cell.id)
-        const lead = slot?.targetLeadSec ?? 0
-        if (!slot || lead <= 0) return []
-        if (!isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) return []
-        return [[slot.cellId, { cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }] as const]
-      })).values()]
-    : []
-
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
@@ -1833,17 +2082,11 @@ export function TargetAudioLane({
           </div>
         )
       })}
-      {leadGaps.map(({ cellId, leftPx, widthPx }) => (
-        <AppTooltip key={`lead-${cellId}`} content={t("editor.timeline.takeLeadPause")}>
-          <div
-            role="img"
-            aria-label={t("editor.timeline.takeLeadPause")}
-            data-testid={`tl-target-lead-${cellId}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-            className={`absolute ${TL_CHIP_BOX_CLASS} border border-border/60 bg-muted/50`}
-          />
-        </AppTooltip>
-      ))}
+      {/* Deliberate silence — a pause someone left before a take, or between
+          two pieces of one — is drawn as nothing at all: plain timeline, no
+          band, no words (Sam, Oct 28: "It's silence… we could just leave it
+          empty"). It still counts in the line's length and plays as silence;
+          the take simply starts where the pause ends. */}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}
@@ -1893,6 +2136,8 @@ export function TargetAudioLane({
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             layout={layout}
+            getOtherLayout={getOtherLayout}
+            track={items}
             pxPerSec={pxPerSec}
             selected={
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
@@ -1909,6 +2154,8 @@ export function TargetAudioLane({
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
             takeMenu={takeMenu}
+            takeVoice={takeVoiceFor ? takeVoiceFor(chip.item.cell, chip.item.audioId) : null}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

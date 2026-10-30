@@ -139,13 +139,15 @@ describe("AgentContextPane — AQU-1571 a refused vote is blocked with its reaso
 
     const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
     expect(button).toHaveAttribute("aria-disabled", "true")
+    // AQU-2260 (Sam, Oct 29): the reason opens on a click, never on hover,
+    // and the click sends nothing.
     fireEvent.mouseEnter(button)
     fireEvent.pointerEnter(button)
-    fireEvent.focus(button)
-    expect(await screen.findByRole("tooltip")).toHaveTextContent(
-      "You made the latest change to this text, so someone else must validate it",
-    )
+    expect(screen.queryByRole("tooltip")).toBeNull()
     fireEvent.click(button)
+    expect(await screen.findByText(
+      "You made the latest change to this text, so someone else must validate it",
+    )).toBeInTheDocument()
     expect(h.onValidationChange).not.toHaveBeenCalled()
   })
 })

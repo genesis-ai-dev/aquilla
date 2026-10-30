@@ -72,10 +72,9 @@ export interface AgentWorkbenchProps {
   onJumpToCell?: (fileId: string, cellId: string) => void
   /** Reveal the file explorer while remaining in Agent mode. */
   onChooseFile?: () => void
-  /** Text / Audio / Agent switch — same control as the editor chapter row. */
+  /** Text / Media / Agent switch — same control as the editor chapter row. */
   editorMode?: {
     lens: EditorLens
-    timeOrdered?: boolean
     onLensChange: (lens: EditorLens) => void
   }
   /** File-identity ⋯ (rename / move / export / delete). Editor-only tools stay off this surface. */
@@ -416,7 +415,6 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
                 lens={editorMode.lens}
                 onChange={editorMode.onLensChange}
                 agentActive
-                timeOrdered={editorMode.timeOrdered}
               />
               <OverflowMenu
                 items={fileMenuItems ?? []}

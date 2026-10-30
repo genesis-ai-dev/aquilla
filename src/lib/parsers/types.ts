@@ -677,6 +677,9 @@ export interface ProjectRecord {
    *  See ProjectWideSettings.allowTrackEditing for why switching it off is
    *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
+  /** AQU-1758: show the Film button and the timeline's Sources menu (see
+   *  ProjectWideSettings.filmAndSources). Unset: the project's kind decides. */
+  filmAndSources?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -1221,8 +1224,6 @@ export interface CompletionSettings {
    * internal clarity; the two names refer to the same concept.
    */
   systemPrompt: string
-  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
-  llmHealthPenalty?: number
 
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 

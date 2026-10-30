@@ -24,6 +24,7 @@ import { ChevronDown } from "lucide-react"
 import { flushSync } from "react-dom"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Badge } from "@/components/ui/badge"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { SegmentTabs } from "@/components/ui/tabs"
@@ -395,24 +396,26 @@ const ReviewRow = memo(function ReviewRow({
             {rivals && (
               <Badge
                 className={cn(AMBER_PILL, "cursor-pointer font-sans hover:bg-amber-500/25")}
-                title={t("importExport.review.contestedToggleHint")}
                 render={<button type="button" aria-expanded={expanded} onClick={() => onToggleExpanded(m.cellId)} />}
               >
                 {t("importExport.review.rowContestedPill")}
                 <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} aria-hidden />
               </Badge>
             )}
+            {/* What a pill means opens on a click of it, never a hover; the
+                text buttons beside them carry their own words (AQU-2260). */}
             {m.flag === "sharedTiming" && (
-              <Badge className={AMBER_PILL} title={t("importExport.review.rowSharedTiming")}>
-                {t("importExport.review.rowSharedTimingPill")}
-              </Badge>
+              <NoteOnClick note={t("importExport.review.rowSharedTiming")}>
+                <Badge className={AMBER_PILL}>
+                  {t("importExport.review.rowSharedTimingPill")}
+                </Badge>
+              </NoteOnClick>
             )}
             {m.flag === "sharedTiming" && !!m.sharedWith?.length && (
               <Button
                 size="xs"
                 variant="outline"
                 className="h-5 px-1.5 text-[10px]"
-                title={t("importExport.review.swapSameTimingHint")}
                 onClick={() => onSwapSameTiming(m.cellId)}
               >
                 {t("importExport.review.swap")}
@@ -422,9 +425,11 @@ const ReviewRow = memo(function ReviewRow({
               <Badge className={AMBER_PILL}>{t("importExport.review.rowTimingDiffers")}</Badge>
             )}
             {m.flag === "sourceDiffers" && (
-              <Badge className={AMBER_PILL} title={t("importExport.review.rowSourceDiffers")}>
-                {t("importExport.review.rowSourceDiffersPill")}
-              </Badge>
+              <NoteOnClick note={t("importExport.review.rowSourceDiffers")}>
+                <Badge className={AMBER_PILL}>
+                  {t("importExport.review.rowSourceDiffersPill")}
+                </Badge>
+              </NoteOnClick>
             )}
           </div>
         )}
@@ -450,7 +455,6 @@ const ReviewRow = memo(function ReviewRow({
               <Button
                 size="xs"
                 variant="outline"
-                title={t("importExport.review.swapHint")}
                 onClick={() => onSwap(m.cellId, rival)}
               >
                 {t("importExport.review.swap")}

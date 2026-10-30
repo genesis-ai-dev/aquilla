@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { LockedNote } from "@/components/ui/locked-note"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import type { DecaySettings } from "@/lib/parsers/types"
 import { DECAY_DEFAULTS } from "@/lib/health/decay-engine"
@@ -42,19 +42,21 @@ export function DecaySettingsSection({
 
   return (
     <details data-slot="settings-disclosure" className="group overflow-hidden rounded-lg border bg-card">
-      <AppTooltip content={disabledTooltip} disabled={!disabled}>
-        <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium group-open:border-b">
-          <ChevronRight
-            className="size-4 shrink-0 text-muted-foreground group-open:rotate-90"
-            aria-hidden
-          />
-          {t("projectSettings.decay.summary")}
-        </summary>
-      </AppTooltip>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium group-open:border-b">
+        <ChevronRight
+          className="size-4 shrink-0 text-muted-foreground group-open:rotate-90"
+          aria-hidden
+        />
+        {t("projectSettings.decay.summary")}
+      </summary>
       <div data-slot="settings-disclosure-body" className="space-y-4 bg-muted/30 px-4 py-4">
         <p className="text-xs text-muted-foreground">
           {t("projectSettings.decay.description")}
         </p>
+        {/* AQU-2260: why it is locked, once, on the page rather than on hover. */}
+        {disabled && disabledTooltip ? (
+          <LockedNote placement="section">{disabledTooltip}</LockedNote>
+        ) : null}
 
         <FieldGroup>
           <Field>

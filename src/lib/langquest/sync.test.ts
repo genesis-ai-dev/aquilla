@@ -3,6 +3,8 @@ import { syncLangQuest, type LangQuestSyncDeps } from "./sync"
 import { LangQuestLinkError } from "./api"
 import type { CqrsRawEvent } from "../sync/outbox-types"
 import type { KnownPassage, LangQuestChange, LangQuestPassage } from "./types"
+import { resolveTargetPieces } from "../audio/track-audio"
+import type { CellData } from "@/hooks/useCells"
 
 function passage(unitId: string, cards = 1, takeId = `${unitId}-t1`): LangQuestPassage {
   return {
@@ -165,5 +167,32 @@ describe("syncLangQuest", () => {
     const spy = vi.spyOn(h.deps, "fetchPassages")
     await expect(syncLangQuest({ ...h.deps, signal: controller.signal })).rejects.toThrow(/cancelled/)
     expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-981 check 8 (Oct 29): a version LangQuest recorded as several cards is
+// written as one take — the first card the take, the rest its pieces, each
+// card its own recording (url). The players read pieces as windows of ONE
+// recording, found through an id seeded with the line's cell id; a LangQuest
+// id ("lq-<first 8 of the cell id>-<hash>") is not, so the timeline, the
+// chapter queue's dub overlay and Free timing find no take on the line at all.
+// Known failure, not fixed here: when it is, vitest reports this test as
+// failing — drop `.fails`.
+describe("a multi-card LangQuest version, as the players read it", () => {
+  it.fails("every card is a piece of the take the line plays, in card order, each with its own recording", async () => {
+    const h = harness({ passages: [passage("01", 3)] })
+    await syncLangQuest(h.deps)
+    const attaches = h.events.filter((e) => e.kind === "cell.audio.attach")
+    const payloads = attaches.map((e) => e.payload as { audioId: string; url: string; slot: string; durationMs: number; pieceOf?: string; label: string })
+    // The line as the attachments read hands it to the players.
+    const root = payloads[0]!.audioId
+    const cell = {
+      id: attaches[0]!.cellId,
+      fileId: attaches[0]!.fileId,
+      selectedAudioId: root,
+      selectedBySlot: { recording: root },
+      attachments: Object.fromEntries(payloads.map((p) => [p.audioId, { type: "audio", url: p.url, slot: p.slot, durationMs: p.durationMs, label: p.label, ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}) }])),
+    } as unknown as CellData
+    expect(resolveTargetPieces(cell).map((p) => p.url)).toEqual(payloads.map((p) => p.url))
   })
 })

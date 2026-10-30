@@ -8,6 +8,8 @@
 //   POST /api/v2/auth/token
 //   GET  /api/v2/auth/me
 //   PATCH /api/v2/auth/me      (preferences only; username/password blocked — AQU-436)
+//   GET  /api/v2/auth/me/preferences
+//   PATCH /api/v2/auth/me/preferences   (merges only the keys sent — AQU-2264)
 //   GET  /api/v2/auth/activity-log
 //   POST /api/v2/auth/password-reset/request
 //   POST /api/v2/auth/password-reset/verify

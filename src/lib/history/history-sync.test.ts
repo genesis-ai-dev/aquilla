@@ -190,6 +190,17 @@ describe("the history follows the person (P13.2)", () => {
     expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Online trim", "Offline trim"])
   })
 
+  // Review, Oct 29: the server's row can go (deleted, a restored database)
+  // while this browser still names the revision it last saw.
+  it("a server copy that went missing is written again, not refused forever", async () => {
+    recordStep(step("First"))
+    await settle()
+    server.rows.clear()
+    recordStep(step("Second"))
+    await settle()
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["First", "Second"])
+  })
+
   it("opening the History panel picks up steps made elsewhere since", async () => {
     // Another device of Asha's writes a step after this one opened.
     const other = server.as("asha")

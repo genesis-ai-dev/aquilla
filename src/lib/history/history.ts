@@ -448,12 +448,16 @@ async function pushOnce(key: string): Promise<void> {
       return
     }
     if (res.history) mergeIn(key, res.history)
-    s.revision = newer(s.revision, res.revision)
+    // The refusal names the revision the server holds NOW, after every write
+    // of ours (they go one at a time): the next try is built on it, even when
+    // it is older than the one this copy knew. A row that went missing answers
+    // 0, and insisting on the old number was refused forever (review, Oct 29).
+    s.revision = res.revision
   }
 }
 
-/** Revisions only grow: a read that left before a write of ours landed must
- *  not take this copy back to an older one. */
+/** Revisions only grow on a READ: one that left before a write of ours landed
+ *  must not take this copy back to an older one. */
 const newer = (a: number | null, b: number) => (a != null && a > b ? a : b)
 
 const pulls = new Map<string, Promise<"unchanged" | "merged" | null>>()

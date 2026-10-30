@@ -780,6 +780,17 @@ describe("the review's cases (Oct 29)", () => {
     expect(moved.assignments.map(lineOf)).toEqual(["d#6", "d#1", "d#2", "d#3"])
   })
 
+  it("a verse's place in the book counts the book's standard chapters, so a chapter the project lacks moves nothing", () => {
+    const MAT = [25, 23, 17, 25, 48, 34, 29, 34, 38, 42, 30, 50, 58, 36, 39, 28, 27, 35, 30, 34]
+    const mat = book("mat", "MAT", "Matthew", MAT)
+    mat.lines = mat.lines.filter((l) => !l.cellId.startsWith("mat:5:"))
+    const files = ["MAT_LN620.mp3", "MAT_LN100.mp3"].map((n) => audio(n))
+    const { assignments } = run(files, [mat], fileScope("mat"))
+    expect(assignments[0].cellIds).toEqual(["mat:19:2"])
+    // LN100 is Matthew 5:10, in the chapter this project doesn't have.
+    expect(assignments[1].reason).toEqual({ code: "noSuchChapter", book: "Matthew", chapter: 5 })
+  })
+
   it("on a bridged line, the same verse twice is two takes; different verses are its pieces", () => {
     const g = book("g", "GEN", "Genesis", [0])
     g.lines.push({ cellId: "g:1:1-2", ref: "GEN 1:1-2", text: "1-2", structural: false, hasRecording: false })

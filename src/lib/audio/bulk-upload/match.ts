@@ -29,6 +29,7 @@
 
 import { BOOK_CODES, BookNameIndex, englishBookName } from "./book-names"
 import { folderSegments, isRangeSep, naturalCompare, readName, type NameNumber, type NameReading } from "./read-name"
+import { LAST_VERSES } from "./verse-counts"
 
 /** Folder order: the path without its extension, sorted naturally — so
  *  "Genesis 1-1" comes before "Genesis 1-1 copy", and 2 before 10. */
@@ -633,9 +634,10 @@ interface FileIndex {
   verses: Map<string, TargetLine>
   chapters: Map<number, TargetLine[]>
   /** Each chapter's last verse number, in chapter order: how a verse's place
-   *  in the book ("LN619") becomes its chapter and verse. The numbering, not
-   *  the lines, so a bridged line or a verse the project leaves out (17:21)
-   *  moves nothing after it. */
+   *  in the book ("LN619") becomes its chapter and verse. The book's standard
+   *  numbering (verse-counts.ts), not the project's lines, so a bridged line,
+   *  a verse the project leaves out (17:21) or a chapter it doesn't have moves
+   *  nothing after it. A book the table doesn't know uses the project's own. */
   chapterLengths: [chapter: number, verses: number][]
   /** Position of each line in `content`. */
   position: Map<string, number>
@@ -672,7 +674,9 @@ function indexFile(file: TargetFile): FileIndex {
     content,
     verses,
     chapters,
-    chapterLengths: [...lastVerse].sort((a, b) => a[0] - b[0]),
+    chapterLengths: file.bookCode && LAST_VERSES[file.bookCode]
+      ? LAST_VERSES[file.bookCode].map((verses, i) => [i + 1, verses] as [number, number])
+      : [...lastVerse].sort((a, b) => a[0] - b[0]),
     position: new Map(content.map((l, i) => [l.cellId, i])),
   }
 }

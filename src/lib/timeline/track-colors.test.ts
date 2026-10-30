@@ -456,6 +456,16 @@ describe("the waveform look", () => {
     expect(trackHueVarsFor("source-audio", null)["--tl-track-wave"]).toBe("oklch(0.484 0.135 235.1)")
   })
 
+  // Every row, lane and takes-list row asks on every render; the answer
+  // depends only on the colour and the row's kind, so it is worked out once.
+  it("works a colour's variables out once, per kind", () => {
+    expect(trackHueVars("violet")).toBe(trackHueVars("violet"))
+    expect(trackHueVarsFor("source-audio", null)).toBe(trackHueVarsFor("source-audio", null))
+    // Same hue, different kind: source audio's own lighter alphas are kept apart.
+    const blue = trackHueVarsFor("source-audio", null)["--tl-track-hue"].slice(1)
+    expect(trackHueVars(blue)["--tl-track-gen"]).not.toBe(trackHueVarsFor("source-audio", null)["--tl-track-gen"])
+  })
+
   it("never writes a negative lightness for a near-black colour", () => {
     expect(trackHueVars("000000")["--tl-track-wave"]).toMatch(/^oklch\(0\.000 /)
   })

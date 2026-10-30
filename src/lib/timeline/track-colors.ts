@@ -185,7 +185,8 @@ export function trackHueVarsFor(
   kind: string,
   color: string | null | undefined,
 ): Record<string, string> {
-  return hueVarsFromHex(hueForTrack(kind, color), { ...ALPHA, ...ALPHA_BY_KIND[kind] })
+  const hex = hueForTrack(kind, color)
+  return cachedHueVars(`${kind}:${hex}`, hex, ALPHA_BY_KIND[kind] ? { ...ALPHA, ...ALPHA_BY_KIND[kind] } : ALPHA)
 }
 
 /** An untouched track. Green because it is the nearest thing in this palette to
@@ -312,10 +313,30 @@ export function hexToRgba(hex: string, alpha: number): string {
  * reads the same hue with no prop threading at all.
  */
 export function trackHueVars(color: string | null | undefined): Record<string, string> {
-  return hueVarsFromHex(parseTrackHue(color), ALPHA)
+  const hex = parseTrackHue(color)
+  return cachedHueVars(hex, hex, ALPHA)
+}
+
+/**
+ * Every row, every lane and every takes-list row asks for these on every
+ * render, and since AQU-2235 each answer costs three OKLab conversions and up
+ * to three P3 gamut walks. It depends only on the colour and the row's kind's
+ * alphas, so each one is worked out once and kept — a handful of entries, the
+ * palette's six and whatever few other colours a project uses. Frozen, because
+ * one object is now handed to every caller.
+ */
+const HUE_VARS = new Map<string, Record<string, string>>()
+function cachedHueVars(key: string, hex: string, alpha: TrackAlpha): Record<string, string> {
+  let vars = HUE_VARS.get(key)
+  if (!vars) {
+    vars = Object.freeze(hueVarsFromHex(hex, alpha)) as Record<string, string>
+    HUE_VARS.set(key, vars)
+  }
+  return vars
 }
 
 function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> {
+  const strip = stripColorFor(hex)
   return {
     "--tl-track-hue": hex,
     "--tl-track-hover": hexToRgba(hex, alpha.hover),
@@ -329,11 +350,11 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
     // Sam, Oct 28: the name bar takes the track's strip colour, matching the
     // strip at the track's far left, at 90% opacity (first chosen as the hue
     // at 34%).
-    "--tl-track-bar": barColorFor(stripColorFor(hex)),
+    "--tl-track-bar": barColorFor(strip),
     "--tl-track-bar-ink": barInkFor(hex),
     "--tl-track-wave": waveColorFor(hex),
     "--tl-track-line": playLineColorCss(hex),
-    "--tl-track-strip": stripColorFor(hex),
+    "--tl-track-strip": strip,
   }
 }
 

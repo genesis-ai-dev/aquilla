@@ -540,6 +540,7 @@ import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
 import { CompletionBulkProgressBanner } from "./CompletionBulkProgressBanner"
+import { RecordingsUploadBanner } from "./RecordingsUploadBanner"
 import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useNextUnfinished } from "@/hooks/useNextUnfinished"
 import { AiSetupDialog } from "./AiSetupDialog"
@@ -1286,6 +1287,8 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  // AQU-981: a file's ⋯ menu → "Upload recordings…" opens Import on that file.
+  const [recordingsTarget, setRecordingsTarget] = useState<{ id: string; name: string } | null>(null)
   const [reimportTarget, setReimportTarget] = useState<{
     fileId: string
     name: string
@@ -11614,6 +11617,17 @@ export function ProjectWorkspace() {
       : (project?.files.length ?? 0) === 0
         ? t("importExport.intent.translation.noFilesLead")
         : null
+  // AQU-981: recordings go into the open lane, for whoever may upload a
+  // recording there today — the rail's upload button's own gate (Contributor
+  // up, the lane not archived), mirrored from cell.audio.attach's floor.
+  const canUploadRecordings = canPerform("cell.audio.attach", project?.syncRole?.level ?? null) && !activeLaneLock
+  const recordingsDisabledReason = activeLaneLock
+    ? t("recordingsUpload.intent.laneArchived", { lane: activeLaneLock.label })
+    : !canPerform("cell.audio.attach", project?.syncRole?.level ?? null)
+      ? denialMessage(t, ROLE.CONTRIBUTOR, project?.syncRole?.level ?? null)
+      : (project?.files.length ?? 0) === 0
+        ? t("recordingsUpload.intent.noFiles")
+        : null
   // AQU-1365: the files a translation can go into, in sidebar order, so the
   // picker reads like the file list beside it.
   const translationImportFiles = useMemo(
@@ -16153,6 +16167,13 @@ export function ProjectWorkspace() {
                     })
                     setImportOpen(true)
                   } : undefined}
+                  onUploadRecordings={canUploadRecordings ? (fileId) => {
+                    const file = project.files.find((entry) => entry.id === fileId)
+                    if (!file) return
+                    setReimportTarget(null)
+                    setRecordingsTarget({ id: fileId, name: fileDisplayName(file) })
+                    setImportOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -16458,6 +16479,10 @@ export function ProjectWorkspace() {
             {/* FRO-235: AI completion progress + stop control */}
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
+            </div>
+            {/* AQU-981: bulk recordings upload — progress, then its summary. */}
+            <div className="px-3 py-1 empty:hidden">
+              <RecordingsUploadBanner />
             </div>
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where
@@ -17955,6 +17980,7 @@ export function ProjectWorkspace() {
         <ImportDialog open={importOpen} onOpenChange={(next) => {
             setImportOpen(next)
             if (!next) setReimportTarget(null)
+            if (!next) setRecordingsTarget(null)
             // AQU-693: when an import launched from the setup checklist closes
             // (success, cancel, or error), return the user to the still-live
             // checklist — step 1 now reflects its true state — instead of
@@ -18029,6 +18055,13 @@ export function ProjectWorkspace() {
                     : undefined,
               })
             },
+          }}
+          recordings={{
+            // AQU-981: bulk recordings upload, into the lane the editor is in.
+            files: translationImportFiles,
+            disabledReason: recordingsDisabledReason,
+            languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
+            file: recordingsTarget,
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

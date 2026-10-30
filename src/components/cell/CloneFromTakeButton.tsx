@@ -1,6 +1,10 @@
 // "Clone voice from take" does what it says (AQU-2212): name the voice, press
 // Clone, and this take becomes a cast voice — no modal. "More options" still
 // opens the full New voice dialog seeded with the take (engine, other clips).
+//
+// AQU-1758: what "Make a character from this voice" does, on the line's take
+// in its Recording tab (this button) and on its take's menu on the timeline —
+// there the menu item opens the same popover at the clip (`anchor`).
 import { useState } from "react"
 import { CopyPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,22 +19,35 @@ export interface CloneFromTakeButtonProps {
   suggestedName?: string
   onClone: (name: string) => Promise<void>
   onMoreOptions: () => void
+  /**
+   * Opened from elsewhere (a take's menu on the timeline): no button of its
+   * own, the popover sits at `anchor`, and closing it calls `onClose`.
+   */
+  anchor?: Element | null
+  onClose?: () => void
 }
 
-export function CloneFromTakeButton({ suggestedName = "", onClone, onMoreOptions }: CloneFromTakeButtonProps) {
+export function CloneFromTakeButton({ suggestedName = "", onClone, onMoreOptions, anchor, onClose }: CloneFromTakeButtonProps) {
   const t = useT()
-  const [open, setOpenState] = useState(false)
+  const anchored = anchor !== undefined
+  const [open, setOpenState] = useState(anchored)
   const [name, setName] = useState(suggestedName)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const label = t("editor.voice.clone")
+  const close = () => {
+    setOpenState(false)
+    onClose?.()
+  }
   const setOpen = (next: boolean) => {
     if (busy) return
     if (next) {
       setName(suggestedName)
       setError(null)
+      setOpenState(true)
+      return
     }
-    setOpenState(next)
+    close()
   }
   const submit = async () => {
     if (!name.trim() || busy) return
@@ -38,7 +55,7 @@ export function CloneFromTakeButton({ suggestedName = "", onClone, onMoreOptions
     setError(null)
     try {
       await onClone(name.trim())
-      setOpenState(false)
+      close()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -47,23 +64,31 @@ export function CloneFromTakeButton({ suggestedName = "", onClone, onMoreOptions
   }
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content={label}>
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={label}
-              data-testid="voice-card-clone"
-              className="shrink-0 text-muted-foreground"
-            />
-          }
-        >
-          <CopyPlus className="h-3.5 w-3.5" />
-        </PopoverTrigger>
-      </AppTooltip>
-      <PopoverContent align="end" side="bottom" className="w-64 p-3">
+      {!anchored && (
+        <AppTooltip content={label}>
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={label}
+                data-testid="voice-card-clone"
+                className="shrink-0 text-muted-foreground"
+              />
+            }
+          >
+            <CopyPlus className="h-3.5 w-3.5" />
+          </PopoverTrigger>
+        </AppTooltip>
+      )}
+      <PopoverContent
+        align={anchored ? "start" : "end"}
+        side="bottom"
+        className="w-64 p-3"
+        data-testid="voice-card-clone-popover"
+        {...(anchored ? { anchor } : {})}
+      >
         <form
           className="flex flex-col gap-2"
           onSubmit={(e) => {
@@ -90,7 +115,7 @@ export function CloneFromTakeButton({ suggestedName = "", onClone, onMoreOptions
               className="px-0 text-muted-foreground"
               disabled={busy}
               onClick={() => {
-                setOpenState(false)
+                close()
                 onMoreOptions()
               }}
             >

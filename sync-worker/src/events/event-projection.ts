@@ -2317,10 +2317,21 @@ case 'cell.audio.attach': {
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.place event ${event.id} is missing fileId or cellId`)
       }
+      // AQU-2267: its place FOLLOWING THE RECORDINGS, beside its place
+      // following the source — both from this one event, so a move is one
+      // write. Absent (an older client, which knows one place) and null both
+      // store NULL: the recordings timing then reads target_offset_ms, as it
+      // did before the column existed. Anything else must be a finite number
+      // of ms; a bad value refuses the event here, before a statement exists,
+      // rather than failing the batch on a bigint cast.
+      const rec = p.recordingsOffsetMs
+      if (rec != null && (typeof rec !== 'number' || !Number.isFinite(rec))) {
+        throw new Error(`cell.audio.place event ${event.id} has a malformed recordingsOffsetMs`)
+      }
       stmts.push(
         db
           .prepare(
-            `UPDATE cell_audio SET target_offset_ms = ?
+            `UPDATE cell_audio SET target_offset_ms = ?, recordings_offset_ms = ?
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
           )
           .bind(
@@ -2328,6 +2339,7 @@ case 'cell.audio.attach': {
             // placed exactly at its line's start — and `||` would turn it back
             // into "never placed".
             p.targetOffsetMs ?? null,
+            rec == null ? null : Math.round(rec),
             event.projectId,
             event.fileId,
             event.cellId,
@@ -2369,12 +2381,13 @@ case 'cell.audio.attach': {
               project_id, file_id, cell_id, audio_id, slot, url, mime_type, voice_id,
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
-              created_by, role, target_offset_ms, piece_of
+              created_by, role, target_offset_ms, recordings_offset_ms, piece_of
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
                    ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
-                   a.created_by, a.role, a.target_offset_ms, COALESCE(a.piece_of, a.audio_id)
+                   a.created_by, a.role, a.target_offset_ms, a.recordings_offset_ms,
+                   COALESCE(a.piece_of, a.audio_id)
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'

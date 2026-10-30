@@ -677,6 +677,9 @@ export interface ProjectRecord {
    *  See ProjectWideSettings.allowTrackEditing for why switching it off is
    *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
+  /** AQU-1758: show the Film button and the timeline's Sources menu (see
+   *  ProjectWideSettings.filmAndSources). Unset: the project's kind decides. */
+  filmAndSources?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in

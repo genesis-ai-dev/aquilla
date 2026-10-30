@@ -104,6 +104,13 @@ export interface CodexCellAttachment {
    * `target_offset_ms` for every take that predates it.
    */
   targetOffsetMs?: number | null;
+  /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way from its line's start in that layout; `targetOffsetMs` is its place
+   * following the source. Undefined = no place of its own there, and that
+   * timing reads `targetOffsetMs` as it always has (every take before AQU-2267).
+   */
+  recordingsOffsetMs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;

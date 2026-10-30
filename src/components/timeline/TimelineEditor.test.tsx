@@ -1662,10 +1662,11 @@ describe("TimelineEditor — audio-first mode", () => {
     // one is held at the 1.5 s floor.
     expect(px(c1, "width")).toBeGreaterThan(px(c2, "width") * 2)
     // ONE explanation of the dashed lines — with the Timing control since
-    // board 55 (its hover text here, below project lead; the menu's foot for a
-    // lead), not an (i) in the bar. Nothing is parked in the Untimed strip.
+    // board 55 (a click on it here, below project lead — AQU-2260, it was its
+    // hover; the menu's foot for a lead), not an (i) in the bar. Nothing is
+    // parked in the Untimed strip.
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
-    await expectTooltip(screen.getByTestId("tl-timing-mode-audioFirst"), /at a stand-in length worked out from its text/)
+    await expectClickNote(screen.getByTestId("tl-timing-mode-audioFirst"), /at a stand-in length worked out from its text/)
     expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
   })
 

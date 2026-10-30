@@ -2,7 +2,7 @@
 // and at what role — Biblica pilot feedback was that it named none of them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
-import { MemoryRouter, Routes, Route, Link } from "react-router-dom"
+import { MemoryRouter, Routes, Route, Link, useLocation } from "react-router-dom"
 import { JoinOrgPage } from "./JoinOrgPage"
 import { acceptOrgInvite } from "@/lib/frontier/orgs"
 import { UserError } from "@/lib/errors/user-error"
@@ -43,9 +43,14 @@ vi.mock("@/components/git-import/FrontierLoginForm", () => ({
   ),
 }))
 
+function CurrentLocation() {
+  return <span data-testid="current-location">{useLocation().pathname}</span>
+}
+
 function renderJoinOrg(token = "tok") {
   return render(
     <MemoryRouter initialEntries={[`/join-org/${token}`]}>
+      <CurrentLocation />
       <Routes>
         <Route path="/join-org/:token" element={<><Link to="/join-org/next">Next invitation</Link><JoinOrgPage /></>} />
       </Routes>
@@ -82,7 +87,7 @@ describe("JoinOrgPage invite context (AQU-471)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /back to login/i }))
     expect(screen.getByText("do-login")).toBeInTheDocument()
     expect(acceptOrgInvite).not.toHaveBeenCalled()
-    expect(navigate).not.toHaveBeenCalled()
+    expect(screen.getByTestId("current-location")).toHaveTextContent(/^\/join-org\/invite-token$/)
   })
 
   it("names the org, inviter, and role when signed out", async () => {

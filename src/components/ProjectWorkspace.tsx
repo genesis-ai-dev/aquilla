@@ -275,7 +275,7 @@ import { injectOptimisticAudioTrim,
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
-import { laneAccessFor, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
+import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
@@ -14513,7 +14513,11 @@ export function ProjectWorkspace() {
     const access = laneAccessFor(lane, laneAccessRef.current)
     if (access !== "ok") return access
     setActiveLane(lane)
-    return waitUntilReady(() => laneReadyRef.current.lane === lane && laneReadyRef.current.ready)
+    // The store is read live: it sorts its rows for the language one effect
+    // pass after the render that opened it.
+    return waitUntilReady(() =>
+      laneShownReady(lane, { open: laneReadyRef.current.lane, storeLane: cellStore.viewLane, loaded: laneReadyRef.current.ready }),
+    )
   }
   useEffect(() => {
     setLaneSwitcher((lane) => laneSwitchRef.current(lane))

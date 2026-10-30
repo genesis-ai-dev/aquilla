@@ -1,7 +1,7 @@
 // Decision 11, gaps 24 and 29: undoing a step made in another language opens
 // that language first, unless the person can no longer work in it.
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { laneAccessFor, waitUntilReady } from "./lane-switch"
+import { laneAccessFor, laneShownReady, waitUntilReady } from "./lane-switch"
 
 const base = { available: ["", "sw", "fr"], scoped: null, archived: [], canSwitch: true, loaded: true }
 
@@ -25,6 +25,18 @@ describe("opening a step's language", () => {
 
   it("keeps the step waiting for someone who cannot switch languages here", () => {
     expect(laneAccessFor("fr", { ...base, canSwitch: false })).toBe("blocked")
+  })
+})
+
+// Review, Oct 29: the line store re-sorts its rows for a new language one
+// effect pass after the switcher changes, and the loaded flags of a read that
+// isn't running say "loaded" for any language. Neither may count until the
+// rows are sorted for the language asked for.
+describe("the language is on screen", () => {
+  it("only once the lines are sorted for it, not on flags left from the one before", () => {
+    expect(laneShownReady("fr", { open: "fr", storeLane: "sw", loaded: true })).toBe(false)
+    expect(laneShownReady("fr", { open: "fr", storeLane: "fr", loaded: false })).toBe(false)
+    expect(laneShownReady("fr", { open: "fr", storeLane: "fr", loaded: true })).toBe(true)
   })
 })
 

@@ -35,6 +35,26 @@ export function laneAccessFor(lane: string, access: LaneAccess): "ok" | "denied"
   return access.canSwitch ? "ok" : "blocked"
 }
 
+/** What the workspace knows about the language on screen, for an undo waiting on it. */
+export interface LaneShown {
+  /** The language the switcher has open. */
+  open: string
+  /** The language the line store has sorted its rows for. It follows the
+   *  switcher one effect pass later. */
+  storeLane: string
+  /** The open language's lines and takes have loaded. */
+  loaded: boolean
+}
+
+/**
+ * Whether `lane` is on screen with its lines and takes: its rows sorted for it
+ * too, so loaded flags left over from the language before cannot count
+ * (review, Oct 29).
+ */
+export function laneShownReady(lane: string, shown: LaneShown): boolean {
+  return shown.open === lane && shown.storeLane === lane && shown.loaded
+}
+
 /**
  * Wait until `ready()` has held on two checks in a row — so the render that
  * made it true has also run its effects (the step handlers re-register there

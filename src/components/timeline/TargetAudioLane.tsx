@@ -47,10 +47,7 @@ import {
   MIN_CHIP_GRIP_H_PX,
   MIN_CHIP_META_H_PX,
   NAME_BAR_CHECK_MIN_W_PX,
-  NAME_BAR_HOVER_MIN_W_PX,
-  NAME_BAR_NAME_MIN_W_PX,
-  NAME_BAR_PLAY_MIN_W_PX,
-  NAME_BAR_VOICE_MIN_W_PX,
+  fitNameBar,
   nameBarPx,
   slotButtonPx,
   slotIconPx,
@@ -898,7 +895,6 @@ function TargetAudioChip({
   // overlap body and the truncation chevrons. A row squeezed down to colour
   // bands must still be able to say "these two dubs collide".
   const fitsBadges = chipH >= MIN_CHIP_META_H_PX
-  const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
   // AQU-646 stage 5. Withheld while a state glyph holds the corner — see the
   // button's own comment — and needing the same room the record mic does.
   // Sam's decision: a hidden line's takes are drawn faded, and neither play
@@ -946,20 +942,37 @@ function TargetAudioChip({
       })
     : takeName
   const voiceName = takeVoice ? (takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")) : null
-  // It gives way from the right as the clip narrows: the voice, then the name.
-  const barShowsName = paintedPx >= NAME_BAR_NAME_MIN_W_PX
-  const barShowsVoice = voiceName != null && paintedPx >= NAME_BAR_VOICE_MIN_W_PX
-  // On hover the record button and the ⋯ take the check's place from 60px
-  // (board 54); the play button (top left before the bar) joins them from
-  // 120px, where the name still has room beside all three. The ⋯ alone stays at ANY width — AQU-1758 (Sam,
-  // decision 4) gave a narrow take the same ⋯ — so the menu is never only a
-  // right-click away.
-  const barPlay = canPlayHere && paintedPx >= NAME_BAR_PLAY_MIN_W_PX
-  const barRecord = canRecordHere && paintedPx >= NAME_BAR_HOVER_MIN_W_PX
-  const barMore = showMoreButton
-  const barHasHover = barPlay || barRecord || barMore
   const validatedState = chipValidationState === "self" || chipValidationState === "full" ? chipValidationState : null
   const barCheck = validatedState != null && paintedPx >= NAME_BAR_CHECK_MIN_W_PX
+  // What the bar holds gives way from the right as the clip narrows (board
+  // 54): the voice, then the name. On hover the record button and the ⋯ take
+  // the check's place, and the play button joins them, each only where the
+  // name keeps room to be double-clicked beside them — budgeted from what is
+  // actually in the bar (`fitNameBar`), not from widths tuned by eye. The ⋯
+  // stays at ANY width — AQU-1758 (Sam, decision 4) gave a narrow take the
+  // same ⋯ — so the menu is never only a right-click away. A passing state
+  // glyph (loading, saving) gives way before any of them: the transport's
+  // "loading" appears on the very click that starts a double-click.
+  const lastingGlyph = leftGlyph === "missing" || leftGlyph === "syncFailed"
+  const glyphFits = leftGlyph != null && fitsBadges && paintedPx >= 20
+  const barFit = fitNameBar(paintedPx, {
+    sparkle: chip.item.kind === "generated" && paintedPx >= 18,
+    unknownLength: geom.usingFallback,
+    lastingGlyph: glyphFits && lastingGlyph,
+    passingGlyph: glyphFits && !lastingGlyph,
+    check: barCheck,
+    more: showMoreButton,
+    record: canRecordHere,
+    play: canPlayHere,
+    voice: voiceName != null,
+  })
+  const showLeftGlyph = glyphFits && (lastingGlyph || barFit.passingGlyph)
+  const barShowsName = barFit.name
+  const barShowsVoice = barFit.voice
+  const barPlay = barFit.play
+  const barRecord = barFit.record
+  const barMore = barFit.more
+  const barHasHover = barPlay || barRecord || barMore
   const renameFromBar =
     editable && !blade && takeMenu?.rename
       ? (e: React.MouseEvent) => {

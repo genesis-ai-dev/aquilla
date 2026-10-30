@@ -207,8 +207,8 @@ describe("the bar's right end", () => {
     expect(ids).toEqual(["tl-target-c1-record", "tl-target-c1-more"])
   })
 
-  // The play button (top left before the bar) joins them from 120px wide, so
-  // the name keeps room to be double-clicked beside all three.
+  // The play button (top left before the bar) joins them only where the name
+  // keeps room to be double-clicked beside all three.
   it("adds the play button only where the name keeps room beside it", () => {
     const factory = () => ({ prime: async () => "ready" as const, play: () => ({ stop() {}, isPlaying: () => false, positionSec: () => null, audible: true }) })
     const { unmount } = render(<TargetAudioLane {...base} items={[item({ durationMs: 3000 })]} onOpenRecording={vi.fn()} takeMenu={menu()} previewFactory={factory} />)
@@ -281,6 +281,48 @@ describe("the bar gives way from the right as the clip narrows", () => {
   it("keeps the bar's colour on the narrowest clip", () => {
     render(voiced(500))
     expect(bar()!.className).toContain("bg-[color:var(--tl-track-bar)]")
+  })
+})
+
+// A double-click happens under the pointer: with the hover glyphs in the
+// check's place, and often just after the first click put a state glyph up.
+// So the name shows only where it keeps room for one beside them.
+describe("the name keeps room to be double-clicked", () => {
+  // At 40 px/s, a take of px × 25 ms is px wide.
+  const at = (px: number, over: Record<string, unknown> = {}, kind: "take" | "generated" = "take") =>
+    item({ durationMs: px * 25, ...over }, kind)
+  const name = () => screen.queryByTestId("tl-target-c1-name")
+
+  it("is left out, not crushed, where the ⋯ beside it would leave it no room", () => {
+    // A 55px AI voice: the sparkle, the name, and on hover the ⋯.
+    render(<TargetAudioLane {...base} items={[at(55, {}, "generated")]} takeMenu={menu()} />)
+    expect(name()).toBeNull()
+    expect(screen.getByTestId("tl-target-c1-more")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-generated")).toBeInTheDocument()
+  })
+
+  it("shows where it keeps its room beside the ⋯", () => {
+    render(<TargetAudioLane {...base} items={[at(70, {}, "generated")]} takeMenu={menu()} />)
+    expect(name()).toBeInTheDocument()
+  })
+
+  it("comes before a passing state glyph, which shows only where there is room for both", () => {
+    // A 60px take still saving, with the ⋯ on hover.
+    const { unmount } = render(<TargetAudioLane {...base} items={[at(60, { pendingSync: true })]} takeMenu={menu()} />)
+    expect(name()).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-saving")).toBeNull()
+    unmount()
+    render(<TargetAudioLane {...base} items={[at(120, { pendingSync: true })]} takeMenu={menu()} />)
+    expect(name()).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-saving")).toBeInTheDocument()
+  })
+
+  it("keeps the record button off a take where it would take the name's room", () => {
+    // 64px: the name and the ⋯ fit, the record button beside them does not.
+    render(<TargetAudioLane {...base} items={[at(64)]} takeMenu={menu()} onOpenRecording={vi.fn()} />)
+    expect(name()).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
+    expect(screen.getByTestId("tl-target-c1-more")).toBeInTheDocument()
   })
 })
 

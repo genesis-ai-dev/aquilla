@@ -439,6 +439,15 @@ UI chrome that used to be one smoke file per click is covered under
   had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
   rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
   smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
+  AQU-2306 adds the row's disclosure of which projects require MORE than the org: the count, the
+  zero state, the loading state that says nothing, the capped and visibility-filtered list with its
+  "and N more" remainder, the absence of a reset, and the re-read when the org's floor moves are in
+  `ImportPermissionsSection.test.tsx`; the server side of the count — name-visibility filtering, the
+  50 cap beside the exact total, the number-typed column, and the count falling to zero when the ORG
+  rises past a project with nothing written to that project — in auth-worker
+  `org-stricter-import-projects.test.ts`. It shares the walk above's gap for the same reason, and
+  the cross-project version of it (project A goes stricter → the org's Security row names A → the
+  link lands on A's Import card) is on AQU-2306's QA checklist.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.

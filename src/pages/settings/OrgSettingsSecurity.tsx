@@ -39,7 +39,7 @@ export function OrgSettingsSecurity() {
         <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEdit} />
         <TermbaseEditSection orgSettings={orgSettings} canEdit={canEdit} />
         <LanguageEditSection orgSettings={orgSettings} canEdit={canEdit} />
-        <ImportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} />
+        <ImportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} orgId={activeOrgId} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

@@ -20,7 +20,7 @@
 // every project member — see the SWARM-TODO in ProjectOverview.tsx next to
 // `selectedMemberUsername` for why and what widening it would take.
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { FieldError } from "@/components/ui/field"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
@@ -36,8 +36,7 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
-import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { fetchVisibilityOverrideCounts, type VisibilityOverrideCounts } from "@/lib/sync/org-settings"
+import { useStricterProjectCounts } from "@/hooks/useStricterProjectCounts"
 import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { OverrideStatus } from "./OverrideStatus"
 
@@ -47,31 +46,6 @@ interface RosterProgressSectionProps {
   canEdit: boolean
   /** The org these settings belong to — for the "N projects are stricter" counts. */
   orgId?: number | null
-}
-
-/**
- * AQU-1771: how many projects make each floor stricter than the org does.
- * Re-read whenever either floor moves, since that changes which projects are
- * stricter. Null until known (or on a server without the count).
- */
-function useStricterProjectCounts(
-  orgId: number | null | undefined,
-  rosterFloor: number,
-  progressFloor: number,
-): VisibilityOverrideCounts | null {
-  const { session } = useFrontierSession()
-  const jwt = session?.jwt ?? null
-  const [counts, setCounts] = useState<{ key: string; value: VisibilityOverrideCounts | null } | null>(null)
-  const key = `${orgId ?? ""}:${rosterFloor}:${progressFloor}`
-  useEffect(() => {
-    if (!jwt || orgId == null) return
-    let cancelled = false
-    void fetchVisibilityOverrideCounts(jwt, orgId).then((value) => {
-      if (!cancelled) setCounts({ key, value })
-    })
-    return () => { cancelled = true }
-  }, [jwt, orgId, key])
-  return counts?.key === key ? counts.value : null
 }
 
 // The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
@@ -93,7 +67,9 @@ export function RosterProgressSection({ orgSettings, canEdit, orgId }: RosterPro
   // back is that project's call. AQU-1938: so the count opens a list of those
   // projects, each linking to its overview, where its Team and Members badges
   // set these two.
-  const stricter = useStricterProjectCounts(orgId, rosterViewMinRole, memberProgressViewMinRole)
+  // Re-read whenever either floor moves, since that changes which projects are
+  // stricter (AQU-2306 moved this hook to src/hooks/ for the import row).
+  const stricter = useStricterProjectCounts(orgId, [rosterViewMinRole, memberProgressViewMinRole])
 
   const [rosterBusy, setRosterBusy] = useState(false)
   const [rosterError, setRosterError] = useState<string | null>(null)

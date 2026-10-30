@@ -613,12 +613,15 @@ describe("counting the org's stricter projects (AQU-1771)", () => {
     expect(res.status).toBe(200)
     // AQU-1938: the projects behind each count ride along, named only where
     // the caller may see them — tom is a contributor on none of these.
+    // AQU-2306: the import floor shares this route; no project here sets one.
     expect(await res.json()).toEqual({
       rosterViewMinRole: 1,
       memberProgressViewMinRole: 1,
+      importMinRole: 0,
       overrideProjects: {
         rosterViewMinRole: { total: 1, projects: [] },
         memberProgressViewMinRole: { total: 1, projects: [] },
+        importMinRole: { total: 0, projects: [] },
       },
     })
   })

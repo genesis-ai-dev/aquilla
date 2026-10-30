@@ -35,20 +35,25 @@ describe("fetchVisibilityOverrideCounts", () => {
   it("carries the projects the server names beside the counts", async () => {
     // The body GET /orgs/:id/settings/visibility-overrides sends (see
     // auth-worker org-override-projects.test.ts).
+    // AQU-2306 added the third floor, the import one, to the same body.
     respond({
       rosterViewMinRole: 2,
       memberProgressViewMinRole: 1,
+      importMinRole: 3,
       overrideProjects: {
         rosterViewMinRole: { total: 2, projects: [{ id: "p-tom", name: "Charlie" }] },
         memberProgressViewMinRole: { total: 1, projects: [] },
+        importMinRole: { total: 3, projects: [{ id: "p-gen", name: "Genesis" }] },
       },
     })
     expect(await fetchVisibilityOverrideCounts("jwt", 1, "https://api.test")).toEqual({
       rosterViewMinRole: 2,
       memberProgressViewMinRole: 1,
+      importMinRole: 3,
       overrideProjects: {
         rosterViewMinRole: { total: 2, projects: [{ id: "p-tom", name: "Charlie" }] },
         memberProgressViewMinRole: { total: 1, projects: [] },
+        importMinRole: { total: 3, projects: [{ id: "p-gen", name: "Genesis" }] },
       },
     })
   })
@@ -58,7 +63,22 @@ describe("fetchVisibilityOverrideCounts", () => {
     expect(await fetchVisibilityOverrideCounts("jwt", 1, "https://api.test")).toEqual({
       rosterViewMinRole: 2,
       memberProgressViewMinRole: 0,
-      overrideProjects: { rosterViewMinRole: null, memberProgressViewMinRole: null },
+      importMinRole: 0,
+      overrideProjects: { rosterViewMinRole: null, memberProgressViewMinRole: null, importMinRole: null },
     })
+  })
+
+  it("from a server before AQU-2306, the import count reads zero — no project is stricter", async () => {
+    respond({
+      rosterViewMinRole: 0,
+      memberProgressViewMinRole: 0,
+      overrideProjects: {
+        rosterViewMinRole: { total: 0, projects: [] },
+        memberProgressViewMinRole: { total: 0, projects: [] },
+      },
+    })
+    const counts = await fetchVisibilityOverrideCounts("jwt", 1, "https://api.test")
+    expect(counts?.importMinRole).toBe(0)
+    expect(counts?.overrideProjects.importMinRole).toBeNull()
   })
 })

@@ -426,6 +426,9 @@ interface ProjectSettingsProps {
 const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
   languages: { elementId: "section-languages", block: "start" },
   "add-lane": { elementId: "add-lane-field", block: "nearest" },
+  // AQU-2306: the org Security page's "N projects are stricter than this" list
+  // links each project here, to the card that holds its own import floor.
+  import: { elementId: "section-import", block: "start" },
 }
 
 export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {

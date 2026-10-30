@@ -18,6 +18,14 @@
 // Editable only by org owners (OWNER-only write gate, enforced server-side in
 // auth-worker/src/routes/org-settings.ts): taking file imports away from every
 // project lead in the org — or handing them back — is not a maintainer's call.
+//
+// AQU-2306: a project may require MORE than this (AQU-2305), and without a word
+// about it the page is silent on why leads in some project still cannot import
+// after an owner set the org to Project lead. So the row carries the same
+// disclosure the roster rows do: how many projects are stricter, opening to
+// name them, each linking to the Import card where its own value is set. No
+// Reset link, matching those rows — a project that chose to be stricter made
+// that call, and undoing it is the project's decision.
 
 import { useState } from "react"
 import { FieldError } from "@/components/ui/field"
@@ -35,11 +43,16 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
+import { useStricterProjectCounts } from "@/hooks/useStricterProjectCounts"
+import { projectImportSettingsPath } from "@/lib/navigation/org-paths"
+import { OverrideStatus } from "./OverrideStatus"
 
 interface ImportPermissionsSectionProps {
   orgSettings: UseOrgSettings
   /** True when the caller's org role meets the OWNER-only write gate. */
   canEdit: boolean
+  /** The org these settings belong to — for the "N projects are stricter" line. */
+  orgId?: number | null
 }
 
 // The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
@@ -54,9 +67,12 @@ const IMPORT_ROLE_OPTIONS: { level: number; labelKey: MessageKey }[] = [
   { level: ROLE.MAINTAINER, labelKey: "settings.importPermissions.optionMaintainer" },
 ]
 
-export function ImportPermissionsSection({ orgSettings, canEdit }: ImportPermissionsSectionProps) {
+export function ImportPermissionsSection({ orgSettings, canEdit, orgId }: ImportPermissionsSectionProps) {
   const { t } = useI18n()
   const { importMinRole, patch } = orgSettings
+  // Re-read whenever the org's floor moves: that alone changes which projects
+  // count as stricter, with nothing written to any project.
+  const stricter = useStricterProjectCounts(orgId, [importMinRole])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -76,7 +92,20 @@ export function ImportPermissionsSection({ orgSettings, canEdit }: ImportPermiss
   return (
     <SettingsRow
       label={t("settings.importPermissions.label")}
-      description={t("settings.importPermissions.description")}
+      description={
+        <>
+          {t("settings.importPermissions.description")}
+          {orgId != null && (
+            <OverrideStatus
+              count={stricter?.importMinRole ?? 0}
+              kind="stricter"
+              loading={stricter == null}
+              projects={stricter?.overrideProjects?.importMinRole ?? null}
+              projectHref={projectImportSettingsPath}
+            />
+          )}
+        </>
+      }
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

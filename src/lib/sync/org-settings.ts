@@ -413,13 +413,21 @@ export async function resetProjectOverrides(
   }
 }
 
-/** AQU-1771: how many of the org's projects are stricter than each visibility floor. */
+/**
+ * AQU-1771: how many of the org's projects are stricter than each visibility
+ * floor. AQU-2306: and than the org's import floor, which the Security page
+ * shows the same way (same route, same rules — see the auth-worker handler).
+ */
 export interface VisibilityOverrideCounts {
   rosterViewMinRole: number
   memberProgressViewMinRole: number
+  importMinRole: number
   /** AQU-1938: which projects those are. Null from an older server. */
-  overrideProjects: Record<"rosterViewMinRole" | "memberProgressViewMinRole", OverrideProjectList | null>
+  overrideProjects: Record<StricterFloorKey, OverrideProjectList | null>
 }
+
+/** The floors the Security page's stricter-projects lines cover. */
+export type StricterFloorKey = "rosterViewMinRole" | "memberProgressViewMinRole" | "importMinRole"
 
 /**
  * GET /api/v2/orgs/:orgId/settings/visibility-overrides. Null on any failure
@@ -438,14 +446,19 @@ export async function fetchVisibilityOverrideCounts(
     const body = (await res.json()) as {
       rosterViewMinRole?: unknown
       memberProgressViewMinRole?: unknown
-      overrideProjects?: { rosterViewMinRole?: unknown; memberProgressViewMinRole?: unknown }
+      importMinRole?: unknown
+      overrideProjects?: Partial<Record<StricterFloorKey, unknown>>
     }
     return {
       rosterViewMinRole: Number(body.rosterViewMinRole) || 0,
       memberProgressViewMinRole: Number(body.memberProgressViewMinRole) || 0,
+      // AQU-2306: absent on a server from before this route grew the key, which
+      // reads as "no project is stricter" — the same zero state as a real zero.
+      importMinRole: Number(body.importMinRole) || 0,
       overrideProjects: {
         rosterViewMinRole: parseOverrideProjectList(body.overrideProjects?.rosterViewMinRole),
         memberProgressViewMinRole: parseOverrideProjectList(body.overrideProjects?.memberProgressViewMinRole),
+        importMinRole: parseOverrideProjectList(body.overrideProjects?.importMinRole),
       },
     }
   } catch {

@@ -379,7 +379,14 @@ CREATE TABLE project_settings (
     -- 0190 (AQU-2263): and whether it sets its own "Auto-propagate
     -- repetitions" answer, for the same count and reset. One line (dev-stack
     -- reconciler).
-    auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED
+    auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED,
+    -- 0192 (AQU-2306): this project's own, stricter-only import floor
+    -- (AQU-2305), so the org's Security page can count and name the projects
+    -- that require more than the org does to import a file. Number-typed like
+    -- the visibility floors above, and for the same reason. One line
+    -- (dev-stack reconciler).
+    import_min_role TEXT
+      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'importMinRole') = 'number' THEN (settings::jsonb) ->> 'importMinRole' END) STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 

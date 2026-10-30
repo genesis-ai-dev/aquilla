@@ -51,6 +51,10 @@ import {
   type ProjectVisibilityOverrides,
   type VisibilityFloorKey,
 } from "../../../db/shared/visibility-floors"
+import {
+  loadOrgProjectImportFloors,
+  stricterProjectImportFloor,
+} from "../../../db/shared/import-floor"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -3321,6 +3325,40 @@ export async function listStricterVisibilityProjects(
     }
   }
   return lists
+}
+
+/**
+ * AQU-2306: how many of the org's live projects require MORE than the org does
+ * to import a file — the "N projects are stricter than this" line under "Who
+ * can import files" — and which ones, so the line can name them.
+ *
+ * Deliberately the same shape and the same rules as the two visibility floors
+ * above, because the Security page shows all three the same way: any org
+ * member may read the count, only the names the caller may already see come
+ * back, and the total still covers the rest. It reads the org's floor fresh
+ * rather than taking it from the caller, so a project that was stricter stops
+ * counting the moment the ORG rises past it — with no write to the project.
+ */
+export async function listStricterImportProjects(
+  env: Env,
+  orgId: number,
+  viewer: ProjectNameViewer,
+): Promise<OverrideProjectList> {
+  const [settings, rows] = await Promise.all([
+    loadOrgSettingsBlob(env, orgId),
+    loadOrgProjectImportFloors(env.AQUILLA_PG, orgId, projectNameVisibleSql(viewer)),
+  ])
+  const orgFloor = extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE)
+  const list: OverrideProjectList = { total: 0, projects: [] }
+  // Rows arrive in name order, so the list is too.
+  for (const row of rows) {
+    if (stricterProjectImportFloor(orgFloor, row.importMinRole) == null) continue
+    list.total += 1
+    if (row.nameVisible && list.projects.length < OVERRIDE_PROJECT_LIST_CAP) {
+      list.projects.push({ id: row.projectId, name: row.name })
+    }
+  }
+  return list
 }
 
 /**

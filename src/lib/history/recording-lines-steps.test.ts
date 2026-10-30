@@ -32,9 +32,11 @@ function ctxFor(lines: Map<string, Line>, files: Record<string, "live" | "delete
     fileUntouched: (fileId) => (fileId !== open ? "notOpen" : [...lines.values()].every((l) => l.untouched)),
     trashFile: vi.fn(async (fileId) => {
       files[fileId] = "deleted"
+      return true
     }),
     restoreFile: vi.fn(async (fileId) => {
       files[fileId] = "live"
+      return true
     }),
   }
   return { ctx, handlers: recordingLinesStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
@@ -114,6 +116,19 @@ describe("file.importRecording", () => {
     expect(files.f1).toBe("deleted")
     expect(await handlers["file.importRecording"].redo({ fileId: "f1" })).toEqual({ kind: "done" })
     expect(files.f1).toBe("live")
+  })
+
+  // Review, Oct 29: the delete or restore can be refused (the person's role,
+  // an outbox error). The step must not say it went, or it moves to Redo
+  // while the file is still where it was.
+  it("fails, rather than reporting done, when the file could not be moved", async () => {
+    const files: Record<string, "live" | "deleted"> = { f1: "live" }
+    const { ctx, handlers } = ctxFor(fresh(), files)
+    vi.mocked(ctx.trashFile).mockResolvedValueOnce(false)
+    expect((await handlers["file.importRecording"].undo({ fileId: "f1" })).kind).toBe("failed")
+    files.f1 = "deleted"
+    vi.mocked(ctx.restoreFile).mockResolvedValueOnce(false)
+    expect((await handlers["file.importRecording"].redo({ fileId: "f1" })).kind).toBe("failed")
   })
 
   it("waits for the file to be open to see its lines, and is skipped once they were worked on", async () => {

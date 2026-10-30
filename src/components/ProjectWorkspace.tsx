@@ -10760,8 +10760,9 @@ export function ProjectWorkspace() {
   // FRO-272: soft-delete via file.delete event. IDB removal is contingent on
   // server ack (fixes F-E6 fire-and-forget fork). The file moves to "Recently
   // deleted" in the trash UI; cells and audio are retained. R2 wipe deferred.
-  const handleDeleteFile = useCallback(async (fileId: string) => {
-    if (!project) return
+  // Resolves whether the delete was queued (the history's undo asks).
+  const handleDeleteFile = useCallback(async (fileId: string): Promise<boolean> => {
+    if (!project) return false
 
     const deleted = project.files.find((f) => f.id === fileId)
 
@@ -10814,7 +10815,7 @@ export function ProjectWorkspace() {
         return next
       })
       setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
-      return
+      return false
     }
 
     // The outbox is authoritative. Local project cache cleanup is best-effort
@@ -10828,11 +10829,13 @@ export function ProjectWorkspace() {
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
     void refreshDeletedFiles()
+    return true
   }, [project, currentUsername, refresh, activeFileId, setActiveFileId, refreshDeletedFiles])
 
   // Restore a soft-deleted file: emit file.restore, then refresh listings.
-  const handleRestoreFile = useCallback(async (fileId: string) => {
-    if (!project) return
+  // Resolves whether the restore was queued.
+  const handleRestoreFile = useCallback(async (fileId: string): Promise<boolean> => {
+    if (!project) return false
     try {
       await emitFileRestore({
         projectId: project.id,
@@ -10841,7 +10844,7 @@ export function ProjectWorkspace() {
       })
     } catch (e) {
       console.error("[restore] file.restore emit failed", e)
-      return
+      return false
     }
     // Un-hide the row if it was soft-deleted this session — the optimistic
     // delete overlay would otherwise keep masking the restored file.
@@ -10854,6 +10857,7 @@ export function ProjectWorkspace() {
     setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
     refresh()
     void refreshDeletedFiles()
+    return true
   }, [project, currentUsername, refresh, refreshDeletedFiles])
 
   // "Delete forever" — hard-delete via the existing REST endpoint (R2 wipe).

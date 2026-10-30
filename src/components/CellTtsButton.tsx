@@ -17,6 +17,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
+import { withGroup } from "@/lib/history/history"
 import { AiModelConsentDeniedError } from "@/lib/audio/ai-consent"
 import { useModelStatus } from "@/lib/audio/prefetch"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -256,60 +257,68 @@ export function CellTtsButton({
           }
           let blob: Blob
           if (!previewOnly && projectId && fileId && session?.jwt) {
-            const gen = await generateAndAttachCellVoice({
-              projectId,
-              fileId,
-              cellId,
-              text: trimmed,
-              projectTtsSettings,
-              cellVoiceId: baseVoice.id,
-              geminiContext,
-              session,
-              username: session.username,
-              onProgress,
-              ...(targetLang ? { targetLang } : {}),
-              surface: "cell", // AQU-1572
-            })
-            blob = gen.blob
-            // The other heard lines performing this same subtitle. Sequential,
-            // not parallel: they share one synth backend and one progress slot,
-            // and a second concurrent run would fight the first for both.
-            //
-            // AFTER the blob is in hand, and each one guarded — the clip the
-            // user asked to hear must not be lost because a sibling failed.
+            // Decision 11: one press, one Undo step, however many heard lines
+            // it voiced. Nothing played here before: this path runs only when
+            // the line has no generated voice yet.
             let alsoWritten = 0
             let alsoFailed = 0
-            for (const also of alsoAttachTo ?? []) {
-              try {
-                await generateAndAttachCellVoice({
-                  projectId,
-                  fileId: also.fileId,
-                  cellId: also.cellId,
-                  text: trimmed,
-                  projectTtsSettings,
-                  cellVoiceId: baseVoice.id,
-                  geminiContext,
-                  session,
-                  username: session.username,
-                  // The same lane as the clip above: every heard line voices
-                  // the one translation, in the one language.
-                  ...(targetLang ? { targetLang } : {}),
-                  surface: "cell", // AQU-1572: one event per line it voiced
-                })
-                alsoWritten += 1
-              } catch (e) {
-                // Still swallowed on purpose — the clip the user asked to hear
-                // must not be lost because a sibling failed — but no longer
-                // SILENT. Until 2026-08-27 this was the whole handler, and
-                // because the success toast below counts only what landed, a
-                // run where every sibling failed produced no toast at all:
-                // indistinguishable from an ordinary one-clip success, with
-                // the other heard lines left silent in the dub and nothing on
-                // screen saying so.
-                alsoFailed += 1
-                console.error("[tts] sibling attach failed", also.cellId, e)
+            const gen = await withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId }, async () => {
+              const made = await generateAndAttachCellVoice({
+                projectId,
+                fileId,
+                cellId,
+                text: trimmed,
+                projectTtsSettings,
+                cellVoiceId: baseVoice.id,
+                geminiContext,
+                session,
+                username: session.username,
+                onProgress,
+                ...(targetLang ? { targetLang } : {}),
+                surface: "cell", // AQU-1572
+                history: { selectedBefore: null },
+              })
+              // The other heard lines performing this same subtitle. Sequential,
+              // not parallel: they share one synth backend and one progress slot,
+              // and a second concurrent run would fight the first for both.
+              //
+              // AFTER the blob is in hand, and each one guarded — the clip the
+              // user asked to hear must not be lost because a sibling failed.
+              for (const also of alsoAttachTo ?? []) {
+                try {
+                  await generateAndAttachCellVoice({
+                    projectId,
+                    fileId: also.fileId,
+                    cellId: also.cellId,
+                    text: trimmed,
+                    projectTtsSettings,
+                    cellVoiceId: baseVoice.id,
+                    geminiContext,
+                    session,
+                    username: session.username,
+                    // The same lane as the clip above: every heard line voices
+                    // the one translation, in the one language.
+                    ...(targetLang ? { targetLang } : {}),
+                    surface: "cell", // AQU-1572: one event per line it voiced
+                    history: { selectedBefore: null },
+                  })
+                  alsoWritten += 1
+                } catch (e) {
+                  // Still swallowed on purpose — the clip the user asked to hear
+                  // must not be lost because a sibling failed — but no longer
+                  // SILENT. Until 2026-08-27 this was the whole handler, and
+                  // because the success toast below counts only what landed, a
+                  // run where every sibling failed produced no toast at all:
+                  // indistinguishable from an ordinary one-clip success, with
+                  // the other heard lines left silent in the dub and nothing on
+                  // screen saying so.
+                  alsoFailed += 1
+                  console.error("[tts] sibling attach failed", also.cellId, e)
+                }
               }
-            }
+              return made
+            }, { owns: { cells: [cellId, ...(alsoAttachTo ?? []).map((a) => a.cellId)], kinds: ["take."] } })
+            blob = gen.blob
             // AQU-646 stage 3g: ONE PRESS, MORE THAN ONE CLIP — say so.
             //
             // A subtitle performed by several heard lines gets voiced onto each

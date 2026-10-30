@@ -68,6 +68,9 @@ export function CellAudioUploadButton({ projectId, fileId, cellId, username, dis
         session, projectId, fileId, cellId, file, username,
         ...(targetLang ? { targetLang } : {}),
         surface: "cell",
+        // Decision 11: an Undo step. The rail shows only on a line with no
+        // audio yet, so nothing played before.
+        history: { selectedBefore: null },
       })
       onTakeSaved?.(cellId)
     } catch (e) {

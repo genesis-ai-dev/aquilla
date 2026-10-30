@@ -8,6 +8,7 @@ import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
+import { isOwnUntouchedRecordingLine } from './recording-line-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
@@ -808,7 +809,24 @@ export async function authorize<K extends EventKind>(
       raw.fileId != null &&
       raw.cellId != null &&
       (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
-    if (!userInserted) {
+    // Slice 13 (Sam, Oct 28): the undo of "make rows from an audio or video
+    // file" may take back lines its author just made, while nobody else has
+    // touched them — never anyone else's, never other imported lines
+    // (recording-line-authority.ts).
+    const undoOf = (raw.payload as { undoOfEventId?: unknown } | null)?.undoOfEventId
+    const ownRecordingLine =
+      !userInserted &&
+      raw.fileId != null &&
+      raw.cellId != null &&
+      typeof undoOf === 'string' &&
+      (await isOwnUntouchedRecordingLine(db, {
+        projectId: raw.projectId,
+        fileId: raw.fileId,
+        cellId: raw.cellId,
+        createEventId: undoOf,
+        author: tokenUsername,
+      }))
+    if (!userInserted && !ownRecordingLine) {
       return {
         ok: false,
         status: 403,

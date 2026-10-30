@@ -542,8 +542,10 @@ export function CellVoicePanel({
   }, [project, cell, sess, username, targetLang, playableId, isSourceClip, projectId])
   const voiceAndDisplace = useCallback(
     (voiceId: string) =>
-      withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: cell.fileId }, () => voiceThenDisplace(voiceId)),
-    [cell.fileId, voiceThenDisplace],
+      withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: cell.fileId }, () => voiceThenDisplace(voiceId), {
+        owns: { cells: [cell.id], kinds: ["take."] },
+      }),
+    [cell.fileId, cell.id, voiceThenDisplace],
   )
   const generate = useCallback(async (voiceId: string = active.id) => {
     if (isVoicing || !canGenerate || !canEdit) return

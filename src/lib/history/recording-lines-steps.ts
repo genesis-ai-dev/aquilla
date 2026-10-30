@@ -56,8 +56,10 @@ export interface RecordingLinesContext {
   /** Whether every line of the file is untouched; "notOpen" when it can't be
    *  told because the file is not the one open. */
   fileUntouched(fileId: string): boolean | "notOpen"
-  trashFile(fileId: string): Promise<void>
-  restoreFile(fileId: string): Promise<void>
+  /** Move the file to Recently deleted, or bring it back from there. False
+   *  when the write was refused and the file stayed where it was. */
+  trashFile(fileId: string): Promise<boolean>
+  restoreFile(fileId: string): Promise<boolean>
 }
 
 export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<string, StepHandler<never>> {
@@ -92,14 +94,14 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
         const untouched = ctx.fileUntouched(d.fileId)
         if (untouched === "notOpen") return { kind: "blocked", reason: "elsewhere" }
         if (!untouched) return CHANGED
-        await ctx.trashFile(d.fileId)
+        if (!(await ctx.trashFile(d.fileId))) return { kind: "failed", error: new Error("the file could not be moved to Recently deleted") }
         return DONE
       },
       async redo(d: ImportedRecordingData) {
         const state = ctx.fileState(d.fileId)
         if (state === null) return GONE
         if (state === "live") return CHANGED
-        await ctx.restoreFile(d.fileId)
+        if (!(await ctx.restoreFile(d.fileId))) return { kind: "failed", error: new Error("the file could not be brought back") }
         return DONE
       },
     } as StepHandler<never>,

@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from "vitest"
 import {
   CastStepBuilder,
+  filmNow,
   mediaStepHandlers,
   voiceEntryChanges,
   voiceSettingsPatch,
@@ -65,6 +66,20 @@ describe("film.link", () => {
   })
 })
 
+// Review, Oct 29: the film just written here stands in for the project read
+// until that read answers. Any new answer ends it, not only one spelled
+// exactly as written (the server may tidy the address), or a collaborator's
+// later film would be hidden behind it and an Undo would write over theirs.
+describe("filmNow", () => {
+  it("is the film written here until the read moves, then the read", () => {
+    const pending = { url: "https://films.example/ep2 ", readBefore: "https://films.example/ep1" }
+    expect(filmNow("https://films.example/ep1", pending)).toEqual({ film: "https://films.example/ep2 ", settled: false })
+    expect(filmNow("https://films.example/ep2", pending)).toEqual({ film: "https://films.example/ep2", settled: true })
+    expect(filmNow("https://films.example/ep9", pending)).toEqual({ film: "https://films.example/ep9", settled: true })
+    expect(filmNow("https://films.example/ep1", undefined)).toEqual({ film: "https://films.example/ep1", settled: true })
+  })
+})
+
 describe("cue.link", () => {
   it("an unlink is undone by linking the pair again, so the line counts through it once more", async () => {
     const state = { links: new Set<string>() }
@@ -86,6 +101,46 @@ describe("cue.link", () => {
       kind: "skipped",
       reason: "gone",
     })
+  })
+})
+
+// Review, Oct 29: "Re-pair cues" can change hundreds of pairings. Undoing it
+// is one write, not one per pairing, and the pairings come back as they were:
+// the matcher's own stay the matcher's, and nothing it removed turns into a
+// pinned hand pairing or a hand rejection.
+describe("cue.links (re-pairing the cues)", () => {
+  const repair = {
+    links: [
+      { textCellId: "sub1", cueCellId: "heard1", linked: true, origin: "auto" as const, confidence: 0.9 },
+      { textCellId: "sub2", cueCellId: "heard2", linked: false, origin: "manual" as const, confidence: null },
+    ],
+  }
+
+  it("is undone and redone in one write each, keeping each pairing's origin", async () => {
+    const state = { links: new Set(["sub1|heard1"]) }
+    const { ctx, handlers } = ctxFor(state)
+    expect(await handlers["cue.links"].undo(repair)).toEqual({ kind: "done" })
+    expect(ctx.writeCueLinks).toHaveBeenCalledTimes(1)
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: false, origin: "auto", confidence: null },
+      { textCellId: "sub2", cueCellId: "heard2", linked: true, origin: "manual", confidence: null },
+    ])
+    expect([...state.links]).toEqual(["sub2|heard2"])
+    expect(await handlers["cue.links"].redo(repair)).toEqual({ kind: "done" })
+    expect(ctx.writeCueLinks).toHaveBeenCalledTimes(2)
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: true, origin: "auto", confidence: 0.9 },
+      { textCellId: "sub2", cueCellId: "heard2", linked: false, origin: "auto", confidence: null },
+    ])
+  })
+
+  it("leaves a pairing someone changed since, and still takes back the rest", async () => {
+    const state = { links: new Set(["sub1|heard1", "sub2|heard2"]) }
+    const { ctx, handlers } = ctxFor(state)
+    expect(await handlers["cue.links"].undo(repair)).toEqual({ kind: "done", partial: { skipped: 1 } })
+    expect(ctx.writeCueLinks).toHaveBeenLastCalledWith([
+      { textCellId: "sub1", cueCellId: "heard1", linked: false, origin: "auto", confidence: null },
+    ])
   })
 })
 

@@ -767,6 +767,9 @@ export interface EditorTableHandle {
    *  a row click doesn't scroll the table but must re-engage following). */
   setMediaFollow: (intent: "engage" | "release") => void
   focusCellEditorIndex: (index: number) => void
+  /** Put the caret in this cell's target editor, by id in DISPLAY space — the
+   *  recorder's "edit this text" pencil. False when the row is not listed. */
+  focusCellEditorId: (cellId: string) => boolean
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
   flashCell: (cellId: string, searchTerm: string) => void
@@ -2086,6 +2089,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       issueFollowCommand(intent)
     },
     focusCellEditorIndex: focusCellEditorByIndex,
+    focusCellEditorId: (cellId: string) => {
+      const index = displayCellIdsRef.current.indexOf(cellId)
+      if (index < 0) return false
+      focusCellEditorByIndex(index)
+      return true
+    },
     getCurrentIndex: () => {
       // The last-active editor cell when it's on screen (so "Next unfinished"
       // advances past a just-jumped-to cell instead of re-finding it),
@@ -3366,10 +3375,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {/* Sam's D1 (2026-10-05): an empty linked video has no rows for the
             column headings to describe — select-all, #, Source, Target — so
             the bar goes until it has some, in the Text view and the Media
-            view's Text pane alike. */}
+            view's Text pane alike.
+            AQU-2288: the bar sits outside the rows' scroller, so a scrollbar
+            there made the rows' 1fr tracks narrower than these and slid the
+            rows' Target column (checks, text) half the scrollbar's width left
+            of the marks and heading. Both reserve the same gutter instead — this one as an
+            overflow-hidden scroll container; every popup here portals. */}
         {!hideColumnHeaders && (
         <div data-testid="table-column-headers" className={cn(
-            "grid grid-cols-2 gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground",
+            "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
               ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
               : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
@@ -3407,7 +3421,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div data-testid="table-target-header" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
+          {/* AQU-2288: ltr like the rows' target column (EditorTargetCellColumn),
+              so in an rtl UI the marks stay on the side the checks are on. */}
+          <div data-testid="table-target-header" dir="ltr" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
             {/* The two validation columns under this heading, told apart —
                 text, then audio — since a validated line shows the same green
                 check in both (Sam, 2026-09-28; the Text and Audio views). */}
@@ -3585,7 +3601,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               onFirstVisibleItemChanged={handleFirstVisibleItemChanged}
               onViewableItemsChanged={handleViewableItemsChanged}
               viewabilityConfig={{ viewAreaCoveragePercentThreshold: 0 }}
-              style={{ flex: 1, minHeight: 0 }}
+              // AQU-2288: the column headings above reserve this same gutter,
+              // so the two grids share widths whether or not the rows overflow.
+              style={{ flex: 1, minHeight: 0, scrollbarGutter: "stable" }}
               contentContainerStyle={{ width: "100%" }}
             />
           </BibleDataProvider>
@@ -6179,7 +6197,7 @@ function EditorRow({
   // label matches no catalog entry resolves to nothing and the attribute is
   // omitted, leaving the browser its own default.
   const targetLanguageCode = useMemo(
-    () => laneLanguageCodeForTag(activeLane, project.lanes, project) ?? undefined,
+    () => laneLanguageCodeForTag(activeLane, project.lanes) ?? undefined,
     [activeLane, project],
   )
   const hasTargetFootnoteMarker = (visibleTranslated ?? "").includes("\\f")
@@ -6851,6 +6869,15 @@ function EditorRow({
     if (!session) return
     void settleSourceStep(session, { cellId: cell.id, fileId: cell.fileId })
   }, [sourceEditing, cell.id, cell.fileId])
+  // …and when the row leaves the screen with the editor still open (the list
+  // is virtualized): the saves it made are still that one step (review, Oct 29).
+  const sourceStepWhereRef = useRef({ cellId: cell.id, fileId: cell.fileId })
+  sourceStepWhereRef.current = { cellId: cell.id, fileId: cell.fileId }
+  useEffect(() => () => {
+    const session = sourceStepRef.current
+    sourceStepRef.current = null
+    if (session) void settleSourceStep(session, sourceStepWhereRef.current)
+  }, [])
 
   // Reconcile the pending source head against the projection — the mirror of
   // ProjectWorkspace's target-side pendingTargetCommitHeadsRef reconciliation.
@@ -9330,9 +9357,9 @@ function EditorRow({
               onOverflowOpenChange={setRailOverflowOpen}
               overflowAttentionDot={railOverflowAttentionDot}
               overflowLabel={`${t("editor.rail.moreActions")} · ${editorAriaLabel}`}
-              // AQU-200: AI-generate is the one action that stays a direct
-              // button. Validate is the other always-visible action, and it
-              // already lives in the row's left gutter — it is not moved.
+              // AQU-200: AI-generate stays a direct button, and AQU-2287 adds
+              // record beside it. Validate is the other always-visible action,
+              // and it already lives in the row's left gutter — it is not moved.
               // Paragraph-draft rides in `primary` beside the sparkle because
               // it IS the generate action at group scale; it is already behind
               // strict gates and only ever renders on a paragraph's first row,
@@ -9397,80 +9424,78 @@ function EditorRow({
                       />
                     )
                   })()}
+
+                  {/* AQU-2287: record is a direct button again, after the AI
+                      group. AQU-200 had moved it behind the `⋯` (reversing
+                      FRO-237's "just hit the record mic — quick action"), but
+                      translators record line after line, so the extra click
+                      landed on every take. In an audio-only lane it is the
+                      only direct button.
+                      WARN fix: the button must NOT be disabled when micDenied —
+                      disabled elements receive no mouse events, so the "click
+                      for help" affordance is unreachable. Instead keep it
+                      enabled and route clicks to the denied-help popover. */}
+                  {onOpenRecording && editable && (() => {
+                    const unsupportedReason = getUnsupportedReason()
+                    const isUnsupported = unsupportedReason !== null
+                    const micTooltip = micDenied
+                      ? t("editor.audio.micBlockedTooltip")
+                      : isUnsupported
+                        // Browser-capability diagnostic from outside any component:
+                        // stays English (AQU-510).
+                        ? `Recording unavailable — ${unsupportedReason}`
+                        : t("editor.audio.record")
+                    return (
+                      <div ref={micHelpAnchorRef} className="relative">
+                        <RailButton
+                          icon={<Mic className="h-3.5 w-3.5" />}
+                          tooltip={micTooltip}
+                          onClick={() => {
+                            if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
+                            if (!isUnsupported) onOpenRecording(cell.id)
+                          }}
+                          toneClass={
+                            micDenied
+                              ? "text-amber-500/70 hover:text-amber-500"
+                              : isUnsupported
+                                ? "cursor-not-allowed text-muted-foreground/30"
+                                : undefined
+                          }
+                          // NEVER disable when micDenied — that kills mouse events
+                          // and makes the help popover unreachable.
+                          disabled={isUnsupported && !micDenied}
+                        />
+                        {micDenied && showMicDeniedHelp && (
+                          <Popover open onOpenChange={(open) => { if (!open) setShowMicDeniedHelp(false) }}>
+                            <PopoverContent
+                              anchor={micHelpAnchorRef}
+                              side="bottom"
+                              align="end"
+                              className="w-52 gap-1 p-3 text-[11px] leading-snug"
+                            >
+                              <PopoverTitle className="text-[11px] font-semibold">
+                                {t("editor.audio.micBlockedTitle")}
+                              </PopoverTitle>
+                              <PopoverDescription className="text-[11px] leading-snug">
+                                {t("editor.audio.micBlockedHelp")}
+                              </PopoverDescription>
+                              <button
+                                type="button"
+                                onClick={() => setShowMicDeniedHelp(false)}
+                                className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
+                              >
+                                {t("common.dismiss")}
+                              </button>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </>
               }
             >
-              {/* AQU-200 moves the mic back behind the `⋯`, reversing FRO-237's
-                  promotion of it to a direct rail button ("just hit the record
-                  mic — quick action"). That was the right call against a rail of
-                  six buttons and the wrong one for a rail of two: the ticket
-                  names record among the actions that collapse. If recording
-                  turns out to be frequent enough to deserve the third direct
-                  slot, promote it back by moving this block into `primary` —
-                  nothing else has to change.
-                  WARN fix: the button must NOT be disabled when micDenied —
-                  disabled elements receive no mouse events, so the "click for
-                  help" affordance is unreachable. Instead keep it enabled and
-                  route clicks to the denied-help popover. */}
-              {onOpenRecording && editable && (() => {
-                const unsupportedReason = getUnsupportedReason()
-                const isUnsupported = unsupportedReason !== null
-                const micTooltip = micDenied
-                  ? t("editor.audio.micBlockedTooltip")
-                  : isUnsupported
-                    // Browser-capability diagnostic from outside any component:
-                    // stays English (AQU-510).
-                    ? `Recording unavailable — ${unsupportedReason}`
-                    : t("editor.audio.record")
-                return (
-                  <div ref={micHelpAnchorRef} className="relative">
-                    <RailButton
-                      icon={<Mic className="h-3.5 w-3.5" />}
-                      tooltip={micTooltip}
-                      onClick={() => {
-                        if (micDenied) { setShowMicDeniedHelp((v) => !v); return }
-                        if (!isUnsupported) onOpenRecording(cell.id)
-                      }}
-                      toneClass={
-                        micDenied
-                          ? "text-amber-500/70 hover:text-amber-500"
-                          : isUnsupported
-                            ? "cursor-not-allowed text-muted-foreground/30"
-                            : undefined
-                      }
-                      // NEVER disable when micDenied — that kills mouse events
-                      // and makes the help popover unreachable.
-                      disabled={isUnsupported && !micDenied}
-                    />
-                    {micDenied && showMicDeniedHelp && (
-                      <Popover open onOpenChange={(open) => { if (!open) setShowMicDeniedHelp(false) }}>
-                        <PopoverContent
-                          anchor={micHelpAnchorRef}
-                          side="bottom"
-                          align="end"
-                          className="w-52 gap-1 p-3 text-[11px] leading-snug"
-                        >
-                          <PopoverTitle className="text-[11px] font-semibold">
-                            {t("editor.audio.micBlockedTitle")}
-                          </PopoverTitle>
-                          <PopoverDescription className="text-[11px] leading-snug">
-                            {t("editor.audio.micBlockedHelp")}
-                          </PopoverDescription>
-                          <button
-                            type="button"
-                            onClick={() => setShowMicDeniedHelp(false)}
-                            className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
-                          >
-                            {t("common.dismiss")}
-                          </button>
-                        </PopoverContent>
-                      </Popover>
-                    )}
-                  </div>
-                )
-              })()}
-
-              {/* AQU-513: file-picker upload next to the mic — a plain
+              {/* AQU-513: file-picker upload, the mic's counterpart — a plain
                   <input type="file"> so phone browsers can attach an
                   existing wav/mp3/m4a recording without a desktop. Same
                   gating as the mic (editable; visible with a take too). */}

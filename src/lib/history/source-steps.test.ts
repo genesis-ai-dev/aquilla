@@ -43,6 +43,16 @@ describe("source.text", () => {
     expect(await handlers["source.text"].undo(step())).toEqual({ kind: "done" })
   })
 
+  // Review, Oct 29: someone else's write moved the head but left the words
+  // (an identical re-commit). Chaining on the step's old head would be a stale
+  // sibling the server accepts and drops: the text would never change.
+  it("chains on the line's current head when someone else moved it without changing the words", async () => {
+    const { state, ctx, handlers } = line({ value: "In the very beginning", eventId: "theirs" })
+    expect(await handlers["source.text"].undo(step())).toEqual({ kind: "done" })
+    expect(ctx.commitSource).toHaveBeenLastCalledWith("sub3", { value: "In the beginning" }, "theirs")
+    expect(state.value).toBe("In the beginning")
+  })
+
   it("is skipped once someone else has edited the line since", async () => {
     const { ctx, handlers } = line({ value: "Someone else's text", eventId: "theirs" })
     expect(await handlers["source.text"].undo(step())).toEqual({ kind: "skipped", reason: "changed" })

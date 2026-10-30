@@ -168,7 +168,8 @@ export async function generateAndAttachCellVoice(
       trimEndMs: null,
     }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
-    recordGenerated(args, result.objectName)
+    // The take that was attached: the re-voiced clip for a character voice.
+    recordGenerated(args, objectName)
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,

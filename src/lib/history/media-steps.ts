@@ -24,10 +24,52 @@ const CHANGED: StepOutcome = { kind: "skipped", reason: "changed" }
 /** Linking, replacing or clearing a file's film. Null = no film. */
 export interface FilmLinkData { fileId: string; before: string | null; after: string | null }
 
+/** A film written from here that the project read has not answered yet. */
+export interface PendingFilm {
+  url: string | null
+  /** What the read said when it was written. */
+  readBefore: string | null
+}
+
+/**
+ * The film a file has now, as far as this tab knows: the one written here,
+ * until the project read answers. ANY new answer settles it, not only one
+ * spelled exactly as written (the server may tidy the address): otherwise a
+ * collaborator's later film stays hidden behind ours, and an Undo checked
+ * against ours writes over theirs (review, Oct 29). `settled`: forget it.
+ */
+export function filmNow(read: string | null, pending: PendingFilm | undefined): { film: string | null; settled: boolean } {
+  if (!pending) return { film: read, settled: true }
+  if (pending.url === read || read !== pending.readBefore) return { film: read, settled: true }
+  return { film: pending.url, settled: false }
+}
+
 // ── Cue links ───────────────────────────────────────────────────────────────
 
 /** Pairing (or unpairing) a subtitle line with a heard line that performs it. */
 export interface CueLinkData { textCellId: string; cueCellId: string; linked: boolean }
+
+/** Who made a pairing: the matcher ("auto") or a person (a pinned "manual"). */
+export type CueLinkOrigin = "auto" | "manual"
+
+/**
+ * Re-pairing the cues: every pairing it changed, as ONE step written in one
+ * batch (review, Oct 29; a re-pair can change hundreds). `linked` is what the
+ * re-pair left; `origin` and `confidence` are the pairing's when it is linked,
+ * so a pairing it removed comes back as it was.
+ */
+export interface CueLinksData {
+  links: Array<{ textCellId: string; cueCellId: string; linked: boolean; origin: CueLinkOrigin; confidence: number | null }>
+}
+
+/** One pairing to write. Without an origin it is a person's ("manual"). */
+export interface CueLinkWrite {
+  textCellId: string
+  cueCellId: string
+  linked: boolean
+  origin?: CueLinkOrigin
+  confidence?: number | null
+}
 
 // ── Characters ──────────────────────────────────────────────────────────────
 
@@ -58,7 +100,7 @@ export interface MediaStepContext {
   writeFilm(fileId: string, url: string | null): Promise<boolean>
   /** Whether the two are paired now; null when the pairings can't be read. */
   readCueLink(textCellId: string, cueCellId: string): boolean | null
-  writeCueLinks(changes: ReadonlyArray<{ textCellId: string; cueCellId: string; linked: boolean }>): Promise<boolean>
+  writeCueLinks(changes: ReadonlyArray<CueLinkWrite>): Promise<boolean>
   /** A line's character as it reads now; null when the line can't be read. */
   readCast(fileId: string, cellId: string): CastValue | null
   writeCast(changes: ReadonlyArray<{ fileId: string; cellId: string; value: CastValue }>): Promise<void>
@@ -157,6 +199,29 @@ export function mediaStepHandlers(ctx: MediaStepContext): Record<string, StepHan
     const ok = await ctx.writeCueLinks([{ textCellId: d.textCellId, cueCellId: d.cueCellId, linked: !from }])
     return ok ? DONE : { kind: "failed", error: new Error("pairing refused") }
   }
+  const cueBatchFlip = async (d: CueLinksData, which: "undo" | "redo"): Promise<StepOutcome> => {
+    const writes: CueLinkWrite[] = []
+    let gone = 0
+    for (const l of d.links) {
+      const from = which === "undo" ? l.linked : !l.linked
+      const now = ctx.readCueLink(l.textCellId, l.cueCellId)
+      if (now == null) {
+        gone += 1
+        continue
+      }
+      if (now !== from) continue
+      // A pairing goes back as it was. Removing one is the matcher's doing,
+      // never a person's "not a pair", which would stop it being proposed.
+      writes.push(
+        from
+          ? { textCellId: l.textCellId, cueCellId: l.cueCellId, linked: false, origin: "auto", confidence: null }
+          : { textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true, origin: l.origin, confidence: l.confidence },
+      )
+    }
+    if (writes.length === 0) return gone === d.links.length && d.links.length > 0 ? GONE : CHANGED
+    if (!(await ctx.writeCueLinks(writes))) return { kind: "failed", error: new Error("pairing refused") }
+    return writes.length < d.links.length ? { kind: "done", partial: { skipped: d.links.length - writes.length } } : DONE
+  }
   const castFlip = async (d: CastAssignData, which: "undo" | "redo"): Promise<StepOutcome> => {
     const writes: Array<{ fileId: string; cellId: string; value: CastValue }> = []
     let gone = 0
@@ -187,6 +252,10 @@ export function mediaStepHandlers(ctx: MediaStepContext): Record<string, StepHan
     "cue.link": {
       undo: (d: CueLinkData) => cueFlip(d, d.linked),
       redo: (d: CueLinkData) => cueFlip(d, !d.linked),
+    } as StepHandler<never>,
+    "cue.links": {
+      undo: (d: CueLinksData) => cueBatchFlip(d, "undo"),
+      redo: (d: CueLinksData) => cueBatchFlip(d, "redo"),
     } as StepHandler<never>,
     "cast.assign": {
       undo: (d: CastAssignData) => castFlip(d, "undo"),

@@ -12,7 +12,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createProjectShared,
-  patchProjectSettingsShared,
   updateProjectSettingsShared,
 } from "../../../db/shared/projects"
 import {
@@ -79,7 +78,7 @@ afterAll(async () => {
 
 describe("ensureProjectLanes", () => {
   it("creates only a source lane when nothing was asked", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     // AQU-1594: a target lane is not invented, and `legacy_tag ''` is not
     // created unless old events ask for that bridge.
     expect(await lanes(t)).toEqual([
@@ -97,7 +96,7 @@ describe("ensureProjectLanes", () => {
 
   it("stores the language from settings and derives the code on read", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { sourceLanguage: "English", targetLanguage: "Spanish", targetLanes: ["French"] },
+      languages: { source: "English", target: "Spanish", extraTargets: ["French"] },
     })
     // Only the typed language is stored. The first target's tag is its language.
     expect(await lanes(t)).toEqual([
@@ -116,7 +115,7 @@ describe("ensureProjectLanes", () => {
 
   it("does not store a lane id from targetLanes as the language", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e", "French"] },
+      languages: { target: "Spanish", extraTargets: ["a3f09c1e", "French"] },
     })
     const rows = await lanes(t)
     const tagged = rows.find((row) => row.legacy_tag === "a3f09c1e")
@@ -133,14 +132,14 @@ describe("ensureProjectLanes", () => {
       legacyTag: "b0b0b0b0",
     })
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["a3f09c1e", "b0b0b0b0", "French"] },
+      languages: { target: "Spanish", extraTargets: ["a3f09c1e", "b0b0b0b0", "French"] },
     })
     const kept = (await listProjectLanes(t.db, PROJECT)).find((lane) => lane.id === "b0b0b0b0")
     expect(kept?.language).toBe("Yoruba")
   })
 
   it("moves the derived code with the language instead of letting it drift (AQU-1585)", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const before = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Spanish")!
     expect(laneLanguageCode(before)).toBe("es")
     const count = (await listProjectLanes(t.db, PROJECT)).length
@@ -182,7 +181,7 @@ describe("ensureProjectLanes", () => {
   })
 
   it("keeps a code override across a language edit", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const lane = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Spanish")!
     expect((await updateTargetLane(t.db, PROJECT, lane.id, { code: "es-mx" })).status).toBe("ok")
     expect((await updateTargetLane(t.db, PROJECT, lane.id, { language: "Mexican Spanish" })).status)
@@ -195,7 +194,7 @@ describe("ensureProjectLanes", () => {
   })
 
   it("refuses a malformed code override rather than storing it", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const lane = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Spanish")!
     expect((await updateTargetLane(t.db, PROJECT, lane.id, { code: "not a tag!" })).status).toBe(
       "malformed_code",
@@ -205,7 +204,7 @@ describe("ensureProjectLanes", () => {
   })
 
   it("clears a name override so the lane falls back to showing its language", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const lane = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Spanish")!
     await updateTargetLane(t.db, PROJECT, lane.id, { name: "Draft Spanish" })
     expect(laneDisplayName((await listProjectLanes(t.db, PROJECT)).find((l) => l.id === lane.id)!)).toBe(
@@ -218,14 +217,14 @@ describe("ensureProjectLanes", () => {
   })
 
   it("refuses an edit that would leave the lane with nothing to display", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const lane = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Spanish")!
     expect((await updateTargetLane(t.db, PROJECT, lane.id, { language: "  " })).status).toBe("empty")
   })
 
   it("refuses a display-name collision with a lane that only carries a language", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["Yoruba"] },
+      languages: { target: "Spanish", extraTargets: ["Yoruba"] },
     })
     const yoruba = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "Yoruba")!
     // "Spanish" is the default lane's LANGUAGE, not its stored name, and it is
@@ -236,13 +235,13 @@ describe("ensureProjectLanes", () => {
   })
 
   it("fills in languages that arrive later, without changing ids", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     const before = await t.pg.query<{ id: string; role: string }>(
       `SELECT id, role FROM lanes WHERE project_id = $1 ORDER BY role`,
       [PROJECT],
     )
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { sourceLanguage: "English", targetLanguage: "Spanish" },
+      languages: { source: "English", target: "Spanish" },
     })
     const after = await t.pg.query<{ id: string; role: string; language: string | null }>(
       `SELECT id, role, language FROM lanes WHERE project_id = $1 ORDER BY role`,
@@ -264,7 +263,7 @@ describe("ensureProjectLanes", () => {
       [PROJECT, BLANK_LANE_PLACEHOLDER],
     )
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish" },
+      languages: { target: "Spanish" },
       dataTargetTags: [""],
     })
     const row = (await listProjectLanes(t.db, PROJECT)).find((l) => l.legacyTag === "")!
@@ -273,13 +272,13 @@ describe("ensureProjectLanes", () => {
   })
 
   it("does not overwrite a human-renamed lane", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     await t.pg.query(
       `UPDATE lanes SET name = 'Draft Spanish' WHERE project_id = $1 AND role = 'target'`,
       [PROJECT],
     )
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { sourceLanguage: "English", targetLanguage: "French" },
+      languages: { source: "English", target: "French" },
     })
     const rows = await lanes(t)
     const spanish = rows.find((r) => r.legacy_tag === "Spanish")
@@ -290,15 +289,15 @@ describe("ensureProjectLanes", () => {
   })
 
   it("is idempotent: a second call does not duplicate rows", async () => {
-    const stmts1 = ensureProjectLaneStmts(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
-    const stmts2 = ensureProjectLaneStmts(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    const stmts1 = ensureProjectLaneStmts(t.db, PROJECT, { languages: { target: "Spanish" } })
+    const stmts2 = ensureProjectLaneStmts(t.db, PROJECT, { languages: { target: "Spanish" } })
     await t.db.batch(stmts1)
     await t.db.batch(stmts2)
     expect(await lanes(t)).toHaveLength(2)
   })
 
   it("assigns 8-hex ids that stay put on re-run, and rejects the same id in another project", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const first = await t.pg.query<{ id: string; role: string }>(
       `SELECT id, role FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
       [PROJECT],
@@ -318,7 +317,7 @@ describe("ensureProjectLanes", () => {
       ),
     ).rejects.toMatchObject({ code: "23505", constraint: "uq_lanes_id" })
 
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     const again = await t.pg.query<{ id: string }>(
       `SELECT id FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
       [PROJECT],
@@ -334,7 +333,7 @@ describe("ensureProjectLanes", () => {
       [taken],
     )
     laneIdQueue.push(taken)
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     expect(laneIdQueue).not.toContain(taken)
 
     const rows = await t.pg.query<{ id: string; project_id: string }>(
@@ -352,13 +351,13 @@ describe("ensureProjectLanes", () => {
   })
 
   it("keeps existing ids when a re-run mints an id this project already has", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     const before = await t.pg.query<{ id: string }>(
       `SELECT id FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
       [PROJECT],
     )
     laneIdQueue.push(before.rows[0]!.id)
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     const after = await t.pg.query<{ id: string }>(
       `SELECT id FROM lanes WHERE project_id = $1 ORDER BY role, legacy_tag NULLS FIRST`,
       [PROJECT],
@@ -387,7 +386,7 @@ describe("isLaneIdCollision", () => {
 describe("createTargetLane", () => {
   it("retries a colliding id and uses the new id as the legacy tag", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["Yoruba"] },
+      languages: { target: "Spanish", extraTargets: ["Yoruba"] },
     })
     const taken = "aabbccdd"
     await t.pg.query(
@@ -498,51 +497,36 @@ describe("createProjectShared seeds lanes atomically", () => {
   })
 })
 
-describe("updateProjectSettingsShared creates the lanes the blob names", () => {
-  const SETTINGS = {
-    sourceLanguage: "English",
-    targetLanguage: "Spanish",
-    targetLanes: ["French"],
-  }
-
-  async function writeSettings(ifMatchVersion: number) {
-    return updateProjectSettingsShared(t.db, {
-      projectId: PROJECT,
-      settings: SETTINGS,
-      ifMatchVersion,
-      updatedBy: 1,
-    })
-  }
-
-  it("creates the named target rows, tagged with the language, and a repeat does not add rows", async () => {
+// AQU-2223: a settings write never creates a lane, whatever language keys an
+// old blob still carries. Lanes come from the lane routes and from create /
+// import / migrate, which pass their languages in.
+describe("updateProjectSettingsShared creates no lanes", () => {
+  it("leaves the lane rows alone when the blob still names languages and lanes", async () => {
     await createProjectShared(t.db, {
       projectId: PROJECT,
       name: "P",
       orgId: null,
       createdBy: 1,
     })
-    expect(await lanes(t)).toEqual([
+    const before = await lanes(t)
+    expect(before).toEqual([
       { role: "source", language: "", name: null, lang_code: null, legacy_tag: null },
     ])
-    const first = await writeSettings(0)
-    expect(first.status).toBe("ok")
-    const created = await lanes(t)
-    expect(created).toEqual([
-      { role: "source", language: "English", name: null, lang_code: null, legacy_tag: null },
-      { role: "target", language: "French", name: null, lang_code: null, legacy_tag: "French" },
-      { role: "target", language: "Spanish", name: null, lang_code: null, legacy_tag: "Spanish" },
-    ])
-    expect(created.find((row) => row.role === "target")?.legacy_tag).not.toBe("")
-    const second = await writeSettings(1)
-    expect(second.status).toBe("ok")
-    expect(await lanes(t)).toEqual(created)
+    const saved = await updateProjectSettingsShared(t.db, {
+      projectId: PROJECT,
+      settings: { sourceLanguage: "English", targetLanguage: "Spanish", targetLanes: ["French"] },
+      ifMatchVersion: 0,
+      updatedBy: 1,
+    })
+    expect(saved.status).toBe("ok")
+    expect(await lanes(t)).toEqual(before)
   })
 })
 
 describe("rename and archive a target lane", () => {
   it("renames without touching the legacy tag, and refuses a duplicate name", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["Yoruba"] },
+      languages: { target: "Spanish", extraTargets: ["Yoruba"] },
     })
     const before = await listProjectLanes(t.db, PROJECT)
     const yoruba = before.find((lane) => lane.legacyTag === "Yoruba")
@@ -564,7 +548,7 @@ describe("rename and archive a target lane", () => {
   // lane; the only refusal left is the project's LAST active target lane.
   it("archives the former default lane like any other, and refuses the last active one", async () => {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: { targetLanguage: "Spanish", targetLanes: ["French"] },
+      languages: { target: "Spanish", extraTargets: ["French"] },
       dataTargetTags: [""],
     })
     const rows = await listProjectLanes(t.db, PROJECT)
@@ -604,7 +588,7 @@ describe("rename and archive a target lane", () => {
 
 describe("readers that select lane rows directly see the display name", () => {
   it("a lane that stores only its language is matched, labelled, and granted by that language", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: { targetLanguage: "Spanish" } })
+    await ensureProjectLanes(t.db, PROJECT, { languages: { target: "Spanish" } })
     await insertTargetLane(t.db, PROJECT, {
       id: "aabbccdd",
       language: "Yoruba",
@@ -622,7 +606,7 @@ describe("readers that select lane rows directly see the display name", () => {
   })
 
   it("falls back to the role placeholder, and stays NULL when no lane row joined", async () => {
-    await ensureProjectLanes(t.db, PROJECT, { settings: {} })
+    await ensureProjectLanes(t.db, PROJECT, { languages: {} })
     const placeholders = await t.pg.query<{ role: string; label: string }>(
       `SELECT role, ${laneDisplayNameSql("lanes")} AS label FROM lanes WHERE project_id = $1 ORDER BY role`,
       [PROJECT],
@@ -687,30 +671,6 @@ describe("AQU-1585 editing a lane language", () => {
     expect(after.filter((row) => row.role === "target")).toHaveLength(2)
   })
 
-  it("registers a brand-new lane named in the settings blob, without duplicating lanes that exist", async () => {
-    await createEnglishSpanishPlusFrench()
-    const before = await lanes(t)
-    const added = await updateProjectSettingsShared(t.db, {
-      projectId: PROJECT,
-      settings: {
-        targetLanguage: "Spanish",
-        targetLanes: ["Spanish", "French", "fr-CA", "Yoruba"],
-      },
-      ifMatchVersion: 0,
-      updatedBy: 1,
-    })
-    expect(added.status).toBe("ok")
-    const after = await lanes(t)
-    expect(after.filter((row) => row.role === "source")).toEqual(before.filter((row) => row.role === "source"))
-    expect(after.filter((row) => row.role === "target").map((row) => row.legacy_tag).sort()).toEqual(
-      ["French", "Spanish", "Yoruba", "fr-CA"],
-    )
-    expect(after.some((row) => row.legacy_tag === "")).toBe(false)
-    for (const tag of ["French", "Spanish"]) {
-      expect(after.filter((row) => row.legacy_tag === tag)).toHaveLength(1)
-    }
-  })
-
   it("keeps a lane added through the lanes route when settings are written", async () => {
     await createEnglishSpanishPlusFrench()
     await insertTargetLane(t.db, PROJECT, {
@@ -720,22 +680,15 @@ describe("AQU-1585 editing a lane language", () => {
       langCode: "yo",
       legacyTag: "Yoruba",
     })
+    const before = await lanes(t)
     const synced = await updateProjectSettingsShared(t.db, {
       projectId: PROJECT,
-      settings: { targetLanes: ["Spanish", "French", "Yoruba"] },
+      settings: { targetLanes: ["Spanish", "French", "Yoruba", "fr-CA"] },
       ifMatchVersion: 0,
       updatedBy: 1,
     })
     expect(synced.status).toBe("ok")
-    const rows = await lanes(t)
-    expect(rows.filter((r) => r.role === "target")).toHaveLength(3)
-    expect(rows.find((r) => r.legacy_tag === "Yoruba")).toEqual({
-      role: "target",
-      language: "Yoruba",
-      name: "Yoruba Team",
-      lang_code: "yo",
-      legacy_tag: "Yoruba",
-    })
+    expect(await lanes(t)).toEqual(before)
   })
 })
 
@@ -745,18 +698,24 @@ describe("AQU-1585 editing a lane language", () => {
 // AQU-1585 name match misses, so every settings save used to mint an empty
 // lane tagged with the stored language. A lane archive is a settings save, so
 // archiving one lane could make another appear.
-describe("AQU-1810 settings saves on a mismatched default lane", () => {
-  const PORTUGUESE_SETTINGS = { sourceLanguage: "English", targetLanguage: "Portuguese" }
+// AQU-1810: regression of AQU-1585. When a caller plans from a default target
+// language, the default lane IS that language — by its `legacy_tag ''`
+// identity, not by its label. Rename the default lane and the AQU-1585 name
+// match misses, so planning again used to mint an empty lane tagged with that
+// language. AQU-2223: settings saves no longer plan lanes at all, and archiving
+// is a lane-row write only.
+describe("AQU-1810 planning on a mismatched default lane", () => {
+  const PORTUGUESE_LANGUAGES = { source: "English", target: "Portuguese" }
 
   /**
    * The shape the bug needs, as the live dev example `c86c1a2f` carries it:
-   * settings target language Portuguese, a `legacy_tag ''` default lane
+   * default target language Portuguese, a `legacy_tag ''` default lane
    * renamed to something else, and a second active lane so one can be
    * archived.
    */
   async function mismatchedProject(defaultLaneName: string) {
     await ensureProjectLanes(t.db, PROJECT, {
-      settings: PORTUGUESE_SETTINGS,
+      languages: PORTUGUESE_LANGUAGES,
       // Old events name the bridge, which is how a `''` lane exists at all.
       dataTargetTags: [""],
     })
@@ -773,69 +732,27 @@ describe("AQU-1810 settings saves on a mismatched default lane", () => {
     return { bridgeId: bridge.id, germanId: "aa11bb22" }
   }
 
-  /** The in-app settings write: the blob still holds the stored language. */
-  function saveSettings(settings: Record<string, unknown>, version: number) {
-    return updateProjectSettingsShared(t.db, {
-      projectId: PROJECT,
-      settings,
-      ifMatchVersion: version,
-      updatedBy: 1,
-    })
-  }
-
-  it("adds no lane when the default lane's name differs from the stored language", async () => {
+  it("adds no lane when the default lane's name differs from the planned language", async () => {
     await mismatchedProject("es")
     const before = await lanes(t)
-    const saved = await saveSettings(PORTUGUESE_SETTINGS, 0)
-    expect(saved.status).toBe("ok")
+    await ensureProjectLanes(t.db, PROJECT, {
+      languages: PORTUGUESE_LANGUAGES,
+      existingLanes: await listProjectLanes(t.db, PROJECT),
+    })
     expect(await lanes(t)).toEqual(before)
     expect((await lanes(t)).some((row) => row.legacy_tag === "Portuguese")).toBe(false)
   })
 
-  it("adds no lane when an unrelated setting is saved", async () => {
-    await mismatchedProject("Brazilian Portuguese")
-    const before = await lanes(t)
-    const saved = await saveSettings({ ...PORTUGUESE_SETTINGS, validationThreshold: 2 }, 0)
-    expect(saved.status).toBe("ok")
-    expect(await lanes(t)).toEqual(before)
-  })
-
-  it("archives a lane without making another one appear, and records the archive", async () => {
+  it("archives a lane on its row alone, without making another one appear or touching settings", async () => {
     const { germanId } = await mismatchedProject("es")
     const before = await lanes(t)
-    // What the archive route does: flip the lane row, then mirror the tag into
-    // settings.archivedLanes — and that mirror is the settings save that used
-    // to mint the lane.
     expect((await setTargetLaneArchived(t.db, PROJECT, germanId, true)).status).toBe("ok")
-    const mirrored = await patchProjectSettingsShared(t.db, {
-      projectId: PROJECT,
-      ops: [{ key: "archivedLanes", value: ["German"] }],
-      ifMatchVersion: 0,
-      updatedBy: 1,
-    })
-    expect(mirrored.status).toBe("ok")
     const after = await listProjectLanes(t.db, PROJECT)
     expect(after.filter((lane) => lane.role === "target")).toHaveLength(2)
     expect(after.find((lane) => lane.id === germanId)?.archivedAt).toBeTruthy()
-    expect(after.some((lane) => lane.legacyTag === "Portuguese")).toBe(false)
     expect((await lanes(t)).map((row) => row.legacy_tag)).toEqual(before.map((row) => row.legacy_tag))
-  })
-
-  it("negative case: a default lane still named its stored language is untouched too", async () => {
-    const { germanId } = await mismatchedProject("Portuguese")
-    const before = await lanes(t)
-    expect((await saveSettings(PORTUGUESE_SETTINGS, 0)).status).toBe("ok")
-    expect(await lanes(t)).toEqual(before)
-    expect((await setTargetLaneArchived(t.db, PROJECT, germanId, true)).status).toBe("ok")
-    expect((await lanes(t)).map((row) => row.legacy_tag)).toEqual(before.map((row) => row.legacy_tag))
-  })
-
-  it("still registers a genuinely new lane the blob names", async () => {
-    await mismatchedProject("es")
-    const saved = await saveSettings({ ...PORTUGUESE_SETTINGS, targetLanes: ["Yoruba"] }, 0)
-    expect(saved.status).toBe("ok")
-    const tags = (await lanes(t)).filter((row) => row.role === "target").map((row) => row.legacy_tag)
-    expect(tags.sort()).toEqual(["", "German", "Yoruba"])
+    const stored = await t.pg.query(`SELECT 1 FROM project_settings WHERE project_id = $1`, [PROJECT])
+    expect(stored.rows).toEqual([])
   })
 })
 

@@ -143,13 +143,13 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create your Frontier account",
-    "onboarding.step.signIn.headingLogin": "Sign in to Frontier",
+    "onboarding.step.signIn.headingSignup": "Create your Aquilla account",
+    "onboarding.step.signIn.headingLogin": "Sign in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
       "Unlock AI-powered translations, sync across devices, and import projects from the cloud.",
     // "Already have an account?" reuses `auth.join.alreadyHaveAccount`
-    // "New to Frontier?" reuses `nav.account.newToFrontier`
+    // "New to Aquilla?" reuses `nav.account.newToFrontier`
     "onboarding.step.signIn.createOne": "Create one",
     "onboarding.step.signIn.devLogin": "Dev login (skip auth)",
 
@@ -255,9 +255,9 @@ export const onboarding = defineNamespace({
       "AI fills in suggested translations as you go and keeps style consistent across the project. " +
       "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
-      "Sign in with a Frontier account to use the managed model.",
+      "Sign in with a Aquilla account to use the managed model.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
-    "onboarding.checklist.aiProvider.frontierLabel": "Frontier AI",
+    "onboarding.checklist.aiProvider.frontierLabel": "Aquilla AI",
     "onboarding.checklist.aiProvider.recommendedBadge": "Recommended",
     "onboarding.checklist.aiProvider.frontierSignedIn":
       "Signed in as {username} — no setup needed.",
@@ -664,7 +664,7 @@ export const onboarding = defineNamespace({
       },
       "onboarding.checklist.aiProvider.frontierSignedIn": {
         description:
-          "Description under the 'Frontier AI' provider option once the viewer is signed in, naming their account.",
+          "Description under the 'Aquilla AI' provider option once the viewer is signed in, naming their account.",
         placeholders: { username: "The signed-in user's handle. Not translated." },
       },
       "onboarding.checklist.aiModels.downloadNotice": {

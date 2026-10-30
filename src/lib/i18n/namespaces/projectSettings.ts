@@ -528,13 +528,13 @@ export const projectSettings = defineNamespace({
 
     // ── Advanced LLM details ──
     "projectSettings.advancedLlm.summary": "AI model (advanced)",
-    "projectSettings.advancedLlm.frontierDefaultStatus": "Frontier (default)",
+    "projectSettings.advancedLlm.frontierDefaultStatus": "Aquilla (default)",
     "projectSettings.advancedLlm.customEndpointStatus": "Custom: {endpoint}",
     "projectSettings.advancedLlm.notSet": "not set",
     "projectSettings.advancedLlm.providerLabel": "Provider",
-    "projectSettings.advancedLlm.providerFrontierName": "Frontier",
+    "projectSettings.advancedLlm.providerFrontierName": "Aquilla",
     "projectSettings.advancedLlm.providerFrontier":
-      "{name} (recommended) — calls {domain} using your Frontier login. Works out of the box.",
+      "{name} (recommended) — uses your Aquilla login. Works out of the box.",
     "projectSettings.advancedLlm.providerCustomName": "Custom endpoint",
     "projectSettings.advancedLlm.providerCustom":
       "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API " +
@@ -559,7 +559,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Aquilla.",
     // AQU-2259: the one label for a setting that stays in this browser — the
     // project AI keys, Audio loading, Git auto-sync. The same words AQU-2053
     // gave the experimental switches.
@@ -572,7 +572,7 @@ export const projectSettings = defineNamespace({
       "Click Connect to discover models, or type one manually (required for providers " +
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
-    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
+    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Aquilla's default",
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
@@ -585,7 +585,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyPlaceholder": "AIza...",
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
-      "Sent directly to Google; never uploaded to Frontier.",
+      "Sent directly to Google; never uploaded to Aquilla.",
     "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
     "projectSettings.voice.openStudioButton": "Open Voice Studio",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
@@ -1914,10 +1914,9 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.providerFrontier": {
-        description: "Radio-option description for the Frontier (recommended, default) completion provider.",
+        description: "Radio-option description for the Aquilla (recommended, default) completion provider.",
         placeholders: {
           name: "The bold provider name, already translated via projectSettings.advancedLlm.providerFrontierName and wrapped in <strong> by the caller.",
-          domain: "The literal, untranslated hostname 'api.frontierrnd.com', styled as inline code by the caller — insert exactly as given.",
         },
       },
       "projectSettings.advancedLlm.providerCustom": {
@@ -1949,7 +1948,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.modelOverrideHelp": {
-        description: "Help text under the optional model-override input for the Frontier provider.",
+        description: "Help text under the optional model-override input for the Aquilla provider.",
         placeholders: {
           example: "An example OpenRouter model id, e.g. 'anthropic/claude-3.5-sonnet', styled as inline code by the caller — data, not translated.",
         },

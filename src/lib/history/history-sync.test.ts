@@ -24,7 +24,7 @@ import {
   type StepRecord,
 } from "./history"
 import { clearHistoryStoreForTests } from "./history-store"
-import { emptyHistoryDoc, mergeDevices, type HistoryDoc } from "./history-merge"
+import { emptyHistoryDoc, mergeDevices, mergeHistories, type HistoryDoc } from "./history-merge"
 import type { HistoryRemote } from "./history-remote"
 
 class FakeServer {
@@ -34,6 +34,9 @@ class FakeServer {
   hang = false
   writes = 0
   reads = 0
+  /** Bodies longer than this are refused, as the route refuses over 2 MB (413). */
+  maxChars = Number.POSITIVE_INFINITY
+  refused = 0
   as(user: string): HistoryRemote {
     const key = (projectId: string) => `${projectId}|${user}`
     const copy = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T
@@ -49,6 +52,10 @@ class FakeServer {
       },
       write: async (projectId, baseRevision, history) => {
         if (!this.online) return null
+        if (JSON.stringify({ baseRevision, history }).length > this.maxChars) {
+          this.refused += 1
+          return { kind: "tooLarge" }
+        }
         const row = this.rows.get(key(projectId))
         const current = row?.revision ?? 0
         if (baseRevision !== current) return { kind: "conflict", revision: current, history: row ? copy(row.history) : null }
@@ -177,6 +184,47 @@ describe("the history follows the person (P13.2)", () => {
     expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Offline trim"])
   })
 
+  // Review, Oct 29: the tab may close before the connection comes back.
+  it("steps made offline reach the server after a reload, even when the server has not changed", async () => {
+    recordStep(step("Online trim"))
+    await settle()
+    server.online = false
+    recordStep(step("Offline trim"))
+    await settle()
+    server.online = true
+    await openSameTabAgain()
+    await settle()
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Online trim", "Offline trim"])
+  })
+
+  // Review, Oct 29: the server's row can go (deleted, a restored database)
+  // while this browser still names the revision it last saw.
+  it("a server copy that went missing is written again, not refused forever", async () => {
+    recordStep(step("First"))
+    await settle()
+    server.rows.clear()
+    recordStep(step("Second"))
+    await settle()
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["First", "Second"])
+  })
+
+  // Review, Oct 29: the server keeps at most 2 MB of history. Past that, the
+  // oldest steps give way, rather than every later step sending megabytes
+  // that are refused and the history no longer following the person.
+  it("a history too large for the server keeps its newest steps that fit", async () => {
+    server.maxChars = 2 * 1024 * 1024
+    const big = (name: string) => ({ ...step(name), data: { name, filler: "x".repeat(1_100_000) } })
+    recordStep(big("Validated chapter 1"))
+    await settle()
+    recordStep(big("Validated chapter 2"))
+    await settle()
+    recordStep(step("Rename take"))
+    await settle()
+    expect(server.refused).toBe(0)
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Validated chapter 2", "Rename take"])
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Validated chapter 2", "Rename take"])
+  })
+
   it("opening the History panel picks up steps made elsewhere since", async () => {
     // Another device of Asha's writes a step after this one opened.
     const other = server.as("asha")
@@ -265,6 +313,27 @@ describe("two devices at once (P13.7)", () => {
     expect(log).toEqual(["undo Rename 1:7"])
   })
 
+  // Review, Oct 29: a NEW step from another device is not that device taking
+  // this one. The press undoes the step the button named; the other device's
+  // step stays on Undo, and the next press takes it.
+  it("a new step made on another device meanwhile does not stop this Undo", async () => {
+    recordStep(step("Rename 1:7"))
+    await settle()
+    // Computer A is in use (this copy has heard from it), then makes a step.
+    await writeOnComputerA((h) => h)
+    await refreshHistory()
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename 1:9", h.undo[0].at + 1)] }))
+
+    const reads = server.reads
+    const result = await undoLast()
+    expect(server.reads).toBe(reads + 1)
+    expect(result?.step.labelKey).toBe("Rename 1:7")
+    expect(result?.outcome.kind).toBe("done")
+    expect(log).toEqual(["undo Rename 1:7"])
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:9"])
+    expect(historyView().redoSteps.map((s) => s.labelKey)).toEqual(["Rename 1:7"])
+  })
+
   it("it waits at most 1.5 s for the server's answer, then undoes", async () => {
     await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename take")] }))
     await refreshHistory()
@@ -343,5 +412,68 @@ describe("one device on its own does not wait (Sam, Oct 22)", () => {
     const reads = server.reads
     expect((await undoLast())?.outcome.kind).toBe("done")
     expect(server.reads).toBe(reads + 1)
+  })
+})
+
+// Review, Oct 29: a step is saved as moved before it runs; when its handler
+// then answers "blocked" it goes back, and that going back must be the newest
+// word on where it is, for every copy that saw it in flight.
+describe("a step that turned out blocked while it ran", () => {
+  it("is back on Undo in every copy, including one that saw it on Redo", async () => {
+    let inFlight: HistoryDoc | null = null
+    registerStepKinds({
+      "test.blocked": {
+        undo: async () => {
+          await new Promise((r) => setTimeout(r, 20))
+          await settleHistorySyncForTests()
+          inFlight = JSON.parse(JSON.stringify(server.copyOf("p1", "asha"))) as HistoryDoc
+          return { kind: "blocked", reason: "elsewhere" }
+        },
+        redo: async () => ({ kind: "done" }),
+      } as StepHandler<never>,
+    })
+    recordStep({ kind: "test.blocked", data: {}, labelKey: "Imported a recording", lane: "Swahili" })
+    await settle()
+    expect((await undoLast())?.outcome.kind).toBe("blocked")
+    await settle()
+    expect(inFlight!.redo.map((r) => r.labelKey)).toEqual(["Imported a recording"])
+    // Another device pulled the in-flight copy and merges the server's now.
+    const elsewhere = mergeHistories(inFlight!, server.copyOf("p1", "asha")!, { steps: 100, log: 30 })
+    expect(elsewhere.undo.map((r) => r.labelKey)).toEqual(["Imported a recording"])
+    expect(elsewhere.redo).toEqual([])
+  })
+})
+
+// Review, Oct 29: each device stamps steps with its own clock, and clocks
+// disagree. What this device does after seeing a step must still count as
+// later than that step, wherever the copies are merged.
+describe("devices whose clocks disagree", () => {
+  const AHEAD_MS = 120_000 // computer A's clock runs two minutes ahead of this one
+
+  it("an undo made here still wins over the copy it undid", async () => {
+    const ahead = Date.now() + AHEAD_MS
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("Rename take", ahead)] }), ahead)
+    await refreshHistory()
+    expect((await undoLast())?.outcome.kind).toBe("done")
+    await settle()
+    // Computer A still holds its own copy, the step on Undo, and merges the server's.
+    const onA = mergeHistories(
+      { ...emptyHistoryDoc(), undo: [made("Rename take", ahead)] },
+      server.copyOf("p1", "asha")!,
+      { steps: 100, log: 30 },
+    )
+    expect(onA.undo.map((r) => r.labelKey)).toEqual([])
+    expect(onA.redo.map((r) => r.labelKey)).toEqual(["Rename take"])
+  })
+
+  it("a step made here after one from a device whose clock is ahead is undone first", async () => {
+    const ahead = Date.now() + AHEAD_MS
+    await writeOnComputerA((h) => ({ ...h, undo: [...h.undo, made("From A", ahead)] }), ahead)
+    await refreshHistory()
+    recordStep(step("From B"))
+    await settle()
+    await openOnNewDevice(server, "asha", log)
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["From A", "From B"])
+    expect((await undoLast())?.step.labelKey).toBe("From B")
   })
 })

@@ -275,8 +275,8 @@ import { injectOptimisticAudioTrim,
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
-import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
+import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
+import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
@@ -4257,7 +4257,7 @@ export function ProjectWorkspace() {
   const timingAckOwnWriteRef = useRef<{ note(mode: AudioTimingMode): void; clear(): void } | null>(null)
   // Decision 11: the film each file was last given from here, until the
   // project read catches up — so an Undo right after a link sees it.
-  const filmWrittenRef = useRef<Map<string, string | null>>(new Map())
+  const filmWrittenRef = useRef<Map<string, PendingFilm>>(new Map())
   /** Write the open file's film; false when it was refused (said in a toast). */
   const writeFilmLink = useCallback(
     async (url: string | null): Promise<boolean> => {
@@ -4278,7 +4278,7 @@ export function ProjectWorkspace() {
           author: currentUsername,
         })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        filmWrittenRef.current.set(activeFileId, url)
+        filmWrittenRef.current.set(activeFileId, { url, readBefore: activeFile?.coreMediaUrl ?? null })
         refresh()
         return true
       } catch (e) {
@@ -4301,15 +4301,9 @@ export function ProjectWorkspace() {
   const readFilmLink = useCallback(
     (fileId: string): string | null | undefined => {
       if (fileId !== activeFileId || !activeFile) return undefined
-      const read = activeFile.coreMediaUrl ?? null
-      const written = filmWrittenRef.current
-      if (!written.has(fileId)) return read
-      // The project read has caught up with what was written here.
-      if (written.get(fileId) === read) {
-        written.delete(fileId)
-        return read
-      }
-      return written.get(fileId) ?? null
+      const now = filmNow(activeFile.coreMediaUrl ?? null, filmWrittenRef.current.get(fileId))
+      if (now.settled) filmWrittenRef.current.delete(fileId)
+      return now.film
     },
     [activeFileId, activeFile],
   )
@@ -4565,10 +4559,12 @@ export function ProjectWorkspace() {
    * same door.
    */
   const writeCueLinks = useCallback(
-    async (changes: ReadonlyArray<{ textCellId: string; cueCellId: string; linked: boolean }>): Promise<boolean> => {
+    async (changes: ReadonlyArray<CueLinkWrite>): Promise<boolean> => {
       if (!project?.id || !activeFileId || !audioCueSibling) return false
-      for (const { textCellId, cueCellId, linked } of changes) {
-        setCueLinkLocally(textCellId, cueCellId, linked)
+      // Painted all at once, in one render, then queued one by one: undoing a
+      // re-pair writes hundreds (review, Oct 29).
+      for (const { textCellId, cueCellId, linked } of changes) setCueLinkLocally(textCellId, cueCellId, linked)
+      for (const [i, { textCellId, cueCellId, linked, origin, confidence }] of changes.entries()) {
         try {
           await emitCellLinkSet({
             projectId: project.id,
@@ -4577,13 +4573,14 @@ export function ProjectWorkspace() {
             toFileId: audioCueSibling.id,
             toCellId: cueCellId,
             linked,
-            origin: "manual",
+            origin: origin ?? "manual",
+            ...(confidence != null ? { confidence } : {}),
             author: currentUsername,
           })
         } catch (e) {
           console.warn("[cue-links] toggle failed", e)
           // Put the paint back where the server still has it.
-          setCueLinkLocally(textCellId, cueCellId, !linked)
+          for (const c of changes.slice(i)) setCueLinkLocally(c.textCellId, c.cueCellId, !c.linked)
           toast.add({ type: "error", title: "Couldn't save that pairing." })
           return false
         }
@@ -10719,8 +10716,9 @@ export function ProjectWorkspace() {
   // FRO-272: soft-delete via file.delete event. IDB removal is contingent on
   // server ack (fixes F-E6 fire-and-forget fork). The file moves to "Recently
   // deleted" in the trash UI; cells and audio are retained. R2 wipe deferred.
-  const handleDeleteFile = useCallback(async (fileId: string) => {
-    if (!project) return
+  // Resolves whether the delete was queued (the history's undo asks).
+  const handleDeleteFile = useCallback(async (fileId: string): Promise<boolean> => {
+    if (!project) return false
 
     const deleted = project.files.find((f) => f.id === fileId)
 
@@ -10773,7 +10771,7 @@ export function ProjectWorkspace() {
         return next
       })
       setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
-      return
+      return false
     }
 
     // The outbox is authoritative. Local project cache cleanup is best-effort
@@ -10787,11 +10785,13 @@ export function ProjectWorkspace() {
     refresh()
     if (activeFileId === fileId) setActiveFileId(null)
     void refreshDeletedFiles()
+    return true
   }, [project, currentUsername, refresh, activeFileId, setActiveFileId, refreshDeletedFiles])
 
   // Restore a soft-deleted file: emit file.restore, then refresh listings.
-  const handleRestoreFile = useCallback(async (fileId: string) => {
-    if (!project) return
+  // Resolves whether the restore was queued.
+  const handleRestoreFile = useCallback(async (fileId: string): Promise<boolean> => {
+    if (!project) return false
     try {
       await emitFileRestore({
         projectId: project.id,
@@ -10800,7 +10800,7 @@ export function ProjectWorkspace() {
       })
     } catch (e) {
       console.error("[restore] file.restore emit failed", e)
-      return
+      return false
     }
     // Un-hide the row if it was soft-deleted this session — the optimistic
     // delete overlay would otherwise keep masking the restored file.
@@ -10813,6 +10813,7 @@ export function ProjectWorkspace() {
     setOptimisticTrash((current) => current.filter((f) => f.fileId !== fileId))
     refresh()
     void refreshDeletedFiles()
+    return true
   }, [project, currentUsername, refresh, refreshDeletedFiles])
 
   // "Delete forever" — hard-delete via the existing REST endpoint (R2 wipe).
@@ -11932,7 +11933,7 @@ export function ProjectWorkspace() {
                 })
               }
             },
-            { alwaysGroup: true },
+            { alwaysGroup: true, owns: { cells: summary.validatable.map((cell) => cell.id), kinds: ["vote.text"] } },
           )
           const repetitions = repetitionRun
             ? await repetitionRun.apply(summary.validatable.map((cell) => ({
@@ -12030,7 +12031,7 @@ export function ProjectWorkspace() {
               })
             }
           },
-          { alwaysGroup: true },
+          { alwaysGroup: true, owns: { cells: targets.map((target) => target.cellId), kinds: ["vote.audio"] } },
         )
         await refreshOutboxPending()
         // EVERY file the run touched, not just the open one. On a file with an
@@ -12381,19 +12382,33 @@ export function ProjectWorkspace() {
       }
       const changed = diff.link.length + diff.unlink.length
       if (changed > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      // Decision 11: one Undo step for the whole re-pair.
-      recordGroup(
-        { labelKey: "editor.history.stepRepairCues", fileId: activeFile.id, fileName: activeFileNameRef.current },
-        [
-          ...diff.link.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true })),
-          ...diff.unlink.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: false })),
-        ].map((data) => ({
-          kind: "cue.link",
-          data,
-          labelKey: data.linked ? "editor.history.stepLinkCue" : "editor.history.stepUnlinkCue",
+      // Decision 11: one Undo step for the whole re-pair, written back in
+      // one batch. A pairing it removed keeps who made it (a person's stays
+      // pinned) and its score, so it comes back as it was.
+      if (changed > 0) {
+        const was = new Map(cueLinkRows.map((r) => [`${r.fromCellId} ${r.toCellId}`, r]))
+        recordStep<CueLinksData>({
+          kind: "cue.links",
+          data: {
+            links: [
+              ...diff.link.map((l) => ({ textCellId: l.textCellId, cueCellId: l.cueCellId, linked: true, origin: "auto" as const, confidence: l.confidence })),
+              ...diff.unlink.map((l) => {
+                const row = was.get(`${l.textCellId} ${l.cueCellId}`)
+                return {
+                  textCellId: l.textCellId,
+                  cueCellId: l.cueCellId,
+                  linked: false,
+                  origin: row?.origin === "manual" ? ("manual" as const) : ("auto" as const),
+                  confidence: row?.confidence ?? null,
+                }
+              }),
+            ],
+          },
+          labelKey: "editor.history.stepRepairCues",
           fileId: activeFile.id,
-        })),
-      )
+          fileName: activeFileNameRef.current,
+        })
+      }
       refreshCueLinks()
       toast.add({ type: "success", title: changed === 0
           ? "The pairings came out the same."
@@ -12405,7 +12420,7 @@ export function ProjectWorkspace() {
       setCueLinksPending(false)
     }
   }, [
-    project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
+    project?.id, activeFile, audioCueSibling, audioCues, cueLinks, cueLinkRows, currentUsername,
     getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 
@@ -12645,6 +12660,7 @@ export function ProjectWorkspace() {
           fileName: activeFileNameRef.current,
         },
         async () => { for (const id of targets) await voteOne(id) },
+        { owns: { cells: [cellId], kinds: ["vote.audio"] } },
       )
       try {
         await commitAudioValidation([cur.owner.fileId], { getTokenForFile: getTokenForProjectFile })
@@ -13417,7 +13433,7 @@ export function ProjectWorkspace() {
    */
   const sourceLanguageCode = useMemo(
     () => sourceLane
-      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      ? laneLanguageCode(sourceLane, { role: "source", legacyTag: sourceLane.legacyTag ?? null })
       : null,
     [sourceLane, project],
   )
@@ -14439,17 +14455,28 @@ export function ProjectWorkspace() {
     lane: activeLane,
     ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
   }
+  // Read through a ref: the switch may first wait for the languages to load,
+  // and must then judge by the loaded list, not the one it started with.
+  const laneAccessRef = useRef<LaneAccess>({ available: [], scoped: null, archived: undefined, canSwitch: false, loaded: false })
+  laneAccessRef.current = {
+    available: availableLanes,
+    scoped: scopedLanes,
+    archived: archivedLaneTags,
+    canSwitch: canSwitchLanes(project?.syncRole?.level),
+    loaded: project?.lanes != null,
+  }
   const laneSwitchRef = useRef<(lane: string) => Promise<LaneSwitch>>(async () => "blocked")
   laneSwitchRef.current = async (lane: string) => {
-    const access = laneAccessFor(lane, {
-      available: availableLanes,
-      scoped: scopedLanes,
-      archived: archivedLaneTags,
-      canSwitch: canSwitchLanes(project?.syncRole?.level),
-    })
+    // Cmd+Z pressed as the project opens: let its languages load first.
+    if (!laneAccessRef.current.loaded && (await waitUntilReady(() => laneAccessRef.current.loaded)) !== "ready") return "blocked"
+    const access = laneAccessFor(lane, laneAccessRef.current)
     if (access !== "ok") return access
     setActiveLane(lane)
-    return waitUntilReady(() => laneReadyRef.current.lane === lane && laneReadyRef.current.ready)
+    // The store is read live: it sorts its rows for the language one effect
+    // pass after the render that opened it.
+    return waitUntilReady(() =>
+      laneShownReady(lane, { open: laneReadyRef.current.lane, storeLane: cellStore.viewLane, loaded: laneReadyRef.current.ready }),
+    )
   }
   useEffect(() => {
     setLaneSwitcher((lane) => laneSwitchRef.current(lane))
@@ -18289,6 +18316,26 @@ export function ProjectWorkspace() {
           }}
           onLastTakeRemoved={(cellId) => {
             for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
+          }}
+          // The pencil beside "Read aloud": close the recorder and put the
+          // caret in the line's target text. A cue's words live on the subtitle
+          // it performs — the same row the recorder keeps scrolled into view
+          // behind it. No pencil at all where the lane takes no writes.
+          onEditText={laneWriteFrozen ? undefined : (cellId) => {
+            const rowId = resolveRecordingRowCellId({
+              cellId,
+              isCueArrangement: Boolean(audioCueCells),
+              linkedTextIds: cueLinks.textForCue.get(cellId),
+            })
+            setRecordingCellId(null)
+            if (!rowId) return
+            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            // A frame later: during this click the recorder is still open, and
+            // its focus trap would take the caret straight back.
+            requestAnimationFrame(() => {
+              const editor = editorRef.current
+              if (editor && !editor.focusCellEditorId(rowId)) editor.scrollToCellId(rowId, { flash: true })
+            })
           }}
           onClose={() => setRecordingCellId(null)}
         />

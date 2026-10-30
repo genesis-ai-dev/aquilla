@@ -48,7 +48,9 @@ export interface RegenerateVoiceArgs {
  * from sounding.
  */
 export function regenerateVoiceTake(args: RegenerateVoiceArgs): Promise<boolean> {
-  return withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: args.cell.fileId }, () => regenerate(args))
+  return withGroup({ labelKey: "editor.history.stepGenerateVoice", fileId: args.cell.fileId }, () => regenerate(args), {
+    owns: { cells: [args.cell.id], kinds: ["take."] },
+  })
 }
 
 async function regenerate(args: RegenerateVoiceArgs): Promise<boolean> {

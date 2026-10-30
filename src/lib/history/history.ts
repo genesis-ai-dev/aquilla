@@ -145,8 +145,18 @@ let laneSwitcher: ((lane: string) => Promise<LaneSwitch>) | null = null
 let remote: HistoryRemote | null = null
 let idCounter = 0
 
-/** Steps recorded while a `withGroup` runs, innermost last. */
-const groupBuffers: StepRecord[][] = []
+/**
+ * The groups running now, newest last. A group that does network work
+ * (generating a voice, validating a chapter) runs for seconds, so two can be
+ * open at once without one being inside the other: each takes in only the
+ * steps it owns (`GroupOwns`), and closes in whatever order its work ends.
+ */
+interface OpenGroup {
+  buffer: StepRecord[]
+  /** Null: it takes in every step recorded while it runs. */
+  owns: ((r: StepRecord) => boolean) | null
+}
+const openGroups: OpenGroup[] = []
 
 /**
  * One history per project and person, whatever language is open (decision 11,
@@ -183,6 +193,24 @@ function bury(s: Stacks, id: string): void {
   if (s.gone.length > GONE_LIMIT) s.gone.splice(0, s.gone.length - GONE_LIMIT)
 }
 
+/**
+ * The time to stamp on what this copy does now: this device's clock, but never
+ * earlier than any step it already holds. Each device stamps with its own
+ * clock, and clocks disagree (review, Oct 29): an undo made here after seeing
+ * a step from a device whose clock runs ahead must still count as later than
+ * that step, or merging the copies puts it back on Undo; a new step made here
+ * must still sit above it.
+ */
+function stampFor(s: Stacks): number {
+  let seen = 0
+  for (const list of [s.undo, s.redo]) for (const r of list) seen = Math.max(seen, r.at, r.movedAt ?? 0)
+  return Math.max(Date.now(), seen + 1)
+}
+
+/** When each step recorded in this session was recorded, by this device's
+ *  clock: what the shortcut arbiter compares with a toast's time. */
+const recordedHere = new Map<string, number>()
+
 function newId(): string {
   idCounter += 1
   return `${Date.now().toString(36)}-${idCounter.toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -205,7 +233,7 @@ function writeLocal(key: string): Promise<void> {
   const s = stacks.get(key)
   if (!s) return Promise.resolve()
   const [projectId, username] = splitKey(key)
-  return saveHistory(projectId, username, { ...docOf(s), revision: s.revision })
+  return saveHistory(projectId, username, { ...docOf(s), revision: s.revision, unpushed: s.unpushed })
 }
 
 // Saved at the end of the current task, not after a delay: a reload a moment
@@ -258,6 +286,8 @@ async function readScope(key: string): Promise<void> {
   }
   const s = stacksFor(key)
   if (saved && s.revision == null) s.revision = saved.revision
+  // Changes the server never took before the tab closed still go (review, Oct 29).
+  if (saved?.unpushed) s.unpushed = true
   const recordedMeanwhile = s.undo.length + s.redo.length > 0
   mergeIn(key, incoming)
   if (lanes.length > 0) {
@@ -398,6 +428,41 @@ function schedulePush(key: string): void {
   })()
 }
 
+/**
+ * The most history sent to the server, in characters of the request body. The
+ * server refuses more than 2 MiB (EDIT_HISTORY_MAX_BYTES,
+ * db/shared/edit-history.ts); this keeps clear of that, and of sending
+ * megabytes with every step.
+ */
+const SEND_LIMIT_CHARS = 1_500_000
+
+/**
+ * Make the history fit what the server keeps (review, Oct 29). Its OLDEST
+ * steps give way first, Undo's before Redo's, and on every device: they are
+ * buried, so no copy brings them back. The newest step always stays. False
+ * when the history still does not fit; it then stays on this device.
+ */
+function fitForServer(key: string, s: Stacks, body: string): boolean {
+  let over = body.length - SEND_LIMIT_CHARS
+  if (over <= 0) return true
+  const dropped: string[] = []
+  const giveWay = (list: StepRecord[], keep: number) => {
+    while (over > 0 && list.length > keep) {
+      const [oldest] = list.splice(0, 1)
+      over -= JSON.stringify(oldest).length + 1
+      dropped.push(oldest.id)
+    }
+  }
+  giveWay(s.undo, 1)
+  giveWay(s.redo, s.undo.length > 0 ? 0 : 1)
+  for (const id of dropped) bury(s, id)
+  if (dropped.length > 0) {
+    void writeLocal(key)
+    emit()
+  }
+  return over <= 0
+}
+
 async function pushOnce(key: string): Promise<void> {
   const [projectId] = splitKey(key)
   // A conflict means another device wrote first: merge its copy and try again
@@ -409,9 +474,17 @@ async function pushOnce(key: string): Promise<void> {
     // Signed with this device and the time, so the person's other devices know
     // it is in use (see `claim`).
     const wrote = { id: thisDevice(), at: Date.now() }
-    const snapshot = JSON.parse(JSON.stringify({ ...docOf(s), devices: mergeDevices(s.devices, [wrote]) })) as HistoryDoc
+    const sign = () => JSON.stringify({ baseRevision: s.revision ?? 0, history: { ...docOf(s), devices: mergeDevices(s.devices, [wrote]) } })
+    let body = sign()
+    if (body.length > SEND_LIMIT_CHARS) {
+      if (!fitForServer(key, s, body)) return
+      body = sign()
+    }
+    const snapshot = (JSON.parse(body) as { history: HistoryDoc }).history
     const res = await r.write(projectId, s.revision ?? 0, snapshot)
-    if (!res) return // offline or refused: it stays unpushed, and goes with the next write
+    // Offline, refused, or too large after all: it stays unpushed, and goes
+    // with the next write.
+    if (!res || res.kind === "tooLarge") return
     if (res.kind === "saved") {
       s.devices = mergeDevices(s.devices, [wrote])
       s.revision = res.revision
@@ -420,12 +493,16 @@ async function pushOnce(key: string): Promise<void> {
       return
     }
     if (res.history) mergeIn(key, res.history)
-    s.revision = newer(s.revision, res.revision)
+    // The refusal names the revision the server holds NOW, after every write
+    // of ours (they go one at a time): the next try is built on it, even when
+    // it is older than the one this copy knew. A row that went missing answers
+    // 0, and insisting on the old number was refused forever (review, Oct 29).
+    s.revision = res.revision
   }
 }
 
-/** Revisions only grow: a read that left before a write of ours landed must
- *  not take this copy back to an older one. */
+/** Revisions only grow on a READ: one that left before a write of ours landed
+ *  must not take this copy back to an older one. */
 const newer = (a: number | null, b: number) => (a != null && a > b ? a : b)
 
 const pulls = new Map<string, Promise<"unchanged" | "merged" | null>>()
@@ -490,9 +567,15 @@ async function claim(key: string, id: string, which: "undo" | "redo"): Promise<"
   if (timer) clearTimeout(timer)
   if (result !== "merged") return "ok"
   const s = stacksFor(key)
-  const from = which === "undo" ? s.undo : s.redo
-  return from[from.length - 1]?.id === id ? "ok" : "moved"
+  return stillOn(which === "undo" ? s.undo : s.redo, id) ? "ok" : "moved"
 }
+
+/**
+ * Whether a step is still where the press found it. Not "still on top": a
+ * step another device made meanwhile may now sit above it, and that device
+ * took nothing (review, Oct 29). The press undoes the step its button named.
+ */
+const stillOn = (list: readonly StepRecord[], id: string) => list.some((r) => r.id === id)
 
 if (typeof window !== "undefined") {
   // Steps made offline reach the server as soon as the connection is back.
@@ -628,7 +711,7 @@ function laneFor(key: string, input: Pick<StepInput, "kind" | "data" | "lane">):
   return stepLane(input.kind, input.data, open)
 }
 
-function toRecord<D>(input: StepInput<D>, key: string, now = Date.now()): StepRecord<D> {
+function toRecord<D>(input: StepInput<D>, key: string, now = stampFor(stacksFor(key))): StepRecord<D> {
   const { lane: _lane, ...rest } = input
   const lane = laneFor(key, input)
   const named = rest.fileName == null && rest.fileId && fileNamer ? fileNamer(rest.fileId) : null
@@ -653,6 +736,7 @@ export function recordStep<D>(
   const key = scope ? scopeKey(scope.projectId, scope.username) : activeScope
   if (!key) return
   const record = toRecord(input, key)
+  recordedHere.set(record.id, input.at ?? Date.now())
   if (opts?.pending) {
     const pending = opts.pending.catch(() => false)
     pendingWrites.set(record.id, pending)
@@ -661,9 +745,9 @@ export function recordStep<D>(
       if (!ok) dropRecord(key, record.id)
     })
   }
-  const buffer = groupBuffers[groupBuffers.length - 1]
-  if (buffer && key === activeScope) {
-    buffer.push(record as StepRecord)
+  const group = key === activeScope ? groupFor(record as StepRecord) : undefined
+  if (group) {
+    group.buffer.push(record as StepRecord)
     return
   }
   pushRecord(record as StepRecord, key)
@@ -697,23 +781,65 @@ function pushRecord(record: StepRecord, key: string): void {
 }
 
 /**
+ * Which steps a group takes in: those on its lines, of its kinds. Anything
+ * else recorded while it runs (a translation typed during a generation,
+ * another line's voice generating at the same time) stays a step of its own
+ * (review, Oct 29).
+ */
+export interface GroupOwns {
+  /** The lines (cell ids) its steps are on. */
+  cells: Iterable<string>
+  /** Step kinds: exact ("vote.text"), or a prefix ending in "." ("take."). */
+  kinds: readonly string[]
+}
+
+function ownsFilter(o: GroupOwns): (r: StepRecord) => boolean {
+  const cells = new Set(o.cells)
+  const kindOk = (kind: string) => o.kinds.some((k) => (k.endsWith(".") ? kind.startsWith(k) : kind === k))
+  const owns = (r: StepRecord): boolean => {
+    if (r.kind === GROUP_KIND) {
+      // An inner group joins this one when all of it is this one's.
+      const parts = (r.data as { steps?: StepRecord[] } | null)?.steps ?? []
+      return parts.length > 0 && parts.every(owns)
+    }
+    const cellId = (r.data as { cellId?: unknown } | null)?.cellId
+    return typeof cellId === "string" && cells.has(cellId) && kindOk(r.kind)
+  }
+  return owns
+}
+
+/** The newest open group that takes this step in, if any. */
+function groupFor(record: StepRecord): OpenGroup | undefined {
+  for (let i = openGroups.length - 1; i >= 0; i -= 1) {
+    const g = openGroups[i]
+    if (!g.owns || g.owns(record)) return g
+  }
+  return undefined
+}
+
+/**
  * Run `fn` and record every step it records as ONE step named `labelKey`. A
  * group of one keeps its own name unless `alwaysGroup` is set (so "Validated
  * 1 line" never replaces the plainer "Validated a line"). Groups nest: an
  * inner group joins the outer one.
+ *
+ * Pass `owns` whenever `fn` waits on the network: without it the group takes
+ * in EVERY step recorded until it ends, whatever line or action it is.
  */
 export async function withGroup<T>(
   label: { labelKey: string; labelParams?: Record<string, string | number>; fileId?: string | null; fileName?: string | null },
   fn: () => Promise<T>,
-  opts?: { alwaysGroup?: boolean },
+  opts?: { alwaysGroup?: boolean; owns?: GroupOwns },
 ): Promise<T> {
-  const buffer: StepRecord[] = []
-  groupBuffers.push(buffer)
+  const group: OpenGroup = { buffer: [], owns: opts?.owns ? ownsFilter(opts.owns) : null }
+  const buffer = group.buffer
+  openGroups.push(group)
   let result: T
   try {
     result = await fn()
   } finally {
-    groupBuffers.pop()
+    // Its own entry, wherever it now sits: groups open together end in any order.
+    openGroups.splice(openGroups.indexOf(group), 1)
   }
   if (buffer.length === 1 && !opts?.alwaysGroup) {
     const { id: _id, lane, ...only } = buffer[0]
@@ -741,8 +867,8 @@ export function recordGroup(
   parts: ReadonlyArray<StepInput>,
 ): void {
   if (parts.length === 0 || !activeScope) return
-  const now = Date.now()
   const key = activeScope
+  const now = stampFor(stacksFor(key))
   const steps: StepRecord[] = parts.map((p) => toRecord(p, key, now))
   recordStep({
     kind: GROUP_KIND,
@@ -848,7 +974,6 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   busy = true
   emit()
   let record: StepRecord | null
-  let movedBefore: number | undefined
   let outcome: StepOutcome
   try {
     // Another device of the same person may have taken this step already.
@@ -859,7 +984,7 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     if (top.lane !== undefined && top.lane !== activeLane) {
       const opened = laneSwitcher ? await laneSwitcher(top.lane) : "blocked"
       if (activeScope !== scope) return null
-      if (fromList()[fromList().length - 1]?.id !== top.id) return { step: label, outcome: { kind: "moved" } }
+      if (!stillOn(fromList(), top.id)) return { step: label, outcome: { kind: "moved" } }
       if (opened === "denied") {
         // The person may no longer work in that language (gap 29).
         takeOut(fromList(), top.id)
@@ -874,10 +999,10 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     // Saved as already moved before it runs: if the tab closes while its writes
     // are out, a reload offers it on the other side rather than offering to do
     // again what has (most likely) landed. Moved back if it doesn't go through.
+    const movedAt = stampFor(s)
     record = takeOut(fromList(), top.id)
     if (!record) return null
-    movedBefore = record.movedAt
-    record.movedAt = Date.now()
+    record.movedAt = movedAt
     toList().push(record)
     scheduleSave(scope)
     emit()
@@ -890,7 +1015,9 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
   if (outcome.kind === "done") {
     // Already where it belongs.
   } else if (outcome.kind === "blocked") {
-    record.movedAt = movedBefore
+    // Moving back is a move too, and the newest one: a copy that took the
+    // in-flight one (on the other stack) must not win a later merge.
+    record.movedAt = Math.max(stampFor(s), (record.movedAt ?? record.at) + 1)
     fromList().push(record)
   } else {
     bury(s, record.id)
@@ -1004,7 +1131,8 @@ export function subscribeHistory(fn: () => void): () => void {
 /** Newest step time in the active scope — the shortcut arbiter's input. */
 export function newestStepAt(): number | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
-  return s?.undo[s.undo.length - 1]?.at ?? null
+  const top = s?.undo[s.undo.length - 1]
+  return top ? (recordedHere.get(top.id) ?? top.at) : null
 }
 
 /** The signed-in person the active scope belongs to. */
@@ -1023,7 +1151,7 @@ export function resetHistoryForTests(): void {
   pulls.clear()
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = null
-  groupBuffers.length = 0
+  openGroups.length = 0
   activeScope = null
   activeUser = null
   activeLane = ""
@@ -1031,6 +1159,7 @@ export function resetHistoryForTests(): void {
   busy = false
   queue = Promise.resolve()
   pendingWrites.clear()
+  recordedHere.clear()
   openFileProbe = null
   laneSwitcher = null
   remote = null

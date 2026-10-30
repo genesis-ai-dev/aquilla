@@ -13,7 +13,7 @@
 //
 // AQU-1840: and the project_settings read is no longer the blob. It selects the
 // `wp_*` generated columns (migration 0171, write-path-settings.ts) — the
-// eleven keys this path reads — so the one remaining per-request load stopped
+// keys this path reads — so the one remaining per-request load stopped
 // detoasting and shipping a multi-MB TEXT column to answer "is this lane
 // archived?". If those columns are missing (0171 not applied) the read falls
 // back to the blob and narrows it in the Worker, so the answers are identical
@@ -44,7 +44,7 @@ import {
 export interface RequestCache {
   /**
    * The write path's projection of `project_settings.settings` (AQU-1840) — the
-   * eleven keys POST /events reads, never the blob. Null when the project has
+   * keys POST /events reads, never the blob. Null when the project has
    * no settings row.
    */
   writePathSettings(projectId: string): Promise<WritePathSettings | null>

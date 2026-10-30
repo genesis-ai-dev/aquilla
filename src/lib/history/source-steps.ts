@@ -12,7 +12,8 @@
  * keeps every head it has known — where the session started, each save it
  * made, each undo and redo since — and chains each write on the newest. That
  * also tells a projection that has not caught up yet (its head is one of
- * ours) from somebody else's edit (a head we never made), which skips it.
+ * ours) from somebody else's edit (a head we never made), which skips it,
+ * unless it left the words as they were: then it chains on that head.
  */
 import { recordStep, type StepHandler, type StepOutcome } from "./history"
 import type { TextValue } from "./edit-steps"
@@ -42,7 +43,12 @@ export function sourceStepHandlers(ctx: SourceStepContext): Record<string, StepH
     if (!now) return GONE
     const ours = now.eventId != null && d.heads.includes(now.eventId)
     if (!ours && now.value !== from.value) return CHANGED
-    const id = await ctx.commitSource(d.cellId, to, d.heads[d.heads.length - 1] ?? now.eventId)
+    // Our own head showing: the projection may lag, so chain on our newest.
+    // Someone else's head with our words (an identical re-commit) is the
+    // line's head now; chaining past it would be a stale sibling the server
+    // drops (review, Oct 29).
+    const parent = ours ? (d.heads[d.heads.length - 1] ?? now.eventId) : (now.eventId ?? d.heads[d.heads.length - 1] ?? null)
+    const id = await ctx.commitSource(d.cellId, to, parent)
     if (!id) return { kind: "failed", error: new Error("source commit refused") }
     d.heads.push(id)
     return DONE

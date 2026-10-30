@@ -574,11 +574,6 @@ export const org = defineNamespace({
     "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.importedOriginalsHeading": "Imported originals",
     "org.projectOverview.importedOriginalsListAria": "Imported original files",
-    "org.projectOverview.importedOriginalsShowMore": plural({
-      one: "Show {count} more",
-      other: "Show {count} more",
-    }),
-    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -597,7 +592,6 @@ export const org = defineNamespace({
       one: "+{count} more file — show all",
       other: "+{count} more files — show all",
     }),
-    "org.projectOverview.showFewer": "Show fewer",
     "org.projectOverview.deadlineHeading": "Project deadline",
     "org.projectOverview.noDeadlineSet": "No project deadline set",
     "org.projectOverview.change": "Change",
@@ -808,12 +802,12 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.description": "People in this organization and their access.",
     "org.membersPage.orgPage.loadErrorTitle": "Couldn't load your organization",
     "org.membersPage.orgPage.loadErrorHint":
-      "Common causes: the Frontier worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
+      "Common causes: the Aquilla worker is unreachable, your session expired, or the request timed out. Check your network and try again.",
     "org.membersPage.orgPage.signInTitle": "Sign in to manage members",
     "org.membersPage.orgPage.selectOrgDescription":
       "Member access is managed within a single organization. Choose one from the switcher to continue.",
     "org.membersPage.orgPage.signInDescription":
-      "Member access requires a Frontier session. Sign in from the dashboard and come back to this page.",
+      "Member access requires a Aquilla session. Sign in from the dashboard and come back to this page.",
     "org.membersPage.orgPage.pageDescriptionPrefix": "People in",
     "org.membersPage.orgPage.pageDescriptionSuffix":
       ". Org-level roles apply across every project; per-project access can be granted separately via the Add-to-projects flow.",
@@ -2387,16 +2381,6 @@ export const org = defineNamespace({
       "org.projectOverview.importedOriginalsListAria": {
         description:
           "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
-      },
-      "org.projectOverview.importedOriginalsShowMore": {
-        description:
-          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
-        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
-      },
-      "org.projectOverview.importedOriginalsShowAll": {
-        description:
-          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
-        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",

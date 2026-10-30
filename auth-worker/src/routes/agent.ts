@@ -783,11 +783,6 @@ interface LoopArgs {
   resolvedLaneId: string
 }
 
-function parseSettingsObject(raw: unknown): Record<string, unknown> {
-  const value = typeof raw === "string" ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
-}
-
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
     const v: unknown = JSON.parse(raw || "{}")
@@ -844,22 +839,23 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings,
-              settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary
+      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
+              settings::jsonb -> 'draftingSettings' AS drafting_settings
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ settings: unknown; brief_summary: string | null }>()
+      .first<{ brief_summary: string | null; drafting_settings: unknown }>()
     if (settings) {
-      const parsed = parseSettingsObject(settings.settings)
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
-      languages = languagesForLanes(lanes, parsed, body.context?.lane ?? "")
+      languages = languagesForLanes(lanes, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
       if (fromLane) languages = { ...languages, targetLanguage: fromLane }
       briefSummary = settings.brief_summary ?? undefined
-      teamLanguage = readDraftingSettings(parsed.draftingSettings)?.main_chat_language
+      const rawDrafting = settings.drafting_settings
+      const drafting = typeof rawDrafting === "string" ? (() => { try { return JSON.parse(rawDrafting) as unknown } catch { return null } })() : rawDrafting
+      teamLanguage = readDraftingSettings(drafting)?.main_chat_language
     }
   } catch {
     /* prompt grounding is best-effort — the run proceeds without it */

@@ -18,6 +18,8 @@ import { billingSelectionPath, readBillingIntent } from "@/lib/billing/intent"
 import { loginPath, safeLoginNext } from "@/lib/navigation/login-path"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+const SIGNUP_STARTED_KEY = "aquilla:signupStarted"
+
 /** Welcome and privacy precede signup; workspace setup happens in the app. */
 export function Signup() {
   const t = useT()
@@ -25,8 +27,12 @@ export function Signup() {
   const [params] = useSearchParams()
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   const [mode, setMode] = useState<"signup" | "login" | "forgot">("signup")
-  const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [visitedSignup, setVisitedSignup] = useState(false)
+  const [step, setStep] = useState<1 | 2 | 3>(() =>
+    sessionStorage.getItem(SIGNUP_STARTED_KEY) === "true"
+      ? hasAnalyticsConsentBeenSet() ? 3 : 2
+      : 1,
+  )
+  const [visitedSignup, setVisitedSignup] = useState(step === 3)
   const openSignup = () => { setVisitedSignup(true); setStep(3) }
   const [identifier, setIdentifier] = useState<string | null>(null)
   const billing = readBillingIntent(params)
@@ -44,7 +50,7 @@ export function Signup() {
     <div className="mb-8 flex justify-center gap-2" aria-label={t("onboarding.wizard.stepProgress", { step, total: 3 })}>
       {[1, 2, 3].map(n => <span key={n} className={`size-2 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`} />)}
     </div>
-    {step === 1 && <><WelcomeStep onNext={() => hasAnalyticsConsentBeenSet() ? openSignup() : setStep(2)} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
+    {step === 1 && <><WelcomeStep onNext={() => { sessionStorage.setItem(SIGNUP_STARTED_KEY, "true"); if (hasAnalyticsConsentBeenSet()) openSignup(); else setStep(2) }} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
     {step === 2 && <PrivacyStep onNext={openSignup} onBack={() => setStep(1)} />}
     {visitedSignup && <div hidden={step !== 3}>
     <h1 className="mb-6 text-center text-2xl font-semibold">

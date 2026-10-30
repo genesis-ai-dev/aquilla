@@ -20,6 +20,7 @@ function show(path = "/signup") {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   auth.session = null
   auth.loading = false
   auth.sessionLoadError = null
@@ -104,4 +105,19 @@ it("shows only required errors for empty signup email and password", async () =>
   expect(screen.queryByText("Enter a valid email address")).toBeNull()
   expect(screen.queryByText("Password must be at least 8 characters")).toBeNull()
   expect(screen.getByText("Password is required")).toBeVisible()
+})
+
+it.each(["true", "false"])("resumes account creation after login with saved sharing choice %s", choice => {
+  sessionStorage.setItem("aquilla:signupStarted", "true")
+  localStorage.setItem("aquilla:analyticsEnabled", choice)
+  show()
+  expect(screen.getByLabelText("Username")).toBeVisible()
+  expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
+  expect(screen.queryByRole("switch")).toBeNull()
+})
+it("resumes at usage sharing when Get Started was passed but no choice was saved", () => {
+  sessionStorage.setItem("aquilla:signupStarted", "true")
+  show()
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeVisible()
+  expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
 })

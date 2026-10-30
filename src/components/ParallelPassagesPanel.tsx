@@ -741,11 +741,13 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
       title={`${dialogTitle} — ${scope === "file" ? scopeLabel : "entire project"}`}
       description={inputPlaceholder}
       showCloseButton
-      className="flex max-h-[46rem] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+      // 46rem is the design cap; the viewport clamp keeps the footer and the
+      // close button on screen on short windows (AQU-2283).
+      className="flex max-h-[min(46rem,85dvh)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
     >
       <Command
         shouldFilter={false}
-        className="flex max-h-[46rem] min-h-0 w-full flex-col gap-3 overflow-hidden rounded-none bg-transparent p-4"
+        className="flex min-h-0 w-full flex-col gap-3 overflow-hidden rounded-none bg-transparent p-4"
       >
         <PageHeader title={dialogTitle} inset={false} className="mb-0 shrink-0 pe-8" />
         {/* pe-8 reserves clearance for the absolute-positioned close button */}
@@ -897,7 +899,7 @@ export function ParallelPassagesPanel(props: ParallelPassagesPanelProps) {
         )}
 
         <div className="-ms-2 -me-4 flex min-h-0 flex-1 flex-col overflow-hidden">
-        <CommandList className="max-h-[46rem] min-h-0 flex-1 overflow-y-auto overscroll-contain pe-4 scrollbar-thin">
+        <CommandList className="max-h-none min-h-0 flex-1 overflow-y-auto overscroll-contain pe-4 scrollbar-thin">
           {loading && <ResultsLoadingSkeleton t={t} />}
 
           {!loading && isIdle && (

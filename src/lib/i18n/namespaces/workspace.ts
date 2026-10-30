@@ -1284,7 +1284,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.description": {
         description:
-          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "Subtitle of the one-time Set up AI chooser. They pick Aquilla, a " +
           "project API key, or a personal override; the dialog does not return " +
           "after that choice.",
         screenshot: "confirm-dialog",
@@ -1299,7 +1299,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.frontierDescriptionSignedIn": {
         description:
-          "Body of the Frontier option when the user is signed in. Names the " +
+          "Body of the Aquilla option when the user is signed in. Names the " +
           "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
         placeholders: {
           username: "Signed-in account username.",
@@ -1309,7 +1309,7 @@ export const workspace = defineNamespace({
       "workspace.aiSetup.projectKeyLabel": {
         description:
           "Title of the per-project bring-your-own-key option. Contrast with " +
-          "the personal override (Preferences, all projects) and Frontier " +
+          "the personal override (Preferences, all projects) and Aquilla " +
           "(hosted). Short, no period.",
         screenshot: "confirm-dialog",
       },

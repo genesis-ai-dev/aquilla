@@ -653,7 +653,7 @@ export async function prepareChangesetCore(
       Number(cred.userId),
       resolvedRole.level,
     )
-    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+    const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
     const resolved: SetTranslationCommand[] = []
     for (const [index, c] of setCommands.entries()) {
       const lane = resolveTargetLaneId(c.laneId, `commands[${index}]`, laneCtx)
@@ -774,7 +774,7 @@ async function expandDraftCells(
   const lane = resolveTargetLaneId(
     cmd.laneId,
     'DraftCells.laneId',
-    laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds),
+    laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds),
   )
   if (!lane.ok) throw new ExternalError('validation_failed', lane.message)
   const laneId = lane.lane.id
@@ -911,7 +911,7 @@ async function preparePlanImport(
     Number(cred.userId),
     callerRoleLevel,
   )
-  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
   for (const [cellIndex, cell] of cmd.cells.entries()) {
     const cellLanes = new Set<string>()
     for (const [variantIndex, variant] of (cell.variants ?? []).entries()) {
@@ -1113,7 +1113,7 @@ async function prepareLinkMedia(
     Number(cred.userId),
     roleLevel,
   )
-  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], projectSettings.settings, visibleLaneIds)
+  const laneCtx = laneContextFrom(projectSettings.lanes ?? [], visibleLaneIds)
   const resolvedCmds: LinkMediaCommand[] = []
 
   for (const [index, cmd] of cmds.entries()) {

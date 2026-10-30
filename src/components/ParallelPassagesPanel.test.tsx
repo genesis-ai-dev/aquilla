@@ -654,17 +654,33 @@ describe("ParallelPassagesPanel — source beside each replace match (AQU-1011)"
     expect(screen.getAllByText("content").length).toBeGreaterThan(0)
   })
 
-  it("caps the command dialog at 25% from the top and scrolls the results", () => {
+  it("centers the dialog in the viewport and scrolls the results inside it (AQU-2283)", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     const list = screen.getByRole("listbox")
     expect(list).toHaveClass("overflow-y-auto")
     expect(list).toHaveClass("pe-4")
+    expect(list).toHaveClass("flex-1")
+    expect(list).toHaveClass("min-h-0")
     expect(list.parentElement).toHaveClass("-me-4")
-    expect(list.className).toMatch(/max-h-\[46rem\]/)
+    // The dialog, not the list, bounds the height: no fixed cap on the list.
+    expect(list).toHaveClass("max-h-none")
+    expect(list.className).not.toMatch(/max-h-\[46rem\]/)
     const dialog = screen.getByRole("dialog")
-    expect(dialog.className).toMatch(/top-\[25%\]/)
-    expect(dialog.className).toMatch(/max-h-\[46rem\]/)
-    expect(dialog.className).toMatch(/overflow-hidden/)
+    // Base dialog placement: centered both ways, never anchored to the upper
+    // quarter, so a short list and a full one sit in the same place.
+    expect(dialog).toHaveClass("top-1/2")
+    expect(dialog).toHaveClass("-translate-y-1/2")
+    expect(dialog).toHaveClass("left-1/2")
+    expect(dialog).toHaveClass("-translate-x-1/2")
+    expect(dialog.className).not.toMatch(/top-\[25%\]/)
+    expect(dialog.className).not.toMatch(/(^|\s)translate-y-0(\s|$)/)
+    // Design cap of 46rem, clamped to the viewport so the footer and the
+    // close button stay on screen at 700px-tall windows.
+    expect(dialog.className).toMatch(/max-h-\[min\(46rem,85dvh\)\]/)
+    expect(dialog.className).not.toMatch(/max-h-\[46rem\]/)
+    expect(dialog).toHaveClass("overflow-hidden")
+    expect(dialog).toHaveClass("flex")
+    expect(dialog).toHaveClass("flex-col")
   })
 
   it("continues a dock query when the dialog opens", async () => {

@@ -40,19 +40,21 @@ export async function loadLaneRows(db: LaneLanguageDb, projectId: string): Promi
   }))
 }
 
-/** Source-lane language and the language of the lane tagged `targetTag`. */
+/**
+ * Source-lane language and the language of the lane tagged `targetTag`, read
+ * off the lane rows alone. AQU-2223: the retired settings language keys are
+ * not a fallback — a project without lane rows is a data bug to fix.
+ */
 export function languagesForLanes(
   lanes: readonly LaneLanguageRow[],
-  settings: { sourceLanguage?: unknown; targetLanguage?: unknown } | null | undefined,
   targetTag: string,
 ): { sourceLanguage?: string; targetLanguage?: string } {
   const sourceLane = lanes.find((lane) => lane.role === "source")
   const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
-    settings,
     role: "source",
     legacyTag: sourceLane?.legacyTag ?? null,
   })
-  const targetLanguage = laneLanguageForTag(targetTag, lanes, settings) ?? ""
+  const targetLanguage = laneLanguageForTag(targetTag, lanes) ?? ""
   return {
     ...(sourceLanguage ? { sourceLanguage } : {}),
     ...(targetLanguage ? { targetLanguage } : {}),

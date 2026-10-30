@@ -44,7 +44,7 @@
 // has had. What syncs between clients is a token; what a token looks like is
 // decided here, by whichever build happens to be drawing.
 
-import { playLineColorCss, stripColorCss, waveColorCss } from "./track-oklch"
+import { hexToOklch, oklchCss, playLineColorCss, stripColorCss, waveColorCss } from "./track-oklch"
 
 /** One selectable hue. Just an identity and a colour now — no class recipes. */
 export interface TrackHue {
@@ -116,6 +116,14 @@ export const TRACK_HUES: readonly TrackHue[] = [
 ]
 
 const BY_ID = new Map(TRACK_HUES.map((h) => [h.id, h]))
+
+/**
+ * The recorder's timing bar while a take is inside its window (AQU-2235; Sam,
+ * Oct 28): the green track's hue at emerald-500's own lightness and chroma,
+ * the bar's green until then. Derived from the track rather than written out,
+ * so the next change to the palette's green moves the timing bar with it.
+ */
+export const RECORDING_OK_GREEN = oklchCss(0.696, 0.149, hexToOklch(BY_ID.get("green")!.hex).h)
 /** The palette's own hexes: only these get the strip colour (AQU-2235). */
 const PALETTE_HEXES: ReadonlySet<string> = new Set(TRACK_HUES.map((h) => h.hex))
 

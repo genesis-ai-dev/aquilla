@@ -3,8 +3,10 @@
 // Used for subtitle cells that carry cue startTime/endTime. Cells without a
 // target duration hit the elapsed-only fallback elsewhere.
 
+import type { CSSProperties } from "react"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RECORDING_OK_GREEN } from "@/lib/timeline/track-colors"
 
 interface Props {
   elapsedMs: number
@@ -39,18 +41,23 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         : "good"
 
   // Sam, Oct 28: the green backed off blue "just like a hair", with the
-  // timeline's green track (AQU-2235) — hue 157, at emerald-500's own
-  // lightness and chroma, where emerald-500's 162.5 read slightly teal.
+  // timeline's green track (AQU-2235) — its hue at emerald-500's own
+  // lightness and chroma, where emerald-500's 162.5 read slightly teal. One
+  // custom property carries it, so the window's tint and the fill can't drift.
   const fillClass =
-    state === "over" ? "bg-red-500" : state === "warn" ? "bg-amber-400" : "bg-[#32b877]"
+    state === "over" ? "bg-red-500" : state === "warn" ? "bg-amber-400" : "bg-[color:var(--rec-ok)]"
 
   return (
-    <div className={cn("space-y-1", className)}>
+    <div
+      data-testid="rec-duration"
+      className={cn("space-y-1", className)}
+      style={{ "--rec-ok": RECORDING_OK_GREEN } as CSSProperties}
+    >
       <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
         {/* Target-window shading up to the target mark */}
         <div
           data-testid="rec-duration-window"
-          className="absolute inset-y-0 left-0 bg-[#32b877]/10"
+          className="absolute inset-y-0 left-0 bg-[color:color-mix(in_oklab,var(--rec-ok)_10%,transparent)]"
           style={{ width: `${targetPct}%` }}
         />
         {/* Fill */}

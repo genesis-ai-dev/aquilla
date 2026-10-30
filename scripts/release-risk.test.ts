@@ -123,6 +123,11 @@ describe("gate machinery holds as infra", () => {
     "sync-worker/src/__tests__/helpers/replay-corpus.ts",
     "scripts/replay-corpus.mjs",
     ".github/workflows/risk-label.yml",
+    // Everything the gate executes through, not only its own two files.
+    "sync-worker/src/__tests__/helpers/pg-test-db.ts",
+    "sync-worker/vitest.config.ts",
+    "sync-worker/package.json",
+    "sync-worker/pnpm-lock.yaml",
   ])("%s", (file) => {
     const { areas, pathHolds } = classifyFiles([file])
     expect(areas).toContain("infra")

@@ -71,7 +71,10 @@ const TEST_FILE = /\.test\.[jt]sx?$|^e2e\/|^sync-worker\/src\/__tests__\//
 // tooling around them. A PR that edits these can make its own gate pass,
 // so they are infra (holding, no gate) and are checked BEFORE the test-file
 // skip, since most of the harness lives under __tests__.
-const GATE_MACHINERY = /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts|helpers\/replay-corpus\.ts)$|^scripts\/replay-corpus/
+// "Executes" is the whole chain: the harness, every shared test helper it
+// runs through (the PGlite seed is one), the sync-worker test config and
+// dependency set, and the corpus tooling.
+const GATE_MACHINERY = /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts$|helpers\/)|^sync-worker\/(vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|package\.json|pnpm-lock\.yaml)$|^scripts\/replay-corpus/
 
 export function classifyFiles(files) {
   const areas = new Set()

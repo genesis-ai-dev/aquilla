@@ -250,7 +250,6 @@ export const DEFAULT_COMPLETION_SETTINGS: CompletionSettings = {
   maxTokens: DEFAULT_COMPLETION_MAX_TOKENS,
   temperature: 0.3,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  llmHealthPenalty: 0.1,
   top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
   contextSize: "medium",
   useOnlyValidatedExamples: true,

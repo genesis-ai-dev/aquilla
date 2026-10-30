@@ -7,7 +7,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import {
   PROJECT_STATUS_LABEL,
   type ProjectAttentionKind,
@@ -148,7 +148,7 @@ export function ProjectAttentionStatuses({
   className,
 }: {
   reasons: ProjectAttentionReason[]
-  /** When set, overdue/due-soon chips show the org-projects deadline tooltip on hover. */
+  /** When set, overdue/due-soon chips give the due date on click. */
   deadlineAt?: string | null
   className?: string
 }) {
@@ -157,19 +157,15 @@ export function ProjectAttentionStatuses({
     <div className={cn("flex flex-col gap-1.5", className)}>
       {reasons.map((r) => {
         if ((r.kind === "overdue" || r.kind === "soon") && deadlineAt) {
+          // AQU-2260 (Sam, Oct 29): the date opens on click, never on hover.
+          // The click stays on the status: in a table, the row it sits in
+          // opens the project on click.
           return (
-            <AppTooltip
-              key={r.kind}
-              content={deadlineStatusTooltip(r.kind, deadlineAt)}
-              side="bottom"
-            >
-              <span
-                tabIndex={0}
-                className="w-fit rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-              >
+            <span key={r.kind} className="w-fit" onClick={(e) => e.stopPropagation()}>
+              <NoteOnClick note={deadlineStatusTooltip(r.kind, deadlineAt)} className="w-fit rounded-md">
                 <ProjectStatusChip kind={r.kind} />
-              </span>
-            </AppTooltip>
+              </NoteOnClick>
+            </span>
           )
         }
         return <ProjectStatusChip key={r.kind} kind={r.kind} />
@@ -202,7 +198,7 @@ export function ProjectStatus({
 }: {
   archived: boolean
   reasons: ProjectAttentionReason[]
-  /** When set, overdue/due-soon chips show the org-projects deadline tooltip on hover. */
+  /** When set, overdue/due-soon chips give the due date on click. */
   deadlineAt?: string | null
   className?: string
 }) {

@@ -102,6 +102,21 @@ describe("SyncStatusIndicator", () => {
     expect(within(dialog).getByText("50 ms", { selector: "dd" })).toBeTruthy()
   })
 
+  // AQU-2260 (Sam, Oct 29): the status says what it means when it is
+  // clicked (the popover's first line), never on hover.
+  it("explains its status in the popover on click, and shows nothing on hover", async () => {
+    const user = userEvent.setup()
+    renderPill("retrying")
+    const trigger = screen.getByRole("button", { name: /last attempt .* failed/i })
+    await user.hover(trigger)
+    // Give a would-be tooltip its chance to open.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await user.click(trigger)
+    const dialog = await screen.findByRole("dialog", { name: "Connection" })
+    expect(dialog).toHaveTextContent(/the last attempt to send your changes failed/i)
+  })
+
   it.each<[SyncStatus, string, RegExp]>([
     ["live", "Live", /all changes are saved to the server/i],
     ["syncing", "Syncing", /still being sent/i],

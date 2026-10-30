@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { usePersistedToggleSet } from "@/hooks/useSidebarExpansion"
 import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { healthRibbonColor, healthRibbonOpacity } from "@/lib/health/health-ribbon"
 import { PROGRESS_COLOR, progressColorAt } from "@/lib/progress/progress-palette"
 import type { MilestoneProgressView } from "@/lib/progress/milestone-progress-view"
@@ -362,7 +362,7 @@ function chapterProgressWords(chapter: BookHealthChapter, t: TFunction): string 
   return parts.join(" · ")
 }
 
-function chapterTooltip(chapter: BookHealthChapter, visual: ChapterVisual, t: TFunction) {
+function chapterNote(chapter: BookHealthChapter, visual: ChapterVisual, t: TFunction) {
   const issueCount = chapter.cells?.filter(showsIssue).length ?? 0
   const untranslated = Math.max(0, chapter.total - chapter.translated)
   const automatic = Math.max(0, chapter.translated - chapter.validated)
@@ -440,8 +440,8 @@ export function BookHealthSpine({
           : chapterCells
         const columns = matrixColumns(visibleCells.length)
         return (
-          <AppTooltip key={chapter.key} content={chapterTooltip(chapter, visual, t)} side="right" delay={250} className="max-w-xs">
-            <div
+          <div
+              key={chapter.key}
               data-testid="book-health-chapter"
               data-chapter-label={chapter.label}
               data-health-score={visual.score === undefined ? undefined : Math.round(visual.score)}
@@ -452,7 +452,7 @@ export function BookHealthSpine({
                 type="button"
                 data-testid="book-health-chapter-link"
                 aria-label={chapter.label}
-                className="block w-full px-1 py-1.5 text-left"
+                className="block w-full py-1.5 pl-1 pr-5 text-left"
                 onClick={() => onChapterClick(chapter.label)}
               >
                 <span className="flex min-w-0 items-baseline justify-between gap-2">
@@ -496,7 +496,6 @@ export function BookHealthSpine({
                           data-ai-draft={aiDraft || undefined}
                           role="img"
                           aria-label={cellDescription(cell, cellIndex)}
-                          title={cellDescription(cell, cellIndex)}
                           className={cn(
                             "size-[7px] rounded-[1px]",
                             aiDraft && "bg-progress-ai",
@@ -517,6 +516,19 @@ export function BookHealthSpine({
                   </span>
                 )}
               </button>
+
+              {/* AQU-2260 third pass: the chapter's numbers open from an (i) on
+                  click. They used to float over the editor on hover. The (i)
+                  sits outside the chapter button, so opening it never navigates. */}
+              <InfoNote
+                label={t("common.aboutAria", { name: chapter.label })}
+                testId="book-health-chapter-info"
+                side="right"
+                className="absolute right-0.5 top-1.5 text-muted-foreground/50 group-hover:text-muted-foreground"
+                iconClassName="h-3 w-3"
+              >
+                {chapterNote(chapter, visual, t)}
+              </InfoNote>
 
               {isLong && (
                 <button
@@ -539,7 +551,6 @@ export function BookHealthSpine({
                 </button>
               )}
             </div>
-          </AppTooltip>
         )
   }
 

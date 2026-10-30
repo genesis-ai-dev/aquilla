@@ -313,7 +313,9 @@ export function FileRow(props: FileRowProps) {
             </DropdownMenuTrigger>
           )}
           {hasSuggestion && !editing && (
-            <AppTooltip content={t("nav.fileRow.suggestionTooltip")} side="right" className="max-w-xs">
+            // The hover names it (AQU-2260); "a cleaner name was detected" is
+            // what the name already says.
+            <AppTooltip content={t("nav.fileRow.applyRenameSuggestion")} side="right">
               <button
                 className="p-1 rounded-md shrink-0 transition-colors hover:text-foreground"
                 onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}

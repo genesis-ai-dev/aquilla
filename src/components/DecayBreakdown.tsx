@@ -15,6 +15,8 @@ interface DecayBreakdownProps {
   /** Number of cells whose pinned source has advanced (AD-9). Optional row. */
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
+  /** The trigger's name for screen readers ("Project health: 55%"). */
+  label: string
   children: React.ReactNode
 }
 
@@ -31,6 +33,7 @@ export function DecayBreakdown({
   warnThreshold = DECAY_DEFAULTS.decayWarnThreshold,
   staleSourceCount,
   onJumpToCell,
+  label,
   children,
 }: DecayBreakdownProps) {
   const t = useT()
@@ -54,7 +57,16 @@ export function DecayBreakdown({
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger nativeButton={false} openOnHover delay={300} closeDelay={120} render={<span className="inline-flex">{children}</span>} />
+      {/* AQU-2260 (Oct 29, fourth pass): opens on a click, never on hover. */}
+      <PopoverTrigger
+        nativeButton={false}
+        aria-label={label}
+        render={
+          <span className="inline-flex cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+            {children}
+          </span>
+        }
+      />
       <PopoverContent side="top" align="start" className="w-72 rounded-lg border-0 bg-card p-3">
         <div className="mb-2 flex items-baseline justify-between">
           <span className="text-xs font-medium text-muted-foreground">

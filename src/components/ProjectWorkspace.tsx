@@ -16520,7 +16520,12 @@ export function ProjectWorkspace() {
                     affordance as someone who has not dismissed. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
-                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                    {/* AQU-2260 (Sam, Oct 29): nothing explains itself on hover.
+                        The hint is shown once, by the code, when the checklist
+                        is first dismissed (handleChecklistOpenChange); a hover
+                        or a focus asking it to open is ignored, and only a
+                        close is let through. */}
+                    <Tooltip open={showChipTooltip} onOpenChange={(next) => { if (!next) setShowChipTooltip(false) }}>
                       <TooltipTrigger
                         render={
                           <button
@@ -18528,7 +18533,7 @@ export function ProjectWorkspace() {
                 <SelectTrigger size="sm" className="w-full!" aria-label={t("editor.voice.changeVoiceQuality")}>
                   {t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality])}
                 </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false} align="start">
+                <SelectContent align="start">
                   <SelectGroup>
                     {CHANGE_VOICE_QUALITIES.map((q) => (
                       <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
@@ -18867,24 +18872,22 @@ export function ProjectWorkspace() {
             {trashFiles.map((f) => (
               <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
                 <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                <AppTooltip content={t("workspace.trash.restoreTooltip")}>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                    onClick={() => void handleRestoreFile(f.fileId)}
-                  >
-                    {t("common.restore")}
-                  </button>
-                </AppTooltip>
-                <AppTooltip content={t("workspace.trash.purgeTooltip")} className="max-w-xs">
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                    onClick={() => void handlePurgeFile(f.fileId)}
-                  >
-                    {t("workspace.trash.deleteForever")}
-                  </button>
-                </AppTooltip>
+                {/* AQU-2260: labelled buttons say nothing on hover; what
+                    Delete forever does is the retention note below. */}
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
+                  onClick={() => void handleRestoreFile(f.fileId)}
+                >
+                  {t("common.restore")}
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                  onClick={() => void handlePurgeFile(f.fileId)}
+                >
+                  {t("workspace.trash.deleteForever")}
+                </button>
               </div>
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">

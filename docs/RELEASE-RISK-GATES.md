@@ -227,6 +227,14 @@ nothing, and `release:approved` is the one label the planner reads.
   `release-verify` runs the full suite, so a red baseline blocks every
   hourly deploy until it is green. That is the intended pressure, but it
   means the first switch-on is a cleanup, not a flag flip.
+- **Jev verdict provenance.** `release-deploy-check.mjs` reads the Jev
+  decision from any commit comment carrying the smart-tests marker, with
+  no author check, the same trust the walk lookup extends to QA-bot PR
+  comments. The repo is private, so only a collaborator could post a
+  forged PASS, but this is a production deploy gate: before switching
+  `HOURLY_RELEASE` on, filter on the bot's login or app id (or have Jev
+  publish a check run, which cannot be forged), and let any FAIL from
+  the trusted author hold rather than the newest comment winning.
 - **Jev cadence.** One Hetzner stack, one suite at a time, queued. An
   hourly cut whose Jev run takes longer than an hour simply deploys the
   hour after; two cuts can not race because one release is in flight at

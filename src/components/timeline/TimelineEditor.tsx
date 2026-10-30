@@ -149,7 +149,7 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { usePersonPref } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
@@ -667,6 +667,12 @@ export interface TimelineEditorProps {
     onMoveToScope(trackId: string, groupId: string | null, order: number): void
     onCreateFolderFrom(trackIds: readonly string[]): string
     onDelete(trackIds: readonly string[]): void
+    /**
+     * AQU-2252 (Sam, Oct 29): "Sets line lengths" on added audio tracks —
+     * `false` makes them layers. Offered only while the file follows its
+     * recordings: following the source, nothing sets a line's length.
+     */
+    onSetLineLengths?(trackIds: readonly string[], sets: boolean): void
   }
 }
 
@@ -1458,6 +1464,9 @@ export function TimelineEditor({
    *  setting had no trigger, no `⋯`, nothing. */
   const canHideTracks = Boolean(fileId)
   const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+  /** AQU-2252: "Sets line lengths" — only while the file follows its
+   *  recordings, where a track's takes are what set a line's length. */
+  const lineLengthsAction = audioFirst ? trackEditing?.onSetLineLengths : undefined
 
   // ── AQU-1684: hiding tracks ───────────────────────────────────────────────
   /** The lane a primary-button press began in, until it is let go: a chip or
@@ -1622,6 +1631,7 @@ export function TimelineEditor({
         canEdit: Boolean(trackEditing),
         canPromote: Boolean(onPromoteTrackToRows),
         canHide: canHideTracks,
+        canSetLengths: Boolean(lineLengthsAction),
       }),
     )
   }
@@ -1714,6 +1724,7 @@ export function TimelineEditor({
             // it asks first (Sam, 2026-08-22). The menu opens the question; the
             // dialog is what calls through.
             onDelete: setDeletingTrackIds,
+            onSetLineLengths: lineLengthsAction,
           }
         : undefined,
     })
@@ -2171,14 +2182,24 @@ export function TimelineEditor({
   // effect shows before anyone picks. Following the source: the source's own
   // end (or the film's, when it runs longer). Following the recordings: the
   // programme, laid out exactly as that choice lays it.
+  // AQU-2252 (Sam, Oct 29): the file's added tracks, and which of them are
+  // layers — the same answer the transport lays the file out from, so the
+  // drawing, the Timing menu and the playback agree about every line.
+  // Keyed on the answer, not on the tracks: renaming or recolouring a track
+  // makes a new tracks array, and must not lay the whole file out again.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(tracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
   const timingLengths = useMemo(() => {
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
     // AQU-1758: the same layout the transport plays and the bottom strip shows.
-    const recorded = layOutProgramme(cells).programme
+    const recorded = layOutProgramme(cells, programmeTracks).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
-  }, [cells, subtitleFileWithFootage, videoDurationSec])
+  }, [cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2192,10 +2213,12 @@ export function TimelineEditor({
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
         // AQU-2204: following the recordings, every unrecorded line takes a
-        // stand-in length from its words, timed file or not.
-        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle) },
+        // stand-in length from its words, timed file or not. AQU-2252: the
+        // takes on the file's added tracks set their lines' lengths too, but
+        // for the tracks made layers.
+        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle), ...programmeTracks },
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, programmeTracks],
   )
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
@@ -2736,7 +2759,7 @@ export function TimelineEditor({
     for (const item of items) {
       if (item.cell.id !== takeSel.cellId) continue
       const att = item.cell.attachments?.[item.audioId]
-      const geom = layout.targetGeom(item.cell, att)
+      const geom = layout.targetGeom(item.cell, att, item.audioId)
       if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
       const atMs = (sec - geom.anchor) * 1000
       return canCutAt(att, atMs) ? { cellId: item.cell.id, audioId: item.audioId, atMs } : null
@@ -2964,7 +2987,7 @@ export function TimelineEditor({
       // AQU-1767: a split take's length is all its pieces'.
       const geoms = targetItems
         .filter((t) => t.cell.id === currentCell.id)
-        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]))
+        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId))
       const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
         ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
         : null
@@ -2982,7 +3005,7 @@ export function TimelineEditor({
     let last = first
     while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
-      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
+      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId) : null
     const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
     if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
     const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
@@ -4025,7 +4048,7 @@ export function TimelineEditor({
     const fromItems = (items: readonly TargetAudioItem[]): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const item of items) {
-        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId], item.audioId)
         const span = geom ?? layout.spanFor(item.cell, "source")
         if (span) out.push({ startSec: span.start, endSec: span.end })
       }
@@ -4327,7 +4350,8 @@ export function TimelineEditor({
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
-            snapEnabled={snapOn && !audioFirst}
+            // AQU-2252: a layer's takes snap as they do following the source.
+            snapEnabled={snapOn && (!audioFirst || track.setsLineLengths === false)}
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
@@ -5129,7 +5153,14 @@ export function TimelineEditor({
                     // inside a folder is said by the indented rows when it is
                     // open and by the summary band when it is closed. The
                     // kind-table fallback flows through unrendered.
-                    sub={render.sub}
+                    // AQU-2252 (Sam, Oct 29): a track made a layer says so in
+                    // words, while the file follows its recordings — the only
+                    // timing where a track's takes set a line's length.
+                    sub={
+                      audioFirst && track.kind === "audio" && track.setsLineLengths === false
+                        ? t("editor.timeline.laneLayerSub")
+                        : render.sub
+                    }
                     dot={render.dot}
                     // Every row but a FOLDER, which is a heading rather than a
                     // track (Sam's own rule) and has a disclosure triangle

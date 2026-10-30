@@ -1227,6 +1227,11 @@ export interface FileTrackSetInput {
      *  creation; the server refuses it on a reserved (derived) track id. */
     sourceTrackId?: string | null
     contentFileId?: string | null
+    /** AQU-2252 (Sam, Oct 29): false makes an added track a LAYER — its takes
+     *  set no line's length while the file follows its recordings; null clears
+     *  it back to the default (every track sets them). The server refuses it
+     *  on a reserved (derived) track id. */
+    setsLineLengths?: boolean | null
   } | null
   author: string
   clientTs?: number

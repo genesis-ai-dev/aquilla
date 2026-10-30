@@ -28,7 +28,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { layOutProgramme } from "@/lib/timeline/programme"
+import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -61,6 +61,10 @@ interface Props {
   virtualSoundingCellId?: string | null
   /** AQU-1704: the file is in Free timing, so the queue plays it (see `virtualOwnsFile`). */
   freeTiming?: boolean
+  /** AQU-2252: the file's added tracks and which are layers
+   *  (`programmeTrackSlots`), so the length shown before anything plays is
+   *  the one the timeline lays out. Absent, every added track sets lengths. */
+  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
   /** AQU-1591: the active target-language lane. The bar plays this lane's takes
@@ -99,7 +103,7 @@ function fmtLength(s: number): string {
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
   videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, freeTiming = false, below,
-  lane, variant = "bar",
+  lane, variant = "bar", programmeTracks,
 }: Props) {
   const t = useT()
 
@@ -158,10 +162,17 @@ export function VoicePlaybackBar({
   // stands where no timeline is drawn, its lines carry its own read of the
   // audio (what the queue plays from it), and handing the timeline's total
   // down to it would be a workspace state change on every take.
+  //
+  // AQU-2252: laid out as the queue PLAYS it (`playedProgramme`), with the
+  // hidden lines' takes taken out — a hidden last line's music running on
+  // past it read 0:20 here before play and 0:18 once it played. A book whose
+  // takes the queue cannot measure yet keeps the plain layout, as it does.
   const showsLaidOut = freeTiming && transport.source === "queue" && !transport.active
   const laidOutSec = useMemo(
-    () => (showsLaidOut ? layOutProgramme(cells).programme.totalSec : 0),
-    [showsLaidOut, cells],
+    () => (showsLaidOut
+      ? (playedProgramme(cells, programmeTracks)?.programme ?? layOutProgramme(cells, programmeTracks).programme).totalSec
+      : 0),
+    [showsLaidOut, cells, programmeTracks],
   )
   const shownLengthSec = showsLaidOut ? laidOutSec : duration
 

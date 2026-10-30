@@ -245,6 +245,14 @@ interface ChipGeometry {
    *  this instead of the amber/red warnings, because running long is the
    *  expected outcome there, not a defect. Null in dubbing mode. */
   ratio: number | null
+  /**
+   * AQU-2252 (Sam, Oct 29): a take on a track made a LAYER while the file
+   * follows its recordings. Its line does not grow to hold it, so it behaves
+   * the way a take does following the source: measured against its line,
+   * amber running past it, red over the next take on its track, a lead-in
+   * allowed, the move clamp stopping at its neighbours.
+   */
+  layer: boolean
 }
 
 /**
@@ -413,6 +421,10 @@ function TargetAudioChip({
   const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
+  // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
+  // to hold it, so it never runs long and moves only inside its line. Every
+  // take but one on a track made a layer, which keeps following the source's.
+  const freeRules = audioFirst && !chip.layer
   // This chip's own take: its length, its trims and its placement. The geometry
   // and the drag both read it, so it is resolved once here.
   const chipAtt = cell.attachments?.[chip.item.audioId]
@@ -531,7 +543,10 @@ function TargetAudioChip({
       // pause before the take, inside its own line. One bound is left: the
       // line's own start, because a pause cannot be negative (dragging left
       // shortens it back to none and stops).
-      if (audioFirst) {
+      //
+      // AQU-2252: …except a take on a track made a layer, whose line does not
+      // grow to hold it: every bound above applies to it, against its line.
+      if (freeRules) {
         const floor = chip.slot?.startSec ?? start
         const bounded = Math.max(start, floor)
         return { start: bounded, end: bounded + len }
@@ -558,8 +573,13 @@ function TargetAudioChip({
       // arm has always had: drag a chip to the move clamp's limit and then pull
       // this handle past it, and the audible span ended up entirely after its
       // own line, with no contact at all.
+      // AQU-2252: following the recordings, never before the start of the
+      // span the layout measures the chip against. That IS `geom.anchor` for a
+      // line's main take; a layer's sample zero can sit before its line, and
+      // its head trim comes back off only as far as the line's start.
       const lo = Math.max(
         geom.anchor,
+        freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,
       )
@@ -592,9 +612,10 @@ function TargetAudioChip({
   const span = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : { start: geom.start, end: geom.end }
   // SUB-53: in audio-first every verse owns its own stretch of the track, so
   // there is nothing to run past and nothing to collide with — the warnings
-  // would fire on every single line and mean nothing.
-  const overflow = audioFirst ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
-  const overlaps = audioFirst
+  // would fire on every single line and mean nothing. AQU-2252: a take on a
+  // track made a layer is the exception — its line does not hold it.
+  const overflow = freeRules ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = freeRules
     ? { headSec: null, tailSec: null }
     : chipOverlaps(span, prevChip, nextChipStartSec)
   // Blame the trespasser: a warning belongs to THIS chip only for territory
@@ -603,7 +624,7 @@ function TargetAudioChip({
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const { head: headTrespass, tail: tailTrespass } = audioFirst
+  const { head: headTrespass, tail: tailTrespass } = freeRules
     ? { head: false, tail: false }
     : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
@@ -614,7 +635,7 @@ function TargetAudioChip({
   // length are placed end to end and have nowhere to go, so they keep the
   // locked chip they have always had rather than springing back from a drag.
   const canMove =
-    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt) ?? true)
+    editable && Boolean(onRetimeTarget) && (layout?.canRetimeTarget(cell, chipAtt, chip.item.audioId) ?? true)
   // SUB-48: a chip that buries a neighbour is PAINTED short so it can never
   // hide one (Sam lost a whole take under one). The logical span is untouched
   // — overflow warnings, trims, snapping and playback all still use the true
@@ -642,7 +663,8 @@ function TargetAudioChip({
   // length — and hovering one of a mutually-offending pair now extends its
   // true edge visibly ACROSS the neighbour's resting cut, so the collision
   // the red warns about can actually be seen.
-  // SUB-53: inert in audio-first (verses are laid out end to end).
+  // SUB-53: inert in audio-first (verses are laid out end to end) — but for a
+  // take on a track made a layer (AQU-2252), which its line does not hold.
   const engaged = hovered || drag !== null
   const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
   const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
@@ -793,7 +815,7 @@ function TargetAudioChip({
         // the take's pause before its line. Either way what comes back is the
         // FILE-clock anchor, which is the only thing stored.
         const anchor = layout
-          ? layout.retimeAnchorSec(cell, chipAtt, s.start)
+          ? layout.retimeAnchorSec(cell, chipAtt, s.start, chip.item.audioId)
           : s.start - geom.trimStartSec
         if (anchor == null) return
         // Compared on the FILE clock for the same reason, so a drag that ends
@@ -975,7 +997,7 @@ function TargetAudioChip({
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
   const lengthNote =
-    audioFirst && !geom.usingFallback
+    freeRules && !geom.usingFallback
       ? `${(span.end - span.start).toFixed(1)}s${chip.ratio != null ? ` — ${chip.ratio.toFixed(1)}× the original` : ""}`
       : null
   // Meeting note (2026-08-05): an overlap warns with the NUMBER, in red — how
@@ -1786,12 +1808,12 @@ export function TargetAudioLane({
   const chips: ChipGeometry[] = []
   for (const item of items) {
     const att = item.cell.attachments?.[item.audioId]
-    const geom = layout ? layout.targetGeom(item.cell, att) : targetChipGeom(item.cell, att)
+    const geom = layout ? layout.targetGeom(item.cell, att, item.audioId) : targetChipGeom(item.cell, att)
     const { startTime, endTime } = item.cell
     // AQU-2204: following its recordings, a line with NO times of its own (a
     // verse in a book with no times) still has its slot in the programme, so
     // its take is drawn there; only the source's clock needs the cell's times.
-    const section = layout?.chipSection(item.cell, att)
+    const section = layout?.chipSection(item.cell, att, item.audioId)
       ?? (typeof startTime === "number" && typeof endTime === "number" ? { start: startTime, end: endTime } : null)
     if (!geom || !section) continue
     const slot = layout?.programme?.byCellId.get(item.cell.id) ?? null
@@ -1827,10 +1849,13 @@ export function TargetAudioLane({
       resizable:
         !geom.usingFallback &&
         (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
+      // AQU-2252: a take on another track has its own length, so its line's
+      // ratio (the main take's) is not its.
       ratio:
-        slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
+        slot && layout?.takeRole(item.cell, item.audioId) === "main" && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
           : null,
+      layer: layout?.takeRole(item.cell, item.audioId) === "layer",
     })
   }
 

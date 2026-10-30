@@ -37,7 +37,7 @@ import { isHiddenCell } from "@/lib/cells/hidden"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { targetChipGeom } from "./lane-timing"
-import { playedProgramme, slotHasNothingToPlay } from "./programme"
+import { playedProgramme, slotHasNothingToPlay, type BuildProgrammeOptions } from "./programme"
 import { isDefaultTrackSlot, RECORDING_SLOT } from "./track-slots"
 import { setVirtualClockJumps, type ClockJump } from "./virtual-clock"
 
@@ -164,6 +164,10 @@ export interface SkipSilentLinesScope {
   clockCells: readonly CellData[] | null
   /** The target tracks that sound (the queue's target slots). */
   slots: readonly string[]
+  /** AQU-2252: following the recordings, the file's added tracks and which of
+   *  them are layers — what the queue lays every line out with, so a line
+   *  only a take on another track sounds in counts as heard. */
+  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
 }
 
 /**
@@ -178,8 +182,11 @@ export interface SkipSilentLinesScope {
 export function skipSilentLinesCanChange(scope: SkipSilentLinesScope): boolean {
   if (scope.timing === "audioFirst") {
     return scope.runs.some((cells) => {
-      const played = playedProgramme(cells)
-      return played != null && played.programme.slots.some((slot) => slotHasNothingToPlay(slot, played.hiddenCellIds))
+      const played = playedProgramme(cells, scope.tracks)
+      return (
+        played != null &&
+        played.programme.slots.some((slot) => slotHasNothingToPlay(slot, played.hiddenCellIds, played.underLayers))
+      )
     })
   }
   if (!scope.clockCells) return false

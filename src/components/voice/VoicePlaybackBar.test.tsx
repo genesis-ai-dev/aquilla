@@ -424,4 +424,25 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     render(<VoicePlaybackBar variant="strip" cells={BOOK} projectId="p" session={null} settings={undefined} />)
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 0:00")
   })
+
+  // Found in the browser, Oct 29: with the last line hidden, the strip read
+  // 0:18 while it played and 0:20 after a reload, because before play it laid
+  // the lines out with the hidden line's music still running on past its end.
+  it("before play, leaves out what a hidden line would play, as the queue does (AQU-2252)", () => {
+    const TRACK = "01a17e67-ef58-74f7-a093-be935876197b"
+    const music = `audio-v3-1700000500-music.wav`
+    const v3 = {
+      ...take("v3", 2_900),
+      hidden: true,
+      selectedBySlot: { [TRACK]: music },
+    } as CellData
+    v3.attachments = { ...v3.attachments, [music]: { type: "audio", url: "frontier-audio://music", slot: TRACK, durationMs: 30_000, targetOffsetMs: 0 } } as never
+    const cells = [...BOOK, v3]
+    const tracks = { layerTrackSlots: [TRACK] }
+    // Laid out as drawn, v3's 30 s of music runs on to 1:58; played, v3 is
+    // hidden and its music with it, so the chapter ends with v3's own line.
+    expect(layOutProgramme(cells, tracks).programme.totalSec).toBeCloseTo(117.94, 2)
+    render(<VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={null} settings={undefined} freeTiming programmeTracks={tracks} />)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:31")
+  })
 })

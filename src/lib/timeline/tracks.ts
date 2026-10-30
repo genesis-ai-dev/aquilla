@@ -90,6 +90,15 @@ export interface TimelineTrack {
   sourceTrackId?: string | null
   /** Hidden cue file owned by this timeline. Each text track has its own content. */
   contentFileId?: string
+  /**
+   * AQU-2252 (Sam, Oct 29): `false` on an added audio track made a LAYER —
+   * music, sound effects, ambience. While the file follows its recordings its
+   * takes set no line's length; they sit against their lines the way takes do
+   * following the source. Absent (the default, and always on the derived rows
+   * and folders) means the track's takes set their lines' lengths: a new track
+   * is most often another voice.
+   */
+  setsLineLengths?: false
 }
 
 /**
@@ -118,6 +127,11 @@ export interface PersistedTrackPatch {
   color?: string
   sourceTrackId?: string
   contentFileId?: string
+  /** AQU-2252: `false` makes an added audio track a layer (see
+   *  TimelineTrack.setsLineLengths). Widened to `boolean` because that is what
+   *  the server accepts; only `false` means anything. HAND-MIRRORED with the
+   *  handler's PATCH_KEYS. */
+  setsLineLengths?: boolean
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
@@ -450,6 +464,8 @@ export function mergeTrackOverrides(
       sourceTrackId: overrideString(patch.sourceTrackId) === id ? null : overrideString(patch.sourceTrackId),
       ...(overrideContentFileId(patch.contentFileId) !== undefined
         ? { contentFileId: overrideContentFileId(patch.contentFileId) } : {}),
+      // AQU-2252: only an audio track has takes to set a line's length with.
+      ...(patch.kind === "audio" && patch.setsLineLengths === false ? { setsLineLengths: false as const } : {}),
     })
   }
 

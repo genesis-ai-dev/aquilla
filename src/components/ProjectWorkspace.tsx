@@ -214,7 +214,7 @@ import { publishProjectApplied } from "@/lib/tools/project-applied-bus"
 import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
-  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
+  setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
   hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
@@ -350,7 +350,7 @@ import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
-import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
@@ -14172,6 +14172,27 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * AQU-2252 (Sam, Oct 29): whether these added tracks' takes set their lines'
+   * lengths while the file follows its recordings. `false` is stored (the
+   * track becomes a layer); `true` clears the field back to the default.
+   * Track editing, one write for the whole selection, and one undo step.
+   */
+  const handleSetTrackLineLengths = useCallback(
+    (trackIds: readonly string[], sets: boolean) => {
+      const value = sets ? null : false
+      recordTrackChanges(
+        sets ? "editor.history.stepTrackSetsLengths" : "editor.history.stepTrackMadeLayer",
+        trackIds.map((trackId) => ({ trackId, after: { setsLineLengths: value } })),
+      )
+      void applyTrackPatches(
+        trackIds.map((trackId) => ({ trackId, patch: { setsLineLengths: value } })),
+        t("editor.timeline.trackSetsLineLengthsFailed"),
+      )
+    },
+    [applyTrackPatches, recordTrackChanges, t],
+  )
+
+  /**
    * BOTH FIELDS IN ONE PATCH, and this is the one place the one-field-per-verb
    * rule bends — because the two ARE one verb. A track changing scope needs a
    * rank among its new siblings, and its old number is a rank in a different
@@ -14806,6 +14827,21 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueTargetSlots(targetSlots)
   }, [targetSlots])
+  // AQU-2252 (Sam, Oct 29): …and which of the added tracks are layers, so the
+  // transport lays every line out at the length the timeline draws. The same
+  // answer the timeline and the play strip are handed.
+  // Keyed on the answer (a renamed track is a new tracks array), so the play
+  // strip doesn't lay the file out again for a rename.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(serverTimelineTracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
+  const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
+  useEffect(() => {
+    setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
+  }, [layerTrackSlotsKey])
+
   // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
   // jumps from the end of one line with a take to the start of the next one.
   // Handed these tracks rather than the queue's copy, which the effect above
@@ -14827,8 +14863,10 @@ export function ProjectWorkspace() {
           : [timelineLines],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
+        // AQU-2252: laid out with the tracks the queue plays them with.
+        tracks: programmeTracks,
       }),
-    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots],
+    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -17323,6 +17361,7 @@ export function ProjectWorkspace() {
                             onMoveToScope: handleMoveTrackToScope,
                             onCreateFolderFrom: handleCreateFolderFrom,
                             onDelete: handleDeleteTrack,
+                            onSetLineLengths: handleSetTrackLineLengths,
                           }
                         : undefined
                     }
@@ -17638,6 +17677,7 @@ export function ProjectWorkspace() {
                 virtualSoundingCellId={virtualSoundingCellId}
                 freeTiming={timingMode === "audioFirst"}
                 lane={activeLane}
+                programmeTracks={programmeTracks}
               />
             ) : null}
             {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
@@ -17957,6 +17997,7 @@ export function ProjectWorkspace() {
                   virtualSoundingCellId={virtualSoundingCellId}
                   freeTiming={timingMode === "audioFirst"}
                   lane={activeLane}
+                  programmeTracks={programmeTracks}
                   below={
                     <>
                       {syncStatus}

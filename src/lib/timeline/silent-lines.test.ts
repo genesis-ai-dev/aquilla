@@ -335,6 +335,44 @@ describe("skipSilentLinesCanChange", () => {
     it("yes: one chapter of a book is all recorded and another is not", () => {
       expect(followingRecordings([cue("c1", 0, 2, 2_000)], [cue("c2", 0, 2), cue("c3", 2, 4, 2_000)])).toBe(true)
     })
+
+    describe("with takes on added tracks (AQU-2252)", () => {
+      const TRACK = "trk-1"
+      /** `c` with a take on Track 1 too, starting on its line. */
+      const onTrack = (c: CellData, ms: number): CellData => {
+        const id = `audio-${c.id}-1700000500-track.webm`
+        return {
+          ...c,
+          selectedBySlot: { [TRACK]: id },
+          attachments: {
+            ...c.attachments,
+            [id]: { type: "audio", url: `http://audio.test/${c.id}-track.webm`, slot: TRACK, durationMs: ms, targetOffsetMs: 0 },
+          },
+        } as CellData
+      }
+      /** Laid out as the queue plays it, with Track 1 — a layer, or not. */
+      const played = (cells: CellData[], layer: boolean) =>
+        skipSilentLinesCanChange({
+          timing: "audioFirst",
+          runs: [cells],
+          clockCells: null,
+          slots: [RECORDING_SLOT, TRACK],
+          tracks: { layerSlots: [TRACK], layerTrackSlots: layer ? [TRACK] : [] },
+        })
+
+      it("no: a line recorded only on an added track has something to play", () => {
+        expect(played([cue("c1", 0, 2, 2_000), onTrack(cue("c2", 2, 4), 1_500)], false)).toBe(false)
+      })
+
+      it("no: a line that a music layer from the line before runs on over is held under it", () => {
+        // c1's take on Track 1, a layer, runs 5 s from c1's start: over all of c2.
+        expect(played([onTrack(cue("c1", 0, 2, 1_000), 5_000), cue("c2", 2, 4)], true)).toBe(false)
+      })
+
+      it("yes: once that layer is over, a line with nothing of its own is silent", () => {
+        expect(played([onTrack(cue("c1", 0, 2, 1_000), 500), cue("c2", 2, 4)], true)).toBe(true)
+      })
+    })
   })
 
   describe("following the source", () => {

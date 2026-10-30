@@ -69,7 +69,9 @@ import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/re
 import {
   COUNTDOWN_SPEEDS,
   countdownStepMs,
+  setRecordingCountdownBeep,
   setRecordingCountdownSpeed,
+  useRecordingCountdownBeep,
   useRecordingCountdownSpeed,
   type CountdownSpeed,
 } from "@/lib/store/recording-countdown-pref"
@@ -410,7 +412,10 @@ export function AudioRecordingModal({
   // can't be saved without a connection), instead of failing mid-flow with a
   // raw fetch error. One copy of the message, used by every gate.
   const offlineMessage = t("audio.recordingModal.offlineMessage")
-  const [beepEnabled, setBeepEnabled] = useState(true)
+  // AQU-2264: remembered, and follows the person. It was held by this modal
+  // alone, so it came back on with every reload and in every other project.
+  const beepEnabled = useRecordingCountdownBeep()
+  const setBeepEnabled = setRecordingCountdownBeep
   // AQU-1209: the count itself is optional. OFF means idle → recording with no
   // counting phase at all — no numbers, no GO, no tones, no film lead-in — for
   // the operator grinding through short lines who has stopped needing the cue.

@@ -18,13 +18,20 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
   OPENROUTER_BYOK_ENDPOINT,
   customProviderNeedsKey,
+  resolveProvider,
 } from "@/lib/completion/completion-service"
-import { getUserApiKey, resolveApiKey } from "@/lib/store/user-api-keys"
+import { getUserApiKey, resolveApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse } from "@/lib/settings/key-in-use"
 import {
   clearUserProviderOverride,
   useUserProviderOverride,
 } from "@/lib/store/user-provider-override"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
+import type { PatchOutcome } from "@/hooks/useProjectSettings"
+import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import { draftingSettingsFrom } from "@/lib/completion/drafting-settings"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type SetupChoice = "frontier" | "project-key" | "override"
@@ -34,15 +41,28 @@ interface AiSetupDialogProps {
   onOpenChange: (open: boolean) => void
   project: ProjectRecord
   onUpdated: (p: ProjectRecord) => void
+  /**
+   * AQU-2259: the provider, endpoint and model are the team's settings, so a
+   * choice that changes them goes to the shared project settings through
+   * this. Without it (or without `canEditShared`) only a choice that leaves
+   * them as they are can be saved.
+   */
+  patchSettings?: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+  canEditShared?: boolean
 }
 
-export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetupDialogProps) {
+export function AiSetupDialog({
+  open, onOpenChange, project, onUpdated, patchSettings, canEditShared = false,
+}: AiSetupDialogProps) {
   const t = useT()
   const navigate = useNavigate()
   const location = useLocation()
   const { id } = useParams<{ id: string }>()
   const { session } = useFrontierSession()
   const override = useUserProviderOverride()
+  // AQU-2263: which key drafts use right now, before anything is chosen here.
+  const personalKey = useUserApiKey("completion")
+  const keyInUse = completionKeyInUse({ settings: project.completionSettings, override, personalKey })
 
   const initialChoice = useMemo<SetupChoice>(() => {
     if (override) return "override"
@@ -70,8 +90,33 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
     setError(null)
   }, [open, initialChoice])
 
-  async function persistChoice(overrides: Parameters<typeof saveSettings>[0]) {
-    await saveSettings(overrides, { aiProviderChosen: true })
+  /**
+   * AQU-2259: `team` is the provider, endpoint and model this choice means.
+   * When they differ from the project's, they go to the shared settings (a
+   * maintainer's call). The key and "the chooser was answered" stay on this
+   * device. Returns false, with the reason shown, when the choice can't be
+   * saved.
+   */
+  async function persistChoice(team: Partial<CompletionSettings>, apiKey?: string): Promise<boolean> {
+    const current = draftingSettingsFrom(project.completionSettings)
+    const next = draftingSettingsFrom({ ...project.completionSettings, ...team })
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      if (!patchSettings || !canEditShared) {
+        setError(t("workspace.aiSetup.teamProviderLocked", {
+          role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+        }))
+        return false
+      }
+      const out = await patchSettings({ draftingSettings: next })
+      if (out.kind !== "ok") {
+        setError(out.kind === "error" ? out.message : t("workspace.aiSetup.teamProviderLocked", {
+          role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+        }))
+        return false
+      }
+    }
+    await saveSettings(apiKey ? { apiKey } : {}, { aiProviderChosen: true })
+    return true
   }
 
   async function handleContinue() {
@@ -91,13 +136,10 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
       }
       setBusy(true)
       try {
-        // Clear a leftover project key so the global default can apply here.
-        await persistChoice({
-          provider: "frontier",
-          endpoint: FRONTIER_CHAT_URL,
-          model: "",
-        })
-        onOpenChange(false)
+        // AQU-2259: the personal override is this person's, so it changes
+        // nothing for the team. It applies wherever the project has no
+        // provider of its own (projectUsesOwnProvider).
+        if (await persistChoice({})) onOpenChange(false)
       } finally {
         setBusy(false)
       }
@@ -115,13 +157,11 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
       }
       setBusy(true)
       try {
-        await persistChoice({
-          provider: "custom",
-          endpoint: customEndpoint.trim(),
-          model: customModel.trim(),
-          ...(key ? { apiKey: key } : {}),
-        })
-        onOpenChange(false)
+        const saved = await persistChoice(
+          { provider: "custom", endpoint: customEndpoint.trim(), model: customModel.trim() },
+          key || undefined,
+        )
+        if (saved) onOpenChange(false)
       } finally {
         setBusy(false)
       }
@@ -131,12 +171,12 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
     try {
       // This chooser is exclusive: Frontier drafts must not still ride a
       // device-wide personal override.
+      // Already on the platform provider: nothing for the team changes, so the
+      // team's model choice stays as it is.
+      const onFrontier = !project.completionSettings || resolveProvider(project.completionSettings) === "frontier"
+      const saved = await persistChoice(onFrontier ? {} : { provider: "frontier", endpoint: FRONTIER_CHAT_URL, model: "" })
+      if (!saved) return
       if (override) clearUserProviderOverride()
-      await persistChoice({
-        provider: "frontier",
-        endpoint: FRONTIER_CHAT_URL,
-        model: "",
-      })
       onOpenChange(false)
     } finally {
       setBusy(false)
@@ -154,6 +194,7 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
           <DialogDescription>
             {t("workspace.aiSetup.description")}
           </DialogDescription>
+          <KeyInUseLine purpose="completion" kind={keyInUse} testId="ai-setup-key-in-use" />
         </DialogHeader>
 
         <div className="space-y-3">

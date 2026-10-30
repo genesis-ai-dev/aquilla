@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Bell, Cpu, Gauge, KeyRound, PanelLeft, ServerCog, UserRound } from "lucide-react"
+import { Bell, Cpu, Gauge, KeyRound, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -33,11 +33,22 @@ import { PersonalProviderSection } from "@/components/settings/PersonalProviderS
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { LocalLlmSection } from "@/components/settings/LocalLlmSection"
 import { UsageSection } from "@/components/settings/UsageSection"
+import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { CommentNotificationsSection } from "@/components/settings/CommentNotificationsSection"
+import {
+  RecordingPreferencesScope,
+  RecordingPreferencesSection,
+} from "@/components/settings/RecordingPreferencesSection"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
+import {
+  LOCAL_AUTHOR_NAME_SETTING_ID,
+  setLocalAuthorName,
+  useLocalAuthorName,
+} from "@/lib/store/local-author-name"
 import {
   getTranslatorProfile,
   setTranslatorProfile,
@@ -172,10 +183,13 @@ function GeneralSection({
   workspaceHint: string
   backgroundLocation?: Location
 }) {
+  // AQU-2264: Recording's hint says where its settings live.
+  const { session } = useFrontierSession()
   const { mode, setMode } = useThemeMode()
   const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
   const { enabled, setEnabled } = useAnalyticsConsent()
+  const localAuthorName = useLocalAuthorName()
   const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
   const fontSizeItems = FONT_SIZE_SCALES.map((id) => ({ value: id, label: t(FONT_SIZE_LABEL_KEYS[id]) }))
 
@@ -280,33 +294,39 @@ function GeneralSection({
           </Select>
         }
       />
-      <SettingsRow
-        label={t("onboarding.privacy.shareUsageData")}
-        description={
-          <>
-            {t("onboarding.preferences.privacy.rowDescription")}
-            {!enabled ? (
-              <span className="mt-1 block text-amber-600 dark:text-amber-400">
-                {t("onboarding.privacy.disabledWarning")}
-              </span>
-            ) : null}
-          </>
-        }
-        control={
-          <Switch
-            id="analytics-consent"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-            aria-label={t("onboarding.privacy.shareUsageData")}
-          />
-        }
-      />
+      {/* AQU-2259: moved here from each project's settings ("User → Username"). */}
+      <div id={LOCAL_AUTHOR_NAME_SETTING_ID}>
+        <SettingsRow
+          label={<label htmlFor="local-author-name">{t("settings.preferences.authorName.label")}</label>}
+          description={t("settings.preferences.authorName.description")}
+          control={
+            <Input
+              id="local-author-name"
+              value={localAuthorName}
+              onChange={(e) => setLocalAuthorName(e.target.value)}
+              placeholder={t("projectSettings.user.usernamePlaceholder")}
+              className="w-44 bg-background"
+            />
+          }
+        />
+      </div>
+      {/* AQU-2263: the one Share usage data setting, as onboarding shows it. */}
+      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
       <NavRow
         to="/preferences/workspace"
         state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
         icon={PanelLeft}
         title={t("onboarding.preferences.workspace.groupLabel")}
         hint={workspaceHint}
+      />
+      <NavRow
+        to="/preferences/recording"
+        state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
+        icon={Mic}
+        title={t("editor.expansion.recording")}
+        hint={session
+          ? t("settings.preferences.recording.hint.followsYou")
+          : t("settings.preferences.recording.hint.thisDevice")}
       />
     </SettingsGroup>
   )
@@ -375,6 +395,8 @@ interface PreferenceSection {
   group: string
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
+  /** Said after the description on the section's own page (AQU-2264). */
+  note?: () => React.ReactNode
   /** Only shown in the Tauri desktop shell (checked at render time). */
   tauriOnly?: boolean
 }
@@ -392,6 +414,17 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "General",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
+  },
+  {
+    // AQU-2264: the recorder's and the timeline's preferences, which follow
+    // the person. Reached from the General card, like Workspace.
+    slug: "recording",
+    titleKey: "editor.expansion.recording",
+    descriptionKey: "settings.preferences.recording.description",
+    group: "General",
+    icon: Mic,
+    render: () => <RecordingPreferencesSection />,
+    note: () => <RecordingPreferencesScope />,
   },
   {
     slug: "profile",
@@ -513,6 +546,11 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   )
 }
 
+/** The section's description, with its note after it when it has one. */
+function sectionDescription(section: PreferenceSection, description: string): React.ReactNode {
+  return section.note ? <>{description} {section.note()}</> : description
+}
+
 /** A single section, rendered on its own page with a back breadcrumb. */
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
   const { t } = useI18n()
@@ -527,7 +565,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
       <Page>
         <div className="space-y-6">
           <BackLink to="/preferences" onClick={() => navigate(-1)} label={t("nav.account.preferences")} />
-          <PageHeader title={t(section.titleKey)} description={t(section.descriptionKey)} />
+          <PageHeader title={t(section.titleKey)} description={sectionDescription(section, t(section.descriptionKey))} />
           {section.render()}
         </div>
       </Page>
@@ -541,7 +579,11 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
       main={
         <Page>
           <div className="flex flex-col gap-12">
-            <PageHeader title={t(section.titleKey)} description={t(section.descriptionKey)} className="mb-0" />
+            <PageHeader
+              title={t(section.titleKey)}
+              description={sectionDescription(section, t(section.descriptionKey))}
+              className="mb-0"
+            />
             {section.render()}
           </div>
         </Page>

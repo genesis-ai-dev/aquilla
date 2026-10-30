@@ -76,7 +76,7 @@ export function MembersMatrixView() {
   const { t } = useI18n()
   const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
   const { state: orgState } = useOrg()
-  const orgId = orgState.kind === "success" ? orgState.org.id : null
+  const orgId = orgState.kind === "success" ? orgState.org?.id ?? null : null
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [selectedMember, setSelectedMember] = useState<SelectedMember | null>(null)

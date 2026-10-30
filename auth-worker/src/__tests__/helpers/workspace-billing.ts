@@ -30,8 +30,8 @@ export function config(catalog = manifest): Env {
   STRIPE_PRICE_CATALOG: JSON.stringify(catalog), BASE_URL: 'http://127.0.0.1:5173' } }
 export async function setup(scope: 'personal' | 'team' = 'personal', catalog = manifest) {
   await seedUser(1, 'alice'); await seedUser(2, 'bob')
-  const created = await app.request(scope === 'team' ? '/api/v2/orgs' : '/api/v2/orgs/me', {
-    method: scope === 'team' ? 'POST' : 'GET', headers: authHeader(await jwtFor('alice')),
+  const created = await app.request(scope === 'team' ? '/api/v2/orgs' : '/api/v2/orgs/personal', {
+    method: 'POST', headers: authHeader(await jwtFor('alice')),
     ...(scope === 'team' ? { body: JSON.stringify({ name: 'Team' }) } : {}),
   }, env)
   expect(created.status).toBe(200)

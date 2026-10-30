@@ -5,7 +5,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { InviteLinkTab } from "@/components/ProjectMembersPage"
+import { InviteLinkTab } from "@/components/ProjectSettings/InviteLinkTab"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
 import type { MemberLaneAccess } from "@/lib/lanes/lane-access-choice"

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { ATTENTION_PROJECT_SORT } from "@/lib/org/project-list-sort"
 import { Link, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
@@ -47,7 +48,6 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Archive } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { readProjectLens } from "./OrgHome"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /**
@@ -101,7 +101,6 @@ export function OrgProjectsPage() {
     rows: [],
   })
   const [directoryTick, setDirectoryTick] = useState(0)
-  const projectLens = readProjectLens()
 
   const directory = useProjectDirectory({
     jwt,
@@ -290,7 +289,8 @@ export function OrgProjectsPage() {
                   portfolio.bumpRefresh()
                   setDirectoryTick((tick) => tick + 1)
                 }}
-                initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                rememberSort
+                initialSort={statusFilter === "attention" ? ATTENTION_PROJECT_SORT : undefined}
                 loading={isPageLoading}
                 loadingLabel={t("org.projectsList.loadingLabel")}
                 searchValue={projectQuery}

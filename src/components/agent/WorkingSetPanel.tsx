@@ -216,18 +216,17 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
               .filter(Boolean)
               .join(" · ")}
           </span>
+          {/* AQU-2260: labelled, so no hover; Shift+A is in the keyboard line. */}
           {pending.length > 0 && onAcceptAll && (
-            <AppTooltip content={t("agent.workingSet.acceptAllTooltip")}>
-              <Button
-                type="button"
-                size="sm"
-                className="ms-auto h-6 text-[11px]"
-                disabled={busy}
-                onClick={() => void onAcceptAll(valueFor)}
-              >
-                {t("agent.workingSet.acceptRemaining", { count: pending.length })}
-              </Button>
-            </AppTooltip>
+            <Button
+              type="button"
+              size="sm"
+              className="ms-auto h-6 text-[11px]"
+              disabled={busy}
+              onClick={() => void onAcceptAll(valueFor)}
+            >
+              {t("agent.workingSet.acceptRemaining", { count: pending.length })}
+            </Button>
           )}
         </div>
 
@@ -375,16 +374,14 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
         )}
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
-          <AppTooltip content={t("agent.workingSet.openInEditorTooltip")}>
-            <button
-              type="button"
-              onClick={() => onJumpToCell(row.fileId!, row.cellId)}
-              className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-            >
-              <ArrowUpRight className="h-3 w-3" />
-              {t("agent.workingSet.openLink")}
-            </button>
-          </AppTooltip>
+          <button
+            type="button"
+            onClick={() => onJumpToCell(row.fileId!, row.cellId)}
+            className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            <ArrowUpRight className="h-3 w-3" />
+            {t("agent.workingSet.openLink")}
+          </button>
         )}
       </div>
 
@@ -428,16 +425,14 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                 className="w-full resize-none rounded-md border border-sky-400 bg-background px-2 py-1.5 text-xs leading-relaxed shadow-[0_0_0_3px_rgba(56,189,248,0.12)] outline-none"
               />
             ) : (
-              <AppTooltip content={t("agent.workingSet.editTooltip")}>
-                <button
-                  type="button"
-                  dir="auto"
-                  onClick={onStartEdit}
-                  className="whitespace-pre-wrap break-words rounded-sm text-start text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
-                >
-                  {editValue}
-                </button>
-              </AppTooltip>
+              <button
+                type="button"
+                dir="auto"
+                onClick={onStartEdit}
+                className="whitespace-pre-wrap break-words rounded-sm text-start text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+              >
+                {editValue}
+              </button>
             )}
 
             {lint.map((msg) => (

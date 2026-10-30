@@ -402,6 +402,28 @@ describe("AssignWork — book dropdown canonicalization (AQU-678)", () => {
     expect(labels).toEqual(["Genesis", "Ezekiel", "1 Corinthians", "Translation Notes"])
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): a Bible has 66 books, and the people
+  // list grows with the team, so both get a search box.
+  it("the Book and Assignee lists each have a search box that narrows them", async () => {
+    rosterOk()
+    render(
+      <AssignWork projectId="p1" files={abbreviatedFiles} jwt="jwt" author="wendi" onAssigned={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
+    fireEvent.click(screen.getByRole("combobox", { name: /^book$/i }))
+    const bookSearch = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(bookSearch, { target: { value: "ezek" } })
+    expect(await screen.findByRole("option", { name: "Ezekiel" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Genesis" })).toBeNull()
+    fireEvent.keyDown(bookSearch, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search the list" })).toBeNull())
+
+    fireEvent.click(screen.getByRole("combobox", { name: /^assignee$/i }))
+    const personSearch = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(personSearch, { target: { value: "ann" } })
+    expect(await screen.findByRole("option", { name: /anna/ })).toBeInTheDocument()
+  })
+
   it("uses the canonical spelled-out name in the emitted scopeLabel", async () => {
     rosterOk()
     mockCreate.mockResolvedValue("as-canon")

@@ -1,4 +1,5 @@
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
+import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
 import { useShowExtensionDataFiles } from "@/lib/tools/show-data-files"
 import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/client"
@@ -243,7 +244,6 @@ import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { SharePanel } from "./SharePanel"
 import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
@@ -351,7 +351,7 @@ import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/s
 import { canPerform, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
-import { denialMessage } from "@/lib/permissions/denial"
+import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
 import { canManageVoices } from "@/lib/audio/voice-permission"
 import { groupByCorpus } from "@/lib/sidebar/group-by-corpus"
 import { lockHolderForCell, useFocusLock } from "@/hooks/useFocusLock"
@@ -1293,7 +1293,6 @@ export function ProjectWorkspace() {
     corpusMarker?: string
   } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
-  const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
@@ -1586,7 +1585,10 @@ export function ProjectWorkspace() {
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
   const { session: frontierSession } = useFrontierSession()
-  const currentUsername = frontierSession?.username || project?.username || "local"
+  // AQU-2259: signed out, the name set in Preferences (it used to be a
+  // per-project field in Project settings, which still counts when unset).
+  const localAuthorName = useLocalAuthorName()
+  const currentUsername = authorNameFor(frontierSession?.username, project?.username, localAuthorName)
   // Desktop: lets an offline launch reopen this project (OfflineLaunchResume).
   useRememberLastWorkspace(projectId, frontierSession?.username)
   // Smart Extensions: an installed `editor` extension may replace the
@@ -4229,7 +4231,7 @@ export function ProjectWorkspace() {
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
   // the file row, so refresh the project (not just cells). `file.video.set`
-  // needs contributor access and the emit THROWS on refusal, so surface that
+  // needs project lead access and the emit THROWS on refusal, so surface that
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
@@ -4268,7 +4270,9 @@ export function ProjectWorkspace() {
             ? e instanceof Error
               ? e.message
               : "Could not save the video link."
-            : denialMessage(t, ROLE.CONTRIBUTOR, level) })
+            // AQU-2230: name the floor the policy actually enforces (project
+            // lead since 2026-08-18), not a role written out by hand.
+            : denialMessageForEvent(t, "file.video.set", level, ROLE.PROJECT_LEAD) })
       }
     },
     [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
@@ -16196,7 +16200,12 @@ export function ProjectWorkspace() {
                     affordance as someone who has not dismissed. */}
                 {checklistState.totalCount > 0 && checklistState.completedCount < checklistState.totalCount && (
                   <div className="mt-auto border-t px-2 pb-2 pt-2">
-                    <Tooltip open={showChipTooltip} onOpenChange={setShowChipTooltip}>
+                    {/* AQU-2260 (Sam, Oct 29): nothing explains itself on hover.
+                        The hint is shown once, by the code, when the checklist
+                        is first dismissed (handleChecklistOpenChange); a hover
+                        or a focus asking it to open is ignored, and only a
+                        close is let through. */}
+                    <Tooltip open={showChipTooltip} onOpenChange={(next) => { if (!next) setShowChipTooltip(false) }}>
                       <TooltipTrigger
                         render={
                           <button
@@ -17802,6 +17811,8 @@ export function ProjectWorkspace() {
           onOpenChange={setAiSetupOpen}
           project={project}
           onUpdated={handleProjectUpdated}
+          patchSettings={patchSettings}
+          canEditShared={projectSettings?.canEdit ?? false}
         />
       )}
       {/* FRO-192: Assign work modal */}
@@ -18209,12 +18220,6 @@ export function ProjectWorkspace() {
           leadsManageVoices={project.projectLeadsManageVoices === true && activeLaneId != null}
         />
       )}
-      <SharePanel
-        open={shareOpen} onOpenChange={setShareOpen}
-        projectId={projectId!}
-        projectName={project?.name}
-        onSharesChanged={refreshChecklistShares}
-      />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}
       {batchFileModal && project && (
@@ -18288,7 +18293,7 @@ export function ProjectWorkspace() {
                 <SelectTrigger size="sm" className="w-full!" aria-label={t("editor.voice.changeVoiceQuality")}>
                   {t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality])}
                 </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false} align="start">
+                <SelectContent align="start">
                   <SelectGroup>
                     {CHANGE_VOICE_QUALITIES.map((q) => (
                       <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
@@ -18627,24 +18632,22 @@ export function ProjectWorkspace() {
             {trashFiles.map((f) => (
               <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
                 <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                <AppTooltip content={t("workspace.trash.restoreTooltip")}>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
-                    onClick={() => void handleRestoreFile(f.fileId)}
-                  >
-                    {t("common.restore")}
-                  </button>
-                </AppTooltip>
-                <AppTooltip content={t("workspace.trash.purgeTooltip")} className="max-w-xs">
-                  <button
-                    type="button"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
-                    onClick={() => void handlePurgeFile(f.fileId)}
-                  >
-                    {t("workspace.trash.deleteForever")}
-                  </button>
-                </AppTooltip>
+                {/* AQU-2260: labelled buttons say nothing on hover; what
+                    Delete forever does is the retention note below. */}
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
+                  onClick={() => void handleRestoreFile(f.fileId)}
+                >
+                  {t("common.restore")}
+                </button>
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+                  onClick={() => void handlePurgeFile(f.fileId)}
+                >
+                  {t("workspace.trash.deleteForever")}
+                </button>
               </div>
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">

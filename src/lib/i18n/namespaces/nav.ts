@@ -28,10 +28,10 @@ export const nav = defineNamespace({
     "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
 
     // -- AccountSwitcher: account menu + auth dialogs --
-    "nav.account.addTitle": "Add Frontier account",
-    "nav.account.loginTitle": "Log in to Frontier",
-    "nav.account.signupTitle": "Create a Frontier account",
-    "nav.account.newToFrontier": "New to Frontier?",
+    "nav.account.addTitle": "Add Aquilla account",
+    "nav.account.loginTitle": "Log in to Aquilla",
+    "nav.account.signupTitle": "Create a Aquilla account",
+    "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
@@ -278,8 +278,6 @@ export const nav = defineNamespace({
     "nav.version.copiedAriaLabel": "Build info copied",
     "nav.version.copyAriaLabel": "Copy build info",
     "nav.version.copiedLabel": "Copied",
-    "nav.version.copiedTooltip": "Copied to clipboard",
-    "nav.version.copyTooltip": "Click to copy\n{buildInfo}",
 
     // -- EnvironmentTag: non-production backend warning beside the build info --
     "nav.environment.development": "Dev data",
@@ -355,8 +353,6 @@ export const nav = defineNamespace({
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
-    "nav.fileRow.suggestionTooltip":
-      "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
     // AQU-1569: the keyboard/touch route to the same reorder the drag does.
     "nav.fileRow.moveUp": "Move up",
@@ -602,7 +598,7 @@ export const nav = defineNamespace({
       "nav.account.newToFrontier": {
         description:
           "Prompt text preceding the 'Create an account' link at the bottom of the " +
-          "login form. 'Frontier' is the identity provider's product name — keep it " +
+          "login form. 'Aquilla' is the identity provider's product name — keep it " +
           "untranslated.",
       },
       "nav.account.menuLabel": {
@@ -1160,16 +1156,6 @@ export const nav = defineNamespace({
           "Visible text on the build-info button for ~1.5s after a successful click, " +
           "replacing the version string.",
       },
-      "nav.version.copiedTooltip": {
-        description: "Tooltip shown right after a successful copy of the build info.",
-      },
-      "nav.version.copyTooltip": {
-        description:
-          "Tooltip shown before the user clicks, inviting them to copy the build info. " +
-          "{buildInfo} is untranslated technical text (version number, git branch, " +
-          "commit SHA) rendered on the line(s) after the invitation.",
-        placeholders: { buildInfo: "Untranslated version/branch/SHA build string." },
-      },
 
       // -- EnvironmentTag (AQU-1022) --
       "nav.environment.development": {
@@ -1478,13 +1464,6 @@ export const nav = defineNamespace({
         description:
           "Tooltip and accessible name for the ⋯ button that opens the file's context " +
           "menu (rename, move, export, assign work, delete).",
-      },
-      "nav.fileRow.suggestionTooltip": {
-        description:
-          "Tooltip on the sparkle icon shown when an automatic cleaner-name suggestion " +
-          "is available for this file. Longer than most nav tooltips — allowed to wrap " +
-          "(max-w-xs on the tooltip), so it isn't length-constrained like the rest of " +
-          "this namespace.",
       },
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",

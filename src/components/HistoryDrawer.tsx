@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { X, User, Bot, Check, BookOpen, ChevronDown, ChevronRight, GitBranch, CloudOff, Sparkles } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import type { CellData } from "@/hooks/useCells"
 import type { CellHistoryEntry } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
@@ -371,8 +371,10 @@ function GroupItem({
           {terminal.validated ? <Check className="h-3 w-3" /> : null}
           {terminal.validated ? t("editor.state.validated") : t("editor.state.unvalidated")}
         </span>
+        {/* What each mark means opens on a click of it, never a hover
+            (AQU-2260). */}
         {postEdit && (
-          <AppTooltip content={t("editor.history.draftKeptTooltip")} className="max-w-xs">
+          <NoteOnClick note={t("editor.history.draftKeptTooltip")}>
             <span
               className={cn(
                 "flex items-center gap-0.5 rounded px-1.5 py-0.5 font-medium",
@@ -386,18 +388,15 @@ function GroupItem({
                     pct: `${Math.round(postEdit.keptFraction * 100)}%`,
                   })}
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         )}
         {isStale && (
-          <AppTooltip
-            content={t("editor.history.staleTooltip")}
-            className="max-w-xs"
-          >
+          <NoteOnClick note={t("editor.history.staleTooltip")}>
             <span className="flex items-center gap-0.5 rounded bg-amber-200/60 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-800/50 dark:text-amber-200">
               <GitBranch className="h-3 w-3" />
               {t("editor.history.staleBadge")}
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         )}
         {terminal.syncState === "pending" && (
           <span className="flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
@@ -406,12 +405,12 @@ function GroupItem({
           </span>
         )}
         {terminal.syncState === "failed" && (
-          <AppTooltip content={t("editor.history.syncFailedTooltip")}>
+          <NoteOnClick note={t("editor.history.syncFailedTooltip")}>
             <span className="flex items-center gap-0.5 rounded bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive">
               <CloudOff className="h-3 w-3" />
               {t("editor.history.syncFailed")}
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         )}
         {hasSubEntries && (
           <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">

@@ -4,7 +4,7 @@ import * as React from "react"
 import { Select as SelectPrimitive } from "@base-ui/react/select"
 
 import { cn } from "@/lib/utils"
-import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
+import { ChevronDownIcon, CheckIcon } from "lucide-react"
 
 /** True when the popup is a dropdown (`data-side` is not `none`), not an overlay on the trigger. */
 const SelectDropdownContext = React.createContext<{
@@ -78,6 +78,14 @@ function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
   )
 }
 
+/** The closed button's look, shared with SearchSelect so a list that gained
+ *  a search box (AQU-2260) is not also a visual change on the page. */
+const SELECT_TRIGGER_CLASS = cn(
+  "flex w-fit! items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pe-2 ps-2.5 text-sm text-foreground whitespace-nowrap outline-none select-none hover:bg-accent/40 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-accent/40 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "aria-expanded:border-input data-popup-open:border-input aria-expanded:focus-visible:border-input data-popup-open:focus-visible:border-input",
+  "group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:hover:bg-transparent group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:dark:hover:bg-input/30",
+)
+
 function SelectTrigger({
   className,
   size = "default",
@@ -92,10 +100,8 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit! items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pe-2 ps-2.5 text-sm text-foreground whitespace-nowrap outline-none select-none hover:bg-accent/40 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-accent/40 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "aria-expanded:border-input data-popup-open:border-input aria-expanded:focus-visible:border-input data-popup-open:focus-visible:border-input",
+        SELECT_TRIGGER_CLASS,
         "data-dropdown:bg-accent/40 hover:data-dropdown:bg-accent/40 dark:hover:data-dropdown:bg-accent/40",
-        "group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:hover:bg-transparent group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:dark:hover:bg-input/30",
         className
       )}
       {...props}
@@ -111,6 +117,14 @@ function SelectTrigger({
   )
 }
 
+/**
+ * The list, below its button like every other menu in the app — flipping above
+ * only when there is no room below — and scrolling with a normal scrollbar, the
+ * wheel and the keys (AQU-2260, Sam, Oct 29). It used to open over its own
+ * button, macOS style, with ▲ ▼ hover strips whenever the list was clipped, so
+ * the same short list grew arrows on one screen and not another. Pass
+ * `alignItemWithTrigger` only to bring that back for one list on purpose.
+ */
 function SelectContent({
   className,
   children,
@@ -118,7 +132,7 @@ function SelectContent({
   sideOffset = 4,
   align = "center",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  alignItemWithTrigger = false,
   collisionAvoidance,
   ...props
 }: SelectPrimitive.Popup.Props &
@@ -154,9 +168,7 @@ function SelectContent({
           )}
           {...props}
         >
-          <SelectScrollUpButton />
           <SelectPrimitive.List>{children}</SelectPrimitive.List>
-          <SelectScrollDownButton />
         </SelectPrimitive.Popup>
       </SelectPrimitive.Positioner>
     </SelectPrimitive.Portal>
@@ -235,52 +247,13 @@ function SelectSeparator({
   )
 }
 
-function SelectScrollUpButton({
-  className,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollUpArrow>) {
-  return (
-    <SelectPrimitive.ScrollUpArrow
-      data-slot="select-scroll-up-button"
-      className={cn(
-        "top-0 z-10 flex w-full cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
-        className
-      )}
-      {...props}
-    >
-      <ChevronUpIcon
-      />
-    </SelectPrimitive.ScrollUpArrow>
-  )
-}
-
-function SelectScrollDownButton({
-  className,
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.ScrollDownArrow>) {
-  return (
-    <SelectPrimitive.ScrollDownArrow
-      data-slot="select-scroll-down-button"
-      className={cn(
-        "bottom-0 z-10 flex w-full cursor-default items-center justify-center bg-popover py-1 [&_svg:not([class*='size-'])]:size-4",
-        className
-      )}
-      {...props}
-    >
-      <ChevronDownIcon
-      />
-    </SelectPrimitive.ScrollDownArrow>
-  )
-}
-
 export {
+  SELECT_TRIGGER_CLASS,
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
   SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
   SelectSeparator,
   SelectTrigger,
   SelectValue,

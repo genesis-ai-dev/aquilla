@@ -249,3 +249,119 @@ describe("WorkloadRollup validators", () => {
     expect(screen.getByText("4/10")).toBeInTheDocument()
   })
 })
+
+// AQU-2293: each list caps at five rows behind the shared Show more / Show all
+// / Show fewer control, and the two cap independently.
+describe("WorkloadRollup paging", () => {
+  const counts = (total: number, validated: number, waiting: number, changed: number) => ({ total, validated, waiting, changed })
+  const translate = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      assignmentId: `t${i + 1}`,
+      projectId: "pa",
+      projectName: "John",
+      fileId: `f${i + 1}`,
+      assigneeUserId: 2,
+      username: "anna",
+      scopeLabel: `Chapter ${i + 1}`,
+      cellsTotal: 10,
+      cellsDone: i,
+      deadline: null,
+    }))
+  const validate = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      assignmentId: `v${i + 1}`,
+      projectId: "pa",
+      projectName: "John",
+      fileId: `vf${i + 1}`,
+      assigneeUserId: 3,
+      username: "bob",
+      scopeLabel: `Psalm ${i + 1}`,
+      cellsTotal: 10,
+      cellsDone: 1,
+      deadline: null,
+      kind: "validate" as const,
+      // Each one further behind than the last, so the sort order is stable.
+      validation: { text: counts(10, i, 0, 0), audio: counts(10, 0, 10, 0) },
+    }))
+
+  const translateRowCount = () =>
+    document.querySelectorAll("#workload-translate-list > div").length
+  const validateRowCount = () =>
+    document.querySelectorAll("#workload-validate-list > div").length
+
+  it("caps the translate list at five rows and reveals the rest a batch at a time or all at once", async () => {
+    mockGetWorkload.mockResolvedValue(translate(12))
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    await screen.findByText("Team workload")
+    expect(translateRowCount()).toBe(5)
+    expect(screen.getByText("Chapter 5")).toBeInTheDocument()
+    expect(screen.queryByText("Chapter 6")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workload-translate-show-more").textContent).toBe("Show 5 more")
+    expect(screen.getByTestId("workload-translate-show-all").textContent).toBe("Show all (12)")
+
+    fireEvent.click(screen.getByTestId("workload-translate-show-more"))
+    expect(translateRowCount()).toBe(10)
+    expect(screen.getByText("Chapter 10")).toBeInTheDocument()
+    // Only two rows are left hidden, so another batch would equal "Show all".
+    expect(screen.queryByTestId("workload-translate-show-more")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workload-translate-show-all")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("workload-translate-show-all"))
+    expect(translateRowCount()).toBe(12)
+    expect(screen.queryByTestId("workload-translate-show-all")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workload-translate-show-fewer").textContent).toBe("Show fewer")
+
+    fireEvent.click(screen.getByTestId("workload-translate-show-fewer"))
+    expect(translateRowCount()).toBe(5)
+    expect(screen.queryByText("Chapter 6")).not.toBeInTheDocument()
+  })
+
+  it("caps the validation list on its own, without a batch control when fewer than a batch is hidden", async () => {
+    mockGetWorkload.mockResolvedValue([...translate(12), ...validate(7)])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    await screen.findByTestId("workload-validations")
+    expect(validateRowCount()).toBe(5)
+    expect(screen.queryByTestId("workload-validate-show-more")).not.toBeInTheDocument()
+    expect(screen.getByTestId("workload-validate-show-all").textContent).toBe("Show all (7)")
+
+    // Expanding one list leaves the other exactly as it was.
+    fireEvent.click(screen.getByTestId("workload-validate-show-all"))
+    expect(validateRowCount()).toBe(7)
+    expect(translateRowCount()).toBe(5)
+    expect(screen.getByTestId("workload-translate-show-all").textContent).toBe("Show all (12)")
+  })
+
+  it("shows no paging controls on a list of five or fewer rows", async () => {
+    mockGetWorkload.mockResolvedValue([...translate(5), ...validate(3)])
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    await screen.findByText("Team workload")
+    expect(translateRowCount()).toBe(5)
+    expect(validateRowCount()).toBe(3)
+    for (const list of ["translate", "validate"]) {
+      for (const control of ["show-more", "show-all", "show-fewer"]) {
+        expect(screen.queryByTestId(`workload-${list}-${control}`)).not.toBeInTheDocument()
+      }
+    }
+  })
+
+  it("pulls the next hidden row up when a visible row is removed from a capped list", async () => {
+    mockGetWorkload.mockResolvedValue(translate(12))
+    mockUnassign.mockResolvedValue(undefined)
+    render(<WorkloadRollup jwt="jwt" orgId={1} />)
+
+    await screen.findByText("Team workload")
+    expect(screen.queryByText("Chapter 6")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove assignment: Chapter 1 (anna)" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm removing assignment: Chapter 1 (anna)" }))
+
+    await waitFor(() => expect(screen.queryByText("Chapter 1")).not.toBeInTheDocument())
+    // Still five rows: the sixth slid up into the cap, and the total dropped.
+    expect(translateRowCount()).toBe(5)
+    expect(screen.getByText("Chapter 6")).toBeInTheDocument()
+    expect(screen.getByTestId("workload-translate-show-all").textContent).toBe("Show all (11)")
+  })
+})

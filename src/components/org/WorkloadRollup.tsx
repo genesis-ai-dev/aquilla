@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/lib/sync/assignments"
 import { Section } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
@@ -20,6 +20,7 @@ import {
 } from "@/lib/assignments/validation-progress"
 import { useValidationProgressLines } from "./use-validation-progress"
 import { RemoveAssignmentButton } from "./RemoveAssignmentButton"
+import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-controls"
 
 /**
  * Team-workload rollup for the org Overview (manager oversight). One row per
@@ -49,6 +50,12 @@ import { RemoveAssignmentButton } from "./RemoveAssignmentButton"
  * behind first, each reading the assignee's OWN approvals — a different
  * measure from a translate row's "validated by anyone", so the two are not
  * interleaved.
+ *
+ * AQU-2293: each of the two lists caps at the shared page size and expands
+ * through the same Show more / Show all / Show fewer control the project
+ * overview's imported-originals list uses, independently of the other — an org
+ * with many assignments used to run the card long enough to push Team usage
+ * and AI usage far down the page.
  *
  * AQU-2294: every row carries a date line — when the assignment went out and
  * when it is due — because the sorts and filters this card is growing
@@ -130,10 +137,24 @@ export function WorkloadRollup({
     }
   }, [jwt, session?.username, t])
 
-  if (!rows || rows.length === 0) return null
+  // Row order is the server's for translate rows (newest-assigned first) and
+  // furthest-behind-first for validate rows; capping must not disturb either.
+  // Derived before the empty-list early return, since the paging hooks below
+  // cannot sit behind it.
+  const translateRows = useMemo(
+    () => (rows ?? []).filter((a) => !isValidationRow(a)),
+    [rows],
+  )
+  const validateRows = useMemo(
+    () => (rows ?? []).filter(isValidationRow).sort(compareValidationBehind),
+    [rows],
+  )
+  // Each list caps on its own. Removing a visible row shrinks the list, so the
+  // next hidden row slides up into the cap and "Show all (N)" drops by one.
+  const { visible: visibleTranslateRows, controls: translatePaging } = useShowMore(translateRows)
+  const { visible: visibleValidateRows, controls: validatePaging } = useShowMore(validateRows)
 
-  const translateRows = rows.filter((a) => !isValidationRow(a))
-  const validateRows = rows.filter(isValidationRow).sort(compareValidationBehind)
+  if (!rows || rows.length === 0) return null
 
   const removeButton = (a: OrgWorkloadAssignment) =>
     canUnassignProject(a.projectId) && (
@@ -204,8 +225,8 @@ export function WorkloadRollup({
 
   return (
     <Section title={t("org.workloadRollup.title")} action={action} contentClassName="pt-0">
-      <div className="divide-y">
-        {translateRows.map((a) => {
+      <div className="divide-y" id="workload-translate-list">
+        {visibleTranslateRows.map((a) => {
           const pct = progressPercent(a.cellsDone, a.cellsTotal)
           return (
             <div key={a.assignmentId} className="flex items-center gap-4 py-2.5 first:pt-0">
@@ -230,11 +251,16 @@ export function WorkloadRollup({
           )
         })}
       </div>
+      <ShowMoreControls
+        state={translatePaging}
+        controlsId="workload-translate-list"
+        testIdPrefix="workload-translate"
+      />
       {validateRows.length > 0 && (
         <div className={translateRows.length > 0 ? "mt-4" : undefined} data-testid="workload-validations">
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">{t("org.validationProgress.heading")}</h3>
-          <div className="divide-y">
-            {validateRows.map((a) => {
+          <div className="divide-y" id="workload-validate-list">
+            {visibleValidateRows.map((a) => {
               const v = a.validation
               const lines = progressLines(v, validationHasAudio(v))
               const left = validationLeftOverall(v)
@@ -277,6 +303,11 @@ export function WorkloadRollup({
               )
             })}
           </div>
+          <ShowMoreControls
+            state={validatePaging}
+            controlsId="workload-validate-list"
+            testIdPrefix="workload-validate"
+          />
         </div>
       )}
       {removeError && <p className="mt-2 text-xs text-destructive">{removeError}</p>}

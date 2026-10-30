@@ -1,8 +1,8 @@
 import { useId, useMemo, useState } from "react"
-import { CircleHelp } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -136,22 +136,6 @@ function edgeStroke(state: ProcessNodeState, kind: ProcessEdge["kind"] = "flow")
     : "color-mix(in oklab, var(--muted-foreground) 32%, transparent)"
 }
 
-function HoverBody({ inspect, t }: { inspect: ProcessNodeInspect; t: TFunction }) {
-  const copy = NODE_COPY[inspect.nodeId]
-  const decision = decisionLine(inspect.decision, t)
-  const brief = inspect.sceneBrief?.l1Summary ?? inspect.sceneBrief?.construal
-  const passage = joinPassageLabels(inspect.spanLabels)
-  return (
-    <div className="flex max-w-xs flex-col gap-1.5 text-start">
-      <p className="font-medium">{t(copy.label)}</p>
-      <p className="text-muted-foreground">{t(copy.role)}</p>
-      {passage && <p>{passage}</p>}
-      {brief && <p className="line-clamp-3 text-muted-foreground">{brief}</p>}
-      {decision && <p>{decision}</p>}
-    </div>
-  )
-}
-
 function GraphSvg({
   model,
   topology,
@@ -265,15 +249,15 @@ function GraphSvg({
           )
         })}
       </svg>
+      {/* AQU-2260 (Sam, Oct 29): a step's hover only names it. What it does,
+          its passage, note and decision open on click, in the inspect card. */}
       {nodes.map((node) => {
-        const inspect = model.inspect[node.id]
         const selected = selectedId === node.id
         return (
           <AppTooltip
             key={node.id}
             delay={200}
-            content={<HoverBody inspect={inspect} t={t} />}
-            className="max-w-xs"
+            content={t(NODE_COPY[node.id].label)}
           >
             <button
               type="button"
@@ -378,6 +362,9 @@ export function AutopilotProcessGraph({
   const { locale, t } = useI18n()
   const topology = processGraphTopology(bibleData)
   const [selectedId, setSelectedId] = useState<ProcessNodeId | null>(null)
+  // AQU-2260: what a span is opens in place under the title, on click.
+  const spanHelpId = useId()
+  const [spanHelpOpen, toggleSpanHelp] = useInfoOpen()
   const model = useMemo(
     () => (compact && !activity && !run
       ? deriveProcessGraphFromOverview(overview)
@@ -407,19 +394,25 @@ export function AutopilotProcessGraph({
         <h3 id="autopilot-graph-title" className="text-sm font-medium">
           {t("autopilot.graph.title")}
         </h3>
-        <AppTooltip content={t("autopilot.graph.spanHelp")} delay={200}>
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            aria-label={t("autopilot.graph.spanHelpAria")}
-            className="text-muted-foreground"
-          >
-            <CircleHelp data-icon="inline-start" aria-hidden />
-          </Button>
-        </AppTooltip>
+        <InfoToggle
+          open={spanHelpOpen}
+          onToggle={toggleSpanHelp}
+          label={t("autopilot.graph.spanHelpAria")}
+          controls={spanHelpId}
+          testId="autopilot-graph-span-help"
+        />
         {model.live && <Badge variant="default">{t("autopilot.status.working")}</Badge>}
       </div>
+      <InfoReveal
+        open={spanHelpOpen}
+        id={spanHelpId}
+        testId="autopilot-graph-span-help-text"
+        // The section's gap would hold the shut text's place open; the
+        // negative margin cancels it, and leaves a small one while it shows.
+        className={cn("text-xs text-muted-foreground", spanHelpOpen ? "-mt-2" : "-mt-3")}
+      >
+        {t("autopilot.graph.spanHelp")}
+      </InfoReveal>
       <p className="text-sm">{liveLine}</p>
       {lastDecision && <p className="text-sm text-muted-foreground">{lastDecision}</p>}
       <p className="text-xs text-muted-foreground">{t("autopilot.graph.inspectHint")}</p>

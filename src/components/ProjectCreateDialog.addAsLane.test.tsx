@@ -164,7 +164,9 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     const panel = screen.getByTestId("add-as-lane-panel")
     expect(panel).toBeTruthy()
     expect(screen.getByTestId("add-as-lane-btn")).toBeTruthy()
-    expect(screen.getByText(/Add it as a target lane on/i)).toBeTruthy()
+    // Sam, Oct 29: a lane is always a "Language lane", never a "target lane".
+    expect(screen.getByText(/Add it as a Language lane on/)).toBeTruthy()
+    expect(within(panel).queryByText(/target lane/i)).toBeNull()
     // "English Source" appears both in the panel copy and the button label;
     // scope to the panel and accept either/both.
     expect(within(panel).getAllByText(/English Source/i).length).toBeGreaterThan(0)

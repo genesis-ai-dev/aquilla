@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useState } from "react"
-import { fireEvent, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { InworldVoiceDesignField, type InworldDesignSelection } from "./InworldVoiceDesignField"
 import { designInworldVoice, synthesizeCellTts } from "@/lib/sync/tts"
@@ -12,7 +12,7 @@ import {
   inworldDesignPresetPrompt,
 } from "@/lib/audio/inworld-voice-design"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 
 vi.mock("@/lib/sync/tts", () => ({
   designInworldVoice: vi.fn(),
@@ -144,15 +144,19 @@ describe("InworldVoiceDesignField", () => {
     expect(designInworldVoice).not.toHaveBeenCalled()
   })
 
-  it("explains Freeform and Structured on hover", async () => {
+  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The two modes
+  // are told apart behind one (i) beside them, on a click.
+  it("explains Freeform and Structured behind the (i) beside them", async () => {
     renderField()
     const freeformHelp =
       "Describe the voice in your own words, and we build the full voice profile from it"
     const structuredHelp =
       "Edit the voice profile directly for full control over the voice's nuances"
+    await userEvent.setup().hover(screen.getByRole("tab", { name: "Freeform" }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
     expect(screen.queryByRole("tooltip")).toBeNull()
-    await expectTooltip(screen.getByRole("tab", { name: "Freeform" }), freeformHelp)
-    await expectTooltip(screen.getByRole("tab", { name: "Structured" }), structuredHelp)
+    await expectClickNote(screen.getByRole("button", { name: "About Voice design mode" }), freeformHelp)
+    expect(document.querySelector('[data-slot="popover-content"]')).toHaveTextContent(structuredHelp)
   })
 
   it("explains the preview script behind an info icon on the label", async () => {
@@ -162,7 +166,8 @@ describe("InworldVoiceDesignField", () => {
     expect(screen.queryByRole("tooltip")).toBeNull()
     expect(screen.queryByText(help)).toBeNull()
     const hint = screen.getByRole("button", { name: "About the preview script" })
-    await expectTooltip(hint, help)
+    // AQU-2260: on a click, never a hover.
+    await expectClickNote(hint, help)
     expect(screen.getByLabelText("Preview script")).toHaveAccessibleName("Preview script")
   })
 

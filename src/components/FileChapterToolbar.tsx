@@ -3,7 +3,7 @@ import { Eye, EyeOff, ListChecks, LoaderCircle, WandSparkles } from "lucide-reac
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import { EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS } from "@/components/editor-surface-toolbar"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -148,8 +148,10 @@ export function FileChapterToolbar({
     // sibling still consumes gap and pads the ⋯ button away from the edge.
     <div className="relative flex shrink-0 items-center">
       <div className="flex items-center gap-2">
+        {/* Its words name it, so no hover; what hiding does is behind the (i)
+            beside it, on a click (AQU-2260). */}
         {hiddenCells && (
-          <AppTooltip content={t("editor.hiddenCells.indicatorTooltip", { count: hiddenCells.count })}>
+          <span className="flex shrink-0 items-center gap-0.5">
             <button
               type="button"
               data-testid="hidden-cells-indicator"
@@ -158,7 +160,6 @@ export function FileChapterToolbar({
               // colour class would pin the styling instead of the behaviour.
               data-revealed={hiddenCells.revealed ? "true" : "false"}
               aria-pressed={hiddenCells.revealed}
-              title={t("editor.hiddenCells.toggle")}
               onClick={() => hiddenCells.onRevealedChange(!hiddenCells.revealed)}
               className={cn(
                 "flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors",
@@ -172,7 +173,13 @@ export function FileChapterToolbar({
                 : <EyeOff className="h-3.5 w-3.5 shrink-0" />}
               <span>{t("editor.hiddenCells.indicator", { count: hiddenCells.count })}</span>
             </button>
-          </AppTooltip>
+            <InfoNote
+              label={t("common.aboutAria", { name: t("editor.hiddenCells.indicator", { count: hiddenCells.count }) })}
+              align="end"
+            >
+              {t("editor.hiddenCells.indicatorTooltip", { count: hiddenCells.count })}
+            </InfoNote>
+          </span>
         )}
         {historyControl}
         <EditorModeToggle

@@ -806,4 +806,14 @@ describe("the review's cases (Oct 29)", () => {
     const two = ["Genesis 1-1.mp3", "Genesis 1-2.mp3"].map((n) => audio(n))
     expect(run(two, [g], fileScope("g")).jobs).toEqual([{ kind: "pieces", fileId: "g", cellId: "g:1:1-2", files: [0, 1] }])
   })
+
+  it("numbers and folder order count verses, not the introduction before 1:1", () => {
+    const ruth = book("ruth", "RUT", "Ruth", [22, 23, 18, 22])
+    ruth.lines.splice(1, 0, ...[1, 2, 3].map((i) => ({ cellId: `ruth-intro${i}`, ref: null, text: `intro ${i}`, structural: false, hasRecording: false })))
+    const verses = Array.from({ length: 85 }, (_, i) => audio(`Ruth/${String(i + 1).padStart(3, "0")}.mp3`))
+    const lone = run(verses, [ruth], fileScope("ruth")).assignments
+    expect([lineOf(lone[0]), lineOf(lone[22]), lineOf(lone[84])]).toEqual(["ruth:1:1", "ruth:2:1", "ruth:4:22"])
+    const phone = ["IMG_4521.m4a", "IMG_4522.m4a"].map((n) => audio(n))
+    expect(run(phone, [ruth], fileScope("ruth")).assignments.map(lineOf)).toEqual(["ruth:1:1", "ruth:1:2"])
+  })
 })

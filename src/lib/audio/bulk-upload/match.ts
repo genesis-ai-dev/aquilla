@@ -493,7 +493,7 @@ function readLoneNumbers(
   if (singleChapter) return { as: "verse" }
   const count = new Set([...lone.values()].map((n) => n.value)).size
   const chapters = fi.chapters.size
-  const verses = fi.content.length
+  const verses = fi.numbered.length
   const asChapters = closeTo(count, chapters)
   const asVerses = closeTo(count, verses)
   if (asChapters !== asVerses) return asChapters ? { as: "chapter" } : { as: "verse" }
@@ -644,17 +644,23 @@ interface FileIndex {
   chapterLengths: [chapter: number, verses: number][]
   /** Position of each line in `content`. */
   position: Map<string, number>
+  /** What numbers alone and folder order count: in a Bible book its verse
+   *  lines, so an introduction before 1:1 is never verse 1; elsewhere every
+   *  content line. */
+  numbered: TargetLine[]
+  /** Position of each line in `numbered`. */
+  numberedPos: Map<string, number>
 }
 
 function indexFile(file: TargetFile): FileIndex {
   const content = file.lines.filter((l) => !l.structural)
   const verses = new Map<string, TargetLine>()
   const chapters = new Map<number, TargetLine[]>()
-  let verseLines = 0
+  const verseLines: TargetLine[] = []
   for (const line of content) {
     const m = line.ref ? VERSE_REF.exec(line.ref) : null
     if (!m) continue
-    verseLines++
+    verseLines.push(line)
     const chapter = Number(m[2])
     const from = Number(m[3])
     const to = m[5] ? Number(m[5]) : from
@@ -671,9 +677,11 @@ function indexFile(file: TargetFile): FileIndex {
     const m = /^(\d+):(\d+)$/.exec(key)
     if (m) lastVerse.set(Number(m[1]), Math.max(lastVerse.get(Number(m[1])) ?? 0, Number(m[2])))
   }
+  const bible = file.bookCode != null || (content.length > 0 && verseLines.length * 2 >= content.length)
+  const numbered = bible && verseLines.length > 0 ? verseLines : content
   return {
     file,
-    bible: file.bookCode != null || (content.length > 0 && verseLines * 2 >= content.length),
+    bible,
     content,
     verses,
     chapters,
@@ -681,6 +689,8 @@ function indexFile(file: TargetFile): FileIndex {
       ? LAST_VERSES[file.bookCode].map((verses, i) => [i + 1, verses] as [number, number])
       : [...lastVerse].sort((a, b) => a[0] - b[0]),
     position: new Map(content.map((l, i) => [l.cellId, i])),
+    numbered,
+    numberedPos: new Map(numbered.map((l, i) => [l.cellId, i])),
   }
 }
 
@@ -761,17 +771,17 @@ function resolve(fi: FileIndex, wanted: Wanted, part: PartInfo | undefined): Res
       return { cellIds: lines.map((l) => l.cellId), read: `${bookLabel(fi)} ${wanted.chapter}` }
     }
     case "line": {
-      const line = fi.content[wanted.line - 1]
-      if (!line || wanted.line < 1) return { reason: { code: "noSuchLine", line: wanted.line, count: fi.content.length } }
+      const line = fi.numbered[wanted.line - 1]
+      if (!line || wanted.line < 1) return { reason: { code: "noSuchLine", line: wanted.line, count: fi.numbered.length } }
       // A verse counted from the top reads as its verse ("Genesis 2:5").
-      return { cellIds: [line.cellId], read: lineReadLabel(fi, line, wanted.line - 1), ...(part ? { part } : {}) }
+      return { cellIds: [line.cellId], read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? wanted.line - 1), ...(part ? { part } : {}) }
     }
     case "lineRange": {
       if (wanted.toLine < wanted.line) return { reason: { code: "rangeBackwards", from: `line ${wanted.line}`, to: `line ${wanted.toLine}` } }
       const [lo, hi] = [wanted.line, wanted.toLine]
-      if (lo < 1 || !fi.content[lo - 1]) return { reason: { code: "noSuchLine", line: lo, count: fi.content.length } }
-      if (!fi.content[hi - 1]) return { reason: { code: "noSuchLine", line: hi, count: fi.content.length } }
-      return { cellIds: fi.content.slice(lo - 1, hi).map((l) => l.cellId), read: `lines ${lo}–${hi}` }
+      if (lo < 1 || !fi.numbered[lo - 1]) return { reason: { code: "noSuchLine", line: lo, count: fi.numbered.length } }
+      if (!fi.numbered[hi - 1]) return { reason: { code: "noSuchLine", line: hi, count: fi.numbered.length } }
+      return { cellIds: fi.numbered.slice(lo - 1, hi).map((l) => l.cellId), read: `lines ${lo}–${hi}` }
     }
     case "none":
       return { reason: { code: "noNumber" } }
@@ -922,16 +932,20 @@ export function matchRecordings(
       // verse; otherwise at the file's first line. The person moves it from there.
       const folderChapter = ordered[0]?.folderChapter?.chapter
       const chapterStart = fi.bible && folderChapter != null ? fi.chapters.get(folderChapter)?.[0] : undefined
-      const base = chapterStart ? fi.position.get(chapterStart.cellId) ?? 0 : 0
+      // The run goes down the verses in a Bible book (never its introduction),
+      // unless the person started it on a line that isn't a verse.
       const start = opts.orderStart?.get(groupKey)
-      const startAt = start ? fi.position.get(start) : undefined
+      const lines = start && !fi.numberedPos.has(start) ? fi.content : fi.numbered
+      const positions = lines === fi.content ? fi.position : fi.numberedPos
+      const base = chapterStart ? positions.get(chapterStart.cellId) ?? 0 : 0
+      const startAt = start ? positions.get(start) : undefined
       const shift = (startAt ?? base) + (opts.orderShift?.get(groupKey) ?? 0)
       ordered.forEach((r, pos) => {
         const at = pos + shift
-        const line = at >= 0 ? fi.content[at] : undefined
+        const line = at >= 0 ? lines[at] : undefined
         out.set(r.index, line
-          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineReadLabel(fi, line, at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
-          : { index: r.index, method: "order", orderRun: groupKey, reason: at < 0 ? { code: "beforeFirstLine" } : { code: "pastLastLine", count: fi.content.length } })
+          ? { index: r.index, method: "order", fileId: fi.file.fileId, cellIds: [line.cellId], orderRun: groupKey, read: lineReadLabel(fi, line, fi.position.get(line.cellId) ?? at), ...(chapterStart && startAt == null ? { fromFolder: ordered[0].folderChapter!.segment } : {}) }
+          : { index: r.index, method: "order", orderRun: groupKey, reason: at < 0 ? { code: "beforeFirstLine" } : { code: "pastLastLine", count: lines.length } })
       })
       continue
     }

@@ -3353,6 +3353,13 @@ export interface ProjectOrgPolicy {
   autoPropagateRepetitions: boolean
   /** Null when the org set none (the client applies no export gate then). */
   exportMinRole: number | null
+  /**
+   * AQU-2304: the org's import floor (`file.create`), defaults applied. Unlike
+   * `exportMinRole` this is never null — the floor always has a value, and the
+   * default IS the behaviour (PROJECT_LEAD), so a project surface can gate on
+   * it without first asking whether the org expressed a preference.
+   */
+  importMinRole: number
 }
 
 export async function getProjectOrgPolicy(
@@ -3393,6 +3400,9 @@ export async function getProjectOrgPolicy(
         typeof exportRaw === "number" && Number.isFinite(exportRaw) && exportRaw >= 100 && exportRaw <= 700
           ? exportRaw
           : null,
+      // AQU-2304: the import floor rides the same bundle so a project member
+      // outside the org gates on the org's real value instead of the default.
+      importMinRole: extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE),
     },
     visibility: combineVisibilityFloors(org, own),
   }
@@ -3448,6 +3458,38 @@ export async function getLanguageEditMinRoleForProject(
   if (!project?.org_id) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
   return getLanguageEditMinRole(env, project.org_id)
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: configurable import floor
+//
+// Who may bring a NEW source file into a project — `file.create`, which the
+// sync-worker's static role table floors at PROJECT_LEAD. Same org_settings
+// plumbing as the two floors above, same OWNER-only write gate, same
+// PROJECT_LEAD default, so an org that never touches the key behaves exactly
+// as it did before the key existed.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns the event log — see
+// sync-worker/src/events/import-authority.ts, which reads this key with this
+// default. auth-worker resolves it here so the floor can travel with the
+// project's settings response for client gating (getProjectOrgPolicy above),
+// exactly as the assignment floor does: a project member who is not a member
+// of the org cannot read the org's settings, so without the carried value
+// their browser would fall back to the built-in PROJECT_LEAD and offer an
+// import the server was always going to refuse.
+//
+// Scope is `file.create` ONLY. Importing a translation into an existing file
+// commits target cells and creates nothing, so it stays at Contributor; the
+// Door43 upstream panel stays hard-wired to Maintainer either way.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Deliberately NO getImportMinRole[ForProject] sibling of the two resolvers
+// above: nothing in auth-worker enforces this floor, so a per-org resolver here
+// would be a fourth reader of the key with no caller. The default below is all
+// this worker needs — `getProjectOrgPolicy` resolves the value onto the
+// project's settings response, and sync-worker does the enforcing.
+
+/** Default floor for importing a new source file when the org hasn't set one. */
+export const DEFAULT_IMPORT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-1002: configurable comment floors

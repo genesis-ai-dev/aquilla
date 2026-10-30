@@ -9,7 +9,7 @@ export function safeLoginNext(raw: string | null | undefined, fallback = APP_FAL
   try {
     const base = "https://aquilla.invalid"
     const parsed = new URL(raw, base)
-    if (parsed.origin !== base || parsed.pathname === "/login" || parsed.pathname.startsWith("/login/")) {
+    if (parsed.origin !== base || /^\/(?:login|signup|onboarding)(?:\/|$)/.test(parsed.pathname)) {
       return fallback
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`

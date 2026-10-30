@@ -163,6 +163,23 @@ export interface OrgWideSettings {
    */
   languageEditMinRole?: number
   /**
+   * AQU-2304: minimum org/project role allowed to bring a NEW source file
+   * into any project of this org — `file.create`, which the Import dialog's
+   * "New source text", the sidebar re-import and the IDML copy repair all
+   * emit. Unset ⇒ PROJECT_LEAD (500), the behaviour before this setting
+   * existed; an org opts in to maintainer-only imports by raising it to 600.
+   *
+   * It does NOT touch importing a TRANSLATION into a file already in the
+   * project (that commits target cells and creates nothing, so it stays at
+   * CONTRIBUTOR), and the Door43 upstream panel stays Maintainer-only either
+   * way.
+   *
+   * Enforced by sync-worker, which owns the event log
+   * (events/import-authority.ts). Same OWNER-only write gate as
+   * languageEditMinRole / termbaseEditMinRole / exportMinRole.
+   */
+  importMinRole?: number
+  /**
    * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
    * reply. Default (when absent) = COMMENTER (200), the static
    * `comment.create` floor the app has always enforced.

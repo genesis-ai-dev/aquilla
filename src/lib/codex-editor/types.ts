@@ -134,6 +134,12 @@ export interface CodexCellAttachment {
    */
   validatorCount?: number;
   validators?: string[];
+  /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms) — the date under each name in "Audio validated by". Optional for the
+   * same reason the two above are; absent draws the name with no date line.
+   */
+  validatorDecidedTs?: Record<string, number>;
   role?: "dub" | "source";
   recordedBy?: string | null;
   /** AQU-1767: the take this one was cut from (its piece group's root). */

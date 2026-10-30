@@ -137,6 +137,14 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   // AQU-1086: who may change a project's source/target language and its extra
   // target lanes. Role-ladder valued, OWNER-only on write like the rest.
   languageEditMinRole: "languageEditMinRole",
+  // AQU-2304: who may bring a NEW source file into a project (`file.create`).
+  // Role-ladder valued, OWNER-only on write like the rest of this table — a
+  // maintainer must not be able to hand out (or take away) import rights on
+  // their own authority. Defaults to PROJECT_LEAD, which is what every org
+  // does today. Enforced in sync-worker, which owns the event log — see
+  // sync-worker/src/events/import-authority.ts; this route only governs who
+  // may SET the policy.
+  importMinRole: "importMinRole",
   // AQU-907: who may use the org-wide Data egress surface. Role-ladder
   // valued, OWNER-only on write like the rest of this table.
   egressMinRole: "egressMinRole",

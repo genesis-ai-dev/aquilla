@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { fmtDeadlineDate, fmtLabeledDeadlineDate, fmtLabeledDateTime, fmtShortCalendarDate } from "./format-date"
+import {
+  fmtDeadlineDate,
+  fmtLabeledDeadlineDate,
+  fmtLabeledDateTime,
+  fmtShortCalendarDate,
+  fmtShortCalendarDateTime,
+} from "./format-date"
 import { DEFAULT_LOCALE } from "./i18n/locales"
 
 const NOW = new Date(2026, 6, 9).getTime()
@@ -66,6 +72,38 @@ describe("fmtShortCalendarDate", () => {
   it("renders against the locale it is given, not the host's", () => {
     expect(fmtShortCalendarDate(RECENT.getTime(), NOW, "th")).toBe(
       renderIn("th", RECENT, { month: "long", day: "numeric" }),
+    )
+  })
+})
+
+// The "validated by" popovers' line: the day with the clock time beside it
+// (Matthew, 2026-10-30), minutes only — the seconds stay on the hover.
+describe("fmtShortCalendarDateTime", () => {
+  it("formats a recent timestamp as month + day + hour:minute", () => {
+    expect(fmtShortCalendarDateTime(RECENT.getTime(), NOW)).toBe(
+      renderIn(DEFAULT_LOCALE, RECENT, { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }),
+    )
+  })
+
+  it("keeps the day on a timestamp older than a year, with the year and the time", () => {
+    // Not the bare "Aug 2024" of fmtShortCalendarDate: a time beside a month
+    // alone would date nothing.
+    expect(fmtShortCalendarDateTime(OLD.getTime(), NOW)).toBe(
+      renderIn(DEFAULT_LOCALE, OLD, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }),
+    )
+  })
+
+  it("never shows seconds", () => {
+    expect(fmtShortCalendarDateTime(RECENT.getTime(), NOW)).not.toContain(":08")
+  })
+
+  it("returns em dash for null", () => {
+    expect(fmtShortCalendarDateTime(null, NOW)).toBe("—")
+  })
+
+  it("renders against the locale it is given, not the host's", () => {
+    expect(fmtShortCalendarDateTime(RECENT.getTime(), NOW, "th")).toBe(
+      renderIn("th", RECENT, { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" }),
     )
   })
 })

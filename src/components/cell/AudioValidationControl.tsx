@@ -451,14 +451,21 @@ export function AudioValidationControl({
           the (i) under it where it does. */}
       <PopoverTrigger render={renderButton(clickable ? validateAll : undefined)} />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
-        {/* "Audio validated by", the twin of the text list's "Text validated
-            by" (Sam, 2026-09-23) — both name their half, since the two sit side
-            by side. Several takes keep the one heading; each take's name
-            follows as a sub-heading above its own list. */}
-        <div className="mb-1 px-1 text-xs text-muted-foreground">
-          {t("editor.audioValidation.validatedBy")}
-        </div>
         <ul className="space-y-1">
+          {/* "Audio validated by", the twin of the text list's "Text validated
+              by" (Sam, 2026-09-23) — both name their half, since the two sit
+              side by side. Several takes keep the one heading; each take's
+              name follows as a sub-heading above its own list.
+
+              The heading is the list's FIRST ROW, as the text list keeps its
+              own — not a sibling above the list. The popover shell is a flex
+              column with a gap between its children, so a heading of its own
+              opened the audio list 10px further below its title than the text
+              list beside it: the "extra space" the two were still showing
+              after AQU-2296's first pass (Oct 30). */}
+          <li className="mb-1 px-1 text-xs text-muted-foreground">
+            {t("editor.audioValidation.validatedBy")}
+          </li>
           {displayed.map((take) => {
             const mine = take.validators.includes(currentUsername)
             const short = take.unrecorded ? 0 : Math.max(0, requirement - take.validatorCount)
@@ -487,7 +494,8 @@ export function AudioValidationControl({
                 ) : take.validators.length === 0 ? (
                   <div className="px-1 py-1 text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
                 ) : (
-                  <ul>
+                  // The same breath between names as the text list's.
+                  <ul className="space-y-0.5">
                     {take.validators.map((validator) => (
                       <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 hover:bg-muted/50">
                         <span className="min-w-0 flex-1">

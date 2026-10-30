@@ -606,11 +606,6 @@ describe("TimelineEditor", () => {
   const followItem = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
   const snapItem = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
 
-  // The layout puts Snap and Follow playhead in the timeline's corner ⋯ as
-  // checkbox items (aria-checked), not toolbar buttons.
-  const follow = () => inTimelineSettings(() => screen.getByTestId("tl-follow-toggle"))
-  const snap = () => inTimelineSettings(() => screen.getByTestId("tl-snap-toggle"))
-
   it("remembers Follow playhead turned off, through a reload", () => {
     const { unmount } = render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,

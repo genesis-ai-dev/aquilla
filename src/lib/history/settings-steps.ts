@@ -36,6 +36,22 @@ export interface SettingsStepContext {
   browser(): string
 }
 
+/**
+ * The steps Project settings' own Undo, Redo and History panel act on (Sam,
+ * Oct 30: "in settings, it should only be really applying to settings"):
+ * every kind Project settings record, "settings.project",
+ * "settings.projectName" and "settings.device". Cmd/Ctrl+Z still takes the
+ * project's newest step, whatever its kind.
+ *
+ * A group counts when ANY of its parts is a settings step, as the Station's
+ * own Undo counts them (`newestMatchingStep`). Settings never record a group
+ * themselves. One forms only when a setting is changed while a workspace
+ * action that takes in every step recorded meanwhile (a `withGroup` without
+ * `owns`) is still running; the settings Undo then takes back that whole
+ * group, the action's own parts too. Rare, and accepted (Oct 30).
+ */
+export const isSettingsStep = (kind: string): boolean => kind.startsWith("settings.")
+
 const sameValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
 export function settingsStepHandlers(ctx: SettingsStepContext): Record<string, StepHandler<never>> {

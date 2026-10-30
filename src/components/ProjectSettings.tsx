@@ -70,6 +70,7 @@ import {
   type DraftingField,
 } from "@/components/ProjectSettings/setting-labels"
 import { HistoryControls } from "@/components/history/HistoryControls"
+import { isSettingsStep } from "@/lib/history/settings-steps"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { holdHistoryScope } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
@@ -1332,8 +1333,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   }
 
   // AQU-2262: where the Save bar was. Settings save as you change them; this
-  // is the app's Undo, the same history the editor and Cmd/Ctrl+Z use.
-  const headerActions = <HistoryControls onResult={reportHistory} />
+  // is the app's Undo, the same history the editor and Cmd/Ctrl+Z use. Its
+  // buttons and History panel act only on settings steps (Sam, Oct 30);
+  // Cmd/Ctrl+Z stays the project's newest step, whatever it changed.
+  const headerActions = <HistoryControls onResult={reportHistory} match={isSettingsStep} />
 
   const onSettingsPane = Boolean(activeGroup && !lowerQuery)
   const showSearch = !onSettingsPane

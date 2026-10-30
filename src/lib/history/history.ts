@@ -114,6 +114,10 @@ export interface SkipLogEntry {
   by?: string
   /** When it was attempted. */
   at: number
+  /** The step's kind, so a History panel that shows one part of the app's
+   *  steps (Project settings, AQU-2262) shows only its skips. Absent on
+   *  entries logged before it was kept. */
+  kind?: string
 }
 
 interface Stacks extends HistoryDoc {
@@ -1043,6 +1047,7 @@ function logSkip(s: Stacks, record: StepRecord, which: "undo" | "redo", outcome:
     reason: outcome.kind === "skipped" ? outcome.reason : "failed",
     ...(outcome.kind === "skipped" && outcome.by ? { by: outcome.by } : {}),
     at: Date.now(),
+    kind: record.kind,
   })
   if (s.log.length > LOG_LIMIT) s.log.splice(0, s.log.length - LOG_LIMIT)
 }
@@ -1073,6 +1078,31 @@ export async function undoTo(
     if (top.id === id) break
   }
   return results
+}
+
+/**
+ * Redo one step by id, out of order: the Redo of a part of the app that has
+ * its own Undo and Redo (Project settings, AQU-2262, Sam Oct 30), the
+ * counterpart of `undoStepById`. It then sits on top of Undo.
+ */
+export function redoStepById(id: string): Promise<HistoryResult | null> {
+  return run("redo", id)
+}
+
+/**
+ * Every step Undo and Redo can reach that touches something `match` names —
+ * for a group, any of its parts, as `newestMatchingStep` counts them — in the
+ * order `historyView` lists them (Undo's oldest first, Redo's next one LAST).
+ * What a part of the app with its own Undo, Redo and History panel acts on
+ * (Project settings, AQU-2262, Sam Oct 30).
+ */
+export function matchingSteps(match: (kind: string, data: unknown) => boolean): { undo: StepSummary[]; redo: StepSummary[] } {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const touches = (r: StepRecord) =>
+    r.kind === GROUP_KIND
+      ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+      : match(r.kind, r.data)
+  return { undo: (s?.undo ?? []).filter(touches).map(summary), redo: (s?.redo ?? []).filter(touches).map(summary) }
 }
 
 // ── Reading ─────────────────────────────────────────────────────────────────

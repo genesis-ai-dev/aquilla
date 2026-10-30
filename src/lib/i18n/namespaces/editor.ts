@@ -1292,6 +1292,7 @@ export const editor = defineNamespace({
     "editor.dock.filmHiddenByTiming": "Hidden in Free timing",
     "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
     "editor.dock.fullOn": "Full screen is on",
+    "editor.dock.fullInfoAria": "About full screen",
     "editor.dock.foldedTimeline": "the timeline",
     "editor.dock.foldedBottomLeft": "the bottom left",
     "editor.dock.foldedBottomRight": "the bottom right",
@@ -2926,7 +2927,7 @@ export const editor = defineNamespace({
       "editor.dock.fullOn": {
         description:
           "The one short line at the top of the Panels menu while a panel is full screen, " +
-          "beside its Restore button. Its tooltip is editor.dock.fullNote.",
+          "beside its Restore button. Its (i) opens editor.dock.fullNote beneath it.",
         maxLength: 24,
       },
       "editor.dock.restoreShort": {
@@ -2937,7 +2938,7 @@ export const editor = defineNamespace({
       },
       "editor.dock.fullNote": {
         description:
-          "Tooltip of the full-screen line in the Panels menu: what " +
+          "Opened by the (i) on the full-screen line in the Panels menu, beneath that line: what " +
           "full screen folded, and that restoring unfolds only those.",
         placeholders: {
           folded:
@@ -2963,6 +2964,11 @@ export const editor = defineNamespace({
         description:
           "Button in the Panels menu that puts this file's media layout back to " +
           "how this kind of file starts: every panel shown in its usual place and size.",
+      },
+      "editor.dock.fullInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button on the full-screen line in the Panels menu, " +
+          "which opens what full screen folded (editor.dock.fullNote) beneath the line.",
       },
       "editor.dock.resetInfoAria": {
         description:

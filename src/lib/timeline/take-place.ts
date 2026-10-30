@@ -88,6 +88,34 @@ export interface MoveClamp {
   /** Its head trim: an audible start below it would put its clip's start
    *  before the start of the file. */
   trimStartSec: number
+  /** How far into its take a piece's sound starts (`pieceLeadInTakeSec`);
+   *  0 or absent for a whole take or its first piece. */
+  leadInTakeSec?: number
+}
+
+/**
+ * How far into its take a piece of a split take starts sounding, past where
+ * the take's own sound starts (the earliest head trim in its group) — 0 for a
+ * whole take or its first piece.
+ *
+ * A piece is held to its line as its TAKE is: the take may not start past its
+ * line's end. So a later piece of a take longer than its line sits past the
+ * line's end and may move about there; measured against the piece itself, the
+ * bound pulled it back over the first piece on any move (found in the browser,
+ * Oct 29: a 5 s take on a 1.1 s line, cut at 2.5 s).
+ */
+export function pieceLeadInTakeSec(cell: CellData, audioId: string): number {
+  const atts = cell.attachments ?? {}
+  const att = atts[audioId] as { pieceOf?: string | null; trimStartMs?: number | null } | undefined
+  if (!att) return 0
+  const group = att.pieceOf ?? audioId
+  let earliestMs: number | null = null
+  for (const [id, a] of Object.entries(atts) as [string, { pieceOf?: string | null; trimStartMs?: number | null; isDeleted?: boolean }][]) {
+    if (a?.isDeleted || (id !== group && a?.pieceOf !== group)) continue
+    const ms = a.trimStartMs ?? 0
+    if (earliestMs == null || ms < earliestMs) earliestMs = ms
+  }
+  return Math.max(0, ((att.trimStartMs ?? 0) - (earliestMs ?? 0)) / 1000)
 }
 
 /**
@@ -96,13 +124,13 @@ export interface MoveClamp {
  * timing it is carried into clamp by the same arithmetic.
  *
  * Not free: the END-based bounds (a chip may slide back into the previous
- * line's space, but its end may not pass its line's start, nor its start its
- * line's end), neither neighbour's start, and never before file zero — the
+ * line's space, but its end may not pass its line's start, nor its take's
+ * start its line's end), neither neighbour's start, and never before file zero — the
  * floors applied last, so they win when the bounds cross.
  */
 export function clampMoveStart(start: number, c: MoveClamp): number {
   if (c.free) return Math.max(start, c.lineStartSec ?? start)
-  const capped = Math.min(start, maxAudibleStartSec(c.section), c.nextChipStartSec ?? Infinity)
+  const capped = Math.min(start, maxAudibleStartSec(c.section) + (c.leadInTakeSec ?? 0), c.nextChipStartSec ?? Infinity)
   return Math.max(capped, minAudibleEndSec(c.section) - c.lenSec, c.prevChipStartSec ?? -Infinity, c.trimStartSec)
 }
 
@@ -165,6 +193,7 @@ export function movedStartSec(
     prevChipStartSec: chips[i - 1]?.start ?? null,
     nextChipStartSec: chips[i + 1]?.start ?? null,
     trimStartSec: chip.trimStartSec,
+    leadInTakeSec: pieceLeadInTakeSec(cell, audioId),
   })
 }
 

@@ -206,6 +206,54 @@ describe("a move, in both timings (AQU-2267)", () => {
   })
 })
 
+// Found in the browser, Oct 29 (Session 4): a 5.0 s take on the 1.1 s line
+// 7.3–8.4, cut at 2.5 s. Its second piece's sound starts at 9.8 s following the
+// source — already past its line's end, because the TAKE runs past it. The move
+// clamp read "its start may not pass its line's end" against the PIECE, so any
+// move of that piece, made there or carried there from the recordings, snapped
+// it back to 8.35 s, on top of the first piece (−1450 ms stored).
+describe("a later piece of a take longer than its line (AQU-2267)", () => {
+  const PIECE = "audio-l3-1700000900-piece.wav"
+  function cutTake(onTrack: boolean) {
+    const TAKE = onTrack ? trackId("l3") : takeId("l3")
+    const slot = onTrack ? TRACK : "recording"
+    const l3 = {
+      ...line("l3", 7.3, 8.4, onTrack ? { durationMs: 1_100 } : undefined),
+      ...(onTrack ? { selectedBySlot: { [TRACK]: TAKE } } : { selectedAudioId: TAKE }),
+    } as unknown as CellData
+    l3.attachments = {
+      ...l3.attachments,
+      [TAKE]: { type: "audio", url: "frontier-audio://t", slot, durationMs: 5_000, trimEndMs: 2_500 },
+      [PIECE]: { type: "audio", url: "frontier-audio://t", slot, pieceOf: TAKE, durationMs: 5_000, trimStartMs: 2_500 },
+    } as never
+    const cells = [line("l1", 0, 3.2, { durationMs: 2_600 }), l3, line("l5", 14, 16.5, { durationMs: 2_900 })]
+    const track: PlacedTake[] = [{ cell: l3, audioId: TAKE }, { cell: l3, audioId: PIECE }]
+    return { cells, l3, track, opts: onTrack ? { layerSlots: [TRACK] } : undefined }
+  }
+
+  for (const onTrack of [true, false]) {
+    it(`moved 0.5 s following the recordings, it moves the same 0.5 s following the source (${onTrack ? "a voice track" : "the main track"})`, () => {
+      const { cells, l3, track, opts } = cutTake(onTrack)
+      const { source, recordings } = layouts(cells, opts)
+      expect(source.targetGeom(l3, l3.attachments![PIECE] as never, PIECE)!.start).toBeCloseTo(9.8, 5)
+      const moved = drag(recordings, source, track, { cell: l3, audioId: PIECE }, 0.5)!
+      expect(moved.place).toEqual({ targetOffsetMs: 500, recordingsOffsetMs: 500 })
+      const after = { ...l3, attachments: { ...l3.attachments, [PIECE]: { ...l3.attachments![PIECE], ...moved.place } } } as unknown as CellData
+      expect(layouts([cells[0], after, cells[2]], opts).source.targetGeom(after, after.attachments![PIECE] as never, PIECE)!.start).toBeCloseTo(10.3, 5)
+    })
+  }
+
+  it("dragged following the source it is held as its take is: the take may not start past its line's end", () => {
+    const { cells, l3, track, opts } = cutTake(true)
+    const { source, recordings } = layouts(cells, opts)
+    expect(drag(source, recordings, track, { cell: l3, audioId: PIECE }, 0.5)!.place.targetOffsetMs).toBe(500)
+    // 5 s right would start the take at 12.3 s, past its line's end: it stops
+    // where the take's sound starts a grip before 8.4 s, the piece 2.5 s on.
+    const far = movedStartSec(source, track, { cell: l3, audioId: PIECE }, 5)!
+    expect(far).toBeCloseTo(maxAudibleStartSec({ start: 7.3, end: 8.4 }) + 2.5, 5)
+  })
+})
+
 // AQU-2252's layer rules, following the recordings, for a move made following
 // the source: its lead-in limit and the previous take on its track.
 describe("a layer moved following the source (AQU-2267)", () => {
@@ -252,6 +300,11 @@ describe("clampMoveStart — the lane's move clamp (AQU-2267)", () => {
     expect(clampMoveStart(5, { ...c, nextChipStartSec: 4 })).toBe(4)
     expect(clampMoveStart(2.2, { ...c, prevChipStartSec: 2.5 })).toBe(2.5)
     expect(clampMoveStart(2.1, { ...c, lenSec: 3, trimStartSec: 2.3 })).toBe(2.3)
+  })
+  it("not free, a later piece of a take: its ceiling moves out by how far into the take its sound starts", () => {
+    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
+    expect(clampMoveStart(9, { ...c, leadInTakeSec: 2.5 })).toBeCloseTo(maxAudibleStartSec(section) + 2.5, 5)
+    expect(clampMoveStart(7, { ...c, leadInTakeSec: 2.5 })).toBe(7)
   })
 })
 

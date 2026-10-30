@@ -103,6 +103,15 @@ describe("TakesStrip", () => {
     }
   })
 
+  // Sam, Oct 25: "make the only distinction between AI and non-AI the little
+  // star in the corner" — ONE star, the one in the take's shape.
+  it("marks a generated take with one star, in its shape's corner", () => {
+    const voiced = { ...take("g", 1500), voiceId: "v-ana" }
+    render(<TakesStrip {...common} chromeless takes={[voiced, take("a", 1500)]} selectedAudioId="a" />)
+    expect(screen.getByTestId("take-row-g").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("take-row-wave-g-generated")).toBeInTheDocument()
+  })
+
   it("lists every take with its (backfilled) name and duration", async () => {
     render(
       <TakesStrip {...common} takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />,

@@ -232,6 +232,15 @@ describe("its colour", () => {
     expect(screen.getByTestId("cell-take-waveform-generated")).toBeInTheDocument()
   })
 
+  it("marks that AI voice with one star, the one in its waveform's corner", () => {
+    const owner = cueOwner()
+    const id = owner.selectedAudioId!
+    const voiced = { ...owner, attachments: { [id]: { ...owner.attachments![id], voiceId: "v-ana" } } } as unknown as CellData
+    draw({ owner: voiced })
+    expect(screen.getByTestId("cell-take-block").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("cell-take-waveform-generated")).toBeInTheDocument()
+  })
+
   it("is the source row's blue for a source-audio section, drawn as a take with no sparkle", () => {
     const source = "audio-mark-reading-1700000000-src.wav"
     const owner = {

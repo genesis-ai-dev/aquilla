@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { recordStep } from "@/lib/history/history"
-import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -715,7 +715,8 @@ export function TakesStrip({
               )}
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
-                {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+                {/* AQU-2235: no second star beside the name — the one in the
+                    take's shape is the only mark (Sam, Oct 25). */}
                 {renamingId === att.audioId ? (
                   <input
                     autoFocus

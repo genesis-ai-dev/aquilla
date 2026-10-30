@@ -20,7 +20,7 @@ export function AuthPage({ children, label }: { children: ReactNode; label?: str
           {children}
         </div>
       </div>
-      <footer className="w-full max-w-md">
+      <footer className="w-full self-start">
         <VersionBadge inline />
       </footer>
     </main>

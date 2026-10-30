@@ -194,7 +194,7 @@ export function VersionTag() {
  * form controls on small screens.
  */
 function hasAuthPageVersionTag(pathname: string): boolean {
-  return /^\/(?:login|onboarding|reset-password|join|join-org)(?:\/|$)/.test(pathname)
+  return /^\/(?:login|signup|onboarding|reset-password|join|join-org)(?:\/|$)/.test(pathname)
 }
 
 /** Floating on other screens without chrome; inline inside an AuthPage footer. */
@@ -207,7 +207,7 @@ export function VersionBadge({ inline = false }: { inline?: boolean }) {
   return (
     <div className={cn(
       "flex items-center gap-1",
-      inline ? "w-full flex-wrap justify-center" : "fixed bottom-3 start-3 z-30 max-w-[90vw]",
+      inline ? "w-full flex-wrap justify-start" : "fixed bottom-3 start-3 z-30 max-w-[90vw]",
     )}>
       <EnvironmentTag className="bg-card border-amber-500/50" />
       <Tooltip>

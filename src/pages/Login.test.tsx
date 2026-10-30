@@ -8,7 +8,7 @@ import { renderWithBrand as render } from "@/test-utils/render-with-brand"
  *  - Already-signed-in visitors are redirected into the app
  *  - Auth error shown in the form
  *  - "Forgot password?" link switches to forgot-password mode
- *  - "Create an account" link points to /onboarding
+ *  - "Create an account" link points to /signup
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -139,10 +139,10 @@ describe("Login page — rendering", () => {
     })
   })
 
-  it("renders a 'Create an account' link pointing to /onboarding", () => {
+  it("renders a 'Create an account' link pointing to /signup", () => {
     renderLogin()
     const link = screen.getByRole("link", { name: /create an account/i })
-    expect(link).toHaveAttribute("href", "/onboarding")
+    expect(link).toHaveAttribute("href", "/signup")
   })
 })
 
@@ -348,5 +348,5 @@ describe("Login page — next param", () => {
 
 it("keeps a paid selection when switching from sign-in to account creation", () => {
   render(<MemoryRouter initialEntries={["/login?next=" + encodeURIComponent("/billing/select?offer=team&interval=year&quantity=1")]}><Login /></MemoryRouter>)
-  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/onboarding?offer=team&interval=year&quantity=1")
+  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/signup?offer=team&interval=year&quantity=1")
 })

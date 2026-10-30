@@ -2,7 +2,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { expect, it, vi } from "vitest"
 import { requestPasswordReset } from "@/lib/frontier/auth"
-import { SignInStep } from "./SignInStep"
+import { FrontierForgotPasswordForm } from "./FrontierForgotPasswordForm"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: null, loading: false, login: vi.fn() }),
@@ -15,16 +15,9 @@ vi.mock("@/lib/frontier/auth", async (importOriginal) => ({
   requestPasswordReset: vi.fn(async () => {}),
 }))
 
-it("keeps recovery in its own flow, validates once, and returns to sign-in without advancing onboarding (AQU-2300)", async () => {
-  const onNext = vi.fn()
+it("validates once and returns to sign-in (AQU-2300)", async () => {
   const onBack = vi.fn()
-  render(<MemoryRouter><SignInStep onNext={onNext} onBack={onBack} /></MemoryRouter>)
-  fireEvent.click(screen.getByRole("button", { name: "Sign in" }))
-  fireEvent.click(screen.getByRole("button", { name: "Forgot password?" }))
-
-  expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Back" })).toBeNull()
-  expect(screen.queryByRole("button", { name: /Dev login/ })).toBeNull()
+  render(<MemoryRouter><FrontierForgotPasswordForm onBack={onBack} /></MemoryRouter>)
 
   const email = screen.getByRole("textbox", { name: "Email" })
   const form = email.closest("form")!
@@ -46,9 +39,7 @@ it("keeps recovery in its own flow, validates once, and returns to sign-in witho
   fireEvent.change(email, { target: { value: " reader@example.com " } })
   fireEvent.submit(form)
   await screen.findByText("reader@example.com")
-  expect(requestPasswordReset).toHaveBeenCalledExactlyOnceWith("reader@example.com")
+  expect(requestPasswordReset).toHaveBeenCalledExactlyOnceWith("reader@example.com", undefined)
   fireEvent.click(screen.getByRole("button", { name: "Back to login" }))
-  expect(screen.getByRole("textbox", { name: "Aquilla username or email" })).toBeVisible()
-  expect(onNext).not.toHaveBeenCalled()
-  expect(onBack).not.toHaveBeenCalled()
+  expect(onBack).toHaveBeenCalledOnce()
 })

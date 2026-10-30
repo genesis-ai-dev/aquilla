@@ -9,6 +9,12 @@
 // placeholders, plus book words and constants. Nothing the assistant writes
 // ever runs as an expression; the app builds its own anchored match from the
 // template. Every check here returns null for a bad rule instead of throwing.
+//
+// Book words are read with the bulk upload's own book-name table
+// (src/lib/audio/bulk-upload/book-names.ts, which imports nothing), so both
+// sides read "Mt" and "Mark" the same way.
+
+import { BookNameIndex, bookKey, englishBookName } from "../src/lib/audio/bulk-upload/book-names"
 
 /** The 66 USFM book codes a rule may name, in canonical order. Pinned to the
  *  bulk upload's own book table by naming-rule.test.ts. */
@@ -33,11 +39,11 @@ const MAX_PLACEHOLDERS = 6
 const MAX_ANY = 2
 const MAX_BOOK_WORDS = 30
 
-/** One way the names are written. `pattern` is matched against the file name
- *  without its extension; `folder`, when set, against the folder it sits in. */
+/** One way the names are written, matched against the file name without its
+ *  extension. Only the file name: the assistant is never shown the folders, so
+ *  a template can't be about them (review, Oct 30). */
 export interface NameTemplate {
   pattern: string
-  folder?: string
 }
 
 export interface NamingRule {
@@ -45,7 +51,9 @@ export interface NamingRule {
   /** One template, or two when the folder mixes two namings. */
   templates: NameTemplate[]
   /** What the `{book}` text means, when it isn't a book name the app knows:
-   *  "mt" → "MAT". Keys are kept in lower case. */
+   *  "mt" → "MAT". Keys are kept in lower case. A word the app's table reads
+   *  as another book is refused; one that names no book at all is a constant
+   *  in disguise (`bookWordNames`). */
   books?: Record<string, string>
   /** The book every file is for, when the names don't say it. */
   book?: string
@@ -62,6 +70,8 @@ const PLACEHOLDERS = {
   book: "([1-3]?\\s?[\\p{L}][\\p{L}.']{0,29}?)",
   chapter: "(\\d{1,3})",
   verse: "(\\d{1,3})",
+  /** The last verse of a recording of several ("v01-03"): with {verse}, a range. */
+  toVerse: "(\\d{1,3})",
   verseInBook: "(\\d{1,5})",
   line: "(\\d{1,5})",
   take: "(\\d{1,2})",
@@ -77,10 +87,8 @@ function isPlaceholder(name: string): name is Placeholder {
 
 export interface CompiledTemplate {
   re: RegExp
-  folderRe: RegExp | null
-  /** Placeholder names in capture order, for the name then the folder. */
+  /** Placeholder names in capture order. */
   names: Placeholder[]
-  folderNames: Placeholder[]
 }
 
 function escapeLiteral(text: string): string {
@@ -103,7 +111,10 @@ type Kind = "literal" | "letters" | "digits" | "part" | "any"
  *   - a book word, or a part, run straight on to a part ("{book}{part}");
  *   - a number or a book word straight after a part ("{part}{verse}": "121"
  *     can't split);
- *   - text to ignore beside any placeholder, or more than two of it.
+ *   - text to ignore beside any placeholder, or more than two of it;
+ *   - any other placeholder twice: only one of its values could be used
+ *     ("v{verse}-{verse}" kept the last verse of "v01-03"). A range is
+ *     "{verse}-{toVerse}" (review, Oct 30).
  * A part run straight on to a number can only be its letter ("4a").
  */
 function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | null {
@@ -118,6 +129,7 @@ function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | null {
     if (m) {
       const name = m[1]
       if (!isPlaceholder(name)) return null
+      if (name !== "any" && names.includes(name)) return null
       const kind: Kind = name === "book" ? "letters" : name === "any" ? "any" : name === "part" ? "part" : "digits"
       if (last !== null && last !== "literal") {
         if (last === kind || kind === "any" || last === "any") return null
@@ -147,11 +159,14 @@ function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | null {
 }
 
 export function compileTemplate(template: NameTemplate): CompiledTemplate | null {
+  // A template read off any other shape (a folder from an older answer) is
+  // nothing this app can apply.
+  if (Object.keys(template).some((key) => key !== "pattern")) return null
   const name = compilePart(template.pattern)
   if (!name) return null
-  const folder = template.folder ? compilePart(template.folder) : null
-  if (template.folder && !folder) return null
-  return { re: name.re, names: name.names, folderRe: folder?.re ?? null, folderNames: folder?.names ?? [] }
+  // A range's end needs its start, read as a chapter's verse.
+  if (name.names.includes("toVerse") && (!name.names.includes("verse") || name.names.includes("verseInBook"))) return null
+  return { re: name.re, names: name.names }
 }
 
 const compiledRules = new WeakMap<NamingRule, CompiledTemplate[]>()
@@ -170,6 +185,45 @@ function bookCode(value: unknown): string | null {
   if (typeof value !== "string") return null
   const code = value.trim().toUpperCase()
   return BOOK_CODE_SET.has(code) ? code : null
+}
+
+/** The bulk upload's own book names: codes, English names and their short
+ *  forms, Chinese names. */
+const TABLE = new BookNameIndex()
+
+/** The book the app's own table reads a word as, short forms included. */
+function tableBook(word: string): string | null {
+  return TABLE.lookup(word, true)?.code ?? null
+}
+
+/** A project's Bible files: the name each is called, and its book's code. */
+export type ProjectBooks = ReadonlyArray<{ name: string; code: string }>
+
+/** True when `short` starts like `long` and its letters come in `long` in order. */
+function shortFormOf(short: string, long: string): boolean {
+  if (short.length < 2 || short[0] !== long[0]) return false
+  let at = 0
+  for (const ch of short) {
+    at = long.indexOf(ch, at)
+    if (at < 0) return false
+    at++
+  }
+  return true
+}
+
+/**
+ * True when a book word plausibly names the book it is mapped to: the app's
+ * book-name table or one of the project's own Bible files reads it as that
+ * code, or it is a short form of the code or the book's English name (the
+ * same first letter, then its letters in order, two at least: "Mt", "Matt",
+ * "Mrk"). Anything else ("sermon" → MAT) names no book: it is a constant book
+ * in disguise, and holds for the one folder it was made for (review, Oct 30).
+ */
+export function bookWordNames(word: string, code: string, projectBooks: ProjectBooks = []): boolean {
+  if (tableBook(word) === code) return true
+  const key = bookKey(word)
+  if (projectBooks.some((b) => b.code.toUpperCase() === code && bookKey(b.name) === key)) return true
+  return shortFormOf(key, bookKey(code)) || shortFormOf(key, bookKey(englishBookName(code)))
 }
 
 /**
@@ -195,8 +249,10 @@ function parse(value: unknown): NamingRule | null {
     if (!t || typeof t !== "object" || Array.isArray(t)) return null
     const { pattern, folder } = t as Record<string, unknown>
     if (typeof pattern !== "string") return null
-    if (folder !== undefined && folder !== null && typeof folder !== "string") return null
-    const template: NameTemplate = typeof folder === "string" && folder.trim() ? { pattern, folder } : { pattern }
+    // The assistant never sees the folders: an answer about one isn't a
+    // reading of these names. An empty folder is no folder.
+    if (folder !== undefined && folder !== null && (typeof folder !== "string" || folder.trim())) return null
+    const template: NameTemplate = { pattern }
     if (!compileTemplate(template)) return null
     templates.push(template)
   }
@@ -209,6 +265,10 @@ function parse(value: unknown): NamingRule | null {
     for (const [word, code] of entries) {
       const known = bookCode(code)
       if (!known || word.trim().length === 0 || word.length > 30) return null
+      // A word the app already reads as another book ("Mark" → MAT) is a
+      // mistake, never a naming (review, Oct 30).
+      const read = tableBook(word)
+      if (read && read !== known) return null
       books.push([normalizeName(word).toLowerCase(), known])
     }
     // fromEntries makes own properties, so even "__proto__" stays a plain key.
@@ -244,13 +304,18 @@ export function bookForWord(rule: NamingRule, word: string): string | undefined 
  * or the book and the verse counted through the book. A rule that leans on a
  * book, chapter or file it was told holds for the one folder it was made for;
  * kept, it would put next week's Mark 2 memos on Matthew 5 without a word.
+ * So does a book word that names no book ("sermon" → MAT): every `books`
+ * entry must plausibly name its book (`bookWordNames`), read with the
+ * project's own Bible files when they are known. The server reads those from
+ * the project's files, the browser from the same list.
  */
-export function isSavableRule(rule: NamingRule): boolean {
+export function isSavableRule(rule: NamingRule, opts: { projectBooks?: ProjectBooks } = {}): boolean {
   if (rule.book !== undefined || rule.chapter !== undefined || rule.file !== undefined) return false
+  if (rule.books && Object.entries(rule.books).some(([word, code]) => !bookWordNames(word, code, opts.projectBooks))) return false
   return rule.templates.every((template) => {
     const compiled = compileTemplate(template)
     if (!compiled) return false
-    const says = new Set<Placeholder>([...compiled.names, ...compiled.folderNames])
+    const says = new Set<Placeholder>(compiled.names)
     return says.has("book") && (says.has("chapter") || says.has("verseInBook"))
   })
 }

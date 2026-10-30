@@ -242,8 +242,8 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   }
 
   // AQU-2302: a recordings folder's naming. Route on the server-owned system
-  // contract, like the importer above. The "brain" reads the first sampled
-  // name:
+  // contract, like the importer above. The names come one per line, each a
+  // JSON string. The "brain" reads the first sampled name:
   //   - "Mt-ch19_v01": the chapter-and-verse rule, which the team may keep;
   //   - "sermon_01": the verse, with Matthew 20 as constants; it places the
   //     folder but is never kept (a constant book and chapter);
@@ -255,7 +255,14 @@ export function scriptMockResponse(messages: ChatMessage[]) {
       && message.content.includes("You work out how a folder of audio recordings is named"),
   )
   if (namesSystemPrompt && userText.includes("<file-names>")) {
-    const first = userText.split("<file-names>\n")[1]?.split("\n")[0] ?? ""
+    const names = (userText.split("<file-names>\n")[1]?.split("\n</file-names>")[0] ?? "").split("\n").map((line) => {
+      try {
+        return String(JSON.parse(line))
+      } catch {
+        return line
+      }
+    })
+    const first = names[0] ?? ""
     const retry = userText.includes("<failed-names>")
     console.log(`[mock] recording-names rule${retry ? " (retry)" : ""} for ${first}`)
     if (/^fail-/i.test(first) && retry) return respond("Sorry, I can't tell.")

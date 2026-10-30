@@ -2,7 +2,7 @@
 // and the outline go up; the answer is re-checked here with parseNamingRule
 // before anything uses it.
 import { AUTH_BASE } from "@/lib/frontier/auth"
-import { isSavableRule, parseNamingRule, type NamingRule, type RuleFailure } from "./naming-rule"
+import { isSavableRule, parseNamingRule, type NamingRule, type ProjectBooks, type RuleFailure } from "./naming-rule"
 
 export const NAMING_RULE_URL = `${AUTH_BASE}/api/v1/import/recording-names`
 
@@ -34,7 +34,13 @@ export async function askForNamingRule(opts: Call & {
   try {
     response = await (opts.fetchImpl ?? fetch)(NAMING_RULE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${opts.identityToken}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${opts.identityToken}`,
+        // One key per ask: the server's paid-call guard runs a request it has
+        // already answered only once (review, Oct 30).
+        "Idempotency-Key": crypto.randomUUID(),
+      },
       body: JSON.stringify({
         projectId: opts.projectId,
         names: opts.names,
@@ -66,10 +72,11 @@ export async function askForNamingRule(opts: Call & {
 /**
  * The team's saved rules by names' shape. Never throws: no saved rules is fine.
  * Each entry is read on its own, so one bad entry is dropped and the rest still
- * work; a rule that leans on a constant is never applied, even if an older
- * version of the app saved one.
+ * work; a rule that leans on a constant, or on a book word that names no book
+ * (read with the project's Bible files, as the server read them), is never
+ * applied, even if an older version of the app saved one.
  */
-export async function loadSavedNamingRules(opts: Call): Promise<Map<string, NamingRule>> {
+export async function loadSavedNamingRules(opts: Call & { projectBooks?: ProjectBooks }): Promise<Map<string, NamingRule>> {
   let rules: unknown
   try {
     const response = await (opts.fetchImpl ?? fetch)(`${NAMING_RULE_URL}/saved?projectId=${encodeURIComponent(opts.projectId)}`, {
@@ -86,7 +93,7 @@ export async function loadSavedNamingRules(opts: Call): Promise<Map<string, Nami
   for (const [shape, value] of Object.entries(rules as Record<string, unknown>)) {
     try {
       const rule = parseNamingRule(value)
-      if (rule && isSavableRule(rule)) out.set(shape, rule)
+      if (rule && isSavableRule(rule, { projectBooks: opts.projectBooks })) out.set(shape, rule)
     } catch {
       // dropped; the others still apply
     }
@@ -108,8 +115,9 @@ export async function saveNamingRule(opts: Call & { shapes: readonly string[]; r
   }
 }
 
-/** Forget the team's saved rule for these names' shapes ("Don't use this
- *  naming" on a saved rule). Never throws; false when it wasn't forgotten. */
+/** Forget the team's saved rule kept under these shapes, under every shape it
+ *  is kept under ("Forget this naming for the team"). Never throws; false
+ *  when it wasn't forgotten. */
 export async function forgetSavedNamingRule(opts: Call & { shapes: readonly string[] }): Promise<boolean> {
   try {
     const response = await (opts.fetchImpl ?? fetch)(`${NAMING_RULE_URL}/saved`, {

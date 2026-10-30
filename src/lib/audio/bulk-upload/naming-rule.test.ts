@@ -38,20 +38,25 @@ function landAll(
   rule: NamingRule,
   paths: string[],
   targets: TargetFile[],
-  opts: { scope?: MatchScope; overrides?: ReadonlyMap<number, { fileId: string; cellId: string } | "skip"> } = {},
+  opts: { scope?: MatchScope; overrides?: ReadonlyMap<number, { fileId: string; cellId: string } | "skip">; projectBooks?: { name: string; code: string }[] } = {},
 ) {
   const made = new Map<number, string>()
   const files = paths.map((p, i) => {
     const f = audio(p)
-    const folder = p.split("/").slice(-2, -1)[0] ?? ""
-    const name = applyNamingRule(rule, f.name, folder)
+    const name = applyNamingRule(rule, f.name)
     if (name) made.set(i, name)
     return name ? { ...f, name, path: name } : f
   })
   const projectFiles = targets.map((t) => ({ fileId: t.fileId, name: t.name, bookCode: t.bookCode }))
   const read = readRecordings(files, { scope: opts.scope ?? { kind: "project" }, index: new BookNameIndex(), projectFiles, maxBytes: 1 << 30 })
   const assignments = matchRecordings(read, new Map(targets.map((t) => [t.fileId, t])), { overrides: opts.overrides })
-  return { made, assignments, names: (i: number) => audio(paths[i]).name }
+  const at = new Map(targets.flatMap((t) => t.lines.map((l, i) => [`${t.fileId}\u0000${l.cellId}`, i] as const)))
+  const where = {
+    pathOf: (i: number) => paths[i],
+    lineIndex: (fileId: string, cellId: string) => at.get(`${fileId}\u0000${cellId}`),
+    projectBooks: opts.projectBooks ?? [],
+  }
+  return { made, assignments, names: (i: number) => audio(paths[i]).name, where }
 }
 
 function land(rule: NamingRule, paths: string[], targets: TargetFile[], scope: MatchScope = { kind: "project" }) {
@@ -118,9 +123,9 @@ describe("a rule's names land through AQU-981's own matching", () => {
       .toEqual(["mat:19:1", "mat:22:32", "bookVerseDisagree"])
   })
 
-  it("the chapter from the folder: Kapitola 19/v01.mp3", () => {
-    const rule = parseNamingRule({ templates: [{ pattern: "v{verse}", folder: "Kapitola {chapter}" }], book: "MAT" })!
-    expect(land(rule, ["Mt/Kapitola 19/v01.mp3", "Mt/Kapitola 20/v34.mp3"], mat)).toEqual(["mat:19:1", "mat:20:34"])
+  it("reads the file name only: the assistant never sees the folders, so an answer naming one is unusable (review, Oct 30)", () => {
+    expect(parseNamingRule({ templates: [{ pattern: "v{verse}", folder: "Kapitola {chapter}" }], book: "MAT" })).toBeNull()
+    expect(compileTemplate({ pattern: "v{verse}", folder: "Kapitola {chapter}" } as never)).toBeNull()
   })
 
   it("a verse the book doesn't have is refused by the matcher, not placed", () => {
@@ -140,8 +145,9 @@ describe("a rule's names land through AQU-981's own matching", () => {
 })
 
 describe("what goes to the assistant: a sample and an outline, the same every time", () => {
-  it("keeps every name of a small folder, sorted", () => {
-    expect(sampleNames(["b10.mp3", "b2.mp3", "b1.mp3"])).toEqual(["b1.mp3", "b2.mp3", "b10.mp3"])
+  it("keeps every name of a small folder, sorted by code point, the same on every machine (review, Oct 30)", () => {
+    expect(sampleNames(["b10.mp3", "b2.mp3", "b1.mp3"])).toEqual(["b1.mp3", "b10.mp3", "b2.mp3"])
+    expect(sampleNames(["á.mp3", "b.mp3", "B.mp3", "a.mp3"])).toEqual(["B.mp3", "a.mp3", "b.mp3", "á.mp3"])
   })
 
   it("takes 30 of 142, the first and last, a spread, and the odd ones out", () => {
@@ -160,9 +166,16 @@ describe("what goes to the assistant: a sample and an outline, the same every ti
     expect(outline).toContain('File: "Welcome letter"')
   })
 
-  it("keeps a team's rule under the names' shape, digits blanked", () => {
-    expect(nameShape("MAT_1_LN619.ogg")).toBe("mat_#_ln#.ogg")
-    expect(shapesOf(["a1.mp3", "a22.mp3", "b.mp3"])).toEqual(["a#.mp3", "b.mp3"])
+  it("keeps a team's rule under the names' shape, digits blanked and the extension left out (review, Oct 30)", () => {
+    expect(nameShape("MAT_1_LN619.ogg")).toBe("mat_#_ln#")
+    expect(nameShape("MAT_1_LN619.mp3")).toBe(nameShape("MAT_1_LN619.ogg"))
+    expect(shapesOf(["a1.mp3", "a22.ogg", "b.mp3"])).toEqual(["a#", "b"])
+  })
+
+  it("breaks a tie between shapes by code point, not by the machine's language (review, Oct 30)", () => {
+    // A locale puts "á" before "b"; code point order puts it after.
+    expect(shapesOf(["á1.mp3", "b1.mp3"])).toEqual(["b#", "á#"])
+    expect(shapesOf(["Z1.ogg", "y1.ogg"])).toEqual(["y#", "z#"])
   })
 })
 
@@ -261,14 +274,12 @@ describe("which rules the team keeps (review, Oct 30)", () => {
   it("keeps a rule only when the names themselves say the book and the chapter, or the book and the verse in the book", () => {
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!)).toBe(true)
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "{book}_{verse}_LN{verseInBook}" }] })!)).toBe(true)
-    expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "v{verse}", folder: "{book} {chapter}" }] })!)).toBe(true)
   })
 
   it("never keeps a rule that relies on a book, chapter or file it was told", () => {
     // Sam's Matthew 5 memos must not land next week's Mark 2 memos on Matthew 5.
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "New Recording {verse}" }], book: "MAT", chapter: 5 })!)).toBe(false)
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "{book} v{verse}" }], chapter: 5 })!)).toBe(false)
-    expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "v{verse}", folder: "Kapitola {chapter}" }], book: "MAT" })!)).toBe(false)
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "IMG_{line}" }], file: "Welcome letter" })!)).toBe(false)
     expect(isSavableRule(parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }, { pattern: "intro {verse}" }], books: { Mt: "MAT" } })!)).toBe(false)
   })
@@ -278,13 +289,18 @@ describe("which names go to the assistant (review, Oct 30)", () => {
   const unplaced = (code: NonNullable<Assignment["reason"]>["code"]): Assignment => ({ index: 0, reason: { code } as NonNullable<Assignment["reason"]> })
 
   it("sends the names none of the app's readings understood", () => {
-    for (const code of ["noBook", "bookNotInProject", "noNumber", "tooManyNumbers", "noSuchChapter", "chapterOrVerse"] as const) {
+    for (const code of ["noBook", "noNumber", "tooManyNumbers", "chapterOrVerse"] as const) {
       expect(ruleEligible(unplaced(code))).toBe(true)
     }
   })
 
   it("leaves out what the app refused on purpose, what the person skipped, and what isn't a recording", () => {
-    for (const code of ["noSuchVerse", "otherBook", "duplicate", "bookVerseDisagree", "rangeBackwards", "skipped", "notAudio", "unplayableFormat", "systemFile", "empty", "tooLarge"] as const) {
+    // A book the project doesn't have, a chapter or line past the end
+    // (review, Oct 30): read, and refused on purpose, like a missing verse.
+    for (const code of [
+      "noSuchVerse", "otherBook", "duplicate", "bookVerseDisagree", "rangeBackwards", "skipped", "notAudio", "unplayableFormat", "systemFile", "empty", "tooLarge",
+      "bookNotInProject", "noSuchChapter", "noSuchLine", "pastLastLine", "beforeFirstLine",
+    ] as const) {
       expect(ruleEligible(unplaced(code))).toBe(false)
     }
     expect(ruleEligible({ index: 0, method: "name", fileId: "mat", cellIds: ["mat:1:1"] })).toBe(false)
@@ -295,7 +311,7 @@ describe("whether a rule placed the names it was asked about (review, Oct 30)", 
   const mat = [book("mat", "MAT", "Matthew", MAT)]
   const chapterVerse = () => parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
   const judge = (rule: NamingRule, landed: ReturnType<typeof landAll>) =>
-    judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names)
+    judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
 
   it("keeps a rule that placed every name by reading it", () => {
     const rule = chapterVerse()
@@ -411,5 +427,156 @@ describe("whether a rule placed the names it was asked about (review, Oct 30)", 
       expect(j.placed.size).toBe(2)
       expect(j.keep).toBe(false)
     })
+  })
+})
+
+// ── The second review (Oct 30): each of these could put recordings on the
+// wrong lines and keep that rule for the whole organization. ─────────────────
+
+describe("a book word that names no book is a constant in disguise (review, Oct 30)", () => {
+  const project = [book("mat", "MAT", "Matthew", MAT), book("mrk", "MRK", "Mark", [45, 28, 35, 41, 43, 56, 37, 38, 50, 52, 33, 44, 37, 72, 47, 20])]
+  const sermons = () => parseNamingRule({ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { sermon: "MAT" } })!
+
+  it("uses books {sermon: MAT} for this week's folder, and never keeps it for next week's Mark sermons", () => {
+    const rule = sermons()
+    expect(rule).not.toBeNull()
+    expect(isSavableRule(rule)).toBe(false)
+    const landed = landAll(rule, ["Files/sermon_05_01.ogg", "Files/sermon_05_02.ogg", "Files/sermon_05_03.ogg"], project)
+    expect(landed.assignments.map((a) => a.cellIds?.[0])).toEqual(["mat:5:1", "mat:5:2", "mat:5:3"])
+    const j = judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
+    expect(j.placed.size).toBe(3)
+    expect(j.keep).toBe(false)
+  })
+
+  it("keeps a book word the app's table reads as that book, or a short form of its code or English name", () => {
+    for (const [word, code] of [["Mt", "MAT"], ["Matt", "MAT"], ["Matthew", "MAT"], ["Mk", "MRK"], ["Mrk", "MRK"], ["Jn", "JHN"], ["1Co", "1CO"], ["1 Cor", "1CO"], ["Gen", "GEN"], ["太", "MAT"]] as const) {
+      const rule = parseNamingRule({ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { [word]: code } })
+      expect(rule, word).not.toBeNull()
+      expect(isSavableRule(rule!), word).toBe(true)
+    }
+  })
+
+  it("counts a word that only shares letters with the book, or a single letter, as a constant", () => {
+    for (const [word, code] of [["sermon", "MAT"], ["track", "MAT"], ["tm", "MAT"], ["M", "MAT"], ["Mta", "MAT"]] as const) {
+      const rule = parseNamingRule({ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { [word]: code } })!
+      expect(isSavableRule(rule), word).toBe(false)
+    }
+  })
+
+  it("keeps a word the project's own book files use for that book, as the server reads them too", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { Mateo: "MAT" } })!
+    expect(isSavableRule(rule)).toBe(false)
+    expect(isSavableRule(rule, { projectBooks: [{ name: "Mateo", code: "MAT" }] })).toBe(true)
+    expect(isSavableRule(rule, { projectBooks: [{ name: "Mateo", code: "MRK" }] })).toBe(false)
+  })
+
+  it("is one shared check, so the server keeps and hands back only what the browser would", () => {
+    expect(shared.bookWordNames("Mt", "MAT")).toBe(true)
+    expect(shared.bookWordNames("sermon", "MAT")).toBe(false)
+  })
+})
+
+describe("names the app refused on purpose never go to the assistant (review, Oct 30)", () => {
+  const matthewOnly = [book("mat", "MAT", "Matthew", MAT)]
+
+  it("a Mark folder dropped on a Matthew project is read, refused as a book the project lacks, and not sent", () => {
+    const paths = ["Mark/Mark 1-1.mp3", "Mark/Mark 1-2.mp3", "Mark/Mark 1-3.mp3"]
+    const files = paths.map(audio)
+    const read = readRecordings(files, { scope: { kind: "project" }, index: new BookNameIndex(), projectFiles: [{ fileId: "mat", name: "Matthew", bookCode: "MAT" }], maxBytes: 1 << 30 })
+    const assignments = matchRecordings(read, new Map(matthewOnly.map((t) => [t.fileId, t])))
+    expect(assignments.map((a) => a.reason?.code)).toEqual(["bookNotInProject", "bookNotInProject", "bookNotInProject"])
+    expect(assignments.filter(ruleEligible)).toEqual([])
+  })
+
+  it("refuses an answer mapping a word the app reads as one book to another: {Mark: MAT}", () => {
+    expect(parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { Mark: "MAT" } })).toBeNull()
+    expect(parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { Mk: "MAT" } })).toBeNull()
+    expect(parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { Mark: "MRK" } })).not.toBeNull()
+  })
+})
+
+describe("a recording of several verses (review, Oct 30)", () => {
+  const mat = [book("mat", "MAT", "Matthew", MAT)]
+  const ranges = ["Files/Mt-ch19_v01-03.ogg", "Files/Mt-ch19_v04-06.ogg", "Files/Mt-ch19_v07-09.ogg"]
+
+  it("refuses a placeholder that appears twice in one template, which would keep only the last value", () => {
+    expect(compileTemplate({ pattern: "{book}-ch{chapter}_v{verse}-{verse}" })).toBeNull()
+    expect(parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{verse}" }], books: { Mt: "MAT" } })).toBeNull()
+    // Text to ignore may still come twice: it is never a value.
+    expect(compileTemplate({ pattern: "{any}_{book}-ch{chapter}_v{verse}_{any}" })).not.toBeNull()
+  })
+
+  it("{toVerse} ends the range: Mt-ch19_v01-03 is one recording over Matthew 19:1-3", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }], books: { Mt: "MAT" } })!
+    expect(rule).not.toBeNull()
+    expect(applyNamingRule(rule, "Mt-ch19_v01-03.ogg")).toBe("MAT 19:1-3.ogg")
+    const landed = landAll(rule, ranges, mat)
+    expect(landed.assignments.map((a) => a.cellIds)).toEqual([
+      ["mat:19:1", "mat:19:2", "mat:19:3"], ["mat:19:4", "mat:19:5", "mat:19:6"], ["mat:19:7", "mat:19:8", "mat:19:9"],
+    ])
+    const j = judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
+    expect(j.keep).toBe(true)
+  })
+
+  it("refuses {toVerse} with no {verse} to start from, or beside a verse counted through the book", () => {
+    expect(compileTemplate({ pattern: "{book}-ch{chapter}_to{toVerse}" })).toBeNull()
+    expect(compileTemplate({ pattern: "{book}_{verseInBook}-{toVerse}" })).toBeNull()
+  })
+
+  it("doesn't keep a rule that drops each range's end: every file on its first verse, far apart", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{any}" }], books: { Mt: "MAT" } })!
+    const landed = landAll(rule, ranges, mat)
+    expect(landed.assignments.map((a) => a.cellIds)).toEqual([["mat:19:1"], ["mat:19:4"], ["mat:19:7"]])
+    const j = judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
+    expect(j.placed.size).toBe(3)
+    expect(j.keep).toBe(false)
+  })
+})
+
+describe("a rule is kept only when where it put the files looks like a reading (review, Oct 30)", () => {
+  const mat = [book("mat", "MAT", "Matthew", MAT)]
+  const judged = (rule: NamingRule, paths: string[], targets: TargetFile[] = mat) => {
+    const landed = landAll(rule, paths, targets)
+    return { landed, j: judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where) }
+  }
+
+  it("doesn't keep Matthew 5:1-20 read with the chapter and the verse swapped: in order, but scattered over twenty chapters", () => {
+    const paths = Array.from({ length: 20 }, (_, i) => `Files/Mt-ch05_v${String(i + 1).padStart(2, "0")}.ogg`)
+    const { landed, j } = judged(parseNamingRule({ templates: [{ pattern: "{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" } })!, paths)
+    expect(landed.assignments.slice(0, 3).map((a) => a.cellIds?.[0])).toEqual(["mat:1:5", "mat:2:5", "mat:3:5"])
+    expect(j.placed.size).toBe(20)
+    expect(j.keep).toBe(false)
+  })
+
+  it("keeps the same folder read the right way round", () => {
+    const paths = Array.from({ length: 20 }, (_, i) => `Files/Mt-ch05_v${String(i + 1).padStart(2, "0")}.ogg`)
+    expect(judged(parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!, paths).j.keep).toBe(true)
+  })
+
+  it("doesn't keep a rule whose files, in name order, run backwards through the lines", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_n{any}_v{verse}" }], books: { Mt: "MAT" } })!
+    const { landed, j } = judged(rule, ["Files/Mt-ch19_n1_v03.ogg", "Files/Mt-ch19_n2_v02.ogg", "Files/Mt-ch19_n3_v01.ogg"])
+    expect(landed.assignments.map((a) => a.cellIds?.[0])).toEqual(["mat:19:3", "mat:19:2", "mat:19:1"])
+    expect(j.placed.size).toBe(3)
+    expect(j.keep).toBe(false)
+  })
+
+  it("doesn't keep a rule that leaves more lines between its files than it fills", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
+    expect(judged(rule, ["Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v05.ogg", "Files/Mt-ch19_v10.ogg"]).j.keep).toBe(false)
+    // Half of the lines from the first to the last is enough.
+    expect(judged(rule, ["Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v02.ogg", "Files/Mt-ch19_v04.ogg"]).j.keep).toBe(true)
+  })
+
+  it("counts takes and pieces on one line as in order, and reads each book on its own", () => {
+    const pieces = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT", Mk: "MRK" } })!
+    const two = [...mat, book("mrk", "MRK", "Mark", [45, 28])]
+    expect(judged(pieces, ["Files/Mk-ch01_v01.ogg", "Files/Mk-ch01_v02.ogg", "Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v02a.ogg", "Files/Mt-ch19_v02b.ogg"], two).j.keep).toBe(true)
+  })
+
+  it("puts the files in folder order by their whole path, as the matcher does", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
+    expect(judged(rule, ["B/Mt-ch19_v01.ogg", "A/Mt-ch19_v02.ogg"]).j.keep).toBe(false)
+    expect(judged(rule, ["A/Mt-ch19_v01.ogg", "B/Mt-ch19_v02.ogg"]).j.keep).toBe(true)
   })
 })

@@ -1,7 +1,7 @@
 // AQU-2302: the assistant works out a folder's naming only when the person
 // asks, once, with one retry at most; the rule it gives is applied and checked
 // here, and a team's saved rule is used with no call at all.
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { TargetFile, TargetLine } from "@/lib/audio/bulk-upload/match"
 
@@ -30,6 +30,7 @@ vi.mock("@/lib/audio/bulk-upload/engine", async (importActual) => ({
   isBulkUploadRunning: () => false,
 }))
 
+import { loadTargetFile } from "@/lib/audio/bulk-upload/load-targets"
 import { RecordingsReview } from "./RecordingsUpload"
 
 const RULE = {
@@ -39,12 +40,17 @@ const RULE = {
 }
 
 const NAMES = ["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch22_v32.ogg"]
+/** A folder close together, as a team's own reading lands it: the kind the
+ *  team may keep (review, Oct 30: a sparse or scattered one isn't). */
+const DENSE = ["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v03.ogg"]
+/** A usable rule that fits none of the Mt-ch names (the scripted model's own). */
+const NO_FIT = { templates: [{ pattern: "rec-{verse}" }], book: "MAT", chapter: 1, explanation: "rec- then the verse." }
 
 function chosen(names: readonly string[]) {
   return names.map((name) => ({ file: new File([new Uint8Array(16)], name, { type: "audio/ogg" }), path: `Files/${name}` }))
 }
 
-type Route = { method: string; url: string; body: Record<string, unknown> | null; signal: AbortSignal | null }
+type Route = { method: string; url: string; body: Record<string, unknown> | null; signal: AbortSignal | null; headers: Headers }
 /** An answer that fails, and one that never comes until the request is aborted. */
 const FAIL = Symbol("fail")
 const HANG = Symbol("hang")
@@ -62,10 +68,15 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = init?.method ?? "GET"
-    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null, signal: init?.signal ?? null })
+    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null, signal: init?.signal ?? null, headers: new Headers(init?.headers) })
     // Answered a little later, as a real server would: the preview re-renders
     // meanwhile, which once cancelled the saved-rule lookup (Chromium, Oct 30).
     if (url.includes("/recording-names/saved") && method === "GET") {
+      if (lookupDelay === Infinity) {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
+        })
+      }
       await new Promise((r) => setTimeout(r, lookupDelay))
       return new Response(JSON.stringify({ rules: saved }), { status: 200 })
     }
@@ -163,7 +174,7 @@ describe("the assistant is offered, never asked on its own", () => {
   })
 
   it("retries once with only the names the first rule failed on, then stops", async () => {
-    answers = [{ ...RULE, books: { Mt: "MRK" } }, { ...RULE, books: { Mt: "MRK" } }]
+    answers = [NO_FIT, NO_FIT]
     review()
     fireEvent.click(await enabledAsk())
     await waitFor(() => expect(asks()).toHaveLength(2))
@@ -173,20 +184,20 @@ describe("the assistant is offered, never asked on its own", () => {
   })
 
   it("keeps the rule for the team when the upload is confirmed", async () => {
-    review()
+    review(DENSE)
     fireEvent.click(await enabledAsk())
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
     fireEvent.click(screen.getByTestId("recordings-confirm"))
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/recording-names/saved"))).toBe(true))
     const save = calls.find((c) => c.method === "POST" && c.url.endsWith("/recording-names/saved"))!
-    expect(save.body!.shapes).toEqual(["mt-ch#_v#.ogg"])
+    expect(save.body!.shapes).toEqual(["mt-ch#_v#"])
     expect(started).toHaveBeenCalledTimes(1)
   })
 })
 
 describe("a team's saved rule", () => {
   it("places the files with no call when the names have its shape", async () => {
-    saved = { "mt-ch#_v#.ogg": RULE }
+    saved = { "mt-ch#_v#": RULE }
     review()
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
     expect(asks()).toHaveLength(0)
@@ -194,7 +205,7 @@ describe("a team's saved rule", () => {
   })
 
   it("can be set aside, which puts the files back to be chosen by hand", async () => {
-    saved = { "mt-ch#_v#.ogg": RULE }
+    saved = { "mt-ch#_v#": RULE }
     review()
     fireEvent.click(await screen.findByTestId("recordings-assistant-undo"))
     await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
@@ -204,7 +215,7 @@ describe("a team's saved rule", () => {
 
 describe("at most two calls for a folder (review, Oct 30)", () => {
   it("a failing retry makes exactly two calls, then stops and says the naming didn't fit", async () => {
-    answers = [{ ...RULE, books: { Mt: "MRK" } }, FAIL]
+    answers = [NO_FIT, FAIL]
     review()
     fireEvent.click(await enabledAsk())
     await waitFor(() => expect(asks()).toHaveLength(2))
@@ -285,7 +296,7 @@ describe("a rule is kept for the team only when it truly placed the folder (revi
   }
 
   it("keeps a rule that placed every name by reading it", async () => {
-    await askAndConfirm(NAMES)
+    await askAndConfirm(DENSE)
     expect(saves()).toHaveLength(1)
   })
 
@@ -297,12 +308,12 @@ describe("a rule is kept for the team only when it truly placed the folder (revi
   })
 
   it("doesn't keep a rule when the person chose a line by hand", async () => {
-    await askAndConfirm(NAMES, () => chooseByHand(0, "Matthew 19:9"))
+    await askAndConfirm(DENSE, () => chooseByHand(0, "Matthew 19:9"))
     expect(saves()).toHaveLength(0)
   })
 
   it("doesn't keep a rule when the person left a file out", async () => {
-    await askAndConfirm(NAMES, () => chooseByHand(2, "Don't upload"))
+    await askAndConfirm(DENSE, () => chooseByHand(2, "Don't upload"))
     expect(saves()).toHaveLength(0)
   })
 
@@ -337,7 +348,7 @@ describe("a rule is kept for the team only when it truly placed the folder (revi
       ])
     })
     expect(saves()).toHaveLength(1)
-    expect(saves()[0].body!.shapes).toEqual(["mt-ch#_v#.ogg", "mt-ch#_v#a.ogg", "mt-ch#_v#b.ogg"])
+    expect(saves()[0].body!.shapes).toEqual(["mt-ch#_v#", "mt-ch#_v#a", "mt-ch#_v#b"])
   })
 })
 
@@ -414,10 +425,11 @@ describe("a retry that does worse doesn't win (Sam, Oct 30)", () => {
   })
 
   it("uses a retry that places more, and keeps it when it placed every name", async () => {
-    // Swapped first: 1:19 and 2:19, not 30:19. The retry places all three.
+    // Swapped first: 1:19 and 2:19, not 3:19 (Matthew 3 has 17 verses). The
+    // retry places all three.
     answers = [SWAPPED, RIGHT]
-    await askTwice(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v30.ogg"])
-    expect(targets()).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:30"])
+    await askTwice(DENSE)
+    expect(targets()).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:3"])
     expect(marked()).toBe(3)
     expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("The chapter, then the verse.")
     await settle(500)
@@ -438,24 +450,40 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
   })
 
   it("applies the team's saved rule for a contributor too, with no call", async () => {
-    saved = { "mt-ch#_v#.ogg": RULE }
+    saved = { "mt-ch#_v#": RULE }
     review(NAMES, { canAsk: false })
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
     expect(within(screen.getAllByTestId("recordings-row")[0]).getByTestId("recordings-how")).toHaveTextContent("by your team's saved rule")
     expect(asks()).toHaveLength(0)
   })
 
-  it("forgets a saved rule when a lead sets it aside, so it doesn't stick", async () => {
-    saved = { "mt-ch#_v#.ogg": RULE }
+  it("sets a saved rule aside for this upload only when a lead says not to use it (review, Oct 30)", async () => {
+    saved = { "mt-ch#_v#": RULE }
     review()
     fireEvent.click(await screen.findByTestId("recordings-assistant-undo"))
+    await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
+    await settle()
+    expect(forgets()).toHaveLength(0)
+    // The offer is back for the names, so the lead can ask instead.
+    expect(await enabledAsk()).toBeInTheDocument()
+  })
+
+  it("forgets a saved rule for the team only on its own plainly labelled button, for a lead (review, Oct 30)", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review()
+    const forget = await screen.findByTestId("recordings-assistant-forget")
+    expect(forget).toHaveTextContent("Forget this naming for the team")
+    fireEvent.click(forget)
     await waitFor(() => expect(forgets()).toHaveLength(1))
-    expect(forgets()[0].body).toEqual({ projectId: "p1", shapes: ["mt-ch#_v#.ogg"] })
+    expect(forgets()[0].body).toEqual({ projectId: "p1", shapes: ["mt-ch#_v#"] })
+    await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
   })
 
   it("only sets a saved rule aside for a contributor, who can't change the team's namings", async () => {
-    saved = { "mt-ch#_v#.ogg": RULE }
+    saved = { "mt-ch#_v#": RULE }
     review(NAMES, { canAsk: false })
+    await screen.findByTestId("recordings-assistant-undo")
+    expect(screen.queryByTestId("recordings-assistant-forget")).toBeNull()
     fireEvent.click(await screen.findByTestId("recordings-assistant-undo"))
     await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
     await settle()
@@ -468,5 +496,162 @@ describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {
     fireEvent.click(await screen.findByTestId("recordings-assistant-undo"))
     await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
     expect(forgets()).toHaveLength(0)
+  })
+})
+
+// ── The second review (Oct 30) ──────────────────────────────────────────────
+
+describe("a saved rule that places only part of a folder (review, Oct 30)", () => {
+  const PARTLY = ["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "rec-03.ogg"]
+  // rec-03 read as Matthew 19:3 by a second template, with the book and the
+  // chapter as constants.
+  const BOTH = {
+    templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }, { pattern: "rec-{verse}" }],
+    books: { Mt: "MAT" },
+    book: "MAT",
+    chapter: 19,
+    explanation: "Both namings.",
+  }
+
+  it("still offers the lead the assistant for the names it left, and asks nothing on its own", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review(PARTLY)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(1)
+    expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("Read with your team's saved naming")
+    expect(await enabledAsk()).toBeInTheDocument()
+    expect(screen.getByTestId("recordings-assistant")).toHaveTextContent("fits 1 of these recordings")
+    await settle()
+    expect(asks()).toHaveLength(0)
+  })
+
+  it("asks like the retry: the saved rule as the one tried, and only the names it left", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    // An answer that reads rec-03 no better: a tie, so the saved rule stays.
+    answers = [{ ...RULE, templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }, { pattern: "rec-{verse}" }], explanation: "Both namings." }]
+    review(PARTLY)
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(1))
+    expect(asks()[0].body!.names).toEqual(["rec-03.ogg"])
+    expect(asks()[0].body!.previous).toMatchObject({ templates: RULE.templates })
+    expect(asks()[0].body!.failures).toEqual([{ name: "rec-03.ogg", made: null, reason: "noBook" }])
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("Read with your team's saved naming"))
+    await settle()
+    expect(asks()).toHaveLength(1)
+  })
+
+  it("keeps the saved rule when the answer places fewer, and makes no further call", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    answers = [NO_FIT, RULE]
+    review(PARTLY)
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(1))
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("Read with your team's saved naming"))
+    await settle(500)
+    expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target"))).toEqual(["Matthew 19:1", "Matthew 19:2"])
+    expect(asks()).toHaveLength(1)
+    expect(screen.queryByTestId("recordings-assistant-ask")).toBeNull()
+  })
+
+  it("uses an answer that places more than the saved rule", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    answers = [BOTH]
+    review(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "rec-03.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-note")).toHaveTextContent("Both namings."))
+    await settle()
+    expect(screen.getAllByTestId("recordings-row").map((r) => r.getAttribute("data-target"))).toEqual(["Matthew 19:1", "Matthew 19:2", "Matthew 19:3"])
+    expect(asks()).toHaveLength(1)
+  })
+})
+
+describe("smaller review items (review, Oct 30)", () => {
+  it("doesn't keep a rule whose book word names no book, though it placed the folder", async () => {
+    answers = [{ templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { sermon: "MAT" }, explanation: "sermon is Matthew." }]
+    review(["sermon_05_01.ogg", "sermon_05_02.ogg", "sermon_05_03.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    await settle()
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(started).toHaveBeenCalledTimes(1))
+    await settle(100)
+    expect(saves()).toHaveLength(0)
+  })
+
+  it("keeps a word the project's own Bible file is called, read with the project's files as the server reads them", async () => {
+    answers = [{ templates: [{ pattern: "{book}x{chapter}x{verse}" }], books: { Mateo: "MAT" }, explanation: "Mateo is Matthew." }]
+    render(
+      <RecordingsReview
+        projectId="p1"
+        canAskAssistant
+        file={null}
+        projectFiles={[{ id: "mat", name: "Mateo", bookCode: "MAT" } as never]}
+        getToken={async () => "file-jwt"}
+        lane=""
+        languageLabel={null}
+        username="lee"
+        chosen={chosen(["Mateox05x01.ogg", "Mateox05x02.ogg"])}
+        onStarted={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    await settle()
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(saves()).toHaveLength(1))
+  })
+
+  it("sends a fresh Idempotency-Key with each ask, so the server's guard against a double run is used", async () => {
+    answers = [NO_FIT, NO_FIT]
+    review()
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    const keys = asks().map((c) => c.headers.get("Idempotency-Key"))
+    expect(keys.every((k) => typeof k === "string" && k.length >= 16)).toBe(true)
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  it("enables the offer when the team's saved namings don't answer within about eight seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      lookupDelay = Infinity
+      review()
+      const ask = await screen.findByTestId("recordings-assistant-ask")
+      expect(ask).toBeDisabled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(8_100) })
+      expect(screen.getByTestId("recordings-assistant-ask")).toBeEnabled()
+      expect(calls.find((c) => c.method === "GET" && c.url.includes("/recording-names/saved"))!.signal?.aborted).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("applies a saved rule kept from .ogg recordings to the same naming in .mp3", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review(NAMES.map((n) => n.replace(".ogg", ".mp3")))
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(0)
+  })
+
+  it("says in the (i) that a rule is kept only when the names say the book and chapter and every file was placed", async () => {
+    review()
+    await enabledAsk()
+    fireEvent.click(screen.getByRole("button", { name: "About working out the naming" }))
+    expect(screen.getByText(/keeps the rule only when the names say the book and the chapter and it placed every file/)).toBeInTheDocument()
+  })
+
+  it("reads each project file's lines once per dialog, however often a rule is applied", async () => {
+    vi.mocked(loadTargetFile).mockClear()
+    // The first rule misses v99, so a retry follows; the tie then sets the
+    // first rule back: three readings of the names, one of Matthew's lines.
+    answers = [RULE, RULE]
+    review(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v99.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-note")).toBeInTheDocument())
+    await settle()
+    expect(screen.getAllByTestId("recordings-row")).toHaveLength(2)
+    expect(vi.mocked(loadTargetFile)).toHaveBeenCalledTimes(1)
   })
 })

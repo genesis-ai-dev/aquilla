@@ -103,7 +103,8 @@ describe("POST /api/v1/import/recording-names", () => {
     expect(body.model).not.toBe("attacker/model")
     expect(body.temperature).toBe(0)
     expect(body.messages[0].content).toContain("untrusted data")
-    expect(body.messages[1].content).toContain("<file-names>\nMt-ch19_v01.ogg")
+    // Each name as a JSON string, like the outline's file names (review, Oct 30).
+    expect(body.messages[1].content).toContain('<file-names>\n"Mt-ch19_v01.ogg"\n"Mt-ch19_v02.ogg"')
   })
 
   it("sends only the failed names on the retry", async () => {
@@ -117,8 +118,8 @@ describe("POST /api/v1/import/recording-names", () => {
       body: ruleBody({ names: ["Mt-ch19_v99.ogg"], previous: GOOD_RULE, failures: [{ name: "Mt-ch19_v99.ogg", made: "MAT 19:99.ogg", reason: "noSuchVerse" }] }),
     }, testEnv())
     const prompt = (JSON.parse(String(upstream.mock.calls[0][1]?.body)) as { messages: Array<{ content: string }> }).messages[1].content
-    expect(prompt).toContain("<file-names>\nMt-ch19_v99.ogg\n</file-names>")
-    expect(prompt).toContain("<failed-names>\nMt-ch19_v99.ogg → MAT 19:99.ogg (noSuchVerse)")
+    expect(prompt).toContain('<file-names>\n"Mt-ch19_v99.ogg"\n</file-names>')
+    expect(prompt).toContain('<failed-names>\n"Mt-ch19_v99.ogg" → "MAT 19:99.ogg" ("noSuchVerse")')
     expect(prompt).not.toContain("Mt-ch19_v01.ogg")
   })
 
@@ -257,17 +258,19 @@ describe("the organization's saved naming rules", () => {
     expect(await storedShapes(72)).toEqual(["other#.ogg"])
   })
 
-  it("forgets a saved rule for the shapes given, with the same rights as keeping one", async () => {
+  it("forgets a saved rule under every shape it is kept under, with the same rights as keeping one (review, Oct 30)", async () => {
     const lead = await seedLead()
     await save(lead, GOOD_RULE, ["mt-ch#_v#.ogg", "mt ch# v#.ogg"])
     await save(lead, ruleNo(2), ["other#.ogg"])
+    // The same rule kept again later, under another shape, goes too.
+    await save(lead, GOOD_RULE, ["mt-ch#_v#a.ogg"])
     const contributor = await seedProjectMember(4, "contributor", 400)
     const forget = (jwt: string) => app.request(SAVED, { method: "DELETE", headers: authHeader(jwt), body: JSON.stringify({ projectId: PROJECT_ID, shapes: ["mt-ch#_v#.ogg"] }) }, testEnv())
     expect((await forget(contributor)).status).toBe(403)
     const done = await forget(lead)
     expect(done.status).toBe(200)
     expect(await done.json()).toEqual({ forgotten: true })
-    expect(await storedShapes()).toEqual(["mt ch# v#.ogg", "other#.ogg"])
+    expect(await storedShapes()).toEqual(["other#.ogg"])
   })
 
   it("never hands back a rule that leans on a constant, even one an older version kept", async () => {
@@ -340,5 +343,80 @@ describe("the organization's saved naming rules", () => {
     expect(settings.validationCount).toBe(2)
     expect(settings).toHaveProperty("recordingNameRules")
     expect(row!.version).toBe(4)
+  })
+})
+
+// ── The second review (Oct 30) ──────────────────────────────────────────────
+
+describe("the prompt says what the browser can apply (review, Oct 30)", () => {
+  it("offers {toVerse} for a range, each placeholder once, and no folder templates", async () => {
+    const jwt = await seedLead()
+    const upstream = modelAnswers(GOOD_RULE)
+    await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody() }, testEnv())
+    const prompt = (JSON.parse(String(upstream.mock.calls[0][1]?.body)) as { messages: Array<{ content: string }> }).messages[1].content
+    expect(prompt).toContain("{toVerse}")
+    expect(prompt).toContain("at most once")
+    expect(prompt).not.toContain("folder")
+  })
+
+  it("refuses an answer that reads a folder, which the browser can't apply", async () => {
+    const jwt = await seedLead()
+    modelAnswers({ templates: [{ pattern: "v{verse}", folder: "Kapitola {chapter}" }], book: "MAT" })
+    const response = await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody() }, testEnv())
+    expect(response.status).toBe(502)
+    expect(await response.json()).toMatchObject({ error: "invalid_naming_rule" })
+  })
+
+  it("refuses an answer that maps a word the app reads as one book to another, such as {Mark: MAT}", async () => {
+    const jwt = await seedLead()
+    modelAnswers({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { Mark: "MAT" } })
+    const response = await app.request("/api/v1/import/recording-names", { method: "POST", headers: authHeader(jwt), body: ruleBody() }, testEnv())
+    expect(response.status).toBe(502)
+    expect((await save(jwt, { templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { Mark: "MAT" } }, ["mark #-#"])).status).toBe(400)
+    expect(await storedShapes()).toEqual([])
+  })
+})
+
+describe("a book word that names no book is never kept (review, Oct 30)", () => {
+  const SERMONS = { templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { sermon: "MAT" } }
+
+  it("refuses to keep {sermon: MAT}, so next week's Mark sermons can't land on Matthew", async () => {
+    const jwt = await seedLead()
+    const response = await save(jwt, SERMONS, ["sermon_#_#"])
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: "naming_rule_not_savable" })
+    expect(await storedShapes()).toEqual([])
+  })
+
+  it("never hands one back, even written straight into the organization's settings", async () => {
+    const lead = await seedLead()
+    const written = { recordingNameRules: {
+      "sermon_#_#": { rule: SERMONS, savedAt: "2026-10-30T10:00:00.000Z" },
+      "mt-ch#_v#-#": { rule: { templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{verse}" }], books: { Mt: "MAT" } }, savedAt: "2026-10-30T10:00:01.000Z" },
+      "mt-ch#_v#": { rule: GOOD_RULE, savedAt: "2026-10-30T10:00:02.000Z" },
+    } }
+    await env.AQUILLA_PG.prepare("INSERT INTO org_settings (org_id, settings, version) VALUES (71, ?, 1)").bind(JSON.stringify(written)).run()
+    expect(Object.keys((await readSaved(lead)).rules)).toEqual(["mt-ch#_v#"])
+  })
+
+  it("keeps a word the project's own Bible file is named, and hands it back only where the project has that file", async () => {
+    const lead = await seedLead()
+    const MATEO = { templates: [{ pattern: "{book}_{chapter}_{verse}" }], books: { Mateo: "MAT" } }
+    expect((await save(lead, MATEO, ["mateo_#_#"])).status).toBe(400)
+    await env.AQUILLA_PG.prepare("INSERT INTO files (id, project_id, name, event_id, cell_count, role, book_code) VALUES ('mateo', ?, 'Mateo', 'e1', 10, 'source', 'MAT')").bind(PROJECT_ID).run()
+    expect((await save(lead, MATEO, ["mateo_#_#"])).status).toBe(200)
+    expect(Object.keys((await readSaved(lead)).rules)).toEqual(["mateo_#_#"])
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by, org_id) VALUES ('names-2', 'Names 2', 1, 71)").run()
+    expect(Object.keys((await readSaved(lead, "names-2")).rules)).toEqual([])
+  })
+})
+
+describe("odd shapes (review, Oct 30)", () => {
+  it("keeps a shape named __proto__ as a shape, never as the object's prototype", async () => {
+    const jwt = await seedLead()
+    const response = await save(jwt, GOOD_RULE, ["__proto__", "mt-ch#_v#"])
+    expect(await response.json()).toEqual({ saved: true })
+    expect(await storedShapes()).toEqual(["__proto__", "mt-ch#_v#"])
+    expect(Object.keys((await readSaved(jwt)).rules).sort()).toEqual(["__proto__", "mt-ch#_v#"])
   })
 })

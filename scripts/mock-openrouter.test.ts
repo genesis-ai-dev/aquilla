@@ -158,7 +158,8 @@ describe("scripted local agent", () => {
 describe("scripted recordings naming", () => {
   const ask = (names: string[], retry = false) => message(scriptMockResponse([
     { role: "system", content: "You work out how a folder of audio recordings is named, so an app can put each recording on its line." },
-    { role: "user", content: ["<file-names>", ...names, "</file-names>", ...(retry ? ["<failed-names>", `${names[0]} → no template fitted (noTemplate)`, "</failed-names>"] : [])].join("\n") },
+    // As the server sends them: each name a JSON string.
+    { role: "user", content: ["<file-names>", ...names.map((n) => JSON.stringify(n)), "</file-names>", ...(retry ? ["<failed-names>", `${JSON.stringify(names[0])} → no template fitted ("noTemplate")`, "</failed-names>"] : [])].join("\n") },
   ])).content as string
 
   it("reads Mt-ch19_v01 as the book, the chapter and the verse", () => {

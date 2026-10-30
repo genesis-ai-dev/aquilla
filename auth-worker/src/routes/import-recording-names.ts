@@ -44,6 +44,7 @@ import {
   MAX_RULE_NAMES,
   parseNamingRule,
   type NamingRule,
+  type ProjectBooks,
 } from "../../../shared/recording-naming-rule"
 
 const names = new Hono<{ Bindings: Env; Variables: Variables }>()
@@ -116,24 +117,25 @@ export function promptFor(input: z.output<typeof ruleRequestSchema>): Array<{ ro
     "Return one declarative naming rule as JSON only. Never return code, regular expressions or a list of assignments.",
   ].join(" ")
   const user = [
-    "Return JSON: {\"templates\":[{\"pattern\":string,\"folder\"?:string}], \"books\"?:{word:CODE}, \"book\"?:CODE, \"chapter\"?:number, \"file\"?:string, \"explanation\":string}.",
-    "A template is the file name WITHOUT its extension, written as literal text plus placeholders: {book} {chapter} {verse} {verseInBook} {line} {take} {part} {any}.",
-    "{verseInBook} is a verse counted from the book's first verse. {line} is a line's position in a document. {any} is text to ignore.",
-    "Never put two number placeholders side by side without text between them. Use \"folder\" only when the folder's own name carries a value (for example \"Chapter {chapter}\").",
-    "\"books\" maps a book word used in the names to a USFM code from the outline (\"Mt\": \"MAT\"). \"book\" and \"chapter\" are constants for when the names never say them. \"file\" names the project file when the recordings are for a document, not a Bible book.",
+    "Return JSON: {\"templates\":[{\"pattern\":string}], \"books\"?:{word:CODE}, \"book\"?:CODE, \"chapter\"?:number, \"file\"?:string, \"explanation\":string}.",
+    "A template is the file name WITHOUT its extension, written as literal text plus placeholders: {book} {chapter} {verse} {toVerse} {verseInBook} {line} {take} {part} {any}.",
+    "{toVerse} is the last verse of a recording that covers several verses, after {verse} (\"v01-03\" is \"v{verse}-{toVerse}\"). {verseInBook} is a verse counted from the book's first verse. {line} is a line's position in a document. {any} is text to ignore.",
+    "Use each placeholder at most once in a template ({any} may appear twice). Never put two number placeholders side by side without text between them.",
+    "\"books\" maps a book word used in the names to the USFM code of the book that word names (\"Mt\": \"MAT\"), from the outline. \"book\" and \"chapter\" are constants for when the names never say them. \"file\" names the project file when the recordings are for a document, not a Bible book.",
     "Use at most two templates. \"explanation\" is one plain sentence a person reads, saying what each part of the names means.",
+    "Each file name below is a JSON string.",
     "<project-outline>",
     input.outline,
     "</project-outline>",
     "<file-names>",
-    ...input.names,
+    ...input.names.map((name) => JSON.stringify(name)),
     "</file-names>",
     ...(input.previous && input.failures?.length
       ? [
           "This rule was tried and did not fit the names below. Return a corrected rule.",
           `<previous-rule>${JSON.stringify(withoutVersion(input.previous))}</previous-rule>`,
           "<failed-names>",
-          ...input.failures.map((f) => `${f.name} → ${f.made ?? "no template fitted"} (${f.reason})`),
+          ...input.failures.map((f) => `${JSON.stringify(f.name)} → ${f.made != null ? JSON.stringify(f.made) : "no template fitted"} (${JSON.stringify(f.reason)})`),
           "</failed-names>",
         ]
       : []),
@@ -149,6 +151,20 @@ function withoutVersion(rule: NamingRule): Omit<NamingRule, "version"> {
 async function projectOrg(env: Env, projectId: string): Promise<number> {
   const project = await env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?").bind(projectId).first<{ org_id: number | null }>()
   return project?.org_id ?? 0
+}
+
+/**
+ * The project's Bible files, each with the book its import recorded: what
+ * the browser's preview reads a rule's book words with too, so both sides
+ * keep the same rules (review, Oct 30). A word one of these files is called
+ * ("Mateo" → MAT) names that book.
+ */
+async function projectBooks(env: Env, projectId: string): Promise<ProjectBooks> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT name, book_code FROM files
+      WHERE project_id = ? AND deleted_at IS NULL AND book_code IS NOT NULL AND (role IS NULL OR role = 'source')`,
+  ).bind(projectId).all<{ name: string; book_code: string }>()
+  return (rows.results ?? []).map((row) => ({ name: row.name, code: row.book_code.toUpperCase() }))
 }
 
 type Gate = { ok: true; orgId: number } | { ok: false; status: 403; body: { error: string; message: string } }
@@ -258,25 +274,33 @@ interface SavedEntry {
   rule: NamingRule
   savedAt: string
 }
-type SavedRules = Record<string, SavedEntry>
+/** By shape. A Map, so a shape named "__proto__" is a shape like any other. */
+type SavedRules = Map<string, SavedEntry>
 
-/** The organization's kept rules, each entry read on its own: one bad entry is
- *  dropped and the rest still work. */
+/** The organization's kept rules, each entry read on its own with the full
+ *  shared format checks: one bad entry is dropped and the rest still work.
+ *  The settings are also written by the organization's settings page (PUT
+ *  /api/v2/orgs/:id/settings), so nothing here trusts how they were written. */
 function savedFrom(settingsJson: string | null | undefined): SavedRules {
+  const out: SavedRules = new Map()
   let saved: unknown
   try {
     saved = (JSON.parse(settingsJson ?? "{}") as Record<string, unknown> | null)?.[SAVED_KEY]
   } catch {
-    return {}
+    return out
   }
-  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {}
-  const out: SavedRules = {}
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return out
   for (const [shape, entry] of Object.entries(saved as Record<string, unknown>)) {
     if (!entry || typeof entry !== "object") continue
     const rule = parseNamingRule((entry as { rule?: unknown }).rule)
-    if (rule) out[shape] = { rule, savedAt: String((entry as { savedAt?: unknown }).savedAt ?? "") }
+    if (rule) out.set(shape, { rule, savedAt: String((entry as { savedAt?: unknown }).savedAt ?? "") })
   }
   return out
+}
+
+/** The same rule, whenever and under whichever shape it was kept. */
+function sameRule(a: NamingRule, b: NamingRule): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /** One save keeps one rule under up to five shapes; they share its savedAt. */
@@ -290,7 +314,7 @@ function ruleKey(entry: SavedEntry): string {
  */
 function capped(saved: SavedRules): SavedRules {
   const groups = new Map<string, { savedAt: string; shapes: string[] }>()
-  for (const [shape, entry] of Object.entries(saved)) {
+  for (const [shape, entry] of saved) {
     const key = ruleKey(entry)
     const group = groups.get(key) ?? { savedAt: entry.savedAt, shapes: [] }
     group.shapes.push(shape)
@@ -299,7 +323,7 @@ function capped(saved: SavedRules): SavedRules {
   const keep = new Set(
     [...groups.values()].sort((a, b) => b.savedAt.localeCompare(a.savedAt)).slice(0, MAX_SAVED_RULES).flatMap((g) => g.shapes),
   )
-  return Object.fromEntries(Object.entries(saved).filter(([shape]) => keep.has(shape)))
+  return new Map([...saved].filter(([shape]) => keep.has(shape)))
 }
 
 /**
@@ -317,7 +341,8 @@ async function updateSaved(env: Env, orgId: number, userId: number, change: (sav
     } catch {
       settings = {}
     }
-    const json = JSON.stringify({ ...settings, [SAVED_KEY]: change(savedFrom(row?.settings)) })
+    // Object.fromEntries makes own properties, so "__proto__" stays a shape.
+    const json = JSON.stringify({ ...settings, [SAVED_KEY]: Object.fromEntries(change(savedFrom(row?.settings))) })
     if (!row) {
       try {
         await env.AQUILLA_PG.prepare("INSERT INTO org_settings (org_id, settings, version, updated_by) VALUES (?, ?, ?, ?)").bind(orgId, json, 1, userId).run()
@@ -337,8 +362,10 @@ async function updateSaved(env: Env, orgId: number, userId: number, change: (sav
 }
 
 // The organization's kept rules, for this project's upload: anyone who may
-// bulk upload recordings may use them. A rule that leans on a constant is never
-// handed back, even one an older version of the app kept.
+// bulk upload recordings may use them. Every rule is checked again with the
+// full shared checks, read with this project's Bible files: a rule that leans
+// on a constant, or on a book word that names no book, is never handed back,
+// whoever wrote it into the settings.
 names.get("/recording-names/saved", authMiddleware, async (c) => {
   const projectId = (c.req.query("projectId") ?? "").trim()
   if (!projectId) return c.json({ error: "projectId required" }, 400)
@@ -350,44 +377,52 @@ names.get("/recording-names/saved", authMiddleware, async (c) => {
   const orgId = await projectOrg(c.env, projectId)
   if (!orgId) return c.json({ rules: {} })
   const row = await c.env.AQUILLA_PG.prepare("SELECT settings FROM org_settings WHERE org_id = ?").bind(orgId).first<{ settings: string }>()
-  const rules = Object.entries(savedFrom(row?.settings))
-    .filter(([, entry]) => isSavableRule(entry.rule))
+  const books = await projectBooks(c.env, projectId)
+  const rules = [...savedFrom(row?.settings)]
+    .filter(([, entry]) => isSavableRule(entry.rule, { projectBooks: books }))
     .map(([shape, entry]) => [shape, withoutVersion(entry.rule)] as const)
   return c.json({ rules: Object.fromEntries(rules) })
 })
 
 // Keep a rule the person confirmed an upload with. The browser sends only a
 // rule that placed every name by reading it; this refuses any rule that leans
-// on a constant, whatever the browser thought.
+// on a constant or on a book word that names no book, whatever the browser
+// thought.
 names.post("/recording-names/saved", authMiddleware, zValidator("json", saveRequestSchema), async (c) => {
   const input = c.req.valid("json")
   const user = c.get("user")
   const gate = await mayChangeSaved(c.env, user, input.projectId)
   if (!gate.ok) return c.json(gate.body, gate.status)
-  if (!isSavableRule(input.rule)) {
+  if (!isSavableRule(input.rule, { projectBooks: await projectBooks(c.env, input.projectId) })) {
     return c.json({ error: "naming_rule_not_savable", message: "A naming that relies on a book, chapter or file it was told is used for one upload only." }, 400)
   }
   const saved = await updateSaved(c.env, gate.orgId, user.id, (current) => {
     // Strictly after every rule already kept, so "oldest first" holds even
     // for two saves in the same millisecond.
-    const newest = Math.max(0, ...Object.values(current).map((e) => Date.parse(e.savedAt) || 0))
+    const newest = Math.max(0, ...[...current.values()].map((e) => Date.parse(e.savedAt) || 0))
     const savedAt = new Date(Math.max(Date.now(), newest + 1)).toISOString()
-    const next = { ...current }
-    for (const shape of input.shapes) next[shape] = { rule: input.rule, savedAt }
+    const next = new Map(current)
+    for (const shape of input.shapes) next.set(shape, { rule: input.rule, savedAt })
     return capped(next)
   })
   return c.json({ saved })
 })
 
-// "Don't use this naming" on a team's saved rule: forget it for these shapes,
-// with the same rights as keeping one.
+// "Forget this naming for the team" on a saved rule: the rule kept under these
+// shapes is forgotten under every shape it is kept under, so it can't come
+// back through another one (review, Oct 30). The same rights as keeping one.
 names.delete("/recording-names/saved", authMiddleware, zValidator("json", forgetRequestSchema), async (c) => {
   const input = c.req.valid("json")
   const user = c.get("user")
   const gate = await mayChangeSaved(c.env, user, input.projectId)
   if (!gate.ok) return c.json(gate.body, gate.status)
-  const forgotten = await updateSaved(c.env, gate.orgId, user.id, (current) =>
-    Object.fromEntries(Object.entries(current).filter(([shape]) => !input.shapes.includes(shape))))
+  const forgotten = await updateSaved(c.env, gate.orgId, user.id, (current) => {
+    const rules = input.shapes.flatMap((shape) => {
+      const entry = current.get(shape)
+      return entry ? [entry.rule] : []
+    })
+    return new Map([...current].filter(([shape, entry]) => !input.shapes.includes(shape) && !rules.some((rule) => sameRule(rule, entry.rule))))
+  })
   return c.json({ forgotten })
 })
 

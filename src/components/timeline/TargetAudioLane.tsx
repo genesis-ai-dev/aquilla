@@ -1370,6 +1370,19 @@ function TargetAudioChip({
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
         </span>
       )}
+      {/* AQU-2212: while the line is being generated or re-voiced, a clip too
+          short for the name bar (which says it there) still says so, as every
+          clip did before the bar (AQU-2235): bottom left, past the sparkle. */}
+      {!hasBar && voicingAs && (
+        <span
+          role="status"
+          data-testid={`tl-target-${testKey}-working`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          <Spinner className="size-3 shrink-0" />
+          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+        </span>
+      )}
       {/* AQU-2235: THE NAME BAR (see `barH` above). Everything that used to
           sit on the waveform at this height is in here now: the corner state
           glyph, the sparkle, the take's name, the "?" of an unmeasured take,

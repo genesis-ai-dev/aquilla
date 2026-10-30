@@ -951,7 +951,6 @@ export const editor = defineNamespace({
     "editor.timeline.timingLengthSeconds": "{seconds} s",
     "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
     "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
-    "editor.timeline.takeLeadPause": "A pause someone left before this take",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -973,6 +972,8 @@ export const editor = defineNamespace({
     // thing differently. Only the reason the Audio tab has no equivalent of
     // is keyed here.
     "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
+    "editor.timeline.takeMenuMakeCharacter": "Make a character from this voice",
+    "editor.timeline.takeMenuSplitAtPlayhead": "Split at the playhead",
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
     "editor.timeline.takeMenuUnapprove": "Remove my approval",
@@ -1826,9 +1827,10 @@ export const editor = defineNamespace({
       other: "{count} lines with no speech nearby",
     }),
 
-    // — Per-cell voice panel (audio lens) ————————————————————————
-    "editor.voice.volumeLevel": "Volume level",
+    // — A line's voice (the timeline's take menu, the Voices tab) ——————————
     "editor.voice.play": "Play this line",
+    // AQU-2212's one-step clone (components/cell/CloneFromTakeButton). Its
+    // card left with the Audio view (AQU-1758); kept for the take's new homes.
     "editor.voice.clone": "Clone voice from take",
     "editor.voice.cloneTitle": "Make a voice from this take",
     "editor.voice.cloneNamePlaceholder": "Voice name",
@@ -1836,35 +1838,29 @@ export const editor = defineNamespace({
     "editor.voice.cloneSubmit": "Add to cast",
     "editor.voice.cloneMoreOptions": "More options",
     "editor.voice.clonedToast": "{name} is in the cast",
+    // AQU-2212's voice card, its jobs moved (AQU-1758): the one-click when a
+    // line's voice and its take disagree, the work in progress, and what a
+    // line nobody cast names a person's take.
     "editor.voice.changeTo": "Change to {voice}",
+    "editor.voice.generateWith": "Generate · {voice}",
     "editor.voice.workingAs": "Voicing as {voice}…",
     "editor.voice.yourRecording": "Your recording",
     "editor.voice.recordedBy": "Recorded by {name}",
     "editor.voice.originalAudio": "Original audio",
-    "editor.voice.generateFromText": "Generate audio from text",
     "editor.voice.changeVoice": "Change voice",
-    "editor.voice.changeVoiceTooltip": "Keep the words and timing, swap to {name}",
     "editor.voice.changeVoiceNeedsClone": "{name} has no reference clip. Assign a cloned voice to change this take.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
     "editor.voice.changeVoiceQuality": "Quality",
     "editor.voice.changeVoiceQuality.fast": "Fast",
     "editor.voice.changeVoiceQuality.standard": "Standard",
     "editor.voice.changeVoiceQuality.high": "High",
-    "editor.voice.changeVoiceQualityTooltip": "How closely the converted take matches the voice. Higher takes longer.",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
-    // Sam, 2026-09-28: the Audio view card — the take, then a row with its voice.
-    "editor.voice.generateWith": "Generate · {voice}",
-    "editor.voice.nothingToReadTooltip": "Nothing to read yet — translate the line first",
-    "editor.voice.generatingAs": "Generating as {voice}…",
-    "editor.voice.tryAgain": "Try again",
-    "editor.voice.failedTooltip": "Couldn’t generate: {reason}",
+    // AQU-1758: a take's voice, named on its timeline clip when it is not the line's.
     "editor.voice.removedVoice": "Removed voice",
     "editor.voice.takeVoiceDiffers": "This take was voiced by {takeVoice}. The line’s voice is now {lineVoice}.",
     "editor.voice.takeVoiceRemoved": "This take was voiced by a voice no longer in the project. The line’s voice is now {lineVoice}.",
-    "editor.voice.noAudioYet": "No audio yet",
-    "editor.voice.record": "Record",
     // Sam, 2026-09-28: marks in the table header naming its narrow columns.
     "editor.gutter.select": "Select lines for batch actions. Drag up or down the column to select a range.",
     "editor.gutter.notices": "Notices: open comments, a changed source, lost formatting, a voice that failed",
@@ -2042,9 +2038,6 @@ export const editor = defineNamespace({
     }),
 
     // — Table header, lane switcher and whole-file empty states ——————
-    "editor.column.controls": "Controls",
-    "editor.audioLens.trackColorAria": "Audio color: {color}",
-    "editor.audioLens.trackColorLabel": "Audio color",
     "editor.lane.activeAria": "Active translation lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
@@ -5761,7 +5754,7 @@ export const editor = defineNamespace({
       },
       "editor.selection.voiceTogether": {
         description:
-          "Button in the selection toolbar (audio lens only) that synthesizes the " +
+          "Button in the selection toolbar (Media only) that synthesizes the " +
           "selected lines into ONE continuous recording rather than one clip per " +
           "line. 'Together' is the whole point — keep that sense.",
         maxLength: 22,
@@ -6583,11 +6576,6 @@ export const editor = defineNamespace({
         description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
         placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
       },
-      "editor.timeline.takeLeadPause": {
-        description:
-          "Hover text on a faint stretch of the timeline just before a recording, inside its " +
-          "line: the person who placed or recorded the take left this pause before it.",
-      },
       "editor.timeline.qualityToggleAria": {
         description:
           "Accessible name of the toolbar toggle that chooses how synthesized voices " +
@@ -6660,6 +6648,22 @@ export const editor = defineNamespace({
           "Shown in place of the 'Change voice' item in a take's right-click menu, greyed out: " +
           "this take is the reference clip some cloned voice was made from, so converting it " +
           "would change what that voice sounds like. It is left as it is.",
+        maxLength: 40,
+      },
+      "editor.timeline.takeMenuSplitAtPlayhead": {
+        description:
+          "Item in a take's menu when it is opened from the take's ⋯ button rather than by " +
+          "right-clicking: cuts the take in two where the playhead (the timeline's position " +
+          "line) crosses it. Greyed out when the playhead is not on this take.",
+        maxLength: 32,
+      },
+      "editor.timeline.takeMenuMakeCharacter": {
+        description:
+          "Item in a take's right-click menu on the timeline, and the tooltip of a button " +
+          "on the take in a line's Recording tab: opens the New voice dialog, cloning, " +
+          "seeded with this take, to make a new character (a reusable voice for the " +
+          "project's cast) that sounds like it. 'Character' is a cast member, as in the " +
+          "Voices tab.",
         maxLength: 40,
       },
       "editor.timeline.takeMenuDeletePiece": {
@@ -6915,11 +6919,6 @@ export const editor = defineNamespace({
           "parked there: they carry no timecode.",
         maxLength: 20,
       },
-      "editor.voice.volumeLevel": {
-        description:
-          "Screen-reader name of the volume slider itself, inside that popover. " +
-          "Distinct from common.volume so the two do not read identically.",
-      },
       "editor.voice.play": {
         description:
           "Tooltip and screen-reader name of the round play button over the " +
@@ -6936,51 +6935,43 @@ export const editor = defineNamespace({
         description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
         placeholders: { name: "The new voice's name, e.g. 'Ana'." },
       },
-      "editor.voice.changeTo": {
-        description: "Button beside a line's voice field: re-voices the line's audio into the voice it is cast as.",
-        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
-      },
-      "editor.voice.workingAs": {
-        description: "Status beside a line's voice field while its audio is being generated or re-voiced.",
-        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
-      },
-      "editor.voice.yourRecording": { description: "Shown in a line's voice field when the audio is the current user's own recording and no voice is assigned." },
-      "editor.voice.recordedBy": {
-        description: "Shown in a line's voice field when the audio is someone's recording and no voice is assigned.",
-        placeholders: { name: "Username of the person who recorded it." },
-      },
-      "editor.voice.originalAudio": { description: "Shown in a line's voice field when the audio is the imported original programme audio." },
       "editor.voice.clone": {
         description:
-          "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
+          "Tooltip of the clone (copy-plus) button on a take, which turns this " +
           "recording into a reusable synthetic voice for the project's cast. " +
           "'Clone' is the voice-synthesis term for copying a speaker's sound. " +
           "Keep it a short label, like the English.",
         maxLength: 24,
       },
-      "editor.voice.generateFromText": {
+      "editor.voice.changeTo": {
         description:
-          "Label of the button that synthesizes this line's translated text as " +
-          "speech in the assigned voice. On a line that already has a take it is " +
-          "an icon, and this same phrase is its tooltip and screen-reader name. " +
-          "'From text' contrasts it with 'Change voice', which works from existing " +
-          "audio instead.",
-        maxLength: 28,
+          "Button in a line's Recording tab, and the first item of its take's menu on the timeline, " +
+          "when the line's voice and its take disagree: re-voices the take into the voice the line is cast as.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
       },
+      "editor.voice.generateWith": {
+        description:
+          "The same button when the voice cannot re-voice the take: synthesizes the line's text in the " +
+          "named voice (the line's character, or the project's default voice).",
+        placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
+        maxLength: 32,
+      },
+      "editor.voice.workingAs": {
+        description: "Status in a line's Recording tab, and on its clip on the timeline, while its audio is being generated or re-voiced.",
+        placeholders: { voice: "Voice name, e.g. 'Hearth'." },
+      },
+      "editor.voice.yourRecording": { description: "What a line's voice circle names its take when the audio is the current user's own recording and no voice is assigned." },
+      "editor.voice.recordedBy": {
+        description: "What a line's voice circle names its take when the audio is someone's recording and no voice is assigned.",
+        placeholders: { name: "Username of the person who recorded it." },
+      },
+      "editor.voice.originalAudio": { description: "What a line's voice circle names its take when the audio is the imported original programme audio." },
       "editor.voice.changeVoice": {
         description:
           "Name of the icon on a line that already has a take, and of the button " +
           "inside the popover it opens. It keeps the recording and makes it sound " +
           "like the assigned cloned voice. No new speech is generated from text.",
         maxLength: 18,
-      },
-      "editor.voice.changeVoiceTooltip": {
-        description:
-          "Tooltip on 'Change voice'. The words and their timing stay as recorded; " +
-          "only who the speaker sounds like changes.",
-        placeholders: {
-          name: "The assigned voice's name from the project's cast — user data, never translate it.",
-        },
       },
       "editor.voice.changeVoiceNeedsClone": {
         description:
@@ -7019,11 +7010,6 @@ export const editor = defineNamespace({
           "Change voice quality option. The closest match, and the slowest.",
         maxLength: 10,
       },
-      "editor.voice.changeVoiceQualityTooltip": {
-        description:
-          "Tooltip on the Change voice quality menu. Explains that the choice is a " +
-          "trade of likeness against waiting time.",
-      },
       "editor.voice.voicing": {
         description:
           "Status text while text-to-speech is producing this line's audio, in both the " +
@@ -7031,49 +7017,19 @@ export const editor = defineNamespace({
           "'to voice'. Rendered as small as 9px, so keep it very short.",
         maxLength: 12,
       },
-      "editor.voice.generateWith": {
-        description:
-          "Button on an Audio view line that has no audio yet: synthesizes the line in " +
-          "the named voice (the line's character, or the project's default voice).",
-        placeholders: { voice: "The voice's display name, e.g. 'Narrator'." },
-        maxLength: 32,
-      },
-      "editor.voice.nothingToReadTooltip": {
-        description:
-          "Tooltip on the greyed-out Generate button when the line has no translation " +
-          "yet: there are no words to synthesize. Says what to do.",
-      },
-      "editor.voice.generatingAs": {
-        description:
-          "Status in an Audio view line's empty slot while its voice is being " +
-          "synthesized, naming the voice.",
-        placeholders: { voice: "The voice's display name." },
-        maxLength: 32,
-      },
-      "editor.voice.tryAgain": {
-        description:
-          "Button that retries synthesizing a line's voice after it failed. Its " +
-          "tooltip gives the reason.",
-        maxLength: 14,
-      },
-      "editor.voice.failedTooltip": {
-        description:
-          "Tooltip on that Try again button: why the last attempt to synthesize the " +
-          "line's voice failed.",
-        placeholders: { reason: "The error message from the voice service." },
-      },
       "editor.voice.removedVoice": {
         description:
-          "Small tag on a generated (synthetic) voice's waveform in the Audio view, " +
-          "where the tag normally shows the name of the voice the take was made in: " +
-          "that voice has since been removed from the project.",
+          "Small label on a generated (synthetic) take's clip on the timeline, where " +
+          "the label normally shows the name of the voice the take was made in: that " +
+          "voice has since been removed from the project.",
         maxLength: 16,
       },
       "editor.voice.takeVoiceDiffers": {
         description:
-          "Tooltip on a small tag on a generated (synthetic) voice's waveform, shown " +
-          "when the take was made in a different voice from the one the line now has " +
-          "(choosing a voice for a line does not regenerate its audio).",
+          "Tooltip of a generated (synthetic) take's clip on the timeline, whose small " +
+          "label names the voice it was made in, shown when that is a different voice " +
+          "from the one the line now has (choosing a voice for a line does not " +
+          "regenerate its audio).",
         placeholders: {
           takeVoice: "The name of the voice the take was made in (e.g. 'Mary').",
           lineVoice: "The name of the voice the line now has (e.g. 'Juan').",
@@ -7084,18 +7040,6 @@ export const editor = defineNamespace({
           "The same tooltip when the voice the take was made in has since been removed " +
           "from the project.",
         placeholders: { lineVoice: "The name of the voice the line now has (e.g. 'Juan')." },
-      },
-      "editor.voice.noAudioYet": {
-        description:
-          "Shown in an Audio view line's empty slot to someone who can't generate or " +
-          "record: the line has no audio.",
-        maxLength: 24,
-      },
-      "editor.voice.record": {
-        description:
-          "Button in an Audio view line's empty slot that opens the recorder on this " +
-          "line. Imperative verb.",
-        maxLength: 14,
       },
       "editor.gutter.select": {
         description:
@@ -7897,27 +7841,6 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.column.controls": {
-        description:
-          "Heading of the editing table's left column in the audio lens, where the " +
-          "per-line voice and playback controls sit instead of source text. Replaces " +
-          "editor.column.source in that mode, so it must read as a column heading.",
-        maxLength: 14,
-      },
-      "editor.audioLens.trackColorAria": {
-        description:
-          "Screen-reader name of a small coloured dot beside the 'Controls' heading " +
-          "in the audio lens. Pressing it opens six colours to choose from; the one " +
-          "chosen colours every recording in this file, for everyone on the project " +
-          "(the same colour the timeline shows for the file's dub track).",
-        placeholders: { color: "The name of the colour currently chosen, e.g. 'Green'." },
-      },
-      "editor.audioLens.trackColorLabel": {
-        description:
-          "Small heading at the top of that colour menu, above six colour swatches " +
-          "(no names). The colour chosen applies to the whole file's audio.",
-        maxLength: 32,
-      },
       "editor.lane.activeAria": {
         description:
           "Screen-reader name of the pill in the table header that shows which " +
@@ -7966,7 +7889,7 @@ export const editor = defineNamespace({
       },
       "editor.empty.noMediaSegments": {
         description:
-          "Heading filling the editing area in the audio lens when a timed file has " +
+          "Heading filling the editing area in Media when a timed file has " +
           "no media clips yet. 'Segments' are the individual timed pieces.",
         maxLength: 30,
       },

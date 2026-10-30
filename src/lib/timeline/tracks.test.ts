@@ -174,6 +174,31 @@ describe("deriveDefaultTracks — the derivation context", () => {
     for (const track of before) expect(after.get(track.id)).toBe(track.order)
   })
 
+  // AQU-1758: books and documents open on the timeline since the Audio view
+  // went. Without source audio of their own they have no Source-audio row.
+  it("gives a book or document with no source audio no Source-audio row", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    expect(shape(deriveDefaultTracks(BOOK))).toEqual([
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
+      ["target-audio", "target-audio", "Target audio", 3, null],
+    ])
+    // A timed file that is neither subtitles nor media keeps its three rows.
+    expect(shape(deriveDefaultTracks({ ...BOOK, sequenceOrdered: false }))).toEqual(DEFAULT_SHAPE)
+  })
+
+  it("keeps the Source-audio row on a book that has source audio to draw", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    for (const extra of [{ hasSourceAudio: true }, { hasAudioCues: true }, { hasLinkedVideoSound: true }]) {
+      expect(deriveDefaultTracks({ ...BOOK, ...extra }).map((t) => t.id)).toEqual([
+        "source-subtitles", "source-audio", "target-audio",
+      ])
+    }
+  })
+
   it("lets media cells win over the subtitle-import flag", () => {
     // A file cannot honestly be both; if both arrive true the caller is mid-
     // transition or holding a stale memo, and the legacy shape hides no row.

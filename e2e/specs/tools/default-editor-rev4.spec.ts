@@ -113,11 +113,12 @@ test("the extension editor carries the source toolbar, the source menu, the foot
   await audioVote.click()
   await expect(audioVote).toHaveAttribute("data-state", "full", { timeout: 15_000 })
 
-  // ── Audio lens: the take's waveform, play and the voice picker.
-  // AQU-2196 (board 55): only the open view keeps its label, so the Audio
-  // tab is its icon with an accessible name — find it by role and name, as
-  // Workspace.viewTab does, never by its text.
-  await alice.getByRole("tab", { name: "Audio", exact: true }).click()
+  // ── Audio lens: the take's waveform, play and the voice picker. The host's
+  // mode switch names it Media on every file (AQU-1758); the extension keeps
+  // its own Audio lens inside the frame. The switch names its views by their
+  // tabs' accessible names: only the open view shows its label beside its
+  // icon (AQU-2196, board 55).
+  await alice.getByRole("tab", { name: "Media", exact: true }).click()
   await expect(row("MAT 1:1").getByTestId("voice-waveform")).toBeVisible({ timeout: 20_000 })
   await expect(row("MAT 1:1").getByRole("button", { name: /Play/ })).toBeVisible()
 })

@@ -201,7 +201,7 @@ export const audio = defineNamespace({
     "audio.newVoice.mmsOtherCode": "Other MMS code",
     "audio.newVoice.mmsCodeLabel": "MMS code",
 
-    // VoicePlaybackBar — the Audio lens' bottom transport bar.
+    // VoicePlaybackBar — the Media view's bottom playback strip.
     "audio.playbackBar.lineFallback": "Line",
     "audio.playbackBar.nothingPlaying": "Nothing playing",
     "audio.playbackBar.pressPlayToListen": "Press play to listen",
@@ -642,7 +642,6 @@ export const audio = defineNamespace({
     "audio.castGutter.noCharacter": "No character",
     "audio.castGutter.addVoice": "Add a voice…",
     "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
-    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -750,7 +749,7 @@ export const audio = defineNamespace({
   context: {
     _context: {
       description:
-        "The Audio Studio (\"Audio lens\") — recording, TTS generation, voice " +
+        "Audio in the Media view — recording, TTS generation, voice " +
         "management, and playback for turning a translated project into narrated " +
         "audio. Domain terms translators will not know from the English alone: a " +
         "'take' is one recorded or generated audio attempt for a line (there can be " +
@@ -844,8 +843,8 @@ export const audio = defineNamespace({
       },
       "audio.castGutter.addVoice": { description: "Last row of a line's voice dropdown: opens the New voice dialog to add a voice to the cast." },
       "audio.castGutter.recordingTooltip": {
-        description: "Tooltip of a line's voice field when its audio is a person's recording and no voice is assigned.",
-        placeholders: { label: "What the field shows, e.g. 'Your recording' or 'Recorded by Ana'." },
+        description: "Tooltip of a line's voice circle in the Media table when its audio is a person's recording and no voice is assigned.",
+        placeholders: { label: "What the circle names the take, e.g. 'Your recording' or 'Recorded by Ana'." },
       },
       "audio.characters.filterGroupAriaLabel": {
         description:
@@ -2970,16 +2969,6 @@ export const audio = defineNamespace({
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
       },
-      "audio.castGutter.defaultVoiceLabel": {
-        description:
-          "The voice field under a line's waveform in the Audio view, when nobody " +
-          "chose a character for the line and it falls back to the default voice — " +
-          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
-        placeholders: {
-          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
-        },
-        maxLength: 32,
-      },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:
           "Accessible name of the cast-gutter avatar's popover-trigger button, which " +
@@ -3386,12 +3375,12 @@ export const audio = defineNamespace({
   surfaces: [
     {
       id: "audio-studio",
-      title: "Audio Studio",
+      title: "Media view",
       route: "/project/:projectId/voice",
       notes:
-        "The Audio lens: left Voices sidebar (select/create/edit/delete voices), " +
-        "center editor rows with per-line record/generate controls, and a bottom " +
-        "transport bar for playback. Take chips, record dialog, and clone-reference " +
+        "The Media view: left Voices sidebar (select/create/edit/delete voices), " +
+        "the timeline over the editor rows with per-line record/generate controls, " +
+        "and a bottom playback strip. Take chips, record dialog, and clone-reference " +
         "controls all nest inside this surface's dialogs and panels.",
     },
   ],

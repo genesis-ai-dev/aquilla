@@ -359,6 +359,27 @@ describe("whose recording it acts on", () => {
   })
 })
 
+// AQU-1758: the Audio view's voice card turned a take into a character; the
+// take in the Recording tab does now.
+describe("make a character from this voice", () => {
+  it("offers it on the take and asks for it once", () => {
+    const onMakeCharacter = vi.fn()
+    draw({ onMakeCharacter })
+    fireEvent.click(screen.getByRole("button", { name: "Make a character from this voice" }))
+    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+  })
+
+  it("is not offered when nobody handed it in", () => {
+    draw()
+    expect(screen.queryByTestId("cell-take-make-character")).toBeNull()
+  })
+
+  it("cannot be pressed by someone who cannot edit", () => {
+    draw({ onMakeCharacter: vi.fn(), editable: false })
+    expect(screen.getByTestId("cell-take-make-character")).toBeDisabled()
+  })
+})
+
 describe("what its line says (Sam, 2026-09-30)", () => {
   it("names the track before the take when it is given one", () => {
     draw({ trackName: "Track" })

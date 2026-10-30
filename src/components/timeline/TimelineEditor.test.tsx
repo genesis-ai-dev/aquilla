@@ -1503,7 +1503,7 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+  it("following the recordings, a pause someone left before a take is plain timeline, and the line keeps it (AQU-2204)", () => {
     const takeId = "audio-p1-1700000000-take.webm"
     const placed = cell({
       id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
@@ -1518,117 +1518,15 @@ describe("TimelineEditor — audio-first mode", () => {
         onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
       />,
     )
-    const gap = screen.getByTestId("tl-target-lead-p1")
-    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
-    // The take starts where the pause ends.
-    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
-  })
-
-  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
-  // what it is on a click of it.
-  it("the pause before a take says what it is on a click, not a hover", async () => {
-    const takeId = "audio-p1-1700000000-take.webm"
-    const placed = cell({
-      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-      attachments: {
-        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
-        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-      },
-    } as unknown as Partial<CellData>)
-    renderWithTooltips(
-      <TimelineEditor
-        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
-        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
-      />,
-    )
-    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
-  })
-
-  // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
-  // move a recorded take around in the timeline." Following the recordings a
-  // take is NOT locked to the front of its line — dragging it right leaves a
-  // pause before it, dragging it left shortens that pause back to none. What
-  // is stored is the pause, measured from the line's own start, never the
-  // programme second the chip was dropped on.
-  describe("following the recordings, a take still moves inside its line (AQU-2215)", () => {
-    const takeId = "audio-p1-1700000000-take.webm"
-    const placedCell = (offsetMs?: number) =>
-      cell({
-        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-        attachments: {
-          [takeId]: {
-            type: "audio", url: "frontier-audio://take", durationMs: 2_000,
-            ...(offsetMs != null ? { targetOffsetMs: offsetMs } : {}),
-          },
-          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-        },
-      } as unknown as Partial<CellData>)
-
-    const renderOne = (offsetMs: number | undefined, onRetimeTarget: () => void) =>
-      renderWithTooltips(
-        <TimelineEditor
-          fileId="pz" coreMediaUrl={null} editable cells={[placedCell(offsetMs)]} timingMode="audioFirst"
-          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
-        />,
-      )
-
-    /** The chip's own px/s, so the drag does not depend on the default zoom. */
-    const chipPxPerSec = (chip: Element) => px(chip, "width") / 2
-
-    it("dragging the take right stores the pause it leaves before its line", () => {
-      const onRetimeTarget = vi.fn()
-      renderOne(undefined, onRetimeTarget)
-      const chip = screen.getByTestId("tl-target-p1")
-      const perSec = chipPxPerSec(chip)
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 400 + perSec })
-      fireEvent.pointerUp(window, { clientX: 400 + perSec })
-      // Dragged 1 s right on a line starting at file second 0 → a 1 s pause,
-      // so the anchor stored is 1. Before this, the handler was withheld
-      // entirely in this mode and the chip could not be dragged at all.
-      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
-      const [cellId, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
-      expect(cellId).toBe("p1")
-      expect(anchorSec).toBeCloseTo(1, 2)
-    })
-
-    it("dragging it back past the line's start shortens the pause to none, never below", () => {
-      const onRetimeTarget = vi.fn()
-      // Starts with a 1.5 s pause already.
-      renderOne(1_500, onRetimeTarget)
-      const chip = screen.getByTestId("tl-target-p1")
-      const perSec = chipPxPerSec(chip)
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 400 - perSec * 5 })
-      fireEvent.pointerUp(window, { clientX: 400 - perSec * 5 })
-      const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
-      // The line's own start — a take never begins before the line it performs.
-      expect(anchorSec).toBeCloseTo(0, 2)
-    })
-
-    it("a take of unknown length stays locked — there is no pause it could hold", () => {
-      const onRetimeTarget = vi.fn()
-      const vague = cell({
-        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-        attachments: {
-          [takeId]: { type: "audio", url: "frontier-audio://take" },
-          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-        },
-      } as unknown as Partial<CellData>)
-      renderWithTooltips(
-        <TimelineEditor
-          fileId="pz" coreMediaUrl={null} editable cells={[vague]} timingMode="audioFirst"
-          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
-        />,
-      )
-      const chip = screen.getByTestId("tl-target-p1")
-      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
-      fireEvent.pointerMove(window, { clientX: 500 })
-      fireEvent.pointerUp(window, { clientX: 500 })
-      // A placement the programme would not read back must not be stored: the
-      // chip would simply spring straight back to the front of its line.
-      expect(onRetimeTarget).not.toHaveBeenCalled()
-    })
+    // Sam, Oct 28: the silence is drawn as nothing — no band, no words.
+    expect(screen.queryByTestId("tl-target-lead-p1")).toBeNull()
+    expect(screen.queryByRole("img", { name: /pause/i })).toBeNull()
+    // …but it is still the line's: the 2 s take starts half a second in, and
+    // the line is 2.5 s long (its text card spans pause and take).
+    const take = screen.getByTestId("tl-target-p1")
+    const perSec = px(take, "width") / 2
+    expect(px(take, "left")).toBeCloseTo(0.5 * perSec, 0)
+    expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
   })
 
   it("picking a choice closes the menu (AQU-2204)", async () => {
@@ -3661,6 +3559,26 @@ describe("who may use the Check tools", () => {
 
 })
 
+// AQU-1758 (Sam's decision 7): Sources sits behind the project's "film and
+// sources" setting, off by default for a project of books and documents.
+describe("the Sources menu follows the project's film and sources setting", () => {
+  const props = {
+    cells: [{ id: "s1", fileId: "f1", original: "One", translated: "", startTime: 0, endTime: 2 }] as unknown as CellData[],
+    fileId: "f1", coreMediaUrl: null, editable: true, onRetimeSubtitle: () => {},
+    onRequestImportCharacters: () => {}, canImportCharacters: true,
+  }
+
+  it("shows it when the setting is on", () => {
+    render(<TimelineEditor {...props} showSources />)
+    expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
+  })
+
+  it("hides it when the setting is off", () => {
+    render(<TimelineEditor {...props} showSources={false} />)
+    expect(screen.queryByTestId("tl-sources-menu")).not.toBeInTheDocument()
+  })
+})
+
 // ── Sources is project setup (Sam, 2026-08-18) ───────────────────────────
 //
 // The film, the audio cues and the character sheets are all attached before
@@ -3775,6 +3693,20 @@ describe("the project timing lock", () => {
       />,
     )
     expect(grips("s1").length).toBeGreaterThan(0)
+  })
+
+  it("never draws them on a book or document's text, unlocked or not (AQU-1758)", () => {
+    // A book opens on the timeline since the Audio view went. Dragging a verse
+    // would give it a time, and quietly start timing the book.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+        sequenceOrdered
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
   })
 
   it("takes them away when it is locked — with no film linked, Sam's case", () => {
@@ -5909,6 +5841,34 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     fireEvent.click(sources)
     fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
     expect(onLink).toHaveBeenCalled()
+  })
+
+  // AQU-1758 (Sam, Oct 29): with "Show the film and sources tools" off, a file
+  // that already has a film keeps it within reach: Sources still shows on it,
+  // holding its film and nothing else.
+  it("with the film and sources setting off, a file with a film keeps Sources, with its film in it and nothing else", async () => {
+    const { film, onLink } = drawBar({ showSources: false })
+    const sources = await screen.findByTestId("tl-sources-menu")
+    fireEvent.click(sources)
+    const menu = await screen.findByRole("menu")
+    const text = menu.textContent ?? ""
+    expect(text).toContain("a.mp4")
+    expect(within(menu).getByTestId("top-film-change")).toBeInTheDocument()
+    expect(within(menu).getByTestId("top-film-hide")).toBeInTheDocument()
+    // The other sources, and their heading, stay behind the setting.
+    expect(text).not.toMatch(/Audio cues/)
+    expect(text).not.toMatch(/^Sources|Sources$/m)
+    fireEvent.click(within(menu).getByTestId("top-film-hide"))
+    expect(film.onHide).toHaveBeenCalled()
+    fireEvent.click(sources)
+    fireEvent.click(within(await screen.findByRole("menu")).getByTestId("top-film-change"))
+    expect(onLink).toHaveBeenCalled()
+  })
+
+  it("with the setting off, a file without a film has no Sources at all, as before", async () => {
+    drawBar({ showSources: false, coreMediaUrl: null, film: undefined })
+    await waitFor(() => expect(screen.getByTestId("tl-timing-mode")).toBeInTheDocument())
+    expect(screen.queryByTestId("tl-sources-menu")).toBeNull()
   })
 
   it("puts the note about stand-in lines at the foot of the Timing menu", async () => {

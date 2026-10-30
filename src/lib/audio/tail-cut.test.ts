@@ -90,6 +90,19 @@ describe("joining a split take's pieces", () => {
     expect([...joined.subarray(44 + 9600 * 2, 44 + 9600 * 2 + 10)]).toEqual([...full.subarray(at(0.5), at(0.5) + 10)])
   })
 
+  // AQU-1758 (Sam's decision 3): a gap dragged open between two pieces is
+  // deliberate silence, joined in as silence.
+  it("puts a piece's silence before it", async () => {
+    const full = await wav(1)
+    const joined = joinWavSpans(full, [{ start: 0.1, end: 0.3 }, { start: 0.5, end: 0.6, gapBeforeSec: 0.25 }])!
+    expect(joined.length).toBe(44 + (9600 + 12000 + 4800) * 2)
+    expect(u32(joined, 40)).toBe((9600 + 12000 + 4800) * 2)
+    const silence = joined.subarray(44 + 9600 * 2, 44 + (9600 + 12000) * 2)
+    expect(silence.every((b) => b === 0)).toBe(true)
+    const at = (sec: number) => 44 + Math.round(sec * 48000) * 2
+    expect([...joined.subarray(44 + (9600 + 12000) * 2, 44 + (9600 + 12000) * 2 + 10)]).toEqual([...full.subarray(at(0.5), at(0.5) + 10)])
+  })
+
   it("refuses an empty piece", async () => {
     expect(joinWavSpans(await wav(1), [{ start: 0.3, end: 0.3 }])).toBeNull()
   })

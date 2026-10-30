@@ -28,11 +28,11 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toBeVisible()
-    expect(screen.getByRole("tab", { name: "Audio" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Media" })).toBeVisible()
     expect(screen.queryByRole("tab", { name: "Agent" })).toBeNull()
   })
 
-  it("offers Agent beside the Text and Audio editor modes", async () => {
+  it("offers Agent beside the Text and Media editor modes", async () => {
     const onAgentSelect = vi.fn()
     render(
       <FileChapterToolbar
@@ -48,7 +48,7 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toBeVisible()
-    expect(screen.getByRole("tab", { name: "Audio" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Media" })).toBeVisible()
     await userEvent.click(screen.getByRole("tab", { name: "Agent" }))
     expect(onAgentSelect).toHaveBeenCalledOnce()
   })
@@ -90,7 +90,7 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toHaveTextContent("Text")
-    expect(screen.getByRole("tab", { name: "Audio" }).textContent).toBe("")
+    expect(screen.getByRole("tab", { name: "Media" }).textContent).toBe("")
     expect(screen.getByRole("tab", { name: "Agent" }).textContent).toBe("")
     expect(screen.getByRole("tab", { name: "Agent" }).querySelector("svg")).not.toBeNull()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()

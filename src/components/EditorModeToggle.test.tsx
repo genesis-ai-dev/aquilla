@@ -17,7 +17,7 @@ afterEach(() => { window.matchMedia = realMatchMedia })
 
 describe("EditorModeToggle", () => {
   it("only the open view keeps its label; the others are named on hover", async () => {
-    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    renderWithTooltips(<EditorModeToggle lens="audio" onChange={vi.fn()} onAgentSelect={vi.fn()} />)
     expect(screen.getByRole("tab", { name: "Media" })).toHaveTextContent("Media")
     for (const name of ["Text", "Transcribe", "Agent"]) {
       expect(screen.getByRole("tab", { name }).textContent, name).toBe("")
@@ -26,17 +26,17 @@ describe("EditorModeToggle", () => {
   })
 
   it("leaves 2 px between the views (Sam, Oct 28)", () => {
-    renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} onAgentSelect={vi.fn()} />)
     expect(screen.getByRole("tablist").className).toContain("gap-0.5")
   })
 
   it("the same in the Text, Transcribe and Agent views", () => {
-    const { rerender } = renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    const { rerender } = renderWithTooltips(<EditorModeToggle lens="text" onChange={vi.fn()} onAgentSelect={vi.fn()} />)
     const labelled = () => screen.getAllByRole("tab").filter((tab) => tab.textContent !== "").map((tab) => tab.textContent)
     expect(labelled()).toEqual(["Text"])
-    rerender(<EditorModeToggle lens="transcribe" onChange={vi.fn()} timeOrdered onAgentSelect={vi.fn()} />)
+    rerender(<EditorModeToggle lens="transcribe" onChange={vi.fn()} onAgentSelect={vi.fn()} />)
     expect(labelled()).toEqual(["Transcribe"])
-    rerender(<EditorModeToggle lens="text" onChange={vi.fn()} timeOrdered agentActive />)
+    rerender(<EditorModeToggle lens="text" onChange={vi.fn()} agentActive />)
     expect(labelled()).toEqual(["Agent"])
   })
 })

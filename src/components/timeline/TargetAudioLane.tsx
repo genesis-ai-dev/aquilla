@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -34,10 +34,10 @@ import {
 } from "@/lib/audio/change-voice"
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
-import { NOTE_CONTENT_CLASS } from "@/components/ui/info-note"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
+import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
+import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
@@ -86,6 +86,12 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
+
+/** AQU-1758: the take's-voice label needs a full-height chip (46 px by
+ *  default) to sit under the sparkle, and room for a short name. */
+const TAKE_VOICE_LABEL_MIN_H_PX = 44
+const TAKE_VOICE_LABEL_MIN_W_PX = 56
 
 export interface TargetAudioItem {
   cell: CellData
@@ -163,6 +169,11 @@ export interface TargetAudioLaneProps {
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   /** AQU-1767: what a right-click on a take offers. Absent, it offers nothing. */
   takeMenu?: TakeMenuActions
+  /** AQU-1758: a take's voice, when it is not the line's — named on its clip. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
+  /** AQU-1758: where the playhead is on this lane's clock, read when a take's
+   *  ⋯ opens its menu (Split there splits at the playhead). */
+  getPlayheadSec?(): number
   /** Round 8b: corner mic button — opens the recording modal on this cell. */
   onOpenRecording?(cellId: string): void
   /** SUB-51: timed media sections with NO dub yet. Their empty space in this
@@ -256,6 +267,26 @@ export interface TakeMenuActions {
    * programme audio has nothing of its own to convert).
    */
   changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  /**
+   * AQU-1758: turn this line's take into a character — the New voice dialog,
+   * cloning, seeded with it. (The Audio view's voice card had this.) With
+   * `cloneTake`, it is the one-step clone's More options.
+   */
+  makeCharacter?(cellId: string): void
+  /**
+   * AQU-1758 / AQU-2212: "Make a character from this voice" clones THIS take
+   * in one step — name it, Add to cast — in a popover at the clip.
+   */
+  cloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that popover suggests (who recorded the take). */
+  cloneName?(cellId: string): string
+  /**
+   * AQU-2212: the one-click when the line's voice and its take disagree —
+   * "Change to …" / "Generate · …", first in the menu. Read when the menu
+   * opens; null when they agree.
+   */
+  lineVoice?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  applyLineVoice?(cellId: string): void
   /** Ask for a new name; `current` is the take's own name, if it has one. */
   rename?(cellId: string, audioId: string, current: string | null): void
   /** Delete this take, or this piece of a cut take. */
@@ -305,6 +336,8 @@ function TargetAudioChip({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoice = null,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio = 1,
   currentUsername = "",
@@ -365,6 +398,10 @@ function TargetAudioChip({
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
   takeMenu?: TakeMenuActions
+  /** AQU-1758: the take's voice, when it is not the line's. */
+  takeVoice?: TakeVoiceNote | null
+  /** AQU-1758: the playhead on this lane's clock, for the ⋯ menu's Split. */
+  getPlayheadSec?(): number
   onOpenRecording?(cellId: string): void
   /** AQU-490: how many validators the project asks for on a recording. */
   validationRequirementAudio?: number
@@ -382,6 +419,8 @@ function TargetAudioChip({
   // AQU-1767: the first (or only) piece keeps the chip's historical test id;
   // later pieces add "-p2", "-p3"… so every piece is addressable.
   const testKey = chip.item.pieceIndex ? `${cell.id}-p${chip.item.pieceIndex + 1}` : cell.id
+  // AQU-2212: the voice this line is being generated or re-voiced in, if any.
+  const voicingAs = useVoicingAs(cell.id)
   // AQU-1767: where the blade would cut, while it hovers over this chip.
   const [bladeX, setBladeX] = useState<number | null>(null)
   // AQU-1767: where the take was right-clicked, so "Split here" cuts there.
@@ -667,6 +706,30 @@ function TargetAudioChip({
     return { atMs, ok: canCutAt(chipTake, atMs), x }
   }
   const cutRef = useRef(false)
+  // AQU-1758: the menu opened from the ⋯, with Split at the playhead when the
+  // playhead is inside this take (null: Split is offered but cannot cut here).
+  const moreOpenRef = useRef<{ atMs: number | null } | null>(null)
+  const [menuFromMore, setMenuFromMore] = useState(false)
+  // AQU-2212: the line's one-click, read as the menu opens (it resolves the
+  // line's takes, which is too much to do for every clip on every render).
+  const [menuLineVoice, setMenuLineVoice] = useState<{ action: "change" | "generate"; voiceName: string } | null>(null)
+  // AQU-1758 / AQU-2212: the one-step clone, open at this clip.
+  const [cloneOpen, setCloneOpen] = useState(false)
+  function openMenuFromMore(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const sec = getPlayheadSec?.()
+    let atMs: number | null = null
+    if (sec != null && Number.isFinite(sec) && sec > geom.start && sec < geom.end) {
+      const ms = (sec - geom.anchor) * 1000
+      if (canCutAt(chipTake, ms)) atMs = ms
+    }
+    moreOpenRef.current = { atMs }
+    const r = e.currentTarget.getBoundingClientRect()
+    chipRef.current?.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, cancelable: true, button: 2, clientX: r.left + r.width / 2, clientY: r.bottom,
+    }))
+  }
   const canResize =
     !blade && editable && Boolean(onTrimTarget) && chip.resizable &&
     chipH >= MIN_CHIP_GRIP_H_PX &&
@@ -827,13 +890,18 @@ function TargetAudioChip({
   // nor take a new recording from here.
   const hiddenLine = isHiddenCell(cell)
   const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  // AQU-1758 (Sam, decision 4): the take's menu from a ⋯ in its top-right
+  // corner, on hover — the same menu a right-click opens. Like the other
+  // corner buttons it is one fixed size whatever the take's width, so a
+  // narrow take gets the same button; only a row too short for badges hides it.
+  const showMoreButton = hasMenu && fitsBadges
   const showRecordButton =
     !hiddenLine &&
     editable &&
     Boolean(onOpenRecording) &&
     fitsBadges &&
-    // Two corners want the width now, not one.
-    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28)
+    // Two corners want the width now, not one — and the ⋯ beside the mic.
+    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28) + (showMoreButton ? 18 : 0)
 
   async function togglePreview() {
     if (previewRef.current) {
@@ -949,6 +1017,16 @@ function TargetAudioChip({
     tipLines.push(<div key="soft">{t("workspace.targetAudioLane.runsPastSectionTooltip", { sec: overflowSec.toFixed(1) })}</div>)
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
+  }
+  // AQU-1758: the take was made in a voice the line no longer has.
+  if (takeVoice) {
+    tipLines.push(
+      <div key="take-voice" data-testid={`tl-target-${testKey}-tip-take-voice`}>
+        {takeVoice.takeVoiceName
+          ? t("editor.voice.takeVoiceDiffers", { takeVoice: takeVoice.takeVoiceName, lineVoice: takeVoice.lineVoiceName })
+          : t("editor.voice.takeVoiceRemoved", { lineVoice: takeVoice.lineVoiceName })}
+      </div>,
+    )
   }
   // Decision 2026-08-05: a definitively 404'd clip says so, in red.
   if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
@@ -1220,6 +1298,33 @@ function TargetAudioChip({
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
         </span>
       )}
+      {/* AQU-1758: the clip names the take's voice when it is not the line's
+          (a voice picked for the line only assigns it). The same small
+          readout a take's running time uses over a waveform; the sentence is
+          in the tooltip. Bottom left, past the sparkle (only a generated take
+          carries a voice), and only where the chip is tall and wide enough
+          to read it. */}
+      {/* AQU-2212: while the line is being generated or re-voiced, the clip
+          says so in the take-voice label's place ("Voicing as …", the Audio
+          view card's status line). */}
+      {voicingAs && (
+        <span
+          role="status"
+          data-testid={`tl-target-${testKey}-working`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          <Spinner className="size-3 shrink-0" />
+          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+        </span>
+      )}
+      {!voicingAs && takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
+        <span
+          data-testid={`tl-target-${testKey}-take-voice`}
+          className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+        >
+          {takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")}
+        </span>
+      )}
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
           the section's width and passing for a measured take. */}
       {geom.usingFallback && fitsBadges && (
@@ -1326,9 +1431,27 @@ function TargetAudioChip({
               onOpenRecording(cell.id)
             }
           }}
-          className={chipCornerButtonClass("right")}
+          className={cn(chipCornerButtonClass("right"), showMoreButton && "right-[1.625rem]")}
         >
           <Mic className="h-2.5 w-2.5" />
+        </span>
+      )}
+      {showMoreButton && (
+        <span
+          role="button"
+          tabIndex={0}
+          title={t("editor.rail.moreActions")}
+          aria-label={t("editor.rail.moreActions")}
+          aria-haspopup="menu"
+          data-testid={`tl-target-${testKey}-more`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={openMenuFromMore}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openMenuFromMore(e)
+          }}
+          className={chipCornerButtonClass("right")}
+        >
+          <Ellipsis className="h-2.5 w-2.5" />
         </span>
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
@@ -1441,9 +1564,19 @@ function TargetAudioChip({
   const isPiece = (chip.item.pieceCount ?? 1) > 1
   const canSplit = Boolean(onCutTarget) && editable
   return (
+    <>
     <ContextMenu
       onOpenChange={(open) => {
         if (!open) return
+        setMenuLineVoice(takeMenu?.applyLineVoice ? takeMenu.lineVoice?.(cell.id) ?? null : null)
+        const fromMore = moreOpenRef.current
+        moreOpenRef.current = null
+        setMenuFromMore(fromMore != null)
+        if (fromMore) {
+          contextXRef.current = null
+          setMenuSplitAtMs(fromMore.atMs)
+          return
+        }
         const x = contextXRef.current
         contextXRef.current = null
         const at = x == null ? null : bladeAt(x)
@@ -1454,6 +1587,20 @@ function TargetAudioChip({
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
         {takeDetails}
         <ContextMenuSeparator />
+        {/* AQU-2212: the line's voice and this take part ways — the one click
+            that brings them back together, first (the Audio view's card put
+            it beside the voice field). */}
+        {menuLineVoice && takeMenu?.applyLineVoice && (
+          <>
+            <ContextMenuItem data-testid="tl-take-menu-apply-voice" onClick={() => takeMenu.applyLineVoice?.(cell.id)}>
+              {menuLineVoice.action === "change" ? <AudioLines className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {menuLineVoice.action === "change"
+                ? t("editor.voice.changeTo", { voice: menuLineVoice.voiceName })
+                : t("editor.voice.generateWith", { voice: menuLineVoice.voiceName })}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {canSplit && (
           <ContextMenuItem
             data-testid="tl-take-menu-split"
@@ -1462,8 +1609,10 @@ function TargetAudioChip({
           >
             <Scissors className="h-3.5 w-3.5" />
             {/* No "S" hint: S splits the selected take at the PLAYHEAD; this
-                splits where you right-clicked (Sam, 2026-10-14). */}
-            {t("editor.timeline.takeMenuSplit")}
+                splits where you right-clicked (Sam, 2026-10-14). Opened from
+                the take's ⋯ there is no click point, so it splits at the
+                playhead (AQU-1758). */}
+            {t(menuFromMore ? "editor.timeline.takeMenuSplitAtPlayhead" : "editor.timeline.takeMenuSplit")}
           </ContextMenuItem>
         )}
         {takeMenu?.reRecord && !hiddenLine && (
@@ -1529,6 +1678,22 @@ function TargetAudioChip({
             </ContextMenuSubContent>
           </ContextMenuSub>
         ))}
+        {/* AQU-1758: make a character from this take's voice — the Audio
+            view's voice card had this; the take's menu is its home now. */}
+        {takeMenu?.makeCharacter && !hiddenLine && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-make-character"
+            onClick={() => {
+              // AQU-2212: in one step, at the clip — once the menu has let go
+              // of focus, or it would close the popover as it opens.
+              if (takeMenu.cloneTake) setTimeout(() => setCloneOpen(true), 0)
+              else takeMenu.makeCharacter?.(cell.id)
+            }}
+          >
+            <CopyPlus className="h-3.5 w-3.5" />
+            {t("editor.timeline.takeMenuMakeCharacter")}
+          </ContextMenuItem>
+        )}
         {vote?.canVote && (
           <>
             <ContextMenuSeparator />
@@ -1565,6 +1730,16 @@ function TargetAudioChip({
         )}
       </ContextMenuContent>
     </ContextMenu>
+    {cloneOpen && takeMenu?.cloneTake && (
+      <CloneFromTakeButton
+        anchor={chipRef.current}
+        onClose={() => setCloneOpen(false)}
+        suggestedName={takeMenu.cloneName?.(cell.id) ?? ""}
+        onClone={(name) => takeMenu.cloneTake!(cell.id, audioId, name)}
+        onMoreOptions={() => takeMenu.makeCharacter?.(cell.id)}
+      />
+    )}
+    </>
   )
 }
 
@@ -1589,6 +1764,8 @@ export function TargetAudioLane({
   bladeActive = false,
   onCutTarget,
   takeMenu,
+  takeVoiceFor,
+  getPlayheadSec,
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
@@ -1728,19 +1905,6 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
-  // AQU-2204: a pause someone left before a take, drawn lightly as part of
-  // its line — following the recordings, the line keeps it (programme
-  // `targetLeadSec`) and the take starts after it.
-  const leadGaps = audioFirst
-    ? [...new Map(chips.flatMap((chip) => {
-        const slot = layout?.programme?.byCellId.get(chip.item.cell.id)
-        const lead = slot?.targetLeadSec ?? 0
-        if (!slot || lead <= 0) return []
-        if (!isVisible(slot.startSec, slot.startSec + lead, viewStartSec, viewEndSec)) return []
-        return [[slot.cellId, { cellId: slot.cellId, leftPx: secToPx(slot.startSec, pxPerSec), widthPx: secToPx(lead, pxPerSec) }] as const]
-      })).values()]
-    : []
-
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
@@ -1852,28 +2016,11 @@ export function TargetAudioLane({
           </div>
         )
       })}
-      {/* What the pause is opens on a click of it, never a hover (AQU-2260).
-          The press stops here, so it never seeks the lane under it. */}
-      {leadGaps.map(({ cellId, leftPx, widthPx }) => (
-        <Popover key={`lead-${cellId}`}>
-          <PopoverTrigger
-            nativeButton={false}
-            render={
-              <div
-                aria-label={t("editor.timeline.takeLeadPause")}
-                data-testid={`tl-target-lead-${cellId}`}
-                style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-                className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer border border-border/60 bg-muted/50`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-              />
-            }
-          />
-          <PopoverContent sideOffset={6} className={NOTE_CONTENT_CLASS}>
-            {t("editor.timeline.takeLeadPause")}
-          </PopoverContent>
-        </Popover>
-      ))}
+      {/* Deliberate silence — a pause someone left before a take, or between
+          two pieces of one — is drawn as nothing at all: plain timeline, no
+          band, no words (Sam, Oct 28: "It's silence… we could just leave it
+          empty"). It still counts in the line's length and plays as silence;
+          the take simply starts where the pause ends. */}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}
@@ -1939,6 +2086,8 @@ export function TargetAudioLane({
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
             takeMenu={takeMenu}
+            takeVoice={takeVoiceFor ? takeVoiceFor(chip.item.cell, chip.item.audioId) : null}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording}
             validationRequirementAudio={validationRequirementAudio}
             currentUsername={session?.username ?? ""}

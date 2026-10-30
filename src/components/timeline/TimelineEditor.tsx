@@ -56,7 +56,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
-import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -164,6 +164,7 @@ import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -215,6 +216,18 @@ export interface TimelineEditorProps {
    *  (Renamed from `onRetime` when the source row was frozen.) */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
   /**
+   * AQU-1758: the file is in reading order (a Bible book, a document), not
+   * timed. Its text chips never drag: a drag would give a verse a time, and
+   * quietly turn the book into a timed file one verse at a time.
+   */
+  sequenceOrdered?: boolean
+  /**
+   * AQU-1758 (Sam's decision 7): the Sources menu shows — the project's
+   * "film and sources" setting, off by default for a project of books and
+   * documents. Absent reads as shown.
+   */
+  showSources?: boolean
+  /**
    * AQU-646: the project's timing lock. When on, every imported row and cue is
    * frozen for everyone — including project leads, which Sam asked for
    * explicitly. Lines someone added here are exempt: they carry no imported
@@ -252,6 +265,20 @@ export interface TimelineEditorProps {
    *  says what it may do (see `TakeMenuActions`). */
   onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+  /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
+   *  leaves it out (someone who may not make voices). */
+  onMakeCharacter?(cellId: string): void
+  /** AQU-1758 / AQU-2212: …in one step (name it, Add to cast) at the clip;
+   *  `onMakeCharacter` is its More options. */
+  onCloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that clone suggests (who recorded the take). */
+  cloneNameFor?(cellId: string): string
+  /** AQU-2212: "Change to …" / "Generate · …" when a line's voice and its
+   *  take disagree, first in its take's menu (lib/audio/line-voice). */
+  lineVoiceFor?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  onApplyLineVoice?(cellId: string): void
+  /** AQU-1758: a take's voice, when it is not the line's — its clip names it. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
@@ -1178,6 +1205,8 @@ export function TimelineEditor({
   editable,
   fileId,
   onRetimeSubtitle,
+  sequenceOrdered = false,
+  showSources = true,
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
@@ -1187,6 +1216,12 @@ export function TimelineEditor({
   onRegenerateVoice,
   onChangeVoice,
   changeVoiceStateFor,
+  onMakeCharacter,
+  onCloneTake,
+  cloneNameFor,
+  lineVoiceFor,
+  onApplyLineVoice,
+  takeVoiceFor,
   onRenameTake,
   onRemoveTake,
   onVoteTake,
@@ -1737,6 +1772,10 @@ export function TimelineEditor({
     view: { top: number; bottom: number } | null
   } | null>(null)
   const clock = useTimelineClock()
+  // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
+  const playheadSecRef = useRef(0)
+  playheadSecRef.current = clock.currentSec
+  const getPlayheadSec = useCallback(() => playheadSecRef.current, [])
   const chipStripSlot = useUiSlot("media-chip-strip")
   // Media redesign, layout: the workspace's top bar, where the tools go.
   const topToolsSlot = useUiSlot("media-top-tools")
@@ -2101,9 +2140,8 @@ export function TimelineEditor({
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
-    const { lines } = programmeLines(cells)
-    // AQU-2204: following the recordings, an unrecorded line takes its stand-in.
-    const recorded = buildProgramme(lines, { standInLenSec: standInEstimator(lines) })
+    // AQU-1758: the same layout the transport plays and the bottom strip shows.
+    const recorded = layOutProgramme(cells).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
   }, [cells, subtitleFileWithFootage, videoDurationSec])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
@@ -2308,6 +2346,9 @@ export function TimelineEditor({
     // name, Change, Hide or Show — and the other sources follow under their
     // own heading.
     if (film && coreMediaUrl) {
+      // A film already linked keeps its controls whatever the project's
+      // "film and sources" setting says (AQU-1758, Sam's decision 7), so it
+      // can still be shown and hidden; the other sources follow the setting.
       items.push({ id: "film-name", type: "label", label: film.name })
       if (onRequestLinkVideo) {
         items.push({
@@ -2321,6 +2362,12 @@ export function TimelineEditor({
           ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
           : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
       items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
+    }
+    // AQU-1758 (Sam's decision 7): everything else in Sources is behind the
+    // project's "film and sources" setting.
+    if (!showSources) return items.filter((item) => item.id !== "sources-heading")
+    if (film && coreMediaUrl) {
+      // The film's rows are above.
     } else if (onRequestLinkVideo) {
       items.push({
         id: "film",
@@ -2418,7 +2465,7 @@ export function TimelineEditor({
     if (items.at(-1)?.id === "sources-heading") items.pop()
     return items
   }, [
-    film, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
+    film, showSources, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
     onRequestAlignScript, canAlignScript,
@@ -2692,6 +2739,14 @@ export function TimelineEditor({
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
           ...(onChangeVoice && changeVoiceStateFor
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
+            : {}),
+          ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
+          ...(onMakeCharacter && onCloneTake
+            ? { cloneTake: onCloneTake, ...(cloneNameFor ? { cloneName: cloneNameFor } : {}) }
+            : {}),
+          // The line's own voice and its take: the line's own track only.
+          ...(slot === RECORDING_SLOT && lineVoiceFor && onApplyLineVoice
+            ? { lineVoice: lineVoiceFor, applyLineVoice: onApplyLineVoice }
             : {}),
           ...(onRenameTake
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
@@ -4009,7 +4064,8 @@ export function TimelineEditor({
               <LinkedVideoLanePrompt
                 onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
             ) : undefined}
-            retimable={!audioFirst}
+            // AQU-1758: nor on a book or document, whichever way it is timed.
+            retimable={!audioFirst && !sequenceOrdered}
             // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
             //
             // This used to read `subtitleFileWithFootage ? isUserAddedLine :
@@ -4170,6 +4226,8 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(RECORDING_SLOT)}
+            takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -4243,6 +4301,8 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}

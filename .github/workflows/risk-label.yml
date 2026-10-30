@@ -41,7 +41,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: node scripts/release-risk-label.mjs "$PR_NUMBER"
+        # The classifier is read from base, so until this workflow's own PR
+        # merges there is nothing to run: skip, with no labels and no areas.
+        run: |
+          if [ ! -f scripts/release-risk-label.mjs ]; then
+            echo "scripts/release-risk-label.mjs is not on the base branch yet; nothing to classify"
+            echo "holds=false" >> "$GITHUB_OUTPUT"
+            echo "areas=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node scripts/release-risk-label.mjs "$PR_NUMBER"
       - if: steps.label.outputs.holds == 'true'
         env:
           AREAS: ${{ steps.label.outputs.areas }}

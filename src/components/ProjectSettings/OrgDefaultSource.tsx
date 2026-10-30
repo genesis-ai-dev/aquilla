@@ -3,15 +3,27 @@
 // the validator counts.
 //
 // The setting's own control stays on screen either way and shows the value in
-// force: while the project follows the organization it is disabled and shows
-// the organization's value, so nobody has to open the menu to learn what
+// force: while the project follows the organization it shows the
+// organization's value, so nobody has to open the menu to learn what
 // "Organization default" means today. Choosing "Set for this project" starts
-// from that same value, so nothing changes until the control is edited.
+// from that same value, so nothing changes until the control is edited — and
+// editing the control itself while it follows the organization sets it for
+// this project in one step (Sam, Oct 28), which flips this menu to "Set for
+// this project" on its own.
 
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+/** A short menu low on a settings card opens BELOW its button, uncapped and
+ *  without scroll arrows, so no choice hides behind an arrow (the Delivers list
+ *  had the same fault). Spread onto `SelectContent`. */
+export const SELECT_LIST_BELOW = {
+  alignItemWithTrigger: false,
+  style: { maxHeight: "none" },
+  className: "[&_[data-slot=select-scroll-down-button]]:hidden [&_[data-slot=select-scroll-up-button]]:hidden",
+} as const
 
 interface OrgDefaultSourceProps {
   id: string
@@ -53,7 +65,7 @@ export function OrgDefaultSource({
       >
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent {...SELECT_LIST_BELOW}>
         <SelectGroup>
           {items.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>

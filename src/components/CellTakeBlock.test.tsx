@@ -8,7 +8,10 @@
 // file — which is worse than the empty tab this fixes.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
@@ -53,6 +56,11 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: vi.fn(async (input: Record<string, unknown>) => { removeEmits.push(input); return "evt-rm" }),
   emitCellAudioAttach: vi.fn(async () => "evt-1"),
   emitCellAudioTrim: vi.fn(async (input: Record<string, unknown>) => { trimEmits.push(input); return "evt-trim" }),
+}))
+
+const joinCalls: Array<Record<string, unknown>> = []
+vi.mock("@/lib/audio/join-pieces", () => ({
+  joinTakePieces: vi.fn(async (args: Record<string, unknown>) => { joinCalls.push(args); return "audio-c1-9-joined.wav" }),
 }))
 
 import { CellTakeBlock } from "./CellTakeBlock"
@@ -101,6 +109,7 @@ function draw(over: Partial<React.ComponentProps<typeof CellTakeBlock>> = {}) {
       onCommitted={onCommitted}
       {...over}
     />,
+    { wrapper: ({ children }) => <TooltipProvider delay={0}>{children}</TooltipProvider> },
   )
   return { onUseAsCellText, onOpenRecording, onCommitted }
 }
@@ -355,6 +364,27 @@ describe("whose recording it acts on", () => {
   })
 })
 
+// AQU-1758: the Audio view's voice card turned a take into a character; the
+// take in the Recording tab does now.
+describe("make a character from this voice", () => {
+  it("offers it on the take and asks for it once", () => {
+    const onMakeCharacter = vi.fn()
+    draw({ onMakeCharacter })
+    fireEvent.click(screen.getByRole("button", { name: "Make a character from this voice" }))
+    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+  })
+
+  it("is not offered when nobody handed it in", () => {
+    draw()
+    expect(screen.queryByTestId("cell-take-make-character")).toBeNull()
+  })
+
+  it("cannot be pressed by someone who cannot edit", () => {
+    draw({ onMakeCharacter: vi.fn(), editable: false })
+    expect(screen.getByTestId("cell-take-make-character")).toBeDisabled()
+  })
+})
+
 describe("what its line says (Sam, 2026-09-30)", () => {
   it("names the track before the take when it is given one", () => {
     draw({ trackName: "Track" })
@@ -464,6 +494,19 @@ describe("the take that plays", () => {
     expect(stamp).toHaveTextContent(fmtShortCalendarDate(Date.parse("2026-09-28T10:00:00Z")))
     expect(stamp.querySelector("[title]")).toBeNull()
     expect(screen.getByText("Text changed")).toBeInTheDocument()
+  })
+
+  // AQU-2260 (Sam, Oct 29): what the mark means opens on a click, never a hover.
+  it("quotes the wording as recorded on a click of Text changed", async () => {
+    draw({
+      provenance: {
+        audioId: "x", recordedAt: Date.parse("2026-09-28T10:00:00Z"), recordedBy: "sam",
+        textAtRecording: "the old wording", textAtRecordingEventId: "e1", latestText: "new", latestTextEventId: "e2", drifted: true,
+      },
+    })
+    const mark = screen.getByText("Text changed").closest("span")!
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "the old wording")
   })
 
   // Sam, 2026-09-29: the take's validation in its own line. Sam, 2026-09-30:
@@ -585,5 +628,73 @@ describe("what a correction teaches the project", () => {
     correctTranscript("alpha bravo charlie met")
     await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument())
     expect(loadTranscriptCorrections("p1")).toEqual([])
+  })
+})
+
+// AQU-981: a take in pieces — cut, or uploaded in parts — offers "Join into
+// one recording", which makes one new take of the pieces in order.
+describe("Join into one recording", () => {
+  const url = "frontier-audio://audio-c1-1700000000-a.wav"
+  const piece = (audioId: string, trimStartMs: number | null, trimEndMs: number | null, pieceOf?: string) => ({
+    audioId, url, slot: "recording", mimeType: "audio/wav", voiceId: null, referenceAudioId: null,
+    durationMs: 1200, trimStartMs, trimEndMs, label: null, ...(pieceOf ? { pieceOf } : {}),
+  })
+  const pieces = [piece("audio-c1-1-a.wav", null, 400), piece("audio-c1-2-b.wav", 400, null, "audio-c1-1-a.wav")]
+  const owner = {
+    id: "c1", fileId: "f1", original: "", translated: "",
+    selectedAudioId: "audio-c1-1-a.wav",
+    attachments: {
+      "audio-c1-1-a.wav": { type: "audio", url, trimEndMs: 400, durationMs: 1200, slot: "recording" },
+      "audio-c1-2-b.wav": { type: "audio", url, trimStartMs: 400, durationMs: 1200, slot: "recording", pieceOf: "audio-c1-1-a.wav" },
+    },
+  } as unknown as CellData
+
+  it("is offered on a split take, and not on a whole one", () => {
+    draw({ owner, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    expect(screen.getByTestId("cell-take-join").textContent).toContain("Join into one recording")
+  })
+
+  it("is not offered on a take of one piece", () => {
+    draw()
+    expect(screen.queryByTestId("cell-take-join")).toBeNull()
+  })
+
+  // Sam, Oct 29 (question 7): the joined take is named "Take N", numbered the
+  // way the recorder numbers a new take (nextTakeLabel): one past the highest
+  // take on this track, a take in pieces counting once, the source clip and
+  // other tracks' takes left out.
+  it("names the joined take as the recorder would name the next take", async () => {
+    joinCalls.length = 0
+    const attachments = owner.attachments as unknown as Record<string, Record<string, unknown>>
+    const withOthers = {
+      ...owner,
+      attachments: {
+        // The take in pieces, its pieces named one by one ("Take 2", "Take 3"),
+        // as the take list used to: the list shows it as "Take 2 · split in 2".
+        "audio-c1-1-a.wav": { ...attachments["audio-c1-1-a.wav"], label: "Take 2" },
+        "audio-c1-2-b.wav": { ...attachments["audio-c1-2-b.wav"], label: "Take 3" },
+        // A named take on this track beside it: Take 3 is next.
+        "audio-c1-0-old.wav": { type: "audio", url: "frontier-audio://audio-c1-0-old.wav", slot: "recording", label: "Take 1" },
+        // Not this track's, not a take, and gone: none of them counts.
+        "audio-c1-5-other.wav": { type: "audio", url: "frontier-audio://audio-c1-5-other.wav", slot: "track-2", label: "Take 9" },
+        "audio-f1-7-source.wav": { type: "audio", url: "frontier-audio://audio-f1-7-source.wav", slot: "recording" },
+        "audio-c1-8-gone.wav": { type: "audio", url: "frontier-audio://audio-c1-8-gone.wav", slot: "recording", label: "Take 8", isDeleted: true },
+      },
+    } as unknown as CellData
+    draw({ owner: withOthers, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(joinCalls).toHaveLength(1))
+    expect(joinCalls[0]).toMatchObject({ cellId: "c1", slot: "recording", label: "Take 3" })
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "New
+// take" carries its own words.
+describe("hover only names icon buttons", () => {
+  it("New take has no hover", async () => {
+    draw()
+    await userEvent.setup().hover(screen.getByTestId("cell-take-new"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

@@ -258,7 +258,8 @@ describe("deriveCommittedCellStats", () => {
   const source: CellRow = { ...base, side: "source", eventId: "S0", value: "src" }
   const prev: CellAuditStats = {
     cellId: "cell-1", editCount: 3, contentHash: "old", lastEditAt: 1, lastEditEventId: "E0",
-    activeValidators: ["bob"], waivers: [{ ruleId: "r1", waivedAt: "2026-01-01T00:00:00.000Z" }],
+    activeValidators: ["bob"], validatorDecidedTs: { bob: 1100 },
+    waivers: [{ ruleId: "r1", waivedAt: "2026-01-01T00:00:00.000Z" }],
   }
 
   it("follows the active lane's target row: new head, validators reset, waivers kept, server hash", () => {
@@ -274,14 +275,19 @@ describe("deriveCommittedCellStats", () => {
       lastEditAt: 1234,
       lastEditEventId: "E1",
       activeValidators: [],
+      // AQU-2296: the dates go with the approvals. A new head means nobody has
+      // validated it yet, so there is no vote left to date.
+      validatorDecidedTs: {},
       waivers: prev.waivers,
     })
     expect(deriveCommittedCellStats("cell-1", rows, "fr", prev)?.lastEditEventId).toBe("E9")
   })
 
-  it("keeps validators when the head did not move (a re-applied echo of the same event)", () => {
+  it("keeps validators and their dates when the head did not move (a re-applied echo of the same event)", () => {
     const rows: CellRow[] = [source, { ...base, side: "target", eventId: "E0", value: "x" }]
-    expect(deriveCommittedCellStats("cell-1", rows, "", prev)?.activeValidators).toEqual(["bob"])
+    const derived = deriveCommittedCellStats("cell-1", rows, "", prev)
+    expect(derived?.activeValidators).toEqual(["bob"])
+    expect(derived?.validatorDecidedTs).toEqual({ bob: 1100 })
   })
 
   it("falls back to the source row for a source-only cell and returns null with no rows", () => {

@@ -210,6 +210,21 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     expect(sent.cellEditingFloor).toBe("reviewer")
   })
 
+  it("changing the tier while it follows the organization sets it for this project in one step (AQU-2263)", async () => {
+    const user = userEvent.setup()
+    renderSettings(PANE)
+    expect(screen.getByTestId("cell-editing-floor-source")).toHaveTextContent("Organization default (No one)")
+    expect(screen.getByTestId("settings-cell-editing-floor")).not.toBeDisabled()
+
+    await user.click(screen.getByTestId("settings-cell-editing-floor"))
+    await user.click(await screen.findByRole("option", { name: "Contributor (400)" }))
+    expect(screen.getByTestId("cell-editing-floor-source")).toHaveTextContent("Set for this project")
+    await user.click(screen.getByRole("button", { name: /save changes/i }))
+
+    const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
+    expect(sent.cellEditingFloor).toBe("contributor")
+  })
+
   it("offers the six tiers in order, reset default first then up the ladder", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)

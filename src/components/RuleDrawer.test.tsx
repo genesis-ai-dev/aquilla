@@ -16,7 +16,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { expectDisabledNote, expectTooltip } from "@/test-utils/tooltip"
 import { MemoryRouter } from "react-router-dom"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { RuleDrawer } from "./RuleDrawer"
@@ -187,28 +189,36 @@ describe("RuleDrawer — fix all (AQU-1805)", () => {
 })
 
 describe("RuleDrawer — a disabled fix always says why (AQU-1805)", () => {
-  // The reason rides on the wrapping span, because a disabled button has
-  // pointer-events: none and would never fire a tooltip of its own.
-  async function reasonOn(button: HTMLElement): Promise<string> {
-    const trigger = button.parentElement!
-    fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
-    fireEvent.mouseEnter(trigger)
-    const tip = await screen.findByRole("tooltip")
-    return tip.textContent ?? ""
-  }
-
+  // AQU-2260 (Sam, Oct 29): the reason opens on a CLICK on the greyed-out
+  // button (AppTooltip's stand-in takes the click a disabled button cannot).
   it("is disabled, with the permission reason, when the host offers no commit path", async () => {
     renderDrawer({ onApplyFix: undefined })
     const fix = screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0]
     expect(fix).toBeDisabled()
-    expect(await reasonOn(fix)).toContain(en("rules.drawer.fixNotPermitted"))
+    await expectDisabledNote(fix, en("rules.drawer.fixNotPermitted"))
   })
 
   it("is disabled, with the setup reason, when AI is not configured", async () => {
     renderDrawer({ session: null })
     const fix = screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0]
     expect(fix).toBeDisabled()
-    expect(await reasonOn(fix)).toContain(en("rules.drawer.aiNotConfigured"))
+    await expectDisabledNote(fix, en("rules.drawer.aiNotConfigured"))
+  })
+
+  it("fix-all says why on a click when it is greyed out for a reason", async () => {
+    renderDrawer({ session: null })
+    const all = screen.getByRole("button", { name: en("rules.surface.tryToFixAllButton") })
+    expect(all).toBeDisabled()
+    await expectDisabledNote(all, en("rules.drawer.aiNotConfigured"))
+  })
+
+  it("an open fix-all has no hover; the per-cell fix's hover only names it", async () => {
+    renderDrawer()
+    const all = screen.getByRole("button", { name: en("rules.surface.tryToFixAllButton") })
+    await userEvent.setup().hover(all)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectTooltip(screen.getAllByLabelText(en("rules.drawer.fixCellAriaLabel"))[0], en("rules.drawer.fixCellTooltip"))
   })
 
   it("still offers fix-all on a saved regex autofix when AI is unconfigured", () => {

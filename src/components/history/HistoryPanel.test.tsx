@@ -5,6 +5,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { act } from "react"
 import { HistoryPanel } from "./HistoryPanel"
+import { expectTooltip } from "@/test-utils/tooltip"
 import {
   historyReady,
   recordStep,
@@ -81,5 +82,23 @@ describe("HistoryPanel", () => {
     render(<HistoryPanel onResult={vi.fn()} />)
     expect(screen.getByRole("button", { name: "Undo history" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Edit history" })).toBeNull()
+  })
+
+  // Canvas board 55, option E, in every view (Sam, Oct 28): a square like its
+  // neighbours, without the count.
+  it("is its icon alone, without the count", () => {
+    add("editor.history.stepAddRow")
+    add("editor.history.stepEditText")
+    render(<HistoryPanel onResult={vi.fn()} />)
+    expect(screen.getByTestId("history-panel-trigger").textContent).toBe("")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("HistoryPanel — the trigger's hover only names it", () => {
+  it("names the undo history and nothing more", async () => {
+    render(<HistoryPanel onResult={vi.fn()} />)
+    await expectTooltip(screen.getByTestId("history-panel-trigger"), "Undo history")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("undo any of your recent steps")
   })
 })

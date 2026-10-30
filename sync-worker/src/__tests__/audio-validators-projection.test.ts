@@ -450,6 +450,7 @@ describe('the audio-attachments read carries votes', () => {
     return (await res.json()) as {
       cells: Record<string, { attachments: Record<string, {
         validatorCount: number; validators: string[]; role: string
+        validatorDecidedTs: Record<string, number>
         recordedBy: string | null; durationMs: number | null
       }> }>
     }
@@ -468,6 +469,10 @@ describe('the audio-attachments read carries votes', () => {
     expect(takes.a1.validatorCount).toBe(2)
     // Newest vote first.
     expect(takes.a1.validators).toEqual(['cy', 'bo'])
+    // AQU-2296: and WHEN each of them voted — the `decided_ts` the projection
+    // wrote, through the real lateral and the real driver, for the date under
+    // each name in the "Audio validated by" list.
+    expect(takes.a1.validatorDecidedTs).toEqual({ bo: 10, cy: 20 })
     expect(takes.a1.role).toBe('dub')
     expect(takes.a1.recordedBy).toBe('ana')
     expect((await rows<AudioRow>('cell_audio'))[0].validator_count).toBe(2)
@@ -535,5 +540,47 @@ describe('the validator list survives either driver', () => {
   it('treats a missing list as nobody', () => {
     expect(names(undefined)).toEqual([])
     expect(names(null)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2296: when each person voted, for the date under their name.
+//
+// The route casts `jsonb_object_agg(...)` to TEXT so there is ONE shape to
+// read, but a driver may still hand back a parsed object — and a stamp that
+// is not a finite number must never reach the popover, where it renders as
+// "Invalid Date".
+// ---------------------------------------------------------------------------
+
+describe('the per-validator timestamps survive either driver', () => {
+  const row = (decided: unknown) => ({
+    cell_id: C, audio_id: 'a1', slot: 'recording', url: 'u', mime_type: null,
+    voice_id: null, reference_audio_id: null, duration_ms: null, label: null,
+    trim_start_ms: null, trim_end_ms: null, target_offset_ms: null,
+    timings_json: null, selected: 1, created_ts: 1, validator_count: 2,
+    validators: ['ana', 'bo'], validator_decided_ts: decided,
+  }) as unknown as Parameters<typeof collapseCellAudioRows>[0][number]
+
+  const stamps = (decided: unknown) =>
+    collapseCellAudioRows([row(decided)])[C].attachments.a1.validatorDecidedTs
+
+  it('parses the jsonb text the route sends', () => {
+    expect(stamps('{"ana": 1700, "bo": 1800}')).toEqual({ ana: 1700, bo: 1800 })
+  })
+
+  it('accepts an already-parsed object, and BIGINT handed back as a string', () => {
+    expect(stamps({ ana: 1700, bo: '1800' })).toEqual({ ana: 1700, bo: 1800 })
+  })
+
+  it('reads no votes, malformed text and a non-object as no stamps at all', () => {
+    for (const bad of [undefined, null, '', 'not json', '[]', '"ana"']) {
+      expect(stamps(bad)).toEqual({})
+    }
+  })
+
+  // `Number(null)`/`Number('')` are both 0 — finite, and 1970 on the row.
+  it('drops a stamp that is absent, blank or unparseable rather than dating the vote to 1970', () => {
+    expect(stamps('{"ana": 1700, "bo": null, "cy": "later", "di": "", "ed": 0}'))
+      .toEqual({ ana: 1700 })
   })
 })

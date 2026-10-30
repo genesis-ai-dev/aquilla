@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import userEvent from "@testing-library/user-event"
 import { FileChapterToolbar } from "./FileChapterToolbar"
 
@@ -26,11 +28,11 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toBeVisible()
-    expect(screen.getByRole("tab", { name: "Audio" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Media" })).toBeVisible()
     expect(screen.queryByRole("tab", { name: "Agent" })).toBeNull()
   })
 
-  it("offers Agent beside the Text and Audio editor modes", async () => {
+  it("offers Agent beside the Text and Media editor modes", async () => {
     const onAgentSelect = vi.fn()
     render(
       <FileChapterToolbar
@@ -46,7 +48,7 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toBeVisible()
-    expect(screen.getByRole("tab", { name: "Audio" })).toBeVisible()
+    expect(screen.getByRole("tab", { name: "Media" })).toBeVisible()
     await userEvent.click(screen.getByRole("tab", { name: "Agent" }))
     expect(onAgentSelect).toHaveBeenCalledOnce()
   })
@@ -73,7 +75,7 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(onLensChange).toHaveBeenCalledWith("text")
   })
 
-  it("shows Text, Audio, and Agent labels beside the icons on larger screens", () => {
+  it("on larger screens, labels only the open view beside its icon (board 55, in every view)", () => {
     render(
       <FileChapterToolbar
         lens="text"
@@ -88,8 +90,8 @@ describe("FileChapterToolbar draft as you read", () => {
     )
 
     expect(screen.getByRole("tab", { name: "Text" })).toHaveTextContent("Text")
-    expect(screen.getByRole("tab", { name: "Audio" })).toHaveTextContent("Audio")
-    expect(screen.getByRole("tab", { name: "Agent" })).toHaveTextContent("Agent")
+    expect(screen.getByRole("tab", { name: "Media" }).textContent).toBe("")
+    expect(screen.getByRole("tab", { name: "Agent" }).textContent).toBe("")
     expect(screen.getByRole("tab", { name: "Agent" }).querySelector("svg")).not.toBeNull()
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
   })
@@ -200,13 +202,17 @@ describe("FileChapterToolbar draft as you read", () => {
     const help = "While on, AI drafts empty cells as you scroll and refreshes existing AI drafts when better validated examples appear. Every draft needs human review. Cells a person translated are never touched."
     expect(toggle).toHaveAccessibleName("Draft as you read")
     expect(toggle).toHaveAccessibleDescription(help)
-    // Sighted users get the same text from the info icon at the end of the
-    // row: hover shows it, and clicking the icon must not flip the toggle.
-    const hint = toggle.querySelector("[data-slot=tooltip-trigger]") as HTMLElement
-    expect(hint).not.toBeNull()
+    // Sighted users get the same text from the (i) at the end of the row: a
+    // click opens it in place under the label (AQU-2260; it was a hover), and
+    // clicking the (i) must not flip the toggle.
+    const hint = screen.getByRole("button", { name: "About Draft as you read" })
     await userEvent.hover(hint)
-    expect(await screen.findByRole("tooltip", { name: help })).toBeVisible()
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const text = document.getElementById(hint.getAttribute("aria-controls")!)!
+    expect(text).toHaveAttribute("data-open", "false")
     await userEvent.click(hint)
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveTextContent(help)
     expect(onChange).not.toHaveBeenCalled()
   })
 
@@ -342,6 +348,26 @@ describe("FileChapterToolbar hidden-cell indicator (AQU-1422)", () => {
 
     await userEvent.click(btn)
     expect(onRevealedChange).toHaveBeenLastCalledWith(false)
+  })
+
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+  // indicator carries its own words; what hiding does is behind the (i)
+  // beside it, on a click.
+  it("has no hover, and says what hiding does behind its (i)", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <FileChapterToolbar
+          {...base}
+          hiddenCells={{ count: 3, revealed: false, onRevealedChange: vi.fn() }}
+        />
+      </TooltipProvider>,
+    )
+    const btn = screen.getByTestId("hidden-cells-indicator")
+    expect(btn).not.toHaveAttribute("title")
+    await userEvent.setup().hover(btn)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About 3 hidden" }), "Nothing was deleted")
   })
 
   it("keeps the count singular-correct", () => {

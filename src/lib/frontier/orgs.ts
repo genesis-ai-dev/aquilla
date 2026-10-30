@@ -289,8 +289,27 @@ export async function getMemberAccess(jwt: string, orgId: number, userId: number
   return (await res.json()) as MemberEffectiveAccess
 }
 
-export async function getOrCreateMyOrg(jwt: string): Promise<MyOrg> {
+/**
+ * The caller's personal workspace, or null when they own none. AQU-2259: the
+ * read never creates one any more; see {@link createPersonalOrg}.
+ */
+export async function getMyOrg(jwt: string): Promise<MyOrg | null> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/me`, {
+    headers: authHeaders(jwt),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new UserError(res.status, "", "org");
+  return (await res.json()) as MyOrg;
+}
+
+/**
+ * AQU-2259: make the caller's personal workspace, at the moment they choose
+ * to work on their own (onboarding's "Just me"). Returns the existing one if
+ * they already have it.
+ */
+export async function createPersonalOrg(jwt: string): Promise<MyOrg> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/personal`, {
+    method: "POST",
     headers: authHeaders(jwt),
   });
   if (!res.ok) throw new UserError(res.status, "", "org");

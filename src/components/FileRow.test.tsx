@@ -4,7 +4,8 @@
 // affordances (progress meter, etc.) that row happens to render.
 
 import { describe, it, expect, vi } from "vitest"
-import { render, within, fireEvent } from "@testing-library/react"
+import { render, within, fireEvent, screen } from "@testing-library/react"
+import { expectTooltip } from "@/test-utils/tooltip"
 import { FileRow } from "./FileRow"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
@@ -332,5 +333,26 @@ describe("FileRow progress in a language that counts its recordings", () => {
     const slot = getByTestId("file-row-progress-slot")
     expect(slot.getAttribute("aria-label")).toBe("50% translated, 20% validated")
     expect(slot.getAttribute("title")).toBeNull()
+  })
+})
+
+// AQU-1758 (Sam): a timed file carried a waveform "squiggle" in the file list.
+// Every file opens on the timeline in Media now — "they're all media files" —
+// so no row is marked.
+describe("FileRow — no marker for a timed file (AQU-1758)", () => {
+  it("draws a subtitle file's row like any other, with no waveform", () => {
+    const { container } = renderRow({ file: makeFile({ type: "vtt", orderedBy: "time", name: "Episode 1.vtt" }) })
+    expect(within(container).queryByLabelText("Timeline-ordered file")).toBeNull()
+    expect(container.querySelector("svg.lucide-audio-waveform")).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("FileRow — hover only names", () => {
+  it("the rename suggestion's hover only names it", async () => {
+    renderRow({ hasSuggestion: true, onApplySuggestion: vi.fn() })
+    const sparkle = screen.getByRole("button", { name: "Apply rename suggestion" })
+    await expectTooltip(sparkle, "Apply rename suggestion")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("cleaner name")
   })
 })

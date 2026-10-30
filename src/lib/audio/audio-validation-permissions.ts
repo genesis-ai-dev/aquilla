@@ -176,6 +176,7 @@ export function audioValidationTakes(
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,
       validators: take.validators ?? [],
+      validatorDecidedTs: take.validatorDecidedTs ?? {},
       isGenerated: Boolean(take.voiceId),
       canValidate: verdict.canValidate,
       ...(verdict.reason ? { blockedReason: reasonText(verdict.reason) } : {}),

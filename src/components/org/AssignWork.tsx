@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignKindField } from "@/components/AssignKindField"
@@ -125,6 +126,12 @@ export interface AssignWorkProps {
 
 const DEFAULT_ROLE_LEVEL = 500
 const DEFAULT_ASSIGNMENT_MIN_ROLE = 500
+
+/** A person in the Assignee list; the empty first row has no user. */
+interface AssigneeOption extends SearchSelectOption {
+  userId?: number
+  username?: string
+}
 
 export function AssignWork({
   projectId,
@@ -267,6 +274,37 @@ export function AssignWork({
       setAssigneeId(effectiveCallerUserId)
     }
   }, [isSelfAssignMode, effectiveCallerUserId])
+
+  // The two searchable lists (AQU-2260). The first assignee row is the empty
+  // "Select member…" choice, as it was in the plain dropdown.
+  const assigneeOptions = useMemo<AssigneeOption[]>(
+    () =>
+      isSelfAssignMode
+        ? members
+            .filter((m) => m.userId === effectiveCallerUserId)
+            .map((m) => ({
+              value: String(m.userId),
+              label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }),
+              userId: m.userId,
+              username: m.username,
+            }))
+        : [
+            { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
+            // AQU-676: project members only — org-baseline-only people are excluded.
+            ...eligibleMembers.map((m) => ({
+              value: String(m.userId),
+              label: m.username,
+              userId: m.userId,
+              username: m.username,
+            })),
+          ],
+    [isSelfAssignMode, members, eligibleMembers, effectiveCallerUserId, t],
+  )
+  const bookOptions = useMemo(
+    () => sortedFiles.map((f) => ({ value: f.id, label: f.label })),
+    [sortedFiles],
+  )
+
 
   // Load the selected file's chapters for the picker; clear the checked
   // chapters when the file changes so stale chapters can't leak across books.
@@ -450,61 +488,28 @@ export function AssignWork({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="assign-work-assignee">{t("org.assignWork.assigneeLabel")}</FieldLabel>
-            <Select
-              items={
-                isSelfAssignMode
-                  ? members
-                      .filter((m) => m.userId === effectiveCallerUserId)
-                      .map((m) => ({ value: String(m.userId), label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }) }))
-                  : [
-                      { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
-                      // AQU-676: project members only — org-baseline-only people are excluded.
-                      ...eligibleMembers.map((m) => ({ value: String(m.userId), label: m.username })),
-                    ]
-              }
+            {/* AQU-2260: a search box, since the people list grows with the team. */}
+            <SearchSelect
+              id="assign-work-assignee"
+              options={assigneeOptions}
               value={assigneeId === "" ? "" : String(assigneeId)}
-              onValueChange={(v) => setAssigneeId(v == null || v === "" ? "" : Number(v))}
+              onValueChange={(v) => setAssigneeId(v === "" ? "" : Number(v))}
               disabled={busy || isSelfAssignMode}
-            >
-              <SelectTrigger id="assign-work-assignee">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {isSelfAssignMode ? (
-                    members
-                      .filter((m) => m.userId === effectiveCallerUserId)
-                      .map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>
-                          <UsernameWithAvatar
-                            userId={m.userId}
-                            username={m.username}
-                            label={t("dialog.assign.assigneeSelfSuffix", { username: m.username })}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        </SelectItem>
-                      ))
-                  ) : (
-                    <>
-                      <SelectItem value="">{t("dialog.assign.selectMemberPlaceholder")}</SelectItem>
-                      {eligibleMembers.map((m) => (
-                        <SelectItem key={m.userId} value={String(m.userId)}>
-                          <UsernameWithAvatar
-                            userId={m.userId}
-                            username={m.username}
-                            size="xs"
-                            menuSafe
-                            nameClassName="text-sm font-normal"
-                          />
-                        </SelectItem>
-                      ))}
-                    </>
-                  )}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+              renderOption={(o) =>
+                o.userId == null ? (
+                  o.label
+                ) : (
+                  <UsernameWithAvatar
+                    userId={o.userId}
+                    username={o.username ?? o.label}
+                    label={isSelfAssignMode ? o.label : undefined}
+                    size="xs"
+                    menuSafe
+                    nameClassName="text-sm font-normal"
+                  />
+                )
+              }
+            />
             {isSelfAssignMode && (
               <FieldDescription>
                 {t("org.assignWork.selfAssignNote")}
@@ -524,23 +529,14 @@ export function AssignWork({
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-book">{t("org.assignWork.bookLabel")}</FieldLabel>
-            <Select
-              items={sortedFiles.map((f) => ({ value: f.id, label: f.label }))}
+            {/* AQU-2260: up to 66 books, so a search box. */}
+            <SearchSelect
+              id="assign-work-book"
+              options={bookOptions}
               value={fileId}
-              onValueChange={(v) => setFileId(v ?? "")}
+              onValueChange={setFileId}
               disabled={busy}
-            >
-              <SelectTrigger id="assign-work-book">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {sortedFiles.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>{f.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            />
           </Field>
           <Field>
             <FieldLabel htmlFor="assign-work-chapters">{t("editor.milestone.vocab.chapterPlural")}</FieldLabel>

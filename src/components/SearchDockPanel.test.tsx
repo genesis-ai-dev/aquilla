@@ -10,7 +10,11 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectTooltip } from "@/test-utils/tooltip"
+import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import { SearchDockPanel, type SearchDockPanelProps } from "./SearchDockPanel"
 
 /** Minimal required props to render the dock panel. */
@@ -75,5 +79,37 @@ describe("SearchDockPanel — labelled mode switcher (AQU-597)", () => {
       query: "teste",
       find: { caseSensitive: false, matchWord: false, useRegexp: false },
     })
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The mode
+// toggles and "Expand all" carry their own words, so they have no hover.
+describe("SearchDockPanel — hover only names icon buttons", () => {
+  async function expectNoHover(el: Element) {
+    await userEvent.setup().hover(el)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  }
+  const result = {
+    cellId: "c1", fileId: "f1", fileName: "GEN", original: "In the beginning", translated: "Au commencement",
+    context: "GEN 1:1", matchedFields: new Set(), matchCount: 1, matchedTokens: ["beginning"],
+    snippet: "In the beginning", rank: 1,
+  } as unknown as WorkspaceSearchResult
+
+  it("the mode toggles have no hover", async () => {
+    render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ bibleResourcesEnabled: true })} /></TooltipProvider>)
+    await expectNoHover(screen.getByRole("button", { name: "Search" }))
+    await expectNoHover(screen.getByRole("button", { name: "Find & Replace" }))
+    await expectNoHover(screen.getByRole("button", { name: "Bible resources" }))
+  })
+
+  it("Expand all has no hover", async () => {
+    render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ results: [result], onExpandResults: vi.fn() })} /></TooltipProvider>)
+    await expectNoHover(screen.getByRole("button", { name: "Expand all results" }))
+  })
+
+  it("the icon-only full-panel button keeps its name on hover", async () => {
+    render(<TooltipProvider delay={0}><SearchDockPanel {...baseProps({ onOpenFullPanel: vi.fn() })} /></TooltipProvider>)
+    await expectTooltip(screen.getByRole("button", { name: "Open full search panel" }), "Open full search panel")
   })
 })

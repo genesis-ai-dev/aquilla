@@ -4,9 +4,9 @@
 // in a booth session — a wrong audioId or slot here silently corrupts the mix.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
@@ -588,9 +588,11 @@ describe("TakesStrip — reporting the last take", () => {
 
       const badge = await screen.findByTestId("take-text-drift-a")
       expect(badge.textContent).toContain("Text changed")
-      // The tooltip must quote the wording AS RECORDED — that is the whole
-      // point of the feature, not just "something changed".
-      expect(badge.getAttribute("title")).toContain("In the beginning")
+      // The note must quote the wording AS RECORDED — that is the whole point
+      // of the feature, not just "something changed". AQU-2260: it opens on a
+      // click, never a hover.
+      expect(badge).not.toHaveAttribute("title")
+      await expectClickNote(badge, "In the beginning")
     })
 
     it("leaves an undrifted take unmarked", () => {
@@ -699,5 +701,86 @@ describe("nextTakeLabel", () => {
   it("counts a split take's pieces as their take's number", () => {
     expect(nextTakeLabel([{ label: "Take 1 · 1" }, { label: "Take 1 · 2" }])).toBe("Take 2")
     expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
+  })
+})
+
+// AQU-981 (Sam, Oct 29): a take split into pieces is still ONE take. After a
+// join the line read "Take 1", "Take 2 · split in 2", "Take 4" — no Take 3 —
+// because every unnamed piece was counted, and named, as a take of its own.
+describe("one number per take, however many pieces it has", () => {
+  const att = (audioId: string, label: string | null, pieceOf?: string, trimStartMs: number | null = null) =>
+    ({ audioId, label, trimStartMs, ...(pieceOf ? { pieceOf } : {}) })
+
+  it("an unnamed take in two pieces beside Take 1: it will be Take 2, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null), att("c", null, "b", 400)])).toBe("Take 3")
+  })
+
+  it("a split take reads by its first piece's name, as the list shows it, whatever its other pieces were named", () => {
+    // Named one piece at a time by the old backfill: the list shows "Take 2 · split in 2".
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2"), att("c", "Take 3", "b", 400)])).toBe("Take 3")
+    // Named by a cut.
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2 · 1"), att("c", "Take 2 · 2", "b", 400)])).toBe("Take 3")
+  })
+
+  it("a named take and an unnamed whole take: the unnamed one is numbered after the named, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null)])).toBe("Take 3")
+  })
+
+  it("named takes alone: one past the highest, a deleted number never reused", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("c", "Take 3")])).toBe("Take 4")
+    expect(nextTakeLabel([att("a", "My best one")])).toBe("Take 1")
+  })
+
+  it("names an unnamed split take once, its pieces as the cut names them", async () => {
+    emitRename.mockClear()
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1"), take("b", 1000), piece]} selectedAudioId="a" />)
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2 · 1" }))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "c", label: "Take 2 · 2" }))
+  })
+
+  it("the list of one take's pieces names nothing: it can't see the line's other takes", async () => {
+    emitRename.mockClear()
+    // The pieces' waveforms load their audio; nothing here is about that.
+    const offline = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} variant="pieces" takes={[take("b", 1000), piece]} selectedAudioId="b" />)
+    // The naming effect calls the rename before its first await, so once the
+    // effects and their microtasks have run, a rename would already be here.
+    await act(async () => {})
+    expect(emitRename).not.toHaveBeenCalled()
+    offline.mockRestore()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A take's
+// status marks explain themselves on a click.
+describe("TakesStrip — status marks open their notes on click", () => {
+  it("says why a take's length is a question mark", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 0), durationMs: null } as unknown as AudioAttachmentOut]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-unknown-length-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "Length unknown")
+  })
+
+  it("says a take that is still saving is kept on this device", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), pendingSync: true }]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-saving-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "kept safe on this device")
+  })
+
+  it("keeps the retry a plain button, and says the take is still on this device behind its (i)", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), syncFailed: true }]} selectedAudioId="a" />,
+    )
+    const retry = await screen.findByTestId("take-sync-failed-a")
+    expect(retry).not.toHaveAttribute("title")
+    await expectClickNote(screen.getByRole("button", { name: "About Not saved — retry" }), "still on this device")
   })
 })

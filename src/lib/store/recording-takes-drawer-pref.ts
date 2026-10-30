@@ -14,64 +14,29 @@
  *
  * Key schema: `aq.recording-takes-drawer.v1` (stores `"closed"` when turned
  * off; absent means open).
+ *
+ * AQU-2264: it now follows the PERSON across devices when they are signed in
+ * (see `src/lib/prefs/person-prefs.ts`); the key above is this device's own
+ * value, used when signed out and as the first device's offer.
  */
 
-import { useSyncExternalStore } from "react"
+import { recorderKeepTakesDrawerOpenPref } from "@/lib/prefs/person-pref-list"
+import { resetPersonPrefCachesForTests, usePersonPref } from "@/lib/prefs/person-prefs"
 
-const STORAGE_KEY = "aq.recording-takes-drawer.v1"
-
-const listeners = new Set<() => void>()
-
-/** Cached snapshot so useSyncExternalStore gets a stable value between writes. */
-let cached: boolean | undefined
-
-function notify(): void {
-  for (const l of listeners) l()
-}
-
-function read(): boolean {
-  if (typeof localStorage === "undefined") return true
-  try {
-    return localStorage.getItem(STORAGE_KEY) !== "closed"
-  } catch {
-    return true
-  }
-}
-
-function peek(): boolean {
-  if (cached === undefined) cached = read()
-  return cached
-}
-
-/** True when the takes drawer rests open under the recorder. */
 export function getRecordingTakesDrawerOpen(): boolean {
-  return peek()
+  return recorderKeepTakesDrawerOpenPref.get()
 }
 
 export function setRecordingTakesDrawerOpen(open: boolean): void {
-  cached = open
-  if (typeof localStorage !== "undefined") {
-    try {
-      if (open) localStorage.removeItem(STORAGE_KEY)
-      else localStorage.setItem(STORAGE_KEY, "closed")
-    } catch {
-      // quota / access denied — the in-memory cache still reflects the edit
-    }
-  }
-  notify()
+  recorderKeepTakesDrawerOpenPref.set(open)
 }
 
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
-
-/** Reactive read of the takes-drawer preference. */
+/** Reactive read of where the takes drawer rests. */
 export function useRecordingTakesDrawerOpen(): boolean {
-  return useSyncExternalStore(subscribe, peek, () => true)
+  return usePersonPref(recorderKeepTakesDrawerOpenPref)
 }
 
 /** Test helper: forget the cached snapshot so a fresh localStorage is read. */
 export function resetRecordingTakesDrawerCacheForTests(): void {
-  cached = undefined
+  resetPersonPrefCachesForTests()
 }

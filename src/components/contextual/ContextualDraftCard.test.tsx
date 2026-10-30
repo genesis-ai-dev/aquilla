@@ -11,6 +11,8 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ContextualDraftCard } from "./ContextualDraftCard"
 import {
   applyContextualDraftsFrame,
@@ -269,5 +271,19 @@ describe("ContextualDraftCard", () => {
     expect(screen.getByTestId("contextual-draft-card")).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText("Use this translation"))
     expect(onAccept).toHaveBeenCalledWith("Au commencement était la Parole")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the Suggested mark says where the draft came from on
+// a click, never on hover.
+describe("ContextualDraftCard Suggested mark", () => {
+  it("opens where the draft came from on click", async () => {
+    seed()
+    render(
+      <TooltipProvider delay={0}>
+        <ContextualDraftCard cellId="c1" projectId="p1" fileId="file-1" targetLang="" editable onAccept={vi.fn(async () => true)} />
+      </TooltipProvider>,
+    )
+    await expectClickNote(screen.getByRole("button", { name: /Suggested/ }), "Drafted for you")
   })
 })

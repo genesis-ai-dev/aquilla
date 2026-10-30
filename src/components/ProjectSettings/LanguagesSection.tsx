@@ -35,17 +35,14 @@ import {
   ArchiveRestore,
   ChevronRight,
   Globe,
-  Info,
-  Lock,
   MoreHorizontal,
   Pencil,
-  Plus,
   TriangleAlert,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { FieldLabel } from "@/components/ui/field"
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
@@ -53,8 +50,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { InfoLabel } from "@/components/ui/info-label"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
+import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import type {
   ProjectWideSettings,
   ProjectLaneView,
@@ -73,6 +72,7 @@ import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { LaneDeliversSelect } from "@/components/LaneDeliversSelect"
+import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { laneRowDelivers, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
@@ -221,54 +221,6 @@ function foldedDisplayName(lane: Pick<ProjectLaneView, "role" | "language" | "na
   return laneDisplayName(lane).trim().toLocaleLowerCase()
 }
 
-/**
- * The card's (i): explanatory or long text, on hover or keyboard focus, so the
- * card itself stays short (Sam, Oct 25). Same shape as ProjectCreateDialog's
- * LanguageFieldHint; a rich node (the permission hint with its link) gets the
- * column layout DisabledFieldTooltip gives it.
- */
-function InfoHint({
-  label,
-  children,
-  testId,
-  warning = false,
-}: {
-  /** The button's accessible name: a few words saying what the text is about. */
-  label: string
-  children: ReactNode
-  testId?: string
-  warning?: boolean
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        closeOnClick={false}
-        render={
-          <button
-            type="button"
-            aria-label={label}
-            data-testid={testId}
-            className={cn(
-              "inline-flex shrink-0 text-muted-foreground hover:text-foreground",
-              warning && "text-amber-700 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-400",
-            )}
-          />
-        }
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent
-        className={cn(
-          "max-w-xs",
-          typeof children !== "string" && "inline-flex max-w-64 flex-col items-start gap-1 pt-2",
-        )}
-      >
-        {children}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
 export function LanguagesSection({
   defaultTargetLanguage,
   targetLanes,
@@ -364,6 +316,8 @@ export function LanguagesSection({
       )
     : undefined
   const archiveBlockedTooltip = t("projectSettings.languages.lastActiveLaneTooltip")
+  // AQU-2260: the Delivers column's (i) opens its text under the header row.
+  const [deliversInfoOpen, toggleDeliversInfo] = useInfoOpen()
 
   // Blob-mode projects have no lane rows. The primary language used to sit in
   // its own "Default target language" field and was left out of the extras
@@ -562,6 +516,8 @@ export function LanguagesSection({
             <DisabledFieldTooltip
               disabled={rowMode && !canArchiveAnyLane}
               tooltip={archiveBlockedTooltip}
+              align="start"
+              noteClassName="px-2 pb-1.5"
             >
               <DropdownMenuItem
                 data-testid={`archive-lane-${key}`}
@@ -589,12 +545,13 @@ export function LanguagesSection({
           data-testid={`archive-confirm-${key}`}
         >
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="flex items-center gap-1.5 text-sm">
+            <InfoLabel
+              label={t("projectSettings.languages.archiveHintAriaLabel")}
+              info={t("projectSettings.languages.archiveHint")}
+              rowClassName="text-sm"
+            >
               {t("projectSettings.languages.archiveConfirmShort", { lane: label })}
-              <InfoHint label={t("projectSettings.languages.archiveHintAriaLabel")}>
-                {t("projectSettings.languages.archiveHint")}
-              </InfoHint>
-            </span>
+            </InfoLabel>
             {/* AQU-1464: whether the lane is dormant or someone is working in
                 it right now — archiving locks them out. */}
             {rowMode && onLoadLaneLastChange && (
@@ -619,6 +576,19 @@ export function LanguagesSection({
     )
   }
 
+  const deliversInfoRow = showDelivers ? (
+    <div role="row" className={cn("px-3", deliversInfoOpen && "border-b bg-muted/20 py-1.5")}>
+      <InfoReveal
+        open={deliversInfoOpen}
+        id="lane-delivers-hint-text"
+        testId="lane-delivers-hint-text"
+        className="text-xs text-muted-foreground"
+      >
+        <span role="cell">{t("projectSettings.languages.deliversHint")}</span>
+      </InfoReveal>
+    </div>
+  ) : null
+
   const tableHeader = (
     <div
       role="row"
@@ -635,13 +605,15 @@ export function LanguagesSection({
         <span role="columnheader" className="flex items-center gap-1">
           {t("projectSettings.languages.deliversLabel")}
           {/* Media redesign slice 1 (Sam, Oct 22): what a language delivers
-              decides how its progress is counted everywhere. */}
-          <InfoHint
+              decides how its progress is counted everywhere. AQU-2260: the
+              (i) opens it in a full-width line under this header row. */}
+          <InfoToggle
+            open={deliversInfoOpen}
+            onToggle={toggleDeliversInfo}
             label={t("projectSettings.languages.deliversHintAriaLabel")}
+            controls="lane-delivers-hint-text"
             testId="lane-delivers-hint"
-          >
-            {t("projectSettings.languages.deliversHint")}
-          </InfoHint>
+          />
         </span>
       )}
       <span role="columnheader">
@@ -660,22 +632,17 @@ export function LanguagesSection({
           <Globe className="h-4 w-4 text-muted-foreground" />
           {t("projectSettings.section.languages")}
         </CardTitle>
-        {/* Below the language-edit floor (or offline) every control here is
-            disabled; this says so once, with the reason behind the (i). */}
-        {!canEdit && (
-          <CardAction
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            data-testid="languages-view-only"
-          >
-            <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("projectSettings.languages.viewOnly")}
-            {disabledTooltip && (
-              <InfoHint label={t("projectSettings.languages.viewOnlyAriaLabel")}>{disabledTooltip}</InfoHint>
-            )}
-          </CardAction>
+        {/* AQU-2260: below the language-edit floor (or offline) every control
+            here is disabled; one line under the title says why, once, and the
+            controls stay quiet. */}
+        {!canEdit && disabledTooltip && (
+          <LockedNote placement="section" testId="languages-view-only">
+            {disabledTooltip}
+          </LockedNote>
         )}
       </CardHeader>
       <CardContent className="space-y-4">
+        <LockedSection reason={canEdit ? null : disabledTooltip}>
         {sourceRow && onRenameLane && (
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium">{t("projectSettings.info.sourceLanguageLabel")}</span>
@@ -725,12 +692,12 @@ export function LanguagesSection({
         )}
 
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-1.5">
+          <InfoLabel
+            label={t("projectSettings.languages.targetLanguagesHintAriaLabel")}
+            info={t("projectSettings.languages.targetLanguagesHint")}
+          >
             <span className="text-sm font-medium">{t("projectSettings.languages.targetLanguagesHeading")}</span>
-            <InfoHint label={t("projectSettings.languages.targetLanguagesHintAriaLabel")}>
-              {t("projectSettings.languages.targetLanguagesHint")}
-            </InfoHint>
-          </div>
+          </InfoLabel>
 
           {/* AQU-1784: two languages that read the same are allowed, but the
               pair is hard to tell apart, so it is named here with a way out. */}
@@ -797,6 +764,7 @@ export function LanguagesSection({
               className="rounded-md border"
             >
               {tableHeader}
+              {deliversInfoRow}
               {rowMode
                 ? activeRows.map((lane) => {
                     const label = laneLabel(lane)
@@ -830,24 +798,33 @@ export function LanguagesSection({
                               a phone leads with it too; the name (only when it
                               differs) and the code fold under it. */}
                           <div role="cell" className="flex min-w-0 flex-col gap-0.5">
-                            <span className="flex min-w-0 items-center gap-1">
-                              <span
-                                className={cn("min-w-0 truncate font-medium", !language && "text-muted-foreground")}
-                                data-testid={`lane-language-cell-${lane.id}`}
+                            {/* AQU-1784: a lane that shares its label with
+                                another says how it is told apart elsewhere,
+                                under its (i) (AQU-2260: on click). */}
+                            {laneSuffixes[lane.id] ? (
+                              <InfoLabel
+                                label={t("projectSettings.languages.laneShownAs", { label })}
+                                info={t("projectSettings.languages.laneShownAs", { label })}
+                                testId={`lane-shown-as-${lane.id}`}
+                                rowClassName="gap-1"
                               >
-                                {language || t("projectSettings.languages.noLanguageSet")}
-                              </span>
-                              {/* AQU-1784: a lane that shares its label with
-                                  another says how it is told apart elsewhere. */}
-                              {laneSuffixes[lane.id] && (
-                                <InfoHint
-                                  label={t("projectSettings.languages.laneShownAs", { label })}
-                                  testId={`lane-shown-as-${lane.id}`}
+                                <span
+                                  className={cn("min-w-0 truncate font-medium", !language && "text-muted-foreground")}
+                                  data-testid={`lane-language-cell-${lane.id}`}
                                 >
-                                  {t("projectSettings.languages.laneShownAs", { label })}
-                                </InfoHint>
-                              )}
-                            </span>
+                                  {language || t("projectSettings.languages.noLanguageSet")}
+                                </span>
+                              </InfoLabel>
+                            ) : (
+                              <span className="flex min-w-0 items-center gap-1">
+                                <span
+                                  className={cn("min-w-0 truncate font-medium", !language && "text-muted-foreground")}
+                                  data-testid={`lane-language-cell-${lane.id}`}
+                                >
+                                  {language || t("projectSettings.languages.noLanguageSet")}
+                                </span>
+                              </span>
+                            )}
                             {sameNameIds.has(lane.id) && (
                               <span
                                 className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-500"
@@ -889,26 +866,33 @@ export function LanguagesSection({
                           </span>
                           {showDelivers && (
                             <div role="cell" className="flex min-w-0 items-center gap-1">
-                              <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-                                <LaneDeliversSelect
-                                  testId={`lane-delivers-${lane.id}`}
-                                  value={deliversSaving?.laneId === lane.id ? deliversSaving.delivers : delivers}
-                                  laneLabel={label}
-                                  disabled={!canEdit || deliversSaving?.laneId === lane.id}
-                                  onValueChange={(next) => void handleDelivers(lane.id, next)}
-                                />
-                              </DisabledFieldTooltip>
-                              {/* A language that had "Records audio" on has
-                                  no choice yet; the select reads Choose. */}
-                              {delivers == null && (
-                                <InfoHint
-                                  warning
-                                  label={t("projectSettings.languages.deliversNeedsChoiceAriaLabel", { lane: label })}
-                                  testId={`lane-delivers-needs-choice-${lane.id}`}
-                                >
-                                  {t("projectSettings.languages.deliversNeedsChoice")}
-                                </InfoHint>
-                              )}
+                              {(() => {
+                                const select = (
+                                  <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
+                                    <LaneDeliversSelect
+                                      testId={`lane-delivers-${lane.id}`}
+                                      value={deliversSaving?.laneId === lane.id ? deliversSaving.delivers : delivers}
+                                      laneLabel={label}
+                                      disabled={!canEdit || deliversSaving?.laneId === lane.id}
+                                      onValueChange={(next) => void handleDelivers(lane.id, next)}
+                                    />
+                                  </DisabledFieldTooltip>
+                                )
+                                // A language that had "Records audio" on has no
+                                // choice yet; the select reads Choose, and its
+                                // (i) says why, under it, on click (AQU-2260).
+                                return delivers == null ? (
+                                  <InfoLabel
+                                    label={t("projectSettings.languages.deliversNeedsChoiceAriaLabel", { lane: label })}
+                                    info={t("projectSettings.languages.deliversNeedsChoice")}
+                                    testId={`lane-delivers-needs-choice-${lane.id}`}
+                                    rowClassName="gap-1"
+                                    revealClassName="text-amber-700 dark:text-amber-400"
+                                  >
+                                    {select}
+                                  </InfoLabel>
+                                ) : select
+                              })()}
                             </div>
                           )}
                           <div role="cell" className="flex justify-end">
@@ -981,12 +965,13 @@ export function LanguagesSection({
                 </div>
                 {rowMode && (
                   <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1">
+                    <InfoLabel
+                      label={t("projectSettings.languages.addNameHintAriaLabel")}
+                      info={t("projectSettings.languages.addNameHint")}
+                      rowClassName="gap-1"
+                    >
                       <FieldLabel htmlFor="add-lane-name">{t("common.name")}</FieldLabel>
-                      <InfoHint label={t("projectSettings.languages.addNameHintAriaLabel")}>
-                        {t("projectSettings.languages.addNameHint")}
-                      </InfoHint>
-                    </div>
+                    </InfoLabel>
                     <input
                       id="add-lane-name"
                       data-testid="add-lane-name-input"
@@ -1010,12 +995,13 @@ export function LanguagesSection({
                     time; the derived value is never written back. */}
                 {rowMode && (
                   <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1">
+                    <InfoLabel
+                      label={t("projectSettings.languages.codeHintAriaLabel")}
+                      info={t("projectSettings.languages.laneCodeNote")}
+                      rowClassName="gap-1"
+                    >
                       <FieldLabel htmlFor="add-lane-code">{t("projectSettings.languages.codeOptionalLabel")}</FieldLabel>
-                      <InfoHint label={t("projectSettings.languages.codeHintAriaLabel")}>
-                        {t("projectSettings.languages.laneCodeNote")}
-                      </InfoHint>
-                    </div>
+                    </InfoLabel>
                     <input
                       id="add-lane-code"
                       data-testid="add-lane-code-input"
@@ -1034,12 +1020,13 @@ export function LanguagesSection({
                 )}
                 {showDelivers && (
                   <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-1">
+                    <InfoLabel
+                      label={t("projectSettings.languages.deliversHintAriaLabel")}
+                      info={t("projectSettings.languages.deliversHint")}
+                      rowClassName="gap-1"
+                    >
                       <FieldLabel htmlFor="add-lane-delivers">{t("projectSettings.languages.deliversLabel")}</FieldLabel>
-                      <InfoHint label={t("projectSettings.languages.deliversHintAriaLabel")}>
-                        {t("projectSettings.languages.deliversHint")}
-                      </InfoHint>
-                    </div>
+                    </InfoLabel>
                     <LaneDeliversSelect
                       id="add-lane-delivers"
                       testId="add-lane-delivers"
@@ -1083,27 +1070,24 @@ export function LanguagesSection({
             </div>
           ) : (
             <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="add-lane-open"
+              <AddLanguageButton
+                testId="add-lane-open"
                 disabled={!canEdit}
                 onClick={() => {
                   resetAddForm()
                   setAddOpen(true)
                 }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("org.overviewLaneTable.addLanguageAction")}
-              </Button>
+              />
             </DisabledFieldTooltip>
           )}
         </div>
 
         {archivedCount > 0 && (
           <Collapsible open={archivedOpen} onOpenChange={setArchivedOpen}>
-            <div className="flex items-center gap-1.5">
+            <InfoLabel
+              label={t("projectSettings.languages.archivedHintAriaLabel")}
+              info={t("projectSettings.languages.archivedHint")}
+            >
               <CollapsibleTrigger className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
                 <ChevronRight
                   className={cn("size-4 transition-transform", archivedOpen && "rotate-90")}
@@ -1113,10 +1097,7 @@ export function LanguagesSection({
                   {t("org.overviewLaneTable.archivedGroup", { count: archivedCount })}
                 </span>
               </CollapsibleTrigger>
-              <InfoHint label={t("projectSettings.languages.archivedHintAriaLabel")}>
-                {t("projectSettings.languages.archivedHint")}
-              </InfoHint>
-            </div>
+            </InfoLabel>
             <CollapsibleContent>
               <ul data-testid="archived-lanes-list" className="mt-2 divide-y rounded-md border">
                 {(rowMode
@@ -1155,6 +1136,7 @@ export function LanguagesSection({
             </CollapsibleContent>
           </Collapsible>
         )}
+        </LockedSection>
       </CardContent>
     </Card>
   )
@@ -1292,12 +1274,13 @@ function LaneEditFields({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-1">
+          <InfoLabel
+            label={t("projectSettings.languages.codeHintAriaLabel")}
+            info={t("projectSettings.languages.laneCodeNote")}
+            rowClassName="gap-1"
+          >
             <FieldLabel htmlFor={`lane-code-${lane.id}`}>{t("projectSettings.languages.codeColumn")}</FieldLabel>
-            <InfoHint label={t("projectSettings.languages.codeHintAriaLabel")}>
-              {t("projectSettings.languages.laneCodeNote")}
-            </InfoHint>
-          </div>
+          </InfoLabel>
           <input
             id={`lane-code-${lane.id}`}
             value={code}

@@ -23,6 +23,8 @@ import { render, screen, cleanup } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
 import { RecordingVideoSurface, seekTargetSec } from "./RecordingVideoSurface"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { resetRecordingFilmAudibleCacheForTests } from "@/lib/store/recording-film-audible-pref"
 
 /** Countdown length — the surface derives the run-up from `zeroAtMs`, so this
  *  only has to agree with what the tests pass, not with the modal. */
@@ -263,5 +265,27 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
       expect(seekTargetSec(-5)).toBe(0)
       expect(seekTargetSec(12.5)).toBe(12.5)
     })
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The mute
+// toggle's hover says what it does; why (the bleed into a take) is the amber
+// warning on the picture, and the unmute name already says headphones only.
+describe("RecordingVideoSurface — the mute toggle's hover only names it", () => {
+  it("names the toggle, muted and unmuted, without explaining it", async () => {
+    // The film's audibility is a device-wide preference other tests flip.
+    localStorage.clear()
+    resetRecordingFilmAudibleCacheForTests()
+    const user = userEvent.setup()
+    renderWithTooltips(
+      <RecordingVideoSurface src="film.webm" startSec={120} running={false} armNonce={1} leadIn={null} />,
+    )
+    const toggle = screen.getByTestId("rec-film-audible")
+    await expectTooltip(toggle, "Unmute the film (headphones only)")
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/echo cancellation/)
+    await user.click(toggle)
+    await user.unhover(toggle)
+    await expectTooltip(toggle, "Mute the film")
+    expect(screen.getByRole("tooltip").textContent).not.toMatch(/Unless you are on headphones/)
   })
 })

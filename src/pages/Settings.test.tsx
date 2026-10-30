@@ -275,6 +275,7 @@ describe("Security settings page", () => {
       "About Allow language lane coordinators to assign work",
       "About Who can manage terminology",
       "About Who can change project languages",
+      "About Who can import files",
     ]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "false")
     }

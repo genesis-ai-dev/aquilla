@@ -15,6 +15,7 @@ import { serializeWithChips, type ContextChip } from "./context-chip"
 import { expandSlashCommand } from "./slash-commands"
 import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { AgentSendOptions } from "./session-store"
+import { appLanguageName } from "./app-language"
 
 export interface ComposeAgentSendInput {
   text: string
@@ -55,6 +56,8 @@ export function composeAgentSend({
       projectId,
       ...(context.fileId || context.cellId || context.lane !== undefined ? { context: { ...context } } : {}),
       ...(translatorProfile ? { translatorProfile } : {}),
+      // AQU-2263: the last step of the language the assistant answers in.
+      appLanguage: appLanguageName(),
       ...(artifacts.length > 0 ? { artifacts } : {}),
     },
   }

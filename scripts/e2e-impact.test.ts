@@ -146,7 +146,7 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/collab/member-presence-popover.smoke.spec.ts",
     ]
     const selected = selectAffectedE2E(
-      ["src/components/org/AddLanguagePopover.tsx"],
+      ["src/components/ProjectSettings/RevokeAllDialog.tsx"],
       withPresence,
     ).specs
     expect(selected).not.toContain("e2e/specs/collab/member-presence-popover.smoke.spec.ts")
@@ -239,9 +239,9 @@ describe("changed-file E2E impact selection", () => {
       "src/components/UsernameTypeahead.tsx",
       "src/components/MemberMultiAddRow.tsx",
       "src/components/MultiProjectInviteDialog.tsx",
-      "src/components/ProjectMembersPage.tsx",
       "src/components/ProjectSettings/AddProjectMemberDialog.tsx",
-      "src/components/SharePanel.tsx",
+      "src/components/ProjectSettings/InviteLinkTab.tsx",
+      "src/components/ProjectSettings/RevokeAllDialog.tsx",
       "src/components/JoinPage.tsx",
       "src/hooks/useUserSearch.ts",
       "src/lib/sync/invites.ts",

@@ -129,13 +129,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "auth.signup.usernameLabel":
-    "Labels the account identifier being chosen at sign-up and sent to the identity " +
-    "server — the name this person will type to sign in from then on. " +
-    "projectSettings.user.usernameLabel labels the local author name recorded " +
-    "against edits in a project's history, a per-device display preference that " +
-    "never authenticates anything. Languages that distinguish a chosen login " +
-    "handle from a displayed personal name need the two separately.",
+  "projectSettings.gitSync.autoSyncSwitch":
+    "The label of the Git sync card's on/off switch, a standalone noun phrase at the " +
+    "start of a row ('Auto-sync'). projectSettings.field.autoSync is the lower-case " +
+    "name of the same setting read inside the 'Saved …' sentence that lists what " +
+    "changed. A capitalized label and a mid-sentence list item differ in case and, " +
+    "in many languages, in grammatical form.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -329,15 +328,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "context). A lower-case mid-sentence filler and a capitalized standalone " +
     "enum/badge value take different forms in languages that case- or " +
     "register-mark that distinction.",
-  "org.membersPage.addMemberHeading":
-    "Static <h2> SECTION HEADING introducing the add-member area of the " +
-    "per-project Members page — a nominal label naming what's below it. " +
-    "org.teamDetail.addMemberButton is the imperative text of an actual clickable " +
-    "button/menu item that starts the add-member flow. This is the same " +
-    "nominalized-heading-vs-imperative-button split already documented for " +
-    "auth.login.title vs auth.login.submitDefault above: languages that " +
-    "nominalize headings while keeping buttons imperative need both forms even " +
-    "though English spells them identically.",
   "org.membersPage.orgPage.noExpiry":
     "Lower-case inline status caption ('no expiry') standing in for a computed " +
     "relative-time phrase on a pending-invite row, in the same register as its " +
@@ -399,11 +389,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "is the cell-level health badge shown on an individual cell's expansion " +
     "panel. A settings-panel heading and a per-cell status badge naming the same " +
     "feature at two different granularities read as different parts of speech.",
-  "projectSettings.share.tabMembers":
-    "Tab label in the Share dialog switching to the per-project member list. " +
-    "editor.navTitle.members is the breadcrumb/nav title for the standalone " +
-    "Members page. A tab within a dialog and a full page's nav title are " +
-    "different UI roles that happen to share the plain noun 'Members'.",
   "projectSettings.breadcrumbEditor":
     "Breadcrumb trail segment in Project Settings linking back to the workspace " +
     "editor. editor.navTitle.editor is the editor's own nav-title/tab label when " +
@@ -452,11 +437,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.share.copied":
-    "Transient confirmation after copying a minted invite link's URL in the " +
-    "Share dialog. nav.report.copied is the equivalent confirmation for the " +
-    "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
-    "confirmations that happen to share the same short exclamation.",
   "projectSettings.section.bibleResources":
     "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
     "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
@@ -542,16 +522,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "shadcn Badge component on a personal API-token row. A lower-case inline " +
     "status word and a capitalized standalone badge take different forms in " +
     "languages that case- or register-mark that distinction.",
-  "onboarding.preferences.profile.responseLanguage.label":
-    "Field label in the personal Translator Profile (Preferences page) for " +
-    "the language the AI assistant should use when replying to THIS person in " +
-    "chat — a device-local, per-person override. projectSettings.ai." +
-    "assistantLanguageLabel is the PROJECT-WIDE default for the same-named " +
-    "setting, shared by everyone on the project, configured in Project " +
-    "Settings' AI card. Same surface word, different scope and different " +
-    "underlying data (personal profile field vs shared project setting) — " +
-    "collapsing them would risk a translator conflating a personal override " +
-    "with a shared team default.",
   "onboarding.preferences.hint.notSet":
     "Standalone Title-Case index-row hint on the Preferences page ('Not set'), " +
     "alongside sibling Title-Case hints 'Personal'/'On-device'/'Sharing on'. " +

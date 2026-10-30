@@ -730,6 +730,13 @@ textarea,
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 8%, transparent); }
 }
 
+/* AQU-2265: a link with ?highlight=<id> scrolls to one setting and flashes it
+   (src/hooks/useSettingHighlight.ts). The search flash's colours, held longer. */
+[data-setting-highlight] {
+  animation: codex-search-flash 2.4s ease-out;
+  border-radius: 6px;
+}
+
 /* AQU-646 round 8: clicking a silence on the source band scrolls the table to
    the line before it and pulses BOTH lines around the gap, so the eye lands on
    the actual silence rather than somewhere in a list with several in view.

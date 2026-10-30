@@ -34,6 +34,20 @@ interface StatusBarProps {
   className?: string
 }
 
+/**
+ * The one figure the footer leads with, as a fraction, and whether it counts
+ * recordings rather than text. The media view's status ring draws the same
+ * number, so the ring and the counts it opens onto can never disagree.
+ */
+export function statusBarFigure(progress: FileStats): { fraction: number; audio: boolean } {
+  const view = fileProgressView(progress)
+  const bothDone = view === "both" && progress.delivers === "text_and_audio"
+  const audioOnly = view === "audio"
+  const recorded = progress.recorded ?? (progress.delivers === "audio" ? progress.translated : 0)
+  const done = bothDone ? progress.validated : audioOnly ? recorded : progress.translated
+  return { fraction: progressPercent(done, progress.total) / 100, audio: audioOnly }
+}
+
 export function StatusBar({
   progress, getHealthByCell, projectHealth, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
@@ -56,7 +70,7 @@ export function StatusBar({
   const showText = !audioOnly && !bothDone
   const showAudio = !bothDone && view !== "text" && recorded > 0
   // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
-  const fraction = progressPercent(bothDone ? validated : audioOnly ? recorded : translated, total) / 100
+  const { fraction } = statusBarFigure(progress)
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each
@@ -73,6 +87,7 @@ export function StatusBar({
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"
+        label={t("workspace.statusBar.healthAria", { percent: projectHealth })}
         getHealthByCell={getHealthByCell}
         staleSourceCount={staleSourceCount}
         onJumpToCell={onJumpToCell}

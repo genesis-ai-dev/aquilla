@@ -15,6 +15,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { WhosWhoSidebar } from "./WhosWhoSidebar"
 import { onBibleFilterRequest, onMentionJumpRequest, publishBibleFilter } from "./bible-data-bus"
 import {
@@ -275,5 +277,23 @@ describe("what it says around the cast", () => {
     await waitFor(() => screen.getByTestId("whos-who-panel"))
     fireEvent.click(screen.getByRole("button", { name: "Hide Who's Who" }))
     expect(onToggle).toHaveBeenCalled()
+  })
+})
+
+/** AQU-2260 (Sam, Oct 29): a control that carries its own words has no hover. */
+async function expectNoHoverTip(el: Element) {
+  await userEvent.setup().hover(el)
+  await act(() => new Promise((r) => setTimeout(r, 30)))
+  expect(screen.queryByRole("tooltip")).toBeNull()
+}
+
+describe("WhosWhoSidebar — the closed edge tab", () => {
+  it("carries its own word, so it has no hover", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <WhosWhoSidebar project={PROJECT} fileId={FILE_ID} trackedRef="JHN 4:10" sourceLanguage="en" open={false} onToggle={vi.fn()} />
+      </TooltipProvider>,
+    )
+    await expectNoHoverTip(screen.getByTestId("whos-who-edge-tab"))
   })
 })

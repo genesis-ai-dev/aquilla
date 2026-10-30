@@ -28,10 +28,10 @@ export const nav = defineNamespace({
     "nav.historyControls.noPreviouslyViewed": "No previously viewed pages",
 
     // -- AccountSwitcher: account menu + auth dialogs --
-    "nav.account.addTitle": "Add Frontier account",
-    "nav.account.loginTitle": "Log in to Frontier",
-    "nav.account.signupTitle": "Create a Frontier account",
-    "nav.account.newToFrontier": "New to Frontier?",
+    "nav.account.addTitle": "Add Aquilla account",
+    "nav.account.loginTitle": "Log in to Aquilla",
+    "nav.account.signupTitle": "Create a Aquilla account",
+    "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
     "nav.account.addAnotherAccount": "Add another account",
@@ -278,8 +278,6 @@ export const nav = defineNamespace({
     "nav.version.copiedAriaLabel": "Build info copied",
     "nav.version.copyAriaLabel": "Copy build info",
     "nav.version.copiedLabel": "Copied",
-    "nav.version.copiedTooltip": "Copied to clipboard",
-    "nav.version.copyTooltip": "Click to copy\n{buildInfo}",
 
     // -- EnvironmentTag: non-production backend warning beside the build info --
     "nav.environment.development": "Dev data",
@@ -345,8 +343,6 @@ export const nav = defineNamespace({
     "nav.fileRow.expandSections": "Expand sections",
     "nav.fileRow.collapse": "Collapse",
     "nav.fileRow.expand": "Expand",
-    "nav.fileRow.timelineOrderedTooltip": "Timeline-ordered (timecodes are the spine)",
-    "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
@@ -355,8 +351,6 @@ export const nav = defineNamespace({
     "nav.fileRow.fileActions": "File actions",
     // Export menu item reuses nav.workspaceActions.export (same phrase, same act).
     // Assign-work menu item reuses dialog.assign.title (same phrase, same act).
-    "nav.fileRow.suggestionTooltip":
-      "A cleaner name was detected for this file. Click to apply, or use the Apply button at the top of the sidebar.",
     "nav.fileRow.applyRenameSuggestion": "Apply rename suggestion",
     // AQU-1569: the keyboard/touch route to the same reorder the drag does.
     "nav.fileRow.moveUp": "Move up",
@@ -500,25 +494,26 @@ export const nav = defineNamespace({
           "long translation there only affects the tooltip/aria-label, not layout).",
       },
 
-      // -- EditorModeToggle / audio-lens-label.ts (AQU-353) --
+      // -- EditorModeToggle (AQU-353; AQU-1758: one Media lens on every file) --
       "nav.lens.audio": {
         description:
-          "Second tab of the header Text/Audio segmented lens switch, for a cell-" +
-          "ordered file: reveals the cast library, transport and per-line speaker " +
-          "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
-          "icon 'Text' tab in a two-tab segmented control.",
+          "The bare word 'Audio' as a short heading: the Audio column of the " +
+          "organization's project table and the Audio side of the character " +
+          "check. (It named the editor's second view until that view became Media " +
+          "on every file.) Short — a column heading or a button label.",
       },
       "nav.lens.transcribe": {
         description:
           "Third tab of the header lens switch, offered when the file has audio: a view for " +
           "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
-          "beside the Text and Audio tabs in a segmented control.",
+          "beside the Text and Media tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:
-          "Same second lens tab as nav.lens.audio, relabelled for a time-ordered " +
-          "(timeline) file where the lens shows separate media segments rather than " +
-          "audio attached to text cells.",
+          "Second tab of the header Text/Media segmented lens switch, on every " +
+          "file: the timeline stacked over the same table the Text tab edits, with " +
+          "the cast library and the playback strip. Short — sits beside a Pencil-" +
+          "icon 'Text' tab in a segmented control.",
       },
 
       // -- NavHistoryControls --
@@ -602,7 +597,7 @@ export const nav = defineNamespace({
       "nav.account.newToFrontier": {
         description:
           "Prompt text preceding the 'Create an account' link at the bottom of the " +
-          "login form. 'Frontier' is the identity provider's product name — keep it " +
+          "login form. 'Aquilla' is the identity provider's product name — keep it " +
           "untranslated.",
       },
       "nav.account.menuLabel": {
@@ -911,7 +906,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.transcribeAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
+          "Secondary action-menu item (Media) that runs Whisper transcription " +
           "on every recorded-but-untimed cell in the file.",
         maxLength: 32,
       },
@@ -932,7 +927,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.synthAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that generates AI voice for " +
+          "Secondary action-menu item (Media) that generates AI voice for " +
           "every translated-but-unrecorded cell in the file.",
         maxLength: 40,
       },
@@ -953,7 +948,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.changeVoiceAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
+          "Secondary action-menu item (Media) that keeps every cell's existing " +
           "recording and makes it sound like the cloned voice assigned to that cell. " +
           "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
           "from text.",
@@ -1097,7 +1092,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.diarize": {
         description:
-          "Action-menu item (Audio lens) that runs speaker diarization on the " +
+          "Action-menu item (Media) that runs speaker diarization on the " +
           "file's audio. Default/idle state of nav.fileMenu.diarizing.",
         maxLength: 24,
       },
@@ -1115,7 +1110,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.useFileSpeakerAsVoice": {
         description:
-          "Action-menu item (Audio lens, after diarization) that adopts the file's " +
+          "Action-menu item (Media, after diarization) that adopts the file's " +
           "detected speaker as a reusable cast voice.",
         maxLength: 40,
       },
@@ -1159,16 +1154,6 @@ export const nav = defineNamespace({
         description:
           "Visible text on the build-info button for ~1.5s after a successful click, " +
           "replacing the version string.",
-      },
-      "nav.version.copiedTooltip": {
-        description: "Tooltip shown right after a successful copy of the build info.",
-      },
-      "nav.version.copyTooltip": {
-        description:
-          "Tooltip shown before the user clicks, inviting them to copy the build info. " +
-          "{buildInfo} is untranslated technical text (version number, git branch, " +
-          "commit SHA) rendered on the line(s) after the invitation.",
-        placeholders: { buildInfo: "Untranslated version/branch/SHA build string." },
       },
 
       // -- EnvironmentTag (AQU-1022) --
@@ -1426,14 +1411,6 @@ export const nav = defineNamespace({
       "nav.fileRow.expand": {
         description: "Accessible name for the chevron toggle in its collapsed state.",
       },
-      "nav.fileRow.timelineOrderedTooltip": {
-        description:
-          "Tooltip on the small waveform icon shown next to files whose cells are " +
-          "ordered by timecode rather than sequence.",
-      },
-      "nav.fileRow.timelineOrderedFile": {
-        description: "Accessible label for the same timeline-ordered indicator icon.",
-      },
       "nav.fileRow.importedAsTooltip": {
         description:
           "Tooltip on a file's name showing both its current (possibly renamed) name " +
@@ -1478,13 +1455,6 @@ export const nav = defineNamespace({
         description:
           "Tooltip and accessible name for the ⋯ button that opens the file's context " +
           "menu (rename, move, export, assign work, delete).",
-      },
-      "nav.fileRow.suggestionTooltip": {
-        description:
-          "Tooltip on the sparkle icon shown when an automatic cleaner-name suggestion " +
-          "is available for this file. Longer than most nav tooltips — allowed to wrap " +
-          "(max-w-xs on the tooltip), so it isn't length-constrained like the rest of " +
-          "this namespace.",
       },
       "nav.fileRow.applyRenameSuggestion": {
         description: "Accessible name for the same sparkle 'apply suggestion' button.",

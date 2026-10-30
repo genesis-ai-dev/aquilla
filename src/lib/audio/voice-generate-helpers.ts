@@ -56,6 +56,8 @@ export interface GenerateCellVoiceArgs {
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
   surface?: TelemetrySurface
+  /** Decision 11: see `GenerateAndAttachArgs.history`. */
+  history?: { selectedBefore: string | null }
 }
 
 /**
@@ -120,8 +122,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       // project, which left Inworld with no language and the default voice
       // picked for none — on every regenerate, voice-panel and batch voice.
       geminiContext: {
-        sourceLanguage: sourceLaneLanguage(project.lanes, project) ?? undefined,
-        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes, project) ?? undefined,
+        sourceLanguage: sourceLaneLanguage(project.lanes) ?? undefined,
+        targetLanguage: laneLanguageForTag(args.targetLang ?? "", project.lanes) ?? undefined,
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,
@@ -134,6 +136,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
       ...(args.surface ? { surface: args.surface } : {}),
+      ...(args.history ? { history: args.history } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

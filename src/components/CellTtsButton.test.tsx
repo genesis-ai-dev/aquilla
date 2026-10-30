@@ -5,6 +5,8 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { CellTtsButton } from "./CellTtsButton"
+import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -14,6 +16,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("@/lib/audio/prefetch", () => ({
   useModelStatus: () => ({ kind: "idle" }),
 }))
+
+const onlineState = vi.hoisted(() => ({ value: true }))
+vi.mock("@/hooks/useOnline", () => ({ useOnline: () => onlineState.value }))
 
 function renderButton(projectTtsSettings: ProjectTtsSettings) {
   render(
@@ -80,5 +85,44 @@ describe("CellTtsButton — round 5 (AQU-646)", () => {
   it("the Narrator speaks Gemini when the project engine IS Gemini", () => {
     render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{ provider: "gemini" }} />)
     expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Gemini")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A failure
+// and the offline preview are explained behind an (i) beside it, on a click.
+describe("CellTtsButton — the hover names it; explanations open on click", () => {
+  it("after a failure, the hover only names the button", async () => {
+    setTtsStatus(ttsStatusKey("c-err"), { kind: "error", message: "Gemini API key required" })
+    renderWithTooltips(<CellTtsButton cellId="c-err" text="Hello there" projectTtsSettings={{}} />)
+    await expectTooltip(screen.getByRole("button", { name: /^Generate & play/ }), "Generate & play")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("Gemini API key required")
+    setTtsStatus(ttsStatusKey("c-err"), { kind: "idle" })
+  })
+
+  it("after a failure, the reason is behind the (i) beside it", async () => {
+    setTtsStatus(ttsStatusKey("c-err2"), { kind: "error", message: "Gemini API key required" })
+    renderWithTooltips(<CellTtsButton cellId="c-err2" text="Hello there" projectTtsSettings={{}} />)
+    await expectClickNote(screen.getByRole("button", { name: /^About / }), "Couldn't generate a voice — Gemini API key required")
+    setTtsStatus(ttsStatusKey("c-err2"), { kind: "idle" })
+  })
+
+  it("offline with the on-device voice, the hover only names it", async () => {
+    onlineState.value = false
+    renderWithTooltips(<CellTtsButton cellId="c-off" text="Hello there" projectTtsSettings={{ provider: "mms" }} />)
+    await expectTooltip(screen.getByRole("button", { name: /^Generate & play/ }), "Generate & play")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("won't be saved")
+    onlineState.value = true
+  })
+
+  it("offline with the on-device voice, says the clip won't be saved behind its (i)", async () => {
+    onlineState.value = false
+    renderWithTooltips(<CellTtsButton cellId="c-off" text="Hello there" projectTtsSettings={{ provider: "mms" }} />)
+    await expectClickNote(screen.getByRole("button", { name: /^About / }), "The clip won't be saved")
+    onlineState.value = true
+  })
+
+  it("has no (i) when there is nothing to explain", () => {
+    render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{}} />)
+    expect(screen.queryByRole("button", { name: /^About / })).toBeNull()
   })
 })

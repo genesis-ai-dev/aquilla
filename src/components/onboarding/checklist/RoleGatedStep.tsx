@@ -10,8 +10,11 @@ import { useT } from "@/lib/i18n/I18nProvider"
  *
  * Pattern source: `aquilla-specs/05-user-stories/customize-ai-settings.md`
  * Persona section — below-floor roles see the step rendered **read-only**
- * with an explanatory tooltip naming the required role, never hidden and
- * never fronted by a 403 popup. Mirrors `DisabledFieldTooltip` (used by
+ * with a note naming the required role, never hidden and never fronted by a
+ * 403 popup. AQU-2260 (Sam, Oct 29): the note opens on CLICK of the greyed
+ * step, never on hover. The step is a disabled <fieldset>, so its controls
+ * are read-only for the keyboard as well as the pointer, and AppTooltip,
+ * seeing a disabled child, gives the reason on click. Mirrors `DisabledFieldTooltip` (used by
  * ProjectSettings.tsx for the same AQU-255 floor) but wraps a whole step
  * body rather than a single field, since a checklist step is a cluster of
  * inputs/buttons rather than one control.
@@ -70,17 +73,18 @@ export function RoleGatedStep({
   })
 
   return (
-    <AppTooltip content={tooltip}>
-      <div
+    <AppTooltip content={tooltip} disabledTriggerClassName="block w-full cursor-not-allowed" align="start">
+      <fieldset
+        disabled
         aria-disabled="true"
         data-testid="role-gated-step"
-        className="pointer-events-none relative opacity-60 select-none"
+        className="pointer-events-none relative m-0 min-w-0 border-0 p-0 opacity-60 select-none"
       >
         <div className="absolute -top-1 -end-1 z-10 flex h-5 w-5 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Lock className="h-3 w-3" aria-hidden />
         </div>
         {children}
-      </div>
+      </fieldset>
     </AppTooltip>
   )
 }

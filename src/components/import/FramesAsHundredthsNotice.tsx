@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react"
-import { AlertTriangle, Info } from "lucide-react"
+import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { InfoLabel } from "@/components/ui/info-label"
 import { filmFrameRateOf, useFilmFrameRates, type FilmFrameRate } from "@/hooks/useFilmFrameRate"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -128,25 +128,17 @@ export function FramesAsHundredthsNotice({
     >
       <div className="flex items-start gap-1.5 text-amber-700 dark:text-amber-300">
         <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-        <span className="font-medium">{t("importExport.framesAsHundredths.warning")}</span>
-        <Tooltip>
-          <TooltipTrigger
-            closeOnClick={false}
-            render={
-              <button
-                type="button"
-                aria-label={t("importExport.framesAsHundredths.infoLabel")}
-                data-testid="frames-as-hundredths-info"
-                className="inline-flex shrink-0 text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
-              />
-            }
-          >
-            <Info className="mt-px size-3.5" aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            {t("importExport.framesAsHundredths.explain", { max: finding.maxFrame })}
-          </TooltipContent>
-        </Tooltip>
+        {/* Why, in place under the warning, on a click of its (i), never a
+            hover (AQU-2260). */}
+        <InfoLabel
+          info={t("importExport.framesAsHundredths.explain", { max: finding.maxFrame })}
+          label={t("importExport.framesAsHundredths.infoLabel")}
+          testId="frames-as-hundredths-info"
+          rowClassName="items-start"
+          revealClassName="text-amber-800/90 dark:text-amber-200/90"
+        >
+          <span className="font-medium">{t("importExport.framesAsHundredths.warning")}</span>
+        </InfoLabel>
       </div>
       <RadioGroup
         value={state.keep ? "keep" : "fix"}

@@ -35,16 +35,17 @@ function authHeaders(jwt: string): HeadersInit {
 }
 
 /**
- * GET /api/v2/orgs/me — the caller's own org. Auto-creates one server-side
- * if the user has none yet.
+ * GET /api/v2/orgs/me — the caller's own personal workspace, or null when they
+ * own none (AQU-2259: the read no longer creates one).
  */
 export async function fetchUserOrgs(
   jwt: string,
   apiUrl: string = AUTH_API_URL,
-): Promise<MyOrg> {
+): Promise<MyOrg | null> {
   const res = await fetch(`${apiUrl}/api/v2/orgs/me`, {
     headers: authHeaders(jwt),
   })
+  if (res.status === 404) return null
   return await readJson<MyOrg>(res)
 }
 

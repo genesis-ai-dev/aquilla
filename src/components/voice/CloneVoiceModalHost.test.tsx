@@ -13,7 +13,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { NewVoiceModalProps } from "./NewVoiceModal"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 
@@ -34,20 +34,7 @@ vi.mock("./NewVoiceModal", () => ({
   },
 }))
 
-vi.mock("@/hooks/useCellAudio", () => ({
-  useCellAudio: () => ({
-    state: "idle", error: null, isPlaying: false, currentTime: 0, duration: 10,
-    peaks: [], peaksState: "idle",
-    play: vi.fn(), pause: vi.fn(), seek: vi.fn(), setVolume: vi.fn(),
-    setTrim: vi.fn(), requestPeaks: vi.fn(), ensureBytes: vi.fn(),
-  }),
-}))
-vi.mock("@/lib/audio/voice-generate-helpers", () => ({
-  generateCellVoice: vi.fn(async () => true),
-}))
-
 import { CloneVoiceModalHost } from "./CloneVoiceModalHost"
-import { CellVoicePanel } from "@/components/cell/CellVoicePanel"
 
 const narrator: Voice = { id: "v-narrator", name: "Narrator", color: "#475569", provider: "gemini", voiceName: "Charon" }
 
@@ -76,7 +63,6 @@ const cell = {
   attachments: { a1: { url: "blob:x", type: "audio/wav" } },
 } as unknown as CellData
 
-const project = { id: "proj-1", name: "P" } as unknown as ProjectRecord
 
 describe("CloneVoiceModalHost", () => {
   it("does not render the modal while closed", () => {
@@ -195,27 +181,24 @@ describe("CloneVoiceModalHost", () => {
   })
 })
 
-describe("Clone voice button → New voice modal (AQU-1001)", () => {
-  it("opens the clone modal in place from a source cell's audio controls", async () => {
+describe("Make a character from this voice → New voice modal (AQU-1001, AQU-1758)", () => {
+  // The entry points (the timeline take menu, the Recording tab's take) hand
+  // the workspace a cell id; the host must open in place, cloning, seeded to it.
+  it("opens the clone modal in place, seeded to the line that asked", async () => {
     function Harness() {
       const [open, setOpen] = useState(false)
       const [seed, setSeed] = useState<string | null>(null)
-      const settings: ProjectTtsSettings = { voices: [narrator], defaultVoiceId: narrator.id }
       return (
         <>
-          <CellVoicePanel
-            cell={cell}
-            project={project}
-            projectId="proj-1"
-            settings={settings}
-            session={{ jwt: "x" } as unknown as never}
-            username="tester"
-            onAfterGenerate={() => {}}
-            onMakeCharacter={() => {
+          <button
+            type="button"
+            onClick={() => {
               setSeed(cell.id)
               setOpen(true)
             }}
-          />
+          >
+            Make a character from this voice
+          </button>
           <CloneVoiceModalHost
             open={open}
             onClose={() => setOpen(false)}
@@ -233,9 +216,7 @@ describe("Clone voice button → New voice modal (AQU-1001)", () => {
     renderWithTooltips(<Harness />)
     expect(screen.queryByTestId("new-voice-modal")).toBeNull()
 
-    // AQU-2212: the button clones in place; the dialog is under More options.
-    await user.click(screen.getByRole("button", { name: /clone/i }))
-    await user.click(screen.getByRole("button", { name: "More options" }))
+    await user.click(screen.getByRole("button", { name: /make a character/i }))
 
     const modal = screen.getByTestId("new-voice-modal")
     expect(modal.getAttribute("data-mode")).toBe("clone")

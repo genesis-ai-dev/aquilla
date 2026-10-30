@@ -5,7 +5,6 @@ import { useConnectionFormat } from "@/hooks/useConnectionFormat"
 import { useConnectionActivity } from "@/hooks/useConnectionActivity"
 import { Popover, PopoverTrigger, PopoverContent, PopoverHeader, PopoverTitle, PopoverDescription } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { ConnectionHistoryPoint } from "@/lib/sync/connection-activity"
@@ -44,6 +43,9 @@ const PING_KEY = { good: "editor.sync.qualityGood", fair: "editor.sync.qualityFa
  *
  * Clicking opens a three-tile popover (upload, download, ping). Full telemetry
  * sits behind the (i) button so the everyday view stays glanceable.
+ *
+ * AQU-2260 (Sam, Oct 29): what the status means is the popover's first line,
+ * read on click. The pill no longer explains itself on hover.
  */
 export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorProps) {
   const { t } = useI18n()
@@ -54,7 +56,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   const connected = status === "live" || status === "syncing" || status === "retrying"
   const quality = connected ? activity.quality : null
   const PingIcon = quality ? PING_ICON[quality] : Signal
-  const { dot, labelKey, tooltipKey } = describeStatus(status)
+  const { dot, labelKey, tooltipKey } = describeSyncStatus(status)
   const label = t(labelKey)
   const tooltip = t(tooltipKey)
   const rows = [
@@ -66,25 +68,23 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-        <AppTooltip content={tooltip} disabled={open}>
-          <PopoverTrigger
+        <PopoverTrigger
+          className={cn(
+            "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-2 text-xs text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground",
+            className,
+          )}
+          aria-label={tooltip}
+        >
+          <span
             className={cn(
-              "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-2 text-xs text-muted-foreground shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground",
-              className,
+              "h-1.5 w-1.5 rounded-full",
+              dot,
+              (status === "connecting" || status === "syncing" || status === "reconnecting") &&
+                "animate-pulse"
             )}
-            aria-label={tooltip}
-          >
-            <span
-              className={cn(
-                "h-1.5 w-1.5 rounded-full",
-                dot,
-                (status === "connecting" || status === "syncing" || status === "reconnecting") &&
-                  "animate-pulse"
-              )}
-            />
-            <span className="leading-none">{label}</span>
-          </PopoverTrigger>
-        </AppTooltip>
+          />
+          <span className="leading-none">{label}</span>
+        </PopoverTrigger>
         <PopoverContent align="end" className="w-72 max-w-[calc(100vw-2rem)] gap-3 p-3">
           <PopoverHeader className="flex-row items-start justify-between gap-2">
             <div className="flex flex-col gap-1">
@@ -133,7 +133,7 @@ function PingSparkline({ history }: { history: ConnectionHistoryPoint[] }) {
 
 /** Pure — no hook access, so it returns message keys rather than text; the
  *  component above resolves them with `useT()`. */
-function describeStatus(status: SyncStatus): {
+export function describeSyncStatus(status: SyncStatus): {
   dot: string
   labelKey: MessageKey
   tooltipKey: MessageKey

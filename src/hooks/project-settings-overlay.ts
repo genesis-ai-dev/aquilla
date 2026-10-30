@@ -2,6 +2,8 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings, ProjectLaneView } from "@/lib/sync/project-settings"
 import { readBibleEnrichments } from "../../db/shared/bible-enrichments"
+import { readDraftingSettings } from "../../db/shared/drafting-settings"
+import { applyDraftingSettings } from "@/lib/completion/drafting-settings"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 
 /**
@@ -46,19 +48,30 @@ export function overlaySettings(
   // AQU-538: the lane registry must reach the workspace or the LaneSwitcher
   // never renders (found by the add-target-language e2e journey).
   assign("targetLanes", settings.targetLanes)
-  // AQU-601: archived-lane markers overlay alongside the registry so the
-  // workspace switcher can hide archived lanes by default.
-  assign("archivedLanes", settings.archivedLanes)
   if (lanes) {
     draft().lanes = lanes
+    // AQU-601: archived-lane markers ride alongside the registry so the lane
+    // lists can hide archived lanes. AQU-2223: they come from the rows'
+    // `archivedAt` — the settings mirror is no longer written, so it misses
+    // every lane archived since. The tags are the rows' own; `''` (the former
+    // default lane) is never a registry entry, so it is left out.
+    draft().archivedLanes = lanes.flatMap((lane) =>
+      lane.role === "target" && lane.archivedAt && lane.legacyTag ? [lane.legacyTag] : [],
+    )
   }
-  if (settings.systemPrompt != null) {
-    if (record.completionSettings?.systemPrompt !== settings.systemPrompt) {
-      draft().completionSettings = buildCompletionSettings(
-        record.completionSettings,
-        { systemPrompt: settings.systemPrompt },
-      )
-    }
+  // AQU-2259: the team's drafting settings replace this browser's copy of
+  // them. Validated on the way in, so a malformed field reads as its default.
+  // The record keeps only what the blob never carries: this device's project
+  // AI key, and the instructions (overlaid from `systemPrompt` just below).
+  let completion = record.completionSettings
+  const drafting = readDraftingSettings(settings.draftingSettings)
+  if (drafting) completion = applyDraftingSettings(completion, drafting)
+  if (settings.systemPrompt != null && completion?.systemPrompt !== settings.systemPrompt) {
+    completion = buildCompletionSettings(completion, { systemPrompt: settings.systemPrompt })
+  }
+  if (completion !== record.completionSettings
+    && JSON.stringify(completion ?? null) !== JSON.stringify(record.completionSettings ?? null)) {
+    draft().completionSettings = completion
   }
   assign("rules", settings.rules)
   assign("rulePenalties", settings.rulePenalties)
@@ -91,6 +104,9 @@ export function overlaySettings(
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
   assign("allowTrackEditing", settings.allowTrackEditing ?? orgDefaults?.media?.allowTrackEditing)
+  // AQU-1758: Film and Sources in the media view. No org default: unset, the
+  // project's kind decides (lib/media/film-and-sources.ts).
+  assign("filmAndSources", settings.filmAndSources)
   // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
   // overview or the gate reads false everywhere and an opted-in project would
   // see no Autopilot at all — the surfaces render only when this is on (or the

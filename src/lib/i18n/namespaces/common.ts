@@ -29,6 +29,15 @@ export const common = defineNamespace({
     "common.loadingSpinner": "Loading",
     "common.showMore": "Show more",
     "common.showLess": "Show less",
+    // AQU-2293: the Show more / Show all / Show fewer trio under a capped
+    //   list. Shared by the project overview's imported-originals list and the
+    //   org Overview's Team workload card, so the wording cannot drift apart.
+    "common.listShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "common.listShowAll": "Show all ({count})",
+    "common.listShowFewer": "Show fewer",
 
     // — Shared vocabulary and status words (AQU-511 wave 4):
     //   promoted here because two or more namespaces render exactly these
@@ -53,6 +62,9 @@ export const common = defineNamespace({
     "common.seek": "Seek",
     "common.volume": "Volume",
     "common.noMatches": "No matches",
+    "common.searchPlaceholder": "Search…",
+    "common.searchListAria": "Search the list",
+    "common.aboutAria": "About {name}",
     "common.readOnlyGit": "Read-only (imported from git)",
     "common.refresh": "Refresh",
     "common.searching": "Searching…",
@@ -313,6 +325,29 @@ export const common = defineNamespace({
           "Inline link that collapses text expanded by common.showMore back to its " +
           "truncated form, next to an upward chevron.",
       },
+      "common.listShowMore": {
+        description:
+          "Text button under a list that starts capped at five rows (the project " +
+          "overview's imported originals, the org Overview's Team workload lists). " +
+          "Reveals the next batch of rows; count is the batch size, not how many are " +
+          "still hidden. Sits beside common.listShowAll and is hidden once fewer than a " +
+          "full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "common.listShowAll": {
+        description:
+          "Text button under a capped list that reveals every remaining row at once. " +
+          "Count is that list's total number of rows, not how many are still hidden. " +
+          "Replaced by common.listShowFewer once everything is visible.",
+        placeholders: { count: "Total number of rows in the list, hidden ones included." },
+      },
+      "common.listShowFewer": {
+        description:
+          "Text button that collapses a fully expanded list back to its first five " +
+          "rows. Takes the place of common.listShowAll once nothing is hidden. Distinct " +
+          "from common.showLess, which collapses a truncated block of prose rather than " +
+          "a list of rows.",
+      },
       "common.logIn": {
         description:
           "The sign-in affordance, in all three places it appears: the button shown in " +
@@ -465,6 +500,26 @@ export const common = defineNamespace({
           "Empty state shown when a filter query matches nothing in the list below — a " +
           "voice picker, a voice library. No trailing period in the English source.",
         screenshot: "audio-studio",
+      },
+      "common.searchPlaceholder": {
+        description:
+          "Placeholder in the search box at the top of a dropdown list that grows with the " +
+          "user's data — the UI language, a Bible's books, projects, people, AI models. Typing " +
+          "narrows the list below. A short imperative; the trailing character is a single " +
+          "ellipsis glyph (…).",
+        maxLength: 24,
+      },
+      "common.aboutAria": {
+        description:
+          "Accessible name (never visible) of a small (i) button beside a menu item or a " +
+          "setting. A click opens a line explaining that item under it. Names the thing it " +
+          "explains.",
+        placeholders: { name: "The menu item's or setting's own label, already translated." },
+      },
+      "common.searchListAria": {
+        description:
+          "Accessible name (never visible) of that same search box at the top of a dropdown " +
+          "list. Says what typing in it does: it narrows the list it sits in. No ellipsis.",
       },
       "common.readOnlyGit": {
         description:

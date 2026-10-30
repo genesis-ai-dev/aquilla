@@ -685,6 +685,9 @@ export interface ProjectRecord {
    *  See ProjectWideSettings.allowTrackEditing for why switching it off is
    *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
+  /** AQU-1758: show the Film button and the timeline's Sources menu (see
+   *  ProjectWideSettings.filmAndSources). Unset: the project's kind decides. */
+  filmAndSources?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -1218,7 +1221,7 @@ export type CompletionProvider = "frontier" | "custom"
 export type ContextSize = "small" | "medium" | "large"
 
 export interface CompletionSettings {
-  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
+  provider?: CompletionProvider // "frontier" (default, uses the Aquilla chat proxy at api.aquilla.app/chat) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
   endpoint: string              // only used when provider === "custom". Base URL (e.g. "http://localhost:8000" or "https://openrouter.ai/api/v1"). Trailing "/v1" or "/chat/completions" is tolerated and normalized.
   apiKey?: string               // only used when provider === "custom". Sent as "Authorization: Bearer <key>". Leave blank for unauthenticated local endpoints.
   model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
@@ -1229,8 +1232,6 @@ export interface CompletionSettings {
    * internal clarity; the two names refer to the same concept.
    */
   systemPrompt: string
-  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
-  llmHealthPenalty?: number
 
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 

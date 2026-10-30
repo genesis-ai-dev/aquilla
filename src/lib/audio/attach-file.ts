@@ -22,6 +22,7 @@ import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
 /** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
  *  enough: some mobile browsers report an empty or wrong MIME type for files
@@ -120,6 +121,9 @@ export interface AttachAudioFileArgs {
   targetLang?: string
   /** AQU-1572: where the upload came from, for telemetry ("recorder", "cell"). */
   surface: TelemetrySurface
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 export interface AttachAudioFileResult {
@@ -178,16 +182,73 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
   // timed the clip, so a probe is the only source there is.
   const durationMs = await probeDurationMsSafe(file)
 
+  await attachUploadedTake({
+    projectId,
+    fileId,
+    cellId,
+    audioId: fullAudioId,
+    url: result.url,
+    slot,
+    mimeType: file.type || undefined,
+    durationMs,
+    label,
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    surface: args.surface,
+    username,
+    // F8: the R2 object uploaded fine but the attach event failed — delete it
+    // rather than leaking storage. The cleanup itself is non-fatal.
+    onEmitFailed: () => {
+      void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    },
+  })
+  notifyAudioAttachmentsChanged(fileId)
+  if (args.history) {
+    recordTakeAdded("upload", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
+  }
+
+  return { audioId: fullAudioId, url: result.url, durationMs }
+}
+
+export interface AttachUploadedTakeArgs {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The stored id INCLUDING its extension ("audio-cell12-….wav"). */
+  audioId: string
+  /** The frontier-audio:// url of the bytes it plays. AQU-981: a recording
+   *  shared over a range of lines is one object, so every line's take names
+   *  the same url under its own cell-seeded id. */
+  url: string
+  slot: string
+  mimeType: string | undefined
+  durationMs: number | undefined
+  label?: string
+  targetLang?: string
+  surface: TelemetrySurface
+  username: string
+  /** Runs when the attach event could not be queued, before the error is
+   *  re-thrown — the caller decides whether the uploaded bytes may go. */
+  onEmitFailed?: () => void
+}
+
+/**
+ * The attach half of an upload, shared by the picker (`attachAudioFileToCell`)
+ * and bulk upload (AQU-981) so the two write the same take: the
+ * cell.audio.attach event, then the optimistic paint that flips `hasAudio`
+ * before the outbox flushes. The caller pokes the attachments read.
+ */
+export async function attachUploadedTake(args: AttachUploadedTakeArgs): Promise<string> {
+  const { projectId, fileId, cellId, audioId, url, slot, mimeType, durationMs, label, username } = args
   let attachEventId: string
   try {
     attachEventId = await emitCellAudioAttach({
       projectId,
       fileId,
       cellId,
-      audioId: fullAudioId,
-      url: result.url,
+      audioId,
+      url,
       slot,
-      mimeType: file.type || undefined,
+      mimeType,
       durationMs,
       label,
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
@@ -197,19 +258,16 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       author: username,
     })
   } catch (emitErr) {
-    // F8: the R2 object uploaded fine but the attach event failed — delete it
-    // rather than leaking storage, then re-throw so the user sees the real
-    // error. The cleanup itself is non-fatal.
-    void deleteCellAudio({ projectId, fileId, audioId: result.audioId, ext: result.ext, getSyncToken })
+    args.onEmitFailed?.()
     throw emitErr
   }
 
-  // Flip `hasAudio` immediately — the bus poke below refetches the server
-  // projection, but that races the outbox flush and would otherwise leave the
-  // gutter icon stale until a manual reload.
+  // Flip `hasAudio` immediately — the bus poke the caller sends refetches the
+  // server projection, but that races the outbox flush and would otherwise
+  // leave the gutter icon stale until a manual reload.
   injectOptimisticAudioAttachment(fileId, cellId, {
-    audioId: fullAudioId,
-    url: result.url,
+    audioId,
+    url,
     // THE CALLER'S SLOT, not a literal. The emit above already used it; this
     // line did not, so an upload aimed at an added track optimistically
     // claimed the DEFAULT dub row's selection — and could never be confirmed,
@@ -218,7 +276,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     // audio-attachments-bus.ts: a plain-string slot means the compiler cannot
     // catch a hard-coded one written where a variable belongs.
     slot,
-    mimeType: file.type || null,
+    mimeType: mimeType ?? null,
     voiceId: null,
     referenceAudioId: null,
     durationMs: durationMs ?? null,
@@ -226,7 +284,5 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
     trimStartMs: null,
     trimEndMs: null,
   }, attachEventId)
-  notifyAudioAttachmentsChanged(fileId)
-
-  return { audioId: fullAudioId, url: result.url, durationMs }
+  return attachEventId
 }

@@ -23,6 +23,7 @@ import { BIBLE_ENRICHMENT_IDS } from './bible-enrichments'
 import { BIBLE_VOICE_OVERRIDES_TYPE_NAME, bibleVoiceOverridesProblem } from './bible-voice-overrides'
 import { LANGUAGE_PROFILE_TYPE_NAME, languageProfileProblem } from './language-profile'
 import { PROJECT_FACTS_TYPE_NAME, projectFactsProblem } from './project-facts'
+import { DRAFTING_SETTINGS_TYPE_NAME, draftingSettingsProblem } from './drafting-settings'
 import {
   ALGORITHMIC_CHECKS_BY_LANE_TYPE_NAME,
   ALGORITHMIC_CHECKS_TYPE_NAME,
@@ -116,21 +117,26 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
  * switches → structured blobs).
  */
 export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec>> = {
-  // Identity / language
-  sourceLanguage: { kind: 'string' },
-  targetLanguage: { kind: 'string' },
-  targetLanes: { kind: 'string[]' },
-  archivedLanes: { kind: 'string[]' },
+  // Language. AQU-1615 / AQU-2223: the language pair and the lane registry are
+  // lane rows, not settings keys (db/shared/retired-lane-settings.ts).
   // AQU-1471: the project's DEFAULT text direction per side. "auto" (and an
   // absent key) means "take it from the language", which is what every project
   // did before these keys existed. They are a default, never a stamp: nothing
   // copies them onto the file rows, so a per-file override still wins and
-  // changing targetLanguage still moves every file that has no override.
+  // changing a lane's language still moves every file that has no override.
   sourceTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
   targetTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
 
   // Drafting
   systemPrompt: { kind: 'string' },
+  // AQU-2259: the team's AI drafting settings — retrieval tuning, batch sizes,
+  // the model choice and the Health penalty (db/shared/drafting-settings.ts).
+  // Never an AI key: those stay on the device or with the organization.
+  draftingSettings: {
+    kind: 'object',
+    problem: (value) => draftingSettingsProblem(value),
+    typeName: DRAFTING_SETTINGS_TYPE_NAME,
+  },
   draftContext: { kind: 'object' },
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },
@@ -231,6 +237,9 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   allowLineCreation: { kind: 'boolean' },
   allowTrackEditing: { kind: 'boolean' },
   timingLocked: { kind: 'boolean' },
+  // AQU-1758 (Sam's decision 7): "Show the film and sources tools in the media
+  // view". Unset, the project's kind decides (src/lib/media/film-and-sources.ts).
+  filmAndSources: { kind: 'boolean' },
   audioTimingMode: { kind: 'enum', values: ['dubbing', 'audioFirst'] },
   bibleResourcesEnabled: { kind: 'boolean' },
   // AQU-1686: one switch per Bible data enrichment (db/shared/bible-enrichments.ts).

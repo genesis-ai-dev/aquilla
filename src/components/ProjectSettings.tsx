@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
+import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
+import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
 import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
@@ -16,6 +19,7 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
@@ -80,6 +84,7 @@ import {
   presetLabel,
 } from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import { draftingSettingsFrom } from "@/lib/completion/drafting-settings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
@@ -128,6 +133,10 @@ import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSec
 import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -229,14 +238,12 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  username: string
   provider: CompletionProvider
   endpoint: string
   apiKey: string
   model: string
   maxTokens: number
   temperature: number
-  llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
   useOnlyValidatedExamples: boolean
@@ -263,6 +270,8 @@ interface Baseline {
   cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
+  /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
+  filmAndSources: boolean | null
   timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -288,7 +297,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
@@ -297,7 +305,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: true,
@@ -325,6 +332,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
@@ -347,6 +355,18 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
+  // AQU-2259: the team's drafting settings and model choice.
+  "provider",
+  "endpoint",
+  "model",
+  "maxTokens",
+  "temperature",
+  "top_k",
+  "contextSize",
+  "main_chat_language",
+  "fewShotExampleFormat",
+  "completionBatchSize",
+  "validationBatchSize",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -357,6 +377,7 @@ const BLOB_BACKED_KEYS = [
   "allowSelfValidationAudio",
   "cellEditingFloor",
   "allowTrackEditing",
+  "filmAndSources",
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
@@ -658,14 +679,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
-  // the control itself (GitHub-style hint), not with a page-level banner.
+  // Server enforces MAINTAINER (600) for settings writes. AQU-2260: a card
+  // locked as a whole says so once under its heading; a single locked control
+  // says so beneath it — never on hover.
   const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
   const roleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: privilegedRole,
-      })}
+      role={privilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -681,6 +701,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
     : null
+  // AQU-2259: the AI cards are shared now, so a locked one says why once, at
+  // its top, rather than on a hover over each of its fourteen controls.
+  const sharedLockedLine = canEditShared ? null
+    : reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : t("projectSettings.permission.onlyRoleCanModify", { role: privilegedRole })
 
   // AQU-1086: the language fields sit behind the org's configurable
   // languageEditMinRole, so their lock hint must name the role the user
@@ -689,9 +714,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
   const languageRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: languagePrivilegedRole,
-      })}
+      role={languagePrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -713,9 +736,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
   const structuralRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: structuralPrivilegedRole,
-      })}
+      role={structuralPrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -753,7 +774,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -761,7 +781,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
@@ -782,10 +801,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState<boolean | null>(null)
   const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
   const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
+  const [filmAndSources, setFilmAndSources] = useState<boolean | null>(null)
   const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
   // Sam, Oct 28: each (i) opens its explanation beneath the setting's title.
   const [lockInfoOpen, toggleLockInfo] = useInfoOpen()
   const [trackEditingInfoOpen, toggleTrackEditingInfo] = useInfoOpen()
+  const [filmInfoOpen, toggleFilmInfo] = useInfoOpen()
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
   // shows while the project follows the organization, and where "Set for this
@@ -826,6 +847,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
   const [geminiApiKey, setGeminiApiKey] = useState("")
+  // AQU-2263: which key drafts and voices use right now — from what is SAVED
+  // (the baseline), the Preferences override and this browser's own keys.
+  const providerOverride = useUserProviderOverride()
+  const completionInUse = completionKeyInUse({
+    settings: baseline ? { provider: baseline.provider, endpoint: baseline.endpoint, apiKey: baseline.apiKey } : undefined,
+    override: providerOverride,
+    personalKey: completionUserKey,
+  })
+  const geminiInUse = geminiKeyInUse({
+    projectKey: baseline?.geminiApiKey,
+    personalKey: geminiUserKey,
+    orgHasKey: Boolean(orgSettingsForProject.orgProviderKeys?.["gemini-tts"]),
+  })
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -840,7 +874,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
     setApiKey(b.apiKey)
@@ -848,7 +881,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
     setUseOnlyValidatedExamples(true)
@@ -868,6 +900,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setAllowSelfValidationAudio(b.allowSelfValidationAudio)
     setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
+    setFilmAndSources(b.filmAndSources)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -935,6 +968,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+      provider: setProvider,
+      endpoint: setEndpoint,
+      model: setModel,
+      maxTokens: setMaxTokens,
+      temperature: setTemperature,
+      top_k: setTopK,
+      contextSize: setContextSize,
+      main_chat_language: setMainChatLanguage,
+      fewShotExampleFormat: setFewShotExampleFormat,
+      completionBatchSize: setCompletionBatchSize,
+      validationBatchSize: setValidationBatchSize,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -945,6 +989,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio: setAllowSelfValidationAudio,
       cellEditingFloor: setCellEditingFloor,
       allowTrackEditing: setAllowTrackEditing,
+      filmAndSources: setFilmAndSources,
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
@@ -973,6 +1018,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
+    // The preset picker follows the endpoint, as it does when the page seeds.
+    if (changed.includes("endpoint")) {
+      setPresetId((prev) =>
+        sameSetting(prev, presetIdForEndpoint(seed.endpoint)) ? presetIdForEndpoint(hydrated.endpoint) : prev,
+      )
+    }
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -990,36 +1041,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
-      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
       // Connect (and the auto-probe after a key/endpoint pause) is the moment
-      // the user believes BYOK is ready. Persist immediately so the workspace
-      // sparkle gate sees Custom OpenRouter without a second "Save changes".
-      if (id && provider === "custom") {
+      // the user believes BYOK is ready. Persist this DEVICE's part at once —
+      // the project's AI key and the "chooser answered" flag — so the
+      // workspace sparkle gate stops asking. AQU-2259: the provider, endpoint
+      // and model are the team's settings now, so they wait for "Save
+      // changes" like every other shared field, rather than changing what
+      // everyone drafts with because someone pressed Connect.
+      if (id && provider === "custom" && apiKey.trim()) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (latest) {
           const nextCompletion = buildCompletionSettings(latest.completionSettings, {
-            provider: "custom",
-            endpoint: trimmedEndpoint,
-            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-            model: chosenModel,
+            apiKey: apiKey.trim(),
           })
           await updateProject({
             ...latest,
             completionSettings: nextCompletion,
             aiProviderChosen: true,
           })
-          setBaseline((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  provider: "custom",
-                  endpoint: trimmedEndpoint,
-                  apiKey,
-                  model: chosenModel,
-                }
-              : prev,
-          )
+          setBaseline((prev) => (prev ? { ...prev, apiKey } : prev))
         }
       }
     } catch (err) {
@@ -1036,14 +1077,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
       apiKey !== baseline.apiKey ||
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
       useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
@@ -1063,6 +1102,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
       cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
+      filmAndSources !== baseline.filmAndSources ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -1077,14 +1117,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    baseline, name, provider, endpoint, apiKey,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
+    filmAndSources,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
@@ -1195,21 +1236,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // everything on the page was written.
     const changedFieldLabels: string[] = []
     try {
+      // AQU-2259: the drafting settings (the AI Instructions card), the model
+      // choice and the Health penalty are the team's settings, so they go to
+      // the shared settings below. Only the project's AI key stays on this
+      // device, where it always lived.
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
-      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
       if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
-      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
-      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
-      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
-      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
-      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
-      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
-      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
-      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
+      let draftingChanged = false
+      const noteDrafting = (changed: boolean, label: string) => {
+        if (!changed) return
+        draftingChanged = true
+        changedFieldLabels.push(label)
+      }
+      noteDrafting(provider !== baseline.provider, "AI provider")
+      noteDrafting(endpoint.trim() !== baseline.endpoint, "endpoint")
+      noteDrafting(model !== baseline.model, "model")
+      noteDrafting(maxTokens !== baseline.maxTokens, "max tokens")
+      noteDrafting(temperature !== baseline.temperature, "temperature")
+      noteDrafting(topK !== baseline.top_k, "examples retrieved")
+      noteDrafting(contextSize !== baseline.contextSize, "context window")
+      noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, "validated examples only")
+      noteDrafting(fewShotExampleFormat !== baseline.fewShotExampleFormat, "reference example format")
+      noteDrafting(mainChatLanguage !== baseline.main_chat_language, "assisted language")
+      noteDrafting(completionBatchSize !== baseline.completionBatchSize, "AI completions batch size")
+      noteDrafting(validationBatchSize !== baseline.validationBatchSize, "batch validation size")
 
       const localUpdates: Partial<ProjectRecord> = {}
       // AQU-765: rename. Trim first so a whitespace-only entry is rejected
@@ -1246,7 +1296,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         localUpdates.name = trimmedName
         changedFieldLabels.push("project title")
       }
-      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
       if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
       if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
@@ -1264,6 +1313,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (geminiKeyChanged) changedFieldLabels.push("voice API key")
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
+        || draftingChanged
       if (hasLocalWork) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (!latest) throw new Error("Project not found")
@@ -1279,11 +1329,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           ...localUpdates,
           completionSettings: nextCompletion,
           ttsSettings: nextTtsSettings,
-          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+          ...(Object.keys(completionUpdates).length > 0 || draftingChanged ? { aiProviderChosen: true } : {}),
         })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
+      // AQU-2259: the whole drafting value, not only the changed fields — the
+      // key is replaced as one object, so a partial one would reset the rest.
+      if (draftingChanged) {
+        sharedUpdates.draftingSettings = draftingSettingsFrom({
+          provider,
+          endpoint: endpoint.trim(),
+          model,
+          maxTokens,
+          temperature,
+          top_k: topK,
+          contextSize,
+          useOnlyValidatedExamples,
+          main_chat_language: mainChatLanguage,
+          fewShotExampleFormat,
+          completionBatchSize,
+          validationBatchSize,
+        })
+      }
       // AQU-1771: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default.
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push("validation count") }
@@ -1304,6 +1372,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
       if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
+      if (filmAndSources !== baseline.filmAndSources) { sharedUpdates.filmAndSources = filmAndSources ?? undefined; changedFieldLabels.push("film and sources") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
@@ -1333,7 +1402,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             },
             labelKey: "editor.history.stepSettings",
             labelParams: { count: Object.keys(sharedUpdates).length },
-          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+          }, id ? { projectId: id, username: authorNameFor(session?.username, project?.username) } : undefined)
         }
         if (out.kind === "conflict") {
           toast.add({
@@ -1376,14 +1445,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
-        username,
         provider,
         endpoint: endpoint.trim(),
         apiKey,
         model,
         maxTokens,
         temperature,
-        llmHealthPenalty,
         top_k: topK,
         contextSize,
         useOnlyValidatedExamples,
@@ -1403,6 +1470,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         allowSelfValidationAudio,
         cellEditingFloor,
         allowTrackEditing,
+        filmAndSources,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -1451,8 +1519,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    id, baseline, name, provider, endpoint, apiKey,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -1473,7 +1541,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
-    cellEditingFloor, timingLocked, allowTrackEditing,
+    cellEditingFloor, timingLocked, allowTrackEditing, filmAndSources,
     bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
@@ -1573,8 +1641,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         }
       : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    // AQU-2259: only the "this setting moved" note is left here, until it expires.
+    { id: "section-user", label: "User", keywords: ["username", "author"], visible: settingMovedNotesShowing() },
+    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
@@ -1588,12 +1657,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
+    { id: "section-voice", label: "Voice", keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so
     // the words a user searches for them by have to reach it.
@@ -1663,7 +1733,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: `Name, languages, content structure, username, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
+      description: `Name, languages, content structure, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
       icon: SlidersHorizontal,
       hub: "Project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
@@ -1889,7 +1959,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Frontier" : "Custom",
+    ai: provider === "frontier" ? "Aquilla" : "Custom",
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
@@ -2148,6 +2218,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               sourceProjectId={project.sourceProjectId}
               settings={sharedSettingsBlob}
               canEdit={canEditShared}
+              locked={sharedDisabledTooltip}
               onPatch={patchShared}
             />
           </div>
@@ -2169,7 +2240,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <div id="section-project-info">
-            <SettingsGroup label={t("projectSettings.section.projectInfo")}>
+            <SettingsGroup label={t("projectSettings.section.projectInfo")} locked={!canRenameProject ? sharedDisabledTooltip : null}>
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
@@ -2287,7 +2358,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             {/* AQU-1068. One setting answers WHO; the file's own nature answers
                 WHERE — a text file takes a cell anywhere, a subtitle file only
                 in a gap — so nothing here mentions timings or media. */}
-            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
                 description={t("projectSettings.cellEditing.description")}
@@ -2369,7 +2440,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
-            <SettingsGroup label={t("projectSettings.section.import")}>
+            <SettingsGroup label={t("projectSettings.section.import")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}
                 description={t("projectSettings.import.excludeFrontMatterDescription")}
@@ -2425,19 +2496,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <div id="section-user">
             <SettingsGroup label={t("projectSettings.section.user")}>
-              <SettingsRow
-                label={<label htmlFor="un">{t("projectSettings.user.usernameLabel")}</label>}
-                description={t("projectSettings.user.usernameDescription")}
-                control={
-                  <Input
-                    id="un"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder={t("projectSettings.user.usernamePlaceholder")}
-                    aria-label={t("projectSettings.user.usernameLabel")}
-                    className="w-40 bg-background"
-                  />
-                }
+              {/* AQU-2259: a person's own setting, so it lives in Preferences now. */}
+              <SettingMovedNote
+                to="/preferences"
+                target={LOCAL_AUTHOR_NAME_SETTING_ID}
+                where={[t("nav.account.preferences"), t("common.general")]}
+                onNavigate={requestNavigate}
               />
             </SettingsGroup>
           </div>
@@ -2446,6 +2510,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+        {/* AQU-2263: who sees the member list and each member's progress. The
+            organization's policy, which a project may only make stricter; a
+            second home beside the dashboard's badges, which stay. */}
+        {id && isCloudProject && projectPolicy.ready && sectionsToRender.some((s) => s.id === "section-members") && (
+          <div id="section-member-visibility">
+            <ProjectVisibilitySection
+              roster={projectPolicy.rosterViewMinRole}
+              progress={projectPolicy.memberProgressViewMinRole}
+              roleLevel={project?.syncRole?.level ?? 0}
+              canEdit={canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
+          </div>
         )}
 
         {/* AQU-1672: a direct, first-class entry to the translation brief.
@@ -2490,13 +2569,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 />
               </NavList>
             ) : null}
-            <SettingsGroup label={t("projectSettings.section.aiInstructions")}>
+            <SettingsGroup label={t("projectSettings.section.aiInstructions")} description={sharedLockedLine}>
               <SettingsRow
                 label={<label htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</label>}
                 description={t("projectSettings.ai.topKDescription", { defaultCount: DEFAULT_APPROVED_EXAMPLE_COUNT })}
                 control={
                   <Input
                     id="top-k"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={20}
@@ -2514,6 +2594,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
                   <Input
                     id="completion-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={50}
@@ -2537,6 +2618,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="validation-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={0}
                     max={500}
@@ -2561,6 +2643,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="context-size" aria-label={t("projectSettings.ai.contextWindowLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2581,6 +2664,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="main-chat-language"
+                    disabled={!canEditShared}
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
                     placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
@@ -2612,6 +2696,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="few-shot-example-format" aria-label={t("projectSettings.ai.referenceExampleFormatLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2663,6 +2748,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <div id="section-advanced-llm">
             <SettingsGroup
+              description={sharedLockedLine}
               label={
                 <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
                   <span>{t("projectSettings.advancedLlm.summary")}</span>
@@ -2676,11 +2762,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </span>
               }
             >
-              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
+              <SettingsRow
+                label={t("projectSettings.advancedLlm.providerLabel")}
+                description={<KeyInUseLine purpose="completion" kind={completionInUse} testId="completion-key-in-use" />}
+                block
+              >
                 <RadioGroup
                   name="provider"
                   value={provider}
                   onValueChange={(value) => setProvider(value as CompletionProvider)}
+                  disabled={!canEditShared}
                   className="flex flex-col gap-2"
                 >
                   <label className="flex items-start gap-2 text-sm">
@@ -2689,11 +2780,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>
@@ -2722,6 +2811,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
+                        disabled={!canEditShared}
                       >
                         <SelectTrigger id="preset" aria-label={t("projectSettings.advancedLlm.presetLabel")} className="w-56 bg-background">
                           <SelectValue />
@@ -2763,6 +2853,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                           lastModelFetchKeyRef.current = null
                         }}
                         placeholder="http://localhost:8000"
+                        disabled={!canEditShared}
                         className="flex-1 bg-background"
                         aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
@@ -2783,7 +2874,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </>
                       )
                     }
-                    description={t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
+                    description={t("projectSettings.deviceOnly")}
                     block
                   >
                     <ApiKeyField
@@ -2801,14 +2892,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       userKey={completionUserKey}
                       onProjectKeyChange={setApiKey}
                       onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Aquilla."
                     />
                   </SettingsRow>
                   {models.length > 0 && (
                     <SettingsRow
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
+                        <Select value={model} onValueChange={(value) => setModel(value ?? "")} disabled={!canEditShared}>
                           <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
                             <SelectValue />
                           </SelectTrigger>
@@ -2831,6 +2922,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       control={
                         <Input
                           id="mdl-manual"
+                    disabled={!canEditShared}
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
                           placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : t("projectSettings.advancedLlm.modelPlaceholder")}
@@ -2858,6 +2950,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   control={
                     <Input
                       id="mdl-frontier"
+                    disabled={!canEditShared}
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
                       placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
@@ -2873,6 +2966,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="mt"
+                    disabled={!canEditShared}
                     type="number"
                     value={maxTokens}
                     onChange={(e) => setMaxTokens(Number(e.target.value))}
@@ -2891,21 +2985,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       step={0.05}
                       value={[temperature]}
                       onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
-                    />
-                  </div>
-                }
-              />
-              <SettingsRow
-                label={t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}
-                description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
-                control={
-                  <div className="w-40">
-                    <Slider
-                      min={0}
-                      max={0.5}
-                      step={0.05}
-                      value={[llmHealthPenalty]}
-                      onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                      disabled={!canEditShared}
                     />
                   </div>
                 }
@@ -2933,8 +3013,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
               <SettingsRow
-                label="Gemini TTS"
-                description={t("projectSettings.voice.geminiKeyHelp")}
+                label={t("projectSettings.voice.geminiTtsLabel")}
+                description={
+                  <>
+                    {t("projectSettings.voice.geminiKeyHelp")}
+                    <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                    <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="gemini-key-in-use" />
+                  </>
+                }
                 block
               >
                 <ApiKeyField
@@ -2948,14 +3034,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 />
               </SettingsRow>
               <SettingsRow
-                label={t("projectSettings.voice.studioLabel")}
-                description={t("projectSettings.voice.libraryNote")}
+                label={t("common.voices")}
+                description={t("projectSettings.voice.voicesNote")}
                 control={
-                  <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                    requestNavigate(`/project/${id}/editor`)
-                  }}>
-                    {t("projectSettings.voice.openStudioButton")}
+                  // AQU-1758: Media, with the Voices tab open (the /voice route).
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)}>
+                    {t("projectSettings.voice.openVoicesButton")}
                   </Button>
                 }
               />
@@ -3049,7 +3133,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-            <SettingsGroup label={t("projectSettings.harmonization.title")}>
+            <SettingsGroup label={t("projectSettings.harmonization.title")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</label>}
                 description={t("projectSettings.harmonization.description")}
@@ -3189,6 +3273,35 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
                 />
               </div>
+              {/* AQU-1758 (Sam's decision 7): the media view's dubbing tools —
+                  the Film button and the timeline's Sources menu — together.
+                  Unset, a project of books and documents hides them and any
+                  other shows them. Not a permission: nothing on the server
+                  reads it. The long explanation sits behind the (i). */}
+              <div className="flex flex-wrap items-start gap-2">
+                <Checkbox
+                  id="film-and-sources"
+                  data-testid="settings-film-and-sources"
+                  checked={filmAndSourcesShown(filmAndSources, project?.files)}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setFilmAndSources(checked)}
+                />
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="film-and-sources">{t("projectSettings.timeline.filmAndSourcesLabel")}</label>
+                    <InfoToggle
+                      open={filmInfoOpen}
+                      onToggle={toggleFilmInfo}
+                      label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                      controls="settings-film-and-sources-explanation"
+                      testId="settings-film-and-sources-info"
+                    />
+                  </span>
+                  <InfoReveal open={filmInfoOpen} id="settings-film-and-sources-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
+                  </InfoReveal>
+                </span>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -3197,7 +3310,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {/* i18n-exempt "git" is a project-origin kind, not copy */}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
-            <SettingsGroup label={t("projectSettings.section.gitSync")}>
+            <SettingsGroup label={t("projectSettings.section.gitSync")} description={t("projectSettings.deviceOnly")}>
               <SettingsRow
                 label={withStyledTerms(
                   t("projectSettings.gitSync.originLabel", {
@@ -3211,7 +3324,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 )}
               />
               <SettingsRow
-                label={<label htmlFor="auto-sync">Auto-sync</label>}
+                label={<label htmlFor="auto-sync">{t("projectSettings.gitSync.autoSyncSwitch")}</label>}
                 description={t("projectSettings.gitSync.intervalNote")}
                 control={
                   <div className="flex items-center gap-2">
@@ -3219,7 +3332,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       id="auto-sync"
                       checked={autoSyncEnabled}
                       onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
-                      aria-label="Auto-sync"
+                      aria-label={t("projectSettings.gitSync.autoSyncSwitch")}
                     />
                     <Input
                       type="number"
@@ -3251,7 +3364,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
-            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
+            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} locked={sharedDisabledTooltip} />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}

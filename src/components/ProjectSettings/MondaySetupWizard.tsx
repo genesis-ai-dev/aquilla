@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -563,32 +564,28 @@ export function MondaySetupWizard({
             : "Set up Monday.com with AI"
   const perFile = granularity === "file"
 
+  // AQU-2260: an account can hold hundreds of boards, so a search box; a
+  // board is found by its workspace's name too.
   const boardSelect = (
-    <Select
-      items={Object.fromEntries(boards_.map((b) => [b.id, b.name]))}
+    <SearchSelect
+      aria-label={t("projectSettings.monday.boardSelectAriaLabel")}
+      className="w-full"
+      options={boards_.map((b) => ({ value: b.id, label: b.name, keywords: b.workspace?.name ?? "", workspace: b.workspace?.name ?? "" }))}
       value={boardId || null}
-      onValueChange={(value) => {
-        const id = (value as string) ?? ""
+      onValueChange={(id) => {
         setNewBoard(false)
         if (!id || id === boardId) return
         if (manual) setBoardId(id)
         else void runScan(id)
       }}
-    >
-      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="w-full">
-        <SelectValue placeholder={t("projectSettings.monday.pickBoardPlaceholder")} />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          {boards_.map((b) => (
-            <SelectItem key={b.id} value={b.id}>
-              {b.name}
-              {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+      placeholder={t("projectSettings.monday.pickBoardPlaceholder")}
+      renderOption={(b) => (
+        <span className="min-w-0 truncate">
+          {b.label}
+          {b.workspace ? ` — ${b.workspace}` : ""}
+        </span>
+      )}
+    />
   )
 
   return (

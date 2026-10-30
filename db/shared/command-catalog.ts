@@ -190,7 +190,7 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     agentReachable: true,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
-Floors: every key needs MAINTAINER 600 (the language keys — sourceLanguage, targetLanguage, targetLanes, archivedLanes — use the org's language-edit floor, default 600, which an org may lower to PROJECT_LEAD 500).
+Floors: every key needs MAINTAINER 600. sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings and are rejected — languages and lanes are lane rows (CreateProject or ProjectSetup \`lanes\`).
 \`terminology\` is RETIRED (AQU-1724): key terms live in the concepts table, so prepare rejects a \`terminology\` op with \`validation_failed\`. Write terms with \`term.create\` / \`term.update\` events in an EmitEvents changeset (read the termbase with \`list_terms\` first).
 Policy keys — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship, rosterViewMinRole, memberProgressViewMinRole — govern the oversight of your own work, and are writable in the RESTRICTIVE DIRECTION ONLY (AQU-1282). Tightening stages like any other write; loosening is \`permission_denied\` with \`details.loosening: [{ key, current, proposed, reason }]\`. The direction is computed against the LIVE blob at prepare AND again at commit, so a human loosening a key mid-flight cannot let your staged plan land as a loosening write. Restrictive direction per key:
 ${POLICY_DIRECTION_DOC}
@@ -334,10 +334,11 @@ Example: \`{ "kind": "SetTiming", "fileId": "f1", "cellId": "c3", "startMs": 240
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetTrackOverride
-Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
+Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId?, setsLineLengths? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
 Compiles to \`file.track.set\`, merged into \`files.meta.trackOverrides[trackId]\`. Track structure is file structure \u2014 MAINTAINER (600).
 Gotchas:
 - TWO GATES. Restructuring patches (anything beyond \`name\`/\`order\`, and every \`patch: null\` delete) additionally require the project's \`allowTrackEditing\` \u2014 with it off, even an OWNER is refused. Renames and reorders stay ungated. Turn it on with PatchSettings first.
+- \`setsLineLengths: false\` makes an added track a layer (music, effects): while the file follows its recordings, its takes set no line's length. Every track sets them by default; the four derived tracks cannot be changed.
 - \`trackId\` must match /^[A-Za-z0-9_-]{1,64}$/; the four derived ids (source-subtitles, source-audio, target-subtitles, target-audio) are reserved and cannot be given a \`kind\`.
 Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audio", "patch": { "name": "Dub \u2014 ES" } }\``,
   },

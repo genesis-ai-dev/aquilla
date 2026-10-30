@@ -24,6 +24,59 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── AQU-2265: the temporary note left where a setting used to live ──
+    "settings.moved.note": "This setting moved to {where}.",
+    "settings.moved.goThere": "Go to it",
+    // ── AQU-2259: the author name for edits made while signed out ──
+    "settings.preferences.authorName.label": "Name when signed out",
+    "settings.preferences.authorName.description": "Used as the author of your edits when you work without signing in.",
+    // ── AQU-2264: Preferences → Recording (RecordingPreferencesSection) ──
+    // Title "Recording" → editor.expansion.recording; "Timeline" →
+    // editor.timeline.title; the recorder rows' names and the countdown speeds →
+    // audio.recordingModal.*; "Follow playhead" → editor.timeline.followPlayhead;
+    // "Snap to neighboring edges" → editor.timeline.snapToggleAria (identical text).
+    "settings.preferences.recording.description": "How the recorder and the timeline work for you.",
+    "settings.preferences.recording.followsYou":
+      "They follow you: change one here, in the recorder or on the timeline, and it changes on " +
+      "every device where you're signed in.",
+    "settings.preferences.recording.thisDeviceOnly":
+      "You're not signed in, so they're kept on this device only.",
+    "settings.preferences.recording.hint.followsYou": "Follows you",
+    "settings.preferences.recording.hint.thisDevice": "This device only",
+    "settings.preferences.recording.recorderGroup": "Recorder",
+    "settings.preferences.recording.countdownInfo":
+      "Before each take the recorder counts 3, 2, 1, so you can get ready. Fast, Normal and Slow " +
+      "give each number half a second, one second or a second and a half. Off starts recording " +
+      "as soon as you press Record.",
+    "settings.preferences.recording.beepInfo":
+      "A short beep on each number of the countdown, so you can keep your eyes on the line. With " +
+      "the countdown off there is nothing to beep, so it waits until the countdown is back.",
+    "settings.preferences.recording.moveOnInfo":
+      "When on, saving a recording takes you to the next line, and on the last line closes the " +
+      "recorder. A file you upload stays on its line either way.",
+    "settings.preferences.recording.takesDrawerInfo":
+      "When on, the line's takes are listed under the recorder, as many as fit, and the arrow " +
+      "beside Takes brings up the rest. When off, only the Takes bar shows.",
+    "settings.preferences.recording.formatTitle": "Recording format",
+    "settings.preferences.recording.formatWav": "WAV",
+    "settings.preferences.recording.formatCompressed": "Compressed",
+    "settings.preferences.recording.formatInfo":
+      "WAV keeps full quality, at about three times the file size, and a take can run to 15 " +
+      "minutes. Compressed files are much smaller and can run to 30 minutes. A take keeps the " +
+      "format it was recorded in. It is also the WAV / COMPRESSED button in the recorder.",
+    "settings.preferences.recording.showFilmTitle": "Show the film beside the recorder",
+    "settings.preferences.recording.showFilmInfo":
+      "When a line has a film, the recorder shows it on the left. Turn this off to open the " +
+      "narrow recorder instead; its Video button brings the film back.",
+    "settings.preferences.recording.filmSoundTitle": "Play the film's sound while recording",
+    "settings.preferences.recording.filmSoundInfo":
+      "Off unless you turn it on. Use it only with headphones: the microphone records without " +
+      "echo cancellation, so on speakers the film's sound goes into your take.",
+    "settings.preferences.recording.followInfo":
+      "While playing, the timeline scrolls to keep the playhead in view. If you scroll away by " +
+      "hand, it lets go until you press play again.",
+    "settings.preferences.recording.snapInfo":
+      "When you drag a take or a line, or one of its edges, it snaps to the edges next to it.",
     // ── CommentNotificationsSection (preferences → notifications) ── AQU-1193
     "settings.notifications.groupLabel": "Comment email",
     "settings.notifications.commentEmailLabel": "Email me about comments",
@@ -217,16 +270,40 @@ export const settings = defineNamespace({
     "settings.providerKeys.restrictedNotice":
       "Only org maintainers and owners can set org-level keys. You can still " +
       "save a personal key in your project or personal settings.",
+    // AQU-2263: it said voices use this key; none do yet (see key-in-use.ts),
+    // so it says what the key is for and the line under it says what is used.
     "settings.providerKeys.geminiTtsDescription":
-      "Used by Gemini TTS synthesis for all org members when no project or " +
-      "personal key is present. Precedence: project key > personal key > org key.",
+      "A Gemini key for the whole organization, for voices when a project and the person have no key of their own.",
+    // ── AQU-2263: the one description of "Share usage data", in Preferences
+    // and onboarding alike (ShareUsageDataSetting) ──
+    "settings.shareUsageData.description":
+      "Usage events, like creating a project or exporting, and session recordings that help us diagnose problems. " +
+      "Never the contents of your translations or files.",
+    // ── AQU-2263: which AI key is in use right now (KeyInUseLine) ──
+    // {name} is the platform provider's name, "Aquilla".
+    "settings.keyInUse.platform": "Using {name}. No key needed.",
+    "settings.keyInUse.projectKey": "Using this project's key (this device only).",
+    "settings.keyInUse.personalKey": "Using your own key (saved in this browser).",
+    "settings.keyInUse.preferences": "Using your own key (Preferences).",
+    "settings.keyInUse.preferencesNoKey": "Using your own provider (Preferences), which needs no key.",
+    "settings.keyInUse.noKeyNeeded": "Using this project's provider, which needs no key.",
+    "settings.keyInUse.missing": "No key is in use, and this provider needs one.",
+    "settings.keyInUse.geminiMissing": "No Gemini key yet.",
+    "settings.keyInUse.geminiOrgUnused":
+      "No key is in use. Your organization has a Gemini key, but voices don't use it yet.",
+    "settings.keyInUse.orgGeminiSaved":
+      "Saved, but voices don't use the organization's key yet: each project or person still needs their own.",
+    "settings.keyInUse.orgGeminiNone": "No organization key.",
+    "settings.keyInUse.prefsActive": "In use in every project that doesn't have its own provider.",
+    // {name} is the platform provider's name, "Aquilla".
+    "settings.keyInUse.prefsNone": "Not set. Projects use {name} unless they have their own provider.",
     // "Clear" button → common.clear (identical text)
 
     // ── PersonalProviderSection (Preferences → AI provider keys) ──
     "settings.personalProvider.groupLabel": "Personal override",
     "settings.personalProvider.advancedToggleLabel": "AI provider (advanced)",
     "settings.personalProvider.description":
-      "Use your own OpenAI-compatible endpoint instead of Frontier for AI " +
+      "Use your own OpenAI-compatible endpoint instead of Aquilla for AI " +
       "translations. Stored only in this browser, never synced. Default for " +
       "projects that don't have their own API key; a project key beats this.",
     // Rendered via <RichMessage> so the two path fragments keep their
@@ -422,7 +499,6 @@ export const settings = defineNamespace({
     "settings.monday.connectedAsOnRow": "Connected as {username} on {date}",
     "settings.monday.disconnectButton": "Disconnect",
     "settings.monday.openMondayButton": "Open Monday.com",
-    "settings.monday.manageRestrictedNotice": "Only org maintainers and owners can manage this connection.",
     "settings.monday.connectPrompt":
       "Connect a Monday.com account to let projects in this organization link " +
       "boards and push translation progress automatically.",
@@ -503,6 +579,12 @@ export const settings = defineNamespace({
     // "Delete '{name}'?" confirm-dialog title → org.teamDetail.deleteConfirmTitle (identical text)
     // "This removes the team and all its grants." → org.teamDetail.deleteConfirmBody (identical text)
     // "Cancel" → common.cancel (identical text)
+
+    // AQU-2260: why a setting is locked, said once where you will see it.
+    "settings.locked.section": "Only {role} can change these settings.",
+    "settings.locked.control": "Only {role} can change this.",
+    "settings.locked.page": "Only {role} can change {section}.",
+    "settings.locked.viewOnly": "View only",
   },
   context: {
     _context: {
@@ -515,6 +597,88 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.locked.section": {
+        description:
+          "One line at the top of a settings card the reader cannot change, saying who can. " +
+          "Shown once for the whole card, instead of a note on every greyed-out control in it. " +
+          "A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+        },
+      },
+      "settings.locked.control": {
+        description:
+          "One short line beneath a single greyed-out setting the reader cannot change, saying " +
+          "who can. 'this' is that one setting. A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+        },
+      },
+      "settings.locked.page": {
+        description:
+          "One line at the top of an organization settings page the reader can open but not " +
+          "change, e.g. 'Only Owners can change Security.' The page stays readable, so people " +
+          "can see how things are set and ask for a change. A sentence, with its period.",
+        placeholders: {
+          role: "Plural role name, already translated, e.g. 'Owners' or 'Maintainers'.",
+          section: "The settings page's own title, already translated, e.g. 'Security'.",
+        },
+      },
+      "settings.locked.viewOnly": {
+        description:
+          "Short note beside a page's name in the organization settings list, for a page the " +
+          "reader can open and read but not change. Two words if possible.",
+        maxLength: 16,
+      },
+      "settings.preferences.recording.followsYou": {
+        description:
+          "Second sentence of the Preferences → Recording page's description, shown when signed " +
+          "in. 'They' are the recorder's and the timeline's settings on that page. 'Device' is a " +
+          "computer, tablet or phone.",
+      },
+      "settings.preferences.recording.thisDeviceOnly": {
+        description:
+          "Second sentence of the Preferences → Recording page's description, shown when not " +
+          "signed in. 'They' are the recorder's and the timeline's settings on that page.",
+      },
+      "settings.preferences.recording.hint.followsYou": {
+        description:
+          "Short grey hint at the right of the Recording row in Preferences, when signed in: " +
+          "these settings go with the person to every device.",
+        maxLength: 24,
+      },
+      "settings.preferences.recording.hint.thisDevice": {
+        description:
+          "Short grey hint at the right of the Recording row in Preferences, when not signed in: " +
+          "these settings are kept on this computer only.",
+        maxLength: 24,
+      },
+      "settings.preferences.recording.recorderGroup": {
+        description:
+          "Heading over the recorder's settings in Preferences → Recording. 'Recorder' is the " +
+          "window that records a line with the microphone. A noun.",
+      },
+      "settings.preferences.recording.formatWav": {
+        description: "A choice of recording format: WAV audio files. Usually kept as 'WAV'.",
+        maxLength: 12,
+      },
+      "settings.preferences.recording.formatCompressed": {
+        description: "A choice of recording format: smaller, compressed audio files. An adjective.",
+        maxLength: 16,
+      },
+      "settings.preferences.recording.formatInfo": {
+        description:
+          "Opens under 'Recording format' when its (i) is clicked. 'WAV / COMPRESSED' names the " +
+          "button in the recorder that shows the same setting; keep it as it is shown there.",
+      },
+      "settings.moved.note": {
+        description:
+          "A quiet line left for a few weeks where a setting used to be, saying where it lives now. " +
+          "Followed by a 'Go to it' link (settings.moved.goThere).",
+        placeholders: {
+          where: "The setting's new home as a path of already-translated page names joined by ' → ', e.g. 'Preferences → General'.",
+        },
+      },
       "settings.transcription.model.supports": {
         description: "Tick line on a transcription model's row: the model knows the project's language.",
         placeholders: { language: "The project's language name, e.g. 'Tok Pisin'." },
@@ -602,6 +766,18 @@ export const settings = defineNamespace({
         description:
           "Body of that dialog. The confirm button clears those projects' own " +
           "number so they follow the organization; the cancel button leaves them alone.",
+      },
+      "settings.keyInUse.platform": {
+        description:
+          "Beside an AI key field or provider choice (Project settings → AI, Preferences, the Set up AI dialog): " +
+          "drafts currently go to the platform's own AI, which needs no key of yours.",
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
+      },
+      "settings.keyInUse.prefsNone": {
+        description:
+          "Under 'AI provider (advanced)' in Preferences → AI provider keys, when the person has saved no provider " +
+          "of their own: projects then use the platform's AI unless the project set its own provider.",
+        placeholders: { name: "The platform provider's product name, 'Aquilla'. Not translated." },
       },
       "settings.overrideStatus.allFollow": {
         description:

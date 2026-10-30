@@ -221,12 +221,14 @@ export interface OrgSettingsResponse {
   /** AQU-1771: the same count for the two validation defaults. */
   validationCountOverrides?: number
   validationCountAudioOverrides?: number
+  /** AQU-2263: and for "Auto-propagate repetitions". */
+  autoPropagateRepetitionsOverrides?: number
   /**
    * AQU-1938: which projects those counts are, keyed by the setting they set
    * their own value for. Absent from an older server: the line then shows the
    * bare count, as it did before. AQU-1768: and the five media defaults.
    */
-  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey, OverrideProjectList>>
+  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey | "autoPropagateRepetitions", OverrideProjectList>>
   /** AQU-1768: per media default, how many projects set their own value. */
   mediaDefaultOverrides?: Partial<Record<MediaDefaultKey, number>>
 }
@@ -364,6 +366,8 @@ export type ProjectOverrideSlug =
   | "cell-editing-floor"
   | "allow-self-validation-audio"
   | "validation-role-floor-audio"
+  // AQU-2263: "Auto-propagate repetitions".
+  | "auto-propagate-repetitions"
 
 /**
  * POST .../settings/<slug>/reset-project-overrides — put every project in the

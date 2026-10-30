@@ -42,6 +42,8 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
         </InfoReveal>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* AQU-2259: it depends on this device's connection, so it stays here. */}
+        <p className="text-xs text-muted-foreground">{t("projectSettings.deviceOnly")}</p>
         <div className="grid gap-2 sm:grid-cols-2">
           {ORDER.map((id) => {
             const label = AUDIO_MEDIA_STRATEGY_LABELS[id]

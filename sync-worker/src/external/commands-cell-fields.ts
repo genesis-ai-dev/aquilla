@@ -92,6 +92,9 @@ export interface TrackPatch {
   groupId?: string | null
   color?: string | null
   sourceTrackId?: string | null
+  /** AQU-2252: false makes an added track a layer (its takes set no line's
+   *  length while the file follows its recordings); null clears it. */
+  setsLineLengths?: boolean | null
 }
 
 export type CellFieldCommand =
@@ -129,7 +132,7 @@ export const CELL_FIELDS_MAX_COMMANDS = 200
 /** Mirrors the handler's allow-lists (handlers/file-track-set.ts) so an agent
  *  gets validation_failed at prepare instead of a per-event perimeter
  *  rejection buried in the receipt. The handler stays the backstop. */
-const TRACK_PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId'])
+const TRACK_PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId', 'setsLineLengths'])
 const TRACK_KINDS = new Set([
   'source-subtitles',
   'source-audio',
@@ -291,6 +294,9 @@ export function validateCellFieldCommand(
         return fail('SetTrackOverride.patch.order must be a finite number or null when present')
       }
     }
+    if (raw.setsLineLengths !== undefined && raw.setsLineLengths !== null && typeof raw.setsLineLengths !== 'boolean') {
+      return fail('SetTrackOverride.patch.setsLineLengths must be a boolean or null when present')
+    }
     const patch: TrackPatch = {
       ...(raw.kind !== undefined ? { kind: raw.kind as TrackPatch['kind'] } : {}),
       ...(raw.name !== undefined ? { name: raw.name as string | null } : {}),
@@ -298,6 +304,7 @@ export function validateCellFieldCommand(
       ...(raw.groupId !== undefined ? { groupId: raw.groupId as string | null } : {}),
       ...(raw.color !== undefined ? { color: raw.color as string | null } : {}),
       ...(raw.sourceTrackId !== undefined ? { sourceTrackId: raw.sourceTrackId as string | null } : {}),
+      ...(raw.setsLineLengths !== undefined ? { setsLineLengths: raw.setsLineLengths as boolean | null } : {}),
     }
     return { kind: 'SetTrackOverride', fileId: c.fileId, trackId: c.trackId, patch }
   }

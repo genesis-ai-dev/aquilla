@@ -38,6 +38,7 @@ import { CATALOGS } from "@/lib/i18n/messages/all"
 import { translate } from "@/lib/i18n/translate"
 import { formatCount } from "@/lib/i18n/format"
 import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt } from "@/lib/parsers/frame-timecode.fixtures"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -548,6 +549,12 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
     expect(within(rowOf("swap two")).getByRole("button", { name: /Contested/ })).toHaveAttribute("aria-expanded", "false")
     expect(screen.getAllByText("Same timing")).toHaveLength(2)
     expect(rowOf("PETER")).toHaveTextContent("Same timing")
+    // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pill says
+    // what it means on a click; the text buttons have no hover at all.
+    expect(within(rowOf("PETER")).getByText("Same timing")).not.toHaveAttribute("title")
+    expect(within(rowOf("swap one")).getByRole("button", { name: /Contested/ })).not.toHaveAttribute("title")
+    expect(within(rowOf("PETER")).getByRole("button", { name: "Swap" })).not.toHaveAttribute("title")
+    await expectClickNote(within(rowOf("PETER")).getByText("Same timing"), "check which is which")
     expect(screen.getByText("Already there")).toBeInTheDocument()
     // No sentence explains them: the "To check" switch and the pills do.
     expect(screen.queryByText(/competed with another cue/)).toBeNull()
@@ -607,6 +614,7 @@ describe("FileTargetImportPanel — a review screen that says what happened (AQU
       expect([cueOn(1), cueOn(2)]).toEqual(["swap one", "swap two"])
 
       fireEvent.click(toggle("swap one"))
+      expect(within(rowOf("swap one")).getByRole("button", { name: "Swap" })).not.toHaveAttribute("title")
       fireEvent.click(within(rowOf("swap one")).getByRole("button", { name: "Swap" }))
       expect([cueOn(1), cueOn(2)]).toEqual(["swap two", "swap one"])
       // Still one contest, still open on line 1, now offering the other cue.
@@ -1050,6 +1058,9 @@ describe("FileTargetImportPanel — untimed imports say why a row found no line 
       await mapAndReview("source,target\nIn the beginning,Uno\nSomething else entirely,Dos\n")
       const row = rowOf("Dos")
       expect(within(row).getByText("Source differs")).toBeInTheDocument()
+      // AQU-2260: what the pill means opens on a click, never a hover.
+      expect(within(row).getByText("Source differs")).not.toHaveAttribute("title")
+      await expectClickNote(within(row).getByText("Source differs"), "doesn't match the line it was paired with")
       expect(within(row).getByText("Source in this row: Something else entirely")).toBeInTheDocument()
       expect(checkboxIn(row).checked).toBe(false)
       expect(screen.getByRole("tab", { name: /To check 1/ })).toBeInTheDocument()

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { BookHealthSpine, type BookHealthChapter } from "./BookHealthSpine"
 
@@ -190,7 +190,8 @@ describe("BookHealthSpine", () => {
     )
     const [rec, recOk, typed, textOk, done] = screen.getAllByTestId("book-health-cell")
     expect(rec).toHaveAccessibleName("Cell 1: recorded, not validated yet; no text yet")
-    expect(rec).toHaveAttribute("title", "Cell 1: recorded, not validated yet; no text yet")
+    // AQU-2260 third pass: no hover title on a tick; its name is for screen readers.
+    expect(rec).not.toHaveAttribute("title")
     expect(recOk).toHaveAccessibleName("Cell 2: recording approved; no text yet")
     expect(typed).toHaveAccessibleName("Cell 3: translated, not validated yet; not recorded yet")
     expect(textOk).toHaveAccessibleName("Cell 4: text validated; recorded, not validated yet")
@@ -204,7 +205,7 @@ describe("BookHealthSpine", () => {
     const onChapterClick = vi.fn()
     render(<BookHealthSpine chapters={chapters} onChapterClick={onChapterClick} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /Mark 2/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Mark 2" }))
     expect(onChapterClick).toHaveBeenCalledWith("Mark 2")
   })
 
@@ -258,5 +259,23 @@ describe("BookHealthSpine", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Show fewer cells" }))
     expect(screen.getAllByTestId("book-health-cell")).toHaveLength(100)
+  })
+
+  it("opens a chapter's numbers from its (i) on click, not on hover, and the (i) does not navigate", async () => {
+    const onChapterClick = vi.fn()
+    render(<BookHealthSpine chapters={chapters} onChapterClick={onChapterClick} />)
+
+    const [chapterOne, chapterTwo] = screen.getAllByTestId("book-health-chapter")
+    fireEvent.mouseEnter(chapterTwo)
+    fireEvent.pointerEnter(chapterTwo)
+    expect(screen.queryByText(/awaiting validation/)).not.toBeInTheDocument()
+
+    const info = within(chapterTwo).getByRole("button", { name: "About Mark 2" })
+    fireEvent.click(info)
+    const note = await screen.findByTestId("book-health-chapter-info-note")
+    expect(note).toHaveTextContent("1 validated · 1 awaiting validation · 1 untranslated")
+    expect(note).toHaveTextContent("1 automatic warning")
+    expect(onChapterClick).not.toHaveBeenCalled()
+    expect(within(chapterOne).getByRole("button", { name: "About Mark 1" })).toBeInTheDocument()
   })
 })

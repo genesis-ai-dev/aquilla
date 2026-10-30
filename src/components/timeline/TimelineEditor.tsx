@@ -24,18 +24,16 @@ import {
   Captions,
   ChevronDown,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   ChevronsDownUp,
   ChevronsUpDown,
   ClipboardCheck,
   Eye,
   EyeOff,
+  FastForward,
   Film,
   FolderInput,
   FolderPlus,
   GripVertical,
-  Info,
   Link2,
   LocateFixed,
   Magnet,
@@ -48,17 +46,19 @@ import {
   Users,
   Volume2,
   LockOpen,
+  Rows3,
   VolumeX,
   X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useHistoryView } from "@/lib/history/useHistory"
+import { stepLabel } from "@/lib/history/step-label"
 import { redoLast, undoLast, type HistoryResult } from "@/lib/history/history"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
-import { buildProgramme, programmeLines } from "@/lib/timeline/programme"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -72,7 +72,6 @@ import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { AddTrackDialog } from "./AddTrackDialog"
 import { RenameTakeDialog } from "./RenameTakeDialog"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DeleteTrackDialog } from "./DeleteTrackDialog"
 import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
 import {
@@ -80,15 +79,26 @@ import {
   ContextMenuContent,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { TimingInfoButton, TimingModeControl } from "./TimingModeControl"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { InfoNote } from "@/components/ui/info-note"
+import { TimingModeControl } from "./TimingModeControl"
 import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
+import type { TakePlace } from "@/lib/timeline/take-place"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
-import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
+import { CORNER_ICON_BTN, PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
 import {
   deriveTracksForFile,
   type TimelineTrack,
@@ -141,21 +151,24 @@ import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } fr
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio, resolveTargetPieces, type TargetAudioRef } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
+import { programmeTrackSlots, RECORDING_SLOT, slotForTrack, trackIdForSlot } from "@/lib/timeline/track-slots"
 import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
-import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
+import { usePersonPref } from "@/lib/prefs/person-prefs"
+import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
 import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtual-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
+import { setSkipSilentLinesPref, useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
+import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import {
@@ -198,6 +211,15 @@ export interface TimelineEditorProps {
    * question about the file, not about whether it happens to be running.
    */
   virtualIsTransport?: boolean
+  /**
+   * AQU-2251 (Sam, Oct 29): can "Skip lines with nothing to play" change
+   * anything on this file, under its current timing — does it have a line with
+   * nothing to play that is not hidden? The ⋯ offers the row only then. Worked
+   * out by the workspace over the WHOLE file (a book's every chapter, since
+   * Play all carries on into the next), with `skipSilentLinesCanChange` — and
+   * asked only while the ⋯ is open, because that lays out every chapter.
+   */
+  skipSilentLinesApplies?: () => boolean
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
@@ -206,6 +228,18 @@ export interface TimelineEditorProps {
    *  text cells' own timing IS their subtitle timing (the workspace routes).
    *  (Renamed from `onRetime` when the source row was frozen.) */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
+  /**
+   * AQU-1758: the file is in reading order (a Bible book, a document), not
+   * timed. Its text chips never drag: a drag would give a verse a time, and
+   * quietly turn the book into a timed file one verse at a time.
+   */
+  sequenceOrdered?: boolean
+  /**
+   * AQU-1758 (Sam's decision 7): the Sources menu shows — the project's
+   * "film and sources" setting, off by default for a project of books and
+   * documents. Absent reads as shown.
+   */
+  showSources?: boolean
   /**
    * AQU-646: the project's timing lock. When on, every imported row and cue is
    * frozen for everyone — including project leads, which Sam asked for
@@ -220,8 +254,10 @@ export interface TimelineEditorProps {
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
-   *  would make dragging one chip move the other. */
-  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
+   *  would make dragging one chip move the other.
+   *  AQU-2267: `place` is what to store — the take's place in both timings
+   *  after the move, each held by its own timing's limits. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -244,6 +280,20 @@ export interface TimelineEditorProps {
    *  says what it may do (see `TakeMenuActions`). */
   onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+  /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
+   *  leaves it out (someone who may not make voices). */
+  onMakeCharacter?(cellId: string): void
+  /** AQU-1758 / AQU-2212: …in one step (name it, Add to cast) at the clip;
+   *  `onMakeCharacter` is its More options. */
+  onCloneTake?(cellId: string, audioId: string, name: string): Promise<void>
+  /** The name that clone suggests (who recorded the take). */
+  cloneNameFor?(cellId: string): string
+  /** AQU-2212: "Change to …" / "Generate · …" when a line's voice and its
+   *  take disagree, first in its take's menu (lib/audio/line-voice). */
+  lineVoiceFor?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
+  onApplyLineVoice?(cellId: string): void
+  /** AQU-1758: a take's voice, when it is not the line's — its clip names it. */
+  takeVoiceFor?(cell: CellData, audioId: string): TakeVoiceNote | null
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
@@ -259,6 +309,13 @@ export interface TimelineEditorProps {
    *  link dialog. The dialog lives up there because the video pane offers the
    *  same action from its could-not-load state. */
   onRequestLinkVideo?(): void
+  /**
+   * Canvas board 55, option E: the linked film's own actions, which head the
+   * Sources menu now that the top bar has no film button — its name, Change
+   * (the link dialog, which also clears it) and Hide / Show. Absent: the
+   * Sources menu's plain "Film" row, which opens the link dialog.
+   */
+  film?: { name: string; hiddenByTiming: boolean; showing: boolean; onHide(): void; onShow(): void }
   /**
    * AQU-646: add a line over a stretch of the film that has no cell of its own
    * — the "T" in the Subtitles track, and the mic in the Target audio track
@@ -287,7 +344,7 @@ export interface TimelineEditorProps {
   canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
-  /** False disables the control — `file.video.set` needs contributor access,
+  /** False disables the control — `file.video.set` needs project lead access,
    *  and the emit throws rather than failing quietly. */
   canLinkVideo?: boolean
   /** AQU-646 stage 2: open the audio-VTT import dialog. It lives up in the
@@ -501,26 +558,13 @@ export interface TimelineEditorProps {
    *  there is nothing to follow: "Follows source" is greyed out with why. */
   timingSourceUnavailable?: boolean
   /**
-   * AQU-1119: collapse the timeline itself, and collapse the text section
-   * whose header this component portals into the workspace's slot.
-   *
-   * Both are the workspace's business — it owns the panel group and the
-   * per-file collapsed set — so this component only offers the affordance.
-   * Absent means no button at all, which is how every other optional control
-   * here behaves and is right outside the media lens, where there is nothing
-   * to collapse into.
+   * Media redesign, layout: the timeline's own Full screen, Fold and ⋯, which
+   * sit in its corner cell beside "Tracks" — the timeline has no title row.
+   * The workspace owns the panels, so this only offers the controls. Absent
+   * outside the media view: the corner then carries the ⋯ alone, with the
+   * timeline's settings.
    */
-  onCollapseSection?: () => void
-  onCollapseTextSection?: () => void
-  /**
-   * AQU-1119: the text section's full-screen toggle, threaded through for the
-   * same reason its collapse control is — this component owns the header it
-   * portals into the table column's slot. The timeline itself gets no such
-   * control: its full screen would fold BOTH body sections, and the body is a
-   * flex row that something has to fill.
-   */
-  onToggleTextFullscreen?: () => void
-  isTextFullscreen?: boolean
+  layoutControls?: RegionLayoutControls
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -627,6 +671,12 @@ export interface TimelineEditorProps {
     onMoveToScope(trackId: string, groupId: string | null, order: number): void
     onCreateFolderFrom(trackIds: readonly string[]): string
     onDelete(trackIds: readonly string[]): void
+    /**
+     * AQU-2252 (Sam, Oct 29): "Sets line lengths" on added audio tracks —
+     * `false` makes them layers. Offered only while the file follows its
+     * recordings: following the source, nothing sets a line's length.
+     */
+    onSetLineLengths?(trackIds: readonly string[], sets: boolean): void
   }
 }
 
@@ -662,6 +712,22 @@ const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
  * item, exactly as before; a cut take is its pieces, numbered in clip order so
  * each chip has a stable test id ("…-p2") beside the first's unchanged one.
  */
+/**
+ * The file's lanes as `mode` lays them out. AQU-2204: following its
+ * recordings, a file with NO times at all (an audio Bible book) lays its lines
+ * out in order — each at its recording's length, or a dashed stand-in from its
+ * text — instead of parking them all in the Untimed strip. The same rule as the
+ * transport's (programmeLines). AQU-2267: a function, so the other timing's
+ * layout (a move's second place) is built from the same lines.
+ */
+function timelineLanes(cells: readonly CellData[], mode: AudioTimingMode) {
+  const lanes = deriveLanes(cells)
+  if (mode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
+    return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
+  }
+  return { ...lanes, standInLines: false }
+}
+
 function piecesAsItems(cell: CellData, pieces: readonly TargetAudioRef[]): TargetAudioItem[] {
   return pieces.map((p, i) => ({
     cell,
@@ -702,6 +768,19 @@ function loadRowHeight(fileId: string): number {
 }
 
 /**
+ * Turns text selection off on the page for a drag, and returns how to put it
+ * back. Kept outside the component: writing the page's own style from inside
+ * it reads to React's compiler as a render changing something it doesn't own.
+ */
+function pauseTextSelection(): () => void {
+  const before = document.body.style.userSelect
+  document.body.style.userSelect = "none"
+  return () => {
+    document.body.style.userSelect = before
+  }
+}
+
+/**
  * Everything a gutter row needs to be DRAGGED, or undefined for a user who may
  * not reorder tracks — in which case the row renders exactly the DOM it always
  * has. See `onReorderTrack` for why the gate is all-or-nothing.
@@ -718,6 +797,10 @@ interface LaneLabelReorder {
   dropEdge: "top" | "bottom" | null
   /** Drawn short and inset, meaning "inside the folder above". */
   dropIndent?: boolean
+  /** Where in the row the line is drawn instead, in px from its top, when its
+   *  edge is out of sight — scrolled up under the header or past the column's
+   *  foot (AQU-2236). Null while the edge itself can be seen. */
+  dropTopPx?: number | null
   onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
@@ -725,6 +808,9 @@ interface LaneLabelReorder {
 /** How far the lane prompt keeps from the visible left edge, and from the end
  *  of a lane long enough to hold it. */
 const LANE_PROMPT_INSET_PX = 10
+
+/** The track drop line's thickness (`h-0.5`), for holding it inside the view. */
+const DROP_LINE_PX = 2
 
 /**
  * Sam's D3 (2026-10-05): the empty Source text lane of a linked video with no
@@ -745,6 +831,29 @@ const LANE_PROMPT_INSET_PX = 10
  * from the editor's remembered scroll offset, which a zoom on a timeline that
  * cannot scroll pushed past the lane altogether (walk r3, 2026-10-05).
  */
+/**
+ * AQU-2251: the ⋯'s "Skip lines with nothing to play" row, offered only where
+ * `applies` says it can change something. Its own component so that answer —
+ * a layout of every chapter of a book — is worked out when the ⋯ opens and
+ * mounts it, not on every edit.
+ */
+function SkipSilentLinesItem({ applies }: { applies: () => boolean }) {
+  const t = useT()
+  const skipSilentLines = useSkipSilentLinesPref()
+  const shown = useMemo(() => applies(), [applies])
+  if (!shown) return null
+  return (
+    <DropdownMenuCheckboxItem
+      checked={skipSilentLines}
+      onCheckedChange={(on) => setSkipSilentLinesPref(on)}
+      data-testid="tl-skip-silent-toggle"
+    >
+      <FastForward />
+      {t("editor.timeline.skipSilentLines")}
+    </DropdownMenuCheckboxItem>
+  )
+}
+
 function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
   const t = useT()
   return (
@@ -969,11 +1078,12 @@ function LaneLabel({
           data-testid="tl-track-drop-line"
           className={cn(
             "pointer-events-none absolute z-20 h-0.5 bg-sky-500",
-            reorder.dropEdge === "top" ? "top-0" : "bottom-0",
+            reorder.dropTopPx == null && (reorder.dropEdge === "top" ? "top-0" : "bottom-0"),
             // The indent matches the one a member row is drawn with, so the
             // line lands exactly where the row it promises will.
             reorder.dropIndent ? "left-3.5 right-0" : "inset-x-0",
           )}
+          style={reorder.dropTopPx == null ? undefined : { top: `${reorder.dropTopPx}px` }}
         />
       )}
       {/* The indent is on the CONTENT, not the row, so the drop line and the
@@ -1155,15 +1265,24 @@ export function TimelineEditor({
   editable,
   fileId,
   onRetimeSubtitle,
+  sequenceOrdered = false,
+  showSources = true,
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
+  skipSilentLinesApplies,
   timingLocked = false,
   onTrimTarget,
   onCutTargets,
   onRegenerateVoice,
   onChangeVoice,
   changeVoiceStateFor,
+  onMakeCharacter,
+  onCloneTake,
+  cloneNameFor,
+  lineVoiceFor,
+  onApplyLineVoice,
+  takeVoiceFor,
   onRenameTake,
   onRemoveTake,
   onVoteTake,
@@ -1171,6 +1290,7 @@ export function TimelineEditor({
   onHistoryResult,
   onTogglePlay,
   onRequestLinkVideo,
+  film,
   onAddLine,
   canAddLine,
   canRemoveImportedCells = false,
@@ -1221,10 +1341,7 @@ export function TimelineEditor({
   timingFilmTimed = false,
   timingSourceUnavailable = false,
   soundSource,
-  onCollapseSection,
-  onCollapseTextSection,
-  onToggleTextFullscreen,
-  isTextFullscreen,
+  layoutControls,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -1275,7 +1392,9 @@ export function TimelineEditor({
   // with the video pane's header button. This is a read; every write goes
   // through toggleAudibility, which merges against the store.
   const audibility = useQueueAudibility()
-  const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  // AQU-2264: a preference that follows the person, shared with
+  // Preferences → Recording, so a change in either place shows in both.
+  const snapOn = usePersonPref(timelineSnapPref)
   // AQU-1767: the blade. Personal and per-session — a tool in your hand, not a
   // setting — and off whenever cutting is not possible here.
   const [bladeOn, setBladeOn] = useState(false)
@@ -1365,6 +1484,9 @@ export function TimelineEditor({
    *  setting had no trigger, no `⋯`, nothing. */
   const canHideTracks = Boolean(fileId)
   const hasTrackMenu = Boolean(onRenameTrack || onSetTrackColor || trackEditing || onPromoteTrackToRows || canHideTracks)
+  /** AQU-2252: "Sets line lengths" — only while the file follows its
+   *  recordings, where a track's takes are what set a line's length. */
+  const lineLengthsAction = audioFirst ? trackEditing?.onSetLineLengths : undefined
 
   // ── AQU-1684: hiding tracks ───────────────────────────────────────────────
   /** The lane a primary-button press began in, until it is let go: a chip or
@@ -1529,6 +1651,7 @@ export function TimelineEditor({
         canEdit: Boolean(trackEditing),
         canPromote: Boolean(onPromoteTrackToRows),
         canHide: canHideTracks,
+        canSetLengths: Boolean(lineLengthsAction),
       }),
     )
   }
@@ -1621,6 +1744,7 @@ export function TimelineEditor({
             // it asks first (Sam, 2026-08-22). The menu opens the question; the
             // dialog is what calls through.
             onDelete: setDeletingTrackIds,
+            onSetLineLengths: lineLengthsAction,
           }
         : undefined,
     })
@@ -1635,7 +1759,15 @@ export function TimelineEditor({
   const [extraIds, setExtraIds] = useState<readonly string[]>([])
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
-  const [follow, setFollow] = useState(true)
+  // Follow playhead (AQU-2264): the button is a preference that follows the
+  // person, remembered and shared with Preferences → Recording. A manual scroll
+  // during playback lets go of the playhead for a while (`followReleased`);
+  // starting playback or a deliberate jump takes it back — but only when the
+  // preference is on. (It used to be one useState(true): reset on reload, and
+  // turned back on by every press of play even after you turned it off.)
+  const followPref = usePersonPref(timelineFollowPlayheadPref)
+  const [followReleased, setFollowReleased] = useState(false)
+  const follow = followPref && !followReleased
   const scrollRef = useRef<HTMLDivElement>(null)
   /** The clipped label column, and the div inside it that carries the vertical
    *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
@@ -1643,6 +1775,12 @@ export function TimelineEditor({
    *  back to the track column (AQU-1632). */
   const gutterRef = useRef<HTMLDivElement>(null)
   const gutterInnerRef = useRef<HTMLDivElement>(null)
+  /** The header strip over the names, which `revealGutterRow` keeps a focused
+   *  row out from under (AQU-2236). */
+  const gutterHeaderRef = useRef<HTMLDivElement>(null)
+  /** Set by a keyboard move that went through, for the layout effect that
+   *  reveals the moved row once the new order lands (AQU-2236). */
+  const keyboardMovedRef = useRef(false)
   /** The horizontal offset this component has already reacted to. Stage 3 made
    *  the track column scroll in y as well, so a scroll event no longer implies
    *  a horizontal move — everything keyed on one has to check first. */
@@ -1689,9 +1827,29 @@ export function TimelineEditor({
      * agree by inspection.
      */
     target: TrackDropTarget | null
+    /** Past the 3px threshold: a drag, not a press. Stays true once set, for
+     *  the rest of the gesture — unlike `target`, which goes back to null
+     *  over the row's own slot — so what it switches on cannot flicker. */
+    moved: boolean
+    /** The stretch of the column that can be seen, in the same content frame
+     *  as `rowBounds`: from the header's foot to the column's. Measured with
+     *  the target, on every move, so the line is held inside it (AQU-2236).
+     *  Null when there is no layout to measure. */
+    view: { top: number; bottom: number } | null
   } | null>(null)
   const clock = useTimelineClock()
+  // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
+  const playheadSecRef = useRef(0)
+  playheadSecRef.current = clock.currentSec
+  const getPlayheadSec = useCallback(() => playheadSecRef.current, [])
   const chipStripSlot = useUiSlot("media-chip-strip")
+  // Media redesign, layout: the workspace's top bar, where the tools go.
+  const topToolsSlot = useUiSlot("media-top-tools")
+  // Board 55, option E: the bar holds what the mock-up draws and nothing
+  // more, so in it the editing tools (undo, redo, the blade) always live in
+  // the timeline corner's ⋯ — History, ⌘Z / ⌘⇧Z, B and S are the quick ways.
+  // Outside the media view (no bar) they stay in the tools row.
+  const compactTools = Boolean(topToolsSlot)
 
   // AQU-646: bridge the audio play-queue into the timeline clock. Progress is
   // file-timeline seconds for imported media (one shared clip); the cellIdSet
@@ -1857,7 +2015,7 @@ export function TimelineEditor({
     // or jumped, follow was released for good and pressing play never took it
     // back. The follow SCROLL below was already video-aware; only its
     // re-engagement was not, which is why the track looked half-fixed.
-    if (queueRunning || videoPlaying) setFollow(true)
+    if (queueRunning || videoPlaying) setFollowReleased(false)
   }, [queueRunning, videoPlaying])
 
   // Measure the scroll viewport before first paint + on resizes — the
@@ -1945,7 +2103,7 @@ export function TimelineEditor({
           el.scrollLeft = 0
           setScrollLeft(0)
         }
-        setFollow(true)
+        setFollowReleased(false)
       }
     }
     document.addEventListener("keydown", onKeyDown)
@@ -2006,17 +2164,9 @@ export function TimelineEditor({
     )
   }
 
-  // AQU-2204: following its recordings, a file with NO times at all (an audio
-  // Bible book) lays its lines out in order — each at its recording's length,
-  // or a dashed stand-in from its text — instead of parking them all in the
-  // Untimed strip. The same rule as the transport's (programmeLines).
-  const { subtitle, dialogue, untimed } = useMemo(() => {
-    const lanes = deriveLanes(cells)
-    if (timingMode === "audioFirst" && lanes.dialogue.length === 0 && lanes.subtitle.length === 0 && lanes.untimed.length > 0) {
-      return { dialogue: lanes.dialogue, subtitle: lanes.untimed, untimed: [] as CellData[], standInLines: true }
-    }
-    return { ...lanes, standInLines: false }
-  }, [cells, timingMode])
+  // AQU-2204: following its recordings, a book with no times lays its lines
+  // out in order (see `timelineLanes`).
+  const { subtitle, dialogue, untimed } = useMemo(() => timelineLanes(cells, timingMode), [cells, timingMode])
   const independentTextCells = useMemo(
     () => Object.values(textTrackCells ?? {}).flat(),
     [textTrackCells],
@@ -2044,15 +2194,24 @@ export function TimelineEditor({
   // effect shows before anyone picks. Following the source: the source's own
   // end (or the film's, when it runs longer). Following the recordings: the
   // programme, laid out exactly as that choice lays it.
+  // AQU-2252 (Sam, Oct 29): the file's added tracks, and which of them are
+  // layers — the same answer the transport lays the file out from, so the
+  // drawing, the Timing menu and the playback agree about every line.
+  // Keyed on the answer, not on the tracks: renaming or recolouring a track
+  // makes a new tracks array, and must not lay the whole file out again.
+  const programmeTracksKey = JSON.stringify(programmeTrackSlots(tracks))
+  const programmeTracks = useMemo(
+    () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
+    [programmeTracksKey],
+  )
   const timingLengths = useMemo(() => {
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
-    const { lines } = programmeLines(cells)
-    // AQU-2204: following the recordings, an unrecorded line takes its stand-in.
-    const recorded = buildProgramme(lines, { standInLenSec: standInEstimator(lines) })
+    // AQU-1758: the same layout the transport plays and the bottom strip shows.
+    const recorded = layOutProgramme(cells, programmeTracks).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
-  }, [cells, subtitleFileWithFootage, videoDurationSec])
+  }, [cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2066,11 +2225,33 @@ export function TimelineEditor({
         dialogue.length > 0 ? dialogue : subtitle,
         subtitleFileWithFootage ? videoDurationSec : null,
         // AQU-2204: following the recordings, every unrecorded line takes a
-        // stand-in length from its words, timed file or not.
-        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle) },
+        // stand-in length from its words, timed file or not. AQU-2252: the
+        // takes on the file's added tracks set their lines' lengths too, but
+        // for the tracks made layers.
+        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle), ...programmeTracks },
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec],
+    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, programmeTracks],
   )
+  // AQU-2267 (Sam, Oct 29): the OTHER timing, laid out the same way. A move
+  // moves a take by the same distance in both timings, each held by its own
+  // limits, so the lanes need the other timing's layout to say where the take
+  // lands there (lib/timeline/take-place). Built from the same lines, tracks
+  // and stand-ins that timing lays the file out from when it is chosen.
+  // Only a drop reads it, so it is built then: built on every change, a long
+  // subtitle film followed by its source laid every line out a second time,
+  // with stand-ins, on each edit.
+  const getOtherLayout = useCallback((): TimelineLayout => {
+    const other: AudioTimingMode = timingMode === "audioFirst" ? "dubbing" : "audioFirst"
+    const lanes = timelineLanes(cells, other)
+    const lines = lanes.dialogue.length > 0 ? lanes.dialogue : lanes.subtitle
+    return buildTimelineLayout(
+      other,
+      cells,
+      lines,
+      subtitleFileWithFootage ? videoDurationSec : null,
+      { standInLenSec: standInEstimator(lines), ...programmeTracks },
+    )
+  }, [timingMode, cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
   // ask "is there a stretch of film here with no line on it": the pencil in the
@@ -2102,24 +2283,6 @@ export function TimelineEditor({
   // coincide with it. It would usually match nothing, and when it did match it
   // would be flashing subtitle rows around a stretch where nobody SPOKE. Two
   // tracks, conflated. (EditorTable keeps its pulseCells API for other callers.)
-
-  // What the section under the timeline is called: "Text".
-  //
-  // Pinned rather than derived per-cell, because in this workflow every cell is
-  // a text cell and the header would otherwise change as you clicked around.
-  // NOT "Dialogue" (Sam, 2026-08-20) — a heading of its own invention, sitting
-  // between the gutter above and "Audio cues" an inch away, invited exactly the
-  // mix-up it was meant to end.
-  //
-  // AQU-1119 stopped it borrowing the GUTTER's word. It used to read
-  // `TRACK_KIND_LABELS["source-subtitles"]`, i.e. "Source text", and that was
-  // wrong once the thing being named became a whole collapsible SECTION:
-  // source and target are the two COLUMNS inside it, so naming the section
-  // after one of its own columns mislabels the other half. The gutter's rows
-  // keep their names — a track genuinely is one side — and the section now has
-  // a word of its own, unconditional, so it no longer depends on how the file
-  // was imported.
-  const textHeadingLabel = t("editor.timeline.textPaneTitle")
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
@@ -2214,7 +2377,7 @@ export function TimelineEditor({
   // Each row states what the file HAS, and opens the dialog that owns that
   // source's verbs — so no row needs two actions. Permission is per row rather
   // than per button, which is strictly better than the buttons were: linking a
-  // film is contributor-level, while both cell-writing imports sit at the
+  // film is project-lead-level, while both cell-writing imports sit at the
   // source.cell.create floor.
   /**
    * The CHECK menu — reviewing, as against Sources' importing. (Sam,
@@ -2231,7 +2394,7 @@ export function TimelineEditor({
     if (linkingAvailable) {
       items.push({
         id: "check-links",
-        label: linkingMode ? "Stop linking" : "Check links",
+        label: linkingMode ? t("editor.timeline.menuStopLinking") : t("editor.timeline.menuCheckLinks"),
         icon: Link2,
         badge: cueLinksPending ? (
           <span className="text-[11px] text-muted-foreground">{t("editor.timeline.badgePairing")}</span>
@@ -2246,7 +2409,7 @@ export function TimelineEditor({
     if (onReviewCharacterDisagreements && canCheck) {
       items.push({
         id: "check-characters",
-        label: "Check characters",
+        label: t("editor.timeline.menuCheckCharacters"),
         icon: Users,
         badge:
           characterDisagreements > 0 ? (
@@ -2269,10 +2432,36 @@ export function TimelineEditor({
     // clean and greyed out (Sam, Oct 5 — a badge beside "Attach captions" was
     // too many words for one row).
     const trackEditingOff = t("editor.timeline.trackEditingOffHint")
-    if (onRequestLinkVideo) {
+    // Board 55, option E: with a film linked, the menu opens with it — its
+    // name, Change, Hide or Show — and the other sources follow under their
+    // own heading.
+    if (film && coreMediaUrl) {
+      // A film already linked keeps its controls whatever the project's
+      // "film and sources" setting says (AQU-1758, Sam's decision 7), so it
+      // can still be shown and hidden; the other sources follow the setting.
+      items.push({ id: "film-name", type: "label", label: film.name })
+      if (onRequestLinkVideo) {
+        items.push({
+          id: "film-change", label: t("editor.dock.filmChange"), icon: Link2,
+          disabled: !canLinkVideo, testId: "top-film-change", onClick: onRequestLinkVideo,
+        })
+      }
+      items.push(film.hiddenByTiming
+        ? { id: "film-hidden", type: "label", label: t("editor.dock.filmHiddenByTiming") }
+        : film.showing
+          ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
+          : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
+      items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
+    }
+    // AQU-1758 (Sam's decision 7): everything else in Sources is behind the
+    // project's "film and sources" setting.
+    if (!showSources) return items.filter((item) => item.id !== "sources-heading")
+    if (film && coreMediaUrl) {
+      // The film's rows are above.
+    } else if (onRequestLinkVideo) {
       items.push({
         id: "film",
-        label: "Film",
+        label: t("editor.timeline.menuFilm"),
         icon: Film,
         disabled: !canLinkVideo,
         badge: (
@@ -2286,7 +2475,7 @@ export function TimelineEditor({
     if (onRequestImportAudioVtt) {
       items.push({
         id: "audio-cues",
-        label: "Audio cues",
+        label: t("editor.timeline.menuAudioCues"),
         icon: AudioLines,
         disabled: !canImportAudioVtt,
         badge: (
@@ -2322,7 +2511,7 @@ export function TimelineEditor({
     if (onRequestExtractSubtitles) {
       items.push({
         id: "subtitles",
-        label: "Subtitles",
+        label: t("editor.timeline.laneSubtitle"),
         icon: Captions,
         disabled: !canExtractSubtitles || subtitleCueCount > 0,
         badge: (
@@ -2338,7 +2527,7 @@ export function TimelineEditor({
     if (onRequestImportCharacters) {
       items.push({
         id: "characters",
-        label: "Characters",
+        label: t("editor.timeline.charactersTitle"),
         icon: Users,
         disabled: !canImportCharacters,
         badge: charactersWriting ? (
@@ -2349,20 +2538,24 @@ export function TimelineEditor({
           <span className="text-[11px] text-muted-foreground">
             {characterCount === 0 && audioCharacterCount === 0
               ? t("editor.timeline.badgeNotImported")
-              : [
-                  characterCount > 0 ? `${characterCount} subtitle` : null,
-                  audioCharacterCount > 0 ? `${audioCharacterCount} heard` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" + ")}
+              : characterCount > 0 && audioCharacterCount > 0
+                ? t("editor.timeline.badgeCharactersBoth", {
+                    subtitle: t("editor.timeline.badgeCharactersSubtitle", { count: characterCount }),
+                    heard: t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount }),
+                  })
+                : characterCount > 0
+                  ? t("editor.timeline.badgeCharactersSubtitle", { count: characterCount })
+                  : t("editor.timeline.badgeCharactersHeard", { count: audioCharacterCount })}
           </span>
         ),
         onClick: onRequestImportCharacters,
       })
     }
+    // A heading with nothing under it says nothing.
+    if (items.at(-1)?.id === "sources-heading") items.pop()
     return items
   }, [
-    onRequestLinkVideo, canLinkVideo, coreMediaUrl,
+    film, showSources, onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
     onRequestImportCaptions, canImportCaptions, t,
     onRequestAlignScript, canAlignScript,
@@ -2598,7 +2791,7 @@ export function TimelineEditor({
     for (const item of items) {
       if (item.cell.id !== takeSel.cellId) continue
       const att = item.cell.attachments?.[item.audioId]
-      const geom = layout.targetGeom(item.cell, att)
+      const geom = layout.targetGeom(item.cell, att, item.audioId)
       if (!geom || geom.usingFallback || sec <= geom.start || sec >= geom.end) continue
       const atMs = (sec - geom.anchor) * 1000
       return canCutAt(att, atMs) ? { cellId: item.cell.id, audioId: item.audioId, atMs } : null
@@ -2636,6 +2829,14 @@ export function TimelineEditor({
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
           ...(onChangeVoice && changeVoiceStateFor
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
+            : {}),
+          ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
+          ...(onMakeCharacter && onCloneTake
+            ? { cloneTake: onCloneTake, ...(cloneNameFor ? { cloneName: cloneNameFor } : {}) }
+            : {}),
+          // The line's own voice and its take: the line's own track only.
+          ...(slot === RECORDING_SLOT && lineVoiceFor && onApplyLineVoice
+            ? { lineVoice: lineVoiceFor, applyLineVoice: onApplyLineVoice }
             : {}),
           ...(onRenameTake
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
@@ -2738,6 +2939,10 @@ export function TimelineEditor({
 
   const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
+  // A short file's timeline still runs to the edge of the view — the ruler and
+  // every row's ground — rather than stopping where the file ends (Sam, Oct
+  // 28). Scrolling, following and seeking still go by the file's own width.
+  const canvasWidthPx = Math.max(trackWidthPx, viewportPx)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
   // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
@@ -2814,7 +3019,7 @@ export function TimelineEditor({
       // AQU-1767: a split take's length is all its pieces'.
       const geoms = targetItems
         .filter((t) => t.cell.id === currentCell.id)
-        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]))
+        .map((t) => layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId))
       const tgtDurationSec = geoms.length > 0 && geoms.every((g) => g && !g.usingFallback)
         ? geoms.reduce((sum, g) => sum + (g!.end - g!.start), 0)
         : null
@@ -2832,7 +3037,7 @@ export function TimelineEditor({
     let last = first
     while (targetItems[last + 1]?.cell.id === currentCell.id) last += 1
     const geomOf = (t: (typeof targetItems)[number] | undefined) =>
-      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId]) : null
+      t ? layout.targetGeom(t.cell, t.cell.attachments?.[t.audioId], t.audioId) : null
     const pieceGeoms = targetItems.slice(first, last + 1).map(geomOf)
     if (pieceGeoms.some((g) => !g || g.usingFallback)) return null
     const spans = pieceGeoms.map((g) => ({ start: g!.start, end: g!.end }))
@@ -2939,7 +3144,7 @@ export function TimelineEditor({
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
     if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
-      setFollow(false)
+      setFollowReleased(true)
     }
   }
 
@@ -2968,6 +3173,52 @@ export function TimelineEditor({
     gutter.scrollLeft = 0
     const el = scrollRef.current
     if (el && scrollTop !== 0) el.scrollTop += scrollTop
+  }
+
+  /**
+   * AQU-2236: the header covers the column's top 28px, and the browser does
+   * not know that. A row up there counts as on screen, so focusing it — a
+   * Shift+Tab, the rename field, a menu handing focus back to its row —
+   * scrolls nothing, and the focus ring or the text being typed sits under
+   * the header. `scroll-padding-top` cannot help: it only changes where the
+   * browser aims, and this reveal would have to scroll the gutter UP, past the
+   * 0 that `handleGutterScroll` holds it at. So the track column, which owns
+   * the vertical offset, scrolls up by what the header hides of the row (or
+   * by all of it, for a row above the column's top).
+   *
+   * Only for a focus that SHOWS (`:focus-visible`). A row focused by a click
+   * draws no ring, so nothing is hidden, and sliding the row away mid-press
+   * can pull its speaker or ⋯ out from under the pointer, so the click misses.
+   *
+   * `belowToo` also brings the row up from under the column's bottom edge. A
+   * focus event must not ask for that: the browser already reveals downward,
+   * and AQU-1632 hands that scroll to the track column, so doing it here as
+   * well would scroll twice. A keyboard move needs it, because the moved row
+   * keeps its focus and gets no focus event at all.
+   */
+  function revealGutterRow(target: EventTarget | null, belowToo = false) {
+    const gutter = gutterRef.current
+    const header = gutterHeaderRef.current
+    const inner = gutterInnerRef.current
+    const el = scrollRef.current
+    if (!gutter || !header || !inner || !el || !(target instanceof Element)) return
+    if (!target.matches(":focus-visible")) return
+    // The ROW, not the control in it: a focused ⋯ alone would leave the row's
+    // own top edge under the header. The rows are `inner`'s children; a
+    // menu's portaled items, whose focus bubbles here through React, are not.
+    let row: Element | null = target
+    while (row && row.parentElement !== inner) row = row.parentElement
+    if (!row) return
+    const rect = row.getBoundingClientRect()
+    const hidden = header.getBoundingClientRect().bottom - rect.top
+    const below = rect.bottom - gutter.getBoundingClientRect().bottom
+    if (hidden > 0) el.scrollTop -= hidden
+    else if (belowToo && below > 0) el.scrollTop += below
+    else return
+    // Move the names NOW rather than on the scroll event, so a second look in
+    // the same frame (the browser's own reveal, or this one again from the
+    // focus React restores after a move) measures where the row really is.
+    handleTrackScroll()
   }
 
   function applyZoom(next: number) {
@@ -3053,14 +3304,15 @@ export function TimelineEditor({
   /** A move expressed in SCOPE indices — see the trackDrag state for why the
    *  distinction is load-bearing. `scope.tracks` is ascending by `order` by
    *  construction (that is what scoping buys), which is the precondition
-   *  orderForDrop's midpoint arithmetic depends on. */
-  function commitScopedMove(scope: ScopeSiblings, toIndex: number) {
-    if (!onReorderTrack) return
+   *  orderForDrop's midpoint arithmetic depends on. Returns whether it wrote. */
+  function commitScopedMove(scope: ScopeSiblings, toIndex: number): boolean {
+    if (!onReorderTrack) return false
     const drop = orderForDrop(scope.tracks, scope.fromIndex, toIndex)
     // null covers both "did not move" and an index off either end (which is how
     // Alt+ArrowUp on the top row resolves), so neither needs its own guard.
-    if (!drop) return
+    if (!drop) return false
     onReorderTrack(drop.trackId, drop.order)
+    return true
   }
 
   /**
@@ -3149,9 +3401,16 @@ export function TimelineEditor({
     } catch {
       /* happy-dom / unsupported — the window listeners still carry the drag */
     }
-    const restoreUserSelect = document.body.style.userSelect
-    document.body.style.userSelect = "none"
-    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null })
+    const restoreUserSelect = pauseTextSelection()
+    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null, moved: false, view: null })
+    // AQU-2236: what the column shows, below the header. Read on every move,
+    // like the target it is drawn for, because the list can scroll mid-drag.
+    const visible = () => {
+      const header = gutterHeaderRef.current?.getBoundingClientRect()
+      const column = gutterRef.current?.getBoundingClientRect()
+      if (!header || !column || column.bottom <= header.bottom) return null
+      return { top: gutterContentY(header.bottom), bottom: gutterContentY(column.bottom) }
+    }
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
@@ -3167,13 +3426,14 @@ export function TimelineEditor({
         trackDragMovedRef.current = true
       }
       const target = moved ? resolve(ev) : null
-      setTrackDrag((d) => (d ? { ...d, dy, target } : d))
+      const view = moved ? visible() : null
+      setTrackDrag((d) => (d ? { ...d, dy, target, moved, view } : d))
     }
     const stop = () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
-      document.body.style.userSelect = restoreUserSelect
+      restoreUserSelect()
       setTrackDrag(null)
     }
     const onUp = (ev: PointerEvent) => {
@@ -3215,8 +3475,24 @@ export function TimelineEditor({
     // next sibling, not out of the folder.
     const scope = scopeSiblings(trackRows, fromIndex)
     if (!scope) return
-    commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))
+    if (commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))) {
+      keyboardMovedRef.current = true
+    }
   }
+
+  // AQU-2236: the row a keyboard move sends somewhere keeps its focus (React
+  // moves the node, or its neighbour, without a focus event), so nothing else
+  // would bring it out from under the header — or up from below the fold —
+  // where it lands. Keyed on the ORDER, so it runs in the commit that carries
+  // the move, not in some render before it. Only after a keyboard move: a
+  // collaborator's reorder must not scroll anyone's view to their focus.
+  const rowOrderKey = trackRows.map((r) => r.track.id).join("\n")
+  useLayoutEffect(() => {
+    if (!keyboardMovedRef.current) return
+    keyboardMovedRef.current = false
+    revealGutterRow(document.activeElement, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads refs and the DOM only; the order is the trigger
+  }, [rowOrderKey])
 
   /**
    * The insertion boundary the drop-indicator line is drawn at: 0..tracks.length,
@@ -3247,11 +3523,30 @@ export function TimelineEditor({
    * exactly what `top` inside the track content div means. If either height
    * ever changes without the other, the line will be off by the difference.
    */
-  const dropLineContentY =
+  const dropEdgeContentY =
     trackDrag && dropRow
       ? dropRow.edge === "top"
         ? trackDrag.rowBounds[dropRow.rowIndex]?.top
         : trackDrag.rowBounds[dropRow.rowIndex]?.bottom
+      : null
+  /**
+   * …held where it can be seen (AQU-2236). Near the top of a scrolled list the
+   * edge a drop lands on can be scrolled up past the header, out of the column,
+   * and the line drawn there showed nowhere — so the top row, the drop people
+   * reach for most up there, had no readout at all. The line stops just under
+   * the header instead, and just above the column's foot at the other end. The
+   * drop itself is unchanged: the line only ever moves to the edge of the view
+   * the real boundary lies beyond.
+   */
+  const dropLineContentY =
+    dropEdgeContentY == null || !trackDrag?.view
+      ? dropEdgeContentY
+      : Math.min(Math.max(dropEdgeContentY, trackDrag.view.top), trackDrag.view.bottom - DROP_LINE_PX)
+  /** The gutter half's place inside its row, or null where the row's own edge
+   *  is in sight and the line sits on it as it always has. */
+  const dropTopInRowPx =
+    dropRow && dropLineContentY != null && dropLineContentY !== dropEdgeContentY
+      ? dropLineContentY - (trackDrag?.rowBounds[dropRow.rowIndex]?.top ?? 0)
       : null
 
   // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
@@ -3511,7 +3806,7 @@ export function TimelineEditor({
     // the queue legitimately drops some seeks (no session, a gap no section
     // owns) and the picture must move regardless.
     send?.(Math.max(0, sec))
-    setFollow(true)
+    setFollowReleased(false)
   }
 
   // Mirror every selection change up — one effect catches the lanes' onSelect
@@ -3678,16 +3973,8 @@ export function TimelineEditor({
 
   const mediaTextHeaderProps = {
     cell: currentCell,
-    headingLabel: textHeadingLabel,
     castName: formatCueCharacter(currentCharacter.names),
     cameraState: currentCharacter.cameraState ?? null,
-    // AQU-1119: the text section's own collapse control. It belongs in this
-    // header rather than the timeline toolbar because it acts on the column
-    // beneath it — the same reasoning that keeps the gutter's toggle inside
-    // the gutter.
-    onCollapse: onCollapseTextSection,
-    onToggleFullscreen: onToggleTextFullscreen,
-    isFullscreen: isTextFullscreen,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
@@ -3793,7 +4080,7 @@ export function TimelineEditor({
     const fromItems = (items: readonly TargetAudioItem[]): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const item of items) {
-        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId], item.audioId)
         const span = geom ?? layout.spanFor(item.cell, "source")
         if (span) out.push({ startSec: span.start, endSec: span.end })
       }
@@ -3867,7 +4154,8 @@ export function TimelineEditor({
               <LinkedVideoLanePrompt
                 onAttach={onRequestImportCaptions && canImportCaptions ? onRequestImportCaptions : undefined} />
             ) : undefined}
-            retimable={!audioFirst}
+            // AQU-1758: nor on a book or document, whichever way it is timed.
+            retimable={!audioFirst && !sequenceOrdered}
             // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
             //
             // This used to read `subtitleFileWithFootage ? isUserAddedLine :
@@ -4003,6 +4291,7 @@ export function TimelineEditor({
             key={track.id}
             items={targetItems}
             layout={layout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
@@ -4028,6 +4317,8 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(RECORDING_SLOT)}
+            takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
@@ -4083,6 +4374,7 @@ export function TimelineEditor({
             key={track.id}
             items={own.items}
             layout={layout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
@@ -4092,7 +4384,8 @@ export function TimelineEditor({
             missingCellIds={missingCellIds}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
-            snapEnabled={snapOn && !audioFirst}
+            // AQU-2252: a layer's takes snap as they do following the source.
+            snapEnabled={snapOn && (!audioFirst || track.setsLineLengths === false)}
             onSelect={selectFromChip}
             onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
             onSeek={laneProps.onSeek}
@@ -4101,6 +4394,8 @@ export function TimelineEditor({
             bladeActive={bladeActive}
             onCutTarget={cutOne}
             takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeVoiceFor={takeVoiceFor}
+            getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
             projectId={project?.id ?? null}
@@ -4132,6 +4427,459 @@ export function TimelineEditor({
     }
   }
 
+  // The timeline's own settings, straight in its corner ⋯ (Sam, Oct 27: no
+  // submenu): the toggles and steppers that used to crowd the right of its
+  // toolbar, which the one 40 px bar has no room for. Same handlers, testids.
+  const stepper = (label: string, readout: string, less: { aria: string; title?: string; icon: typeof Minus; run: () => void }, more: { aria: string; title?: string; icon: typeof Plus; run: () => void }) => (
+    <div className="flex items-center gap-2 px-1.5 py-1 text-sm">
+      <span className="flex-1">{label}</span>
+      <div className="inline-flex items-center rounded-md border border-border">
+        <button type="button" aria-label={less.aria} title={less.title} onClick={less.run} className="px-1.5 py-1 text-foreground/70 hover:bg-muted">
+          <less.icon className="h-3.5 w-3.5" />
+        </button>
+        <span className="border-x border-border px-2 font-mono text-[11px] tabular-nums text-muted-foreground">{readout}</span>
+        <button type="button" aria-label={more.aria} title={more.title} onClick={more.run} className="px-1.5 py-1 text-foreground/70 hover:bg-muted">
+          <more.icon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  )
+  // Board 55, option E: Add track is a + beside "Tracks" in the corner cell,
+  // next to its Full screen / Fold / ⋯ — where the tracks are — not in the top
+  // bar; with the track names narrowed (room for two squares only) its two
+  // choices are in that ⋯.
+  //
+  // AQU-646 stage 2: ADDING A TRACK IS A BUTTON, NOT A RIGHT-CLICK (Sam,
+  // 2026-08-22). Right-click is for the tracks that already exist; a project
+  // that has just turned track editing on has none of the new ones yet, so the
+  // way in has to be somewhere you can see. It renders only when the setting
+  // is on and the person is a maintainer — the whole control, not a disabled
+  // one.
+  const addTrackItems: OverflowMenuItem[] = trackEditing ? [
+    {
+      id: "add-audio",
+      label: t("editor.timeline.trackAddTrack"),
+      icon: AudioLines,
+      onClick: () => setAddingTrack(true),
+    },
+    {
+      id: "add-folder",
+      label: t("editor.timeline.trackAddFolder"),
+      icon: FolderPlus,
+      // A folder needs no decisions — it has no alignment and holds
+      // nothing yet — so it is made immediately and named in place,
+      // rather than through a dialog whose only field is a name.
+      onClick: () => {
+        const folderId = trackEditing.onAdd({
+          kind: "folder",
+          // The STORED name, not the menu's label. Naming it
+          // `t(...)` put the creator's UI language into a synced
+          // field, so a folder made in Thai read as Thai for
+          // everyone — and being a constant, every folder on a file
+          // was called the same thing (2026-08-28).
+          name: nextFolderName(tracks),
+        })
+        setRenamingTrackId(folderId)
+      },
+    },
+  ] : []
+  const addTrackMenu = addTrackItems.length > 0 ? (
+    <OverflowMenu
+      items={addTrackItems}
+      triggerVariant="ghost"
+      triggerSize="icon-xs"
+      triggerClassName={CORNER_ICON_BTN}
+      triggerTooltip={t("editor.timeline.trackAdd")}
+      triggerIcon={Plus}
+      testId="tl-add-track"
+      ariaLabel={t("editor.timeline.trackAdd")}
+    />
+  ) : null
+  const addTrackMenuItems = addTrackItems.length > 0 ? (
+    <DropdownMenuGroup>
+      <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">{t("editor.timeline.trackAdd")}</DropdownMenuLabel>
+      {addTrackItems.map((item) => (
+        <DropdownMenuItem key={item.id} onClick={item.onClick} data-testid={`tl-menu-${item.id}`}>
+          {item.icon && <item.icon />}
+          {item.label}
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuGroup>
+  ) : null
+  // Where undo, redo and the blade go while the tools are in the top bar.
+  const compactEditItems = compactTools && (onHistoryResult || (onCutTargets && editable)) ? (
+    <>
+      <DropdownMenuGroup>
+        {onHistoryResult && (
+          <>
+            <DropdownMenuItem disabled={!history.canUndo} onClick={() => runHistory("undo")} data-testid="tl-menu-undo">
+              <Undo2 />
+              {history.nextUndo
+                ? t("editor.history.undoTooltip", { step: stepLabel(t as never, history.nextUndo) })
+                : t("editor.history.nothingToUndo")}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!history.canRedo} onClick={() => runHistory("redo")} data-testid="tl-menu-redo">
+              <Redo2 />
+              {history.nextRedo
+                ? t("editor.history.redoTooltip", { step: stepLabel(t as never, history.nextRedo) })
+                : t("editor.history.nothingToRedo")}
+            </DropdownMenuItem>
+          </>
+        )}
+        {onCutTargets && editable && (
+          <DropdownMenuCheckboxItem
+            checked={bladeActive}
+            disabled={!canCut}
+            onCheckedChange={(on) => setBladeOn(on)}
+            data-testid="tl-menu-blade"
+          >
+            <Scissors />
+            {t("editor.timeline.bladeToggleAria")}
+          </DropdownMenuCheckboxItem>
+        )}
+      </DropdownMenuGroup>
+      <DropdownMenuSeparator />
+    </>
+  ) : null
+  const timelineSettings = (
+    <>
+      {/* Meeting 2026-08-05: generated voices default to compressed
+          playback; fast connections can opt into the original WAV. Mic
+          recordings have no lossless form. AQU-2260 (Sam, Oct 29): nothing
+          explains the row on hover — its words name it, its tick is its
+          state. */}
+      <DropdownMenuCheckboxItem
+        checked={audioQuality === "original"}
+        onCheckedChange={(on) => setAudioQualityPref(on ? "original" : "compressed")}
+        data-testid="tl-quality-toggle"
+      >
+        <AudioLines />
+        {t("editor.timeline.qualityToggleAria")}
+      </DropdownMenuCheckboxItem>
+      {/* AQU-2251 (Sam, Oct 28): on, playback steps over a line with nothing
+          to hear (a stand-in nobody has recorded yet); off, it plays the
+          line through in silence for its length. The queue and the built-in
+          clock read the same remembered setting. Oct 29: shown only where it
+          can change something — a line with nothing to play, not hidden. */}
+      {skipSilentLinesApplies && <SkipSilentLinesItem applies={skipSilentLinesApplies} />}
+      {/* SUB-53: nothing to snap to when positions are computed. */}
+      {!audioFirst && (
+        <DropdownMenuCheckboxItem
+          checked={snapOn}
+          onCheckedChange={(on) => timelineSnapPref.set(on)}
+          data-testid="tl-snap-toggle"
+        >
+          <Magnet />
+          {t("editor.timeline.snapToggleAria")}
+        </DropdownMenuCheckboxItem>
+      )}
+      <DropdownMenuCheckboxItem
+        checked={follow}
+        onCheckedChange={(next) => {
+          // AQU-2264: off turns the preference off. On takes the playhead
+          // back: after a manual scroll that is all it does; when the
+          // preference was off, it turns it on.
+          if (!next) timelineFollowPlayheadPref.set(false)
+          else {
+            setFollowReleased(false)
+            if (!followPref) timelineFollowPlayheadPref.set(true)
+          }
+          if (next) {
+            const el = scrollRef.current
+            if (el) {
+              const target = computeFollowScroll(
+                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+              )
+              if (target != null) scrollTrackTo(target)
+            }
+          }
+        }}
+        data-testid="tl-follow-toggle"
+      >
+        <LocateFixed />
+        {t("editor.timeline.followPlayhead")}
+      </DropdownMenuCheckboxItem>
+      {/* AQU-646 stage 3b: the gutter's two widths, all rows at once (Sam,
+          2026-08-24). It was the « » in the corner; chevrons are gone from
+          the layout, so it is a setting beside the others. */}
+      <DropdownMenuCheckboxItem
+        checked={!gutterCollapsed}
+        onCheckedChange={(on) => setGutterCollapsed(!on)}
+        data-testid="tl-gutter-toggle"
+      >
+        <Rows3 />
+        {t("editor.timeline.gutterExpandAria")}
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuSeparator />
+      {stepper(
+        t("editor.dock.zoom"),
+        `${(pxPerSec / ZOOM_DEFAULT).toFixed(1)}×`,
+        { aria: t("editor.timeline.zoomOut"), icon: Minus, run: () => applyZoom(pxPerSec / 1.3) },
+        { aria: t("editor.timeline.zoomIn"), icon: Plus, run: () => applyZoom(pxPerSec * 1.3) },
+      )}
+      {/* Stage 3: the vertical zoom beside the horizontal one, and the
+          readout says pixels so the two are never confused. */}
+      {stepper(
+        t("editor.dock.rowHeight"),
+        `${rowH}px`,
+        { aria: t("editor.timeline.rowsShorterAria"), title: t("editor.timeline.rowsShorterTooltip"), icon: ChevronsDownUp, run: () => applyRowHeight(rowH / 1.3) },
+        { aria: t("editor.timeline.rowsTallerAria"), title: t("editor.timeline.rowsTallerTooltip"), icon: ChevronsUpDown, run: () => applyRowHeight(rowH * 1.3) },
+      )}
+    </>
+  )
+
+  // The timeline's tools, in the top bar's order (canvas board 55, option E):
+  // Sources (the film first in it), Timing, a thin divider, Check — then any
+  // passing notes (hidden tracks, unlocked timings, Bluetooth). Add track is
+  // the corner's +; in the bar the editing tools and the settings the 40 px
+  // bar has no room for live in the corner ⋯ (`timelineSettings`).
+  const topTools = (
+    <>
+      {/* AQU-646 stage 6: ONE menu for everything that attaches material to
+          the file already open — the film, the heard lines, the cast — as
+          distinct from the Import button, which mints a NEW file. Three
+          separate buttons said nothing about what a file already had;
+          a menu row can carry its state, so "548 imported" replaces a
+          label that had to choose between "Import" and "Replace" and got
+          it wrong either way.
+
+          Built from `items`, not three hardcoded rows: stage 8's untimed
+          pocket bin is the same category and will want a fourth. */}
+      {sourceMenuItems.length > 0 && sourcesUsable && (
+        <OverflowMenu
+          items={sourceMenuItems}
+          triggerVariant="outline"
+          triggerSize="icon-sm"
+          // Board 55, option E: its icon alone — no chevron (Sam, Oct 28:
+          // "shouldn't have a dropdown arrow"), like Check beside it.
+          triggerTooltip={t("editor.timeline.sourcesTip")}
+          triggerIcon={FolderInput}
+          testId="tl-sources-menu"
+          ariaLabel={t("editor.timeline.sourcesMenuAria")}
+        />
+      )}
+      {/* AQU-2204: the file's one Timing control ("Follows source" /
+          "Follows recordings"), after Sources in the top bar (board 55).
+          `onChangeTimingMode` absent = below project lead = plain text;
+          `timingFilmTimed` = a file timed to a film, which only follows its
+          source. */}
+      {!hideTimingMode && (
+        <TimingModeControl
+          size="bar"
+          mode={timingMode}
+          onChange={onChangeTimingMode}
+          filmTimed={timingFilmTimed}
+          sourceUnavailable={timingSourceUnavailable}
+          lengths={timingLengths}
+          // AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip
+          // — at the foot of the Timing menu since board 55.
+          standInInfo={layout.programme?.slots.some((slot) => slot.standIn) ? t("editor.timeline.standInInfo") : undefined}
+        />
+      )}
+      {/* Board 55, option E: a thin divider between what the file is (Sources,
+          Timing) and its state (Check, then History beside it). */}
+      {topToolsSlot && <span aria-hidden data-testid="tl-tools-divider" className="mx-0.5 h-5 w-px shrink-0 bg-border" />}
+      {/* Stage 4: linking mode. An explicit toggle, off by default, because
+          while it is off clicking must stay exactly what it always was —
+          seek, select, drag, trim. Only offered once there are cues to pair
+          with and the file is editable. */}
+      {checkMenuItems.length > 0 && (
+        <OverflowMenu
+          items={checkMenuItems}
+          triggerVariant="outline"
+          triggerSize="icon-sm"
+          triggerTooltip={t(linkingMode ? "editor.timeline.checkMenuLinking" : "editor.timeline.checkMenu")}
+          triggerIcon={cueLinksPending ? Spinner : ClipboardCheck}
+          // Armed linking is a MODE, so the control has to look different
+          // while it is on — the confusing state Sam hit was one where
+          // nothing on screen said which way it was set.
+          triggerClassName={cn(
+            "relative",
+            linkingMode &&
+              "bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-950 dark:text-violet-300",
+          )}
+          // THE COUNT RIDES ON THE TRIGGER, not on an item — a badge you
+          // have to open a menu to see is not doing a badge's job.
+          triggerBadge={
+            characterDisagreements > 0 ? (
+              <span
+                data-testid="tl-check-count"
+                // On the square's corner, as the mock-up draws it.
+                className="absolute -end-1.5 -top-1.5 rounded-full bg-amber-500 px-1 text-[10px] leading-4 font-semibold text-white"
+              >
+                {characterDisagreements}
+              </span>
+            ) : undefined
+          }
+          testId="tl-check-menu"
+          ariaLabel={t("editor.timeline.checkMenuAria")}
+        />
+      )}
+      {/* AQU-1767: Undo / Redo — the edit history, app-wide. */}
+      {onHistoryResult && !compactTools && (
+        <>
+          <AppTooltip
+            content={
+              history.nextUndo
+                ? t("editor.history.undoTooltip", { step: stepLabel(t as never, history.nextUndo) })
+                : t("editor.history.nothingToUndo")
+            }
+          >
+            <button
+              type="button"
+              aria-label={t("editor.history.undoAria")}
+              data-testid="tl-undo"
+              disabled={!history.canUndo}
+              onClick={() => runHistory("undo")}
+              className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
+          <AppTooltip
+            content={
+              history.nextRedo
+                ? t("editor.history.redoTooltip", { step: stepLabel(t as never, history.nextRedo) })
+                : t("editor.history.nothingToRedo")
+            }
+          >
+            <button
+              type="button"
+              aria-label={t("editor.history.redoAria")}
+              data-testid="tl-redo"
+              disabled={!history.canRedo}
+              onClick={() => runHistory("redo")}
+              className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
+        </>
+      )}
+      {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead"
+          button — it cut every voice track at once. S splits the one
+          selected take at the playhead instead.) */}
+      {onCutTargets && editable && !compactTools && (
+        <>
+          <AppTooltip
+            content={
+              bladeActive
+                ? t("editor.timeline.bladeOnTooltip")
+                : t("editor.timeline.bladeOffTooltip")
+            }
+          >
+            <button
+              type="button"
+              aria-label={t("editor.timeline.bladeToggleAria")}
+              aria-pressed={bladeActive}
+              data-testid="tl-blade-toggle"
+              disabled={!canCut}
+              onClick={() => setBladeOn((on) => !on)}
+              className={cn(
+                "inline-flex items-center rounded-md border border-border px-1.5 py-1 disabled:opacity-40",
+                bladeActive
+                  ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
+                  : "bg-background text-foreground/70 hover:bg-muted",
+              )}
+            >
+              <Scissors className="h-3.5 w-3.5" />
+            </button>
+          </AppTooltip>
+        </>
+      )}
+      {/* AQU-1684: THE WAY BACK. Present exactly while this person has
+          hidden something on this file, so a lane never vanishes without
+          trace: it names how many, and lists each to show again. */}
+      {hiddenTracks.length > 0 && (
+        <OverflowMenu
+          items={[
+            { id: "hidden-note", type: "label", label: t("editor.timeline.hiddenTracksNote") },
+            ...hiddenTracks.map((track) => ({
+              id: `show-${track.id}`,
+              label: t("editor.timeline.showTrack", { name: track.name }),
+              icon: Eye,
+              testId: `tl-show-track-${track.id}`,
+              onClick: () => showTracks([track.id]),
+            })),
+            ...(hiddenTracks.length > 1
+              ? [
+                  { id: "show-all-sep", type: "separator" as const },
+                  {
+                    id: "show-all",
+                    label: t("editor.timeline.showAllTracks"),
+                    testId: "tl-show-all-tracks",
+                    onClick: () => showTracks(hiddenTracks.map((track) => track.id)),
+                  },
+                ]
+              : []),
+          ]}
+          triggerVariant="outline"
+          triggerLabel={t("editor.timeline.hiddenTracks", { count: hiddenTracks.length })}
+          triggerIcon={EyeOff}
+          testId="tl-hidden-tracks"
+          ariaLabel={t("editor.timeline.hiddenTracksAria")}
+        />
+      )}
+      {/* AQU-646: the reminder, for as long as the project is unlocked.
+          Sam: "the app should remind you when you're unlocked." A toast
+          would be exactly wrong here — it goes away, and the whole risk is
+          somebody leaving a project unlocked for a week without noticing.
+          This sits in the toolbar and does not leave until the lock is back
+          on, which is also why it is deliberately plain rather than an
+          alarm: it is a state, not an error. */}
+      {!timingLocked && (
+        <span
+          data-testid="tl-timing-unlocked"
+          className="flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400"
+        >
+          <LockOpen className="h-3 w-3" />
+          {t("editor.timeline.timingsUnlocked")}
+        </span>
+      )}
+      {/* AQU-646: the playhead is already shifted back by the delay the
+          browser reports, so this does NOT say "there is latency" — it says
+          the part we cannot measure is still there. Shown only on a path
+          slow enough that the reading is untrustworthy, which in practice
+          means Bluetooth. Sam, 2026-10-15: a short amber word beside the
+          heading (after the timing switch, when there is one), the full
+          message behind its info button — it was a full-width line.
+          AQU-2260 (Sam, Oct 29): plain amber text, never a pill. */}
+      {outputLatencySec >= HIGH_LATENCY_SEC && (
+        <span
+          data-testid="tl-output-latency-note"
+          className="ms-1 inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+        >
+          {t("editor.timeline.bluetoothPill")}
+          {/* AQU-2260: the same click-open note as every toolbar (i). */}
+          <InfoNote
+            label={t("editor.timeline.bluetoothPillInfo")}
+            testId="tl-output-latency-info"
+            className="rounded-full p-0 text-amber-700/80 hover:text-amber-800 aria-expanded:text-amber-800 dark:text-amber-300/80 dark:hover:text-amber-200"
+            iconClassName="h-3 w-3"
+          >
+            {t("editor.timeline.outputLatencyNote")}
+          </InfoNote>
+        </span>
+      )}
+      {/* The two states in which the overlay would otherwise lie by
+          omission get a sentence instead of paint (2026-08-14: a dead
+          links table rendered as every chip confidently amber). */}
+      {linkingAvailable && linkingMode && cueLinksFailed && (
+        <span
+          data-testid="tl-linking-notice"
+          className="text-xs text-red-600 dark:text-red-400"
+        >
+          {t("editor.timeline.pairingsFailed")}
+        </span>
+      )}
+      {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
+        <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
+          {t("editor.timeline.neverPaired", { repairAll: t("editor.timeline.cueLinkRepairAll") })}
+        </span>
+      )}
+    </>
+  )
+
   return (
     // Stage 3: the editor FILLS the height it is given, and gives it all to the
     // tracks. It sits in a resizable panel now, so it no longer sizes itself to
@@ -4158,439 +4906,23 @@ export function TimelineEditor({
         } as CSSProperties
       }
     >
-      {/* toolbar */}
-      <div
-        className={`flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 ${MEDIA_HEADER_ROW}`}
-      >
-        <span className="text-sm font-semibold tracking-wide text-muted-foreground">
-            {t("editor.timeline.title")}
-          </span>
-        {/* AQU-1119: beside the heading, like the gutter's own toggle sits in
-            the gutter — a control that folds a region belongs on that region's
-            name, not in the corner. Withheld entirely when the workspace
-            passes no handler: outside the media lens there is nothing to fold
-            INTO, and a disabled button would be a question the reader cannot
-            act on. */}
-        {onCollapseSection && (
-          <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
-        )}
-        {/* AQU-2204: the file's one Timing control ("Follows source" /
-            "Follows recordings"). Self-contained so the layout work can move
-            it into the top bar beside the play controls as it is.
-            `onChangeTimingMode` absent = below project lead = plain text;
-            `timingFilmTimed` = a file timed to a film, which only follows
-            its source. */}
-        {!hideTimingMode && (
-          <TimingModeControl
-            className="ms-2"
-            mode={timingMode}
-            onChange={onChangeTimingMode}
-            filmTimed={timingFilmTimed}
-            sourceUnavailable={timingSourceUnavailable}
-            lengths={timingLengths}
-          />
-        )}
-        {/* AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip. */}
-        {layout.programme?.slots.some((slot) => slot.standIn) && (
-          <TimingInfoButton
-            label={t("editor.timeline.standInInfoAria")}
-            text={t("editor.timeline.standInInfo")}
-            testId="tl-stand-in-info"
-          />
-        )}
-        {/* AQU-646: the playhead is already shifted back by the delay the
-            browser reports, so this does NOT say "there is latency" — it says
-            the part we cannot measure is still there. Shown only on a path
-            slow enough that the reading is untrustworthy, which in practice
-            means Bluetooth. Sam, 2026-10-15: a small amber pill beside the
-            heading (after the timing switch, when there is one), the full
-            message behind its info button — it was a full-width line. */}
-        {outputLatencySec >= HIGH_LATENCY_SEC && (
-          <span
-            data-testid="tl-output-latency-note"
-            className="ms-1 inline-flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
-          >
-            {t("editor.timeline.bluetoothPill")}
-            <Popover>
-              <PopoverTrigger
-                render={
-                  <button
-                    type="button"
-                    data-testid="tl-output-latency-info"
-                    aria-label={t("editor.timeline.bluetoothPillInfo")}
-                    className="inline-flex rounded-full text-amber-700/80 outline-none hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-amber-500/50 dark:text-amber-300/80 dark:hover:text-amber-200"
-                  />
-                }
-              >
-                <Info className="h-3 w-3" />
-              </PopoverTrigger>
-              <PopoverContent side="bottom" align="start" sideOffset={6} className="w-72 p-3 text-xs leading-relaxed">
-                {t("editor.timeline.outputLatencyNote")}
-              </PopoverContent>
-            </Popover>
-          </span>
-        )}
-        <div className="ms-auto flex items-center gap-1.5">
-          {/* Meeting 2026-08-05: generated voices default to compressed
-              playback; fast connections can opt into the original WAV. Mic
-              recordings have no lossless form — the tooltip says so. */}
-          <AppTooltip
-            content={
-              audioQuality === "original"
-                ? t("editor.timeline.qualityOriginalTooltip")
-                : t("editor.timeline.qualityCompressedTooltip")
-            }
-          >
-            <button
-              type="button"
-              aria-label={t("editor.timeline.qualityToggleAria")}
-              aria-pressed={audioQuality === "original"}
-              data-testid="tl-quality-toggle"
-              onClick={() => setAudioQualityPref(audioQuality === "original" ? "compressed" : "original")}
-              className={cn(
-                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
-                audioQuality === "original"
-                  ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                  : "bg-background text-foreground/70 hover:bg-muted",
-              )}
-            >
-              <AudioLines className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
-          {/* AQU-1767: Undo / Redo — the edit history, app-wide. */}
-          {onHistoryResult && (
-            <>
-              <AppTooltip
-                content={
-                  history.nextUndo
-                    ? t("editor.history.undoTooltip", { step: t(history.nextUndo.labelKey as never, history.nextUndo.labelParams as never) })
-                    : t("editor.history.nothingToUndo")
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.history.undoAria")}
-                  data-testid="tl-undo"
-                  disabled={!history.canUndo}
-                  onClick={() => runHistory("undo")}
-                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-                >
-                  <Undo2 className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-              <AppTooltip
-                content={
-                  history.nextRedo
-                    ? t("editor.history.redoTooltip", { step: t(history.nextRedo.labelKey as never, history.nextRedo.labelParams as never) })
-                    : t("editor.history.nothingToRedo")
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.history.redoAria")}
-                  data-testid="tl-redo"
-                  disabled={!history.canRedo}
-                  onClick={() => runHistory("redo")}
-                  className="inline-flex items-center rounded-md border border-border bg-background px-1.5 py-1 text-foreground/70 hover:bg-muted disabled:opacity-40"
-                >
-                  <Redo2 className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-            </>
-          )}
-          {/* AQU-1767: the blade. (Sam, 2026-10-14: no "cut at the playhead"
-              button — it cut every voice track at once. S splits the one
-              selected take at the playhead instead.) */}
-          {onCutTargets && editable && (
-            <>
-              <AppTooltip
-                content={
-                  bladeActive
-                    ? t("editor.timeline.bladeOnTooltip")
-                    : t("editor.timeline.bladeOffTooltip")
-                }
-              >
-                <button
-                  type="button"
-                  aria-label={t("editor.timeline.bladeToggleAria")}
-                  aria-pressed={bladeActive}
-                  data-testid="tl-blade-toggle"
-                  disabled={!canCut}
-                  onClick={() => setBladeOn((on) => !on)}
-                  className={cn(
-                    "inline-flex items-center rounded-md border border-border px-1.5 py-1 disabled:opacity-40",
-                    bladeActive
-                      ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-                      : "bg-background text-foreground/70 hover:bg-muted",
-                  )}
-                >
-                  <Scissors className="h-3.5 w-3.5" />
-                </button>
-              </AppTooltip>
-            </>
-          )}
-          {/* SUB-53: nothing to snap to when positions are computed. */}
-          {!audioFirst && (
-          <AppTooltip content={snapOn ? t("editor.timeline.snapOnTooltip") : t("editor.timeline.snapOffTooltip")}>
-            <button
-              type="button"
-              aria-label={t("editor.timeline.snapToggleAria")}
-              aria-pressed={snapOn}
-              data-testid="tl-snap-toggle"
-              onClick={() => {
-                const next = !snapOn
-                setSnapOn(next)
-                saveSnapEnabled(next)
-              }}
-              className={cn(
-                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
-                snapOn ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
-              )}
-            >
-              <Magnet className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
-          )}
-          <AppTooltip content={t("editor.timeline.followPlayhead")}>
-            <button
-              type="button"
-              aria-label={t("editor.timeline.followPlayhead")}
-              aria-pressed={follow}
-              onClick={() => {
-                const next = !follow
-                setFollow(next)
-                if (next) {
-                  const el = scrollRef.current
-                  if (el) {
-                    const target = computeFollowScroll(
-                      secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
-                    )
-                    if (target != null) scrollTrackTo(target)
-                  }
-                }
-              }}
-              className={cn(
-                "inline-flex items-center rounded-md border border-border px-1.5 py-1",
-                follow ? "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300" : "bg-background text-foreground/70 hover:bg-muted",
-              )}
-            >
-              <LocateFixed className="h-3.5 w-3.5" />
-            </button>
-          </AppTooltip>
-          {/* AQU-646 stage 6: ONE menu for everything that attaches material to
-              the file already open — the film, the heard lines, the cast — as
-              distinct from the Import button, which mints a NEW file. Three
-              separate buttons said nothing about what a file already had;
-              a menu row can carry its state, so "548 imported" replaces a
-              label that had to choose between "Import" and "Replace" and got
-              it wrong either way.
-
-              Built from `items`, not three hardcoded rows: stage 8's untimed
-              pocket bin is the same category and will want a fourth. */}
-          {/* AQU-1684: THE WAY BACK. Present exactly while this person has
-              hidden something on this file, so a lane never vanishes without
-              trace: it names how many, and lists each to show again. */}
-          {hiddenTracks.length > 0 && (
-            <OverflowMenu
-              items={[
-                { id: "hidden-note", type: "label", label: t("editor.timeline.hiddenTracksNote") },
-                ...hiddenTracks.map((track) => ({
-                  id: `show-${track.id}`,
-                  label: t("editor.timeline.showTrack", { name: track.name }),
-                  icon: Eye,
-                  testId: `tl-show-track-${track.id}`,
-                  onClick: () => showTracks([track.id]),
-                })),
-                ...(hiddenTracks.length > 1
-                  ? [
-                      { id: "show-all-sep", type: "separator" as const },
-                      {
-                        id: "show-all",
-                        label: t("editor.timeline.showAllTracks"),
-                        testId: "tl-show-all-tracks",
-                        onClick: () => showTracks(hiddenTracks.map((track) => track.id)),
-                      },
-                    ]
-                  : []),
-              ]}
-              triggerVariant="outline"
-              triggerLabel={t("editor.timeline.hiddenTracks", { count: hiddenTracks.length })}
-              triggerIcon={EyeOff}
-              testId="tl-hidden-tracks"
-              ariaLabel={t("editor.timeline.hiddenTracksAria")}
-            />
-          )}
-          {sourceMenuItems.length > 0 && sourcesUsable && (
-            <OverflowMenu
-              items={sourceMenuItems}
-              triggerVariant="outline"
-              triggerLabel={t("editor.timeline.sourcesMenu")}
-              triggerIcon={FolderInput}
-              testId="tl-sources-menu"
-              ariaLabel={t("editor.timeline.sourcesMenuAria")}
-            />
-          )}
-          {/* AQU-646 stage 2: ADDING A TRACK IS A BUTTON, NOT A RIGHT-CLICK
-              (Sam, 2026-08-22). Right-click is for the tracks that already
-              exist; a project that has just turned track editing on has none
-              of the new ones yet, so the way in has to be somewhere you can
-              see. It renders only when the setting is on and the person is a
-              maintainer — the whole control, not a disabled one. */}
-          {trackEditing && (
-            <OverflowMenu
-              items={[
-                {
-                  id: "add-audio",
-                  label: t("editor.timeline.trackAddTrack"),
-                  icon: AudioLines,
-                  onClick: () => setAddingTrack(true),
-                },
-                {
-                  id: "add-folder",
-                  label: t("editor.timeline.trackAddFolder"),
-                  icon: FolderPlus,
-                  // A folder needs no decisions — it has no alignment and holds
-                  // nothing yet — so it is made immediately and named in place,
-                  // rather than through a dialog whose only field is a name.
-                  onClick: () => {
-                    const folderId = trackEditing.onAdd({
-                      kind: "folder",
-                      // The STORED name, not the menu's label. Naming it
-                      // `t(...)` put the creator's UI language into a synced
-                      // field, so a folder made in Thai read as Thai for
-                      // everyone — and being a constant, every folder on a file
-                      // was called the same thing (2026-08-28).
-                      name: nextFolderName(tracks),
-                    })
-                    setRenamingTrackId(folderId)
-                  },
-                },
-              ]}
-              triggerVariant="outline"
-              triggerLabel={t("editor.timeline.trackAdd")}
-              triggerIcon={Plus}
-              testId="tl-add-track"
-              ariaLabel={t("editor.timeline.trackAdd")}
-            />
-          )}
-          {/* AQU-646: the reminder, for as long as the project is unlocked.
-              Sam: "the app should remind you when you're unlocked." A toast
-              would be exactly wrong here — it goes away, and the whole risk is
-              somebody leaving a project unlocked for a week without noticing.
-              This sits in the toolbar and does not leave until the lock is back
-              on, which is also why it is deliberately plain rather than an
-              alarm: it is a state, not an error. */}
-          {!timingLocked && (
-            <span
-              data-testid="tl-timing-unlocked"
-              className="flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400"
-            >
-              <LockOpen className="h-3 w-3" />
-              {t("editor.timeline.timingsUnlocked")}
-            </span>
-          )}
-          {/* Stage 4: linking mode. An explicit toggle, off by default, because
-              while it is off clicking must stay exactly what it always was —
-              seek, select, drag, trim. Only offered once there are cues to pair
-              with and the file is editable. */}
-          {checkMenuItems.length > 0 && (
-            <OverflowMenu
-              items={checkMenuItems}
-              triggerVariant="outline"
-              triggerLabel={t(linkingMode ? "editor.timeline.checkMenuLinking" : "editor.timeline.checkMenu")}
-              triggerIcon={cueLinksPending ? Spinner : ClipboardCheck}
-              // Armed linking is a MODE, so the control has to look different
-              // while it is on — the confusing state Sam hit was one where
-              // nothing on screen said which way it was set.
-              triggerClassName={cn(
-                linkingMode &&
-                  "bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-950 dark:text-violet-300",
-              )}
-              // THE COUNT RIDES ON THE TRIGGER, not on an item — a badge you
-              // have to open a menu to see is not doing a badge's job.
-              triggerBadge={
-                characterDisagreements > 0 ? (
-                  <span
-                    data-testid="tl-check-count"
-                    className="ml-0.5 rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
-                  >
-                    {characterDisagreements}
-                  </span>
-                ) : undefined
-              }
-              testId="tl-check-menu"
-              ariaLabel={t("editor.timeline.checkMenuAria")}
-            />
-          )}
-          {/* The two states in which the overlay would otherwise lie by
-              omission get a sentence instead of paint (2026-08-14: a dead
-              links table rendered as every chip confidently amber). */}
-          {linkingAvailable && linkingMode && cueLinksFailed && (
-            <span
-              data-testid="tl-linking-notice"
-              className="text-xs text-red-600 dark:text-red-400"
-            >
-              {t("editor.timeline.pairingsFailed")}
-            </span>
-          )}
-          {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
-            <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
-              {t("editor.timeline.neverPaired")}
-            </span>
-          )}
-          <div className="inline-flex items-center rounded-md border border-border">
-            <button
-              type="button"
-              aria-label={t("editor.timeline.zoomOut")}
-              onClick={() => applyZoom(pxPerSec / 1.3)}
-              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
-            >
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <span className="border-x border-border px-2 font-mono text-[11px] tabular-nums text-muted-foreground">
-              {(pxPerSec / ZOOM_DEFAULT).toFixed(1)}×
-            </span>
-            <button
-              type="button"
-              aria-label={t("editor.timeline.zoomIn")}
-              onClick={() => applyZoom(pxPerSec * 1.3)}
-              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          {/* Stage 3: the vertical zoom, in the horizontal one's chrome and
-              immediately beside it — same stepper, the other axis.
-              "Shorter rows"/"Taller rows" rather than another zoom pair: two
-              controls both labelled some flavour of "zoom" leave a user
-              hovering to find out which is which, and the readout says the
-              number of pixels for the same reason — a second "1.0×" next door
-              to the first is unreadable at a glance. */}
-          <div className="inline-flex items-center rounded-md border border-border">
-            <button
-              type="button"
-              aria-label={t("editor.timeline.rowsShorterAria")}
-              title={t("editor.timeline.rowsShorterTooltip")}
-              onClick={() => applyRowHeight(rowH / 1.3)}
-              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
-            >
-              <ChevronsDownUp className="h-3.5 w-3.5" />
-            </button>
-            <span className="border-x border-border px-2 font-mono text-[11px] tabular-nums text-muted-foreground">
-              {rowH}px
-            </span>
-            <button
-              type="button"
-              aria-label={t("editor.timeline.rowsTallerAria")}
-              title={t("editor.timeline.rowsTallerTooltip")}
-              onClick={() => applyRowHeight(rowH * 1.3)}
-              className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
-            >
-              <ChevronsUpDown className="h-3.5 w-3.5" />
-            </button>
-          </div>
+      {/* Media redesign, layout (canvas board 23): the timeline has NO title
+          row. Its tools go up into the view's one 40 px top bar — the
+          workspace's "media-top-tools" slot, after the film — and its layout
+          controls and settings sit in its corner cell beside "Tracks". Where
+          there is no top bar (outside the media view, and in the tests) the
+          same tools render in a plain row here instead. */}
+      {topToolsSlot ? createPortal(
+        <div className="flex shrink-0 items-center gap-1.5">{topTools}</div>,
+        topToolsSlot,
+      ) : (
+        <div
+          data-testid="tl-tools-row"
+          className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5"
+        >
+          {topTools}
         </div>
-      </div>
+      )}
 
       {/* SUB-53: a video runs on the original recording's clock, so it cannot
           follow a re-flowed track — say so rather than let it drift silently
@@ -4619,13 +4951,15 @@ export function TimelineEditor({
           <span className="min-w-0 flex-1">
             {t("editor.timeline.measureNote", { count: legacyMeasure.count })}
           </span>
+          {/* Its words name it; why it is greyed out opens on a click on it,
+              and what it does is behind the (i) beside it (AQU-2260). */}
           <AppTooltip
             content={
               !online
                 ? t("editor.timeline.measureOfflineTooltip")
                 : batchProgress != null
                   ? t("editor.timeline.measureBusyTooltip")
-                  : t("editor.timeline.measureTooltip")
+                  : null
             }
           >
             <button
@@ -4638,6 +4972,9 @@ export function TimelineEditor({
               {t("editor.timeline.measureNow")}
             </button>
           </AppTooltip>
+          <InfoNote label={t("common.aboutAria", { name: t("editor.timeline.measureNow") })} align="end">
+            {t("editor.timeline.measureTooltip")}
+          </InfoNote>
           <button
             type="button"
             aria-label={t("editor.timeline.measureDismiss")}
@@ -4685,23 +5022,38 @@ export function TimelineEditor({
               rows did. */}
           <div
             ref={gutterRef}
-            className="relative overflow-hidden bg-muted/20"
+            // `isolate` (AQU-2236): the z-indexes in here rank against EACH
+            // OTHER and nothing else — header 40 over names 30 over rule 20.
+            // Without it they ranked in the workspace's own stacking context,
+            // where 40 is the menus' tier (AppShell's z-scale), and the header
+            // and the names drew over the expanded search results (z-20) that
+            // are meant to cover the editor.
+            className="relative isolate overflow-hidden bg-muted/20"
             onScroll={handleGutterScroll}
+            // React's onFocus bubbles: any row, or any control in one, that
+            // takes focus under the header comes back out from under it.
+            onFocus={(e) => revealGutterRow(e.target)}
           >
             {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
                 BORDER. It was `border-r` on this container — but a border
                 paints outside the content box, so no row could ever cover its
                 own segment of it, and Sam wants the folder band to run
                 UNBROKEN across both columns. Same pixel (border-box kept the
-                1px inside this cell's width, and so does right-0 w-px), full
-                height including the header strip and the space below the
-                rows, exactly as before — except where a folder row (opaque,
-                z-30) now paints over it. z-20 keeps it above the header's
-                opaque z-10 background, where the old border also showed. */}
+                1px inside this cell's width, and so does end-0 w-px), full
+                height through the space below the rows — except where a
+                folder row (opaque, z-30) paints over it.
+
+                The header covers its top 28px (AQU-2236): the names scroll
+                under the header now, so the header outranks them, and this
+                rule with them. The header draws that stretch of the divider
+                itself, with its own `border-e`. Keep both: raising the rule
+                over the header would raise it over the folder band too, and
+                the header without its border would leave the strip with no
+                divider at all. */}
             <div
               aria-hidden
               data-testid="tl-gutter-rule"
-              className="pointer-events-none absolute inset-y-0 right-0 z-20 w-px bg-border"
+              className="pointer-events-none absolute inset-y-0 end-0 z-20 w-px bg-border"
             />
             {/* The ruler's opposite number. It does NOT translate — the labels
                 below slide under it exactly as the chips slide under the sticky
@@ -4710,49 +5062,59 @@ export function TimelineEditor({
                 through it would still be perfectly legible; this paints
                 `bg-background` and lays the same tint back over it, reproducing
                 today's composite to the pixel. */}
-            <div className="relative z-10 h-7 border-b border-border bg-background">
-              <div className="absolute inset-0 bg-muted/20" />
-              {/* THE TOGGLE LIVES HERE, AND ITS POSITIONING IS ABSOLUTE FOR A
-                  REASON THAT IS NOT COSMETIC. This spacer is the ruler's
-                  opposite number: the two are both `h-7`, and that shared
-                  height is the whole vertical coordinate frame the drop lines,
-                  the lift offsets and `gutterContentY` are measured in. A
-                  button in the normal flow would grow this box by its own
-                  height and put every one of those out by that much. Absolute
-                  contributes no layout, so the frame is untouched.
+            {/* z-40, above the track names (z-30, raised for the folder band
+                below): they scroll UNDER this header, as the chips slide under
+                the ruler. Above the divider rule too, so the header draws that
+                pixel itself (`border-e`, on the rule's own column).
 
-                  It sits in the header rather than in the toolbar because it
-                  acts on the column directly beneath it, and because the
-                  toolbar is already the busiest strip in the editor. */}
-              <button
-                type="button"
-                data-testid="tl-gutter-toggle"
-                aria-expanded={!gutterCollapsed}
-                aria-label={
-                  gutterCollapsed
-                    ? t("editor.timeline.gutterExpandAria")
-                    : t("editor.timeline.gutterCollapseAria")
-                }
-                title={
-                  gutterCollapsed
-                    ? t("editor.timeline.gutterExpandAria")
-                    : t("editor.timeline.gutterCollapseAria")
-                }
-                onClick={() => setGutterCollapsed((v) => !v)}
-                className={cn(
-                  "absolute inset-y-0 flex items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
-                  // Collapsed it is the only thing in the strip, so it takes
-                  // the whole strip and is impossible to miss; expanded it
-                  // tucks into the right edge, against the border it moves.
-                  gutterCollapsed ? "inset-x-0" : "right-0 w-7",
+                LOGICAL SIDES, here and on the rule: Arabic and
+                Urdu flip `<html dir>`, the grid puts this column on the RIGHT,
+                and the edge it shares with the lanes is then its left one.
+                `border-e` and `end-0` follow that edge; `border-r` and
+                `right-0` would draw the divider on the column's outer edge. */}
+            <div ref={gutterHeaderRef} className="relative z-40 h-7 border-b border-e border-border bg-background">
+              <div className="absolute inset-0 bg-muted/20" />
+              {/* THE CORNER CELL (media redesign, layout): "Tracks", and the
+                  timeline's own Full screen, Fold and ⋯ — the timeline has no
+                  title row, so its controls cost no row here (canvas board 23).
+                  The gutter's « » toggle is gone with the other chevrons; the
+                  track names are a setting in the ⋯ now.
+
+                  ITS POSITIONING IS ABSOLUTE FOR A REASON THAT IS NOT
+                  COSMETIC. This spacer is the ruler's opposite number: the two
+                  are both `h-7`, and that shared height is the whole vertical
+                  coordinate frame the drop lines, the lift offsets and
+                  `gutterContentY` are measured in. Content in the normal flow
+                  would grow this box by its own height and put every one of
+                  those out by that much. Absolute contributes no layout. */}
+              <div data-testid="tl-corner" className="absolute inset-0 flex items-center gap-1 ps-3 pe-1">
+                {!gutterCollapsed && (
+                  <span className="truncate text-xs text-muted-foreground">{t("editor.dock.tracks")}</span>
                 )}
-              >
-                {gutterCollapsed ? (
-                  <ChevronsRight className="h-3.5 w-3.5" />
+                {layoutControls ? (
+                  <PanelControlButtons
+                    region="tl"
+                    controls={layoutControls}
+                    leading={gutterCollapsed ? undefined : addTrackMenu}
+                    // The narrow gutter has room for two squares: Full screen
+                    // and the ⋯, which carries Fold too.
+                    compact={gutterCollapsed}
+                    foldTip={t("editor.dock.foldTimelineTip", { keys: dockKeys().fold })}
+                    menu={
+                      <TimelineMenu
+                        controls={layoutControls}
+                        compact={gutterCollapsed}
+                        settings={<>{gutterCollapsed ? addTrackMenuItems : null}{compactEditItems}{timelineSettings}</>}
+                      />
+                    }
+                  />
                 ) : (
-                  <ChevronsLeft className="h-3.5 w-3.5" />
+                  <div className="ms-auto flex items-center gap-px">
+                    {gutterCollapsed ? null : addTrackMenu}
+                    <TimelineMenu settings={<>{gutterCollapsed ? addTrackMenuItems : null}{compactEditItems}{timelineSettings}</>} />
+                  </div>
                 )}
-              </button>
+              </div>
             </div>
             {/* Slaved to the track column's scrollTop by handleTrackScroll.
                 `role="list"` only when the rows can actually be reordered: it
@@ -4773,7 +5135,17 @@ export function TimelineEditor({
               // rule still shows through every ordinary row and is covered only
               // where a row paints something opaque, which is what the folder
               // band is.
-              className="relative z-30"
+              //
+              // …AND OVER THE HEADER TOO, BUT ONLY MID-DRAG (AQU-2236). At rest
+              // the names pass under the header, as the chips pass under the
+              // ruler. During a drag the lane half of the drop line still draws
+              // over the ruler (its z-30 beats the ruler's z-20), so near the
+              // top the gutter half and the row in the air would vanish under
+              // the header while the lane half showed — and the drop still
+              // resolves up there. A dragged chip lifts its whole lane over the
+              // ruler for the same reason (TargetAudioLane): mid-gesture, the
+              // thing under the pointer is what you need to see.
+              className={cn("relative", trackDrag?.moved ? "z-50" : "z-30")}
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
@@ -4815,7 +5187,14 @@ export function TimelineEditor({
                     // inside a folder is said by the indented rows when it is
                     // open and by the summary band when it is closed. The
                     // kind-table fallback flows through unrendered.
-                    sub={render.sub}
+                    // AQU-2252 (Sam, Oct 29): a track made a layer says so in
+                    // words, while the file follows its recordings — the only
+                    // timing where a track's takes set a line's length.
+                    sub={
+                      audioFirst && track.kind === "audio" && track.setsLineLengths === false
+                        ? t("editor.timeline.laneLayerSub")
+                        : render.sub
+                    }
                     dot={render.dot}
                     // Every row but a FOLDER, which is a heading rather than a
                     // track (Sam's own rule) and has a disclosure triangle
@@ -4957,6 +5336,7 @@ export function TimelineEditor({
                             // outcomes of one gesture are distinguishable
                             // before the pointer is let go.
                             dropIndent: Boolean(dropRow?.indent),
+                            dropTopPx: dropRow?.rowIndex === index ? dropTopInRowPx : null,
                             onPointerDown: (e) => beginTrackDrag(index, e),
                             onKeyDown: (e) => onTrackLabelKeyDown(index, e),
                           }
@@ -5049,10 +5429,11 @@ export function TimelineEditor({
             className="overflow-auto overscroll-contain"
             onScroll={handleTrackScroll}
           >
-            <div className="relative" style={{ width: `${trackWidthPx}px` }}>
+            <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>
               <TimelineRuler
                 durationSec={durationSec}
                 pxPerSec={pxPerSec}
+                fillPx={canvasWidthPx}
                 viewStartSec={viewStartSec}
                 viewEndSec={viewEndSec}
                 onScrub={seekTo}

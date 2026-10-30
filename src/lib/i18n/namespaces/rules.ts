@@ -135,10 +135,6 @@ export const rules = defineNamespace({
       one: "{count} violation",
       other: "{count} violations",
     }),
-    "rules.builtinChecks.harmonizeAllTooltip": plural({
-      one: "Harmonize all {count} violation for this check",
-      other: "Harmonize all {count} violations for this check",
-    }),
     "rules.builtinChecks.harmonizeAllButton": "Harmonize all ({count})",
     "rules.builtinChecks.manageNeedsMaintainer": "Only maintainers and owners can change built-in checks",
     "rules.builtinChecks.severitySelectAriaLabel": "{name} severity",
@@ -172,7 +168,6 @@ export const rules = defineNamespace({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
     }),
-    "rules.checkDrawer.goToCell": "Go to cell",
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
@@ -245,9 +240,7 @@ export const rules = defineNamespace({
     "rules.surface.pendingRequests": "Pending requests ({count})",
     "rules.surface.requestedBy": "Requested by {requester}",
     "rules.surface.requestedByFallback": "user {userId}",
-    "rules.surface.approveRequestTooltip": "Promote this rule to org scope",
     "rules.surface.approveButton": "Approve",
-    "rules.surface.dismissRequestTooltip": "Dismiss this request",
     "rules.surface.promoteDialog.title": "Promote rule to org?",
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
@@ -258,12 +251,9 @@ export const rules = defineNamespace({
       "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",
     "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
-    "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
     "rules.surface.tryToFixAllButton": "Try to fix all",
-    "rules.surface.promoteToOrgTooltip": "Copy this rule to the org's rule library",
     "rules.surface.promoteToOrgButton": "Promote to org",
     "rules.surface.requestedBadge": "Requested",
-    "rules.surface.requestPromotionTooltip": "Ask an org maintainer to promote this rule to org scope",
     "rules.surface.requestingButton": "Requesting…",
     "rules.surface.requestPromotionButton": "Request promotion",
     "rules.surface.disableRuleAriaLabel": "Disable rule: {name}",
@@ -280,7 +270,6 @@ export const rules = defineNamespace({
     "rules.drawer.openCellAriaLabel": "Open cell {cellId} in the editor",
     "rules.drawer.fixCellTooltip": "Propose a fix for this cell",
     "rules.drawer.fixCellAriaLabel": "Fix this cell with AI",
-    "rules.drawer.tryToFixAllTooltip": "Propose a fix for every cell breaking this rule",
     "rules.drawer.proposingFix": "Proposing…",
     "rules.drawer.aiNotConfigured": "Set up AI to propose fixes",
     "rules.drawer.fixNotPermitted": "You do not have permission to apply fixes in this project",
@@ -380,7 +369,6 @@ export const rules = defineNamespace({
     "rules.importDialog.fileEmpty": "File appears to be empty.",
     "rules.importDialog.extractingRules": "Extracting rules from document…",
     "rules.importDialog.structuring": "Structuring {structured} / {candidates} rules…",
-    "rules.importDialog.tooltip": "Import rules from a document",
     "rules.importDialog.tooltipUnconfigured": "Configure LLM in settings first",
     "rules.importDialog.triggerButton": "Import from doc",
     "rules.importDialog.reviewTitle": plural({
@@ -420,13 +408,13 @@ export const rules = defineNamespace({
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
-    "rules.completion.frontierLimitReached": "Frontier AI limit reached: {detail}",
+    "rules.completion.frontierLimitReached": "Aquilla AI limit reached: {detail}",
     "rules.completion.outOfCredits": "Out of credits.",
     "rules.completion.completionFailed": "Completion failed: {status} {text}",
     "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
     "rules.completion.streamError": "Completion stream error",
     "rules.completion.completionAborted": "Completion aborted",
-    "rules.completion.signInRequired": "Sign in to use Frontier AI.",
+    "rules.completion.signInRequired": "Sign in to use Aquilla AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
 
     // ── autofix.ts (LLM autofix proposal, lib/) — fallbacks only; the LLM's
@@ -609,11 +597,6 @@ export const rules = defineNamespace({
         description:
           "Badge on a built-in check's row in the checks list, counting how many cells currently violate it.",
         placeholders: { count: "Number of cells currently violating this check." },
-      },
-      "rules.builtinChecks.harmonizeAllTooltip": {
-        description:
-          "Tooltip on the 'Harmonize all' button for a built-in check, stating how many violations a harmonization sweep would fix.",
-        placeholders: { count: "Number of violations the sweep would fix." },
       },
       "rules.builtinChecks.harmonizeAllButton": {
         description:
@@ -833,10 +816,6 @@ export const rules = defineNamespace({
       "rules.drawer.fixCellAriaLabel": {
         description: "Accessible label for the per-cell AI fix button in the rule drawer.",
       },
-      "rules.drawer.tryToFixAllTooltip": {
-        description:
-          "Hover text for the rule drawer's button that proposes one fix across every cell breaking the rule.",
-      },
       "rules.drawer.proposingFix": {
         description: "Busy label while the model is being asked for a fix.",
       },
@@ -953,7 +932,7 @@ export const rules = defineNamespace({
       },
       "rules.completion.frontierLimitReached": {
         description:
-          "Thrown error when a Frontier completion request 402s (subscription/credits exhausted).",
+          "Thrown error when a Aquilla completion request 402s (subscription/credits exhausted).",
         placeholders: { detail: "Server-provided detail text, or rules.completion.outOfCredits as a fallback." },
       },
       "rules.completion.completionFailed": {

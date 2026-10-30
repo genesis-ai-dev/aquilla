@@ -364,6 +364,39 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  // AQU-1758 (Sam, Oct 29): agents change "Show the film and sources tools in
+  // the media view" like the other shared settings. It used to be `unknown
+  // settings key`, as it was missing from the list both workers share.
+  it('accepts filmAndSources (a boolean) from a maintainer and stores it', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'filmAndSources', value: false }]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.filmAndSources).toBe(false)
+    expect(stored.targetLanguage).toBe('fr')
+  })
+
+  it('rejects a filmAndSources that is not a boolean, naming the key and its type', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'filmAndSources', value: 'off' }]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(JSON.stringify(body.error.details)).toContain('filmAndSources')
+    expect(JSON.stringify(body.error.details)).toContain('boolean')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('refuses filmAndSources from a project lead, as every shared setting below the maintainer floor', async () => {
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500)
+    const { res } = await prepare(env, lead.token, patchCmd([{ key: 'filmAndSources', value: true }]))
+    expect(res.status).toBe(403)
+  })
+
   it('negative control: a valid single-key patch still stages, commits, and leaves other keys alone', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)

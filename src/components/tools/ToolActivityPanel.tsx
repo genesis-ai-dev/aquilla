@@ -7,7 +7,7 @@ import { BadgeCheck, RefreshCw, RotateCcw, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SegmentTabs } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { useOutbox } from "@/context/OutboxContext"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -162,12 +162,17 @@ export function ToolActivityPanel({
       {activity?.truncated && <p className="mt-1 text-xs text-muted-foreground">{t("extensions.activity.truncated")}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <AppTooltip content={t("extensions.activity.undoHint")}>
+        {/* AQU-2260: what Undo does is an (i) beside it, opened on click;
+            the labelled button says nothing on hover. */}
+        <span className="inline-flex items-center gap-1">
           <Button size="sm" variant="outline" onClick={prepareRevert} disabled={!activity || reverting || activity.events.length === 0}>
             <RotateCcw className="size-3.5" aria-hidden />
             {t("extensions.revert.button")}
           </Button>
-        </AppTooltip>
+          <InfoNote label={t("common.aboutAria", { name: t("extensions.revert.button") })} testId="tool-activity-undo-info">
+            {t("extensions.activity.undoHint")}
+          </InfoNote>
+        </span>
         {pendingPlan && (
           <span role="group" className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5">
             <span className="text-xs text-amber-900 dark:text-amber-200">{t("extensions.revert.confirm", { count: pendingPlan.commits.length })}</span>

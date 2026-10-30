@@ -1,10 +1,11 @@
 "use client"
 
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
-import { cloneElement } from "react"
+import { cloneElement, useRef, useState } from "react"
 import type { ReactElement, ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
+import { Popover, PopoverContent } from "@/components/ui/popover"
 
 type TooltipSide = "top" | "bottom" | "left" | "right"
 type TooltipAlign = NonNullable<TooltipPrimitive.Positioner.Props["align"]>
@@ -125,49 +126,105 @@ function AppTooltip({
   // the host changed her role by hand.
   //
   // So keep the child exactly as the caller wrote it (still `disabled`: not
-  // clickable, not submittable) and let a wrapper span be the trigger. Hover
+  // clickable, not submittable) and let a wrapper span be the trigger. A click
   // lands on the wrapper, which the child cannot swallow precisely because it
   // has no pointer events, and `tabIndex={0}` gives keyboard users the same
   // sentence — a disabled button is not focusable, so without it they get
   // nothing.
   //
   // ⚠️ Testing this: happy-dom and jsdom DO dispatch pointer events on disabled
-  // elements, so hovering a disabled button opens the tooltip with or without
-  // this wrapper. Assert that the trigger is not itself `[disabled]`; asserting
-  // the hover is a false green.
+  // elements. Assert that the trigger is not itself `[disabled]`, and click
+  // the stand-in, not the control.
   const childDisabled = (children.props as { disabled?: boolean }).disabled === true
-  const triggerNode = childDisabled ? (
-    <span
-      data-slot="tooltip-disabled-trigger"
-      tabIndex={0}
-      className={cn("inline-flex", disabledTriggerClassName)}
-    >
-      {trigger}
-    </span>
-  ) : (
-    trigger
-  )
 
-  // The key starts a fresh trigger whenever the child turns disabled or
-  // enabled. That swaps the element the tooltip hangs on (the stand-in span
-  // above, or the child itself), and Base UI attaches its hover listeners to
-  // the trigger element only once, when the trigger mounts: without the key
-  // they stayed on the element that was just removed, so hover never opened
-  // the tooltip again while focus still did. Seen on the selection bar's
-  // "Validate text" when the selection began on a line it cannot validate
-  // (2026-10-03). The child is remounted by the swap either way, so the key
-  // costs nothing extra.
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button; why a
+  // control is greyed out is an explanation, so it opens on CLICK, in a small
+  // note anchored to the control, and shuts on a second click or a click
+  // outside. The stand-in span is still what takes the click and the focus
+  // (Enter or Space opens the note); the child stays exactly as the caller
+  // wrote it. Hovering a disabled control shows nothing.
+  if (childDisabled) {
+    return (
+      <DisabledReason
+        content={content}
+        trigger={trigger}
+        side={side}
+        align={align}
+        disabled={disabled}
+        className={className}
+        disabledTriggerClassName={disabledTriggerClassName}
+      />
+    )
+  }
+
   return (
     <Tooltip disabled={disabled}>
-      <TooltipTrigger
-        key={childDisabled ? "disabled-child" : "child"}
-        render={triggerNode}
-        delay={delay}
-      />
+      <TooltipTrigger render={trigger} delay={delay} />
       <TooltipContent side={side} align={align} className={className}>
         {content}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+/**
+ * A disabled control's reason, opened by a click (or Enter / Space) on its
+ * stand-in, and shut by a second one or a click outside (AQU-2260). The
+ * stand-in takes no role of its own, so the control inside keeps its name and
+ * its disabled state for a screen reader; the note opens beside it.
+ */
+function DisabledReason({
+  content, trigger, side, align, disabled, className, disabledTriggerClassName,
+}: {
+  content: ReactNode
+  trigger: ReactElement
+  side: TooltipSide
+  align: TooltipAlign
+  disabled: boolean
+  className?: string
+  disabledTriggerClassName?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef<HTMLSpanElement>(null)
+  const toggle = () => setOpen((o) => !o)
+  return (
+    <Popover
+      open={open && !disabled}
+      onOpenChange={(next, details) => {
+        // A press on the stand-in itself is the toggle below; the popover's
+        // own outside-press close must not race it.
+        const target = details?.event?.target
+        if (!next && target instanceof Node && anchorRef.current?.contains(target)) return
+        setOpen(next)
+      }}
+    >
+      <span
+        ref={anchorRef}
+        data-slot="tooltip-disabled-trigger"
+        data-open={open ? "" : undefined}
+        tabIndex={0}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            toggle()
+          }
+        }}
+        className={cn("inline-flex", disabledTriggerClassName)}
+      >
+        {trigger}
+      </span>
+      <PopoverContent
+        anchor={anchorRef}
+        side={side}
+        align={align}
+        sideOffset={6}
+        data-slot="disabled-reason-note"
+        className={cn("w-auto max-w-72 p-3 text-xs leading-relaxed", className)}
+      >
+        {content}
+      </PopoverContent>
+    </Popover>
   )
 }
 

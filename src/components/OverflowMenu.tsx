@@ -1,8 +1,10 @@
-import { Fragment, useId, useState, type ComponentType, type ReactNode, type Ref } from "react"
+import { Fragment, useId, type ComponentType, type ReactNode, type Ref } from "react"
 import type { VariantProps } from "class-variance-authority"
-import { Info, MoreHorizontal } from "lucide-react"
+import { MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { AppTooltip, Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { toSections } from "./overflow-menu-sections"
 import {
@@ -31,19 +33,20 @@ export interface OverflowMenuItem {
   /** Optional trailing badge (e.g. check-file finding count). */
   badge?: ReactNode
   /**
-   * Explanation behind a small info icon at the end of the row: hover or
-   * focus shows it as a tooltip, tap or click toggles it for touch users, and
-   * it is wired to the item through aria-describedby so assistive tech reads
-   * it as the item's description. Use it when the label alone cannot say what
-   * the item does (AQU-1078: "Draft as you read" needs its guarantees stated
+   * Explanation behind a small (i) at the end of the row: a click opens it in
+   * place under the label and a second click shuts it (AQU-2260), and it is
+   * wired to the item through aria-describedby so assistive tech reads it as
+   * the item's description. Use it when the label alone cannot say what the
+   * item does (AQU-1078: "Draft as you read" needs its guarantees stated
    * somewhere, but not as a paragraph inside the menu).
    */
   description?: string
   /**
-   * Why a disabled item is disabled, shown when you hover it. The row stays
-   * clean, greyed out with no inline text (Sam, Oct 5: "track editing off"
-   * beside "Attach captions" was too many words for one row), and the reason
-   * reaches assistive tech as the item's description.
+   * Why a disabled item is disabled, behind the row's (i): a click opens it in
+   * place (AQU-2260; it was a hover). The row stays clean, greyed out with no
+   * inline text until asked (Sam, Oct 5: "track editing off" beside "Attach
+   * captions" was too many words for one row), and the reason reaches
+   * assistive tech as the item's description.
    */
   disabledReason?: string
   onClick?: () => void
@@ -92,79 +95,65 @@ interface Props {
  * (Members, Settings, Close Project, etc.) collapse here so the top bar stops
  * scaling sideways with every new feature.
  */
-function ItemHint({ id, text }: { id: string; text: string }) {
-  // Controlled so a click can toggle it: Base UI tooltips open on hover and
-  // focus only, and a touch user has neither. The click stops at the icon so
-  // it never activates the menu item around it.
-  const [open, setOpen] = useState(false)
+/**
+ * A row's icon and label, with an (i) when the row has something to explain:
+ * what it does (`description`), or why it is greyed out (`disabledReason`).
+ * AQU-2260 (Sam, Oct 29): a click on the (i) opens the text in place, under
+ * the label, inside the menu, and a second click shuts it; it never runs the
+ * row, and hovering shows nothing. It used to be a tooltip that also toggled on
+ * click, floating to the right. The text is the row's accessible description,
+ * so a screen reader hears it whether or not it is open.
+ */
+function ItemBody({ item, textId }: { item: OverflowMenuItem; textId: string | undefined }) {
+  const t = useT()
+  const [open, toggle] = useInfoOpen()
+  const why = item.disabled ? item.disabledReason : undefined
+  const texts = [item.description, why].filter((x): x is string => Boolean(x))
   return (
     <>
-      {/* aria-hidden keeps the text out of the item's accessible NAME; an
-          aria-describedby reference still reads hidden nodes, so it lands in
-          the DESCRIPTION as intended. */}
-      <span id={id} aria-hidden="true" className="sr-only">
-        {text}
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
+          {item.icon && <item.icon className="h-4 w-4" />}
+          <span className="flex-1">{item.label}</span>
+          {textId && texts.length > 0 && (
+            // A disabled row takes no pointer events; its (i) takes them back.
+            <span className="pointer-events-auto ms-auto" data-testid={item.testId && `${item.testId}-info`}>
+              <InfoToggle
+                open={open}
+                onToggle={toggle}
+                label={t("common.aboutAria", { name: item.label ?? "" })}
+                controls={textId}
+              />
+            </span>
+          )}
+        </span>
+        {textId && texts.length > 0 && (
+          <InfoReveal
+            open={open}
+            id={textId}
+            testId={item.testId && `${item.testId}-reason`}
+            className="max-w-64 text-xs leading-snug font-normal text-muted-foreground"
+          >
+            <span className="flex flex-col gap-1 pt-0.5">
+              {texts.map((text) => <span key={text}>{text}</span>)}
+            </span>
+          </InfoReveal>
+        )}
       </span>
-      <Tooltip open={open} onOpenChange={setOpen}>
-        <TooltipTrigger
-          delay={200}
-          render={
-            <span
-              aria-hidden="true"
-              className="ml-auto inline-flex shrink-0 text-muted-foreground/60 transition-colors hover:text-foreground"
-            />
-          }
-          onClick={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            setOpen((value) => !value)
-          }}
-        >
-          <Info className="h-3.5 w-3.5" />
-        </TooltipTrigger>
-        <TooltipContent side="right" className="max-w-xs leading-snug">
-          {text}
-        </TooltipContent>
-      </Tooltip>
+      {item.badge}
     </>
   )
 }
 
 function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
   const menuId = useId()
-  // The hint text lives in a visually hidden span and reaches the item through
-  // aria-describedby, so the accessible NAME stays the bare label and the copy
-  // lands in the DESCRIPTION. Sighted users get the same text from the icon.
+  // The (i)'s text reaches the item through aria-describedby, so the
+  // accessible NAME stays the bare label (set outright, since the (i) button
+  // inside the row would otherwise join it) and the text is its DESCRIPTION.
   const reason = (item: OverflowMenuItem) => (item.disabled ? item.disabledReason : undefined)
   const describedBy = (item: OverflowMenuItem) =>
     item.description || reason(item) ? `${menuId}-${item.id}-description` : undefined
-  const body = (item: OverflowMenuItem) => {
-    const why = reason(item)
-    const main = (
-      <>
-        {item.icon && <item.icon className="h-4 w-4" />}
-        <span className="flex-1">{item.label}</span>
-      </>
-    )
-    return (
-      <>
-        {why ? (
-          <>
-            <span id={describedBy(item)} aria-hidden="true" className="sr-only">{why}</span>
-            {/* A disabled row takes no pointer events, so its content takes
-                them back for itself, or the reason could never be hovered. */}
-            <AppTooltip content={why} side="right">
-              <span className="pointer-events-auto flex flex-1 items-center gap-1.5" data-testid={item.testId && `${item.testId}-reason`}>
-                {main}
-              </span>
-            </AppTooltip>
-          </>
-        ) : main}
-        {item.description && <ItemHint id={describedBy(item)!} text={item.description} />}
-        {item.badge}
-      </>
-    )
-  }
+  const body = (item: OverflowMenuItem) => <ItemBody item={item} textId={describedBy(item)} />
   // DropdownMenuContent sizes itself to its anchor with a 192px floor. The
   // info icon and the check indicator share the row with the label, so a
   // panel that carries a hint gets a slightly wider floor to keep short labels
@@ -185,6 +174,7 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
         disabled={item.disabled}
         data-testid={item.testId}
         aria-describedby={describedBy(item)}
+        aria-label={describedBy(item) ? item.label : undefined}
         onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
       >
         {body(item)}
@@ -196,6 +186,7 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
         variant={item.destructive ? "destructive" : "default"}
         data-testid={item.testId}
         aria-describedby={describedBy(item)}
+        aria-label={describedBy(item) ? item.label : undefined}
         onClick={item.onClick}
       >
         {body(item)}

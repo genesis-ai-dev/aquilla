@@ -39,7 +39,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TableEmptyState } from "@/components/ui/page"
@@ -521,15 +521,22 @@ export function OrgProjectsDataTable({
                 aria-label={t("org.orgProjectsDataTable.unitsDoneAria", { done, total })}
               >
                 <span>{t("org.orgProjectsDataTable.unitsDoneValue", { done, total })}</span>
+                {/* AQU-2260: what the flag counts opens on click, never on
+                    hover; the click stays on the flag, not the row. */}
                 {overdue > 0 && (
-                  <AppTooltip content={t("org.orgProjectsDataTable.unitsOverdueTooltip", { count: overdue })}>
-                    <span
-                      data-testid="project-table-units-overdue"
-                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive/12 px-1 text-[10px] font-semibold text-destructive"
+                  <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+                    <NoteOnClick
+                      note={t("org.orgProjectsDataTable.unitsOverdueTooltip", { count: overdue })}
+                      align="end"
                     >
-                      {overdue}
-                    </span>
-                  </AppTooltip>
+                      <span
+                        data-testid="project-table-units-overdue"
+                        className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive/12 px-1 text-[10px] font-semibold text-destructive"
+                      >
+                        {overdue}
+                      </span>
+                    </NoteOnClick>
+                  </span>
                 )}
               </div>
             )

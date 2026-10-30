@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 // TermMatchingSection — AQU-1271 "Project settings: affix inventory editor".
 //
 // Editor for the project-wide `TermMatchingSettings` affix inventory:
@@ -26,6 +27,8 @@ interface Props {
   value: TermMatchingSettings
   onChange: (next: TermMatchingSettings) => void
   disabled: boolean
+  /** Why it is disabled, said once under the card's heading (AQU-2260). */
+  locked?: ReactNode
 }
 
 function clampMaxAffixes(raw: string): number {
@@ -97,7 +100,7 @@ function AffixTagInput({
   )
 }
 
-export function TermMatchingSection({ value, onChange, disabled }: Props) {
+export function TermMatchingSection({ value, onChange, disabled, locked }: Props) {
   const t = useT()
 
   function addAffix(side: "prefixes" | "suffixes", affix: string) {
@@ -114,7 +117,7 @@ export function TermMatchingSection({ value, onChange, disabled }: Props) {
   }
 
   return (
-    <SettingsGroup label={t("projectSettings.termMatching.title")} description={t("projectSettings.termMatching.description")}>
+    <SettingsGroup label={t("projectSettings.termMatching.title")} description={t("projectSettings.termMatching.description")} locked={disabled ? locked : null}>
       <SettingsRow
         label={t("projectSettings.termMatching.loadPreset")}
         control={

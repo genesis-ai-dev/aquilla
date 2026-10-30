@@ -129,7 +129,7 @@ vi.mock("@/components/TranslatedEditor", () => ({
 import { GlossaryEditor } from "./GlossaryEditor"
 import { useProject } from "@/hooks/useProject"
 import { minimalProjectRecord } from "@/lib/sync/cloud-projects"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import { JESUS, jhn4People } from "@/lib/bible-data/__fixtures__/jhn4"
 
 function concept(p: Partial<Concept>): Concept {
@@ -565,13 +565,15 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
   it.each([
     [100, "viewer", /Viewers cannot perform this action — you need at least Project lead access/],
     [400, "contributor", /Contributors cannot perform this action — you need at least Project lead access/],
-  ])("keeps the MANAGEMENT controls visible but disabled for level %i, with the role tooltip", async (level, name, tip) => {
+  ])("keeps the MANAGEMENT controls visible but disabled for level %i, with the reason once under the toolbar", async (level, name, tip) => {
     renderAs(hydrated(level, name))
 
     for (const control of MANAGEMENT_CONTROLS) {
       expect(screen.getByRole("button", { name: control })).toBeDisabled()
     }
-    await expectTooltip(screen.getByRole("button", { name: "Import" }), tip)
+    // AQU-2260: said once on the page, never on a hover.
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(tip)
+    expect(screen.getAllByText(tip)).toHaveLength(1)
 
     // Disabled is not merely cosmetic: the import picker cannot be opened.
     fireEvent.click(screen.getByRole("button", { name: "Suggest terms" }))
@@ -589,8 +591,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
 
     const add = screen.getByRole("button", { name: "Add term" })
     expect(add).toBeDisabled()
-    await expectTooltip(
-      add,
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
       /Viewers cannot perform this action — you need at least Contributor access/,
     )
     fireEvent.click(add)
@@ -638,8 +639,7 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     const { unmount } = renderAs({ ...hydrated(400, "contributor"), terminology: duplicates })
     const merge = screen.getByRole("button", { name: "Merge duplicates" })
     expect(merge).toBeDisabled()
-    await expectTooltip(
-      merge,
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
       /Contributors cannot perform this action — you need at least Project lead access/,
     )
     fireEvent.click(merge)
@@ -659,11 +659,10 @@ describe("GlossaryEditor role gating (AQU-208)", () => {
     }
   })
 
-  it("names the org's configured floor in the tooltip, not the default", async () => {
+  it("names the org's configured floor in the lock line, not the default", async () => {
     renderAs(hydrated(500, "project_lead", 600))
 
-    await expectTooltip(
-      screen.getByRole("button", { name: "Import" }),
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(
       /Project leads cannot perform this action — you need at least Maintainer access/,
     )
   })

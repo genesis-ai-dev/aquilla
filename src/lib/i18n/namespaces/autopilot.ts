@@ -549,7 +549,7 @@ export const autopilot = defineNamespace({
     "autopilot.graph.spanHelpAria": "What a span is",
     "autopilot.graph.liveSpans": "Now: {spans}",
     "autopilot.graph.noLiveSpan": "Autopilot is not working on a passage now.",
-    "autopilot.graph.inspectHint": "Point to a step to see the text. Click to see more.",
+    "autopilot.graph.inspectHint": "Click a step to see what it did.",
     "autopilot.graph.decision.ambiguities": plural({
       one: "Noted {count} part of the meaning not to over-specify in {span}",
       other: "Noted {count} parts of the meaning not to over-specify in {span}",

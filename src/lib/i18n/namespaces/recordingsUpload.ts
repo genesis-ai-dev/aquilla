@@ -248,8 +248,9 @@ const KEYS = {
     "recordingsUpload.assistant.undo": "Don't use this naming",
     "recordingsUpload.assistant.byRule": "by the assistant's rule",
     "recordingsUpload.assistant.bySavedRule": "by your team's saved rule",
-    "recordingsUpload.assistant.noFit": "The assistant's naming didn't fit these recordings. Choose their lines by hand.",
-    "recordingsUpload.assistant.failed": "The assistant couldn't work out the naming just now. Try again, or choose the lines by hand.",
+    "recordingsUpload.assistant.noFit": "The assistant's naming didn't fit these recordings, so they won't be uploaded.",
+    "recordingsUpload.assistant.noFitChoose": "The assistant's naming didn't fit these recordings. Choose their lines by hand.",
+    "recordingsUpload.assistant.failed": "The assistant couldn't work out the naming just now. Try again in a moment.",
     "recordingsUpload.assistant.limit": "Your team has used its AI allowance for now, so the assistant can't read this folder.",
 } satisfies Record<string, MessageValue>
 
@@ -263,7 +264,8 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.assistant.undo": { description: "Button: stop using the naming the assistant (or the team) worked out; those recordings go back to being chosen by hand.", maxLength: 32 },
   "recordingsUpload.assistant.byRule": { description: "Small grey text in a preview row: this recording's line came from the naming rule the AI assistant worked out.", maxLength: 32 },
   "recordingsUpload.assistant.bySavedRule": { description: "Small grey text in a preview row: this recording's line came from a naming rule the team saved from an earlier upload.", maxLength: 32 },
-  "recordingsUpload.assistant.noFit": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try. Full sentences." },
+  "recordingsUpload.assistant.noFit": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try, and no file's lines are loaded to choose from, so those recordings won't upload. Full sentences." },
+  "recordingsUpload.assistant.noFitChoose": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try, and the person can still choose each one's line by hand with the 'Choose a line' button beside it. Full sentences." },
   "recordingsUpload.assistant.failed": { description: "Shown when the assistant couldn't be reached or answered with something unusable. Full sentences." },
   "recordingsUpload.assistant.limit": { description: "Shown when the team's AI allowance is used up, so the assistant can't help. Full sentences." },
   "recordingsUpload.intent.title": { description: "Title of the third card in the Import dialog's 'What are you importing?' choice: audio recordings for lines already in the project. Short noun.", maxLength: 24 },

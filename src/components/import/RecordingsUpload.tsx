@@ -745,7 +745,7 @@ function ReviewBody({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border" data-testid="recordings-list">
-        <AssistantBox {...assistant} />
+        <AssistantBox {...assistant} canChoose={pickerLines.length > 0} />
         {unmatched.length > 0 && (
           <div className="border-b bg-muted/40 p-3" data-testid="recordings-unmatched">
             <p className="mb-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
@@ -880,7 +880,7 @@ function ReviewBody({
  * AQU-2302: the offer to let the assistant work out the naming, never taken on
  * its own (Sam, Oct 29: as little AI use as possible), and what it found.
  */
-function AssistantBox({ offer, state, note, onAsk, onUndo }: AssistantProps) {
+function AssistantBox({ offer, state, note, onAsk, onUndo, canChoose }: AssistantProps & { canChoose: boolean }) {
   const t = useT()
   const { locale } = useI18n()
   const [infoOpen, toggleInfo] = useInfoOpen()
@@ -904,7 +904,7 @@ function AssistantBox({ offer, state, note, onAsk, onUndo }: AssistantProps) {
   }
   if (offer === 0) return null
   const problemKey = state.kind === "problem"
-    ? ({ noFit: "recordingsUpload.assistant.noFit", limit: "recordingsUpload.assistant.limit", unavailable: "recordingsUpload.assistant.failed", unusable: "recordingsUpload.assistant.failed", failed: "recordingsUpload.assistant.failed" } as const)[state.problem]
+    ? ({ noFit: canChoose ? "recordingsUpload.assistant.noFitChoose" : "recordingsUpload.assistant.noFit", limit: "recordingsUpload.assistant.limit", unavailable: "recordingsUpload.assistant.failed", unusable: "recordingsUpload.assistant.failed", failed: "recordingsUpload.assistant.failed" } as const)[state.problem]
     : null
   return (
     <div className="space-y-1.5 border-b bg-muted/40 p-3 text-xs" data-testid="recordings-assistant">

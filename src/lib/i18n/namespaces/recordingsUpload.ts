@@ -30,6 +30,7 @@ const PLACEHOLDERS: Record<string, string> = {
   recordings: "A phrase with a count, such as '12 recordings'.",
   lines: "A phrase with a count, such as '12 lines'.",
   list: "A list of lines and how many takes each gets, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4'.",
+  explanation: "One sentence the AI assistant wrote about what each part of the file names means, in English, such as 'Mt is Matthew, then the chapter and the verse.'",
 }
 
 /** Where a key sits, by its prefix, for keys without a hand-written note. */
@@ -45,6 +46,7 @@ const SURFACE_NOTES: ReadonlyArray<readonly [string, string]> = [
   ["recordingsUpload.failures.", "The list of recordings that couldn't upload: its title, or why one failed. A full sentence."],
   ["recordingsUpload.join.", "The 'Join into one recording' action on a recording made of pieces."],
   ["recordingsUpload.takes.", "Names the lines that get more than one take from this upload, in the preview and in the summary after it."],
+  ["recordingsUpload.assistant.", "In the preview, when none of the namings the app knows fits some recordings: the offer to let the AI assistant work out the folder's naming from the file names, and what it found."],
 ]
 
 /** Placeholders a message uses, across its plural forms. */
@@ -228,11 +230,42 @@ const KEYS = {
     "recordingsUpload.join.tooltip": "Make one recording of these pieces, in order. The pieces stay in the take list.",
     "recordingsUpload.join.joining": "Joining…",
     "recordingsUpload.join.failed": "Couldn't join these pieces: {message}",
+    // AQU-2302: the assistant works out a folder's naming
+    "recordingsUpload.assistant.offer": plural({
+      one: "None of the namings the app knows fits {count} of these recordings.",
+      other: "None of the namings the app knows fits {count} of these recordings.",
+    }),
+    "recordingsUpload.assistant.ask": "Work out the naming with the assistant",
+    "recordingsUpload.assistant.infoLabel": "About working out the naming",
+    "recordingsUpload.assistant.info": "The assistant sees up to 30 of the file names and the project's book and file names, never the recordings. It answers with a naming rule, which is checked here before any recording is placed. Your team keeps the rule, so a folder named the same way is read next time without asking.",
+    "recordingsUpload.assistant.asking": "Asking the assistant…",
+    "recordingsUpload.assistant.read": "The assistant read the names like this: {explanation}",
+    "recordingsUpload.assistant.readSaved": "Read with your team's saved naming: {explanation}",
+    "recordingsUpload.assistant.placed": plural({
+      one: "{count} recording is placed by this naming.",
+      other: "{count} recordings are placed by this naming.",
+    }),
+    "recordingsUpload.assistant.undo": "Don't use this naming",
+    "recordingsUpload.assistant.byRule": "by the assistant's rule",
+    "recordingsUpload.assistant.bySavedRule": "by your team's saved rule",
+    "recordingsUpload.assistant.noFit": "The assistant's naming didn't fit these recordings. Choose their lines by hand.",
+    "recordingsUpload.assistant.failed": "The assistant couldn't work out the naming just now. Try again, or choose the lines by hand.",
+    "recordingsUpload.assistant.limit": "Your team has used its AI allowance for now, so the assistant can't read this folder.",
 } satisfies Record<string, MessageValue>
 
 type Key = keyof typeof KEYS
 
 const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
+  "recordingsUpload.assistant.ask": { description: "Button in the preview: let the AI assistant work out how this folder's recordings are named, so they can be placed on their lines.", maxLength: 48 },
+  "recordingsUpload.assistant.infoLabel": { description: "Accessible name of the (i) beside the offer to let the assistant work out the naming." },
+  "recordingsUpload.assistant.info": { description: "Text that opens under the (i): what the assistant sees (only file names and the project's book and file names), that its rule is checked before anything is placed, and that the team keeps it. Full sentences." },
+  "recordingsUpload.assistant.asking": { description: "Shown while the assistant works out the naming." },
+  "recordingsUpload.assistant.undo": { description: "Button: stop using the naming the assistant (or the team) worked out; those recordings go back to being chosen by hand.", maxLength: 32 },
+  "recordingsUpload.assistant.byRule": { description: "Small grey text in a preview row: this recording's line came from the naming rule the AI assistant worked out.", maxLength: 32 },
+  "recordingsUpload.assistant.bySavedRule": { description: "Small grey text in a preview row: this recording's line came from a naming rule the team saved from an earlier upload.", maxLength: 32 },
+  "recordingsUpload.assistant.noFit": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try. Full sentences." },
+  "recordingsUpload.assistant.failed": { description: "Shown when the assistant couldn't be reached or answered with something unusable. Full sentences." },
+  "recordingsUpload.assistant.limit": { description: "Shown when the team's AI allowance is used up, so the assistant can't help. Full sentences." },
   "recordingsUpload.intent.title": { description: "Title of the third card in the Import dialog's 'What are you importing?' choice: audio recordings for lines already in the project. Short noun.", maxLength: 24 },
   "recordingsUpload.menuItem": { description: "Item in a file's ⋯ menu in the sidebar that opens the upload of many recordings into that file.", maxLength: 32 },
   "recordingsUpload.preview.byName": { description: "Small grey text in a preview row: this recording's line was found from the book and verse in its name.", maxLength: 20 },

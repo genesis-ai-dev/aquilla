@@ -55,6 +55,9 @@ import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib
 import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-summary"
 import { readLengths } from "@/lib/audio/bulk-upload/read-length"
 import { mapWithConcurrency } from "@/lib/concurrency"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { applyNamingRule, projectOutline, sampleNames, shapesOf, type NamingRule, type RuleFailure } from "@/lib/audio/bulk-upload/naming-rule"
+import { askForNamingRule, loadSavedNamingRules, NamingRuleError, saveNamingRule, type NamingRuleProblem } from "@/lib/audio/bulk-upload/naming-rule-client"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
 
@@ -258,6 +261,19 @@ export function RecordingsReview({
     () => chosen.map(({ file: f, path }) => ({ name: f.name, path, size: f.size, type: f.type, lastModified: f.lastModified })),
     [chosen],
   )
+  // AQU-2302: a naming rule — the assistant's, or one the team saved — gives
+  // the names none of the app's own readings placed a name the matcher reads.
+  // Everything after that is the ordinary matching below.
+  const [rule, setRule] = useState<AppliedRule | null>(null)
+  const [assistant, setAssistant] = useState<AssistantState>({ kind: "idle" })
+  const [savedChecked, setSavedChecked] = useState(false)
+  const effectiveInputs = useMemo(() => {
+    if (!rule) return inputs
+    return inputs.map((f, i) => {
+      const made = rule.made.get(i)
+      return made ? { ...f, name: made, path: made } : f
+    })
+  }, [inputs, rule])
 
   // Read every name, learn the project's own book names where a name has a
   // book word nothing knows, then load the lines of every file named.
@@ -269,7 +285,7 @@ export function RecordingsReview({
       const infos = projectFileInfos(projectFiles, index)
       const scope: MatchScope = file ? { kind: "file", fileId: file.id } : { kind: "project" }
       const opts = { scope, index, projectFiles: infos, maxBytes: BULK_MAX_FILE_BYTES }
-      let read = readRecordings(inputs, opts)
+      let read = readRecordings(effectiveInputs, opts)
       try {
         const scoped = file ? infos.filter((f) => f.fileId === file.id) : infos.filter((f) => f.bookCode)
         const wantsNames = file != null || read.some((r) => r.reading.unknownBookWord || r.targetReason?.code === "noBook")
@@ -278,7 +294,7 @@ export function RecordingsReview({
             const jwt = await getToken(f.fileId)
             if (jwt) await learnHeaderNames(projectId, f, jwt, lane, index).catch(() => {})
           })
-          read = readRecordings(inputs, opts)
+          read = readRecordings(effectiveInputs, opts)
         }
         const files = chosen.map((c) => c.file)
         const targets = new Map<string, TargetFile>()
@@ -309,7 +325,7 @@ export function RecordingsReview({
       }
     })()
     return () => { live = false }
-  }, [inputs, chosen, file, projectFiles, projectId, getToken, lane, attempt])
+  }, [effectiveInputs, chosen, file, projectFiles, projectId, getToken, lane, attempt])
 
   const ready = phase.kind === "ready" ? phase : null
   const assignments = useMemo(
@@ -317,6 +333,79 @@ export function RecordingsReview({
     [ready, overrides, orderShift, orderStart],
   )
   const jobs = useMemo(() => (ready ? planJobs(assignments, ready.read) : []), [ready, assignments])
+
+  // The names a rule may rewrite: placed by none of the app's own readings,
+  // and not refused for what the file is (not audio, too big…).
+  const unplaced = useMemo(
+    () => (ready && !rule ? assignments.filter((a) => !a.cellIds && canChooseLine(a)).map((a) => a.index) : []),
+    [ready, rule, assignments],
+  )
+  // Judged only once the lines were read with the rule's names: the render
+  // between setting a rule and that read still holds the old reading.
+  const ruleRead = Boolean(ready && rule && [...rule.made].every(([i, name]) => ready.read[i]?.file.name === name))
+  const failures = useMemo<RuleFailure[]>(() => {
+    if (!ready || !rule || !ruleRead) return []
+    const byIndex = new Map(assignments.map((a) => [a.index, a]))
+    return [...rule.eligible].flatMap((i) => {
+      const a = byIndex.get(i)
+      if (a?.cellIds) return []
+      return [{ name: inputs[i].name, made: rule.made.get(i) ?? null, reason: a?.reason?.code ?? "noTemplate" }]
+    })
+  }, [ready, rule, ruleRead, assignments, inputs])
+
+  const applyRule = useCallback((next: NamingRule, from: AppliedRule["from"], eligible: readonly number[], tries: number) => {
+    const made = new Map<number, string>()
+    for (const i of eligible) {
+      const folder = inputs[i].path.split("/").slice(-2, -1)[0] ?? ""
+      const name = applyNamingRule(next, inputs[i].name, folder)
+      if (name) made.set(i, name)
+    }
+    setRule({ rule: next, from, eligible: new Set(eligible), made, shapes: shapesOf(eligible.map((i) => inputs[i].name)).slice(0, 5), tries })
+  }, [inputs])
+
+  const ask = useCallback(async (eligible: readonly number[], previous?: NamingRule, failed?: readonly RuleFailure[], tries = 1) => {
+    if (!session?.jwt) return
+    setAssistant({ kind: "asking" })
+    try {
+      const next = await askForNamingRule({
+        projectId,
+        identityToken: session.jwt,
+        names: sampleNames(eligible.map((i) => inputs[i].name)),
+        outline: projectOutline(projectFileInfos(projectFiles, new BookNameIndex())),
+        ...(previous && failed ? { previous, failures: failed } : {}),
+      })
+      setAssistant({ kind: "idle" })
+      applyRule(next, "assistant", eligible, tries)
+    } catch (e) {
+      setAssistant({ kind: "problem", problem: e instanceof NamingRuleError ? e.problem : "failed" })
+    }
+  }, [session?.jwt, projectId, inputs, projectFiles, applyRule])
+
+  // A team's saved rule for these names' shape is used with no call at all.
+  useEffect(() => {
+    if (!ready || rule || savedChecked || unplaced.length === 0 || !session?.jwt) return
+    let live = true
+    setSavedChecked(true)
+    void loadSavedNamingRules({ projectId, identityToken: session.jwt }).then((saved) => {
+      if (!live) return
+      const shape = shapesOf(unplaced.map((i) => inputs[i].name))[0]
+      const hit = shape ? saved.get(shape) : undefined
+      if (hit) applyRule(hit, "saved", unplaced, 0)
+    })
+    return () => { live = false }
+  }, [ready, rule, savedChecked, unplaced, session?.jwt, projectId, inputs, applyRule])
+
+  // The one retry: only the names the first answer failed on go back. A rule
+  // that still places nothing is set aside, and the files are chosen by hand.
+  useEffect(() => {
+    if (!ready || !rule || !ruleRead || rule.from !== "assistant" || assistant.kind === "asking" || failures.length === 0) return
+    if (rule.tries < 2) {
+      void ask([...rule.eligible], rule.rule, failures, rule.tries + 1)
+    } else if (failures.length === rule.eligible.size) {
+      setRule(null)
+      setAssistant({ kind: "problem", problem: "noFit" })
+    }
+  }, [ready, rule, ruleRead, assistant.kind, failures, ask])
 
   if (phase.kind !== "ready") {
     return (
@@ -345,6 +434,20 @@ export function RecordingsReview({
   return (
     <ReviewBody
       ready={ready!}
+      ruleSource={rule ? new Map([...rule.made.keys()].map((i) => [i, rule.from])) : NO_RULE}
+      assistant={{
+        offer: session?.jwt && !rule ? unplaced.length : 0,
+        state: assistant,
+        note: rule && assistant.kind !== "asking"
+          ? {
+              from: rule.from,
+              explanation: rule.rule.explanation ?? rule.rule.templates.map((t) => t.pattern).join(" · "),
+              placed: assignments.filter((a) => a.cellIds && rule.made.has(a.index)).length,
+            }
+          : null,
+        onAsk: () => void ask(unplaced),
+        onUndo: () => { setRule(null); setAssistant({ kind: "idle" }) },
+      }}
       fileOrder={projectFiles.map((f) => f.id)}
       assignments={assignments}
       jobs={jobs}
@@ -371,6 +474,11 @@ export function RecordingsReview({
         setStarting(true)
         setError(null)
         const labelOf = new Map(assignments.map((a) => [a.index, a.read ?? ""]))
+        // The assistant's rule is kept for the team once a person uploads
+        // with it, and only when it placed every name it was asked about.
+        if (rule?.from === "assistant" && failures.length === 0) {
+          void saveNamingRule({ projectId, identityToken: session.jwt, shapes: rule.shapes, rule: rule.rule })
+        }
         try {
           // Not awaited: the engine runs on after the dialog closes, and its
           // banner reports the result. It finishes its run whatever happens,
@@ -394,8 +502,40 @@ export function RecordingsReview({
   )
 }
 
+/** A naming rule in use, and which names it rewrote. */
+interface AppliedRule {
+  rule: NamingRule
+  from: "assistant" | "saved"
+  /** The names it was asked to read: those nothing else placed. */
+  eligible: ReadonlySet<number>
+  /** The name it made of each one it fitted, by input index. */
+  made: ReadonlyMap<number, string>
+  /** The names' shapes the team keeps it under. */
+  shapes: string[]
+  /** 1 for the first answer, 2 for the retry; 0 for a saved rule. */
+  tries: number
+}
+
+type AssistantState =
+  | { kind: "idle" }
+  | { kind: "asking" }
+  | { kind: "problem"; problem: NamingRuleProblem | "noFit" }
+
+interface AssistantProps {
+  /** How many recordings it could help with; 0 hides the offer. */
+  offer: number
+  state: AssistantState
+  note: { from: AppliedRule["from"]; explanation: string; placed: number } | null
+  onAsk: () => void
+  onUndo: () => void
+}
+
+const NO_RULE: ReadonlyMap<number, AppliedRule["from"]> = new Map()
+
 interface ReviewBodyProps {
   ready: Extract<Phase, { kind: "ready" }>
+  ruleSource: ReadonlyMap<number, AppliedRule["from"]>
+  assistant: AssistantProps
   /** The project's files in sidebar order, so the books list in that order. */
   fileOrder: readonly string[]
   assignments: Assignment[]
@@ -415,7 +555,7 @@ interface ReviewBodyProps {
 }
 
 function ReviewBody({
-  ready, fileOrder, assignments, jobs, chosen, file, languageLabel, editing, setEditing, starting, error, onOverride, onShift, onStartAt, onCancel, onConfirm,
+  ready, ruleSource, assistant, fileOrder, assignments, jobs, chosen, file, languageLabel, editing, setEditing, starting, error, onOverride, onShift, onStartAt, onCancel, onConfirm,
 }: ReviewBodyProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -605,6 +745,7 @@ function ReviewBody({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-md border" data-testid="recordings-list">
+        <AssistantBox {...assistant} />
         {unmatched.length > 0 && (
           <div className="border-b bg-muted/40 p-3" data-testid="recordings-unmatched">
             <p className="mb-2 text-xs font-semibold text-amber-700 dark:text-amber-400">
@@ -653,7 +794,14 @@ function ReviewBody({
                   const hit = lineById.get(`${a.fileId}\u0000${a.cellIds![0]}`)
                   const parts = partsOf.get(a.index)
                   const recorded = a.cellIds!.some((id) => lineById.get(`${a.fileId}\u0000${id}`)?.line.hasRecording)
-                  const notes: string[] = [a.chosen ? t("recordingsUpload.preview.chosen") : t(METHOD_KEY[a.method ?? "name"])]
+                  const byRule = a.chosen ? undefined : ruleSource.get(a.index)
+                  const notes: string[] = [
+                    a.chosen
+                      ? t("recordingsUpload.preview.chosen")
+                      : byRule
+                        ? t(byRule === "saved" ? "recordingsUpload.assistant.bySavedRule" : "recordingsUpload.assistant.byRule")
+                        : t(METHOD_KEY[a.method ?? "name"]),
+                  ]
                   if (a.fromFolder) notes.push(t("recordingsUpload.preview.fromFolder", { folder: a.fromFolder }))
                   if (a.byLength) notes.push(t(a.byLength.as === "chapter" ? "recordingsUpload.preview.chapterByLength" : "recordingsUpload.preview.verseByLength"))
                   if (a.cellIds!.length > 1) notes.push(t("recordingsUpload.preview.range", { count: fmt(a.cellIds!.length) }))
@@ -724,6 +872,51 @@ function ReviewBody({
           {t("recordingsUpload.preview.confirm", { count: fmt(uploadCount) })}
         </Button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * AQU-2302: the offer to let the assistant work out the naming, never taken on
+ * its own (Sam, Oct 29: as little AI use as possible), and what it found.
+ */
+function AssistantBox({ offer, state, note, onAsk, onUndo }: AssistantProps) {
+  const t = useT()
+  const { locale } = useI18n()
+  const [infoOpen, toggleInfo] = useInfoOpen()
+  if (note) {
+    return (
+      <div className="flex items-start gap-2 border-b bg-muted/40 p-3 text-xs" data-testid="recordings-assistant-note">
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="block text-foreground/90">
+            {t(note.from === "saved" ? "recordingsUpload.assistant.readSaved" : "recordingsUpload.assistant.read", { explanation: note.explanation })}
+          </span>
+          <span className="block text-muted-foreground">{t("recordingsUpload.assistant.placed", { count: formatNumber(note.placed, locale) })}</span>
+        </span>
+        <Button type="button" size="xs" variant="outline" onClick={onUndo} data-testid="recordings-assistant-undo">
+          {t("recordingsUpload.assistant.undo")}
+        </Button>
+      </div>
+    )
+  }
+  if (state.kind === "asking") {
+    return <p className="border-b bg-muted/40 p-3 text-xs font-medium" role="status" data-testid="recordings-assistant-asking">{t("recordingsUpload.assistant.asking")}</p>
+  }
+  if (offer === 0) return null
+  const problemKey = state.kind === "problem"
+    ? ({ noFit: "recordingsUpload.assistant.noFit", limit: "recordingsUpload.assistant.limit", unavailable: "recordingsUpload.assistant.failed", unusable: "recordingsUpload.assistant.failed", failed: "recordingsUpload.assistant.failed" } as const)[state.problem]
+    : null
+  return (
+    <div className="space-y-1.5 border-b bg-muted/40 p-3 text-xs" data-testid="recordings-assistant">
+      <p className="flex items-center gap-1 text-foreground/90">
+        {t("recordingsUpload.assistant.offer", { count: formatNumber(offer, locale) })}
+        <InfoToggle open={infoOpen} onToggle={toggleInfo} label={t("recordingsUpload.assistant.infoLabel")} controls="recordings-assistant-info" />
+      </p>
+      <InfoReveal open={infoOpen} id="recordings-assistant-info" className="text-muted-foreground">{t("recordingsUpload.assistant.info")}</InfoReveal>
+      {problemKey && <p className="text-amber-700 dark:text-amber-400" role="alert" data-testid="recordings-assistant-problem">{t(problemKey)}</p>}
+      <Button type="button" size="xs" variant="outline" onClick={onAsk} data-testid="recordings-assistant-ask">
+        {t("recordingsUpload.assistant.ask")}
+      </Button>
     </div>
   )
 }

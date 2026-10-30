@@ -26,6 +26,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── auth-worker/        # identity + agent-API Worker — see Backend below
 ├── sync-worker/        # realtime/sync Worker — see Backend below
 ├── agent-worker/       # sandboxed agent code-execution Worker — see Backend below
+├── monitor-worker/     # uptime cron → Discord alerts with @mentions (monitor-worker/README.md)
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
@@ -86,6 +87,7 @@ pnpm test:e2e
 cd sync-worker && npm test
 cd auth-worker && npm test
 cd agent-worker && npm test    # worker/ also has its own vitest suite
+cd monitor-worker && npm test
 
 # Run one test file / pattern
 pnpm test src/lib/parsers/usfm.test.ts
@@ -129,7 +131,10 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   project's whole history, and the nightly progress self-heal sweep (AQU-2145,
   `src/progress-selfheal-cron.ts`; `POST /admin/progress-selfheal?projectId=…` on demand)
   that re-projects files whose progress rows fell behind their own audio events — its
-  `repaired=N` log line is the alarm for a write-path regression — and the external
+  `repaired=N` log line is the alarm for a write-path regression — and files missing a
+  row for one of their project's lanes (`laneRows=N`, not an alarm: "Add language" and
+  unarchive write those rows themselves via `db/shared/lane-progress.ts`, but imports
+  and migrations that add a language leave them to the sweep) — and the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and

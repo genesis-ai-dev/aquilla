@@ -37,6 +37,7 @@ import { applyEBibleTargetImport } from "@/lib/import"
 import { CATALOGS } from "@/lib/i18n/messages/all"
 import { translate } from "@/lib/i18n/translate"
 import { formatCount } from "@/lib/i18n/format"
+import { filmFetch, framesAsHundredthsVtt, properlyTimedVtt } from "@/lib/parsers/frame-timecode.fixtures"
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -264,6 +265,49 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     // &nbsp; must be decoded before it can reach a target cell.
     expect(screen.getByText("Second cue translated")).toBeInTheDocument()
     expect(screen.queryByText(/&nbsp;/)).not.toBeInTheDocument()
+  })
+
+  // AQU-2197: a target subtitle file whose times are frame numbers written as
+  // hundredths gets the same warning, choice and conversion as every other
+  // VTT import, before its cues are matched to the file's lines.
+  it("AQU-2197: warns about times written as frame numbers in hundredths, and lets the person keep them", async () => {
+    renderPanel()
+    await selectFile(makeFile(framesAsHundredthsVtt(), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("frames-as-hundredths-keep"))
+    })
+    expect(screen.getByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByTestId("frames-as-hundredths-keep")).toHaveAttribute("aria-checked", "true")
+  })
+
+  // The destination's film is read up front; when its rate is still on the
+  // way as the file is read, the review settles on it once it lands.
+  it("AQU-2197: converts at the destination's linked film's rate, even when it lands after the file", async () => {
+    let land!: () => void
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+      land = () => resolve(filmFetch("23.976")())
+    })))
+    try {
+      renderPanel({ filmUrl: "https://cdn.example.test/videos/target-film/master.m3u8" })
+      await selectFile(makeFile(framesAsHundredthsVtt(), "episode.vtt"))
+      expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+      expect(screen.getByTestId("frames-as-hundredths-rate-source")).toHaveAttribute("data-from", "pending")
+      await act(async () => { land() })
+      await waitFor(() => expect(screen.getByTestId("frames-as-hundredths-rate-source"))
+        .toHaveTextContent("Converted at 23.976 frames a second, the film's rate."))
+      expect(screen.getByText(/review matches/i)).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("AQU-2197: says nothing about a properly timed target subtitle file", async () => {
+    renderPanel()
+    await selectFile(makeFile(properlyTimedVtt(), "episode.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
   })
 
   // WHY: while a slow enqueue is in flight the Import button must be disabled so

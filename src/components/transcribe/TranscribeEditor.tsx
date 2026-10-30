@@ -1,13 +1,14 @@
 // The Transcribe lens (docs/superpowers/specs/2026-10-23-transcript-cleanup-design.md §2–3).
 //
-// Every line of the file that has a clip, one row each. The sparkle on a row
-// transcribes it (when nothing ASR heard is saved yet) and cleans the
-// transcript up with AI, taught by the corrections already made in this file's
-// rows of the same language. "Transcribe and clean up all" works through the
-// rows that are neither validated nor corrected by hand, one at a time.
+// Every line of the file that has a clip, one row each. "Transcribe all" runs
+// speech recognition only, on every row with nothing transcribed yet, a few at
+// a time. The AI cleanup stays a person's call: the sparkle on a row, or
+// "Clean up selected" for the rows ticked (Shift-click ticks a range). It
+// transcribes a row first when nothing ASR heard is saved yet, and is taught by
+// the corrections already made in this file's rows of the same language.
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
-import { Sparkles, Square } from "lucide-react"
+import { AudioLines, Sparkles, Square, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -19,10 +20,33 @@ import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus
 import { firstActuallyVisibleIndex } from "@/lib/chapter-navigation"
 import { PENDING_CELL_SCROLL_MAX_ATTEMPTS } from "@/components/pending-cell-scroll"
 import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
+import { applyCorrections } from "@/lib/audio/transcript-corrections"
 import { isHumanCorrected, transcriptRowOf, type TranscriptRow } from "@/lib/transcript-cleanup/rows"
-import { transcribeAndCleanUp } from "@/lib/transcript-cleanup/run"
-import { saveTranscript } from "@/lib/transcript-cleanup/save"
+import { rowLanguage, transcribeAndCleanUp, transcribeRow, type SparkleOutcome } from "@/lib/transcript-cleanup/run"
+import { clearTranscript, saveTranscript } from "@/lib/transcript-cleanup/save"
 import { TranscribeRow, type RowStatus } from "./TranscribeRow"
+import { SpeechModelBanner } from "./SpeechModelStatus"
+import { routesToCtc, useSpeechModelWarmup } from "./useSpeechModelWarmup"
+
+/** Rows sent at once. Omnilingual CTC runs up to 4 containers; the per-user
+ *  limit (60 requests a window) is waited out, not failed. */
+const CONCURRENCY = 3
+
+/** Run `work` over `items`, `size` at a time, until done or `stopped()`. */
+async function runPool<T>(items: readonly T[], size: number, stopped: () => boolean, work: (item: T) => Promise<void>) {
+  let next = 0
+  const worker = async () => {
+    while (!stopped() && next < items.length) await work(items[next++])
+  }
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker))
+}
+
+class StoppedError extends Error {
+  constructor() {
+    super("Stopped")
+    this.name = "StoppedError"
+  }
+}
 
 interface Props {
   project: ProjectRecord
@@ -66,6 +90,14 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
   const [statusById, setStatusById] = useState<Record<string, RowStatus>>({})
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null)
   const stopRef = useRef(false)
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+  /** The last row ticked, where a Shift-click range starts. */
+  const anchorRef = useRef<string | null>(null)
+  const needsCtc = useMemo(
+    () => rows.some((row) => routesToCtc(session?.username, rowLanguage(project, row, targetLang))),
+    [rows, session?.username, project, targetLang],
+  )
+  const modelState = useSpeechModelWarmup(editable ? session : null, project.id, needsCtc)
   // AQU-2153: the scroll container and the sticky toolbar that overlays its
   // top edge — the toolbar's bottom IS the top of the visible content, so it
   // is what both the measure and the restore below line rows up against.
@@ -128,10 +160,15 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
     notifyAudioAttachmentsChanged(row.cell.fileId)
   }, [onCommitted])
 
-  const run = useCallback(async (row: TranscriptRow, forceAsr: boolean) => {
+  const finish = useCallback(async (row: TranscriptRow, outcome: SparkleOutcome) => {
+    setStatus(row.cell.id, outcome.kind === "cleaned" || outcome.kind === "transcribed" ? { kind: "idle" } : outcome)
+    await refresh(row)
+  }, [setStatus, refresh])
+
+  const cleanUp = useCallback(async (row: TranscriptRow, forceAsr: boolean) => {
     if (!session) return
     setStatus(row.cell.id, { kind: "working" })
-    const outcome = await transcribeAndCleanUp({
+    await finish(row, await transcribeAndCleanUp({
       row,
       rows,
       project,
@@ -140,29 +177,119 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
       concepts,
       learned: loadTranscriptCorrections(project.id),
       forceAsr,
-    })
-    setStatus(row.cell.id, outcome.kind === "cleaned" ? { kind: "idle" } : outcome)
-    await refresh(row)
-  }, [session, rows, project, targetLang, concepts, setStatus, refresh])
+    }))
+  }, [session, rows, project, targetLang, concepts, setStatus, finish])
 
   const runOne = useCallback((row: TranscriptRow, forceAsr: boolean) => {
     // Human work wins: replacing a hand-corrected transcript asks first.
     if (isHumanCorrected(row, loadTranscriptCorrections(project.id)) && !window.confirm(t("transcribe.confirmReplace"))) return
-    void run(row, forceAsr)
-  }, [project.id, run, t])
+    void cleanUp(row, forceAsr)
+  }, [project.id, cleanUp, t])
 
-  const runAll = useCallback(async () => {
-    const learned = loadTranscriptCorrections(project.id)
-    const todo = rows.filter((r) => !r.validated && !r.aiCleaned && !isHumanCorrected(r, learned))
+  /** Wait out the per-user limit; Stop ends the wait. */
+  const waitOutLimit = useCallback(async (seconds: number) => {
+    const until = Date.now() + seconds * 1000
+    while (Date.now() < until) {
+      if (stopRef.current) throw new StoppedError()
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
+  }, [])
+
+  const runBatch = useCallback(async (todo: readonly TranscriptRow[], work: (row: TranscriptRow) => Promise<void>) => {
     stopRef.current = false
     setBatch({ done: 0, total: todo.length })
-    for (let i = 0; i < todo.length; i++) {
-      if (stopRef.current) break
-      await run(todo[i], false)
-      setBatch({ done: i + 1, total: todo.length })
-    }
+    await runPool(todo, CONCURRENCY, () => stopRef.current, async (row) => {
+      await work(row)
+      setBatch((b) => b && { ...b, done: b.done + 1 })
+    })
     setBatch(null)
-  }, [project.id, rows, run])
+  }, [])
+
+  // ASR only, on rows with nothing transcribed yet.
+  const runAll = useCallback(async () => {
+    if (!session) return
+    const todo = rows.filter((r) => !r.validated && !r.heard && !r.transcript)
+    await runBatch(todo, async (row) => {
+      setStatus(row.cell.id, { kind: "working" })
+      await finish(row, await transcribeRow({
+        row, project, session, ...(targetLang ? { targetLang } : {}), onRateLimited: waitOutLimit,
+      }))
+    })
+  }, [session, rows, project, targetLang, runBatch, setStatus, finish, waitOutLimit])
+
+  const cleanUpSelected = useCallback(async () => {
+    const learned = loadTranscriptCorrections(project.id)
+    const todo = rows.filter((r) => selected.has(r.cell.id) && !r.validated)
+    const corrected = todo.filter((r) => isHumanCorrected(r, learned)).length
+    if (corrected > 0 && !window.confirm(t("transcribe.confirmReplaceSelected", { count: corrected }))) return
+    await runBatch(todo, (row) => cleanUp(row, false))
+    setSelected(new Set())
+  }, [project.id, rows, selected, runBatch, cleanUp, t])
+
+  const toggleSelect = useCallback((row: TranscriptRow, range: boolean) => {
+    const anchor = range ? rows.findIndex((r) => r.cell.id === anchorRef.current) : -1
+    const at = rows.indexOf(row)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (anchor >= 0) {
+        // A range takes the state the clicked row is about to get.
+        const on = !prev.has(row.cell.id)
+        for (const r of rows.slice(Math.min(anchor, at), Math.max(anchor, at) + 1)) {
+          if (on) next.add(r.cell.id)
+          else next.delete(r.cell.id)
+        }
+      } else if (next.has(row.cell.id)) next.delete(row.cell.id)
+      else next.add(row.cell.id)
+      return next
+    })
+    anchorRef.current = row.cell.id
+  }, [rows])
+
+  const revert = useCallback(async (row: TranscriptRow) => {
+    if (!row.heard) return
+    // What transcription stores: ASR's words with the learned fixes applied.
+    const text = applyCorrections(row.heard, loadTranscriptCorrections(project.id))
+    const attachment = row.cell.attachments?.[row.audioId]
+    const timings = row.cell.audioTimings?.[row.audioId] as WordTiming[] | undefined
+    if (!attachment || !timings || timings.length === 0) return
+    if (text === row.transcript && !row.aiCleaned) return
+    try {
+      await saveTranscript({
+        projectId: project.id,
+        owner: row.cell,
+        audioId: row.audioId,
+        attachment,
+        timings,
+        text,
+        ...(targetLang && !row.isSourceSegment ? { targetLang } : {}),
+        author: session?.username ?? "local",
+        learn: false,
+      })
+      setStatus(row.cell.id, { kind: "idle" })
+      await refresh(row)
+    } catch (err) {
+      setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
+    }
+  }, [project.id, targetLang, session, setStatus, refresh])
+
+  const clear = useCallback(async (row: TranscriptRow) => {
+    const attachment = row.cell.attachments?.[row.audioId]
+    if (!attachment || !window.confirm(t("transcribe.confirmClear"))) return
+    try {
+      await clearTranscript({
+        projectId: project.id,
+        owner: row.cell,
+        audioId: row.audioId,
+        attachment,
+        ...(targetLang && !row.isSourceSegment ? { targetLang } : {}),
+        author: session?.username ?? "local",
+      })
+      setStatus(row.cell.id, { kind: "idle" })
+      await refresh(row)
+    } catch (err) {
+      setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
+    }
+  }, [project.id, targetLang, session, setStatus, refresh, t])
 
   const save = useCallback(async (row: TranscriptRow, text: string) => {
     const attachment = row.cell.attachments?.[row.audioId]
@@ -182,8 +309,7 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
       setStatus(row.cell.id, { kind: "idle" })
       await refresh(row)
     } catch (err) {
-      console.warn("[transcribe] save failed:", err)
-      setStatus(row.cell.id, { kind: "failed" })
+      setStatus(row.cell.id, { kind: "failed", step: "save", detail: err instanceof Error ? err.message : String(err) })
     }
   }, [project.id, targetLang, session, setStatus, refresh])
 
@@ -198,6 +324,7 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
   return (
     <div ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="transcribe-editor">
       <div ref={toolbarRef} className="sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border bg-background px-4 py-2">
+        <SpeechModelBanner state={modelState} />
         {!session && <span className="text-xs text-muted-foreground">{t("transcribe.signIn")}</span>}
         {batch && (
           <>
@@ -210,9 +337,21 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
             </Button>
           </>
         )}
+        {canRun && !batch && selected.size > 0 && (
+          <>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(new Set())} data-testid="transcribe-select-none">
+              <X />
+              {t("transcribe.selectNone")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => void cleanUpSelected()} data-testid="transcribe-clean-selected">
+              <Sparkles />
+              {t("transcribe.cleanSelected", { count: selected.size })}
+            </Button>
+          </>
+        )}
         {canRun && !batch && (
           <Button type="button" variant="outline" size="sm" onClick={() => void runAll()} data-testid="transcribe-run-all">
-            <Sparkles />
+            <AudioLines />
             {t("transcribe.runAll")}
           </Button>
         )}
@@ -226,8 +365,12 @@ export const TranscribeEditor = forwardRef<TranscribeEditorHandle, Props>(functi
           editable={editable}
           canRun={canRun && !batch}
           status={statusById[row.cell.id] ?? { kind: "idle" }}
+          selected={selected.has(row.cell.id)}
+          onToggleSelect={(range) => toggleSelect(row, range)}
           onRun={(forceAsr) => runOne(row, forceAsr)}
           onSave={(text) => void save(row, text)}
+          onRevert={() => void revert(row)}
+          onClear={() => void clear(row)}
         />
       ))}
     </div>

@@ -180,6 +180,7 @@
     "neon:scrub:local": "tsx scripts/neon-target.ts local scrub-integrations",
     "neon:scrub:dev": "tsx scripts/neon-target.ts dev scrub-integrations",
     "neon:copy-dev-audio:dev": "tsx scripts/neon-target.ts dev copy-dev-audio",
+    "neon:copy-dev-audio-all:dev": "tsx scripts/neon-target.ts dev copy-dev-audio-all",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
     "neon:refresh-dev": "pnpm neon:refresh:dev",

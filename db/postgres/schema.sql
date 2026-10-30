@@ -796,7 +796,7 @@ CREATE TABLE cells (
     -- comments and validations all come back untouched on show.
     hidden_at         BIGINT,
     -- AQU-2185: the name a person gave a navigator division of their own with
-    -- "Start a section here" (migration 0188). NULL on every cell nobody has
+    -- "Start a section here" (migration 0192). NULL on every cell nobody has
     -- marked. Written by source.cell.milestone.set on the SHARED SOURCE ROW
     -- ONLY (side='source') — a division belongs to the file every lane shares,
     -- not to one translation, so one event covers every language and consumers

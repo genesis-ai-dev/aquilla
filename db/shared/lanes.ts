@@ -19,8 +19,10 @@
 //   * a later ask may retire a stored placeholder name, but never overwrites
 //     a human rename
 //
-// Settings writes do not call this. Lanes are created and edited only by lane
-// routes and by the create / seed / migrate callers below.
+// Settings writes do not call this, and nothing here reads the settings blob
+// (AQU-2223): a caller that seeds lanes passes the languages it knows. Lanes
+// are created and edited only by lane routes and by the create / seed /
+// migrate callers below.
 //
 // Lives in db/shared so auth-worker and sync-worker apply the SAME writes.
 //
@@ -35,7 +37,6 @@
 import {
   BLANK_LANE_PLACEHOLDER,
   SOURCE_LANE_PLACEHOLDER,
-  type ProjectLaneInputs,
 } from "../../src/lib/lanes/backfill-plan"
 import {
   canonicalLanguageCodeOverride,
@@ -53,6 +54,7 @@ import { laneNameProblem } from "../../src/lib/lanes/lane-name"
 import { isPrimaryRegistryLane } from "../../src/lib/lanes/registry-lanes"
 import { isLaneId, newLaneId } from "../../src/lib/lanes/lane-id"
 import { grantNewLaneStmt } from "./lane-grants"
+import { seedLaneProgressStmt } from "./lane-progress"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // A fresh row stores the typed language and NO name or code: both are derived
@@ -92,31 +94,18 @@ const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, language, name, 
      END,
      updated_at = now()`
 
-export type LaneSettingsBlob = {
-  sourceLanguage?: unknown
-  targetLanguage?: unknown
-  targetLanes?: unknown
-}
-
-function asStringArray(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []
-}
-
-function stringOrNull(v: unknown): string | null {
-  return typeof v === "string" ? v : null
-}
-
-export function settingsToLaneInputs(
-  settings: LaneSettingsBlob | Record<string, unknown> | null | undefined,
-  dataTargetTags: string[] = [],
-): ProjectLaneInputs {
-  const s = settings ?? {}
-  return {
-    sourceLanguage: stringOrNull(s.sourceLanguage),
-    targetLanguage: stringOrNull(s.targetLanguage),
-    registryTargetLanes: asStringArray(s.targetLanes),
-    dataTargetTags,
-  }
+/**
+ * The languages a seeding caller knows for a project with no lanes yet — an
+ * import's file languages, or an operator migration's. AQU-2223: passed in,
+ * never read off the settings blob.
+ */
+export interface SeedLaneLanguages {
+  /** The source language, as typed. */
+  source?: string | null
+  /** The default target language, as typed. Names the `''` bridge when the data asks for it. */
+  target?: string | null
+  /** Further target lanes, by tag. */
+  extraTargets?: readonly string[]
 }
 
 /**
@@ -137,22 +126,6 @@ export function dataTargetTagsFromEvents(
     tags.add(typeof lang === "string" ? lang : "")
   }
   return [...tags]
-}
-
-export function parseSettingsJson(raw: unknown): Record<string, unknown> {
-  if (raw == null) return {}
-  if (typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>
-  if (typeof raw === "string") {
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>
-      }
-    } catch {
-      /* corrupt row → empty */
-    }
-  }
-  return {}
 }
 
 /** `lanes.id` unique index (0132 / AQU-1606). Not the composite primary key. */
@@ -230,8 +203,8 @@ export type ExistingLaneShape = {
  *
  * `planLanesForProject` drops the registry entry for the primary language,
  * because the primary *is* the default lane (`legacy_tag ''`) rather than a lane
- * beside it. But it recognises the primary only by today's
- * `settings.targetLanguage`, so the moment someone changes the project target
+ * beside it. But it recognises the primary only by the default target
+ * language it was given, so the moment someone changes the project target
  * language the registry's entry for the outgoing language stops looking like the
  * primary — and a project set up English -> Spanish and then moved to Portuguese
  * grew a second, empty "Spanish" lane next to the default lane that already was
@@ -252,22 +225,20 @@ export type ExistingLaneShape = {
  * external Agent API's only way to declare one, and the create dialog's extra
  * languages — name a different language, so they are untouched by this.
  *
- * AQU-1810: matching on the display name alone was not enough. The planner
- * recognises the primary by today's `settings.targetLanguage`, so an entry it
- * plans from that key is the default lane *by construction* — `legacy_tag ''`
- * is the identity, not whatever the lane happens to be called now. Rename the
- * default lane and the two stopped agreeing: the name match missed, and any
- * settings save — a lane archive among them, since that is a settings save —
- * minted an empty lane labelled with the stored language beside the lane that
- * already was it. So a caller that knows the stored `targetLanguage` passes it
- * and the entry is matched against every way that one lane is named: the
- * stored language it was planned from, the language the row itself holds, and
- * its display label.
+ * AQU-1810: matching on the display name alone was not enough. An entry
+ * planned from the caller's default target language is the default lane *by
+ * construction* — `legacy_tag ''` is the identity, not whatever the lane
+ * happens to be called now. Rename the default lane and the two stopped
+ * agreeing: the name match missed, and an empty lane labelled with that
+ * language was minted beside the lane that already was it. So a caller that
+ * planned from a default target language passes it, and the entry is matched
+ * against every way that one lane is named: the language it was planned from,
+ * the language the row itself holds, and its display label.
  */
 export function isDefaultLaneUnderAnotherName(
   legacyTag: string | null,
   existingLanes: ReadonlyArray<ExistingLaneShape>,
-  storedTargetLanguage?: string | null,
+  plannedTargetLanguage?: string | null,
 ): boolean {
   // The source lane (null) and the default lane itself ('') are never dropped.
   if (!legacyTag) return false
@@ -278,7 +249,7 @@ export function isDefaultLaneUnderAnotherName(
   if (!defaultLane) return false
   const label = laneDisplayName({ role: "target", name: defaultLane.name, language: defaultLane.language })
   const names = [
-    storedTargetLanguage,
+    plannedTargetLanguage,
     defaultLane.language,
     label === BLANK_LANE_PLACEHOLDER ? null : label,
   ]
@@ -386,31 +357,30 @@ export function askedLanesFromSpecs(
 }
 
 /**
- * The lanes a settings blob and a set of data tags actually ask for.
+ * The lanes a seeding caller's languages and a set of data tags actually ask for.
  *
  * A source lane is always one of them. A `legacy_tag ''` target lane is
- * included only when the data names it (old events). `targetLanguage` names
+ * included only when the data names it (old events). `languages.target` names
  * that bridge when it is present, and otherwise becomes a target lane whose
- * tag is the language itself — never `''`. Registry and data tags are added
- * beside it. The primary language is not added a second time.
+ * tag is the language itself — never `''`. Extra targets and data tags are
+ * added beside it. The primary language is not added a second time.
  */
-export function lanesAskedFromSettings(
-  settings: LaneSettingsBlob | Record<string, unknown> | null | undefined,
-  dataTargetTags: string[] = [],
+export function lanesAskedFromLanguages(
+  languages: SeedLaneLanguages | null | undefined,
+  dataTargetTags: readonly string[] = [],
 ): AskedLane[] {
-  const input: ProjectLaneInputs = settingsToLaneInputs(settings, dataTargetTags)
-  const sourceLanguage = (input.sourceLanguage ?? "").trim()
-  const targetLanguage = (input.targetLanguage ?? "").trim()
+  const sourceLanguage = (languages?.source ?? "").trim()
+  const targetLanguage = (languages?.target ?? "").trim()
   const asked: AskedLane[] = [{ role: "source", language: sourceLanguage }]
   const tags = new Set<string>()
-  for (const tag of input.dataTargetTags) tags.add(tag)
+  for (const tag of dataTargetTags) tags.add(tag)
   const hasBridge = tags.has("")
   if (hasBridge) {
     asked.push({ role: "target", language: targetLanguage, legacyTag: "" })
   } else if (targetLanguage) {
     tags.add(targetLanguage)
   }
-  for (const raw of input.registryTargetLanes) {
+  for (const raw of languages?.extraTargets ?? []) {
     const tag = (raw ?? "").trim()
     if (!tag) continue
     if (hasBridge && isPrimaryRegistryLane(tag, targetLanguage)) continue
@@ -433,36 +403,36 @@ export function lanesAskedFromSettings(
  * on {@link LANE_ID_UNIQUE_INDEX} has to call this again inside
  * {@link retryingLaneIdCollision}.
  *
- * Pass `lanes` for an explicit ask (project create). Pass `settings` and
- * `dataTargetTags` for migrate and seeds. With neither, the only lane is a
- * source lane — a target lane is not invented.
+ * Pass `lanes` for an explicit ask (project create). Pass `languages` and
+ * `dataTargetTags` for imports, migrations and seeds. With neither, the only
+ * lane is a source lane — a target lane is not invented.
  */
 export function ensureProjectLaneStmts(
   db: AquillaDb,
   projectId: string,
   opts?: {
     lanes?: readonly AskedLane[]
-    settings?: LaneSettingsBlob | Record<string, unknown> | null
+    languages?: SeedLaneLanguages | null
     dataTargetTags?: string[]
     /**
-     * When the caller already has the lane rows, a registry tag that only
+     * When the caller already has the lane rows, an asked tag that only
      * renames the `legacy_tag ''` bridge is not a new lane
      * ({@link isDefaultLaneUnderAnotherName}).
      */
     existingLanes?: ReadonlyArray<ExistingLaneShape>
   },
 ): AquillaStatement[] {
-  const asked = opts?.lanes ?? lanesAskedFromSettings(opts?.settings, opts?.dataTargetTags ?? [])
+  const asked = opts?.lanes ?? lanesAskedFromLanguages(opts?.languages, opts?.dataTargetTags ?? [])
   const existing = opts?.existingLanes
-  // AQU-1810: the blob's own `targetLanguage` is what the planner turned into
-  // a target entry, so the guard needs it to see that the entry is the default
+  // AQU-1810: the default target language is what the planner turned into a
+  // target entry, so the guard needs it to see that the entry is the default
   // lane under a name that no longer matches.
-  const storedTargetLanguage = settingsToLaneInputs(opts?.settings).targetLanguage
+  const plannedTargetLanguage = opts?.languages?.target ?? null
   const planned = asked.map((lane, position) => ({ lane, position }))
   const kept = existing
     ? planned.filter(
         ({ lane }) =>
-          !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing, storedTargetLanguage),
+          !isDefaultLaneUnderAnotherName(lane.legacyTag ?? null, existing, plannedTargetLanguage),
       )
     : planned
   const stmts: AquillaStatement[] = []
@@ -502,32 +472,19 @@ export function ensureProjectLaneStmts(
   return stmts
 }
 
-/** Load settings if the caller did not pass them, then apply the lane stmts. */
+/** Apply the lane stmts for one ask, retrying a lane-id collision. */
 export async function ensureProjectLanes(
   db: AquillaDb,
   projectId: string,
   opts?: {
     lanes?: readonly AskedLane[]
-    settings?: LaneSettingsBlob | Record<string, unknown> | null
+    languages?: SeedLaneLanguages | null
     dataTargetTags?: string[]
     existingLanes?: ReadonlyArray<ExistingLaneShape>
   },
 ): Promise<void> {
-  let settings = opts?.settings
-  if (settings === undefined) {
-    const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-      .bind(projectId)
-      .first<{ settings: unknown }>()
-    settings = parseSettingsJson(row?.settings)
-  }
   await retryingLaneIdCollision(async () => {
-    const stmts = ensureProjectLaneStmts(db, projectId, {
-      lanes: opts?.lanes,
-      settings,
-      dataTargetTags: opts?.dataTargetTags,
-      existingLanes: opts?.existingLanes,
-    })
+    const stmts = ensureProjectLaneStmts(db, projectId, opts)
     if (stmts.length > 0) await db.batch(stmts)
   })
 }
@@ -764,17 +721,21 @@ export async function insertTargetLane(
   const existing = await listProjectLanes(db, projectId)
   const position = existing.reduce((max, row) => Math.max(max, row.position), -1) + 1
   const delivers = lane.delivers ?? "text"
-  await db
-    .prepare(
-      `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position,
-                          delivers, records_audio)
-       VALUES (?, ?, 'target', ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position,
-      delivers, deliversRecordsAudio(delivers),
-    )
-    .run()
+  // The new language owes every file from now on: its progress rows land with
+  // it, or each reader would count it short until every file was next edited.
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, name, lang_code, legacy_tag, position,
+                            delivers, records_audio)
+         VALUES (?, ?, 'target', ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        lane.id, projectId, lane.language, lane.name, lane.langCode, lane.legacyTag, position,
+        delivers, deliversRecordsAudio(delivers),
+      ),
+    seedLaneProgressStmt(db, projectId),
+  ])
 }
 
 /**
@@ -963,9 +924,8 @@ export type ArchiveLaneResult =
  * The one refusal left is `last_lane`: a project must keep at least one
  * non-archived target lane, so archiving the last active one is rejected
  * rather than leaving a project nobody can translate in. The row's
- * `archived_at` is the only input to that count — the legacy
- * `settings.archivedLanes` mirror is a list of TAGS and cannot name the
- * former default lane (its tag is ''), so it is not consulted here.
+ * `archived_at` is the only input to that count, and the only record of an
+ * archived lane (AQU-2223).
  */
 export async function setTargetLaneArchived(
   db: AquillaDb,
@@ -989,14 +949,17 @@ export async function setTargetLaneArchived(
     if (!stillActive) return { status: "last_lane" }
   }
   const archivedAt = archived ? new Date().toISOString() : null
-  await db
+  const update = db
     .prepare(
       `UPDATE lanes
           SET archived_at = ?, updated_at = now()
         WHERE project_id = ? AND id = ? AND role = 'target'`,
     )
     .bind(archivedAt, projectId, laneId)
-    .run()
+  // A language coming back is counted again, so it needs a row for every
+  // file, including any added while it was archived and never edited since.
+  if (archived) await update.run()
+  else await db.batch([update, seedLaneProgressStmt(db, projectId)])
   return { status: "ok", lane: { ...current, archivedAt } }
 }
 

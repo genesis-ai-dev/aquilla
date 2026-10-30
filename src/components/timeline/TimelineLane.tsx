@@ -260,6 +260,10 @@ export function TimelineLane({
           retimable={cardRetimable}
           span={spanOf(c)}
           bounds={boundsById.get(c.id)}
+          // AQU-2204: following its recordings, a file's SOURCE rows show no
+          // times; a stand-in line (no times, no recording) shows none either.
+          hideTime={layout?.mode === "audioFirst" && variant !== "target-subtitle"}
+          standIn={Boolean(layout?.programme?.byCellId.get(c.id)?.standIn)}
           snap={cardRetimable ? { enabled: Boolean(snapEnabled), candidates: candidatesFor(c) } : undefined}
           onSelect={onSelect}
           onRetime={onRetime}

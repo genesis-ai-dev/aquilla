@@ -64,13 +64,14 @@ export interface EditorActionsContextValue {
    * synthesizes). `scope` (Oct 23) says how far it reaches: this line, this
    * character's lines in the file, or the character in every episode — see
    * `CastScope`. Ref-wrapped in the workspace so the context value stays
-   * identity-stable while cast data changes underneath.
+   * identity-stable while cast data changes underneath. Returns false when
+   * the pick was refused (no permission), so the Audio view doesn't act on it.
    */
   onAssignCastVoice?: (
     cell: import("@/hooks/useCells").CellData,
     voiceId: string,
     opts?: { scope?: import("@/lib/audio/character-cast").CastScope },
-  ) => void
+  ) => boolean | void
   /**
    * Matt's QA (2026-08-21): the inverse — take the character OFF a line
    * without putting another in its place. Returns the row to the NC ring.
@@ -221,6 +222,9 @@ export interface EditorActionsContextValue {
    */
   timingLocked?: boolean
   canUnlockTiming?: boolean
+  /** AQU-2204: the open file follows its recordings, so no source times are
+   *  shown — a line's "Edit timestamps" is unavailable, with the reason. */
+  followsRecordings?: boolean
   /** Takes a maintainer to the setting that holds the lock. Deliberately not
    *  a toggle: the lock is project-wide, so they should see its scope before
    *  changing it (Sam, 2026-09-09). */

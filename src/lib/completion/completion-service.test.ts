@@ -8,7 +8,8 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
+import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
   clearUserProviderOverride,
@@ -1216,6 +1217,183 @@ describe("buildRulesBlock", () => {
     const rule = makeRule("builtin:r1", { type: "builtin", checkId: "no-repeated-word" as TranslationRule["check"] extends { type: "builtin"; checkId: infer C } ? C : never })
     // builtin produces no lines → returns ""
     expect(buildRulesBlock([rule])).toBe("")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2209: termbase injection is scoped to the cell and regex-free
+//
+// The bug these encode: a 722-concept termbase rendered 722 lines of raw match
+// regex into EVERY draft call (~30k tokens of system prompt for a 213-char
+// source), so prompt cost and term adherence tracked the size of the glossary
+// instead of the cell. Rules are compiled by the real compiler here, not
+// hand-built, so a change to either side has to keep them agreeing.
+// ---------------------------------------------------------------------------
+
+describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
+  const concept = (id: string, sourceTerm: string, renderings: { rendering: string; status: "preferred" | "admitted" | "forbidden" }[]) => ({
+    id,
+    sourceTerm,
+    renderings,
+    status: "active" as const,
+    createdAt: "2024-01-01T00:00:00Z",
+  })
+
+  const generalRule = (id: string, check: TranslationRule["check"]): TranslationRule => ({
+    id, name: id, description: "", severity: "minor", source: "user", scope: "project",
+    check, enabled: true, createdAt: new Date().toISOString(),
+  })
+
+  const moses = concept("c-moses", "Moses", [{ rendering: "Moisés", status: "preferred" as const }])
+  const jesus = concept("c-jesus", "Jesus", [{ rendering: "Jesús", status: "preferred" as const }])
+
+  it("injects only the concepts present in the source", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const block = buildRulesBlock(rules, { sourceText: "Moses went up the mountain." })
+    expect(block).toContain("Moses")
+    expect(block).toContain("Moisés")
+    expect(block).not.toContain("Jesus")
+    expect(block).not.toContain("Jesús")
+  })
+
+  it("renders a term as plain guidance, never as the match pattern", () => {
+    const rules = compileConceptsToRules([moses])
+    const block = buildRulesBlock(rules, { sourceText: "Moses spoke." })
+    expect(block).toContain('"Moses" → "Moisés"')
+    // The matcher's boundary wrappers are internals; they mean nothing to a model.
+    expect(block).not.toContain("\\p{L}")
+    expect(block).not.toContain("(?<!")
+    expect(block).not.toContain("(?!")
+  })
+
+  it("lists admitted renderings as acceptable alternates", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "aliento", status: "admitted" as const },
+      ]),
+    ])
+    const block = buildRulesBlock(rules, { sourceText: "the spirit moved" })
+    expect(block).toContain('"spirit" → "espíritu"')
+    expect(block).toContain('also acceptable: "aliento"')
+  })
+
+  it("renders forbidden renderings as a Do NOT use line on the same concept", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "fantasma", status: "forbidden" as const },
+      ]),
+    ])
+    const block = buildRulesBlock(rules, { sourceText: "the spirit moved" })
+    // One concept → one line.
+    expect(block.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
+    expect(block).toContain('"spirit" → "espíritu"')
+    expect(block).toContain('Do NOT use "fantasma"')
+  })
+
+  it("injects nothing when no concept occurs in the source", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    expect(buildRulesBlock(rules, { sourceText: "In the beginning." })).toBe("")
+  })
+
+  it("leaves a project's general rules alone while narrowing terminology", () => {
+    const general = generalRule("r1", { type: "target-forbids", targetPattern: "bienes" })
+    const block = buildRulesBlock([general, ...compileConceptsToRules([jesus])], {
+      sourceText: "Moses spoke.",
+    })
+    expect(block).toContain("bienes")
+    expect(block).not.toContain("Jesús")
+  })
+
+  it("injects no term without a source to narrow against", () => {
+    expect(buildRulesBlock(compileConceptsToRules([moses]))).toBe("")
+  })
+
+  it("keeps a 722-concept termbase down to the terms the cell actually bears", () => {
+    const termbase = [
+      ...Array.from({ length: 720 }, (_, i) =>
+        concept(`c-${i}`, `filler${i}`, [{ rendering: `relleno${i}`, status: "preferred" as const }]),
+      ),
+      moses,
+      jesus,
+    ]
+    const rules = compileConceptsToRules(termbase)
+    const source = "Moses wrote of the coming of Jesus to the people of Israel."
+    const block = buildRulesBlock(rules, { sourceText: source })
+    const lines = block.split("\n").filter((l) => l.startsWith("- "))
+    expect(lines).toHaveLength(2)
+    // The old behavior put ~115 KB into the system prompt for a short source.
+    expect(block.length).toBeLessThan(source.length * 4)
+  })
+
+  it("bounds the number of injected concepts and reports the overflow", () => {
+    const dense = Array.from({ length: DEFAULT_MAX_INJECTED_TERMS + 5 }, (_, i) =>
+      concept(`c-${i}`, `term${i}`, [{ rendering: `rend${i}`, status: "preferred" as const }]),
+    )
+    const rules = compileConceptsToRules(dense)
+    const sourceText = dense.map((c) => c.sourceTerm).join(" ")
+
+    const selection = selectInjectedTerms(rules, sourceText)
+    expect(selection.matched).toBe(DEFAULT_MAX_INJECTED_TERMS + 5)
+    expect(selection.injected).toHaveLength(DEFAULT_MAX_INJECTED_TERMS)
+    expect(selection.dropped).toBe(5)
+    // Compile order is precedence order: the cap drops from the tail.
+    expect(selection.injected[0].conceptId).toBe("c-0")
+
+    const lines = buildRulesBlock(rules, { sourceText }).split("\n").filter((l) => l.startsWith("- "))
+    expect(lines).toHaveLength(DEFAULT_MAX_INJECTED_TERMS)
+  })
+
+  it("merges a concept's approved and forbidden rules into one selection entry", () => {
+    const rules = compileConceptsToRules([
+      concept("c-spirit", "spirit", [
+        { rendering: "espíritu", status: "preferred" as const },
+        { rendering: "aliento", status: "admitted" as const },
+        { rendering: "fantasma", status: "forbidden" as const },
+      ]),
+    ])
+    expect(selectInjectedTerms(rules, "the spirit moved").injected).toEqual([
+      {
+        conceptId: "c-spirit",
+        sourceTerm: "spirit",
+        approvedRenderings: ["espíritu", "aliento"],
+        forbiddenRenderings: ["fantasma"],
+      },
+    ])
+  })
+
+  it("reports nothing for an empty source", () => {
+    const rules = compileConceptsToRules([moses])
+    expect(selectInjectedTerms(rules, "")).toEqual({ injected: [], matched: 0, dropped: 0 })
+  })
+
+  it("narrows the terms buildPrompt injects to the cell being drafted", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const [system] = buildPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Spanish",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      sourceText: "Moses went up the mountain.",
+      examples: [],
+      rules,
+    })
+    expect(system.content).toContain("Moisés")
+    expect(system.content).not.toContain("Jesús")
+  })
+
+  it("narrows a batch's terms to the union of its own cells", () => {
+    const rules = compileConceptsToRules([moses, jesus])
+    const [system] = buildBatchPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Spanish",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "Moses spoke." }, { source: "The crowd listened." }],
+      examples: [],
+      rules,
+    })
+    expect(system.content).toContain("Moisés")
+    expect(system.content).not.toContain("Jesús")
   })
 })
 

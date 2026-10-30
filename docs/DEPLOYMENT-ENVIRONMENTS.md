@@ -82,6 +82,22 @@ what the nightly cleanup protects — the same reference queries, shared in
 (`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
 refuses any destination but the dev bucket and any database but the dev branch.
 
+**Audio follows the rows, as its own step.** The restore copies every audio row
+and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
+dev` step that runs the copy across every project with media, most recently
+active first (AQU-2115, `pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
+in the job on purpose: the restore has already succeeded by then, so a copy
+failure turns only that step red and `dev.aquilla.app` still shows the data the
+restore wrote. The first backfill (~561k objects / 167 GB) is bigger than one
+run, so each run takes a wall-clock budget (`DEV_AUDIO_COPY_BUDGET_MINUTES`),
+stops at a project boundary, and resumes on the next run — there is no cursor,
+only the rule that an object already in dev is never copied twice. Every run
+writes its counts to the run page's summary. Two dispatch inputs bracket it:
+`preflight_only` copies nothing, and `media_copy_only` copies without restoring
+(use it to push the backfill along during the day, or to re-run after a
+failure). Without `R2_ACCOUNT_ID` and the AQU-2113 copy key the step prints a
+`::warning` and skips, leaving the restore green.
+
 All unnamed Wrangler profiles are local-only, including the SPA, identity, sync,
 agent sandbox, and resource proxy Workers. A bare
 `wrangler deploy` therefore cannot target a production Worker. Production named
@@ -189,6 +205,19 @@ since the character voice library (#1576), production since custom voice trainin
 library-voice conversion with `503 voice conversion not configured` and a training
 start with `503 voice training not configured`; cloned-voice conversions still go to
 Seed-VC and are unaffected.
+
+Omnilingual ASR has two backends. `OMNI_ASR_MODAL_URL` is the Modal app
+(`infra/modal/omni_asr.py`). `OMNI_ASR_PRIMARY_URL` is an optional self-hosted
+server (`infra/selfhost/`, for example a GPU box behind a Cloudflare Tunnel at
+`https://omni-asr.aquilla.app`). Both are plain `[vars]` in
+`auth-worker/wrangler.toml`, not secrets. When the primary is set, identity
+probes its `/healthz` with a 3 s timeout before each call and uses it when it
+answers; on a failed probe, a network error, a 60 s timeout or a 5xx it calls
+Modal instead. It never retries a 4xx. Each call is billed on the `gpu` name
+that the answering backend reports (`db/shared/omni-asr-cost.ts`). Both backends
+check the same `OMNI_SHARED_SECRET`: when you rotate it, also update
+`/etc/aquilla-omni.env` on the self-hosted box and restart `omni-asr@<user>`,
+or the box answers 401 and every call fails (a 401 does not fall back).
 
 `MONDAY_TOKEN_KEY` is development-only (AQU-1775): the Monday token encryption key is
 derived from it instead of `SECRET_KEY`, which production and development still share,

@@ -1279,8 +1279,9 @@ describe("TimelineEditor — audio-first mode", () => {
     const chip1 = screen.getByTestId("tl-target-v1")
     // v2's original waits for v1's TRANSLATION, not v1's original.
     expect(px(v2, "left")).toBeGreaterThanOrEqual(px(chip1, "left") + px(chip1, "width") - 0.5)
-    // …and each original keeps its own real length.
-    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 10, 5)
+    // …and each original is drawn as long as it sounds: v1's whole 6 s, v2's
+    // 10 s cut at its 4 s take (AQU-2204: only the recordings set a line's length).
+    expect(px(v1, "width") / px(v2, "width")).toBeCloseTo(6 / 4, 5)
   })
 
   it("a verse's two sides share a left edge", () => {
@@ -1291,12 +1292,23 @@ describe("TimelineEditor — audio-first mode", () => {
     }
   })
 
-  it("the detail readout shows DURATIONS only — file-clock ranges lie against the re-flowed track (2026-08-06)", () => {
+  it("following the recordings, the readout shows the recording's length and no source timing (AQU-2204)", () => {
     renderAt("audioFirst", { initialSelectedCellId: "v1" })
-    // v1: original 6s, translation 11s.
-    expect(screen.getByTestId("tl-detail-src-duration")).toHaveTextContent("Source: 6.0s")
+    // v1: original 6s, translation 11s. The original's 6s is a SOURCE timing,
+    // which a file following its recordings shows nowhere (Sam, Oct 26).
+    expect(screen.queryByTestId("tl-detail-src-duration")).toBeNull()
     expect(screen.getByTestId("tl-detail-tgt-duration")).toHaveTextContent("Target: 11.0s")
     expect(screen.queryByTestId("tl-detail-dub-range")).toBeNull()
+  })
+
+  it("following the recordings, the source rows' cards show no time range; following the source they do (AQU-2204)", () => {
+    const { container, unmount } = renderAt("audioFirst")
+    const sourceCard = container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!
+    expect(sourceCard.textContent).not.toMatch(/\d:\d\d/)
+    unmount()
+    const dub = renderAt("dubbing")
+    const dubCard = dub.container.querySelector('[data-variant="dialogue"] [data-testid="tl-card-v1"]')!
+    expect(dubCard.textContent).toMatch(/0:00\.0–0:06\.0/)
   })
 
   it("running long stops being a warning, and says how it compares instead", async () => {
@@ -1320,34 +1332,250 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-target-v1"), "left")).toBe(0)
   })
 
-  it("hides the snap toggle, and below the floor shows the mode as a plain label", () => {
-    // Pre-merge round: the mode is FILE-level and its control is back in the
-    // toolbar. Without `onChangeTimingMode` (below the maintainer floor) only
-    // the ACTIVE mode renders, as a span — same testid, so browser passes
-    // read the mode identically either way.
+  it("hides the snap toggle, and below project lead shows the timing as plain text with its (i) (AQU-2204)", async () => {
+    // Without `onChangeTimingMode` (below the project-lead floor) the choice
+    // renders as plain text — same testids, so browser passes read the mode
+    // identically either way — and the (i) says who can change it.
     renderAt("audioFirst")
     expect(screen.queryByTestId("tl-snap-toggle")).toBeNull()
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-locked", "role")
     const label = screen.getByTestId("tl-timing-mode-audioFirst")
     expect(label.tagName).toBe("SPAN")
-    expect(label).toHaveTextContent("Free timing")
-    expect(label).toHaveAttribute("title", expect.stringContaining("Only a maintainer can change this."))
-    // The inactive mode renders nothing at all below the floor.
+    expect(label).toHaveTextContent("Timing:Follows recordings")
+    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    // The other choice renders nothing at all below the floor.
     expect(screen.queryByTestId("tl-timing-mode-dubbing")).toBeNull()
+    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /Only a project lead or above can change/)
   })
 
-  it("above the floor the mode is a two-button control that changes THIS file", () => {
+  it("from project lead up, Timing is a dropdown of two choices that changes THIS file (AQU-2204)", async () => {
     const onChange = vi.fn()
     renderAt("audioFirst", { onChangeTimingMode: onChange })
-    const active = screen.getByTestId("tl-timing-mode-audioFirst")
+    const trigger = screen.getByTestId("tl-timing-mode-trigger")
+    expect(trigger).toHaveTextContent("Timing:Follows recordings")
+    fireEvent.click(trigger)
+    const active = await screen.findByTestId("tl-timing-mode-audioFirst")
     const other = screen.getByTestId("tl-timing-mode-dubbing")
-    expect(active).toHaveAttribute("aria-pressed", "true")
-    expect(other).toHaveAttribute("aria-pressed", "false")
-    // Clicking the active mode is a no-op; clicking the other requests it.
-    fireEvent.click(active)
-    expect(onChange).not.toHaveBeenCalled()
+    // Each choice carries its one line.
+    expect(active).toHaveTextContent(/Lines play back to back, each as long as its recording/)
+    expect(other).toHaveTextContent(/Lines keep their times from the source, and its pauses stay\./)
+    expect(active).toHaveAttribute("aria-checked", "true")
+    expect(other).toHaveAttribute("aria-checked", "false")
+    // Picking the other choice requests it, for THIS file.
     fireEvent.click(other)
     expect(onChange).toHaveBeenCalledWith("dubbing")
+  })
+
+  it("picking the choice the file already has changes nothing (AQU-2204)", async () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("the menu as drawn on board 22: a heading, each choice's file length and the muting line (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    // Beside the (i): how long the file is with the current choice.
+    expect(screen.getByTestId("tl-timing-length")).toHaveTextContent("16.0 s long")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    expect(await screen.findByTestId("tl-timing-menu-heading")).toHaveTextContent("What decides how long each line is")
+    expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
+    // Following the recordings each verse is as long as its take: 11 + 4.
+    expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
+    expect(screen.getByTestId("tl-timing-menu-mute-note")).toHaveTextContent(
+      "Muting a track only changes what you hear. It never moves anything.",
+    )
+  })
+
+  it("with nothing to follow, Follows source is greyed out with why (AQU-2204, board 24)", async () => {
+    const onChange = vi.fn()
+    renderAt("audioFirst", { onChangeTimingMode: onChange, timingSourceUnavailable: true })
+    expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "audioFirst")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    const source = await screen.findByTestId("tl-timing-mode-dubbing")
+    expect(source).toHaveAttribute("data-disabled")
+    expect(source).toHaveTextContent("This file has no times and no source recording to follow.")
+    expect(screen.queryByTestId("tl-timing-mode-dubbing-length")).toBeNull()
+    fireEvent.click(source)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("following the recordings, a pause someone left before a take is drawn lightly inside its line (AQU-2204)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placed = cell({
+      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+      attachments: {
+        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
+        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+      },
+    } as unknown as Partial<CellData>)
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="pz" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
+        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
+      />,
+    )
+    const gap = screen.getByTestId("tl-target-lead-p1")
+    expect(gap).toHaveAttribute("aria-label", "A pause someone left before this take")
+    // The take starts where the pause ends.
+    expect(px(screen.getByTestId("tl-target-p1"), "left")).toBeCloseTo(px(gap, "left") + px(gap, "width"), 0)
+  })
+
+  // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
+  // move a recorded take around in the timeline." Following the recordings a
+  // take is NOT locked to the front of its line — dragging it right leaves a
+  // pause before it, dragging it left shortens that pause back to none. What
+  // is stored is the pause, measured from the line's own start, never the
+  // programme second the chip was dropped on.
+  describe("following the recordings, a take still moves inside its line (AQU-2215)", () => {
+    const takeId = "audio-p1-1700000000-take.webm"
+    const placedCell = (offsetMs?: number) =>
+      cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: {
+            type: "audio", url: "frontier-audio://take", durationMs: 2_000,
+            ...(offsetMs != null ? { targetOffsetMs: offsetMs } : {}),
+          },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+
+    const renderOne = (offsetMs: number | undefined, onRetimeTarget: () => void) =>
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[placedCell(offsetMs)]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+
+    /** The chip's own px/s, so the drag does not depend on the default zoom. */
+    const chipPxPerSec = (chip: Element) => px(chip, "width") / 2
+
+    it("dragging the take right stores the pause it leaves before its line", () => {
+      const onRetimeTarget = vi.fn()
+      renderOne(undefined, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 + perSec })
+      fireEvent.pointerUp(window, { clientX: 400 + perSec })
+      // Dragged 1 s right on a line starting at file second 0 → a 1 s pause,
+      // so the anchor stored is 1. Before this, the handler was withheld
+      // entirely in this mode and the chip could not be dragged at all.
+      expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+      const [cellId, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      expect(cellId).toBe("p1")
+      expect(anchorSec).toBeCloseTo(1, 2)
+    })
+
+    it("dragging it back past the line's start shortens the pause to none, never below", () => {
+      const onRetimeTarget = vi.fn()
+      // Starts with a 1.5 s pause already.
+      renderOne(1_500, onRetimeTarget)
+      const chip = screen.getByTestId("tl-target-p1")
+      const perSec = chipPxPerSec(chip)
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 400 - perSec * 5 })
+      fireEvent.pointerUp(window, { clientX: 400 - perSec * 5 })
+      const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+      // The line's own start — a take never begins before the line it performs.
+      expect(anchorSec).toBeCloseTo(0, 2)
+    })
+
+    it("a take of unknown length stays locked — there is no pause it could hold", () => {
+      const onRetimeTarget = vi.fn()
+      const vague = cell({
+        id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
+        attachments: {
+          [takeId]: { type: "audio", url: "frontier-audio://take" },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as Partial<CellData>)
+      renderWithTooltips(
+        <TimelineEditor
+          fileId="pz" coreMediaUrl={null} editable cells={[vague]} timingMode="audioFirst"
+          onRetimeSubtitle={() => {}} onRetimeTarget={onRetimeTarget} onTrimTarget={() => {}}
+        />,
+      )
+      const chip = screen.getByTestId("tl-target-p1")
+      fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 500 })
+      fireEvent.pointerUp(window, { clientX: 500 })
+      // A placement the programme would not read back must not be stored: the
+      // chip would simply spring straight back to the front of its line.
+      expect(onRetimeTarget).not.toHaveBeenCalled()
+    })
+  })
+
+  it("picking a choice closes the menu (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn() })
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    await waitFor(() => expect(screen.queryByTestId("tl-timing-mode-audioFirst")).toBeNull())
+  })
+
+  it("following the recordings, a file with no times lays its lines out at stand-in lengths, dashed and with no times (AQU-2204)", () => {
+    const book = [
+      cell({ id: "b1", medium: "text", original: "In the days when the judges ruled, there was a famine in the land." }),
+      cell({ id: "b2", medium: "text", original: "Short." }),
+    ]
+    const { container } = renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="audioFirst" onRetimeSubtitle={() => {}} />,
+    )
+    const c1 = container.querySelector('[data-testid="tl-card-b1"]')!
+    const c2 = container.querySelector('[data-testid="tl-card-b2"]')!
+    for (const card of [c1, c2]) {
+      expect(card).toHaveAttribute("data-stand-in")
+      expect(card.textContent).not.toMatch(/\d:\d\d/)
+    }
+    // The longer verse takes longer to read, so it takes more room; the short
+    // one is held at the 1.5 s floor.
+    expect(px(c1, "width")).toBeGreaterThan(px(c2, "width") * 2)
+    // ONE (i) explains the dashed lines; nothing is parked in the Untimed strip.
+    expect(screen.getByTestId("tl-stand-in-info")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-untimed-b1")).toBeNull()
+  })
+
+  it("following the recordings, a recorded verse with no times draws its take in its slot (AQU-2204)", () => {
+    const take = "audio-b1-1700000000-take.webm"
+    const book = [
+      cell({
+        id: "b1", medium: "text", original: "In the days when the judges ruled.",
+        selectedAudioId: take,
+        attachments: { [take]: { type: "audio", url: "frontier-audio://take", durationMs: 4_000 } },
+      } as Partial<CellData>),
+      cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+    ]
+    const { container } = renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="audioFirst" onRetimeSubtitle={() => {}} />,
+    )
+    // The recorded verse is a real slot, not a stand-in, and its take is on the
+    // Target audio row; the unrecorded one is the stand-in.
+    expect(container.querySelector('[data-testid="tl-card-b1"]')).not.toHaveAttribute("data-stand-in")
+    expect(container.querySelector('[data-testid="tl-card-b2"]')).toHaveAttribute("data-stand-in")
+    expect(container.querySelectorAll('[data-testid="tl-target-lane"] [data-testid^="tl-target-"]').length).toBeGreaterThan(0)
+  })
+
+  it("following the source, a file with no times keeps its lines in the Untimed strip, as before (AQU-2204)", () => {
+    const book = [cell({ id: "b1", medium: "text", original: "In the beginning." })]
+    renderWithTooltips(
+      <TimelineEditor fileId="bk" coreMediaUrl={null} editable cells={book} timingMode="dubbing" onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-untimed-b1")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
+  })
+
+  it("a file timed to a film only follows its source: plain text and an (i), even for a lead (AQU-2204)", async () => {
+    renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
+    const control = screen.getByTestId("tl-timing-mode")
+    expect(control).toHaveAttribute("data-mode", "dubbing")
+    expect(control).toHaveAttribute("data-locked", "film")
+    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
+    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent("Timing:Follows source")
+    await expectTooltip(screen.getByTestId("tl-timing-mode-info"), /timed to the film, so it always follows its source/)
   })
 
   // Sam, 2026-10-15: the Bluetooth note is a small amber pill beside the
@@ -2991,7 +3219,7 @@ describe("TimelineEditor — withholding the timing-mode control", () => {
   it("is shown by default — an imported recording still chooses its mode", () => {
     render(editor({ onChangeTimingMode: vi.fn() }))
     expect(screen.getByTestId("tl-timing-mode")).toHaveAttribute("data-mode", "dubbing")
-    expect(screen.getByTestId("tl-timing-mode-audioFirst")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-timing-mode-trigger")).toHaveTextContent("Follows source")
   })
 })
 
@@ -5094,6 +5322,40 @@ describe("TimelineEditor — splitting takes (AQU-1767)", () => {
     expect(chip().className).not.toContain("ring-2")
     fireEvent.keyDown(window, { key: "s" })
     expect(onCutTargets).not.toHaveBeenCalled()
+  })
+
+  // AQU-2213: an audio Bible book has no times of its own, so it can only
+  // follow its recordings — and the blade was held back in that mode, which
+  // left a whole class of file unable to split a take at all. Splitting is
+  // offered on every file, whichever clock it follows.
+  it("offers the blade, and splits, on a file following its recordings (AQU-2213)", () => {
+    const BOOK_TAKE = "audio-b1-1700000000-take.webm"
+    const onCutTargets = vi.fn()
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="bk" coreMediaUrl={null} editable onRetimeSubtitle={() => {}} timingMode="audioFirst"
+        onCutTargets={onCutTargets}
+        cells={[
+          cell({
+            id: "b1", medium: "text", original: "In the days when the judges ruled.",
+            selectedAudioId: BOOK_TAKE,
+            attachments: { [BOOK_TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000 } },
+          }),
+          cell({ id: "b2", medium: "text", original: "There was a famine in the land." }),
+        ]}
+      />,
+    )
+    expect(screen.getByTestId("tl-blade-toggle")).not.toBeDisabled()
+    // The verse's take fills its slot from 0 s; the playhead lands 2 s in.
+    fireEvent.click(screen.getByTestId("tl-ruler"), { clientX: 2 * 38 })
+    fireEvent.click(screen.getByTestId("tl-target-b1"))
+    fireEvent.keyDown(window, { key: "s" })
+    expect(onCutTargets).toHaveBeenCalledTimes(1)
+    const [cuts] = onCutTargets.mock.calls[0]
+    expect(cuts).toHaveLength(1)
+    expect(cuts[0]).toMatchObject({ cellId: "b1", audioId: BOOK_TAKE })
+    expect(cuts[0].atMs).toBeGreaterThan(1900)
+    expect(cuts[0].atMs).toBeLessThan(2100)
   })
 })
 

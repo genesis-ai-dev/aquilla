@@ -40,13 +40,6 @@
 //
 // These keys are permission-scoped rather than dumb-stored:
 //
-//   AQU-1086 the project-language keys (`sourceLanguage`, `targetLanguage`,
-//            `targetLanes`, `archivedLanes`). A write whose only *changed*
-//            keys are language keys is gated by the org's configurable
-//            `languageEditMinRole` floor (default project_lead 500 when the
-//            org has not stored one — AQU-984) so project leads can correct a
-//            wrong or reset language without also receiving AI config,
-//            validation, or health. An explicit stored floor is kept.
 //   AQU-1246 `autopilotEnabled` (the project-wide opt-in to the experimental
 //            Autopilot surface). An autopilot-only write is admitted at
 //            project_lead 500 — whether your own project tries an experiment
@@ -92,7 +85,6 @@ import {
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
-  patchProjectSettingsShared,
   updateProjectSettingsShared,
   type ProjectSettingsResponse,
 } from "../../../db/shared/projects"
@@ -129,6 +121,7 @@ import {
 } from "../../../db/shared/retired-lane-settings"
 import { loadOrgValidationDefaults } from "../../../db/shared/validation-threshold"
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
+import { castNameFromCellMetadata, copyCastsOntoSplitPieces, splitPieceBelongsTo, type SplitCastSource } from "../../../src/lib/audio/split-cast"
 import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -150,22 +143,6 @@ const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
-
-/**
- * AQU-1086 / AQU-984: the project-language keys, gated by the org's
- * configurable `languageEditMinRole` (default project lead 500 when unset)
- * rather than the flat maintainer floor. The default target language and the
- * extra-lane registry are one scope on purpose: a lead who can change the
- * default target must be
- * able to add/archive a lane too, or the Project Info and Languages cards
- * disagree (AQU-898).
- */
-const LANGUAGE_KEYS = new Set([
-  "sourceLanguage",
-  "targetLanguage",
-  "targetLanes",
-  "archivedLanes",
-])
 
 /**
  * AQU-1246: the project-wide opt-in to the experimental Autopilot surface.
@@ -531,8 +508,6 @@ projectSettings.on(
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
       const noop = changed.length === 0
-      const languageOnly = changed.length > 0
-        && changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
       const countStructuralOnly = changed.length > 0
@@ -547,7 +522,7 @@ projectSettings.on(
         && role.level >= ROLE.PROJECT_LEAD
         && leadMaySaveTtsSettings(storedTts, nextTts, visible, lanes)
       if (
-        !noop && !languageOnly && !autopilotOnly
+        !noop && !autopilotOnly
         && !countStructuralOnly && !alignmentSeedsOnly && !voiceLeadWrite
       ) {
         return c.json(
@@ -570,11 +545,6 @@ projectSettings.on(
             { error: `role >= ${noopFloor} required to save project settings (org termbaseEditMinRole)` },
             403,
           )
-        }
-      } else if (languageOnly) {
-        const languageFloor = await getLanguageEditMinRoleForProject(c.env, projectId)
-        if (role.level < languageFloor) {
-          return c.json(languageWriteDenial(languageFloor, role), 403)
         }
       } else if (autopilotOnly) {
         // AQU-1246: this is the gate that decides whether the experimental
@@ -831,36 +801,6 @@ async function denyLanguageWrite(
   return null
 }
 
-/** Add or remove one tag in targetLanes / archivedLanes, bumping the version. */
-export async function mergeSettingsArray(
-  db: AquillaDb,
-  projectId: string,
-  userId: number,
-  key: "targetLanes" | "archivedLanes",
-  tag: string,
-  present: boolean,
-): Promise<"ok" | "conflict" | "error"> {
-  if (!tag) return "ok"
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const current = await loadProjectSettings(db, projectId)
-    const raw = current.settings[key]
-    const list = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : []
-    const has = list.includes(tag)
-    if (has === present) return "ok"
-    const next = present ? [...list, tag] : list.filter((item) => item !== tag)
-    const result = await patchProjectSettingsShared(db, {
-      projectId,
-      ops: [{ key, value: next }],
-      ifMatchVersion: current.version,
-      updatedBy: userId,
-    })
-    if (result.status === "ok") return "ok"
-    if (result.status === "conflict") continue
-    return "error"
-  }
-  return "conflict"
-}
-
 /**
  * AQU-1816: a lane-row write relays to the project DO the way the settings
  * PATCH and the archive route already do, so a workspace open in another tab
@@ -921,7 +861,6 @@ projectSettings.post(
     )
     const resolvedDefault = defaultLane
       ? laneLanguage(defaultLane, {
-          settings: current.settings,
           role: "target",
           legacyTag: "",
         })
@@ -1115,24 +1054,8 @@ projectSettings.post(
     // refusal left is the last active one — a project must keep at least one
     // non-archived target lane.
     if (result.status === "last_lane") return c.json({ error: "last_lane" }, 400)
-    const tag = result.lane.legacyTag ?? ""
-    // The legacy `settings.archivedLanes` mirror holds TAGS, and the former
-    // default lane's tag is '' — which that array cannot name (every reader
-    // filters the empty string out). Its `lanes.archived_at` row is the only
-    // record of its archived state, so skip the mirror rather than push a ''
-    // entry no reader would honour.
-    if (tag !== "") {
-      const synced = await mergeSettingsArray(
-        c.env.AQUILLA_PG,
-        projectId,
-        user.id,
-        "archivedLanes",
-        tag,
-        archived,
-      )
-      if (synced === "conflict") return c.json({ error: "version mismatch" }, 409)
-      if (synced === "error") return c.json({ error: "write failed" }, 500)
-    }
+    // AQU-2223: `lanes.archived_at` is the only record. The retired
+    // `settings.archivedLanes` mirror is no longer written.
     const fresh = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
     const notifyPromise = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, fresh.version)
     try {
@@ -1142,6 +1065,114 @@ projectSettings.post(
     }
     await pushMondayAfterLaneChange(c, projectId)
     return c.json({ lane: fresh.lanes?.find((row) => row.id === laneId) ?? result.lane })
+  },
+)
+
+const splitCastSchema = z.object({
+  fileId: z.string().min(1).max(200),
+  splits: z.array(z.object({
+    cellId: z.string().min(1).max(200),
+    sameKindAsFirst: z.array(z.string().min(1).max(200)).max(40),
+  })).min(1).max(400),
+})
+
+/**
+ * Every new piece must be a source row in this file that was split off the
+ * named row. One stranger refuses the whole request, so an extra id cannot
+ * ride along with a real split. An empty piece list has nothing to prove.
+ * The character name is read off the original row, never off the request, so
+ * the copy can follow a character's voice without the caller naming one.
+ */
+async function splitsReadyToCopy(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+): Promise<SplitCastSource[] | null> {
+  const parentOf = new Map<string, string>()
+  for (const split of splits) {
+    for (const pieceId of split.sameKindAsFirst) {
+      const parent = parentOf.get(pieceId)
+      if (parent !== undefined && parent !== split.cellId) return null
+      parentOf.set(pieceId, split.cellId)
+    }
+  }
+  const wanted = new Set<string>([...parentOf.keys(), ...splits.map((split) => split.cellId)])
+  const found = new Map<string, unknown>()
+  if (wanted.size > 0) {
+    const ids = [...wanted]
+    const marks = ids.map(() => "?").join(", ")
+    const rows = await db
+      .prepare(
+        `SELECT cell_id, metadata FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'source' AND cell_id IN (${marks})`,
+      )
+      .bind(projectId, fileId, ...ids)
+      .all<{ cell_id: string; metadata: unknown }>()
+    for (const row of rows.results ?? []) found.set(row.cell_id, row.metadata)
+  }
+  for (const [pieceId, parentId] of parentOf) {
+    if (!splitPieceBelongsTo(found.get(pieceId), parentId)) return null
+  }
+  return splits.map((split) => {
+    const castName = castNameFromCellMetadata(found.get(split.cellId))
+    return castName
+      ? { cellId: split.cellId, sameKindAsFirst: split.sameKindAsFirst, castName }
+      : { cellId: split.cellId, sameKindAsFirst: split.sameKindAsFirst }
+  })
+}
+
+// AQU-2101: a quote split is a source edit, which a project lead may do, and
+// it has to copy each lane's cast onto the new narration pieces. That copy
+// is not a voice-panel edit: it must land on lanes the lead cannot see, and
+// it must land even when "project leads can manage voices" is off. The only
+// mutation is filling absent cell ids with a voice the same map already holds,
+// and only onto pieces this file records as split from that row.
+projectSettings.post(
+  "/:projectId/split-casts",
+  authMiddleware,
+  zValidator("json", splitCastSchema),
+  async (c) => {
+    const user = c.get("user")
+    const projectId = c.req.param("projectId") as string
+    const role = await resolveProjectRole(c.env, user, projectId)
+    if (!role) return c.json({ error: "no access to project" }, 403)
+    if (role.level < ROLE.PROJECT_LEAD) {
+      return c.json({ error: "role >= project lead required" }, 403)
+    }
+    const { fileId, splits } = c.req.valid("json")
+    const ready = await splitsReadyToCopy(c.env.AQUILLA_PG, projectId, fileId, splits)
+    if (!ready) return c.json({ error: "not a split piece" }, 422)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const current = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+      const storedTts = plainRecord(current.settings.ttsSettings) ?? {}
+      const nextTts = copyCastsOntoSplitPieces(storedTts, ready)
+      if (!nextTts) return c.json({ changed: false })
+      const over = ttsSettingsCapProblem(nextTts)
+      if (over) return c.json({ error: over.message }, 422)
+      const result = await updateProjectSettingsShared(c.env.AQUILLA_PG, {
+        projectId,
+        settings: { ...current.settings, ttsSettings: nextTts },
+        ifMatchVersion: current.version,
+        updatedBy: user.id,
+        blobs: c.env.SNAPSHOTS ?? null,
+        r2KeyPrefix: c.env.R2_KEY_PREFIX,
+      })
+      if (result.status === "conflict") continue
+      if (result.status === "error") return c.json({ error: "write failed" }, 500)
+      const notifyPromise = notifySyncWorkerOfProjectSettingsChange(
+        c.env,
+        projectId,
+        result.settings.version,
+      )
+      try {
+        c.executionCtx.waitUntil(notifyPromise)
+      } catch {
+        void notifyPromise
+      }
+      return c.json({ changed: true })
+    }
+    return c.json({ error: "version mismatch" }, 409)
   },
 )
 

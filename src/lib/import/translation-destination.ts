@@ -19,6 +19,8 @@ import { fileBookCode, type GroupableFile } from "@/lib/sidebar/group-by-corpus"
 /** A project file the translation can go into. */
 export interface TranslationDestination extends GroupableFile {
   id: string
+  /** The file's linked film, if any (AQU-2197: the frame check reads its rate). */
+  coreMediaUrl?: string | null
 }
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])

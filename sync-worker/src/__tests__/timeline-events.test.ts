@@ -233,7 +233,8 @@ describe("file.timing.set projection (pre-merge round: file-level timing mode)",
   it("is maintainer-gated and non-chain-mutating", async () => {
     const { REQUIRED_ROLE } = await import("../events/role-policy")
     const { isChainMutatingKind } = await import("../events/event-projection")
-    expect(REQUIRED_ROLE["file.timing.set"]).toBe(600)
+    // AQU-2204: project lead (500) and above choose a file's timing.
+    expect(REQUIRED_ROLE["file.timing.set"]).toBe(500)
     expect(isChainMutatingKind("file.timing.set")).toBe(false)
   })
 

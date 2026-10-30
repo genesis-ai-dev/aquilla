@@ -242,9 +242,10 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // whole team at the wrong episode.
   'file.video.set': ROLE.PROJECT_LEAD,
   // The timing mode changes how the whole file lays out and plays for
-  // everyone — structural, so it keeps the clearance the setting had when it
-  // lived in Project Settings (the shared-settings maintainer floor).
-  'file.timing.set': ROLE.MAINTAINER,
+  // everyone. AQU-2204 (Sam, Oct 26): project lead and above choose it, per
+  // file ("Follows source" / "Follows recordings"); it was the shared-settings
+  // maintainer floor it had when it lived in Project Settings.
+  'file.timing.set': ROLE.PROJECT_LEAD,
   // Track structure IS file structure: renaming, reordering or regrouping a
   // track relayouts the timeline for every collaborator who opens the file —
   // the same rationale that put file.timing.set at this floor. Deliberately

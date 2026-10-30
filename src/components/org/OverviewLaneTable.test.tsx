@@ -290,3 +290,52 @@ describe("OverviewLaneTable validation columns (AQU-2178)", () => {
     )
   })
 })
+
+// ── AQU-2194: a project whose only language delivers Audio ───────────────────
+// The table now shows on one-language projects too, so an Audio language on its
+// own must not read "Translated 0%" for text it never delivers.
+describe("OverviewLaneTable text columns (AQU-2194)", () => {
+  it("leaves out Translated and Text Validated when no language delivers text", () => {
+    renderLanes([
+      metricLane("sw", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 4 }),
+    ])
+    expect(screen.queryByText("Translated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Text Validated")).not.toBeInTheDocument()
+    expect(screen.getByText("Audio Validated")).toBeInTheDocument()
+    expect(figure("audio", "sw")).toBe("40%")
+  })
+
+  it("keeps them while any language delivers text", () => {
+    renderLanes([
+      metricLane("sw", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 4 }),
+      metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
+    ])
+    expect(screen.getByText("Translated")).toBeInTheDocument()
+    expect(screen.getByText("Text Validated")).toBeInTheDocument()
+  })
+})
+
+// An Audio language's bar in the Languages table is drawn in the audio (plum)
+// colours, like its row everywhere else; a Text language's stays blue.
+describe("OverviewLaneTable progress bar colours", () => {
+  const tones = (row: HTMLElement): string[] =>
+    [...row.querySelectorAll<HTMLElement>("[data-progress-tone]")].map((el) => el.dataset.progressTone ?? "")
+
+  it("draws an Audio language's bar in the audio colours", () => {
+    // Beside a Text language, so the Translated column (where the bar sits) shows.
+    renderLanes([
+      metricLane("sw", { delivers: "audio", totalCells: 10, audioTotalCells: 10, audioCells: 5, validatedAudioCells: 2 }),
+      metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
+    ])
+    const row = screen.getByTestId("overview-lane-audio-validated-sw").closest("tr") as HTMLElement
+    expect(tones(row)).toEqual(["audioValidated", "audioRecorded"])
+  })
+
+  it("keeps a Text language's bar in the text colours", () => {
+    renderLanes([
+      metricLane("de", { delivers: "text", totalCells: 10, filledCells: 4, validatedCells: 2 }),
+    ])
+    const row = screen.getByTestId("overview-lane-text-validated-de").closest("tr") as HTMLElement
+    expect(tones(row)).toEqual(["textValidated", "textTranslated"])
+  })
+})

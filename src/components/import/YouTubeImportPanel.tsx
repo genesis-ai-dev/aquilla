@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -8,6 +8,7 @@ import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
+import { FramesAsHundredthsNotice, useFramesAsHundredths } from "./FramesAsHundredthsNotice"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
 import { prepareYouTubeCaptionImport,
@@ -38,6 +39,17 @@ export function YouTubeImportPanel({ ctx, onImported }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const commit = useRef<(() => Promise<EmitParsedFileResult>) | null>(null)
+  /** The caption preview `commit` was built from: a retry reuses it, a changed
+   *  frame-rate choice rebuilds it (AQU-2197). */
+  const commitFor = useRef<unknown>(null)
+  // AQU-2197: a caption export gets the same frames-as-hundredths check,
+  // notice and conversion as every other VTT import; the table and the import
+  // both use the chosen times.
+  const frames = useFramesAsHundredths(source === "captions" ? preview?.strings : undefined)
+  const shown = useMemo(
+    () => (preview && frames.finding && frames.cues !== preview.strings ? { ...preview, strings: [...frames.cues] } : preview),
+    [preview, frames.finding, frames.cues],
+  )
   const controller = useRef(new AbortController())
   useEffect(() => {
     const active = new AbortController()
@@ -49,6 +61,7 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     setPreview(null)
     setError(null)
     commit.current = null
+    commitFor.current = null
   }
   const read = async () => {
     if (busy || (source === "captions" && !file)) return
@@ -93,7 +106,9 @@ export function YouTubeImportPanel({ ctx, onImported }: {
         prepared = prepareYouTubePictureImport({ url, name })
       }
       active.signal.throwIfAborted()
-      commit.current = createYouTubeCaptionCommit(prepared, {
+      // Caption commits are built at publish time, from the times the person
+      // chose (AQU-2197); a picture-only link has no times to choose.
+      if (prepared.strings.length === 0) commit.current = createYouTubeCaptionCommit(prepared, {
         ...ctx, signal: ctx.signal
           ? AbortSignal.any([ctx.signal, active.signal]) : active.signal,
       })
@@ -107,8 +122,14 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     }
   }
   const publish = async () => {
-    if (!commit.current || busy) return
     const active = controller.current
+    if (source === "captions" && shown && shown.strings.length > 0 && commitFor.current !== shown) {
+      commit.current = createYouTubeCaptionCommit(shown, {
+        ...ctx, signal: ctx.signal ? AbortSignal.any([ctx.signal, active.signal]) : active.signal,
+      })
+      commitFor.current = shown
+    }
+    if (!commit.current || busy) return
     setBusy(true)
     setError(null)
     try {
@@ -192,16 +213,17 @@ export function YouTubeImportPanel({ ctx, onImported }: {
         {t(source === "captions" ? "importExport.youtube.preview" : "importExport.youtube.previewImport")}
       </Button>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {preview && <>
-        {preview.strings.length === 0 ? <p className="font-medium">{preview.name}</p>
+      {shown && <>
+        {frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
+        {shown.strings.length === 0 ? <p className="font-medium">{shown.name}</p>
           : <div className="max-h-72 overflow-auto rounded-md border">
           <table className="w-full text-sm">
-            <caption className="p-2 text-left font-medium">{preview.name}</caption>
+            <caption className="p-2 text-left font-medium">{shown.name}</caption>
             <thead><tr>
               <th className="p-2 text-left">{t("importExport.youtube.time")}</th>
               <th className="p-2 text-left">{t("importExport.youtube.text")}</th>
             </tr></thead>
-            <tbody>{preview.strings.map((cue, index) => <tr key={index}>
+            <tbody>{shown.strings.map((cue, index) => <tr key={index}>
               <td className="whitespace-nowrap p-2 tabular-nums">
                 {cue.start!.toFixed(3)}–{cue.end!.toFixed(3)}
               </td>

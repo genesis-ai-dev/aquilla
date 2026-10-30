@@ -101,6 +101,7 @@ import { handleCellGlossesReadRequest } from "./events/cell-glosses-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
+import { handleExternalStyleRulesReadRequest } from "./external/style-rules-read-routes"
 import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -123,6 +124,7 @@ import { redactLogPath } from "../../shared/log-path-redaction"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 import { runR2GcSweep, R2_GC_CRON } from "./r2-gc-cron"
+import { handleHealthRequest } from "./health-route"
 import { withStoreSecrets } from "../../db/shared/secrets-store-overlay"
 
 declare global {
@@ -405,6 +407,13 @@ const worker = {
     const background = trackBackgroundWork(ctx)
     const routeCtx = background.ctx
     try {
+    // Uptime probe for monitor-worker/. Runs after the shim so it exercises the
+    // real Postgres path, and ahead of every auth-gated route.
+    const healthResponse = await handleHealthRequest(request, {
+      db: env.AQUILLA_PG,
+      r2: env.SNAPSHOTS,
+    })
+    if (healthResponse) return healthResponse
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
     // AQU-346: eject a removed member's live WS sessions + denylist their
@@ -540,6 +549,9 @@ const worker = {
     // suffix routes second matches the ordering convention above.
     const externalMemoryReadResponse = await handleExternalMemoryReadRequest(request, env)
     if (externalMemoryReadResponse) return withCors(externalMemoryReadResponse, request)
+    // AQU-2195: style-rule reads (the Rules page's Style rules section).
+    const externalStyleRulesResponse = await handleExternalStyleRulesReadRequest(request, env)
+    if (externalStyleRulesResponse) return withCors(externalStyleRulesResponse, request)
     // AQU-858: agent-callable round-trip export (the mirror of the artifact
     // import tools). Its path (.../files/:fileId/export) is disjoint from the
     // external read routes above, so ordering is for readability only.

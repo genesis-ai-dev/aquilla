@@ -44,6 +44,7 @@ import {
   serializeScopeLanes,
 } from "../services/invite-scopes"
 import { resolveExplicitLaneChoice } from "../services/lane-choice"
+import { emailBoundInviteUnverified } from "../services/verified-email-invite"
 
 const invites = new Hono<AuthHonoEnv>()
 
@@ -445,6 +446,14 @@ invites.post("/:token/accept", authMiddleware, async (c) => {
       403,
     )
   }
+  // AQU-1579: the match above is only a string compare. Refuse before any
+  // row is claimed so an unverified account cannot spend the token.
+  const unverified = await emailBoundInviteUnverified(
+    c.env.AQUILLA_PG,
+    user.id,
+    first.email,
+  )
+  if (unverified) return c.json(unverified, 403)
 
   // Archived projects can't be joined via invite (mirrors legacy accept).
   const archivedRows = await c.env.AQUILLA_PG.prepare(

@@ -263,6 +263,27 @@ describe("EditorTable — source-edit affordance", () => {
     expect(editor).toBeInTheDocument()
     expect(editor.className).toContain("ProseMirror")
   })
+
+  it("asks before opening the source editor when two target languages share it", async () => {
+    renderTable(withRole(ROLE.PROJECT_LEAD, {
+      lanes: [
+        { id: "src", role: "source", language: "English", name: null, langCode: "en", legacyTag: null, position: 0, archivedAt: null },
+        { id: "es", role: "target", language: "Spanish", name: null, langCode: "es", legacyTag: "es", position: 1, archivedAt: null },
+        { id: "ar", role: "target", language: "Arabic", name: null, langCode: "ar", legacyTag: "ar", position: 2, archivedAt: null },
+        { id: "old", role: "target", language: "French", name: null, langCode: "fr", legacyTag: "fr", position: 3, archivedAt: "2026-01-01" },
+      ],
+    }))
+    fireEvent.click(await openCellMenu())
+    const warning = screen.getByTestId("source-edit-lane-warning")
+    expect(warning).toHaveTextContent(/all lanes/i)
+    expect(warning).toHaveTextContent(/approval/i)
+    expect(warning.textContent ?? "").not.toMatch(/\d/)
+    expect(warning.textContent ?? "").not.toMatch(/done again/i)
+    expect(screen.queryByRole("textbox", { name: "Edit source text" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("source-edit-lane-warning-confirm"))
+    expect(await screen.findByRole("textbox", { name: "Edit source text" })).toBeInTheDocument()
+    expect(screen.queryByTestId("source-edit-lane-warning")).not.toBeInTheDocument()
+  })
 })
 
 describe("EditorTable — media source edits are transcript corrections (AQU-646)", () => {

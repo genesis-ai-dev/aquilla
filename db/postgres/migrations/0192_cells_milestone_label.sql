@@ -1,4 +1,4 @@
--- Migration 0188: cells.milestone_label — AQU-2185 "Start a section here".
+-- Migration 0192: cells.milestone_label — AQU-2185 "Start a section here".
 --
 -- The name a person gave a navigator division of their own, or NULL on every
 -- cell nobody has marked. `source.cell.milestone.set` writes it (a label to
@@ -25,7 +25,7 @@
 -- Apply by hand against Neon (same convention as prior migrations here —
 -- NOT applied automatically):
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0188_cells_milestone_label.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0192_cells_milestone_label.sql
 -- Verify: `milestone_label` appears on `cells`; the partial index exists.
 
 ALTER TABLE cells ADD COLUMN IF NOT EXISTS milestone_label TEXT;

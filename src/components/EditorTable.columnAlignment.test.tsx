@@ -138,9 +138,11 @@ function renderTable({
   cellLabels = false,
   castName,
   projectOverride,
+  followsRecordings,
 }: {
   lineNumbers?: boolean
   timecode?: boolean
+  followsRecordings?: boolean
   cellLabels?: boolean
   castName?: string
   projectOverride?: ProjectRecord
@@ -151,7 +153,7 @@ function renderTable({
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
-      <EditorActionsProvider value={{}}>
+      <EditorActionsProvider value={followsRecordings ? { followsRecordings } : {}}>
         <EditorTable
           // ALWAYS the cast-bearing project, so `cellLabelsEnabled` below is
           // the ONLY variable (2026-08-28). This used to swing with the gate
@@ -256,6 +258,15 @@ describe("EditorTable — source/target first-line alignment", () => {
   // The foot line is NOT reserved when empty, and that asymmetry is deliberate:
   // nothing below the source text mirrors anything in the target column, so an
   // always-on strip would be wasted height on every scripture row in the app.
+  // AQU-2204 (Sam, Oct 26): a file that follows its recordings shows no source
+  // time anywhere — the English cue times are not the Arabic's.
+  it("draws no timecode while the file follows its recordings", async () => {
+    renderTable({ timecode: true, followsRecordings: true })
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-timing-line")).toBeNull()
+    expect(screen.queryByText("00:00:00.000 --> 00:00:03.970")).toBeNull()
+  })
+
   it("draws no foot line at all when the context is not a timecode", async () => {
     renderTable()
     await screen.findByText("hello")

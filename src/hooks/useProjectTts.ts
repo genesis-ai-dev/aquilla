@@ -16,6 +16,7 @@ import {
 } from "@/lib/audio/voices"
 import { laneScopedTtsSettings, stampNewVoiceLanes } from "@/lib/audio/voice-lanes"
 import { laneTtsSettings, setLaneCast, setLaneDefaultVoice } from "@/lib/audio/lane-cast"
+import { copyCastsOntoSplitPieces, type SplitCastSource } from "@/lib/audio/split-cast"
 import {
   castLinesOf,
   castPickPatch,
@@ -94,6 +95,13 @@ export interface ProjectTtsApi {
   assignCharacter: (castName: string, voiceId: string | null, lineIds: Iterable<string>) => void
   /** One pick in the voice picker, as far as its scope reaches (`castPickPatch`). */
   assignPick: (pick: CastPick) => void
+  /**
+   * AQU-2101: copy the original row's voice onto the new narration pieces, on
+   * every lane map this client holds and on the project-wide map. Local only.
+   * The server copy is a separate call, so a project lead's settings save —
+   * which may not touch hidden lanes — is not the thing that writes them.
+   */
+  applySplitCastCopies: (splits: readonly SplitCastSource[]) => void
 }
 
 /**
@@ -153,10 +161,18 @@ export function useProjectTts(
   // AQU-1943: which save is the latest. A refusal arrives after its save, so a
   // rollback must not undo a LATER save that already succeeded.
   const writeSeqRef = useRef(0)
+  // AQU-2212: the last write, until the render that shows it. Two saves in one
+  // tick (add a voice, then cast it on the line it was added from) must each
+  // build on the one before, not on the same stale render.
+  const pendingRef = useRef<ProjectTtsSettings | undefined>(undefined)
+  useEffect(() => {
+    if (pendingRef.current === localTts) pendingRef.current = undefined
+  }, [localTts])
   useEffect(() => {
     if (loadedForRef.current === projectId) return
     loadedForRef.current = projectId
     migratedForRef.current = null
+    pendingRef.current = undefined
     setLocalTts(projectId ? loadProjectTts(projectId) : undefined)
   }, [projectId])
 
@@ -176,8 +192,9 @@ export function useProjectTts(
   const writeSettings = useCallback(
     async (next: ProjectTtsSettings) => {
       if (!projectId) return
-      const previous = localTts ?? serverSettings
+      const previous = pendingRef.current ?? localTts ?? serverSettings
       const seq = ++writeSeqRef.current
+      pendingRef.current = next
       setLocalTts(next)
       // Source of truth: durable, client-owned, survives reload + pulls.
       saveProjectTts(projectId, next)
@@ -199,6 +216,7 @@ export function useProjectTts(
           .then((outcome) => {
             if (!outcome?.rejected) return
             if (writeSeqRef.current !== seq) return
+            pendingRef.current = previous
             setLocalTts(previous)
             if (previous) saveProjectTts(projectId, previous)
             else clearProjectTts(projectId)
@@ -220,7 +238,7 @@ export function useProjectTts(
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!projectId) return
-      const previous = localTts ?? serverSettings
+      const previous = pendingRef.current ?? localTts ?? serverSettings
       let patch: Partial<ProjectTtsSettings> = overrides
       // AQU-2037: the one place a voice is given its lane. Every mint site —
       // New voice / Clone / voice design, an import with speaker labels,
@@ -286,23 +304,37 @@ export function useProjectTts(
 
   const assignCells = useCallback(
     (cellIds: Iterable<string>, voiceId: string | null) => {
-      void saveTts(setLaneCast(localTts ?? serverSettings, lane, cellIds, voiceId))
+      void saveTts(setLaneCast(pendingRef.current ?? localTts ?? serverSettings, lane, cellIds, voiceId))
     },
     [localTts, serverSettings, lane, saveTts],
   )
 
   const assignCharacter = useCallback(
     (castName: string, voiceId: string | null, lineIds: Iterable<string>) => {
-      void saveTts(setLaneCharacterCast(localTts ?? serverSettings, lane, activeLaneId, castName, voiceId, lineIds))
+      void saveTts(setLaneCharacterCast(pendingRef.current ?? localTts ?? serverSettings, lane, activeLaneId, castName, voiceId, lineIds))
     },
     [localTts, serverSettings, lane, activeLaneId, saveTts],
   )
 
   const assignPick = useCallback(
     (pick: CastPick) => {
-      void saveTts(castPickPatch(localTts ?? serverSettings, lane, activeLaneId, pick))
+      void saveTts(castPickPatch(pendingRef.current ?? localTts ?? serverSettings, lane, activeLaneId, pick))
     },
     [localTts, serverSettings, lane, activeLaneId, saveTts],
+  )
+
+  const applySplitCastCopies = useCallback(
+    (splits: readonly SplitCastSource[]) => {
+      if (!projectId) return
+      const previous = (localTts ?? serverSettings) as Record<string, unknown> | undefined
+      const copied = copyCastsOntoSplitPieces(previous, splits)
+      if (!copied) return
+      const next = copied as ProjectTtsSettings
+      setLocalTts(next)
+      saveProjectTts(projectId, next)
+      void patchProject(projectId, (p) => ({ ...p, ttsSettings: next }))
+    },
+    [projectId, localTts, serverSettings],
   )
 
   const allVoices = useMemo(() => getVoiceLibrary(settings), [settings])
@@ -343,7 +375,10 @@ export function useProjectTts(
     return m
   }, [cells, laneSettings, defaultVoiceId])
 
-  return { settings, laneSettings, voices, allVoices, defaultVoiceId, castStats, saveTts, assignCells, assignCharacter, assignPick }
+  return {
+    settings, laneSettings, voices, allVoices, defaultVoiceId, castStats,
+    saveTts, assignCells, assignCharacter, assignPick, applySplitCastCopies,
+  }
 }
 
 /**

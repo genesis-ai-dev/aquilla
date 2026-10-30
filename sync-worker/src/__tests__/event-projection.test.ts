@@ -474,8 +474,9 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
       stmts,
     )
     // AQU-292: validator UPSERT + ai_drafted clear + cells.validated recompute
-    // + endorsement_count recompute + files counters recompute.
-    expect(stmts).toHaveLength(5)
+    // + reviewLanes clear (sidebar re-import) + endorsement_count recompute
+    // + files counters recompute.
+    expect(stmts).toHaveLength(6)
     expect(recorded[0].sql).toContain('INSERT INTO cell_validators')
     // 0012: columns are (project_id, file_id, cell_id, event_id, username, decided_ts) — no is_active
     expect(recorded[0].sql).toContain('event_id')
@@ -488,12 +489,25 @@ describe('buildEventProjectionStmts — cell.validate / cell.unvalidate', () => 
     expect(recorded[2].sql).toContain('SET validated')
     // Recompute references event_id (not edit_event_id) per 0012 schema
     expect(recorded[2].sql).toContain('event_id = cells.event_id')
+    // Sidebar re-import: once this lane's target carries a validated row, the
+    // lane drops out of the source cell's `aquillaImport.reviewLanes` outline.
+    // Scoped to the source side and keyed on the vote's lane (no targetLang in
+    // the payload → the '' legacy tag), so lane B's flag survives lane A's vote.
+    expect(recorded[3].sql).toContain("'{aquillaImport,reviewLanes}'")
+    expect(recorded[3].sql).toContain("source.side = 'source'")
+    expect(recorded[3].sql).toContain('t.validated = 1')
+    expect(recorded[3].args).toEqual([
+      'proj-1', '',
+      'proj-1', 'file-a', 'cell-1',
+      'proj-1', 'file-a', 'cell-1',
+      'proj-1', '',
+    ])
     // AD-14 pass 1: endorsement_count recompute against current chain head
-    expect(recorded[3].sql).toContain('SET endorsement_count')
-    expect(recorded[3].sql).toContain('cells.event_id')
+    expect(recorded[4].sql).toContain('SET endorsement_count')
+    expect(recorded[4].sql).toContain('cells.event_id')
     // approved_count moves on validate, so files counters are recomputed.
-    expect(recorded[4].sql).toContain('UPDATE files SET cell_count')
-    expect(recorded[4].sql).toContain('approved_count')
+    expect(recorded[5].sql).toContain('UPDATE files SET cell_count')
+    expect(recorded[5].sql).toContain('approved_count')
   })
 
   it('cell.unvalidate emits DELETE (not UPSERT) + cells.validated recompute + endorsement_count recompute', () => {

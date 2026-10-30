@@ -129,7 +129,7 @@ interface CellRowRaw {
   hidden_at?: number | null
   /** AQU-2185: the hand-set navigator-section name, NULL when unmarked. Source
    *  row only — see the column comment in db/postgres/schema.sql. Absent on a
-   *  pre-0188 database or a hand-built fixture. */
+   *  pre-0192 database or a hand-built fixture. */
   milestone_label?: string | null
 }
 

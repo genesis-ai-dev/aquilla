@@ -1819,6 +1819,57 @@ export function buildEventProjectionStmts(
           ),
       )
 
+      if (event.kind === 'cell.validate') {
+        // A sidebar re-import flags the lane until it is validated again.
+        // The vote above has to have reached the project's count first;
+        // a partial endorsement leaves the outline in place.
+        const laneTag = lane
+        stmts.push(
+          db.prepare(
+            `UPDATE cells AS source
+                SET metadata = CASE
+                  WHEN next_lanes.lanes = '[]'::jsonb
+                    THEN source.metadata #- '{aquillaImport,reviewLanes}'
+                  ELSE jsonb_set(source.metadata, '{aquillaImport,reviewLanes}', next_lanes.lanes, true)
+                END
+               FROM (
+                 SELECT COALESCE((
+                   SELECT jsonb_agg(to_jsonb(flagged))
+                     FROM jsonb_array_elements_text(
+                       COALESCE(src.metadata #> '{aquillaImport,reviewLanes}', '[]'::jsonb)
+                     ) AS flagged
+                    WHERE flagged IS DISTINCT FROM (
+                      SELECT id FROM lanes
+                       WHERE project_id = ? AND role = 'target' AND legacy_tag = ?
+                       LIMIT 1
+                    )
+                 ), '[]'::jsonb) AS lanes
+                   FROM cells src
+                  WHERE src.project_id = ? AND src.file_id = ? AND src.cell_id = ?
+                    AND src.side = 'source'
+               ) AS next_lanes
+              WHERE source.project_id = ? AND source.file_id = ? AND source.cell_id = ?
+                AND source.side = 'source'
+                AND source.metadata #> '{aquillaImport,reviewLanes}' IS NOT NULL
+                AND EXISTS (
+                  SELECT 1 FROM cells t
+                   WHERE t.project_id = source.project_id AND t.file_id = source.file_id
+                     AND t.cell_id = source.cell_id AND t.side = 'target' AND t.validated = 1
+                     AND t.lane_id = (
+                       SELECT id FROM lanes
+                        WHERE project_id = ? AND role = 'target' AND legacy_tag = ?
+                        LIMIT 1
+                     )
+                )`,
+          ).bind(
+            event.projectId, laneTag,
+            event.projectId, event.fileId, event.cellId,
+            event.projectId, event.fileId, event.cellId,
+            event.projectId, laneTag,
+          ),
+        )
+      }
+
       // AD-14 pass 1: endorsement_count = number of validators on the CURRENT
       // chain head. Idempotent under replay (derives from the validators
       // table, not an increment). Resets to 0 on cell.commit because that

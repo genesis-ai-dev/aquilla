@@ -22,6 +22,7 @@
 // SQL is not emitted here — all FTS5 execution is delegated to scoped-search.ts,
 // which is the single structural choke-point for project-scoped FTS queries.
 
+import { grantedLaneIds, visibleLanesForRead } from "./lane-read-wall"
 import { verifyTokenForProject } from "../auth"
 import {
   makeVerifiedProjectId,
@@ -42,6 +43,7 @@ export { sanitizeFtsQuery }
 export interface SearchReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 // /search must be anchored with $ so it does NOT match /search/passages.
@@ -160,6 +162,12 @@ export async function handleSearchReadRequest(
   // Build the structural permission gate: VerifiedProjectId can only come
   // from verified JWT claims, and queryScopedSearch only accepts that type.
   const verifiedProjectId = makeVerifiedProjectId(auth.claims)
+  // Lane read wall: a lane-limited member must not read other lanes by searching.
+  const laneIds = await grantedLaneIds(
+    env.AQUILLA_PG,
+    projectId,
+    visibleLanesForRead(env.LANE_READ_WALL, auth.claims),
+  )
 
   const q = url.searchParams.get("q")
   if (q === null || q.trim() === "") {
@@ -182,10 +190,12 @@ export async function handleSearchReadRequest(
           matchCase,
           wholeWord,
           useRegexp,
+          laneIds,
         })
       : await queryScopedSearch(env.AQUILLA_PG, verifiedProjectId, q, {
           side: sideFilter,
           limit,
+          laneIds,
         })
     return Response.json({ results })
   } catch (err) {
@@ -228,6 +238,12 @@ export async function handleSearchPassagesRequest(
 
   // Same structural permission gate as the ranked-search route.
   const verifiedProjectId = makeVerifiedProjectId(auth.claims)
+  // Lane read wall: a lane-limited member must not read other lanes by searching.
+  const laneIds = await grantedLaneIds(
+    env.AQUILLA_PG,
+    projectId,
+    visibleLanesForRead(env.LANE_READ_WALL, auth.claims),
+  )
 
   const q = url.searchParams.get("q")
   if (q === null || q.trim() === "") {
@@ -245,6 +261,7 @@ export async function handleSearchPassagesRequest(
     const results = await queryScopedExact(env.AQUILLA_PG, verifiedProjectId, q, {
       side: sideFilter,
       limit,
+      laneIds,
     })
     return Response.json({ results })
   } catch (err) {

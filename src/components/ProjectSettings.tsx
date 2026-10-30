@@ -787,7 +787,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // shows while the project follows the organization, and where "Set for this
   // project" starts from.
   const effectiveTimingLocked = resolveTimingLocked({ timingLocked: timingLocked ?? orgMediaDefaults.timingLocked })
-  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? false
+  // AQU-2214: the built-in default is ON — the project's own choice first, then
+  // the organization's, then on.
+  const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? true
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
@@ -1736,7 +1738,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "experimental",
       label: "Experimental",
-      description: "Early features, this device only",
+      description: "Autopilot, extensions, and other early features",
       icon: FlaskConical,
       hub: "Integrations",
       sectionIds: ["section-experimental"],
@@ -1883,12 +1885,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Frontier" : "Custom",
+    ai: provider === "frontier" ? "Aquilla" : "Custom",
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com, Airtable",
-    experimental: "This device",
   }
 
   const headerActions = (
@@ -2684,11 +2685,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>
@@ -2796,7 +2795,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       userKey={completionUserKey}
                       onProjectKeyChange={setApiKey}
                       onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Aquilla."
                     />
                   </SettingsRow>
                   {models.length > 0 && (
@@ -3137,8 +3136,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               {/* AQU-646 stage 2. LAST in the card, because it is the wider
                   claim of the two: the lock above constrains what may move on
                   a timeline, this one decides whether the timeline's own rows
-                  may be added to, grouped and recoloured at all. Off by
-                  default, and enforced on the server as well — the UI
+                  may be added to, grouped and recoloured at all. ON by default
+                  since AQU-2214, and enforced on the server as well — the UI
                   withholding a button is not a permission. */}
               <div className="flex flex-wrap items-start gap-2">
                 <Checkbox
@@ -3158,7 +3157,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   id="allow-track-editing-source"
                   settingLabel={t("projectSettings.timeline.trackEditingLabel")}
                   inherited={allowTrackEditing == null}
-                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? false)}
+                  orgOptionLabel={orgBooleanOptionLabel(t, orgMediaDefaults.allowTrackEditing ?? true)}
                   disabled={!canEditShared}
                   onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
                 />

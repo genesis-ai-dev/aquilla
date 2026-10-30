@@ -176,7 +176,6 @@ describe("planProjectFold + the versioned write", () => {
       ops: [{ key: "ttsSettings", value: plan!.nextTts }],
       ifMatchVersion: plan!.version,
       updatedBy: "0",
-      registerLanes: false,
     })
     expect(written.status).toBe("ok")
     const after = await loadProjectSettings(db, "dubbing")

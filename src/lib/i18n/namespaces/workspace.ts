@@ -446,28 +446,19 @@ export const workspace = defineNamespace({
     "workspace.orgStep.emailsPlaceholder": "alex@example.com, sam@example.com",
 
     // -- timeline/LinkVideoTimingDialog --
-    "workspace.linkVideoTiming.title": "This file uses Free timing — the video won't be shown",
+    "workspace.linkVideoTiming.title": "Linking a film makes this file follow its source",
     "workspace.linkVideoTiming.description":
-      "A linked video plays on the original recording's timing. This file is set to Free timing, " +
-      "where the timeline re-flows to the translations' own lengths, so the video will stay " +
-      "hidden until the file switches back to Original's timing — a maintainer can change that " +
-      "any time with the timing control in the Media timeline, and switching is lossless.",
-    "workspace.linkVideoTiming.linkAnyway": "Link anyway",
+      "This file follows its recordings. A file timed to a film always follows its source, so " +
+      "once the film is linked its lines keep the film's times and the film plays. No recordings " +
+      "or times change, and clearing the film lets the file follow its recordings again.",
+    "workspace.linkVideoTiming.linkAnyway": "Link the film",
 
     // -- timeline/TimingModeChangedDialog --
-    "workspace.timingModeChanged.title": "Timing mode changed",
+    "workspace.timingModeChanged.title": "Timing changed",
     "workspace.timingModeChanged.description":
-      "Someone with settings access switched this file from {from} to {to}. The Media timeline " +
-      "now lays out on the new mode — recordings and timing data are untouched.",
+      "A project lead switched this file's timing from {from} to {to}. The Media timeline now " +
+      "follows the new choice — recordings and times are untouched.",
 
-    // -- timeline/TimingVideoWarningDialog --
-    "workspace.timingVideoWarning.title": "Switch to Free timing and hide the video?",
-    "workspace.timingVideoWarning.description":
-      "This file has a linked video, which plays on the original recording's timing. Free " +
-      "timing re-flows the timeline to the translations' own lengths, so the video will stay " +
-      "hidden until the file switches back to Original's timing. Switching is lossless — no " +
-      "timing data is changed either way.",
-    "workspace.timingVideoWarning.confirmButton": "Switch to Free timing",
 
     // -- timeline/TimelineCard --
     "workspace.timelineCard.camLabel": "cam {state}",
@@ -1333,7 +1324,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.description": {
         description:
-          "Subtitle of the one-time Set up AI chooser. They pick Frontier, a " +
+          "Subtitle of the one-time Set up AI chooser. They pick Aquilla, a " +
           "project API key, or a personal override; the dialog does not return " +
           "after that choice.",
         screenshot: "confirm-dialog",
@@ -1348,7 +1339,7 @@ export const workspace = defineNamespace({
       },
       "workspace.aiSetup.frontierDescriptionSignedIn": {
         description:
-          "Body of the Frontier option when the user is signed in. Names the " +
+          "Body of the Aquilla option when the user is signed in. Names the " +
           "account and that hosted drafts bill as Aquilla usage, not a BYOK key.",
         placeholders: {
           username: "Signed-in account username.",
@@ -1358,7 +1349,7 @@ export const workspace = defineNamespace({
       "workspace.aiSetup.projectKeyLabel": {
         description:
           "Title of the per-project bring-your-own-key option. Contrast with " +
-          "the personal override (Preferences, all projects) and Frontier " +
+          "the personal override (Preferences, all projects) and Aquilla " +
           "(hosted). Short, no period.",
         screenshot: "confirm-dialog",
       },
@@ -1985,17 +1976,17 @@ export const workspace = defineNamespace({
 
       "workspace.linkVideoTiming.title": {
         description:
-          "Heading of the warning dialog shown when linking a video to a " +
-          "file that's currently in Free timing (the video won't display " +
-          "until the mode changes).",
+          "Heading of the dialog shown when linking a film to a file whose timing " +
+          "is 'Follows recordings': a file timed to a film always follows its source, " +
+          "so linking switches it. Use the same names as the timeline's Timing dropdown.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.description": {
-        description: "Body copy of the same dialog, explaining why the video would stay hidden and how to fix it.",
+        description: "Body copy of the same dialog: what linking does to the file's timing, and that nothing is lost.",
         screenshot: "confirm-dialog",
       },
       "workspace.linkVideoTiming.linkAnyway": {
-        description: "Confirm button that links the video despite the Free-timing warning.",
+        description: "Confirm button that links the film (and so switches the file to following its source).",
       },
 
       "workspace.timingModeChanged.title": {
@@ -2007,8 +1998,8 @@ export const workspace = defineNamespace({
       },
       "workspace.timingModeChanged.description": {
         description:
-          "Body of the timing-mode-changed heads-up dialog. {from} and {to} " +
-          "are the old and new timing mode names, both rendered in bold.",
+          "Body of the timing-changed heads-up dialog. {from} and {to} are the old " +
+          "and new timing choices ('Follows source' / 'Follows recordings'), both in bold.",
         placeholders: {
           from: "The file's previous timing mode name, rendered as bold markup.",
           to: "The file's new timing mode name, rendered as bold markup.",
@@ -2016,22 +2007,6 @@ export const workspace = defineNamespace({
         screenshot: "confirm-dialog",
       },
 
-      "workspace.timingVideoWarning.title": {
-        description: "Heading of the confirm dialog shown before switching a file with a linked video to Free timing.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.timingVideoWarning.description": {
-        description: "Body copy of the same dialog, explaining the consequence and that switching is lossless.",
-        screenshot: "confirm-dialog",
-      },
-      "workspace.timingVideoWarning.confirmButton": {
-        description:
-          "Confirm button proceeding with the switch to Free timing. Keep " +
-          "the English wording an e2e/browser-pass guard matches this exact " +
-          "button name verbatim in the default locale; translate normally " +
-          "for other locales.",
-        screenshot: "confirm-dialog",
-      },
 
       "workspace.timelineCard.camLabel": {
         description:

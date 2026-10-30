@@ -5,7 +5,7 @@
 // Tab/Esc accept/reject step. The streaming preview is shown only while
 // generating.
 
-import { useState, useCallback, useMemo, useRef } from "react"
+import { useState, useCallback, useMemo, useRef, type Dispatch, type SetStateAction } from "react"
 
 /** AQU-1025: examples/previews/errors/completing are per (cell, lane). The
  *  source cell id is shared across lanes, so a cell-id-only map kept showing
@@ -22,6 +22,34 @@ export function sliceCompletionLaneMap<T>(store: Map<string, T>, lane: string): 
     out.set(key.slice(0, -suffix.length), value)
   }
   return out
+}
+
+/** The status/preview/error/example maps are all keyed by `lk(cellId)` and all
+ *  written copy-on-write. These three are the only shapes those writes ever
+ *  take; spelling them out per call site duplicated the copy 73 times. */
+type LaneMapSetter<T> = Dispatch<SetStateAction<Map<string, T>>>
+
+/** `value` is `NoInfer` so `T` comes from the setter: a literal argument like
+ *  `"error"` would otherwise narrow `T` and reject the `Map<string, string>`
+ *  setter, since `Dispatch` is invariant in its payload. */
+function putLaneEntry<T>(set: LaneMapSetter<T>, key: string, value: NoInfer<T>): void {
+  set((p) => new Map(p).set(key, value))
+}
+
+function dropLaneEntry<T>(set: LaneMapSetter<T>, key: string): void {
+  set((p) => { const m = new Map(p); m.delete(key); return m })
+}
+
+/** Identity-preserving variant: an absent key returns the same map, so a
+ *  no-op clear does not re-render. Used where a fresh attempt supersedes a
+ *  prior error (see `clearCellError`). */
+function dropLaneEntryIfPresent<T>(set: LaneMapSetter<T>, key: string): void {
+  set((p) => {
+    if (!p.has(key)) return p
+    const next = new Map(p)
+    next.delete(key)
+    return next
+  })
 }
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -49,6 +77,7 @@ import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footn
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
 import { parseParagraphResponse } from "@/lib/completion/paragraph-protocol"
+import { isRefusalReply, REFUSAL_ERROR_MESSAGE } from "@/lib/completion/refusal"
 import { fixedSlices, packSelectionIntoCalls, type GroupingCell } from "@/lib/completion/draft-grouping"
 import { isMeaningUnitDraftingEnabled } from "@/lib/completion/seams-flag"
 import type { PrecedingContextEntry } from "@/lib/completion/prompt-build"
@@ -431,8 +460,8 @@ export function useCompletion(
     // clear error instead of a garbage "translation" of the filename.
     const sourceText = effectiveSourceText(cell)
     if (!sourceText.trim()) {
-      setErrors((p) => new Map(p).set(lk(cell.id), "No source text yet — transcribe this section first."))
-      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+      putLaneEntry(setErrors, lk(cell.id), "No source text yet — transcribe this section first.")
+      putLaneEntry(setCompleting, lk(cell.id), "error")
       return false
     }
     // AQU-620: raise the temperature for an explicit regenerate so the second
@@ -444,17 +473,12 @@ export function useCompletion(
     // A new attempt supersedes any prior error for this cell — without this,
     // messages like the SUB-28 "transcribe first" guidance stuck to the cell
     // forever (nothing ever deleted from the errors map).
-    setErrors((p) => {
-      if (!p.has(lk(cell.id))) return p
-      const next = new Map(p)
-      next.delete(lk(cell.id))
-      return next
-    })
-    setCompleting((p) => new Map(p).set(lk(cell.id), "searching"))
+    dropLaneEntryIfPresent(setErrors, lk(cell.id))
+    putLaneEntry(setCompleting, lk(cell.id), "searching")
     const evidence = opts?.preparedEvidence ?? await prepareSingleEvidence(cell)
     const { found, approvedExamples, precedingContext } = evidence
-    setExamples((p) => new Map(p).set(lk(cell.id), found))
-    setCompleting((p) => new Map(p).set(lk(cell.id), "generating"))
+    putLaneEntry(setExamples, lk(cell.id), found)
+    putLaneEntry(setCompleting, lk(cell.id), "generating")
 
     try {
       // AQU-662: decompose any inline footnote markers into clean base text +
@@ -497,7 +521,7 @@ export function useCompletion(
         stream: !idmlAddendum,
         ...(!idmlAddendum && {
           onChunk: (text: string) => {
-            setPreviews((p) => new Map(p).set(lk(cell.id), text))
+            putLaneEntry(setPreviews, lk(cell.id), text)
           },
         }),
         signal,
@@ -514,6 +538,28 @@ export function useCompletion(
       // (error badge + message) instead of writing an empty draft.
       if (!result.trim()) {
         throw new Error("The AI returned an empty translation. Please try again.")
+      }
+      // AQU-2217: the model can answer a perfectly healthy request with a
+      // refusal ("I'm sorry, but I cannot assist with that request."). That is
+      // a non-empty reply, so the guard above let it through and AQU-211's
+      // auto-commit wrote the boilerplate into the cell as a real draft —
+      // which is why reload, re-login and Regenerate never cleared it. A
+      // refusal is a failed generation: nothing is committed, the previous
+      // target is untouched, and the cell shows the error badge instead.
+      if (isRefusalReply(result)) {
+        console.warn(`[completeSingle] model refused (not committed): ${cell.id}`)
+        posthog.capture("ai translation refused", {
+          provider,
+          model: modelName,
+          mode: opts?.mode ?? "single",
+          source_language: sourceLanguage,
+          target_language: targetLanguage,
+          regenerate: Boolean(opts?.regenerate),
+        })
+        dropLaneEntry(setPreviews, lk(cell.id))
+        putLaneEntry(setCompleting, lk(cell.id), "error")
+        putLaneEntry(setErrors, lk(cell.id), REFUSAL_ERROR_MESSAGE)
+        return false
       }
       posthog.capture("ai translation completed", {
         provider,
@@ -545,9 +591,9 @@ export function useCompletion(
       // false so the sparkle flow does not show its "Saved" confirmation.
       if (!finalText.trim()) {
         console.warn(`[completeSingle] empty draft from model (not committed): ${cell.id}`)
-        setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-        setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-        setErrors((p) => new Map(p).set(lk(cell.id), "The model returned no translation — nothing was saved"))
+        dropLaneEntry(setPreviews, lk(cell.id))
+        putLaneEntry(setCompleting, lk(cell.id), "error")
+        putLaneEntry(setErrors, lk(cell.id), "The model returned no translation — nothing was saved")
         return false
       }
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
@@ -569,8 +615,8 @@ export function useCompletion(
       )
       finalText = completed.valueHtml ?? completed.value
       if (opts?.commitGuard && !opts.commitGuard()) {
-        setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        dropLaneEntry(setPreviews, lk(cell.id))
+        dropLaneEntry(setCompleting, lk(cell.id))
         return false
       }
       const mode = opts?.mode ?? "single"
@@ -600,15 +646,15 @@ export function useCompletion(
           exampleCellIds: exampleIds,
         }],
       })
-      setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-      setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+      dropLaneEntry(setPreviews, lk(cell.id))
+      dropLaneEntry(setCompleting, lk(cell.id))
       return true
     } catch (err) {
       // AbortError: the user stopped the run — clear state without persisting
       // an error entry (no stuck spinner, no error badge on the cell).
       if (err instanceof DOMException && err.name === "AbortError") {
-        setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        dropLaneEntry(setPreviews, lk(cell.id))
+        dropLaneEntry(setCompleting, lk(cell.id))
         return false
       }
       // AQU-670: a commit/enqueue failure lands here (commitCompletedCell
@@ -616,9 +662,9 @@ export function useCompletion(
       // report failure so the caller does not show a "Saved" confirmation.
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
       captureIdmlDraftRejection([cell], err, opts?.mode ?? "single")
-      setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-      setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+      dropLaneEntry(setPreviews, lk(cell.id))
+      putLaneEntry(setCompleting, lk(cell.id), "error")
+      putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
@@ -630,18 +676,13 @@ export function useCompletion(
     signal?: AbortSignal,
   ): Promise<boolean> => {
     if (!isConfigured || !isAvailable) return false
-    setErrors((p) => {
-      if (!p.has(lk(cell.id))) return p
-      const next = new Map(p)
-      next.delete(lk(cell.id))
-      return next
-    })
+    dropLaneEntryIfPresent(setErrors, lk(cell.id))
     if (!cellCanAlignStyles(cell)) {
-      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-      setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnavailable")))
+      putLaneEntry(setCompleting, lk(cell.id), "error")
+      putLaneEntry(setErrors, lk(cell.id), t("editor.idml.alignStylesUnavailable"))
       return false
     }
-    setCompleting((p) => new Map(p).set(lk(cell.id), "aligning"))
+    putLaneEntry(setCompleting, lk(cell.id), "aligning")
     try {
       // The shape placement keeps the saved words and does not call the model,
       // so a provider rate limit cannot leave the note as one unsplit block.
@@ -669,7 +710,7 @@ export function useCompletion(
         )
         clearStyleAlignDirty(cell.id)
         clearManualStyleAlign(cell.id)
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        dropLaneEntry(setCompleting, lk(cell.id))
         return true
       }
       // AQU-1656: kept for the AI intervention trail, like every other draft.
@@ -689,8 +730,8 @@ export function useCompletion(
       if (!aligned.changed) {
         clearStyleAlignDirty(cell.id)
         clearManualStyleAlign(cell.id)
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-        setErrors((p) => new Map(p).set(lk(cell.id), t("editor.idml.alignStylesUnchanged")))
+        dropLaneEntry(setCompleting, lk(cell.id))
+        putLaneEntry(setErrors, lk(cell.id), t("editor.idml.alignStylesUnchanged"))
         return false
       }
       posthog.capture("ai styles aligned", {
@@ -739,16 +780,16 @@ export function useCompletion(
       })
       clearStyleAlignDirty(cell.id)
       clearManualStyleAlign(cell.id)
-      setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+      dropLaneEntry(setCompleting, lk(cell.id))
       return true
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+        dropLaneEntry(setCompleting, lk(cell.id))
         return false
       }
       posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-      setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-      setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+      putLaneEntry(setCompleting, lk(cell.id), "error")
+      putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
@@ -859,7 +900,7 @@ export function useCompletion(
           for (const c of chunk) next.delete(lk(c.id))
           return next
         })
-        for (const c of chunk) setCompleting((p) => new Map(p).set(lk(c.id), "searching"))
+        for (const c of chunk) putLaneEntry(setCompleting, lk(c.id), "searching")
         const concatenated = chunk.map((c) => effectiveSourceText(c)).join(" ")
         let passages: PassageHit[] = []
         try {
@@ -871,8 +912,8 @@ export function useCompletion(
         // If we were superseded while awaiting searchPassages, bail out cleanly.
         if (isBatchCompletionCancelled(runId)) {
           for (const c of chunk) {
-            setPreviews((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-            setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
+            dropLaneEntry(setPreviews, lk(c.id))
+            dropLaneEntry(setCompleting, lk(c.id))
           }
           break
         }
@@ -890,8 +931,8 @@ export function useCompletion(
         )
         const llmAuthor = modelName
         for (const c of chunk) {
-          setExamples((p) => new Map(p).set(lk(c.id), flatExamples))
-          setCompleting((p) => new Map(p).set(lk(c.id), "generating"))
+          putLaneEntry(setExamples, lk(c.id), flatExamples)
+          putLaneEntry(setCompleting, lk(c.id), "generating")
         }
 
         const filledText = new Map<number, string>()
@@ -906,7 +947,7 @@ export function useCompletion(
             if (!cell) continue
             const text = m[2].trim()
             if (!idmlCompletionSystemAddendum([cell])) {
-              setPreviews((p) => new Map(p).set(lk(cell.id), text))
+              putLaneEntry(setPreviews, lk(cell.id), text)
             }
             filledText.set(idx, text)
           }
@@ -1000,8 +1041,8 @@ export function useCompletion(
             if (err instanceof DOMException && err.name === "AbortError") {
               for (let i = 0; i < chunk.length; i++) {
                 const c = chunk[i]
-                setPreviews((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-                setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
+                dropLaneEntry(setPreviews, lk(c.id))
+                dropLaneEntry(setCompleting, lk(c.id))
               }
               chunkFailed = true
               lastErr = err
@@ -1025,8 +1066,8 @@ export function useCompletion(
           for (let i = 0; i < chunk.length; i++) {
             if (filledText.has(i + 1)) continue
             const c = chunk[i]
-            setCompleting((p) => new Map(p).set(lk(c.id), "error"))
-            setErrors((p) => new Map(p).set(lk(c.id), msg))
+            putLaneEntry(setCompleting, lk(c.id), "error")
+            putLaneEntry(setErrors, lk(c.id), msg)
             skippedCount += 1
           }
           if (skippedCount > 0) incrementBatchCompletionFailed(runId, skippedCount)
@@ -1044,8 +1085,8 @@ export function useCompletion(
         if (isBatchCompletionCancelled(runId)) {
           for (let i = 0; i < chunk.length; i++) {
             const c = chunk[i]
-            setPreviews((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-            setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
+            dropLaneEntry(setPreviews, lk(c.id))
+            dropLaneEntry(setCompleting, lk(c.id))
           }
           break
         }
@@ -1085,9 +1126,9 @@ export function useCompletion(
               if (err instanceof DOMException && err.name === "AbortError") throw err
               posthog.captureException(err instanceof Error ? err : new Error(String(err)))
               captureIdmlDraftRejection([cell], err, "batch")
-              setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-              setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-              setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+              dropLaneEntry(setPreviews, lk(cell.id))
+              putLaneEntry(setCompleting, lk(cell.id), "error")
+              putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
               incrementBatchCompletionFailed(runId, 1)
             }
           } else {
@@ -1152,8 +1193,8 @@ export function useCompletion(
         // already have completed, but this stale run must not update counters.
         if (isBatchCompletionCancelled(runId)) {
           for (const draft of preparedDrafts) {
-            setPreviews((p) => { const m = new Map(p); m.delete(lk(draft.cell.id)); return m })
-            setCompleting((p) => { const m = new Map(p); m.delete(lk(draft.cell.id)); return m })
+            dropLaneEntry(setPreviews, lk(draft.cell.id))
+            dropLaneEntry(setCompleting, lk(draft.cell.id))
           }
           break
         }
@@ -1164,17 +1205,17 @@ export function useCompletion(
             status: "rejected" as const,
             reason: new Error("Batch commit returned no result for this cell"),
           }
-          setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+          dropLaneEntry(setPreviews, lk(cell.id))
           if (outcome.status === "fulfilled") {
-            setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+            dropLaneEntry(setCompleting, lk(cell.id))
             incrementBatchCompletionDone(runId)
             continue
           }
           const err = outcome.reason
           posthog.captureException(err instanceof Error ? err : new Error(String(err)))
           captureIdmlDraftRejection([cell], err, "batch")
-          setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-          setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+          putLaneEntry(setCompleting, lk(cell.id), "error")
+          putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
           incrementBatchCompletionFailed(runId, 1)
         }
 
@@ -1235,8 +1276,8 @@ export function useCompletion(
       } else {
         // Clear pending fallback cells without erroring them.
         for (const cell of fallbackQueue) {
-          setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-          setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+          dropLaneEntry(setPreviews, lk(cell.id))
+          dropLaneEntry(setCompleting, lk(cell.id))
         }
       }
     } finally {
@@ -1283,7 +1324,7 @@ export function useCompletion(
 
     // Mark only the cells actually being drafted as "generating". Validated
     // cells are left untouched (no pulsing ring — they were never queued).
-    for (const c of draftCells) setCompleting((p) => new Map(p).set(lk(c.id), "generating"))
+    for (const c of draftCells) putLaneEntry(setCompleting, lk(c.id), "generating")
 
     // Track which cells were actually committed so a mid-loop commit failure
     // does NOT relabel already-persisted cells as errored (declared outside the
@@ -1386,7 +1427,7 @@ export function useCompletion(
         console.warn(msg)
         // Surface in hook errors so callers can show a toast/badge if desired.
         for (const id of extra) {
-          setErrors((p) => new Map(p).set(lk(id), `Unknown tag in response: ${id}`))
+          putLaneEntry(setErrors, lk(id), `Unknown tag in response: ${id}`)
         }
       }
 
@@ -1395,9 +1436,9 @@ export function useCompletion(
         const msg = `[completeParagraph] cells missing from model response (not committed): ${missing.join(", ")}`
         console.warn(msg)
         for (const id of missing) {
-          setErrors((p) => new Map(p).set(lk(id), `Cell not translated by model: ${id}`))
+          putLaneEntry(setErrors, lk(id), `Cell not translated by model: ${id}`)
           // Clear the "generating" spinner for the missing cell.
-          setCompleting((p) => { const m = new Map(p); m.delete(lk(id)); return m })
+          dropLaneEntry(setCompleting, lk(id))
         }
       }
 
@@ -1414,12 +1455,28 @@ export function useCompletion(
         // but the don't-commit-empty policy lives here in the draft path.
         if (!text.trim()) {
           console.warn(`[completeParagraph] empty content for cell (not committed): ${cellId}`)
-          setErrors((p) => new Map(p).set(lk(cellId), `Cell not translated by model: ${cellId}`))
-          setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
+          putLaneEntry(setErrors, lk(cellId), `Cell not translated by model: ${cellId}`)
+          dropLaneEntry(setCompleting, lk(cellId))
+          continue
+        }
+        // AQU-2217: a refusal inside a present tag is "no translation" just
+        // like an empty one — flag it and NEVER commit the boilerplate.
+        if (isRefusalReply(text)) {
+          console.warn(`[completeParagraph] model refused for cell (not committed): ${cellId}`)
+          posthog.capture("ai translation refused", {
+            provider,
+            model: modelName,
+            mode: "paragraph",
+            source_language: sourceLanguage,
+            target_language: targetLanguage,
+            regenerate: false,
+          })
+          putLaneEntry(setErrors, lk(cellId), REFUSAL_ERROR_MESSAGE)
+          dropLaneEntry(setCompleting, lk(cellId))
           continue
         }
         if (!idmlCompletionSystemAddendum([cell])) {
-          setPreviews((p) => new Map(p).set(lk(cellId), text))
+          putLaneEntry(setPreviews, lk(cellId), text)
         }
         const completed = await normalizeProtectedCompletionWithRepair(
           cell,
@@ -1449,8 +1506,8 @@ export function useCompletion(
           output: committedText,
           exampleCellIds: paragraphExampleIds,
         })
-        setPreviews((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
-        setCompleting((p) => { const m = new Map(p); m.delete(lk(cellId)); return m })
+        dropLaneEntry(setPreviews, lk(cellId))
+        dropLaneEntry(setCompleting, lk(cellId))
       }
 
       if (recordedCells.length > 0) {
@@ -1482,8 +1539,8 @@ export function useCompletion(
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         for (const c of draftCells) {
-          setPreviews((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-          setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
+          dropLaneEntry(setPreviews, lk(c.id))
+          dropLaneEntry(setCompleting, lk(c.id))
         }
         return
       }
@@ -1494,11 +1551,11 @@ export function useCompletion(
         // Don't relabel a cell that was already committed before the failure —
         // its AI draft is persisted; only the still-uncommitted cells errored.
         if (committedIds.has(c.id)) {
-          setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
+          dropLaneEntry(setCompleting, lk(c.id))
           continue
         }
-        setCompleting((p) => new Map(p).set(lk(c.id), "error"))
-        setErrors((p) => new Map(p).set(lk(c.id), msg))
+        putLaneEntry(setCompleting, lk(c.id), "error")
+        putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
@@ -1514,12 +1571,7 @@ export function useCompletion(
    * left alone, so dismissing a stale error can never cancel a live draft.
    */
   const clearCellError = useCallback((cellId: string) => {
-    setErrors((p) => {
-      if (!p.has(lk(cellId))) return p
-      const next = new Map(p)
-      next.delete(lk(cellId))
-      return next
-    })
+    dropLaneEntryIfPresent(setErrors, lk(cellId))
     setCompleting((p) => {
       if (p.get(lk(cellId)) !== "error") return p
       const next = new Map(p)

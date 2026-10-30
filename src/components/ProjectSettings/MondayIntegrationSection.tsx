@@ -111,6 +111,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
   const [savingMapping, setSavingMapping] = useState(false)
   const [toggling, setToggling] = useState(false)
+  const [togglingSubitems, setTogglingSubitems] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [syncNotice, setSyncNotice] = useState<string | null>(null)
   const [unlinkOpen, setUnlinkOpen] = useState(false)
@@ -217,6 +218,28 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   }, [jwt, proposal, link, projectId])
 
   // ── Linked-state actions ─────────────────────────────────────────────────
+  // Files as subitems: turning it on pushes straight away so the files show up.
+  const handleToggleFileSubitems = useCallback(
+    async (on: boolean) => {
+      if (!jwt || !link) return
+      setTogglingSubitems(true)
+      setError(null)
+      try {
+        setSyncNotice(null)
+        const next = await patchMondayLink(jwt, projectId, { fileSubitems: on })
+        if (!aliveRef.current) return
+        setLink(next.link)
+        setWarnings(next.warnings)
+        if (next.push) setSyncNotice(syncNoticeText(next.push))
+      } catch (e) {
+        if (aliveRef.current) setError(errMsg(e))
+      } finally {
+        if (aliveRef.current) setTogglingSubitems(false)
+      }
+    },
+    [jwt, link, projectId],
+  )
+
   const handleToggleEnabled = useCallback(
     async (enabled: boolean) => {
       if (!jwt || !link) return
@@ -372,6 +395,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               reconfigureMsg={reconfigureMsg}
               onReconfigureMsg={setReconfigureMsg}
               onToggleEnabled={handleToggleEnabled}
+              fileSubitems={{ toggling: togglingSubitems, onToggle: (on) => void handleToggleFileSubitems(on) }}
               onSyncNow={handleSyncNow}
               onSaveMapping={handleSaveMapping}
               newColumns={newColumns}

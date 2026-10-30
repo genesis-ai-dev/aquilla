@@ -333,7 +333,7 @@ export const agent = defineNamespace({
     "agent.mode.checkNothing": "Nothing new to follow up on.",
     "agent.mode.flagLabel": "Agent modes",
     "agent.mode.flagDescription":
-      "Show the agent-mode dial in the team view, along with the next-passage button and manual update checks. The mode itself stays off until someone turns it on.",
+      "Show the agent-mode dial in the team view, along with the next-passage button and manual update checks. The mode itself stays off until someone turns it on. Only on this device.",
     // Reaction conversations: a run the team started off the back of human
     // edits, rather than one a person asked for.
     "agent.team.reactionPreview": "Reacted to your changes — {preview}",

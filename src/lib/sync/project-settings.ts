@@ -166,15 +166,20 @@ export interface ProjectWideSettings {
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
    *
-   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
-   * floor change: `file.track.set` is already maintainer-floored, so this
-   * answers *whether*, not *who*, and with it off the write is refused even to
-   * an owner. Multi-track is capability for clients who want it; a project that
-   * never turns it on should not be able to tell it was built.
+   * ON UNLESS EXPLICITLY TURNED OFF (AQU-2214, Sam, after the ETEN demo). It
+   * shipped the other way round — multi-track read as capability for the
+   * clients who asked for it, so a project that never turned it on was not
+   * supposed to be able to tell it was built. Adding a track turned out to be
+   * the ordinary case, so the DEFAULT flipped and the gate did not: it is
+   * still a SECOND gate rather than a floor change (`file.track.set` is
+   * already maintainer-floored, so this answers *whether*, not *who*), and an
+   * explicit `false` here — or inherited from the org — still refuses the
+   * write to an owner. Only the unset reading changed, on the client and at
+   * the perimeter alike; a project or org that already chose keeps its choice.
    *
    * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
-   * ship, and a new setting defaulting to off must not silently take an
-   * existing capability away from every project that has one. They stay
+   * shipped before the setting existed, which must not take an existing
+   * capability away from a project that switches this OFF. They stay
    * maintainer-only, which is what they were.
    *
    * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.
@@ -933,4 +938,52 @@ export async function patchProjectSettings(
   // actual count). Handing the raw JSON to a toast showed them the braces.
   const text = await res.text().catch(() => "")
   return { kind: "error", status: res.status, message: errorMessageFrom(text) }
+}
+
+/**
+ * AQU-2101: what the voice copy did.
+ * `saved` — the server accepted it. Apply the same copy locally.
+ * `unsaved` — the request never landed (network, 5xx, version conflict)
+ * after a few tries. Do not paint a local copy the server does not have.
+ * `refused` — the server rejected the body or the role. Same: leave local alone.
+ */
+export type SplitCastCopyStatus = "saved" | "unsaved" | "refused"
+
+const SPLIT_CAST_ATTEMPTS = 3
+
+function splitCastRefused(status: number): boolean {
+  return status === 400 || status === 403 || status === 422
+}
+
+/**
+ * AQU-2101: ask the server to copy each lane's cast of these rows onto the new
+ * narration pieces. The server holds every lane, including ones this client
+ * was not shown. `fileId` is how it checks the new pieces really were split
+ * from those rows.
+ */
+export async function postSplitCastCopies(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  splits: readonly { cellId: string; sameKindAsFirst: readonly string[] }[],
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<SplitCastCopyStatus> {
+  const body = JSON.stringify({ fileId, splits })
+  for (let attempt = 0; attempt < SPLIT_CAST_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(
+        `${apiUrl}/api/v2/projects/${encodeURIComponent(projectId)}/split-casts`,
+        {
+          method: "POST",
+          headers: authHeaders(jwt),
+          body,
+        },
+      )
+      if (res.ok) return "saved"
+      if (splitCastRefused(res.status)) return "refused"
+    } catch {
+      // A dropped request is worth another try. A refusal is not.
+    }
+  }
+  return "unsaved"
 }

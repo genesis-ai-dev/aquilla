@@ -27,6 +27,7 @@ export type NeonTargetCommand =
   | "seed-extract"
   | "scrub-integrations"
   | "copy-dev-audio"
+  | "copy-dev-audio-all"
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
@@ -47,6 +48,9 @@ export function scriptFor(command: NeonTargetCommand): string {
   // AQU-2114: copy one project's prod audio into the dev bucket, so the rows
   // the dev refresh restored have bytes behind them.
   if (command === "copy-dev-audio") return "scripts/neon-copy-dev-audio.ts"
+  // AQU-2115: copy EVERY project's prod audio into the dev bucket, so the rows
+  // the nightly dev refresh restored have bytes behind them.
+  if (command === "copy-dev-audio-all") return "scripts/neon-copy-dev-audio-all.ts"
   return "scripts/neon-migrate.ts"
 }
 
@@ -66,6 +70,7 @@ export function childArgs(command: NeonTargetCommand, passthrough: readonly stri
     command === "fold-cast-by-character" ||
     command === "seed-extract" ||
     command === "scrub-integrations" ||
-    command === "copy-dev-audio"
+    command === "copy-dev-audio" ||
+    command === "copy-dev-audio-all"
   return forwardsFlags ? [script, ...passthrough] : [script, command]
 }

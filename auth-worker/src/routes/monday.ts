@@ -76,6 +76,7 @@ import {
 } from "../lib/monday/analyze"
 import { LlmRefusedError } from "../lib/billing/paid-llm"
 import { pushBoardLink } from "../lib/monday/push"
+import { subitemMetricsFor } from "../lib/monday/subitems"
 import { schedulePush } from "../lib/integrations/push"
 import {
   addMissingColumns,
@@ -527,6 +528,10 @@ monday.put(
     const structure = await fetchBoardStructure(token, body.boardId)
     const { mapping, warnings } = sanitizeMapping(body.config, structure)
     if (!mapping) return c.json({ error: "invalid config", warnings }, 400)
+    // Files as subitems: the push finds this board's subitems board and its
+    // columns afresh (lib/monday/subitems.ts); whatever came with the config
+    // was found for another link or board.
+    if (mapping.fileSubitems) mapping.fileSubitems = { columns: [] }
 
     // New rows go in an "Aquilla projects" group so they sit together, not
     // among the board's own rows. The server picks it: the AI may suggest a
@@ -631,8 +636,9 @@ async function moveItemsToGroupBestEffort(
   groupId: string,
 ): Promise<void> {
   try {
+    // Subitems live on their own board and follow their row wherever it goes.
     const items = await env.AQUILLA_PG.prepare(
-      "SELECT external_item_id FROM integration_item_links WHERE link_id = ?",
+      "SELECT external_item_id FROM integration_item_links WHERE link_id = ? AND entity_kind <> 'subitem'",
     )
       .bind(linkId)
       .all<{ external_item_id: string }>()
@@ -649,6 +655,8 @@ async function moveItemsToGroupBestEffort(
 const patchLinkSchema = z.object({
   enabled: z.boolean().optional(),
   config: z.record(z.string(), z.unknown()).optional(),
+  /** Files as subitems of the project's row, on or off (the only way to change it). */
+  fileSubitems: z.boolean().optional(),
 })
 
 monday.patch(
@@ -664,6 +672,8 @@ monday.patch(
 
     const warnings: string[] = []
     let configJson: string | null = null
+    const savedMapping = sanitizeMapping(parseJsonColumn(link.config, null)).mapping
+    let nextMapping: MondayMapping | null = null
     // Set only when the board was re-read just now: replaces the link-time
     // snapshot and clears the "Board structure changed" flag.
     let freshStructureJson: string | null = null
@@ -699,8 +709,33 @@ monday.patch(
       if (!result.mapping.groupId && savedGroupId && structure?.groups.some((g) => g.id === savedGroupId)) {
         result.mapping.groupId = savedGroupId
       }
-      configJson = JSON.stringify(result.mapping)
+      // Nor file subitems: only `fileSubitems` turns them on or off, so a
+      // mapping saved by hand or proposed by the AI keeps the saved choice.
+      // When the row's columns change what a file's subitem would show, the
+      // push finds the subitem columns again.
+      const savedSubitems = savedMapping?.fileSubitems
+      delete result.mapping.fileSubitems
+      if (savedSubitems && result.mapping.itemGranularity === "project") {
+        const same = subitemMetricsFor(result.mapping).join() === subitemMetricsFor(savedMapping!).join()
+        result.mapping.fileSubitems = same ? savedSubitems : { columns: [] }
+      }
+      nextMapping = result.mapping
     }
+    let subitemsTurnedOn = false
+    if (body.fileSubitems !== undefined) {
+      const base = nextMapping ?? savedMapping
+      if (!base) return c.json({ error: "invalid config", warnings }, 400)
+      if (!body.fileSubitems) {
+        delete base.fileSubitems
+      } else if (base.itemGranularity !== "project") {
+        warnings.push("files are subitems only under one item for the whole project")
+      } else if (!base.fileSubitems) {
+        base.fileSubitems = { columns: [] }
+        subitemsTurnedOn = true
+      }
+      nextMapping = base
+    }
+    if (nextMapping) configJson = JSON.stringify(nextMapping)
 
     await c.env.AQUILLA_PG.prepare(
       `UPDATE integration_links
@@ -722,8 +757,9 @@ monday.patch(
 
     // Turning Sync back on pushes straight away: edits made while it was off
     // were never queued, so nothing else would bring the board up to date.
+    // So does turning file subitems on, so the files show up now.
     let push: Awaited<ReturnType<typeof pushBoardLink>> | undefined
-    if (body.enabled === true && !link.enabled) {
+    if ((body.enabled === true && !link.enabled) || (subitemsTurnedOn && fresh.enabled)) {
       push = await pushBoardLink(c.env, fresh)
       fresh = (await getLink(c.env, guard.projectId)) ?? fresh
     }
@@ -762,8 +798,12 @@ async function boardChanges(
       known.push({ id: column.id, title: column.title, type: column.type })
     }
   }
+  // With files as subitems the Subitems column is Aquilla's own (its first
+  // subitem is what adds it to a board without one), not one to map.
+  const ownsSubitems = parseJsonColumn<Partial<MondayMapping>>(link.config, {}).fileSubitems != null
   const newColumns = live.columns
     .filter((col) => !known.some((k) => k.id === col.id))
+    .filter((col) => !(ownsSubitems && col.type === "subtasks"))
     .map(({ id, title, type }) => ({ id, title, type }))
   const stale = newColumns.length > 0
   if (stale !== link.remote_state_stale || acknowledge.length > 0) {

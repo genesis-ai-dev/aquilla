@@ -32,7 +32,11 @@ function makeDb(options: { allowed?: boolean } = {}): AquillaDb {
           return {
             async first() {
               if (sql.includes('FROM project_settings')) {
-                return projectSettingsRow(sql, JSON.stringify(allowed ? { allowTrackEditing: true } : {}))
+                // AQU-2214: the setting is written out EXPLICITLY on both
+                // legs. An absent key is no longer the off case — it is the
+                // default, and the default is now ON — so seeding `{}` here
+                // would quietly stop testing the gate at all.
+                return projectSettingsRow(sql, JSON.stringify({ allowTrackEditing: allowed }))
               }
               return null
             },

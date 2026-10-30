@@ -61,7 +61,7 @@ export interface CellRowRaw {
   /** AQU-2185: the name a person gave a navigator division starting at this
    *  cell, NULL when nobody has marked it. Only ever set on the shared source
    *  row — see the column comment in db/postgres/schema.sql. Absent on a
-   *  pre-0188 database or a hand-built fixture. */
+   *  pre-0192 database or a hand-built fixture. */
   milestone_label?: string | null
 }
 

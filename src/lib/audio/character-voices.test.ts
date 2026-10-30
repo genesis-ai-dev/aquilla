@@ -15,19 +15,18 @@ describe("character voice catalog", () => {
     expect(new Set(CHARACTER_VOICES.map((c) => c.id)).size).toBe(CHARACTER_VOICES.length)
   })
 
-  it("tags every voice with a sex and an age band, so each filter finds someone", () => {
-    for (const c of CHARACTER_VOICES) {
-      expect(c.tags.some((t) => t === "male" || t === "female")).toBe(true)
-    }
+  it("gives every filter someone to find", () => {
     for (const f of CHARACTER_VOICE_FILTERS) {
       expect(filterCharacterVoices(CHARACTER_VOICES, [f]).length).toBeGreaterThan(0)
     }
   })
 
-  it("ANDs filters together", () => {
-    const elderlyWomen = filterCharacterVoices(CHARACTER_VOICES, ["female", "elderly"])
-    expect(elderlyWomen.length).toBeGreaterThan(0)
-    for (const c of elderlyWomen) expect(c.tags).toEqual(expect.arrayContaining(["female", "elderly"]))
+  it("narrows across groups and widens within one", () => {
+    const oldWomen = filterCharacterVoices(CHARACTER_VOICES, ["female", "old"])
+    expect(oldWomen.map((c) => c.name)).toEqual(["Sage"])
+    const youngOrOld = filterCharacterVoices(CHARACTER_VOICES, ["young", "old"])
+    expect(youngOrOld.every((c) => c.age !== "middle-aged")).toBe(true)
+    expect(youngOrOld.some((c) => c.age === "young") && youngOrOld.some((c) => c.age === "old")).toBe(true)
   })
 
   it("builds a cast Voice that routes on libraryVoiceId alone", () => {

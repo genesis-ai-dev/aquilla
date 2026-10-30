@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -88,7 +89,7 @@ export function AddFootnoteDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
+        <DialogBody className="grid gap-4">
           <div className="grid gap-2">
             <div className="text-sm font-medium">{t("editor.footnote.markerStyle")}</div>
             <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label={t("editor.footnote.markerStyleGroup")}>
@@ -167,7 +168,7 @@ export function AddFootnoteDialog({
               </div>
             </div>
           )}
-        </div>
+        </DialogBody>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

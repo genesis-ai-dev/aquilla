@@ -62,9 +62,13 @@ describe("errorFromVoiceConvert", () => {
     )
   })
 
-  it("still names Seed-VC on a later conversion failure", () => {
+  it("reports a later conversion failure without naming one engine (AQU-2212)", () => {
     const err = errorFromVoiceConvert(500, "gpu OOM")
-    expect(err.message).toMatch(/^Voice cloning \(Seed-VC\) failed \(500\)/)
+    expect(err.message).toMatch(/^Voice conversion failed \(500\)/)
     expect(err.message).toContain("gpu OOM")
+  })
+
+  it("turns a worker timeout into a retry hint", () => {
+    expect(errorFromVoiceConvert(504, "did not respond within 240s").message).toMatch(/starting up/)
   })
 })

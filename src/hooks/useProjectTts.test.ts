@@ -200,3 +200,56 @@ describe("useProjectTts casting by character (AQU-2125)", () => {
   })
 })
 
+describe("applySplitCastCopies (AQU-2101)", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.mocked(patchProject).mockClear()
+  })
+
+  it("copies each lane's voice onto the new narration pieces without a settings save", () => {
+    const server: ProjectTtsSettings = {
+      provider: "inworld",
+      voices: [{ id: "sina", name: "Sina", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+      castAssignments: { line: "narrator" },
+      laneCastAssignments: {
+        sm: { line: "sina" },
+        ar: { line: "layla" },
+      },
+    }
+    const onSyncTts = vi.fn()
+    const { result } = renderHook(() => useProjectTts("proj-split-cast", server, [], onSyncTts, "en"))
+    act(() => {
+      result.current.applySplitCastCopies([{ cellId: "line", sameKindAsFirst: ["line-b"] }])
+    })
+    const stored = loadProjectTts("proj-split-cast")
+    expect(stored?.castAssignments).toEqual({ line: "narrator", "line-b": "narrator" })
+    expect(stored?.laneCastAssignments).toEqual({
+      sm: { line: "sina", "line-b": "sina" },
+      ar: { line: "layla", "line-b": "layla" },
+    })
+    expect(onSyncTts).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2212: "Add a voice…" from a line saves the new voice, then casts it on
+// that line in the same tick. The second save must build on the first.
+describe("useProjectTts back-to-back saves", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("keeps a voice added just before a cast pick in the same tick", async () => {
+    const server: ProjectTtsSettings = {
+      provider: "inworld",
+      voices: [{ id: "v1", name: "Narrator", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+      defaultVoiceId: "v1",
+    }
+    const { result } = renderHook(() => useProjectTts("proj-race", server, [], undefined, "en"))
+    await act(async () => {
+      const tts = result.current
+      void tts.saveTts({ voices: [...tts.allVoices, { id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }] })
+      tts.assignPick({ scope: "line", lineId: "cell-1", castName: null, fileLineIds: [], voiceId: "v-hearth" })
+    })
+    const stored = loadProjectTts("proj-race")
+    expect(stored?.voices?.map((v) => v.id)).toContain("v-hearth")
+    expect(JSON.stringify(stored)).toContain("cell-1")
+  })
+})

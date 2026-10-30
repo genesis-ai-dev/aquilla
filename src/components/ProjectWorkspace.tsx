@@ -114,7 +114,8 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemoryFile, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
-import { isAudioCueFile, isExtensionDataFile, isHiddenTimelineFile, isSubtitleImportFile, isVideoTimedSubtitleFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { hasNothingToFollow } from "@/lib/timeline/stand-in"
+import { isAudioCueFile, isExtensionDataFile, isFilmTimedFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -180,6 +181,7 @@ import {
   ruleFixPreflight,
   fetchDeletedFilesWithProjectToken,
   pushedRollupProgress,
+  canRestructureTracks,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -290,7 +292,7 @@ import {
 import { canHarmonize, emitCastAssign, emitCellHarmonize, emitSourceCellVisibilitySet, emitSourceCellMilestoneSet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
+import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { buildCharacterCastWrite, castLinesOf, type CastLine, type CastScope } from "@/lib/audio/character-cast"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
@@ -309,7 +311,8 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
-import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow, voiceAssignmentsForSplits } from "@/lib/cells/quote-split-plan"
+import { planQuoteSplits, quoteSplitCandidates, quoteSplitForRow } from "@/lib/cells/quote-split-plan"
+import { openTargetLaneCount } from "@/lib/lanes/open-target-lanes"
 import type { QuoteSplitPiece } from "@/lib/cells/quote-split"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { SplitAtQuotesDialog } from "@/components/SplitAtQuotesDialog"
@@ -360,7 +363,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, flushOutboxUntilSettled, subscribeStaleSiblings, subscribeAppliedEvents, subscribeRejected, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { laneWriteRejections } from "@/lib/sync/lane-write-rejections"
+import { settleOwnEvent } from "@/lib/sync/settle-own-event"
 import { createLiveApplier } from "@/lib/sync/live-apply"
 import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
@@ -370,7 +375,9 @@ import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, castNameOf, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
 import { clearLaneCast, setLaneCast } from "@/lib/audio/lane-cast"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
 import { categorizeAiError } from "@/lib/audio/ai-error"
@@ -408,9 +415,9 @@ import { useFileFilterFocus } from "@/hooks/useFileFilterFocus"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import {
   computeRightRailSurfaces,
-  hasRightRailEdge,
-  hasRightRailPanel,
+  type RightRailPanel,
 } from "@/lib/editor/right-rail-panels"
+import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
@@ -446,7 +453,6 @@ import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
-import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
@@ -1281,6 +1287,12 @@ export function ProjectWorkspace() {
     location.search,
   ])
   const [importOpen, setImportOpen] = useState(false)
+  const [reimportTarget, setReimportTarget] = useState<{
+    fileId: string
+    name: string
+    importProfile?: string
+    corpusMarker?: string
+  } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
@@ -1529,6 +1541,7 @@ export function ProjectWorkspace() {
   // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
+  const [makeCharacterMode, setMakeCharacterMode] = useState<"clone" | "character">("clone")
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
   // File the sidebar context menu asked to assign; null means "use the
@@ -2296,6 +2309,69 @@ export function ProjectWorkspace() {
     })
   }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
+  // AQU-1901: a refused edit is not a saved one. The server answers /events
+  // with a 200 and lists a refused write in `rejected[]` — a write with no lane
+  // on a project with only tagged lanes (the AQU-1900 422), or any other
+  // validation refusal — and the flusher drops it. Every hand-typed edit and
+  // validation goes out through a flush that cannot tell whose it was, so
+  // without this the line kept the typed text and the chip went back to
+  // "Synced". Undo it the way a dead-letter is undone (above), and say so.
+  // Flows that report their own refusals (AI drafts) claim them first.
+  //
+  // Unlike a dead-letter, a refusal leaves the server exactly as it was, so
+  // nothing that reads "what changed" will ever correct the line: the edit
+  // wrote the typed text into the store's own row, the drain's delta read
+  // finds no change, and the plain targeted revalidate is discarded when that
+  // drain bumps the store's generation mid-flight. So read the refused cells
+  // back here and install the server's rows directly — unless the reader has
+  // edited one again since (its freshness floor moved past the read).
+  const refusedEditProjectId = project?.id
+  useEffect(() => {
+    if (!refusedEditProjectId || !activeFileId) return
+    const projectId = refusedEditProjectId
+    const fileId = activeFileId
+    return subscribeRejected((entries) => {
+      const refused = laneWriteRejections(entries)
+      if (refused.length === 0) return
+      const restore = new Set<string>()
+      for (const entry of refused) {
+        if (entry.fileId !== fileId) continue
+        const key = laneCellKey(entry.cellId)
+        if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === entry.id) {
+          pendingTargetCommitHeadsRef.current.delete(key)
+        }
+        cellStore.clearOptimisticForCell(entry.cellId)
+        restore.add(entry.cellId)
+      }
+      if (restore.size > 0) {
+        const cellIds = [...restore]
+        void (async () => {
+          const startSeq = cellStore.getWriteSeq()
+          const mint = await getTokenForProjectFile(projectId, fileId)
+          if (!mint.token) return
+          const rows = await fetchCellsByIds(projectId, fileId, cellIds, mint.token)
+          for (const cellId of cellIds) {
+            const floor = cellStore.getFreshnessFloor(cellId)
+            if (floor !== undefined && floor > startSeq) continue
+            cellStore.replaceRowsForCell(cellId, rows.filter((row) => row.cellId === cellId))
+          }
+        })().catch((err) => {
+          console.warn("[refused-edit] could not read the refused cells back:", err)
+          for (const cellId of cellIds) revalidateCell(cellId)
+        })
+      }
+      const first = refused[0]
+      const label = first.fileId === fileId
+        ? (cellStore.getCellSummary(first.cellId)?.cellLabel || first.cellId)
+        : first.cellId
+      toast.add({
+        type: "error",
+        title: t("editor.write.refusedTitle", { count: refused.length }),
+        description: t("editor.write.refusedDetail", { cell: label, reason: first.reason }),
+      })
+    })
+  }, [refusedEditProjectId, activeFileId, cellStore, laneCellKey, revalidateCell, getTokenForProjectFile, t])
+
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
@@ -2542,6 +2618,31 @@ export function ProjectWorkspace() {
             // Turn this line's take into a reusable Cast character.
             onMakeCharacterFromCell: (cellId) => {
               setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("clone")
+              setMakeCharacterOpen(true)
+            },
+            // AQU-2212: Clone voice from take, without the dialog.
+            onCloneTake: async (cell, audioId, name) => {
+              const level = project?.syncRole?.level ?? null
+              if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
+                throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
+              }
+              const voice = await cloneVoiceFromTake({
+                projectId: audioProject.id, cell, audioId, name,
+                provider: resolveTtsProvider(tts.settings),
+                // A clone rides Inworld or Gemini, which take no target language.
+                paletteIndex: tts.allVoices.length,
+                session: frontierSession ?? null,
+              })
+              const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
+              await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
+              toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+            },
+            // "Add a voice…" opens New voice on the ready-made characters; the
+            // voice it adds is cast on the line it was opened from.
+            onAddVoice: (cellId) => {
+              setMakeCharacterSeedCellId(cellId)
+              setMakeCharacterMode("character")
               setMakeCharacterOpen(true)
             },
             place: audioViewPlace,
@@ -2550,6 +2651,7 @@ export function ProjectWorkspace() {
     [
       lens, audioProject, activeFileTimeOrdered, tts.voices, tts.laneSettings, tts.defaultVoiceId,
       tts.assignCells, frontierSession, currentUsername, cellStore, refresh, audioViewPlace,
+      tts, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t,
     ],
   )
 
@@ -2831,7 +2933,44 @@ export function ProjectWorkspace() {
   // audio-only dubbing projects, whose source is an SRT with no video and for
   // which Free timing is the whole point. Read through the same predicate the
   // resolver uses so the picker and the mode can never disagree.
-  const timingModeFixedByFootage = isVideoTimedSubtitleFile(activeFile)
+  //
+  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — footage
+  // linked of any kind, or an audio cue file, whose cues transcribe the film.
+  // Those offer only "Follows source"; the control shows it with an (i).
+  const fileHasAudioCues = (hydratedProject?.files ?? []).some(
+    (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
+  )
+  const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
+  // AQU-2204 (board 24): a file whose lines have no times and no source
+  // recording has NOTHING TO FOLLOW, so it follows its recordings and the
+  // control greys "Follows source" out. Only a time-ordered file has the
+  // timeline (and so the control); a sequence-ordered book opens in the Audio
+  // view and keeps today's playback.
+  const timingNothingToFollow = useMemo(
+    () =>
+      activeFileTimeOrdered &&
+      Boolean(activeFileId) &&
+      hasNothingToFollow(readAtVersion(cellStoreVersion, getActiveCells).filter((c) => c.fileId === activeFileId)),
+    [activeFileTimeOrdered, activeFileId, cellStoreVersion, getActiveCells],
+  )
+  // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
+  // file-level (files.meta via file.timing.set); a file with no mode of its
+  // own inherits the legacy project-level value (so projects that chose Free
+  // timing in Project Settings keep it), else "Follows source". AQU-2204: a
+  // file timed to a film always follows its source.
+  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, {
+    timedToLinkedVideo,
+    hasAudioCues: fileHasAudioCues,
+    nothingToFollow: timingNothingToFollow,
+  })
+  // AQU-2204: the mode as the file's CHOICE resolves it, without the derived
+  // nothing-to-follow switch. "Timing changed" reads this: the derived switch
+  // flips the resolved mode the moment a file's lines load, and nobody changed
+  // anything.
+  const timingChoiceMode = resolveFileTimingMode(activeFile, project ?? undefined, {
+    timedToLinkedVideo,
+    hasAudioCues: fileHasAudioCues,
+  })
 
   const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
     if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
@@ -3039,17 +3178,22 @@ export function ProjectWorkspace() {
    * anchor chain honest; if that companion is the one refused, the row is
    * fine but the chain is not, and putting the row back is still the correct
    * repair.
+   *
+   * Returns the ids it reported, so the tab-wide rejection listener (AQU-1901)
+   * does not announce the same refusal a second time.
    */
   const rollbackRefusedCellChange = useCallback(
     (
-      entries: { kind: string }[],
+      entries: { id?: string; kind: string }[],
       cellId: string,
       restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
       message?: MessageKey,
-    ) => {
-      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+    ): string[] => {
+      const refused = entries.filter((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))
+      if (refused.length === 0) return []
       cellStore.rollbackOptimisticSourceChange(cellId, restore)
       if (message) toast.add({ type: "error", title: t(message) })
+      return refused.flatMap((e) => (e.id ? [e.id] : []))
     },
     [cellStore, toast, t],
   )
@@ -3303,7 +3447,7 @@ export function ProjectWorkspace() {
         // and present on the server, permanently. Put it back and say so.
         onRejected: (entries) => {
           refused = true
-          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
+          return rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast")
         },
         onForbidden: (entries) => {
           refused = true
@@ -3843,17 +3987,17 @@ export function ProjectWorkspace() {
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
-  // gutter's picker. PURE assignment (no auto-synthesis — generation stays an
-  // explicit act). The picker's scope (Oct 23) says how far it reaches: this
+  // gutter's picker. The assignment itself never synthesizes; in the Audio
+  // view the card then acts on the picked line (AQU-2212). The picker's scope (Oct 23) says how far it reaches: this
   // line, this character's lines in the file, or — AQU-2125 — the character
   // itself in every episode, cast once rather than line by line.
   // Ref-wrapped below so the context value stays identity-stable.
   const handleTimelineAssignVoice = useCallback(
-    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }) => {
+    (cell: CellData, voiceId: string, opts?: { scope?: CastScope }): boolean => {
       const level = project?.syncRole?.level ?? null
       if (!canManageVoices(level, project?.projectLeadsManageVoices === true, activeLaneId != null)) {
         toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
-        return
+        return false
       }
       const castName =
         cell.metadata && typeof cell.metadata.cast_name === "string" ? (cell.metadata.cast_name as string) : null
@@ -3863,6 +4007,7 @@ export function ProjectWorkspace() {
             .map((c) => c.id)
         : []
       tts.assignPick({ scope: opts?.scope ?? "line", lineId: cell.id, castName, fileLineIds, voiceId })
+      return true
     },
     [tts, getActiveCells, project?.syncRole?.level, project?.projectLeadsManageVoices, activeLaneId, t],
   )
@@ -4189,8 +4334,10 @@ export function ProjectWorkspace() {
       const nextMode = resolveFileTimingMode(
         activeFile ? { ...activeFile, coreMediaUrl: url } : null,
         project,
+        { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow },
       )
-      const modeWillChange = nextMode !== resolveFileTimingMode(activeFile, project)
+      const modeWillChange =
+        nextMode !== resolveFileTimingMode(activeFile, project, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow })
       if (modeWillChange) timingAckOwnWriteRef.current?.note(nextMode)
       try {
         await emitFileVideoSet({
@@ -4212,7 +4359,7 @@ export function ProjectWorkspace() {
             : denialMessage(t, ROLE.CONTRIBUTOR, level) })
       }
     },
-    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane],
+    [project, activeFile, activeFileId, currentUsername, getTokenForProjectFile, refresh, activeLane, fileHasAudioCues, timingNothingToFollow],
   )
   // Flow B (2026-08-05): linking a video while in Free timing prompts to
   // switch back (declinable, with the video-stays-hidden warning). NOTE the
@@ -4225,26 +4372,20 @@ export function ProjectWorkspace() {
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      // AQU-1704: skipped for a subtitle import, because linking footage there
-      // resolves the mode to Original timing on its own (isVideoTimedSubtitleFile)
-      // — there is nothing to decline, and prompting would promise a Free-timing
-      // state the resolver will not hand back. Otherwise resolved against the
-      // NEW link (AQU-1565 follow-up): a YouTube link drops the legacy
-      // project-level Free timing, so only a file that chose Free timing itself
-      // still gets the switch-back warning.
+      // AQU-2204: a file timed to a film always follows its source, so linking
+      // footage to a file that follows its recordings SWITCHES it — say so
+      // first. Asked of the file as it is now (before the link): that is the
+      // state the person is about to leave.
       if (
         url &&
-        !isSubtitleImportFile(activeFile) &&
-        resolveFileTimingMode(activeFile, project ?? undefined, {
-          timedToLinkedVideo: youTubeVideoId(url) != null,
-        }) === "audioFirst"
+        resolveFileTimingMode(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }) === "audioFirst"
       ) {
         setPendingVideoUrl(url)
         return
       }
       void applyLinkVideo(url) // clearing never prompts
     },
-    [activeFile, project, applyLinkVideo],
+    [activeFile, project, applyLinkVideo, fileHasAudioCues, timingNothingToFollow],
   )
 
   // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
@@ -6302,6 +6443,9 @@ export function ProjectWorkspace() {
     let sourceEventIdPin = commitCell.sourceEventId ?? null
     let eventId = ""
     let draftDeadLettered = false
+    // AQU-1901: refused outright (a lane or validation 4xx inside the 200, or
+    // a 403). Not retryable, and not saved: the row must not say "Saved".
+    let draftRefusal = null as string | null
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         eventId = await emitTargetCellCommit({
@@ -6337,20 +6481,18 @@ export function ProjectWorkspace() {
       }
       pendingCompletionEventIdRef.current.set(laneCellKey(cell.id), eventId)
       rememberPendingTargetCommit(cell.id, eventId, parentId)
-      draftDeadLettered = false
-      const flushedEventId = eventId
       // AQU-579: settle THIS event, not just "one batch". A single
       // flushOutboxBatch posts the oldest file group, so with any older row
       // queued the draft goes out later under the background flusher, where a
       // dead-letter only reaches the tab-wide stale listener — it clears the
       // shadow with no rebase, erasing the draft after "Saved".
-      await flushOutboxUntilSettled([flushedEventId], {
-        getTokenForFile: getTokenForProjectFile,
-        onStaleSiblings: (entries) => {
-          if (entries.some((entry) => entry.id === flushedEventId)) draftDeadLettered = true
-        },
-      })
+      const outcome = await settleOwnEvent(eventId, { getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
+      draftDeadLettered = outcome.kind === "dead-lettered"
+      if (outcome.kind === "refused") {
+        draftRefusal = outcome.reason
+        break
+      }
       if (!draftDeadLettered) break
 
       // The draft had no visible effect. Drop it from the pending-parent maps
@@ -6391,6 +6533,18 @@ export function ProjectWorkspace() {
         }
       }
       break
+    }
+    if (draftRefusal !== null) {
+      const key = laneCellKey(cell.id)
+      if (pendingCompletionEventIdRef.current.get(key) === eventId) pendingCompletionEventIdRef.current.delete(key)
+      if (pendingTargetCommitHeadsRef.current.get(key)?.eventId === eventId) pendingTargetCommitHeadsRef.current.delete(key)
+      applyOptimisticTargetEdit(cell.id, {
+        value: commitCell.translated ?? "",
+        valueHtml: commitCell.translatedHtml ?? "",
+      })
+      revalidateCellStats(cell.id)
+      revalidateCell(cell.id)
+      throw new Error(draftRefusal)
     }
     if (draftDeadLettered) {
       // Rebase exhausted — a genuine concurrent conflict. Revert to the LIVE
@@ -6519,9 +6673,12 @@ export function ProjectWorkspace() {
 
     const staleIndexes = new Set<number>()
     const rejectedIndexes = new Map<number, Error>()
+    // Returns the ids it took, so the tab-wide listener (AQU-1901) leaves
+    // those to this flow's own report.
     const noteRejectedEntries = (
       entries: Array<{ id: string; status: number; reason: string }>,
-    ) => {
+    ): string[] => {
+      const claimed: string[] = []
       for (const entry of entries) {
         const preparedIndex = initialIndexByEventId.get(entry.id)
         if (preparedIndex === undefined) continue
@@ -6529,7 +6686,9 @@ export function ProjectWorkspace() {
           preparedIndex,
           new Error(entry.reason || `The server refused this draft (${entry.status})`),
         )
+        claimed.push(entry.id)
       }
+      return claimed
     }
     // AQU-579: settle this response's own events (see flushOutboxUntilSettled).
     await flushOutboxUntilSettled(eventIds, {
@@ -6647,7 +6806,8 @@ export function ProjectWorkspace() {
           const retryRejectedIndexes = new Map<number, Error>()
           const noteRetryRejected = (
             entries: Array<{ id: string; status: number; reason: string }>,
-          ) => {
+          ): string[] => {
+            const claimed: string[] = []
             for (const entry of entries) {
               const index = retryIndexByEventId.get(entry.id)
               if (index === undefined) continue
@@ -6655,7 +6815,9 @@ export function ProjectWorkspace() {
                 index,
                 new Error(entry.reason || `The server refused this draft (${entry.status})`),
               )
+              claimed.push(entry.id)
             }
+            return claimed
           }
           await flushOutboxUntilSettled(retryEventIds, {
             getTokenForFile: getTokenForProjectFile,
@@ -8514,6 +8676,15 @@ export function ProjectWorkspace() {
   // large import landing) tears the socket down and recreates it.
   const projectFilesRef = useRef(projectFiles)
   projectFilesRef.current = projectFiles
+  // Same for the sidebar rollup refresh: its identity carries the active lane
+  // and the first file id (AQU-2118), both of which settle a few ms after the
+  // socket starts connecting on a fresh editor mount — and again on every lane
+  // switch. As an effect dependency that tore the socket down while it was
+  // still CONNECTING and opened a second one (dropping the focus lease and
+  // forcing a reconnect resync each time). The handlers read the latest
+  // callback through this ref instead.
+  const refreshAllFilesProgressRef = useRef(refreshAllFilesProgress)
+  refreshAllFilesProgressRef.current = refreshAllFilesProgress
   const presenceStaleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const clearPresenceStaleTimer = useCallback(() => {
@@ -8615,7 +8786,7 @@ export function ProjectWorkspace() {
           revalidateAuditStats,
           invalidateProjectFileProgress: () => invalidateProjectFileProgress(pid),
           refreshComments,
-          refreshAllFilesProgress,
+          refreshAllFilesProgress: () => refreshAllFilesProgressRef.current(),
         })
       })
       reconciler = createWsReconciler(
@@ -8860,7 +9031,7 @@ export function ProjectWorkspace() {
               // The frame names no lane; the record on screen is the open
               // lane's (AQU-2118).
               invalidateFileProgress(pid, msg.file, activeLaneRef.current)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure. Do not turn a realtime hint into an
                 // unhandled rejection.
@@ -8890,7 +9061,7 @@ export function ProjectWorkspace() {
               // A validation-threshold change alters every file's derived
               // validated count without mutating its progress histogram.
               invalidateProjectFileProgress(pid)
-              void refreshAllFilesProgress().catch(() => {
+              void refreshAllFilesProgressRef.current().catch(() => {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
@@ -9045,7 +9216,6 @@ export function ProjectWorkspace() {
     presenceStore,
     sendPresenceUpdate,
     refreshContextualDrafts,
-    refreshAllFilesProgress,
     revalidateAuditStats,
   ])
 
@@ -9625,15 +9795,31 @@ export function ProjectWorkspace() {
         cellStore.rollbackOptimisticQuoteSplit(undo)
         toast.add({ type: "error", title: t(refusal) })
       } else {
-        // Narration after narration keeps the row's voice; quotations are left
-        // for casting — which is the whole point of splitting.
-        // AQU-2125: through the lookup, so a row cast by its character (no entry
-        // of its own) still hands its voice to its narration pieces.
-        const voices = voiceAssignmentsForSplits(
-          plan.splits,
-          (id) => assignedCastVoiceId(tts.settings, cellStore.getCellView(id) ?? id),
-        )
-        if (voices) void tts.saveTts({ castAssignments: { ...(tts.settings?.castAssignments ?? {}), ...voices } })
+        // Narration after narration keeps the row's voice, on every lane that
+        // had cast it — the line's own entry, or its character's when it has
+        // none. The server writes the lanes this client cannot see; the local
+        // copy updates the ones it can, after the server accepts. Quotations
+        // are left for casting.
+        const castSplits = plan.splits
+          .filter((split) => split.sameKindAsFirst.length > 0)
+          .map((split) => {
+            const view = cellStore.getCellView(split.cellId)
+            const castName = view ? castNameOf(view) : null
+            return {
+              cellId: split.cellId,
+              sameKindAsFirst: split.sameKindAsFirst,
+              ...(castName ? { castName } : {}),
+            }
+          })
+        const jwt = jwtRef.current
+        let castFailed = false
+        if (castSplits.length > 0) {
+          const castStatus = jwt
+            ? await postSplitCastCopies(jwt, projectId, fileId, castSplits)
+            : "unsaved"
+          if (castStatus === "saved") tts.applySplitCastCopies(castSplits)
+          else castFailed = true
+        }
         const lines = plan.splits.reduce((n, split) => n + split.pieces.length, 0)
         const kept = plan.splits.reduce((n, split) => n + split.lanes.filter((l) => l.outcome === "kept").length, 0)
         toast.add({
@@ -9643,9 +9829,12 @@ export function ProjectWorkspace() {
             : t("editor.splitQuotes.doneManyToast", { rows: plan.splits.length, count: lines }),
           ...(kept > 0 ? { description: t("editor.splitQuotes.keptToast", { count: kept }) } : {}),
         })
-        // A translation kept whole now sits on changed source text: ask again
-        // which rows are stale, so its review marker shows without a reload.
-        if (kept > 0) staleSourceRefetchRef.current()
+        if (castFailed) {
+          toast.add({ type: "error", title: t("editor.splitQuotes.castFailedToast") })
+        }
+        // Every translation of a split row is pinned to the old source, so ask
+        // again which rows are stale and show the review marker without a reload.
+        if (plan.splits.some((split) => split.lanes.length > 0)) staleSourceRefetchRef.current()
       }
       revalidateCells()
     },
@@ -9816,7 +10005,10 @@ export function ProjectWorkspace() {
     timingLocked,
     canUnlockTiming,
     onOpenTimingSettings: handleOpenTimingSettings,
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleStartSectionStable, sectionStartCellIds, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
+    // AQU-2204: following its recordings, a file shows no source times — so
+    // a line's "Edit timestamps" is unavailable, with the reason.
+    followsRecordings: timingMode === "audioFirst",
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleStartSectionStable, sectionStartCellIds, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -9830,9 +10022,12 @@ export function ProjectWorkspace() {
       cellsLoading,
       cellsError,
       hasLinkedPicture: activeFile?.orderedBy === "time" && Boolean(activeFile.coreMediaUrl),
+      // AQU-1901: no rows until the open lane can be named — paired with the
+      // '' fallback they read "empty" on a project with only tagged lanes.
+      lanesLoading: lanesPending,
     }),
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError,
-      activeFile?.orderedBy, activeFile?.coreMediaUrl]
+      activeFile?.orderedBy, activeFile?.coreMediaUrl, lanesPending]
   )
 
   const showFileStats = centerSurface === "editor"
@@ -11533,6 +11728,7 @@ export function ProjectWorkspace() {
     // dialog itself greys out New source text below Project lead.
     const level = project.syncRole?.level ?? null
     if (!canPerform("file.create", level) && !canPerform("target.cell.commit", level)) return
+    setReimportTarget(null)
     setImportOpen(true)
   }, [project])
 
@@ -12909,11 +13105,8 @@ export function ProjectWorkspace() {
     [canEditLines, placement, insertSlots, rowActions],
   )
 
-  // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
-  // file-level (files.meta via file.timing.set); a file with no mode of its
-  // own inherits the legacy project-level value (so projects that chose Free
-  // timing in Project Settings keep it), else Original timing.
-  const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, { timedToLinkedVideo })
+  // (AQU-2204: `timingMode` is resolved up beside `timingFilmTimed`, so the row
+  // context and the link-video prompt can read it without a TDZ hazard.)
   // AQU-646 stage 2: which rows a file derives is a question about the file,
   // and this is the only place that can answer it — tracks.ts is deliberately
   // import-free, so what it knows about a file arrives as this flat context
@@ -13068,7 +13261,7 @@ export function ProjectWorkspace() {
    * merged list must never be written back (it drops kinds this build has never
    * heard of); an overlay that leaked into an emit would break exactly that.
    *
-   * BOUND TO ITS FILE, like `timingVideoWarnFor` — a bare Map would be applied
+   * BOUND TO ITS FILE — a bare Map would be applied
    * to whatever file happened to be open when the refresh landed, which on a
    * project of 168 episodes is a reorder appearing on the wrong one.
    *
@@ -13111,28 +13304,26 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setPendingTrackOrders(null)
   }, [activeFileId, projectId])
-  // Pre-merge round: the control returned to the timeline toolbar, gated by
-  // the same clearance the setting had in Project Settings (maintainer). The
-  // gate is "don't pass the callback": below the floor the toolbar renders
-  // the active mode as a plain label.
-  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // Pre-merge round: the control returned to the timeline toolbar. The gate
+  // is "don't pass the callback": below the floor the toolbar renders the
+  // active choice as plain text. AQU-2204 (Sam, Oct 26): project lead and
+  // above, per file, for everyone — the server's file.timing.set floor too.
+  const canEditTimingMode = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD
   // Stage 3: track order is PROJECT-WIDE (Sam's call) and rides `file.track.set`,
   // which the server floors at maintainer — the same clearance, read the same
   // way, as the timing mode beside it. The gate is "don't pass the callback":
   // below the floor the gutter has no grip, no grab cursor and no tab stop.
-  const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
-  // AQU-646 stage 2: RESTRUCTURING is doubly gated — the same maintainer floor
-  // AND the project's `allowTrackEditing` setting, which is off unless somebody
-  // turned it on. Two independent conditions, and the server checks both
-  // separately (track-editing-authority.ts), so this is the affordance rather
-  // than the permission.
-  //
-  // RENAME AND REORDER ARE DELIBERATELY NOT IN HERE. Both already ship, and a
-  // new setting defaulting to off must not silently take an existing capability
-  // away from every project that has one — so they stay on `canReorderTracks`'
-  // clearance alone. That split is why the editor takes `onRenameTrack` as its
-  // own prop instead of folding it into `trackEditing`.
-  const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
+  const trackRoleLevel = serverRoleLevel ?? project?.syncRole?.level ?? 0
+  const canReorderTracks = trackRoleLevel >= ROLE.MAINTAINER
+  // AQU-646 stage 2 / AQU-2214: RESTRUCTURING is doubly gated — the same
+  // maintainer floor AND the project's `allowTrackEditing`, which is ON unless
+  // somebody turned it off. Both clauses, and why rename and reorder are not
+  // among them, live in `canRestructureTracks` so a test pins the rule without
+  // rendering this component.
+  const canEditTracks = canRestructureTracks({
+    roleLevel: trackRoleLevel,
+    allowTrackEditing: project?.allowTrackEditing,
+  })
   /**
    * AQU-1565 / AQU-1566: who is offered captions as rows, the timeline's
    * Attach captions, and the upload of the original recording. One pure
@@ -13163,7 +13354,7 @@ export function ProjectWorkspace() {
    */
   const sourceLanguageCode = useMemo(
     () => sourceLane
-      ? laneLanguageCode(sourceLane, { settings: project, role: "source", legacyTag: sourceLane.legacyTag ?? null })
+      ? laneLanguageCode(sourceLane, { role: "source", legacyTag: sourceLane.legacyTag ?? null })
       : null,
     [sourceLane, project],
   )
@@ -13231,7 +13422,6 @@ export function ProjectWorkspace() {
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
   // apply to that file.
-  const [timingVideoWarnFor, setTimingVideoWarnFor] = useState<string | null>(null)
   const showVideoPane = shouldShowVideoPane({
     timelineStacked,
     coreMediaUrl: activeFile?.coreMediaUrl,
@@ -13500,9 +13690,12 @@ export function ProjectWorkspace() {
   // "dubbing" off the not-yet-loaded project and then read its own hydration
   // as a remote change — a false "Timing mode changed" modal on every reload.
   const timingAck = useTimingModeAck({
-    timingMode,
+    timingMode: timingChoiceMode,
     fileId: activeFileId,
+    // AQU-2204: a file with nothing to follow always follows its recordings,
+    // so nothing anyone stores changes what it shows — say nothing about it.
     eligible:
+      !timingNothingToFollow &&
       project != null &&
       settingsFetched &&
       centerSurface === "editor" &&
@@ -13543,12 +13736,13 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646, rescoped by AQU-1704: a subtitle import with its video linked
-      // has no Free timing to switch to, and the picker is not rendered for
-      // one. Silent because it is unreachable from the UI; this exists so no
+      // AQU-646, rescoped by AQU-1704 and AQU-2204: a file timed to a film has
+      // no "Follows recordings" to switch to, and the control offers none.
+      // Silent because it is unreachable from the UI; this exists so no
       // programmatic caller can write a mode the resolver would then ignore.
-      // A video-less subtitle file DOES get the picker, so it must get through.
-      if (mode === "audioFirst" && timingModeFixedByFootage) return
+      if (mode === "audioFirst" && timingFilmTimed) return
+      // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
+      if (mode === "dubbing" && timingNothingToFollow) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -13560,16 +13754,9 @@ export function ProjectWorkspace() {
         })
         return
       }
-      if (mode === "audioFirst" && activeFile?.coreMediaUrl) {
-        // Bind the warning to the file it was raised for: the dialog can
-        // outlive the active file (history navigation is not blocked by the
-        // modal overlay), and confirming must never switch a different file.
-        setTimingVideoWarnFor(activeFileId)
-        return
-      }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, activeFile?.coreMediaUrl, timingModeFixedByFootage, applyTimingMode],
+    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -14826,6 +15013,16 @@ export function ProjectWorkspace() {
    * came from. See `useRepetitionValidation`.
    */
   const repetitionRoleLevel = project?.syncRole?.level ?? null
+  /**
+   * AQU-2176: an entry in the "these rows were signed off" dialog is a jump to
+   * that row. Repetitions are always in the OPEN file, so the editor usually
+   * has the row already; the park is for the case where it does not — the
+   * media lens, where no text editor is mounted to scroll.
+   */
+  const goToRepetitionRow = useCallback((cellId: string) => {
+    if (editorRef.current?.scrollToCellId(cellId, { flash: true })) return
+    pendingCellScrollRef.current = { cellId, flash: true, fileId: activeFileId, source: "link" }
+  }, [activeFileId])
   const {
     handleCellValidated,
     prepareBulkRepetitions,
@@ -14852,6 +15049,7 @@ export function ProjectWorkspace() {
     applyOptimisticTargetEdit,
     rememberPendingTargetCommit,
     afterWrite: flushRepetitionWrites,
+    goToCell: goToRepetitionRow,
   })
   // The "Batch validate text…" action is built above this point; it reaches
   // the bulk planner through this ref.
@@ -15148,6 +15346,7 @@ export function ProjectWorkspace() {
     onClearCastVoice: handleClearCastVoice,
     onCloneVoice: (cellId) => {
       setMakeCharacterSeedCellId(cellId)
+      setMakeCharacterMode("clone")
       setMakeCharacterOpen(true)
     },
   })
@@ -15922,6 +16121,23 @@ export function ProjectWorkspace() {
     verseResourcesOpen,
     whosWhoOpen,
   })
+  // The rail's buttons act like tabs: opening one panel closes the other two,
+  // and `null` closes whichever is open.
+  const selectRightRailPanel = (panel: RightRailPanel | null) => {
+    const next = {
+      bibles: panel === "bibles",
+      resources: panel === "resources",
+      people: panel === "people",
+    }
+    setParallelBiblesOpen(next.bibles)
+    setVerseResourcesOpen(next.resources)
+    setWhosWhoOpen(next.people)
+    if (projectId) {
+      writeParallelBiblesOpen(projectId, next.bibles)
+      writeVerseResourcesOpen(projectId, next.resources)
+      writeWhosWhoOpen(projectId, next.people)
+    }
+  }
 
   return (
     <EditorScrollProvider>
@@ -16027,6 +16243,17 @@ export function ProjectWorkspace() {
                     setAssignModalOpen(true)
                   } : undefined}
                   onSegmentation={setSegmentationFileId}
+                  onReimport={canImportSource ? (fileId) => {
+                    const file = project.files.find((entry) => entry.id === fileId)
+                    if (!file) return
+                    setReimportTarget({
+                      fileId,
+                      name: file.name,
+                      ...(file.importProfile ? { importProfile: file.importProfile } : {}),
+                      ...(file.corpusMarker ? { corpusMarker: file.corpusMarker } : {}),
+                    })
+                    setImportOpen(true)
+                  } : undefined}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -16810,7 +17037,8 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    hideTimingMode={timingModeFixedByFootage}
+                    timingFilmTimed={timingFilmTimed}
+                    timingSourceUnavailable={timingNothingToFollow}
                     // AQU-1119: the timeline's own collapse control, and the
                     // text section's — the latter because TimelineEditor owns
                     // the header it portals into the table column's slot.
@@ -17116,6 +17344,7 @@ export function ProjectWorkspace() {
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
+            activeLaneId={activeLaneId}
             audioOnlyLane={activeLaneDelivers === "audio"}
             laneDelivers={activeLaneDelivers}
             lanes={availableLanes}
@@ -17312,7 +17541,7 @@ export function ProjectWorkspace() {
         )}
         aside={(() => {
           const hasRightAside =
-            hasRightRailPanel(rightRail) ||
+            rightRail.openPanel !== null ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -17327,7 +17556,7 @@ export function ProjectWorkspace() {
             <>
               {/* Parallel Bibles (helloao): open panel only — collapsed edge tab
                   rides in asideEdge so it isn't stretched by Resizable. */}
-              {rightRail.biblesPanel && (
+              {rightRail.openPanel === "bibles" && (
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
@@ -17341,7 +17570,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
                   collapsed edge tab rides in asideEdge alongside the bibles'. */}
-              {rightRail.resourcesPanel && (
+              {rightRail.openPanel === "resources" && (
                 <VerseResourcesSidebar
                   key={`${activeFile!.id}-resources`}
                   projectId={project!.id}
@@ -17357,7 +17586,7 @@ export function ProjectWorkspace() {
               )}
               {/* AQU-1689: Who's Who, the passage's cast — open panel only;
                   its "People" edge tab rides in asideEdge. */}
-              {rightRail.peoplePanel && (
+              {rightRail.openPanel === "people" && (
                 <WhosWhoSidebar
                   project={project!}
                   fileId={activeFile?.id ?? null}
@@ -17541,57 +17770,18 @@ export function ProjectWorkspace() {
             </>
           )
         })()}
-        asideEdge={(() => {
-          // AQU-461: collapsed tabs stack here — bibles, verse resources and
-          // (AQU-1689) Who's Who — each shown only while its own panel is closed.
-          // AQU-1316: both flags come from `rightRail`, the same value `aside`
-          // reads, so a tab can never sit beside its own open panel.
-          if (!hasRightRailEdge(rightRail)) return null
-          return (
-            <>
-              {rightRail.biblesEdge && (
-                <ParallelBiblesSidebar
-                  key={`${activeFile!.id}-edge`}
-                  trackedRef={trackedCellRef}
-                  open={false}
-                  onToggle={() => {
-                    const next = !parallelBiblesOpen
-                    setParallelBiblesOpen(next)
-                    if (projectId) writeParallelBiblesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.resourcesEdge && (
-                <VerseResourcesSidebar
-                  key={`${activeFile!.id}-resources-edge`}
-                  projectId={project!.id}
-                  trackedRef={trackedCellRef}
-                  getJwt={() => jwtRef.current}
-                  open={false}
-                  onToggle={() => {
-                    const next = !verseResourcesOpen
-                    setVerseResourcesOpen(next)
-                    if (projectId) writeVerseResourcesOpen(projectId, next)
-                  }}
-                />
-              )}
-              {rightRail.peopleEdge && (
-                <WhosWhoSidebar
-                  project={project!}
-                  fileId={activeFile?.id ?? null}
-                  trackedRef={trackedCellRef}
-                  sourceLanguage={activeSourceLanguage}
-                  open={false}
-                  onToggle={() => {
-                    const next = !whosWhoOpen
-                    setWhosWhoOpen(next)
-                    if (projectId) writeWhosWhoOpen(projectId, next)
-                  }}
-                />
-              )}
-            </>
-          )
-        })()}
+        asideEdge={
+          // The Bibles / Helps / People buttons share one rail and switch
+          // between their panels, so at most one is open (AQU-1316's
+          // panel-or-tab rule now lives in `rightRail.openPanel`).
+          rightRail.tabs.length > 0 ? (
+            <ScriptureSideRail
+              tabs={rightRail.tabs}
+              openPanel={rightRail.openPanel}
+              onSelect={selectRightRailPanel}
+            />
+          ) : null
+        }
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on
@@ -17815,6 +18005,26 @@ export function ProjectWorkspace() {
           onLastTakeRemoved={(cellId) => {
             for (const textId of linkedTextIdsFor(cellId)) void resetTargetRowAfterLastTake(textId)
           }}
+          // The pencil beside "Read aloud": close the recorder and put the
+          // caret in the line's target text. A cue's words live on the subtitle
+          // it performs — the same row the recorder keeps scrolled into view
+          // behind it. No pencil at all where the lane takes no writes.
+          onEditText={laneWriteFrozen ? undefined : (cellId) => {
+            const rowId = resolveRecordingRowCellId({
+              cellId,
+              isCueArrangement: Boolean(audioCueCells),
+              linkedTextIds: cueLinks.textForCue.get(cellId),
+            })
+            setRecordingCellId(null)
+            if (!rowId) return
+            if (timelineStacked && mediaSections.isCollapsed("text")) mediaSections.expand("text")
+            // A frame later: during this click the recorder is still open, and
+            // its focus trap would take the caret straight back.
+            requestAnimationFrame(() => {
+              const editor = editorRef.current
+              if (editor && !editor.focusCellEditorId(rowId)) editor.scrollToCellId(rowId, { flash: true })
+            })
+          }}
           onClose={() => setRecordingCellId(null)}
         />
       )}
@@ -17838,6 +18048,7 @@ export function ProjectWorkspace() {
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
         <ImportDialog open={importOpen} onOpenChange={(next) => {
             setImportOpen(next)
+            if (!next) setReimportTarget(null)
             // AQU-693: when an import launched from the setup checklist closes
             // (success, cancel, or error), return the user to the still-live
             // checklist — step 1 now reflects its true state — instead of
@@ -17860,6 +18071,7 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
+          reimportTarget={reimportTarget}
           excludeFrontMatter={project.importExcludeFrontMatter}
           cellUnit={project.importCellUnit}
           sourceDisabledReason={sourceImportDenialReason}
@@ -18081,6 +18293,14 @@ export function ProjectWorkspace() {
             setMakeCharacterSeedCellId(null)
           }}
           seedCellId={makeCharacterSeedCellId}
+          initialMode={makeCharacterMode}
+          // Added from a line's dropdown: cast it on that line too.
+          onAdded={makeCharacterMode === "character" && makeCharacterSeedCellId
+            ? (voice) => {
+                const cell = audioMergedCells.find((c) => c.id === makeCharacterSeedCellId)
+                if (cell) handleAssignCastVoice(cell, voice.id)
+              }
+            : undefined}
           tts={tts}
           projectId={project.id}
           fileId={activeFileId}
@@ -18147,9 +18367,11 @@ export function ProjectWorkspace() {
                 quality: t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality]),
               })
             : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
-          notice={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
-            ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
-            : undefined}
+          notice={pendingActionConfirm.id === "split-quotes" && project && openTargetLaneCount(project) >= 2
+            ? t("nav.workspaceActions.splitQuotes.multiLaneWarning")
+            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
+              ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
+              : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
@@ -18279,6 +18501,7 @@ export function ProjectWorkspace() {
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}
         hasRecordings={pendingQuoteSplit?.hasRecordings ?? false}
+        targetLaneCount={project ? openTargetLaneCount(project) : 1}
         onCancel={() => setPendingQuoteSplit(null)}
         onConfirm={() => {
           if (pendingQuoteSplit) void handleSplitAtQuotes([pendingQuoteSplit.cellId])
@@ -18322,6 +18545,7 @@ export function ProjectWorkspace() {
         referenceLines={anchorCueLines}
         existingCues={audioCues ?? undefined}
         takeCount={cueTakeCountRef.current()}
+        filmUrl={activeFile?.coreMediaUrl}
         // Deleting a file is PROJECT_LEAD, a step above the contributor floor
         // most of this dialog sits on, so the button is gated on its own kind
         // rather than on the import's.
@@ -18355,6 +18579,7 @@ export function ProjectWorkspace() {
           // so pressing again after a failure never writes twice.
           <ImportTimelineTextDialog key={`${captionDialogFileId}:rows`} mode="rows"
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             onCancel={() => setCaptionDialogFileId(null)}
             onConfirm={async input => {
               if (!canManageSources) throw new Error(t("importExport.captionTrack.saveFailed"))
@@ -18388,6 +18613,7 @@ export function ProjectWorkspace() {
         ) : (
           <ImportTimelineTextDialog key={captionDialogFileId}
             projectId={project.id} mediaName={activeFile.name} durationMs={captionMediaDurationMs}
+            filmUrl={activeFile.coreMediaUrl}
             // AQU-1566: once the file has rows, its own Source text and Target
             // text rows are not something a caption file may replace.
             tracks={captionTrackDestinations(serverTimelineTracks.filter(track =>
@@ -18444,6 +18670,7 @@ export function ProjectWorkspace() {
         // about one file over a confirm button that would write to another.
         open={extractSubtitlesFileId !== null && extractSubtitlesFileId === activeFileId}
         textFileName={activeFile?.name ?? ""}
+        filmUrl={activeFile?.coreMediaUrl}
         onCancel={() => setExtractSubtitlesFileId(null)}
         onConfirm={(parsed) => {
           const fileId = extractSubtitlesFileId
@@ -18502,19 +18729,6 @@ export function ProjectWorkspace() {
           const u = pendingVideoUrl
           setPendingVideoUrl(null)
           if (u) void applyLinkVideo(u)
-        }}
-      />
-      {/* Flow A (file-scoped): switching a video-bearing file to Free timing
-          hides the video — confirm before the mode changes. */}
-      <TimingVideoWarningDialog
-        // Only while the warned-about file is still the open one — navigating
-        // away answers the question by abandoning it.
-        open={timingVideoWarnFor != null && timingVideoWarnFor === activeFileId}
-        onCancel={() => setTimingVideoWarnFor(null)}
-        onConfirm={() => {
-          const target = timingVideoWarnFor
-          setTimingVideoWarnFor(null)
-          if (target) void applyTimingMode("audioFirst", target)
         }}
       />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned

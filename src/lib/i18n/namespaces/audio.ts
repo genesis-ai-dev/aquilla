@@ -43,11 +43,16 @@ export const audio = defineNamespace({
     "audio.characters.filterGroupAriaLabel": "Filter character voices",
     "audio.characters.filterFemale": "Female",
     "audio.characters.filterMale": "Male",
-    "audio.characters.filterChild": "Child",
-    "audio.characters.filterTeen": "Teen",
-    "audio.characters.filterYoungAdult": "Young adult",
-    "audio.characters.filterAdult": "Adult",
-    "audio.characters.filterElderly": "Elderly",
+    "audio.characters.filterYoung": "Young",
+    "audio.characters.filterMiddleAged": "Middle-aged",
+    "audio.characters.filterOld": "Old",
+    "audio.characters.rangeTreble": "Treble",
+    "audio.characters.rangeSoprano": "Soprano",
+    "audio.characters.rangeMezzo": "Mezzo",
+    "audio.characters.rangeAlto": "Alto",
+    "audio.characters.rangeTenor": "Tenor",
+    "audio.characters.rangeBaritone": "Baritone",
+    "audio.characters.rangeBass": "Bass",
     "audio.characters.noMatches": "No character voices match these filters.",
     "audio.characters.previewAriaLabel": "Preview {name}",
     "audio.characters.pauseAriaLabel": "Stop previewing {name}",
@@ -245,6 +250,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
+    "audio.recordingModal.editTextTooltip": "Edit this text",
     "audio.recordingModal.notTranslated": "not translated",
     "audio.recordingModal.countingHint": "Recording starts in…",
     "audio.recordingModal.countingGo": "GO",
@@ -646,6 +652,8 @@ export const audio = defineNamespace({
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
     "audio.castGutter.noCharacter": "No character",
+    "audio.castGutter.addVoice": "Add a voice…",
+    "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
     "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
@@ -695,7 +703,9 @@ export const audio = defineNamespace({
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
     "audio.aiError.creditCapTitle": "AI credit allowance used up",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
-    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
+    "audio.aiError.seedVcFailedTitle": "Voice conversion failed",
+    "audio.aiError.voiceConvertSlowTitle": "The voice service was starting up",
+    "audio.aiError.voiceConvertSlowBody": "It took too long to answer, which usually means it had been idle. Try again; the next one is usually quick.",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
@@ -844,11 +854,32 @@ export const audio = defineNamespace({
         description: "Start button text while the recordings upload.",
         placeholders: { done: "Recordings uploaded so far, e.g. '3'.", total: "Recordings in total, e.g. '8'." },
       },
+      "audio.castGutter.addVoice": { description: "Last row of a line's voice dropdown: opens the New voice dialog to add a voice to the cast." },
+      "audio.castGutter.recordingTooltip": {
+        description: "Tooltip of a line's voice field when its audio is a person's recording and no voice is assigned.",
+        placeholders: { label: "What the field shows, e.g. 'Your recording' or 'Recorded by Ana'." },
+      },
       "audio.characters.filterGroupAriaLabel": {
         description:
           "Accessible group label (not visible text) for the row of filter chips " +
-          "(Female, Male, Child, …) above the list of character voices.",
+          "(Female, Male, Young, …) above the list of character voices.",
       },
+      "audio.characters.filterYoung": {
+        description: "Age filter chip and card label for character voices: children to people in their twenties.",
+      },
+      "audio.characters.filterMiddleAged": {
+        description: "Age filter chip and card label for character voices: people in their thirties to fifties.",
+      },
+      "audio.characters.filterOld": {
+        description: "Age filter chip and card label for character voices: people sixty and older.",
+      },
+      "audio.characters.rangeTreble": { description: "Vocal range (singing term) on a character voice card: a boy's high voice." },
+      "audio.characters.rangeSoprano": { description: "Vocal range (singing term) on a character voice card: the highest female voice." },
+      "audio.characters.rangeMezzo": { description: "Vocal range (singing term, short for mezzo-soprano) on a character voice card." },
+      "audio.characters.rangeAlto": { description: "Vocal range (singing term) on a character voice card: the lowest female voice." },
+      "audio.characters.rangeTenor": { description: "Vocal range (singing term) on a character voice card: the highest male voice." },
+      "audio.characters.rangeBaritone": { description: "Vocal range (singing term) on a character voice card: the middle male voice." },
+      "audio.characters.rangeBass": { description: "Vocal range (singing term) on a character voice card: the lowest male voice." },
       "audio.characters.previewAriaLabel": {
         description: "Accessible label of the play button on a character voice card.",
         placeholders: { name: "The character voice's name, e.g. 'Hearth'." },
@@ -1832,6 +1863,12 @@ export const audio = defineNamespace({
         description:
           "Small caption above the translated text the user should read aloud into " +
           "the microphone — this is the actual script for the recording.",
+      },
+      "audio.recordingModal.editTextTooltip": {
+        description:
+          "Tooltip and screen-reader label on the small pencil beside the 'Read aloud' " +
+          "caption. Clicking it closes the recorder and puts the cursor in this line's " +
+          "translation in the editor, so a mistake in the script can be fixed right away.",
       },
       "audio.recordingModal.notTranslated": {
         description:
@@ -3195,9 +3232,11 @@ export const audio = defineNamespace({
           "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
           "inworldNotConfiguredTitle — Inworld clones skip this step.",
       },
+      "audio.aiError.voiceConvertSlowTitle": { description: "Popover heading when Change voice timed out because the GPU voice service was starting from idle." },
+      "audio.aiError.voiceConvertSlowBody": { description: "Popover body for that timeout: nothing is wrong with the line; retrying usually works quickly." },
       "audio.aiError.seedVcFailedTitle": {
         description:
-          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
+          "Popover heading when voice conversion (Change voice, or a clone voice after TTS) ran but failed.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:

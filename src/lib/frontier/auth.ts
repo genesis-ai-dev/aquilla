@@ -1,3 +1,4 @@
+import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
@@ -94,13 +95,21 @@ export async function login(
  * (clearSession) must proceed even if this network call fails.
  */
 export async function logout(jwt: string): Promise<void> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(() => { controller.abort(); resolve(); }, 5_000);
+  });
   try {
-    await fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
+    await Promise.race([deadline, fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
       method: "POST",
       headers: { Authorization: `Bearer ${jwt}` },
-    });
+      signal: controller.signal,
+    })]);
   } catch {
     // Best-effort — offline or backend hiccup shouldn't block local logout.
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -229,11 +238,11 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
   return { session, projectId: data.project_id };
 }
 
-export async function requestPasswordReset(email: string): Promise<void> {
+export async function requestPasswordReset(email: string, returnTo?: string): Promise<void> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, return_to: orgInviteReturnTo(returnTo) }),
   });
   if (!res.ok) {
     // AQU-820: dropped body.detail/body.error — showing it here would both

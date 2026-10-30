@@ -49,10 +49,16 @@ interface MediaDefaultsSectionProps {
   canEdit: boolean
 }
 
-/** What each setting reads as when neither the org nor a project sets it. */
+/**
+ * What each setting reads as when neither the org nor a project sets it.
+ *
+ * HAND-MIRRORED with the readers: ProjectSettings' `effectiveAllowTrackEditing`
+ * and the sync worker's `resolveAllowTrackEditing`. `allowTrackEditing` is ON
+ * here since AQU-2214.
+ */
 const BUILT_IN = {
   timingLocked: true,
-  allowTrackEditing: false,
+  allowTrackEditing: true,
   cellEditingFloor: "none",
   allowSelfValidationAudio: true,
   validationRoleFloorAudio: "reviewer",

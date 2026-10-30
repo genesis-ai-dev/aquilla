@@ -56,15 +56,30 @@ import {
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { listProjectLanes } from "../../../db/shared/lanes"
+import { listRulesForProject } from "../../../db/shared/style-rules"
+import {
+  buildApplicabilityIndex,
+  cellCoordinates,
+  resolveEffectiveRules,
+} from "../../../src/lib/rules/applicability"
+import type {
+  RuleApplicability as ClientRuleApplicability,
+  StyleRule as ClientStyleRule,
+} from "../../../src/lib/rules/style-rule-types"
+import { bookGenre } from "../../../src/lib/scripture/book-genres"
 import { conceptsForLane, mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 import {
   buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
+  buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
   selectApprovedExamples,
+  selectInjectedTerms,
   type ChatMessage,
+  type InjectedTerm,
   type PromptRule,
   type ValidatedPair,
 } from "../../../src/lib/completion/prompt-build"
@@ -110,6 +125,7 @@ export interface PromptPreviewEnv {
 
 interface CellRow {
   file_id: string
+  canonical_ref: string | null
   value: string
   medium: string | null
   transcription: string | null
@@ -188,13 +204,10 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 }
 
 /** Labeled description of one injected term, so a caller can see WHICH
- *  terminology entry produced a line in the rules block. */
-export interface InjectedTerm {
-  conceptId: string
-  sourceTerm: string
-  approvedRenderings: string[]
-  forbiddenRenderings: string[]
-}
+ *  terminology entry produced a line in the rules block. Re-exported from the
+ *  shared builder: since AQU-2209 this list IS the builder's selection — the
+ *  concepts present in this cell's source — not the whole termbase. */
+export type { InjectedTerm }
 
 export interface PromptPreviewBody {
   projectId: string
@@ -214,8 +227,11 @@ export interface PromptPreviewBody {
     base: string
     /** The brief block, or "" when the project has no L1 summary. */
     brief: string
-    /** The rules block (terminology + style rules), or "" when nothing injects. */
+    /** The rules block (terminology and your own regex rules), or "" when nothing injects. */
     rules: string
+    /** The style-rules block (approved, enabled style rules in force for this
+     *  cell), or "" when none applies. Proposed and rejected rules never appear. */
+    styleRules: string
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
@@ -244,6 +260,51 @@ export interface PromptPreviewBody {
 }
 
 /**
+ * Style-rule instructions in force for one cell: the library resolved through
+ * the applicability graph exactly as the editor does. Only `approved` and
+ * `enabled` rules participate (resolveEffectiveRules), so proposed, rejected
+ * and archived rules never reach the prompt.
+ */
+async function styleInstructionsFor(
+  db: AquillaDb,
+  args: {
+    projectId: string
+    fileId: string
+    cellId: string
+    canonicalRef: string | null
+    settings: Record<string, unknown>
+  },
+): Promise<string[]> {
+  const { rules, applicability } = await listRulesForProject(db, args.projectId)
+  if (rules.length === 0) return []
+
+  const file = await db
+    .prepare("SELECT book_code FROM files WHERE id = ? AND project_id = ?")
+    .bind(args.fileId, args.projectId)
+    .first<{ book_code: string | null }>()
+  // An explicit file genre wins over the one derived from the book code
+  // (resolveFileGenre). The id is only matched against applicability rows, so
+  // an unknown one simply matches nothing.
+  const assigned = objectSetting(args.settings, "fileGenres")[args.fileId]
+  const genre = typeof assigned === "string" && assigned.trim() ? assigned.trim().toLowerCase() : undefined
+  const coords = cellCoordinates(
+    { id: args.cellId, ...(args.canonicalRef ? { globalReferences: [args.canonicalRef] } : {}) },
+    {
+      fileId: args.fileId,
+      ...(file?.book_code ? { bookCode: file.book_code } : {}),
+      ...(genre ? { genre } : {}),
+    },
+    bookGenre,
+  )
+  // The worker's rows carry a looser checkSpec type than the client's; the
+  // resolver never reads it.
+  const index = buildApplicabilityIndex(applicability as unknown as ClientRuleApplicability[])
+  return resolveEffectiveRules(rules as unknown as ClientStyleRule[], index, coords).map(
+    (effective) => effective.rule.instruction,
+  )
+}
+
+/**
  * Build the preview. Split from the route handler so tests can drive it
  * against a seeded DB without minting a credential.
  */
@@ -255,7 +316,7 @@ export async function buildPromptPreview(
 
   // ── the cell itself ──────────────────────────────────────────────────────
   const cellSql =
-    "SELECT file_id, value, medium, transcription, sequence_index " +
+    "SELECT file_id, canonical_ref, value, medium, transcription, sequence_index " +
     "FROM cells WHERE project_id = ? AND cell_id = ? AND side = 'source'" +
     (args.fileId ? " AND file_id = ?" : "") +
     " ORDER BY file_id LIMIT 1"
@@ -283,11 +344,10 @@ export async function buildPromptPreview(
   // string was already taken. Settings are not consulted.
   const sourceLane = (lanes ?? []).find((lane) => lane.role === "source")
   const sourceLanguage = laneLanguage(sourceLane ?? { role: "source" }, {
-    settings,
     role: "source",
     legacyTag: sourceLane?.legacyTag ?? null,
   })
-  const targetLanguage = laneLanguageForTag(targetLang, lanes, settings) ?? ""
+  const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
@@ -432,18 +492,13 @@ export async function buildPromptPreview(
     targetLang,
   )
 
-  const injectedTerms: InjectedTerm[] = visibleConcepts
-    .filter((c) => c.status === "active")
-    .map((c) => ({
-      conceptId: c.id,
-      sourceTerm: c.sourceTerm,
-      approvedRenderings: c.renderings
-        .filter((r) => r.status === "preferred" || r.status === "admitted")
-        .map((r) => r.rendering),
-      forbiddenRenderings: c.renderings
-        .filter((r) => r.status === "forbidden")
-        .map((r) => r.rendering),
-    }))
+  // AQU-2209: report exactly what the prompt injects — the concepts whose
+  // source term occurs in THIS cell — by asking the builder that does the
+  // narrowing, never by re-deriving it from the full concept list. An agent
+  // tuning a termbase reads this to confirm a term landed, so a preview that
+  // listed all 722 concepts while the prompt carried two was worse than none.
+  const termSelection = selectInjectedTerms(rules, sourceText)
+  const injectedTerms: InjectedTerm[] = termSelection.injected
 
   // ── discourse window (D4): the approved target of preceding cells ────────
   const precedingContext = precedingCount
@@ -495,6 +550,18 @@ export async function buildPromptPreview(
     { source: sourceText },
   ])
 
+  // ── style rules: the Rules page's Style rules library (AQU-2195) ──────────
+  // The same selection the editor makes (ProjectWorkspace styleInstructionsFor):
+  // approved, enabled rules resolved against this cell's place in the
+  // applicability graph, with the org's shared rules included.
+  const styleInstructions = await styleInstructionsFor(db, {
+    projectId,
+    fileId,
+    cellId,
+    canonicalRef: cell.canonical_ref,
+    settings,
+  })
+
   const messages = buildPrompt({
     sourceLanguage,
     targetLanguage,
@@ -502,6 +569,7 @@ export async function buildPromptPreview(
     sourceText,
     examples: [],
     rules,
+    styleInstructions,
     validatedPairs: examples,
     exampleFormat,
     briefSummary,
@@ -515,6 +583,16 @@ export async function buildPromptPreview(
       message:
         "this cell has no effective source text (an untranscribed media section, or an empty cell) — " +
         "the copilot refuses to draft it, and retrieval was skipped",
+    })
+  }
+  if (termSelection.dropped > 0) {
+    warnings.push({
+      code: "terms_capped",
+      message:
+        `${termSelection.matched} glossary concepts occur in this source, more than the ` +
+        `${DEFAULT_MAX_INJECTED_TERMS}-term injection cap: the ${termSelection.dropped} ` +
+        "lowest-precedence matches (the project's own concepts before any subscribed " +
+        "termbase's) were left out of the prompt",
     })
   }
   if (/\\f\s/.test(sourceText) || sourceText.includes("\\f*")) {
@@ -542,7 +620,8 @@ export async function buildPromptPreview(
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
         brief: buildBriefBlock(briefSummary),
-        rules: buildRulesBlock(rules),
+        rules: buildRulesBlock(rules, { sourceText }),
+        styleRules: buildStyleRulesBlock(styleInstructions),
         injectedTerms,
         examples,
         precedingContext,

@@ -93,6 +93,7 @@ import { TRANSLATION_NOTES_FILE_KIND } from "./notes/note-files"
 import { parseObsStories } from "./parsers/obs"
 import { splitStringsByBook, type BookSlice } from "./import/split-by-book"
 import { reimportKeysFor } from "./import/reimport-keys"
+import { planSidebarReimport, type SidebarReimportMode } from "./import/reimport-copy-name"
 import { getBookName } from "./file-labeling/bible-book-names"
 import {
   aquillaImportMetadata,
@@ -103,6 +104,7 @@ import {
 import { ImportService } from "./import/import-service"
 import type { ImportPreviewNotice, PreparedImportFile } from "./import/import-service"
 import type { SubtitleCueRepair } from "./parsers/core-types"
+import type { FramesAsHundredths } from "./parsers/frame-timecode"
 import {
   classifyAndParseUnknownText,
   readUnknownTextFile,
@@ -510,6 +512,9 @@ export interface ImportResult {
    *  notices by `preparedParsedFile`; absent when nothing was repaired or
    *  refused. */
   cueRepair?: SubtitleCueRepair
+  /** AQU-2197: cue times that look like frame numbers written as hundredths.
+   *  The preview offers to convert them at a frame rate the person picks. */
+  framesAsHundredths?: FramesAsHundredths
   roundTripFidelity?: RoundTripFidelity
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
@@ -561,6 +566,15 @@ export interface ImportContext {
   /** Replaces the upload phase label, for example while styles are aligning. */
   onPhase?: (label: string) => void
   onAlignProgress?: (done: number, total: number) => void
+  /** Sidebar re-import of one chosen file. Forces that file (or a copy of it)
+   *  and ignores any translation embedded in the upload. */
+  sidebarReimport?: {
+    mode: SidebarReimportMode
+    targetFileId: string
+    existingNames: readonly string[]
+    /** Already-translated collision suffix ("updated" or "blank"). */
+    suffix: string
+  }
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
@@ -726,6 +740,9 @@ export async function importFile(
     emitParsedFile,
   })
   const ready = prepared ?? await prepareImportFile(file, ctx)
+  if (ctx.sidebarReimport && ready.results.length !== 1) {
+    throw new Error(t("importExport.reimport.oneDocument"))
+  }
   const sharedArtifact = ready.results.find((result) => result.sharedSourceArtifact)?.sharedSourceArtifact
   const multiResult = ready.results.length > 1
   const imported = await service.importFile(
@@ -1471,40 +1488,74 @@ export interface PartnerNotesImportOptions {
   splitSentences?: boolean
 }
 
+export interface PreparedPartnerNotes {
+  name: string
+  strings: TranslatableString[]
+  bookCodes: string[]
+  skippedScriptureCount: number
+  frontBackMatter: boolean
+}
+
+/**
+ * Parse a partner IDML package without writing it. Re-import uses this to
+ * count added and updated cells before the user picks a choice; the commit
+ * path parses again so a changed edition or sentence split cannot save a
+ * stale read.
+ */
+export async function readPartnerNoteStrings(
+  file: File,
+  options: PartnerNotesImportOptions,
+  extras?: {
+    signal?: AbortSignal
+    onProgress?: (p: PartnerImportProgress) => void
+  },
+): Promise<PreparedPartnerNotes> {
+  const { edition } = options
+  assertSourceUploadByteLength(file.size)
+  extras?.onProgress?.({ phase: "parse" })
+
+  // The worker transfers (detaches) its input, so the preserved source artifact
+  // is read from the File a second time rather than shared with the parse buffer.
+  const parseBuffer = await file.arrayBuffer()
+  assertIdmlPackageBytes(parseBuffer, file.name)
+  const parsed = await edition.parse(parseBuffer, {
+    ...(extras?.signal ? { signal: extras.signal } : {}),
+    onProgress: (idml: IdmlProgress) => extras?.onProgress?.({ phase: "parse", idml }),
+    ...(options.splitSentences !== undefined
+      ? { splitSentences: options.splitSentences }
+      : {}),
+  })
+
+  // A volume that yields nothing was almost certainly read with the wrong
+  // edition. A front/back matter volume that yields nothing is simply artwork —
+  // the maps and plates hold no text — and still imports, so the file stays part
+  // of the project and exports back unchanged.
+  if (parsed.strings.length === 0 && !parsed.frontBackMatter) {
+    throw new Error(edition.emptyImportMessage(file.name))
+  }
+
+  const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
+  return {
+    name,
+    strings: parsed.strings,
+    bookCodes: parsed.bookCodes,
+    skippedScriptureCount: parsed.skippedScriptureCount,
+    frontBackMatter: parsed.frontBackMatter,
+  }
+}
+
 export async function importPartnerNotes(
   file: File,
   ctx: ImportContext,
   onProgress: ((p: PartnerImportProgress) => void) | undefined,
   options: PartnerNotesImportOptions,
 ): Promise<FileReference> {
+  const prepared = await readPartnerNoteStrings(file, options, {
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    onProgress,
+  })
   const { edition } = options
-  assertSourceUploadByteLength(file.size)
-  onProgress?.({ phase: "parse" })
-
-  // The worker transfers (detaches) its input, so the preserved source artifact
-  // is read from the File a second time rather than shared with the parse buffer.
-  const parseBuffer = await file.arrayBuffer()
-  assertIdmlPackageBytes(parseBuffer, file.name)
-  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await edition.parse(
-    parseBuffer,
-    {
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
-      onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
-      ...(options.splitSentences !== undefined
-        ? { splitSentences: options.splitSentences }
-        : {}),
-    },
-  )
-
-  // A volume that yields nothing was almost certainly read with the wrong
-  // edition. A front/back matter volume that yields nothing is simply artwork —
-  // the maps and plates hold no text — and still imports, so the file stays part
-  // of the project and exports back unchanged.
-  if (strings.length === 0 && !frontBackMatter) {
-    throw new Error(edition.emptyImportMessage(file.name))
-  }
-
-  const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
+  const { name, strings, bookCodes, skippedScriptureCount } = prepared
   const normalized = normalizeTranslatableStrings(strings, {
     fileName: name,
     fileType: "idml",
@@ -1628,6 +1679,10 @@ export function buildBulkCellsWithSpeakers(
       ...(castNamed ? { cast_name: speaker } : {}),
       aquillaImport: aquillaImportMetadata(normalizedFile, unit),
       ...(str.paragraphStart ? { paragraphStart: true } : {}),
+      // AQU-2184: the paragraph's own USFM marker, so the HTML export can
+      // tell a \q2 poetry line from a \p paragraph. Deliberately NOT inside
+      // `aquillaImport` — re-import replaces that envelope wholesale.
+      ...(str.paragraphMarker ? { paragraphMarker: str.paragraphMarker } : {}),
     }
     cells.push({
       id: uuidv7(),
@@ -1708,9 +1763,21 @@ export async function emitParsedFile(
   ctx: ImportContext,
   normalizedFile?: NormalizedImportFile,
 ): Promise<EmitParsedFileResult> {
-  const existingFileId = reimportKeysFor(result)
-    .map((key) => ctx.reimportFileIds?.get(key))
-    .find((id): id is string => Boolean(id))
+  const sidebar = ctx.sidebarReimport
+    ? planSidebarReimport({
+      mode: ctx.sidebarReimport.mode,
+      targetFileId: ctx.sidebarReimport.targetFileId,
+      uploadName: result.name,
+      existingNames: ctx.sidebarReimport.existingNames,
+      suffix: ctx.sidebarReimport.suffix,
+      forkFileId: uuidv7(),
+    })
+    : null
+  const existingFileId = sidebar
+    ? sidebar.reconcileFileId
+    : reimportKeysFor(result)
+      .map((key) => ctx.reimportFileIds?.get(key))
+      .find((id): id is string => Boolean(id))
 
   const normalized = normalizedFile ?? normalizeTranslatableStrings(result.strings, {
     fileName: result.name,
@@ -1743,7 +1810,7 @@ export async function emitParsedFile(
     : await resolveImportSession({
       projectId: ctx.projectId,
       importKey: importSessionKeyFor(fileType, result),
-      fileName: result.name,
+      fileName: sidebar?.displayName ?? result.name,
       cellKeys: cells.map((cell) => cell.cellId),
       chunkSize: BULK_IMPORT_CHUNK,
     })
@@ -1759,7 +1826,8 @@ export async function emitParsedFile(
     })
   }
 
-  const targets: TargetCommit[] = cells.flatMap((cell, index) => {
+  const displayName = sidebar?.displayName ?? result.name
+  const targets: TargetCommit[] = sidebar?.stripTargets ? [] : cells.flatMap((cell, index) => {
     const value = result.strings[index]?.translated
     const valueHtml = result.strings[index]?.translatedHtml
     return value || valueHtml
@@ -1792,16 +1860,15 @@ export async function emitParsedFile(
     throw error
   }
 
-  const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
-  await upload({
+  const shared = {
     projectId: ctx.projectId,
     fileId,
     ...(session ? { session } : {}),
     file: {
       id: session?.fileEventId ?? uuidv7(),
-      name: result.name,
+      name: displayName,
       fileType,
-      role: "source",
+      role: "source" as const,
       kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
@@ -1821,11 +1888,24 @@ export async function emitParsedFile(
     artifactFidelity: normalized.fidelity,
     targets,
     targetLang: ctx.targetLang,
-    ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     getToken: ctx.getToken,
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
-  })
+  }
+  if (existingFileId) {
+    await reconcileSourceImport({
+      ...shared,
+      ...(sidebar?.reviewChangedSource ? { reviewChangedSource: true as const } : {}),
+      ...(sidebar?.fork && sidebar.sourceFileId
+        ? { fork: true as const, sourceFileId: sidebar.sourceFileId }
+        : {}),
+    })
+  } else {
+    await bulkUploadSource({
+      ...shared,
+      ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
+    })
+  }
 
   if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
     try {
@@ -1855,7 +1935,7 @@ export async function emitParsedFile(
   return {
     ref: {
       id: fileId,
-      name: result.name,
+      name: displayName,
       type: fileType,
       createdAt: new Date().toISOString(),
       cellCount: cells.length,
@@ -1870,6 +1950,7 @@ export async function emitParsedFile(
       ...(ctx.sourceTextDirection ? { sourceTextDirection: ctx.sourceTextDirection } : {}),
       ...(ctx.targetTextDirection ? { targetTextDirection: ctx.targetTextDirection } : {}),
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
+      ...(normalized.profileId ? { importProfile: normalized.profileId } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
       ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
@@ -2535,7 +2616,16 @@ export async function importParatextAsTarget(
         group: cell.ref,
         globalReferences: [cell.ref],
         type: cell.type,
-        ...(cell.paragraphStart ? { paragraphStart: true, metadata: { paragraphStart: true } } : {}),
+        ...(cell.paragraphStart
+          ? {
+              paragraphStart: true,
+              metadata: {
+                paragraphStart: true,
+                // AQU-2184: poetry level for the HTML export's page.
+                ...(cell.paragraphMarker ? { paragraphMarker: cell.paragraphMarker } : {}),
+              },
+            }
+          : {}),
       }))
       const normalized = normalizeTranslatableStrings(strings, {
         fileName: bookPlan.displayName,

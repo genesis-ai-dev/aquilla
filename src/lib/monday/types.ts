@@ -52,6 +52,12 @@ export interface MondayMapping {
   columns: MondayColumnMapping[]
   /** AI rationale, shown in UI. */
   notes?: string
+  /**
+   * Each file as a subitem of the project's item ('project' only). Present
+   * means on; the server fills in the subitems board and its columns on the
+   * first push. Turned on or off with PATCH `{ fileSubitems }`.
+   */
+  fileSubitems?: { boardId?: string; columns: MondayColumnMapping[] }
 }
 
 /** Every metric key, in display order — drives the metric Select in the editor. */

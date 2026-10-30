@@ -15,6 +15,7 @@ import { YouTubeImportPanel } from "./YouTubeImportPanel"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
 import { createMediaFileCommit } from "@/lib/import"
 import { embeddedSubtitleFixture } from "@/lib/parsers/__fixtures__/embedded-subtitles"
+import { framesAsHundredthsVtt, SAMPLE_CUE } from "@/lib/parsers/frame-timecode.fixtures"
 
 const SRT_CONTENT = `1
 00:00:01,000 --> 00:00:02,000
@@ -109,6 +110,27 @@ describe("YouTubeImportPanel", () => {
     if (!("rawBytes" in prepared)) throw new Error("Caption artifact is missing")
     expect(new TextDecoder().decode(prepared.rawBytes)).toBe(SRT_CONTENT)
   })
+  it("warns about times written as frame numbers in hundredths, and imports them converted (AQU-2197)", async () => {
+    const onImported = vi.fn()
+    renderPanel({ onImported })
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Import a caption export"))
+    await selectFile(makeFile(framesAsHundredthsVtt(), "ep101.vtt"))
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /preview captions/i }))
+    })
+    expect(await screen.findByTestId("frames-as-hundredths")).toHaveTextContent(/frame numbers written as hundredths/)
+    // The preview table shows the converted time.
+    expect(screen.getByText(`${SAMPLE_CUE.startAt24.toFixed(3)}–${SAMPLE_CUE.endAt24.toFixed(3)}`)).toBeInTheDocument()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /import captions/i }))
+    })
+    await waitFor(() => expect(onImported).toHaveBeenCalled())
+    const prepared = vi.mocked(createYouTubeCaptionCommit).mock.calls.at(-1)![0]
+    const cue = prepared.strings.find(c => c.original === SAMPLE_CUE.text)!
+    expect(cue.start).toBeCloseTo(SAMPLE_CUE.startAt24, 6)
+  })
+
   it("keeps the preview when publication fails and retries its commit", async () => {
     const onImported = vi.fn()
     const publish = vi.fn()

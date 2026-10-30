@@ -227,9 +227,10 @@ describe('cell-field commands — role floors', () => {
     expect(
       requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, cellId: 'c', startMs: 0, endMs: 1 }),
     ).toBe(ROLE.CONTRIBUTOR)
-    // timingMode is a FILE-level structural change — it pulls the floor up.
+    // timingMode is a FILE-level change — it pulls the floor up to project
+    // lead (AQU-2204: leads and above choose a file's timing).
     expect(requiredRoleForCommand({ kind: 'SetTiming', fileId: FILE, timingMode: 'dubbing' })).toBe(
-      ROLE.MAINTAINER,
+      ROLE.PROJECT_LEAD,
     )
     expect(
       requiredRoleForCommand({ kind: 'SetTrackOverride', fileId: FILE, trackId: 't', patch: null }),
@@ -427,6 +428,8 @@ describe('SetTrackOverride — apply', () => {
   it('a RESTRUCTURING patch is refused while allowTrackEditing is off — even for an OWNER', async () => {
     const env = makeEnv(tdb.db)
     const owner = await memberToken(tdb, ROLE.OWNER)
+    // AQU-2214: the project has to say no out loud — unset is the ON default.
+    await setSettings(tdb, { timingLocked: false, allowTrackEditing: false })
     const denied = await prepare(env, owner, [
       { kind: 'SetTrackOverride', fileId: FILE, trackId: 'target-audio', patch: null },
     ])

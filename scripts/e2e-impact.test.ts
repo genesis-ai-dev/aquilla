@@ -17,6 +17,7 @@ const specs = [
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
   "e2e/specs/editor/import-media-captions.smoke.spec.ts",
+  "e2e/specs/editor/sidebar-reimport.smoke.spec.ts",
   "e2e/specs/editor/comments.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
@@ -67,6 +68,22 @@ describe("changed-file E2E impact selection", () => {
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
         "e2e/specs/editor/import-media-captions.smoke.spec.ts",
+      )
+    }
+  })
+  it("selects the sidebar re-import journey for the review apply", () => {
+    for (const file of [
+      "src/components/FileActionMenu.tsx",
+      "src/components/ImportDialog.tsx",
+      "src/components/import/PreviewPanel.tsx",
+      "src/lib/cells/source-review.ts",
+      "src/lib/import/reimport-copy-name.ts",
+      "src/lib/import.ts",
+      "src/lib/sync/bulk-import.ts",
+      "sync-worker/src/events/import-reconcile-route.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/sidebar-reimport.smoke.spec.ts",
       )
     }
   })

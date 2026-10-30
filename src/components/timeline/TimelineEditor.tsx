@@ -214,9 +214,10 @@ export interface TimelineEditorProps {
    * anything on this file, under its current timing — does it have a line with
    * nothing to play that is not hidden? The ⋯ offers the row only then. Worked
    * out by the workspace over the WHOLE file (a book's every chapter, since
-   * Play all carries on into the next), with `skipSilentLinesCanChange`.
+   * Play all carries on into the next), with `skipSilentLinesCanChange` — and
+   * asked only while the ⋯ is open, because that lays out every chapter.
    */
-  skipSilentLinesApplies?: boolean
+  skipSilentLinesApplies?: () => boolean
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
@@ -784,6 +785,29 @@ const LANE_PROMPT_INSET_PX = 10
  * from the editor's remembered scroll offset, which a zoom on a timeline that
  * cannot scroll pushed past the lane altogether (walk r3, 2026-10-05).
  */
+/**
+ * AQU-2251: the ⋯'s "Skip lines with nothing to play" row, offered only where
+ * `applies` says it can change something. Its own component so that answer —
+ * a layout of every chapter of a book — is worked out when the ⋯ opens and
+ * mounts it, not on every edit.
+ */
+function SkipSilentLinesItem({ applies }: { applies: () => boolean }) {
+  const t = useT()
+  const skipSilentLines = useSkipSilentLinesPref()
+  const shown = useMemo(() => applies(), [applies])
+  if (!shown) return null
+  return (
+    <DropdownMenuCheckboxItem
+      checked={skipSilentLines}
+      onCheckedChange={(on) => setSkipSilentLinesPref(on)}
+      data-testid="tl-skip-silent-toggle"
+    >
+      <FastForward />
+      {t("editor.timeline.skipSilentLines")}
+    </DropdownMenuCheckboxItem>
+  )
+}
+
 function LinkedVideoLanePrompt({ onAttach }: { onAttach?: () => void }) {
   const t = useT()
   return (
@@ -1199,7 +1223,7 @@ export function TimelineEditor({
   onRetimeTarget,
   onRetimeCue,
   virtualIsTransport = false,
-  skipSilentLinesApplies = false,
+  skipSilentLinesApplies,
   timingLocked = false,
   onTrimTarget,
   onCutTargets,
@@ -1672,7 +1696,6 @@ export function TimelineEditor({
     })
   }
   const audioQuality = useAudioQualityPref()
-  const skipSilentLines = useSkipSilentLinesPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
@@ -4341,16 +4364,7 @@ export function TimelineEditor({
           line through in silence for its length. The queue and the built-in
           clock read the same remembered setting. Oct 29: shown only where it
           can change something — a line with nothing to play, not hidden. */}
-      {skipSilentLinesApplies && (
-        <DropdownMenuCheckboxItem
-          checked={skipSilentLines}
-          onCheckedChange={(on) => setSkipSilentLinesPref(on)}
-          data-testid="tl-skip-silent-toggle"
-        >
-          <FastForward />
-          {t("editor.timeline.skipSilentLines")}
-        </DropdownMenuCheckboxItem>
-      )}
+      {skipSilentLinesApplies && <SkipSilentLinesItem applies={skipSilentLinesApplies} />}
       {/* SUB-53: nothing to snap to when positions are computed. */}
       {!audioFirst && (
         <DropdownMenuCheckboxItem

@@ -587,7 +587,7 @@ describe("TimelineEditor", () => {
       render(
         <TimelineEditor
           fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
-          skipSilentLinesApplies
+          skipSilentLinesApplies={() => true}
         />,
       )
       const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
@@ -618,12 +618,28 @@ describe("TimelineEditor", () => {
     rerender(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
-        skipSilentLinesApplies
+        skipSilentLinesApplies={() => true}
       />,
     )
     expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toHaveTextContent(
       "Skip lines with nothing to play",
     )
+  })
+
+  // Review finding (Oct 29): the answer lays out every chapter of a book, so
+  // the workspace worked it out again on every edit. It is asked only when the
+  // ⋯ opens.
+  it("asks whether Skip lines with nothing to play applies only when the ⋯ opens", () => {
+    const applies = vi.fn(() => true)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies={applies}
+      />,
+    )
+    expect(applies).not.toHaveBeenCalled()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toBeInTheDocument()
+    expect(applies).toHaveBeenCalled()
   })
 
   it("Skip lines with nothing to play reads back off after a reload", () => {
@@ -633,7 +649,7 @@ describe("TimelineEditor", () => {
       render(
         <TimelineEditor
           fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
-          skipSilentLinesApplies
+          skipSilentLinesApplies={() => true}
         />,
       )
       const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))

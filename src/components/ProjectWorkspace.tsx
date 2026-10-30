@@ -14795,7 +14795,9 @@ export function ProjectWorkspace() {
   // is offered only where it can change something. Over the whole file — a
   // book's every chapter, since Play all carries on into the next — laid out
   // as the queue plays it, or as the built-in clock does while it drives.
-  const skipSilentLinesApplies = useMemo(
+  // Handed over as a question, which the timeline asks when its ⋯ opens: the
+  // answer lays out every chapter, too much to redo on every edit.
+  const skipSilentLinesApplies = useCallback(
     () =>
       skipSilentLinesCanChange({
         timing: timingMode,

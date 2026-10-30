@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fillWalks, lookupWalk, normalizeVerdict, parseWalkComment } from "./release-plan-walk.mjs"
+import { fillWalks, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment } from "./release-plan-walk.mjs"
 
 const HEAD_SHA = "a".repeat(40)
 const OTHER_SHA = "b".repeat(40)
@@ -73,6 +73,7 @@ interface AssociatedPr {
   number: number
   head: { sha: string }
   merge_commit_sha: string
+  labels?: { name: string }[]
 }
 
 interface FakeComment {
@@ -174,7 +175,34 @@ describe("lookupWalk", () => {
   })
 })
 
+describe("lookupPr", () => {
+  it("reads the release:approved label off the same /pulls response", async () => {
+    const { fetchImpl, calls } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "risk:auth" }, { name: "release:approved" }] }],
+      comments: [{ body: walkComment(771, HEAD_SHA, "FAIL") }],
+    })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "fail", approved: true })
+    expect(calls.filter((url) => url.includes("/pulls"))).toHaveLength(1)
+  })
+
+  it("is not approved without the label, and not approved when no PR resolves", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "risk:auth" }] }],
+    })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "unknown", approved: false })
+    expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl: fakeGitHub().fetchImpl })).toEqual({ walk: "unknown", approved: false })
+  })
+})
+
 describe("fillWalks", () => {
+  it("keeps a docs-only PR at none but still reads its approval", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 2, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA, labels: [{ name: "release:approved" }] }],
+    })
+    const filled = await fillWalks([{ number: 2, sha: MERGE_SHA, walk: "none" }], { token: "t", fetchImpl })
+    expect(filled[0]).toEqual({ number: 2, sha: MERGE_SHA, walk: "none", approved: true })
+  })
+
   it("leaves none and already-resolved PRs untouched, and fills unknown ones", async () => {
     const { fetchImpl } = fakeGitHub({
       associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],

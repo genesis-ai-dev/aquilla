@@ -1,0 +1,12 @@
+export const VERIFY_CHECK_NAME: string
+
+export type JevDecision = "fail" | "pass" | "inconclusive" | "unavailable"
+
+/** The newest decision line in any smart-Jev marker comment, or null when none has posted. */
+export function jevDecision(commentBodies: unknown[]): JevDecision | null
+
+/** Whether the HEAD may deploy: release-verify must be `success` and Jev must have reported anything but FAIL. */
+export function decide(input: { verify: string | undefined; jev: JevDecision | null }): { deploy: boolean; reason: string }
+
+/** release/* branches on origin whose HEAD carries no calver tag. */
+export function openReleaseBranches(): string[]

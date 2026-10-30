@@ -30,14 +30,17 @@ export interface LookupWalkOptions {
   fetchImpl?: FetchImpl
 }
 
+/** The walk verdict and `release:approved` label of the PR a dev merge closed. */
+export function lookupPr(options: LookupWalkOptions): Promise<{ walk: "PASS" | "fail" | "none" | "unknown"; approved: boolean }>
+
 // Resolves one dev-branch merge commit to the walk verdict for the PR it
 // closed. Returns "unknown" when that isn't possible yet: no associated PR,
 // no matching comment, or a comment whose sha is stale.
 export function lookupWalk(options: LookupWalkOptions): Promise<"PASS" | "fail" | "none" | "unknown">
 
-// Fills `walk` for every PR still "unknown". One PR's lookup failing never
+// Fills `walk` and `approved` for every PR. One PR's lookup failing never
 // blocks the others; it just stays "unknown", which holds.
 export function fillWalks<T extends { sha: string; walk: string }>(
   prs: T[],
   opts: Omit<LookupWalkOptions, "mergeSha">,
-): Promise<T[]>
+): Promise<(T & { approved?: boolean })[]>

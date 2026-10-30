@@ -8,6 +8,10 @@ stop.** Who reads the cut and who deploys it is set by
 
 ## When it runs
 
+- **On the hour** (`:05`). The hourly release line
+  (`docs/RELEASE-RISK-GATES.md`): with no release in flight and ready PRs
+  on `dev`, the next slice is cut; `release-deploy.yml` deploys it at
+  `:45` once `release-verify` and smart Jev have reported on its HEAD.
 - **After every production deploy.** `pnpm run deploy:aquilla` ends with
   `scripts/tag-release.sh`, which pushes the calver tag once production
   serves the release. That tag push starts the workflow, so the next slice
@@ -20,15 +24,16 @@ stop.** Who reads the cut and who deploys it is set by
   to look: tick **Show the plan without pushing a branch** to see what it
   would cut.
 
-Nothing runs on a timer. A run that finds a release in flight names it in
-the run summary and stops.
+A run that finds a release in flight names it in the run summary and
+stops.
 
 The workflow never deploys and never touches production. It does not run
 `pnpm run deploy:aquilla`, `scripts/tag-release.sh`, or
-`scripts/record-github-deployment.mjs`; those are a person's job, always,
-by policy (see "Deployment ownership" in
-[DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md)). It
-does not deploy even when the plan says `hold: false`.
+`scripts/record-github-deployment.mjs`. Those run from
+`release-deploy.yml` on the hour once the repository variable
+`HOURLY_RELEASE` is `on`, and from a person's checkout otherwise (see
+"Deployment ownership" in
+[DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md)).
 
 ## Hard stops
 
@@ -38,17 +43,18 @@ The workflow pushes no branch and posts no comment, and the run says why:
   parse as JSON. This is a checker bug; fix the planner, never hand-roll
   the decision it was supposed to make.
 - `cut` is `false`. This is the ordinary case, not a failure: a release is
-  already in flight, or there's nothing new on `dev`. The run summary gives
-  `plan.reason`.
+  already in flight, there's nothing new on `dev`, or every unreleased PR
+  is held. The run summary gives `plan.reason`.
 - The named `branch` already exists on `origin`. The plan computes a fresh
   `-NN` suffix from `usedSuffixesToday`, so two runs raced or a person cut
   by hand. The run fails rather than overwrite it or guess a `-NN+1`.
 - The push is rejected for any reason. The workflow never force-pushes and
   never falls back to another sha; run it again once the cause is fixed.
 
-**Not a hard stop:** `hold: true`. That's the plan saying this slice needs a
-person before it deploys. The slice is cut and the notes posted exactly like
-an ordinary one.
+**Not a hard stop:** a held PR. Held PRs are skipped by the cut, listed in
+the notes with why, and wait for a person's `release:approved` label. A
+pick that conflicts is aborted and joins the held list as `pick conflict`;
+the cut goes on with the rest.
 
 ## Steps
 
@@ -61,47 +67,52 @@ an ordinary one.
    which the walk lookup needs (`scripts/release-plan-walk.mjs`). The rules
    live in the planner on purpose; if a result looks wrong, fix the code.
 3. If `cut` is `false`, stop.
-4. If `cut` is `true`, push `plan.sha` to `plan.branch`. That sha is the
-   last PR in the slice, or `plan.floor` (the newest `dev` commit
-   production already runs) when the slice ends behind it; never the tip
-   of `dev`. Then post the release notes (template below) as a **commit
-   comment** on `plan.sha`, where QA and whoever deploys both find it.
+4. If `cut` is `true`, start `plan.branch` at `plan.base` (the tagged tip
+   production runs) and `git cherry-pick -x` every PR in `plan.prs` onto
+   it, in order (`-m 1` for a merge commit). Push the result. Then post
+   the release notes (template below) as a **commit comment** on the
+   branch HEAD, where QA and whoever deploys both find it. The branch is
+   never the tip of `dev`: it is production plus exactly the picked PRs.
 
-## After the cut: smart Jev, then a person
+## After the cut: release-verify, smart Jev, then the hourly deploy
 
 The workflow does not start Jev and does not read its result. The push that
 creates `plan.branch`, and every later push onto that branch, is what starts
-the one Hetzner run. The webhook accepts `push` events for
+the one Hetzner run and the `release-verify` workflow (the full suite:
+typecheck, lint, every unit and worker test, the production build).
+`release-deploy.yml` reads both for the branch's current HEAD at `:45`
+(`scripts/release-deploy-check.mjs`) and deploys when `release-verify`
+succeeded and Jev reported anything but FAIL; no Jev result yet means it
+waits an hour. The webhook accepts `push` events for
 `refs/heads/release/YYYY/MM/DD-NN` and ignores pull requests. See
 [smart-testing-webhook.md](../../docs/runbooks/smart-testing-webhook.md).
 
-The HEAD Jev tests is not always `plan.sha`. When `hold` is true, a person
-checks that pull request and ready pull requests are added onto the branch.
-Jev runs after that pile-on. Only a result for the branch's current HEAD counts. A comment on an older commit does not decide the deploy.
+The HEAD Jev tests is not always the cut's HEAD: a person may pick a fix
+onto the branch. Jev and `release-verify` run again on that push. Only a
+result for the branch's current HEAD counts. A comment on an older commit
+does not decide the deploy.
 
 - **FAIL** (a journey verdict of `FAIL (model-free check)` or `PRODUCT FAILURE`)
   means that HEAD does not deploy. A new commit on the branch starts Jev again.
-- **PASS**. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. A person deploys, then tags production.
+- **PASS**. `INCONCLUSIVE` and `HARNESS UNAVAILABLE` do not hold. The hourly
+  deploy (or a person) deploys, then tags production.
 
 Adversarial Jev is not part of this cut. It attacks deployed `dev` at 09:00 UTC
 and files Linear tickets. It does not affect the cut or the deploy.
 
 ## Release notes template
 
-Identical to the one in [QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md); repeated
-here because this is what actually gets posted.
-
 ```
-## Release release/2026/09/24-02 · 4 PRs · areas: sync
+## Release release/2026/10/30-02 · 3 PRs · areas: sync
 
 | PR | Title | Walk @ head sha | Areas |
 | --- | --- | --- | --- |
 | #771 | Remove Inworld companion preset | PASS | — |
 | #772 | Comment thread polish | PASS | sync |
-| #773 | Export raw mode fix | fail | — |
 | #774 | Retention tab copy | none (docs only) | — |
 
-Needs a human: #773 (walk fail).
+**Held, not in this release:** #773 (walk fail), #775 (touches migration), #776 (pick conflict).
+A held PR joins the next cut once it carries the `release:approved` label.
 ```
 
 - Title line: `## Release <plan.branch> · <plan.prs.length> PRs · areas: <plan.areas joined by ", ", or omit "areas:" entirely if plan.areas is empty>`.
@@ -109,21 +120,18 @@ Needs a human: #773 (walk fail).
   `dev` at plan time (a PR the tagged release tip already carries as a
   cherry-pick counts as released), not this slice's size. Use
   `plan.prs.length`.
-- One table row per PR in `plan.prs`, oldest first (the plan already returns
+- One table row per picked PR, oldest first (the plan already returns
   them in that order). "Title" is the PR's title, fetched from the GitHub
   API — the plan itself doesn't carry it. "Walk @ head sha" is `pr.walk`
-  verbatim: `PASS`, `none`, `fail` (any of PR-BOT.md's FAIL/FLAKY/BLOCKED
-  normalize to this), or `unknown` (no walk comment found yet, or the
-  lookup had no `GITHUB_TOKEN` to run at all). `none` prints as
-  `none (docs only)`. A title the API can't return prints as
-  `(title unavailable)` rather than failing the cut. "Areas" is `pr.areas.join(", ")` or `—`.
-- "Needs a human" lists every PR whose `walk` is not `PASS` and not `none`
-  (that is: `fail` or `unknown`) on one line, as `#<number> (walk <walk>)`
-  separated by commas. It reads `none` if every PR is `PASS`/`none`.
-- If `hold` is `true`, add one line above the table: `**Held:** <reason>` —
-  copy `plan.reason` verbatim. Do not editorialize on why it holds; the
-  reason string already says (oldest PR holds, migration, infra, non-PASS
-  walk).
+  verbatim: `PASS`, `none`, or (only on an approved PR) `fail` /
+  `unknown`. `none` prints as `none (docs only)`. A title the API can't
+  return prints as `(title unavailable)` rather than failing the cut.
+  "Areas" is `pr.areas.join(", ")` or `—`.
+- The **Held** line lists every PR in `plan.held` plus every pick that
+  conflicted, as `#<number> (<why>)` separated by commas, followed by the
+  fixed sentence about `release:approved`. Omit both lines when nothing
+  is held. `why` is `touches <areas>`, `walk <verdict>`, or `pick
+  conflict`; copy it verbatim.
 
 ## Say only what the plan measured
 
@@ -134,17 +142,18 @@ result, not walking a UI) but the ones it has are worth naming:
 - **Every field in the notes comes from the plan's JSON or the GitHub API
   fetched in this run, never from a previous run's memory.** A PR's title
   can change between when it merged and when a release finally cuts.
-- **The sha in the notes is `plan.sha`, not the branch's current tip.**
-  They're the same right after the cut but must never be assumed equal
-  later: the workflow never touches this branch again.
-- **"Needs a human" is derived from `pr.walk`, never assumed from the PR's
-  size or author.** A one-line PR can hold; a large PR can be `PASS`.
+- **The comment sits on the HEAD the cut pushed, not the branch's current
+  tip.** They're the same right after the cut but must never be assumed
+  equal later: the workflow never touches this branch again.
+- **"Held" is derived from the merged diff, the walk and the label, never
+  from the PR's size or author.** A one-line PR can hold; a large PR can
+  be ready.
 
 ## What the comment is for
 
-A person deciding whether to deploy this branch should not have to open
-every PR in it. The commit comment is the whole of what they need to start:
-which PRs are in, what each one's walk said, and which rows still need a
-look. Nothing here is a sign-off — see
-[QA-BOT-REGIMEN.md](QA-BOT-REGIMEN.md) §3 for who checks what before
-`pnpm run deploy:aquilla` actually runs.
+A person reading this branch should not have to open every PR in it. The
+commit comment is the whole of what they need to start: which PRs are in,
+what each one's walk said, and which PRs were left out and why. Nothing
+here is a sign-off — the deploy gate is `release-verify` plus Jev on this
+HEAD (`scripts/release-deploy-check.mjs`), and a held PR's sign-off is the
+`release:approved` label on that PR.

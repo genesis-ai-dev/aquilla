@@ -22,15 +22,16 @@ const pr = (
 
 const migration = (number: number, mergedAt: string) => pr(number, mergedAt, { areas: ["migration"], pathHolds: true })
 const syncPr = (number: number, mergedAt: string) => pr(number, mergedAt, { areas: ["sync"] })
-const authPr = (number: number, mergedAt: string) => pr(number, mergedAt, { areas: ["auth"] })
+const authPr = (number: number, mergedAt: string) => pr(number, mergedAt, { areas: ["auth"], pathHolds: true })
+const exportPr = (number: number, mergedAt: string) => pr(number, mergedAt, { areas: ["export"] })
 
 const NOW = "2026-09-24T12:00:00Z"
 const recent = "2026-09-24T10:00:00Z"
 
 // One release in QA at a time keeps QA from re-testing a moving target. The
-// next slice cuts the instant that one closes, at whatever's ready in dev —
-// no ceiling, no wait timer — so a hotfix cherry-picked onto the closed
-// branch is already on dev by the time the next slice is cut.
+// next slice cuts the instant that one closes, at whatever's ready in dev.
+// Ready PRs are picked around held ones (the cherry-pick model), so a held
+// schema change never walls off the PRs merged after it.
 describe("planRelease", () => {
   it("never cuts while another release is waiting for QA or deploy", () => {
     const prs = Array.from({ length: 10 }, (_, i) => pr(i, recent))
@@ -39,28 +40,20 @@ describe("planRelease", () => {
     expect(plan.reason).toContain("release/2026/09/23-01")
   })
 
-  it("cuts every ready PR the instant the line is free, naming the branch and sha", () => {
+  it("cuts every ready PR the instant the line is free, naming the branch and base", () => {
     const prs = Array.from({ length: 3 }, (_, i) => pr(i, recent))
-    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    const plan = planRelease({ openReleases: [], prs, now: NOW, base: "tagtip" })
     expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
     expect(plan.prs).toHaveLength(3)
-    expect(plan.sha).toBe(prs[2].sha)
+    expect(plan.held).toEqual([])
+    expect(plan.base).toBe("tagtip")
     expect(plan.branch).toBe("release/2026/09/24-01")
-  })
-
-  it("cuts a single ready PR immediately, with no wait", () => {
-    const plan = planRelease({ openReleases: [], prs: [pr(1, recent)], now: NOW })
-    expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
-    expect(plan.prs).toHaveLength(1)
   })
 
   it("has no ceiling: a large ready run cuts as one slice", () => {
     const prs = Array.from({ length: 200 }, (_, i) => pr(i, recent))
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
     expect(plan.prs).toHaveLength(200)
   })
 
@@ -74,40 +67,59 @@ describe("planRelease", () => {
     expect(planRelease({ openReleases: [], prs: [], now: NOW }).cut).toBe(false)
   })
 
-  it("cuts the oldest migration PR alone and immediately, even with plenty waiting behind it", () => {
+  it("picks around a held migration: the PRs behind it still ship, the migration waits", () => {
     const prs = [migration(1, "2026-09-23T09:00:00Z"), ...Array.from({ length: 6 }, (_, i) => pr(i + 2, recent))]
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(true)
-    expect(plan.prs).toHaveLength(1)
-    expect(plan.prs[0].number).toBe(1)
-    expect(plan.areas).toEqual(["migration"])
+    expect(plan.prs.map((p) => p.number)).toEqual([2, 3, 4, 5, 6, 7])
+    expect(plan.held).toEqual([expect.objectContaining({ number: 1, why: "touches migration" })])
+    expect(plan.areas).toEqual([])
   })
 
-  it("ships the ready run the moment a holding PR sits behind it", () => {
+  it("picks around a held PR in the middle of the queue too", () => {
     const prs = [pr(1, recent), pr(2, recent), migration(3, recent), pr(4, recent)]
     const plan = planRelease({ openReleases: [], prs, now: NOW })
-    expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
-    expect(plan.prs.map((p: { number: number }) => p.number)).toEqual([1, 2])
+    expect(plan.prs.map((p) => p.number)).toEqual([1, 2, 4])
+    expect(plan.held.map((p) => p.number)).toEqual([3])
+  })
+
+  it("does not cut when every unreleased PR is held", () => {
+    const plan = planRelease({ openReleases: [], prs: [migration(1, recent), pr(2, recent, { walk: "fail" })], now: NOW })
+    expect(plan.cut).toBe(false)
+    expect(plan.reason).toBe("2 PR(s) waiting on a person, none ready")
+    expect(plan.held.map((p) => p.why)).toEqual(["touches migration", "walk fail"])
   })
 
   it("holds on a FAIL or unknown walk the same way a path hold does", () => {
-    const failed = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "fail" })], now: NOW })
-    expect(failed.cut).toBe(true)
-    expect(failed.hold).toBe(true)
+    const failed = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "fail" }), pr(2, recent)], now: NOW })
+    expect(failed.prs.map((p) => p.number)).toEqual([2])
+    expect(failed.held.map((p) => p.number)).toEqual([1])
 
-    const unknown = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "unknown" })], now: NOW })
-    expect(unknown.cut).toBe(true)
-    expect(unknown.hold).toBe(true)
+    const unknown = planRelease({ openReleases: [], prs: [pr(1, recent, { walk: "unknown" }), pr(2, recent)], now: NOW })
+    expect(unknown.held.map((p) => p.number)).toEqual([1])
   })
 
-  it("does not hold on sync or auth alone, but still notes the areas", () => {
-    const prs = Array.from({ length: 6 }, (_, i) => (i % 2 ? syncPr(i, recent) : authPr(i, recent)))
+  it("a person's release:approved label puts a held PR back on the line", () => {
+    const prs = [{ ...migration(1, recent), approved: true }, { ...pr(2, recent, { walk: "fail" }), approved: true }]
+    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    expect(plan.prs.map((p) => p.number)).toEqual([1, 2])
+    expect(plan.held).toEqual([])
+    expect(plan.areas).toEqual(["migration"])
+  })
+
+  it("does not hold on export or sync alone, but still notes the areas", () => {
+    const prs = Array.from({ length: 6 }, (_, i) => (i % 2 ? syncPr(i, recent) : exportPr(i, recent)))
     const plan = planRelease({ openReleases: [], prs, now: NOW })
     expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
-    expect(plan.areas).toEqual(["auth", "sync"])
+    expect(plan.held).toEqual([])
+    expect(plan.areas).toEqual(["export", "sync"])
+  })
+
+  it("does not leak pathHolds or behindFloor into the reported PRs", () => {
+    const plan = planRelease({ openReleases: [], prs: [{ ...pr(1, recent), behindFloor: true }, migration(2, recent)], now: NOW })
+    expect(plan.prs[0]).not.toHaveProperty("behindFloor")
+    expect(plan.prs[0]).not.toHaveProperty("pathHolds")
+    expect(plan.held[0]).not.toHaveProperty("pathHolds")
   })
 })
 
@@ -119,6 +131,10 @@ describe("prHolds", () => {
   it("does not hold on a clean walk with no path match", () => {
     expect(prHolds({ pathHolds: false, walk: "PASS" })).toBe(false)
     expect(prHolds({ pathHolds: false, walk: "none" })).toBe(false)
+  })
+
+  it("never holds an approved PR: the label is the manual path's sign-off", () => {
+    expect(prHolds({ pathHolds: true, walk: "fail", approved: true })).toBe(false)
   })
 })
 
@@ -171,43 +187,19 @@ describe("scripts-only PR that is also infra", () => {
   })
 })
 
-// A misclassified migration or deploy-infra change would skip the one gate
-// that keeps a schema change or a deploy-script change off the ordinary line.
+// The file map itself is tested in release-risk.test.ts; this pins that the
+// planner reads the same table.
 describe("classifyFiles", () => {
-  it.each([
-    ["db/postgres/migrations/0123_add.sql", "migration", true],
-    ["db/postgres/schema.sql", "migration", true],
-    ["wrangler.toml", "infra", true],
-    ["config/cloudflare-deployments.json", "infra", true],
-    ["scripts/tag-release.sh", "infra", true],
-    ["scripts/tag-metadata.mjs", "infra", true],
-    ["scripts/verify-deploy-branch.sh", "infra", true],
-    ["scripts/verify-dist-host.sh", "infra", true],
-    ["scripts/verify-live-environment.mjs", "infra", true],
-    ["scripts/verify-worker-deployment.mjs", "infra", true],
-    ["scripts/verify-deployment-artifacts.mjs", "infra", true],
-    ["scripts/record-github-deployment.mjs", "infra", true],
-    ["scripts/assert-workers-build-env.mjs", "infra", true],
-    ["scripts/ci-build.sh", "infra", true],
-    ["scripts/resolve-deployment-target.sh", "infra", true],
-    ["sync-worker/src/project-do.ts", "sync", false],
-    ["src/lib/sync/outbox.ts", "sync", false],
-    ["db/shim/postgres.ts", "sync", false],
-    ["auth-worker/src/routes/orgs.ts", "auth", false],
-  ])("flags %s as %s, holding: %s", (file, area, pathHolds) => {
-    expect(classifyFiles([file])).toEqual({ areas: [area], pathHolds })
-  })
-
-  it("leaves UI and copy changes with no area and no hold", () => {
-    expect(classifyFiles(["src/components/Editor.tsx", "src/locales/en.json", "docs/SEO.md"]))
-      .toEqual({ areas: [], pathHolds: false })
+  it("is release-risk.mjs's classification", () => {
+    expect(classifyFiles(["db/postgres/schema.sql"])).toEqual({ areas: ["migration", "events"], pathHolds: true })
+    expect(classifyFiles(["src/components/Editor.tsx"])).toEqual({ areas: [], pathHolds: false })
   })
 })
 
 // Built from the shape of 2026-09-23's real queue (29 PRs, 14 touching sync
-// or auth, 4 of those auth-worker alone, none holding on their own): with no
-// ceiling, a busy day this size cuts as one slice the instant the line is
-// free, rather than four full slices plus a short one.
+// or auth, 4 of those auth-worker alone): with no ceiling, a busy day this
+// size cuts as one slice the instant the line is free. Under the cherry-pick
+// model the 4 auth PRs wait for a person and the other 25 still ship.
 describe("a 29-PR day shaped like 2026-09-23", () => {
   function fixture() {
     const prs = []
@@ -220,11 +212,11 @@ describe("a 29-PR day shaped like 2026-09-23", () => {
     return prs
   }
 
-  it("ships all 29 as one slice, none of them holding", () => {
+  it("ships the 25 ready PRs as one slice and holds the 4 auth PRs", () => {
     const plan = planRelease({ openReleases: [], prs: fixture(), now: "2026-09-24T00:00:00Z" })
     expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
-    expect(plan.prs).toHaveLength(29)
+    expect(plan.prs).toHaveLength(25)
+    expect(plan.held.map((p) => p.number)).toEqual([11, 12, 13, 14])
   })
 })
 
@@ -313,52 +305,6 @@ describe("splitReleased", () => {
   })
 })
 
-describe("planRelease with a deploy floor", () => {
-  type Opts = Parameters<typeof pr>[2]
-  const behind = (number: number, opts?: Opts) => ({ ...pr(number, recent, opts), sha: devSha(number), behindFloor: true })
-  const ahead = (number: number, opts?: Opts) => ({ ...pr(number, recent, opts), sha: devSha(number), behindFloor: false })
-  const floor = devSha(912)
-
-  it("never cuts below the floor: a ready run that ends behind it cuts at the floor", () => {
-    const plan = planRelease({ openReleases: [], prs: [behind(900), behind(911)], now: NOW, floor })
-    expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(false)
-    expect(plan.sha).toBe(floor)
-    expect(plan.prs.map((p) => p.number)).toEqual([900, 911])
-    expect(plan.floor).toBe(floor)
-  })
-
-  it("a run that reaches past the floor cuts at its own tail", () => {
-    const plan = planRelease({ openReleases: [], prs: [behind(900), behind(911), ahead(920)], now: NOW, floor })
-    expect(plan.sha).toBe(devSha(920))
-    expect(plan.prs).toHaveLength(3)
-  })
-
-  it("a hold behind the floor cuts every PR behind the floor together, at the floor, held", () => {
-    const prs = [behind(900), behind(776, { areas: ["migration"], pathHolds: true }), behind(911), ahead(920)]
-    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
-    expect(plan.cut).toBe(true)
-    expect(plan.hold).toBe(true)
-    expect(plan.sha).toBe(floor)
-    expect(plan.prs.map((p) => p.number)).toEqual([900, 776, 911])
-    expect(plan.reason).toBe("a PR behind the deployed floor holds")
-  })
-
-  it("with nothing behind the floor the oldest-holds rule is unchanged", () => {
-    const prs = [ahead(920, { areas: ["migration"], pathHolds: true }), ahead(921)]
-    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
-    expect(plan.hold).toBe(true)
-    expect(plan.sha).toBe(devSha(920))
-    expect(plan.prs.map((p) => p.number)).toEqual([920])
-    expect(plan.reason).toBe("oldest unreleased PR holds")
-  })
-
-  it("does not leak the flag into the reported PRs", () => {
-    const plan = planRelease({ openReleases: [], prs: [behind(900)], now: NOW, floor })
-    expect(plan.prs[0]).not.toHaveProperty("behindFloor")
-  })
-})
-
 // The bug lived in the git plumbing, not the pure rules: the range was
 // `<tag>..origin/dev`. This builds each tag shape in a scratch repo and runs
 // the real command against it.
@@ -406,10 +352,11 @@ describe("unreleasedPrs against a scratch repo", () => {
     mergePr(2, "docs/two.md")
     mergePr(3, "docs/three.md")
     git("tag", "2026.09.28.01", m1)
-    const { prs, floor } = unreleasedPrs({ cwd: root })
+    const { prs, floor, base } = unreleasedPrs({ cwd: root })
     expect(prs.map((p) => p.number)).toEqual([2, 3])
     expect(prs.map((p) => p.behindFloor)).toEqual([false, false])
     expect(floor).toBe(m1)
+    expect(base).toBe(m1)
   })
 
   it("tag on a cherry-pick tip: picked PRs are released; the next slice starts after the newest pick", () => {
@@ -418,13 +365,15 @@ describe("unreleasedPrs against a scratch repo", () => {
     const m3 = mergePr(3, "docs/three.md")
     const m4 = mergePr(4, "docs/four.md")
     release(m1, [{ sha: m2 }, { sha: m3 }], "2026.09.28.01")
-    const { prs, floor } = unreleasedPrs({ cwd: root })
+    const { prs, floor, base } = unreleasedPrs({ cwd: root })
     expect(prs.map((p) => p.number)).toEqual([4])
     expect(floor).toBe(m3)
-    // Before the fix this cut #2 alone, at a dev commit production already ran.
-    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
+    // The next branch starts at the tagged tip, so the picks of #2 and #3
+    // stay in production and #4 is picked on top.
+    expect(base).toBe(git("rev-parse", "2026.09.28.01^{commit}"))
+    const plan = planRelease({ openReleases: [], prs, now: NOW, base })
     expect(plan.prs.map((p) => p.number)).toEqual([4])
-    expect(plan.sha).toBe(m4)
+    expect(plan.prs[0].sha).toBe(m4)
   })
 
   it("mixed: a pick without -x and a hotfix picked ahead of its order", () => {
@@ -434,15 +383,14 @@ describe("unreleasedPrs against a scratch repo", () => {
     const m4 = mergePr(4, "docs/four.md")
     mergePr(5, "docs/five.md")
     release(m1, [{ sha: m2, x: false }, { sha: m4 }], "2026.09.28.02")
-    const { prs, floor } = unreleasedPrs({ cwd: root })
+    const { prs, floor, base } = unreleasedPrs({ cwd: root })
     expect(prs.map((p) => [p.number, p.behindFloor])).toEqual([[3, true], [5, false]])
     expect(floor).toBe(m4)
-    // #3 holds on its migration and sits behind the deployed hotfix #4, so
-    // the held slice cuts at #4's dev merge, not #3's: cutting at #3 would
-    // take the hotfix back out of production.
-    const plan = planRelease({ openReleases: [], prs, now: NOW, floor })
-    expect(plan.hold).toBe(true)
-    expect(plan.prs.map((p) => p.number)).toEqual([3])
-    expect(plan.sha).toBe(m4)
+    // #3 holds on its migration; #5 is picked onto the tagged tip, which
+    // already carries the hotfix #4, so nothing leaves production.
+    const plan = planRelease({ openReleases: [], prs, now: NOW, base })
+    expect(plan.prs.map((p) => p.number)).toEqual([5])
+    expect(plan.held.map((p) => p.number)).toEqual([3])
+    expect(plan.base).toBe(git("rev-parse", "2026.09.28.02^{commit}"))
   })
 })

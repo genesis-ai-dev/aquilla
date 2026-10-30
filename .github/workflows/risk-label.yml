@@ -1,0 +1,47 @@
+name: Risk labels
+
+# Labels every pull request into dev with the production risk areas its
+# files touch (`risk:events`, `risk:auth`, `risk:offline-sync`,
+# `risk:migration`, `risk:infra`, and the noted-only `risk:export`,
+# `risk:sync`), from the one file map in scripts/release-risk.mjs. A PR
+# carrying a holding area is kept off the hourly release line by
+# scripts/release-plan.mjs until a person adds `release:approved`; see
+# docs/RELEASE-RISK-GATES.md. The planner classifies the merged diff itself,
+# so these labels inform people and route review; they are not the gate.
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: risk-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The classifier runs from the base branch, so a PR cannot
+          # relabel itself by editing the file map in the same change.
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+      - id: label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/release-risk-label.mjs "$PR_NUMBER"
+      - if: steps.label.outputs.holds == 'true'
+        env:
+          AREAS: ${{ steps.label.outputs.areas }}
+        run: |
+          echo "### Off the hourly line until a person approves" >> "$GITHUB_STEP_SUMMARY"
+          echo "Areas: $AREAS. After manual QA, add the \`release:approved\` label." >> "$GITHUB_STEP_SUMMARY"

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { NoteOnClick } from "@/components/ui/info-note"
+import { UpdateIndicator } from "@/components/UpdateIndicator"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
@@ -150,6 +151,7 @@ export function VersionTag() {
       className="mt-auto flex w-full min-w-0 shrink-0 flex-col items-start gap-0.5"
     >
       <EnvironmentTag />
+      <UpdateIndicator />
       <Tooltip>
         <TooltipTrigger
           render={
@@ -233,6 +235,7 @@ export function VersionBadge() {
           {title}
         </TooltipContent>
       </Tooltip>
+      <UpdateIndicator className="bg-card px-2 py-1.5" />
     </div>
   )
 }

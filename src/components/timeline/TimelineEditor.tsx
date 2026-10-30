@@ -2149,7 +2149,10 @@ export function TimelineEditor({
   // limits, so the lanes need the other timing's layout to say where the take
   // lands there (lib/timeline/take-place). Built from the same lines, tracks
   // and stand-ins that timing lays the file out from when it is chosen.
-  const otherLayout = useMemo<TimelineLayout>(() => {
+  // Only a drop reads it, so it is built then: built on every change, a long
+  // subtitle film followed by its source laid every line out a second time,
+  // with stand-ins, on each edit.
+  const getOtherLayout = useCallback((): TimelineLayout => {
     const other: AudioTimingMode = timingMode === "audioFirst" ? "dubbing" : "audioFirst"
     const lanes = timelineLanes(cells, other)
     const lines = lanes.dialogue.length > 0 ? lanes.dialogue : lanes.subtitle
@@ -4108,7 +4111,7 @@ export function TimelineEditor({
             key={track.id}
             items={targetItems}
             layout={layout}
-            otherLayout={otherLayout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}
@@ -4191,7 +4194,7 @@ export function TimelineEditor({
             key={track.id}
             items={own.items}
             layout={layout}
-            otherLayout={otherLayout}
+            getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
             viewStartSec={viewStartSec}
             viewEndSec={viewEndSec}

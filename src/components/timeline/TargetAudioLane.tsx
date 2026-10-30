@@ -113,13 +113,13 @@ export interface TargetAudioLaneProps {
    *  the laid-out programme in audio-first. Absent = dubbing. */
   layout?: TimelineLayout
   /**
-   * AQU-2267: the OTHER timing's layout. A move moves the take by the same
-   * distance there too, held by that timing's own limits (its line, its
-   * neighbours on this track), so a move states the take's place in both.
-   * Absent (this lane's own tests), the other place moves by the same distance
-   * with no limits of its own.
+   * AQU-2267: the OTHER timing's layout, built when asked (only a drop
+   * asks). A move moves the take by the same distance there too, held by that
+   * timing's own limits (its line, its neighbours on this track), so a move
+   * states the take's place in both. Absent (this lane's own tests), the
+   * other place moves by the same distance with no limits of its own.
    */
-  otherLayout?: TimelineLayout
+  getOtherLayout?: () => TimelineLayout
   pxPerSec: number
   viewStartSec: number
   viewEndSec: number
@@ -366,7 +366,7 @@ function TargetAudioChip({
   peaks,
   preview,
   layout,
-  otherLayout,
+  getOtherLayout,
   track,
 }: {
   chip: ChipGeometry
@@ -376,8 +376,8 @@ function TargetAudioChip({
   layout?: TimelineLayout
   /** AQU-2267: the other timing's layout, and every take on this track — where
    *  a move carries the take, by the same distance, held by that timing's
-   *  limits. See `TargetAudioLaneProps.otherLayout`. */
-  otherLayout?: TimelineLayout
+   *  limits. See `TargetAudioLaneProps.getOtherLayout`. */
+  getOtherLayout?: () => TimelineLayout
   track: readonly TargetAudioItem[]
   // AQU-646 stage 7: NO `color` PROP. The hue reaches this chip as inherited
   // CSS custom properties set on the lane root, so there is nothing to thread
@@ -852,7 +852,7 @@ function TargetAudioChip({
         // its line's start.)
         const moved = movedTakePlace({
           here: layout,
-          other: otherLayout,
+          other: getOtherLayout?.(),
           track,
           take: chip.item,
           fromStartSec: geom.start,
@@ -1786,7 +1786,7 @@ function TargetAudioChip({
 export function TargetAudioLane({
   items,
   layout,
-  otherLayout,
+  getOtherLayout,
   pxPerSec,
   viewStartSec,
   viewEndSec,
@@ -2114,7 +2114,7 @@ export function TargetAudioLane({
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             layout={layout}
-            otherLayout={otherLayout}
+            getOtherLayout={getOtherLayout}
             track={items}
             pxPerSec={pxPerSec}
             selected={

@@ -767,6 +767,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const historyUser = authorNameFor(session?.username, project?.username)
   const commit = useSettingsCommit({
     projectId: id ?? null,
+    project: project ?? null,
     username: historyUser,
     isCloudProject,
     settings: sharedSettingsBlob ?? {},

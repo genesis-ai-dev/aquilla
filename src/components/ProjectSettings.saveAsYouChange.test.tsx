@@ -71,11 +71,15 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   return { ...actual, fetchModels: vi.fn().mockResolvedValue([]) }
 })
 const store = vi.hoisted(() => ({ record: null as Record<string, unknown> | null }))
+// As the real store: no copy in this browser means patchProject does nothing.
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => store.record),
-  updateProject: vi.fn(async () => undefined),
+  updateProject: vi.fn(async (p: Record<string, unknown>) => {
+    store.record = p
+  }),
   patchProject: vi.fn(async (_id: string, fn: (p: Record<string, unknown>) => Record<string, unknown>) => {
-    store.record = fn(store.record ?? {})
+    if (!store.record) return undefined
+    store.record = fn(store.record)
     return store.record
   }),
 }))
@@ -189,5 +193,27 @@ describe("Project settings save as you change them", () => {
     expect(renameProject).toHaveBeenCalledTimes(1)
     expect(renameProject).toHaveBeenCalledWith("tok", PROJECT_ID, "Ruth (draft 2)")
     await waitFor(() => expect(historyView().nextUndo?.labelParams).toMatchObject({ setting: "Project name" }))
+  })
+
+  // A project opened straight at its settings in a browser that has never
+  // opened it has no copy here yet; its settings still save (as the old Save
+  // did, from the page's own copy of the project).
+  it("saves the name and this device's settings in a browser with no copy of the project yet", async () => {
+    store.record = null
+    const user = userEvent.setup()
+    const view = renderSettings("general")
+    const field = screen.getByRole("textbox", { name: "Project name" })
+    await user.clear(field)
+    await user.type(field, "Ruth (draft 2)")
+    await user.tab()
+    expect(await screen.findByTestId("save-status-name")).toHaveTextContent("Saved")
+    expect(renameProject).toHaveBeenCalledWith("tok", PROJECT_ID, "Ruth (draft 2)")
+    expect((store.record as Record<string, unknown> | null)?.name).toBe("Ruth (draft 2)")
+    view.unmount()
+
+    store.record = null
+    renderSettings("audio-media")
+    await user.click(screen.getByRole("button", { name: /Eager/ }))
+    await waitFor(() => expect(store.record?.audioMediaStrategy).toBe("eager"))
   })
 })

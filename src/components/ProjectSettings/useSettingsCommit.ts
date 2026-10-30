@@ -30,7 +30,7 @@ import { thisBrowser } from "@/lib/history/settings-steps"
 import type { SettingsChange } from "@/lib/history/edit-steps"
 import { useSaveTracker, type SaveResult } from "@/lib/settings/save-status"
 import type { CommitInfo } from "@/lib/settings/useCommitOnPause"
-import { getProject, patchProject } from "@/lib/store/project-index"
+import { getProject, patchProject, updateProject } from "@/lib/store/project-index"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { settingsEditorName, type ProjectWideSettings } from "@/lib/sync/project-settings"
 import type { PatchOptions, PatchOutcome } from "@/hooks/useProjectSettings"
@@ -52,6 +52,9 @@ export interface SharedChange {
 
 export interface SettingsCommitOptions {
   projectId: string | null
+  /** The project as this page shows it: what this browser's copy starts
+   *  from when it has none yet (a project opened straight at its settings). */
+  project: ProjectRecord | null
   /** Whose history the steps go in. */
   username: string
   isCloudProject: boolean
@@ -79,6 +82,21 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
     if (typed.final) startedAt.current.delete(id)
     else if (!kept) startedAt.current.set(id, now)
     return kept ?? now
+  }
+
+  // This browser's copy of the project. A browser that has never opened the
+  // project (settings opened straight from a link) has none yet; a change
+  // starts it from the page's own copy, as the Save bar did.
+  const localRecord = async (projectId: string): Promise<ProjectRecord | null> =>
+    (await getProject(projectId)) ?? ref.current.project ?? null
+  const patchLocal = async (projectId: string, update: (p: ProjectRecord) => ProjectRecord) => {
+    const patched = await patchProject(projectId, update)
+    if (patched) return patched
+    const base = ref.current.project
+    if (!base) return undefined
+    const next = update(base)
+    await updateProject(next)
+    return next
   }
 
   const scope = () => {
@@ -209,7 +227,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
       track(id, async () => {
         const projectId = ref.current.projectId
         if (!projectId) return { kind: "none" }
-        const record = await getProject(projectId)
+        const record = await localRecord(projectId)
         if (!record) return { kind: "failed", message: ref.current.t("settings.save.failed") }
         const now = (record as unknown as Record<string, unknown>)[key] ?? null
         const [before] = startOf(id, [now], typed)
@@ -226,7 +244,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
           step()
           return record_ && !same(before, value) ? { kind: "saved" } : { kind: "none" }
         }
-        const pending = patchProject(projectId, (p) => withDeviceSetting(p, key, value)).then(Boolean, () => false)
+        const pending = patchLocal(projectId, (p) => withDeviceSetting(p, key, value)).then(Boolean, () => false)
         step(pending)
         return (await pending) ? { kind: "saved" } : { kind: "failed", message: ref.current.t("settings.save.failed") }
       }),
@@ -240,7 +258,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
       track(id, async () => {
         const projectId = ref.current.projectId
         if (!projectId) return { kind: "none" }
-        const next = await patchProject(projectId, update)
+        const next = await patchLocal(projectId, update)
         return next ? { kind: "saved" } : { kind: "failed", message: ref.current.t("settings.save.failed") }
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -253,7 +271,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
       track("name", async () => {
         const { projectId, isCloudProject, getJwt, t } = ref.current
         if (!projectId) return { kind: "none" }
-        const record = await getProject(projectId)
+        const record = await localRecord(projectId)
         if (!record) return { kind: "failed", message: t("settings.save.failed") }
         const step = (pending?: Promise<boolean>) => {
           if (!info.final || info.from === next) return
@@ -278,7 +296,7 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
               return { kind: "failed", message: err instanceof Error ? err.message : t("projectSettings.save.renameFailedGeneric") }
             }
           }
-          await patchProject(projectId, (p) => ({ ...p, name: next }))
+          await patchLocal(projectId, (p) => ({ ...p, name: next }))
           return { kind: "saved" }
         })()
         step(write.then((r) => r.kind === "saved", () => false))

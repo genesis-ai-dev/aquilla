@@ -104,6 +104,12 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   }
 })
 
+// AQU-2262: a name typed and left (or closed) saves, through the rename.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
+  return { ...actual, renameProject: vi.fn(async (_jwt: string, id: string, name: string) => ({ id, name })) }
+})
+
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),

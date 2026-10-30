@@ -245,8 +245,12 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   // contract, like the importer above. The names come one per line, each a
   // JSON string. The "brain" reads the first sampled name:
   //   - "Mt-ch19_v01": the chapter-and-verse rule, which the team may keep;
+  //     with a letter after a verse ("Mt-ch19_v03a"), a second template for
+  //     the pieces of a verse, kept too;
   //   - "sermon_01": the verse, with Matthew 20 as constants; it places the
   //     folder but is never kept (a constant book and chapter);
+  //   - "worse-Mt-ch19_v01": the right rule, then on the retry the chapter and
+  //     the verse swapped, which places fewer, so the first is kept in use;
   //   - "fail-…": a rule that fits nothing, then a retry that fails outright;
   //   - anything else: a rule that fits nothing, twice ("didn't fit").
   const namesSystemPrompt = messages.some((message) =>
@@ -274,11 +278,21 @@ export function scriptMockResponse(messages: ChatMessage[]) {
         explanation: "The number is the verse; every recording is Matthew 20.",
       }))
     }
+    if (/^worse-/i.test(first)) {
+      return respond(JSON.stringify(retry
+        ? { templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the verse and the chapter." }
+        : { templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the chapter and the verse." }))
+    }
+    const pieces = names.some((name) => /_v\d+[a-h]\.[A-Za-z0-9]+$/.test(name))
     return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
       ? {
-          templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+          templates: pieces
+            ? [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+            : [{ pattern: "{book}-ch{chapter}_v{verse}" }],
           books: { Mt: "MAT", Mk: "MRK" },
-          explanation: "Mt is Matthew, then the chapter and the verse.",
+          explanation: pieces
+            ? "Mt is Matthew, then the chapter, the verse, and a letter for each piece of a verse."
+            : "Mt is Matthew, then the chapter and the verse.",
         }
       : { templates: [{ pattern: "rec-{verse}" }], explanation: "rec- then the verse." }))
   }

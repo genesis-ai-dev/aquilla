@@ -170,6 +170,18 @@ describe("scripted recordings naming", () => {
     expect(JSON.parse(ask(["sermon_01.ogg"]))).toMatchObject({ templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20 })
   })
 
+  it("adds a template for the pieces of a verse when a name has a letter after its verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg", "Mt-ch19_v03a.wav", "Mt-ch19_v03b.wav"]))).toMatchObject({
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+    })
+  })
+
+  it("answers a worse- folder's retry with the chapter and the verse swapped", () => {
+    expect(JSON.parse(ask(["worse-Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }] })
+    expect(JSON.parse(ask(["worse-Mt-ch19_v99.ogg"], true))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }] })
+  })
+
   it("answers a fail- folder's retry with no rule at all", () => {
     expect(JSON.parse(ask(["fail-a.ogg"]))).toMatchObject({ templates: [{ pattern: "rec-{verse}" }] })
     expect(() => JSON.parse(ask(["fail-a.ogg"], true))).toThrow()

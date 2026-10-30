@@ -8,7 +8,14 @@ import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { useMediaPictureUrl } from "@/hooks/useMediaPictureUrl"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
-import { FilmFrameQueue, FrameUnavailableError, type CaptureFrame } from "@/lib/timeline/film-frames"
+import {
+  drawnFrameKind,
+  drawUntilPictured,
+  FilmFrameQueue,
+  FrameUnavailableError,
+  type CaptureFrame,
+  type DrawnFrame,
+} from "@/lib/timeline/film-frames"
 import { setVideoDurationSec } from "@/lib/timeline/video-duration"
 import { youTubeVideoId } from "@/lib/video/youtube"
 
@@ -22,6 +29,11 @@ const GRABBER_MAX_HEIGHT = 240
 const FRAME_NUDGE_SEC = 0.12
 /** How long one seek may take before that frame is given up on. */
 const SEEK_PATIENCE_MS = 8000
+/** How long to wait for a seeked frame to reach the screen before drawing it
+ *  anyway, and between the tries of a blank draw. */
+const PRESENT_PATIENCE_MS = 250
+/** How long the one-time play before the first frame may take. */
+const PRIME_PATIENCE_MS = 2000
 
 function waitFor(video: HTMLVideoElement, event: string, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -41,6 +53,54 @@ function waitFor(video: HTMLVideoElement, event: string, ms: number): Promise<bo
 }
 
 /**
+ * Watch for the element's next frame on screen; the function returned waits
+ * for it, at most `ms` longer. Safari can say `seeked` before the new frame is
+ * painted, and a draw then comes back black. Started before the seek, so a
+ * browser that paints first and says `seeked` after costs no wait at all.
+ * Where there is no requestVideoFrameCallback, the next paint.
+ */
+function watchNextFrame(video: HTMLVideoElement): (ms: number) => Promise<void> {
+  if (!("requestVideoFrameCallback" in video)) {
+    return () => new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
+  }
+  let shown = false
+  let wake = () => {}
+  let handle = video.requestVideoFrameCallback(() => {
+    handle = 0
+    shown = true
+    wake()
+  })
+  return (ms) =>
+    new Promise((resolve) => {
+      if (shown) return resolve()
+      const timer = window.setTimeout(() => {
+        if (handle) video.cancelVideoFrameCallback(handle)
+        handle = 0
+        resolve()
+      }, ms)
+      wake = () => {
+        window.clearTimeout(timer)
+        resolve()
+      }
+    })
+}
+
+/**
+ * Play the hidden film for a moment, once, before its first frame. Safari may
+ * not decode pictures for a canvas from a film that was only ever loaded for
+ * its metadata and never played. Muted, so no browser refuses it; one that
+ * does (a "never auto-play" setting) still gets the seeks.
+ */
+async function primeOnce(video: HTMLVideoElement): Promise<void> {
+  const played = video.play().then(
+    () => true,
+    () => false,
+  )
+  await Promise.race([played, new Promise((r) => window.setTimeout(r, PRIME_PATIENCE_MS))])
+  video.pause()
+}
+
+/**
  * Where to seek for a tile's moment: a hair past it, and never into the film's
  * last moments. Tile moments sit on a whole-second grid, and so do a stream's
  * segment boundaries, but a segment's first picture lands a frame or two after
@@ -53,23 +113,39 @@ export function captureSeekSec(sec: number, duration: number): number {
   return Number.isFinite(duration) && duration > 0 ? Math.min(wanted, Math.max(0, duration - 0.1)) : wanted
 }
 
+/** A canvas read that a film from a server that does not allow it refuses. */
+function readable<T>(read: () => T): T {
+  try {
+    return read()
+  } catch {
+    throw new FrameUnavailableError("the film's pictures cannot be read here")
+  }
+}
+
 /**
  * Seek the hidden film to `sec` and draw what it shows there, cropped to fill
  * the picture the way a tile's `object-fit: cover` would.
  */
+
 export function videoFrameCapture(video: HTMLVideoElement): CaptureFrame {
   const canvas = document.createElement("canvas")
   canvas.width = FILM_FRAME_W
   canvas.height = FILM_FRAME_H
   const ctx = canvas.getContext("2d")
+  let primed: Promise<void> | null = null
   return async (sec) => {
     if (!ctx) throw new FrameUnavailableError("no canvas")
     if (video.error) throw new FrameUnavailableError("the film did not load")
+    primed ??= primeOnce(video)
+    await primed
     const at = captureSeekSec(sec, video.duration)
     if (Math.abs(video.currentTime - at) > 0.01) {
+      const shown = watchNextFrame(video)
       const landed = waitFor(video, "seeked", SEEK_PATIENCE_MS)
       video.currentTime = at
-      if (!(await landed)) return null
+      const ok = await landed
+      await shown(ok ? PRESENT_PATIENCE_MS : 0)
+      if (!ok) return null
     }
     if (video.readyState < 2 && !(await waitFor(video, "loadeddata", SEEK_PATIENCE_MS))) return null
     const vw = video.videoWidth
@@ -78,13 +154,16 @@ export function videoFrameCapture(video: HTMLVideoElement): CaptureFrame {
     const scale = Math.max(FILM_FRAME_W / vw, FILM_FRAME_H / vh)
     const sw = FILM_FRAME_W / scale
     const sh = FILM_FRAME_H / scale
-    ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, FILM_FRAME_W, FILM_FRAME_H)
-    try {
-      return canvas.toDataURL("image/jpeg", 0.72)
-    } catch {
-      // A film from a server that does not allow it to be read back.
-      throw new FrameUnavailableError("the film's pictures cannot be read here")
+    // Cleared first, so a draw that finds no frame shows as empty, not as the
+    // last tile's picture.
+    const draw = (): DrawnFrame => {
+      ctx.clearRect(0, 0, FILM_FRAME_W, FILM_FRAME_H)
+      ctx.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, FILM_FRAME_W, FILM_FRAME_H)
+      return drawnFrameKind(readable(() => ctx.getImageData(0, 0, FILM_FRAME_W, FILM_FRAME_H).data))
     }
+    const kind = await drawUntilPictured(draw, () => watchNextFrame(video)(PRESENT_PATIENCE_MS))
+    if (kind === "empty") return null
+    return readable(() => canvas.toDataURL("image/jpeg", 0.72))
   }
 }
 
@@ -180,7 +259,9 @@ export function useFilmFrames({
       // server that refuses gives the plain strip, not a broken one.
       crossOrigin={stream.pipeline === "hls" ? undefined : "anonymous"}
       disablePictureInPicture
-      className="pointer-events-none absolute left-0 top-0 h-[2px] w-[2px] opacity-0"
+      // Not opacity 0: Safari may skip painting frames for an element it can
+      // see is invisible, and a canvas drawn from one gets black (AQU-2253).
+      className="pointer-events-none absolute left-0 top-0 h-[2px] w-[2px] opacity-[0.01]"
       onLoadedMetadata={(e) => {
         setVideoDurationSec(storedSrc, e.currentTarget.duration)
         setReady(true)

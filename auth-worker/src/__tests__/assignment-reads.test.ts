@@ -82,6 +82,7 @@ describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
         scopeLabel: string
         cellsTotal: number
         cellsDone: number
+        createdAt: number
       }>
     }
     // as-anna-old is unassigned (soft-closed), so it's excluded entirely —
@@ -97,6 +98,9 @@ describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
       scopeLabel: "Genesis",
       cellsTotal: 3,
       cellsDone: 2,
+      // AQU-2294: when the assignment was handed out, so the manager card can
+      // show it beside the deadline (and AQU-2295 can order by it).
+      createdAt: 1000,
     })
     expect(byId["as-bob"]).toMatchObject({
       projectId: "pa",
@@ -106,6 +110,7 @@ describe("GET /api/v2/orgs/:orgId/assignments/workload", () => {
       scopeLabel: "Genesis 1",
       cellsTotal: 2,
       cellsDone: 1,
+      createdAt: 1100,
     })
   })
 

@@ -93,12 +93,16 @@ describe("applyRowOverlays — the audio validation fields (AQU-490)", () => {
     audioTimings: {},
   } as unknown as CellAudioEntry)
 
-  it("forwards the vote count, the validators, the role, the recorder and the label", () => {
+  it("forwards the vote count, the validators, their dates, the role, the recorder and the label", () => {
     const out = applyRowOverlays(mediaCell(), {
-      audioEntry: entry({ validatorCount: 2, validators: ["ana", "bo"], role: "dub", recordedBy: "cy", label: "Take 3" }),
+      audioEntry: entry({
+        validatorCount: 2, validators: ["ana", "bo"], validatorDecidedTs: { ana: 1700, bo: 1800 },
+        role: "dub", recordedBy: "cy", label: "Take 3",
+      }),
     })
     expect(out.attachments?.["take-1"]).toMatchObject({
-      validatorCount: 2, validators: ["ana", "bo"], role: "dub", recordedBy: "cy", label: "Take 3",
+      validatorCount: 2, validators: ["ana", "bo"], validatorDecidedTs: { ana: 1700, bo: 1800 },
+      role: "dub", recordedBy: "cy", label: "Take 3",
     })
   })
 

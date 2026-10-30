@@ -717,5 +717,15 @@ describe("the two validated-by lists are spaced alike", () => {
     const textList = (await screen.findAllByRole("dialog")).find((el) => el !== audioList)!
 
     expect(boxClasses(audioRow)).toBe(boxClasses(validatorRow(textList, "bo")))
+
+    // The heading is the list's own first row, as the text list keeps it —
+    // not a sibling above the list. The popover shell is a flex column with a
+    // gap between its children, so a heading of its own opened a gap between
+    // the title and the first name that the text popover does not have.
+    const headingOf = (list: HTMLElement) => within(list).getByText(/validated by$/)
+    expect(headingOf(audioList).tagName).toBe("LI")
+    expect(headingOf(audioList).parentElement!.parentElement).toBe(audioList)
+    expect(headingOf(audioList).parentElement!.contains(audioRow)).toBe(true)
+    expect(headingOf(audioList).className).toBe(headingOf(textList).className)
   })
 })

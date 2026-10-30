@@ -27,6 +27,7 @@ import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-a
 import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import { standInEstimator } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
 
@@ -418,6 +419,16 @@ function splitWindows(
  * `cells` must already be the dialogue lane, time-sorted (deriveLanes does
  * both) — the programme's order IS the cells' order.
  */
+/** AQU-2252: where a line's last take on another track stops sounding, on the
+ *  programme clock (0 with none) — what the file's length reaches to. */
+function layersReachSec(lineStartSec: number, layers: readonly ProgrammeLayer[] | undefined): number {
+  let reach = 0
+  for (const l of layers ?? []) {
+    if (l.window) reach = Math.max(reach, lineStartSec + l.atSec + (l.window.end - l.window.start))
+  }
+  return reach
+}
+
 export function buildProgramme(cells: readonly CellData[], opts?: BuildProgrammeOptions): Programme {
   if (cells.length === 0) return EMPTY
   const slots: ProgrammeSlot[] = []
@@ -512,9 +523,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     for (const slot of extraSlots) {
       if (layerTracks.has(slot)) layers.push(...layerTrackLayers(slot, cell, untimed, cursor))
     }
-    for (const l of layers) {
-      if (l.window) reachSec = Math.max(reachSec, cursor + l.atSec + (l.window.end - l.window.start))
-    }
+    reachSec = Math.max(reachSec, layersReachSec(cursor, layers))
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -595,7 +604,84 @@ export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<s
     byCellId.set(out.cellId, out)
     return out
   })
-  return { ...prog, slots, byCellId }
+  // …and so does how far past the last line they reached: a hidden last
+  // line's layer that ran on would leave seconds on the play strip that can
+  // never play.
+  const totalSec = slots.reduce((t, s) => Math.max(t, s.startSec + s.slotLenSec, layersReachSec(s.startSec, s.layers)), 0)
+  return { ...prog, slots, byCellId, totalSec }
+}
+
+/**
+ * The programme as the queue PLAYS it (play-queue's `progRebuild`): the
+ * layout, with the hidden lines' takes taken out. Null where a file with no
+ * times has a take whose length was never measured (a generated voice nobody
+ * has played yet): such a file only reaches the programme through AQU-2204's
+ * stand-ins, so it keeps the plain line-by-line path rather than going quiet.
+ *
+ * AQU-2252: laid out with the file's added tracks, as the queue is handed
+ * them, and saying which lines a take on another track sounds in.
+ */
+export function playedProgramme(
+  cells: readonly CellData[],
+  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+): { programme: Programme; hiddenCellIds: ReadonlySet<string>; underLayers: ReadonlySet<string> } | null {
+  const { programme: built, lines, untimed } = layOutProgramme(cells, tracks)
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) return null
+  const hiddenCellIds = new Set(lines.filter(isHiddenCell).map((c) => c.id))
+  const programme = withoutHiddenTakes(built, hiddenCellIds)
+  return { programme, hiddenCellIds, underLayers: linesUnderLayers(programme) }
+}
+
+/**
+ * AQU-2252: the lines a take on another track sounds in — its own line's, or
+ * one running on over the lines after it. Following the recordings such a
+ * line is held under it (the queue's `progSlotHolds`), so it has something
+ * to hear even with nothing of its own.
+ */
+export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
+  const spans: { start: number; end: number }[] = []
+  for (const slot of prog.slots) {
+    for (const l of slot.layers ?? []) {
+      if (!l.window) continue
+      const start = slot.startSec + l.atSec
+      spans.push({ start, end: start + (l.window.end - l.window.start) })
+    }
+  }
+  const out = new Set<string>()
+  if (spans.length === 0) return out
+  // Joined into the stretches where any sounds, by start; the lines are in
+  // order too, so one walk of each answers every line.
+  spans.sort((a, b) => a.start - b.start)
+  const sounding: { start: number; end: number }[] = []
+  for (const sp of spans) {
+    const last = sounding[sounding.length - 1]
+    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
+    else sounding.push({ ...sp })
+  }
+  let j = 0
+  for (const slot of prog.slots) {
+    while (j < sounding.length && sounding[j].end <= slot.startSec) j++
+    if (j < sounding.length && sounding[j].start < slot.startSec + slot.slotLenSec) out.add(slot.cellId)
+  }
+  return out
+}
+
+/**
+ * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
+ * to hear (no original, no take the programme can play) and not hidden. A
+ * hidden line is skipped whichever way the setting is: following the
+ * recordings the playhead jumps it (Sam, Oct 29). (Following the source under
+ * a film or a recording it is passed through instead — not this layout.)
+ *
+ * AQU-2252: a take on another track is the line's to play too, and a line a
+ * take from another line runs on over (`underLayers`) is held under it.
+ */
+export function slotHasNothingToPlay(
+  slot: ProgrammeSlot,
+  hiddenCellIds: ReadonlySet<string>,
+  underLayers: ReadonlySet<string> = new Set(),
+): boolean {
+  return !slotHasOwnSound(slot) && !underLayers.has(slot.cellId) && !hiddenCellIds.has(slot.cellId)
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

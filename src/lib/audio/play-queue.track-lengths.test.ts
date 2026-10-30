@@ -274,6 +274,21 @@ describe("following the recordings, every track's takes set their lines' lengths
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 
+  it("pausing while the line waits on another track's take stops the clock where it is, not at its last beat", async () => {
+    const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
+    startQueue(ctxFor(cells), 1)
+    await settle()
+    el("b2")!.tick(0.2) // the main take is over: the rest of b2 is held from 0.6 s
+    await settle()
+    await wait(130) // past the hold's 100 ms beat, short of its next one
+    pauseQueue()
+    const at = getQueueProgress().currentTime
+    expect(Number.isFinite(at)).toBe(true)
+    // Where the clock is (0.73 s and on), not where the last beat put it (0.7 s).
+    expect(at).toBeGreaterThan(0.72)
+    expect(at).toBeLessThan(0.9)
+  })
+
   it("next line from a line waiting on another track's take goes to the next line", async () => {
     const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
     startQueue(ctxFor(cells), 1)
@@ -294,6 +309,17 @@ describe("following the recordings, every track's takes set their lines' lengths
     setQueueLayerTrackSlots([TRACK])
     expect(getQueueProgress().duration).toBeCloseTo(1.0, 5)
     setQueueLayerTrackSlots([])
+    expect(getQueueProgress().duration).toBeCloseTo(1.3, 5)
+  })
+
+  it("a track that comes back while it plays (an undone deletion) is laid in at once", async () => {
+    // The cells carrying Track 1's takes can land before the tracks do.
+    setQueueTargetSlots(["recording"])
+    const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(getQueueProgress().duration).toBeCloseTo(1.0, 5)
+    setQueueTargetSlots(["recording", TRACK])
     expect(getQueueProgress().duration).toBeCloseTo(1.3, 5)
   })
 })
@@ -402,5 +428,69 @@ describe("following the source, nothing changes (AQU-2252)", () => {
     const plain = await run(false)
     expect(plain.some((s) => (s as { pool: unknown[] }).pool.length > 0)).toBe(true)
     expect(await run(true)).toEqual(plain)
+  })
+})
+
+describe("a line's own take that stops short, under another track's take (AQU-2252)", () => {
+  // b2: a 2 s main take and a 2.5 s Track 1 take → b2 lasts 2.5 s (0.4–2.9).
+  const book = () => [line("b1", 400), line("b2", 2000, { durationMs: 2500, targetOffsetMs: 0 }), line("b3", 400)]
+
+  it("a take that fails partway holds the line from where it stopped, not from where it was meant to end", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(0.5)
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.9, 5)
+    el("b2")!.onerror?.() // an expired stream token, half a second in
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(el("b2-track")!.paused).toBe(false)
+    // Not 2.4 s, the end of the 2 s the take was meant to play: the playhead
+    // stays with Boaz's take, which is still at 0.5 s.
+    expect(getQueueProgress().currentTime).toBeLessThan(1)
+  })
+
+  it("a take whose clip runs out before its measured length holds the line from where it ran out", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(1.2)
+    el("b2")!.onended?.()
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.6, 1)
+  })
+
+  it("a take that plays to its end still holds from its end", async () => {
+    startQueue(ctxFor(book()), 1)
+    await settle()
+    el("b2")!.tick(2.0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2.4, 1)
+  })
+})
+
+describe("more layers sounding at once than the players allow (AQU-2252)", () => {
+  // Eight lines of 0.1 s, each with a 3 s take on Track 1, a layer: at 0.75 s
+  // all eight are sounding, over the six players two tracks get.
+  const book = () =>
+    Array.from({ length: 8 }, (_, i) => line(`b${i + 1}`, 100, { durationMs: 3000, targetOffsetMs: 0 }))
+  const layerPlayers = () => FakeAudio.instances.filter((a) => a.src.endsWith("-track.webm"))
+
+  beforeEach(() => setQueueLayerTrackSlots([TRACK]))
+
+  it("the ones sounding keep sounding; the rest wait instead of pushing each other out", async () => {
+    startQueueAtTime(ctxFor(book()), 0.75)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b8" })
+    const sounding = trackEntries().map((e) => e.cellId)
+    expect(sounding.length).toBeGreaterThan(0)
+    const made = layerPlayers().length
+    await wait(320) // five boundary checks
+    await settle()
+    // No layer was stopped and started again, and none was fetched again.
+    expect(layerPlayers().length).toBe(made)
+    expect(trackEntries().map((e) => e.cellId)).toEqual(sounding)
+    // The earliest ones sound (a music bed under the effects starts first).
+    expect(sounding).toContain("b1")
   })
 })

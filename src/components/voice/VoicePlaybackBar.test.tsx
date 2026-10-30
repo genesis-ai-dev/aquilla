@@ -5,7 +5,7 @@
  * volume) and that play-all is disabled when no line has voiced audio.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { act, render, screen, fireEvent } from "@testing-library/react"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 
@@ -263,6 +263,41 @@ describe("VoicePlaybackBar — playback speed", () => {
     pickSpeed("0.75x")
     expect(setQueueRate).toHaveBeenCalledWith(0.75)
     expect(videoController.setRate).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2251 (Sam, Oct 29): following the source on a file with a film, a hidden
+// line is passed through, not jumped — the film and its sound play on across
+// it. Next and previous line step to it like any other line.
+describe("VoicePlaybackBar — a hidden line on a film's clock", () => {
+  const seek = vi.fn()
+  const cells = [
+    cell({ id: "a", startTime: 0, endTime: 2 } as Partial<CellData>),
+    cell({ id: "b", startTime: 3, endTime: 5, hidden: true } as Partial<CellData>),
+    cell({ id: "c", startTime: 6, endTime: 8 } as Partial<CellData>),
+  ]
+  beforeEach(() => {
+    transportSource.value = "video"
+    seek.mockClear()
+    ;(videoController as unknown as { seek: typeof seek }).seek = seek
+  })
+  afterEach(() => {
+    transportSource.value = "queue"
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+
+  it("next line goes to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 0.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Next line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
+  })
+
+  it("previous line goes back to the hidden line, not past it", () => {
+    act(() => __setQueuePlaybackForTests({ cellId: null, currentTime: 6.5, playing: false, duration: 8 }))
+    render(<VoicePlaybackBar cells={cells} projectId="p1" session={null} settings={undefined} />)
+    fireEvent.click(screen.getByLabelText("Previous line"))
+    expect(seek).toHaveBeenLastCalledWith(3)
   })
 })
 

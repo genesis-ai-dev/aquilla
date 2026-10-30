@@ -208,6 +208,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
   languageEditMinRole: 600,
+  importMinRole: 500,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),

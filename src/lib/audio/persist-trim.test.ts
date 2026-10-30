@@ -15,7 +15,7 @@ beforeEach(() => { vi.clearAllMocks() })
 
 const base = {
   projectId: "p1", fileId: "cues", cellId: "cue-4", audioId: "rec-cue-4-a.wav",
-  att: { url: "frontier-audio://rec-cue-4-a.wav", durationMs: 3000, validatorCount: 1, validators: ["sam"] },
+  att: { url: "frontier-audio://rec-cue-4-a.wav", durationMs: 3000, validatorCount: 1, validators: ["sam"], validatorDecidedTs: { sam: 1700 } },
   selectedAudioId: "rec-cue-4-a.wav",
   trimStartMs: 300, trimEndMs: null, author: "sam",
 }
@@ -33,7 +33,7 @@ describe("persistTakeTrim", () => {
     void persistTakeTrim(base)
     const [fileId, cellId, att] = injectOptimisticAudioTrim.mock.calls[0] as unknown as [string, string, Record<string, unknown>]
     expect([fileId, cellId]).toEqual(["cues", "cue-4"])
-    expect(att).toMatchObject({ slot: "recording", trimStartMs: 300, trimEndMs: null, validatorCount: 1, validators: ["sam"] })
+    expect(att).toMatchObject({ slot: "recording", trimStartMs: 300, trimEndMs: null, validatorCount: 1, validators: ["sam"], validatorDecidedTs: { sam: 1700 } })
     expect(notifyAudioAttachmentsChanged).toHaveBeenCalledWith("cues")
   })
 

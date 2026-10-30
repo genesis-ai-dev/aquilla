@@ -1298,9 +1298,8 @@ export const editor = defineNamespace({
     "editor.station.approve": "Approve",
     "editor.station.approveTip": "Approve the clip on {line} (A)",
     "editor.station.approveTakeTip": "Approve the take (A)",
-    "editor.station.undoTip": "Undo ({keys})",
+    "editor.station.undoTip": "Undo your last change to this recording",
     "editor.station.nothingToUndo": "Nothing to undo",
-    "editor.station.undoElsewhere": "Your last change was elsewhere. Use Undo in the top bar.",
     "editor.station.laneTip": "Drag across the recording to select a part; click to place the cursor",
     "editor.station.startFlag": "Start {time}",
     "editor.station.endFlag": "End {time}",
@@ -1419,6 +1418,8 @@ export const editor = defineNamespace({
     "editor.station.recordedInsert": "a recording made here",
     "editor.station.tooLong": "Too long to cut or insert here yet; trims, volume and fades work.",
     "editor.station.takeVersion": "{take} · version {n}",
+    "editor.station.sourceReadOnly": "This is the source recording, so it can’t be edited here.",
+    "editor.station.hintListen": "Drag across the waveform to select a part. Space plays.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3008,16 +3009,10 @@ export const editor = defineNamespace({
         description: "Tooltip of the Station's Approve button on one piece of a split take, which approves the whole take.",
       },
       "editor.station.undoTip": {
-        description: "Tooltip of the Station's Undo button.",
-        placeholders: {
-          keys: "The shortcut, e.g. ⌘Z.",
-        },
+        description: "Tooltip of the Station's Undo button: it takes back your last change to the open recording, even if you changed other things since (Cmd/Ctrl+Z is the project-wide Undo).",
       },
       "editor.station.nothingToUndo": {
         description: "Tooltip of the Station's Undo button when there is nothing to undo.",
-      },
-      "editor.station.undoElsewhere": {
-        description: "Tooltip of the Station's greyed Undo button when your newest change was not to the recording open in the Station.",
       },
       "editor.station.laneTip": {
         description: "Tooltip and screen-reader name of the Station's waveform.",
@@ -3429,6 +3424,12 @@ export const editor = defineNamespace({
           take: "The take's name, e.g. 'Take 2'.",
           n: "The version number (2 or more).",
         },
+      },
+      "editor.station.sourceReadOnly": {
+        description: "Plain line under the Station's heading when the open recording is the imported source (the original everyone's timing follows): it can be played and looped, not edited.",
+      },
+      "editor.station.hintListen": {
+        description: "One quiet line under the Station's controls when the recording can only be listened to.",
       },
       "editor.dock.film": {
         description:

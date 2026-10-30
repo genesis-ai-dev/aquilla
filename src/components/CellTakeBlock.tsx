@@ -625,8 +625,9 @@ function CellTakeBlockView({
               </Button>
             </AppTooltip>
           )}
-          {/* AQU-2327 (Q1): open the take that plays in the Station, beside Remove noise. */}
-          {stationHere && !isSection && selectedAudioId && attachment && (
+          {/* AQU-2327 (Q1): open the take that plays in the Station, beside
+              Remove noise. A source section opens too, to listen only (Q10). */}
+          {stationHere && selectedAudioId && attachment && (
             <AppTooltip content={t("editor.station.editIn")}>
               <Button
                 type="button"

@@ -91,6 +91,13 @@ describe("the Station", () => {
     expect(screen.getByTestId("station-header")).toBeTruthy()
   })
 
+  it("opens the source recording to listen only, and says why (Q10)", () => {
+    const src = makeTake({ role: "source" } as never)
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(src)} visible />)
+    expect(screen.getByTestId("station-source-note").textContent).toMatch(/source recording/)
+  })
+
   it("counts approvals against the project's need, and versions by the chain", () => {
     expect(approvalState(makeTake({ validatorCount: 1 }).att, 2)).toEqual({ approved: false, count: 1 })
     const v2 = makeTake({ referenceAudioId: "t1.webm" })

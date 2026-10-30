@@ -13,9 +13,9 @@ import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { castNameOf } from "@/lib/audio/voices"
-import { historyView, newestStepMatches, subscribeHistory, undoLast } from "@/lib/history/history"
+import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { isApplePlatform } from "@/lib/platform"
+import { audioIdSeededWith } from "@/lib/audio/upload"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -155,7 +155,11 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const t = useT()
   const [message, setMessage] = useState<string | null>(initialMessage ?? null)
   const ed = useStationEditor(host, take, target, visible)
-  const editable = host.editable
+  // Q10 (Sam, Oct 30): the imported source recording is everyone's timing
+  // reference — it opens to listen, select and loop, its tools hidden, with a
+  // plain line saying why. One switch: STATION_PICKS.sourceEditable.
+  const isSource = take.att.role === "source" || audioIdSeededWith(target.audioId, take.fileId)
+  const editable = host.editable && (!isSource || STATION_PICKS.sourceEditable)
   const [hovering, setHovering] = useState(false)
   const [insertOpen, setInsertOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -351,6 +355,11 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         />
       ) : null}
       <StationHeader host={host} take={take} target={target} places={placeLines} unsaved={unsaved} undoUnsaved={ed.undoUnsaved} />
+      {isSource && !STATION_PICKS.sourceEditable ? (
+        <p data-testid="station-source-note" className="shrink-0 px-3 pb-1 text-[11.5px] text-muted-foreground">
+          {t("editor.station.sourceReadOnly")}
+        </p>
+      ) : null}
       {unsaved ? (
         <StationNotice
           kinds={changedKinds(ed.ops)}
@@ -395,7 +404,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             ed={ed}
             editable={editable}
             calm={calm}
-            hint={editable ? t("editor.station.hint") : t("editor.station.hintCalm")}
+            hint={editable ? t("editor.station.hint") : t("editor.station.hintListen")}
             onMessage={setMessage}
           />
           <StationHistory
@@ -456,8 +465,9 @@ export function StationHeader({
       ? `◷ ${t("editor.station.waitingCount", { done: count, need: host.approvalsNeeded })}`
       : `◷ ${t("editor.station.waiting")}`
 
-  // Q4: the Station's own Undo takes back your last change to THIS recording;
-  // greyed, with the reason, when your newest change was somewhere else.
+  // Q4 (Sam, Oct 30): the Station's own Undo always takes back your last
+  // change to THIS recording, even if you have changed other things since;
+  // ⌘Z stays the project's newest step. Unsaved edits go first.
   const view = useSyncExternalStore(subscribeHistory, historyView, historyView)
   const mine = useCallback(
     (_kind: string, data: unknown) => {
@@ -466,18 +476,17 @@ export function StationHeader({
     },
     [cellId, audioId],
   )
-  const canUndo = unsaved || (view.canUndo && (STATION_PICKS.undoButton === "project" || newestStepMatches(mine)))
+  const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
+  const canUndo = unsaved || step != null
   const undoTip = unsaved
     ? t("editor.station.undoUnsaved")
-    : canUndo
-      ? t("editor.station.undoTip", { keys: isApplePlatform() ? "⌘Z" : "Ctrl+Z" })
-      : view.canUndo
-        ? t("editor.station.undoElsewhere")
-        : t("editor.station.nothingToUndo")
+    : step
+      ? t("editor.station.undoTip")
+      : t("editor.station.nothingToUndo")
   const undo = () => {
     if (unsaved && undoUnsaved?.()) return
-    if (!canUndo) return
-    void undoLast().then((r) => {
+    if (!step) return
+    void (STATION_PICKS.undoButton === "project" ? undoLast() : undoStepById(step.id)).then((r) => {
       if (r) host.reportHistory("undo", r)
     })
   }

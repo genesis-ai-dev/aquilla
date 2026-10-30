@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
+import { STATION_PICKS } from "@/lib/station/picks"
 import type { EditOp } from "@/lib/station/edit-list"
 
 export interface InsertChoice {
@@ -46,11 +47,14 @@ export function StationInsertMenu({
       className="flex w-[250px] flex-col rounded-md bg-popover p-1 shadow-md ring-1 ring-border"
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <button type="button" className={row} aria-expanded={libOpen} onClick={() => setLibOpen((o) => !o)} data-testid="station-insert-library">
-        <Library className="size-3.5" />
-        {t("editor.station.fromLibrary")}
-      </button>
-      {libOpen ? (
+      {/* Q3: hidden until the Library exists (AQU-2333). */}
+      {STATION_PICKS.library ? (
+        <button type="button" className={row} aria-expanded={libOpen} onClick={() => setLibOpen((o) => !o)} data-testid="station-insert-library">
+          <Library className="size-3.5" />
+          {t("editor.station.fromLibrary")}
+        </button>
+      ) : null}
+      {STATION_PICKS.library && libOpen ? (
         <div className="flex max-h-48 flex-col overflow-y-auto pb-1 ps-[30px]">
           {choices.length === 0 ? <span className="px-1.5 py-1 text-xs text-muted-foreground">{t("editor.station.libraryEmpty")}</span> : null}
           {choices.map((c) => (

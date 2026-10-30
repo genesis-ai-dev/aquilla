@@ -23,9 +23,10 @@ export const STATION_PICKS = {
    */
   versions: "under" as "under" | "newTake",
   /**
-   * Q4, what the Station's Undo button undoes: "thisRecording" = your last
-   * change to the open recording (greyed, with a reason, when your newest
-   * change in the project was elsewhere); "project" = the project's Undo.
+   * Q4, what the Station's Undo button undoes — Sam, Oct 30: "thisRecording"
+   * = always your last change to the open recording, even if you have changed
+   * other things since (it is never greyed for that); "project" = the
+   * project's newest step. ⌘Z is the project's newest step either way.
    */
   undoButton: "thisRecording" as "thisRecording" | "project",
   /**
@@ -35,7 +36,25 @@ export const STATION_PICKS = {
    * Station at once, before the timeline and exports hear them.
    */
   levelsRelease: "together" as "together" | "stationFirst",
-  /** Q12: History says who made each change, and when. */
+  /**
+   * Q3 (Sam, Oct 30): no recordings Library yet, so "Insert audio here › From
+   * the library" and "Show in the library" stay hidden. AQU-2333 brings them
+   * back when the Library exists; flip this then.
+   */
+  library: false,
+  /**
+   * Q10 (Sam, Oct 30): the imported source recording opens to listen, select
+   * and loop, with its editing tools hidden and a plain line saying why. Sam
+   * may allow editing source lines later: this is that switch.
+   */
+  sourceEditable: false,
+  /**
+   * Q12: History says who made each change, and when (Sam likes it, Oct 30).
+   * His pinned idea for later: a line's Recording tab could become the take's
+   * history of changes, as text has its edit history — the Station's History
+   * reads the same server history (cell-history-read-route), so it can feed
+   * that. Q7: the Station never replaces the Recording tab.
+   */
   historyNamesWho: true,
   /** Q13: with more than one approval needed, "Waiting · 1 of 2". */
   showApprovalCount: true,

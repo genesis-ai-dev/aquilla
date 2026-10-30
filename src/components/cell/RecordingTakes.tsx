@@ -15,10 +15,17 @@
 // 2026-09-30); the listed takes show their validation read-only.
 
 import { useMemo } from "react"
-import { Mic } from "lucide-react"
+import { AudioLines, Mic, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
+import { cloneNameSuggestion, lineVoicePending } from "@/lib/audio/line-voice"
+import { useVoicingAs } from "@/lib/audio/voicing-as"
+import { takeUsedByVoice } from "@/lib/audio/change-voice-batch"
+import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { useOnline } from "@/hooks/useOnline"
+import { useConnectivity } from "@/lib/offline/connectivity"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -54,6 +61,10 @@ interface Shared {
 export interface RecordingTakesProps extends Shared {
   /** The row's own cell. */
   cell: CellData
+  /** AQU-2212: the lane's cast, for the line's "Change to …" / "Generate · …". */
+  ttsSettings?: ProjectTtsSettings
+  /** False in a language that delivers Audio and no text: nothing to read. */
+  voiceFromText?: boolean
   /** Takes that live on the heard lines performing this row (dubbing). */
   linkedTakes?: ReadonlyArray<{
     cell: CellData
@@ -119,6 +130,9 @@ function OwnerTakes({
    *  than draw nothing (Sam, 2026-09-29 — a line split across heard lines). */
   offerWhenEmpty?: boolean
 }) {
+  // AQU-1758: the take's "Make a character from this voice", when offered —
+  // in one step (AQU-2212), the dialog its More options.
+  const { onMakeCharacter, onCloneTake } = useEditorActions()
   const t = useT()
   const shared: Shared = { ...rest, project, session }
   const { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, fileId, id: cellId } = owner
@@ -255,6 +269,9 @@ function OwnerTakes({
                 pieces={split}
                 takesHistory={history}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
+                onMakeCharacter={onMakeCharacter ? () => onMakeCharacter(owner.id) : undefined}
+                onCloneTake={onCloneTake ? (name) => onCloneTake(owner.id, playing, name) : undefined}
+                cloneSuggestedName={cloneNameSuggestion(owner, shared.username)}
                 trackName={showTracks ? group.name || t("editor.recordingTab.addedTrack") : null}
                 trackFileId={trackFileId}
               />
@@ -288,7 +305,63 @@ function OwnerTakes({
   )
 }
 
-export function RecordingTakes({ cell, linkedTakes, ...shared }: RecordingTakesProps) {
+/**
+ * AQU-2212: the Audio view card's one-click for a line whose voice and take
+ * disagree — "Change to …" / "Generate · …" — and its "Voicing as …" while
+ * that (or any other voicing of the line) runs. The row's own line only: a
+ * heard line's take is voiced on its own subtitle line.
+ */
+function LineVoiceRow({ cell, settings, editable, voiceFromText }: {
+  cell: CellData
+  settings: ProjectTtsSettings | undefined
+  editable: boolean
+  voiceFromText: boolean
+}) {
+  const t = useT()
+  const { onApplyLineVoice, allTtsSettings } = useEditorActions()
+  const voicingAs = useVoicingAs(cell.id)
+  const status = useTtsStatus(ttsStatusKey(cell.id))
+  const online = useOnline()
+  const reachable = useConnectivity()
+  if (voicingAs) {
+    return (
+      <span role="status" data-testid="voice-card-working" className="flex min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+        <Spinner className="size-3 shrink-0" />
+        <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+      </span>
+    )
+  }
+  if (!onApplyLineVoice) return null
+  const pending = lineVoicePending(settings, cell, {
+    generateReady: voiceFromText && Boolean(cell.translated?.trim()) && cell.type !== "paratext" && online && reachable !== false,
+    // The whole library, as the click is run (AQU-2037): a voice on another
+    // lane cloned from this take would be changed just the same.
+    takeIsReference: takeUsedByVoice(cell, allTtsSettings ?? settings),
+    canEdit: editable,
+    busy: status.kind === "loading" || status.kind === "synthesizing",
+  })
+  if (!pending) return null
+  return (
+    <div data-slot="voice-card-row" className="flex min-w-0 items-center gap-1">
+      <Button
+        type="button"
+        size="xs"
+        data-testid="voice-card-apply"
+        className="min-w-0 shrink"
+        onClick={() => onApplyLineVoice(cell.id)}
+      >
+        {pending.action === "change" ? <AudioLines /> : <Sparkles />}
+        <span className="truncate">
+          {pending.action === "change"
+            ? t("editor.voice.changeTo", { voice: pending.voice.name })
+            : t("editor.voice.generateWith", { voice: pending.voice.name })}
+        </span>
+      </Button>
+    </div>
+  )
+}
+
+export function RecordingTakes({ cell, linkedTakes, ttsSettings, voiceFromText = true, ...shared }: RecordingTakesProps) {
   const t = useT()
   const { cellStore } = useEditorActions()
   /**
@@ -315,6 +388,7 @@ export function RecordingTakes({ cell, linkedTakes, ...shared }: RecordingTakesP
   }
   return (
     <div data-testid="recording-takes" className="flex flex-col gap-4">
+      <LineVoiceRow cell={cell} settings={ttsSettings} editable={shared.editable} voiceFromText={voiceFromText} />
       <OwnerTakes {...shared} owner={cell} trackFileId={cell.fileId} />
       {linkedTakes?.map((heard) => {
         const { cell: cue, sharedWith } = heard

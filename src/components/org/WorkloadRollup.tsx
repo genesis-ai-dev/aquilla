@@ -3,8 +3,12 @@ import { getWorkload, unassignAssignment, type OrgWorkloadAssignment } from "@/l
 import { Section } from "@/components/ui/page"
 import { Badge } from "@/components/ui/badge"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { UserChip } from "@/components/UserChip"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { ProjectDeadlineStatuses } from "@/components/ProjectStatus"
+import { deadlineStatus } from "@/lib/frontier/portfolio-metrics"
+import { fmtDeadlineDate, fmtShortCalendarDate } from "@/lib/format-date"
 import { progressPercent } from "@/lib/progress/progress-percent"
 import { PROGRESS_BG } from "@/lib/progress/progress-palette"
 import { UserError } from "@/lib/errors/user-error"
@@ -52,6 +56,11 @@ import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-control
  * overview's imported-originals list uses, independently of the other — an org
  * with many assignments used to run the card long enough to push Team usage
  * and AI usage far down the page.
+ *
+ * AQU-2294: every row carries a date line — when the assignment went out and
+ * when it is due — because the sorts and filters this card is growing
+ * (AQU-2295) only mean something to a manager who can read those dates off
+ * the rows they reorder.
  */
 export function WorkloadRollup({
   jwt,
@@ -68,8 +77,15 @@ export function WorkloadRollup({
   onRefused?: () => void
 }) {
   const t = useT()
+  const { locale } = useI18n()
   const progressLines = useValidationProgressLines()
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
+  /**
+   * AQU-2294: the clock the date line is measured against, stamped when the
+   * workload was read. Reading `Date.now()` during render instead would be an
+   * impure call whose answer changes on any unrelated re-render.
+   */
+  const [now, setNow] = useState(0)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [removeError, setRemoveError] = useState<string | null>(null)
   const { session } = useFrontierSession()
@@ -81,7 +97,11 @@ export function WorkloadRollup({
   const load = useCallback(() => {
     let cancelled = false
     getWorkload(jwt, orgId)
-      .then((w) => { if (!cancelled) setRows(w) })
+      .then((w) => {
+        if (cancelled) return
+        setRows(w)
+        setNow(Date.now())
+      })
       .catch((err: unknown) => {
         if (cancelled) return
         setRows(null)
@@ -162,6 +182,47 @@ export function WorkloadRollup({
     </div>
   )
 
+  /**
+   * AQU-2294: assigned-at and deadline, in the row's own muted extra-small
+   * type. Both dates render through the shared `DateTooltip` — the deadline in
+   * the `deadline` variant the Due column of "Assigned to me" uses, the
+   * assigned date in the default one the Projects table's Updated column uses
+   * — so the formats and the hover detail cannot drift from those surfaces.
+   * The overdue / due-soon chips are the Projects table's own, off the same
+   * `deadlineStatus()` rule, so this card and that table never disagree about
+   * a date.
+   *
+   * `createdAt` is absent when the SPA is talking to a worker older than this
+   * change: the row then simply has no "Assigned …" (DateTooltip renders
+   * nothing for a null value), and a row with neither date has no line at all.
+   */
+  const dates = (a: OrgWorkloadAssignment) => {
+    if (a.createdAt == null && !a.deadline) return null
+    return (
+      <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+        <DateTooltip
+          value={a.createdAt ?? null}
+          label={t("org.workloadRollup.assignedLabel")}
+        >
+          {t("org.workloadRollup.assignedDate", {
+            date: fmtShortCalendarDate(a.createdAt, now, locale),
+          })}
+        </DateTooltip>
+        <DateTooltip
+          value={a.deadline}
+          label={t("org.assignedToMe.dueColumnLabel")}
+          variant="deadline"
+        >
+          {t("org.orgHome.dueDate", { date: fmtDeadlineDate(a.deadline, now, locale) })}
+        </DateTooltip>
+        <ProjectDeadlineStatuses
+          deadline={deadlineStatus({ deadlineAt: a.deadline }, now)}
+          testId={`workload-deadline-${a.assignmentId}`}
+        />
+      </div>
+    )
+  }
+
   return (
     <Section title={t("org.workloadRollup.title")} action={action} contentClassName="pt-0">
       <div className="divide-y" id="workload-translate-list">
@@ -172,6 +233,7 @@ export function WorkloadRollup({
               <div className="min-w-0 flex-1">
                 {head(a)}
                 <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
+                {dates(a)}
                 {/* AQU-1764: done cells are VALIDATED cells — the shared
                     palette's text-validated blue. */}
                 <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -212,6 +274,7 @@ export function WorkloadRollup({
                   <div className="min-w-0 flex-1">
                     {head(a)}
                     <p className="truncate text-xs text-muted-foreground">{a.scopeLabel}</p>
+                    {dates(a)}
                     {/* The assignee's own approvals, in the text-validated tone. */}
                     <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />

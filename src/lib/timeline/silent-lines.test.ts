@@ -12,9 +12,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
-import { clockSoundMap, silentSkipTarget, skipSilentLinesCanChange, useSkipSilentLinesOnVirtualClock } from "./silent-lines"
+import { clockJumps, clockSoundMap, skipSilentLinesCanChange, useSkipSilentLinesOnVirtualClock, type ClockSoundMap } from "./silent-lines"
 import {
   getVirtualClockSec,
+  useVirtualClockSec,
   getVirtualClockPlaying,
   resetVirtualClockForTests,
   startVirtualClock,
@@ -46,7 +47,13 @@ function cue(id: string, start: number, end: number, takeMs?: number, extra: Par
 
 const SLOTS = [RECORDING_SLOT]
 
-describe("silentSkipTarget", () => {
+/** Where a clock at `sec` jumps to straight away over `map`'s jumps, or null when it plays on. */
+function silentSkipTarget(map: ClockSoundMap, sec: number, endSec: number, skipSilent = true): number | null {
+  const jump = clockJumps(map, skipSilent).find((j) => sec >= j.start && sec < j.end)
+  return jump ? (Number.isFinite(jump.to) ? jump.to : endSec) : null
+}
+
+describe("clockJumps — where the clock jumps from each position", () => {
   // c1 [0,2] recorded; c2 [2.5,4] and c3 [4.5,6] not; c4 [7,9] recorded. End 9.
   const map = clockSoundMap([cue("c1", 0, 2, 1_500), cue("c2", 2.5, 4), cue("c3", 4.5, 6), cue("c4", 7, 9, 2_000)], SLOTS)
 
@@ -151,7 +158,9 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     advance(1)
     expect(getVirtualClockSec()).toBeCloseTo(1, 3)
     advance(1.05)
-    expect(getVirtualClockSec()).toBeCloseTo(7, 3)
+    // 0.05 s past c1's end on this beat, and that 0.05 s is played in c4: the
+    // silence between is skipped, not sat through.
+    expect(getVirtualClockSec()).toBeCloseTo(7.05, 3)
     expect(getVirtualClockPlaying()).toBe(true)
   })
 
@@ -191,12 +200,12 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
-    expect(getVirtualClockSec()).toBeCloseTo(4, 3)
+    expect(getVirtualClockSec()).toBeCloseTo(4.05, 3)
     expect(getVirtualClockPlaying()).toBe(true)
     advance(1)
-    expect(getVirtualClockSec()).toBeCloseTo(5, 3)
+    expect(getVirtualClockSec()).toBeCloseTo(5.05, 3)
     advance(1.5)
-    expect(getVirtualClockSec()).toBeCloseTo(6.5, 3)
+    expect(getVirtualClockSec()).toBeCloseTo(6.55, 3)
   })
 
   it("on: the clock jumps a hidden line as it does an unrecorded one", () => {
@@ -204,7 +213,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
-    expect(getVirtualClockSec()).toBeCloseTo(7, 3)
+    expect(getVirtualClockSec()).toBeCloseTo(7.05, 3)
   })
 
   // AQU-2251 (Sam, Oct 29): following the source on a file with a film or a
@@ -247,6 +256,33 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3) // the file's own gap before c2, which sounds on B
     setQueueTargetSlots([])
+  })
+
+  // Review finding (Oct 29): the jump came from an effect after each beat, so
+  // every beat that crossed into a skipped stretch first published a position
+  // inside it, and a beat that came late — a background tab runs timers once
+  // a second — played the silence through instead of skipping it.
+  it("never publishes a position inside a stretch it skips", () => {
+    const seen: (number | null)[] = []
+    renderHook(() => { seen.push(useVirtualClockSec()) })
+    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, SLOTS, true))
+    act(() => { virtualClockPlay() })
+    advance(1)
+    seen.length = 0
+    advance(1.05)
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen.filter((s) => s != null && s > 2 && s < 7)).toEqual([])
+  })
+
+  it("a late beat lands where a clock that skipped the silence would be", () => {
+    // c1 [0,2] recorded; c2 [2,2.4] not; c3 [2.4,6] recorded. One beat a second.
+    const short = [cue("c1", 0, 2, 2_000), cue("c2", 2, 2.4), cue("c3", 2.4, 6, 3_600)]
+    renderHook(() => useSkipSilentLinesOnVirtualClock(short, SLOTS, true))
+    act(() => { virtualClockPlay() })
+    advance(1.9)
+    advance(1)
+    // 0.1 s more of c1, the 0.4 s of c2 skipped, then 0.9 s into c3.
+    expect(getVirtualClockSec()).toBeCloseTo(3.3, 3)
   })
 
   it("does nothing while the built-in clock is not this file's transport", () => {

@@ -95,6 +95,49 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(res.audioId).toBe("audio-clone-9.wav")
   })
 
+  // Review, Oct 29: the Undo step must name the take that was attached — the
+  // re-voiced clip — or Cmd+Z finds nothing to take back and the voice stays.
+  it("a character voice's Undo step names the re-voiced take, not the stock reading", async () => {
+    vi.resetModules()
+    const recordTakeAdded = vi.fn()
+    vi.doMock("@/lib/history/take-steps", () => ({ recordTakeAdded }))
+    vi.doMock("@/lib/sync/tts", () => ({
+      synthesizeCellTts: vi.fn(async () => ({
+        audioId: "audio-tts-1", durationSeconds: 1.2,
+        objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+      })),
+    }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({
+      convertToCloneVoice: vi.fn(async () => ({
+        audioId: "audio-clone-9", ext: "wav", url: "frontier-audio://audio-clone-9.wav", bytes: 4,
+      })),
+    }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-hearth", name: "Hearth", libraryVoiceId: "narrator-hearth" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+      history: { selectedBefore: null },
+    })
+    expect(recordTakeAdded).toHaveBeenCalledTimes(1)
+    expect(recordTakeAdded).toHaveBeenCalledWith(
+      "generate",
+      expect.objectContaining({ cellId: "c", audioId: "audio-clone-9.wav" }),
+      { fileId: "f" },
+    )
+  })
+
   it("leftover Kokoro voices take the Inworld server path with Dennis", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({

@@ -85,7 +85,7 @@ function AuthDialogBody({
               onClick={() => setMode("login")}
               className="font-medium text-foreground underline-offset-4 hover:underline"
             >
-              {t("auth.login.submitDefault")}
+              {t("common.logIn")}
             </button>
           </p>
         </div>

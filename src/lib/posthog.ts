@@ -24,16 +24,11 @@ function whenLoaded(call: Call): void {
   else pending.push(call)
 }
 
-function whenConsented(call: Call): void {
-  if (!isAnalyticsEnabled()) return
-  whenLoaded(ph => { if (isAnalyticsEnabled()) call(ph) })
-}
-
 const posthog = {
-  capture: (...args: Parameters<PostHog["capture"]>): void => whenConsented((ph) => void ph.capture(...args)),
+  capture: (...args: Parameters<PostHog["capture"]>): void => whenLoaded((ph) => void ph.capture(...args)),
   captureException: (...args: Parameters<PostHog["captureException"]>): void =>
-    whenConsented((ph) => void ph.captureException(...args)),
-  identify: (...args: Parameters<PostHog["identify"]>): void => whenConsented((ph) => ph.identify(...args)),
+    whenLoaded((ph) => void ph.captureException(...args)),
+  identify: (...args: Parameters<PostHog["identify"]>): void => whenLoaded((ph) => ph.identify(...args)),
   register: (...args: Parameters<PostHog["register"]>): void => whenLoaded((ph) => ph.register(...args)),
   reset: (...args: Parameters<PostHog["reset"]>): void => whenLoaded((ph) => ph.reset(...args)),
   /** Undefined until the library has loaded (and while recording is off). */
@@ -44,14 +39,14 @@ const posthog = {
 /** Errors thrown before the library arrives; PostHog's own handlers take over after. */
 function holdEarlyErrors(win: Window): (ph: PostHog) => void {
   const early: unknown[] = []
-  const onError = (event: ErrorEvent) => { if (isAnalyticsEnabled()) early.push(event.error ?? event.message) }
-  const onRejection = (event: PromiseRejectionEvent) => { if (isAnalyticsEnabled()) early.push(event.reason) }
+  const onError = (event: ErrorEvent) => early.push(event.error ?? event.message)
+  const onRejection = (event: PromiseRejectionEvent) => early.push(event.reason)
   win.addEventListener("error", onError)
   win.addEventListener("unhandledrejection", onRejection)
   return (ph) => {
     win.removeEventListener("error", onError)
     win.removeEventListener("unhandledrejection", onRejection)
-    if (isAnalyticsEnabled()) for (const error of early) ph.captureException(error)
+    for (const error of early) ph.captureException(error)
   }
 }
 

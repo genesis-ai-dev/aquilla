@@ -3,7 +3,7 @@ import { renderWithBrand as render } from "@/test-utils/render-with-brand"
  * AQU-282: Login page tests
  *
  * Covers:
- *  - Page renders username + password fields and a Sign in button
+ *  - Page renders username + password fields and a Log in button
  *  - Successful login navigates to /app
  *  - Already-signed-in visitors are redirected into the app
  *  - Auth error shown in the form
@@ -129,9 +129,9 @@ describe("Login page — rendering", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
   })
 
-  it("renders a Sign in button that stays enabled and validates on submit", async () => {
+  it("renders a Log in button that stays enabled and validates on submit", async () => {
     renderLogin()
-    const btn = screen.getByRole("button", { name: /^sign in$/i })
+    const btn = screen.getByRole("button", { name: /^log in$/i })
     expect(btn).toBeEnabled()
     await submitLogin()
     await waitFor(() => {
@@ -196,7 +196,7 @@ describe("Login page — success path", () => {
     fillLogin("alice", "secret")
     await submitLogin()
 
-    expect(screen.getByRole("button", { name: "Signing in…" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logging in…" })).toBeDisabled()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
 
     act(() => announceMigration())

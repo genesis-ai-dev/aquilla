@@ -107,12 +107,12 @@ function buildSignupSchema(t: TFunction) {
         .string()
         .trim()
         .min(1, t("auth.resetPassword.emailRequired"))
-        .email(t("auth.resetPassword.emailInvalid")),
+        .refine(value => value.length === 0 || z.string().email().safeParse(value).success, t("auth.resetPassword.emailInvalid")),
       password: z.string().min(1, t("auth.signup.passwordRequired")),
     })
     .superRefine((data, ctx) => {
       const checks = checkPasswordRequirements(data.password, data.email)
-      if (!checks.minLength) {
+      if (data.password.length > 0 && !checks.minLength) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: t("auth.resetPassword.passwordTooShort"),

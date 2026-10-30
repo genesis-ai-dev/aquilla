@@ -175,8 +175,8 @@ export function Login() {
                       {isSubmitting
                         ? isMigrating
                           ? t("auth.login.submitMigrating")
-                          : t("auth.login.submitSigningIn")
-                        : t("auth.login.submitDefault")}
+                          : t("auth.login.submitLoggingIn")
+                        : t("common.logIn")}
                     </Button>
                     {isSubmitting && isMigrating && (
                       <p

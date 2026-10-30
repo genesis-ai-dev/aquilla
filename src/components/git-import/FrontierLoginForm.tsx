@@ -166,7 +166,7 @@ export function FrontierLoginForm({
       )}
       <Button type="submit" size="lg" form="frontier-login-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-        {form.state.isSubmitting ? t("auth.login.submitSigningIn") : t("auth.login.submitDefault")}
+        {form.state.isSubmitting ? t("auth.login.submitLoggingIn") : t("common.logIn")}
       </Button>
     </form>
   )

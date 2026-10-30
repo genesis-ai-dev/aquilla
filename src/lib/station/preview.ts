@@ -58,11 +58,15 @@ export class StationPreview {
 
   /** The samples to play from now on. Keeps the position if it was playing. */
   setSamples(samples: Float32Array, rate: number, opts: { mix?: boolean } = {}): void {
+    this.setBlob(encodeWavPcm16(samples, rate), opts)
+  }
+
+  /** A recording to play as it is (a plain take plays its own bytes). */
+  setBlob(blob: Blob, opts: { mix?: boolean } = {}): void {
     const el = this.element()
     if (!el) return
     const wasAt = el.currentTime
     const wasPlaying = !el.paused
-    const blob = encodeWavPcm16(samples, rate)
     const next = URL.createObjectURL(blob)
     const prev = this.url
     this.url = next

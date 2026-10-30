@@ -29,6 +29,11 @@ import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
 
 export const BASE_SRC = "base"
+/** Slice 12: past this, a recording plays from its own bytes. */
+export const STATION_LONG_SEC = 120
+/** Slice 12: past this, deleting and inserting wait for block-by-block
+ *  rendering; trims, approval, volume and fades work at any length. */
+export const STATION_EDIT_MAX_SEC = 600
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 export const MAX_ZOOM = 16
 
@@ -210,6 +215,17 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   useEffect(() => {
     if (!pcm) return
     const flat = clip.fadeIn <= 0 && clip.fadeOut <= 0 && !clip.gainDb
+    // A plain recording plays from its own bytes (no re-encode: slice 12),
+    // its volume and fades applied by the mixer.
+    // Only a long one, and never a recorder's webm: a MediaRecorder webm has
+    // no duration, and seeking one ends it (clip-preview.ts), so short takes
+    // and webm play from a WAV render instead.
+    const playOriginal = pcm.original && pcm.duration > STATION_LONG_SEC && !pcm.original.type.includes("webm")
+    if (ops.length === 0 && playOriginal && pcm.original && (flat || previewCanMix())) {
+      preview.setLevel(flat ? null : { gainDb: clip.gainDb, fadeInSec: clip.fadeIn, fadeOutSec: clip.fadeOut, startSec: clip.trimA, endSec: clip.trimB })
+      preview.setBlob(pcm.original, { mix: previewCanMix() })
+      return
+    }
     if (ops.length === 0 && flat) {
       preview.setLevel(null)
       preview.setSamples(pcm.data, pcm.rate, { mix: previewCanMix() })

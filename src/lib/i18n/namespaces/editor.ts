@@ -1417,6 +1417,7 @@ export const editor = defineNamespace({
     "editor.station.voiceStarted": "Changing the voice. The new version appears on the line when it’s ready.",
     "editor.station.voiceUnavailable": "This line’s voice can’t be changed here.",
     "editor.station.recordedInsert": "a recording made here",
+    "editor.station.tooLong": "Too long to cut or insert here yet; trims, volume and fades work.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3417,6 +3418,9 @@ export const editor = defineNamespace({
       },
       "editor.station.recordedInsert": {
         description: "How audio recorded with 'Record now' is named in the History row and its mark's tooltip.",
+      },
+      "editor.station.tooLong": {
+        description: "Note in the selection's bar on a recording longer than ten minutes, where Delete and Insert are not offered yet.",
       },
       "editor.dock.film": {
         description:

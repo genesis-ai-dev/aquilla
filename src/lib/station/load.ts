@@ -6,6 +6,7 @@
 import { audioCacheGet, audioCachePut } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k, TARGET_RATE } from "@/lib/audio/decode-mono"
 import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
+import { audioMimeForExt } from "@/lib/audio/mime"
 import { fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { peakOf, type PcmSource } from "./render"
 
@@ -14,6 +15,9 @@ export interface StationPcm extends PcmSource {
   peak: number
   /** Seconds. */
   duration: number
+  /** The stored recording itself, to play it untouched without re-encoding
+   *  (slice 12: a long recording plays from its own bytes). */
+  original?: Blob
 }
 
 export interface LoadPcmArgs {
@@ -51,7 +55,8 @@ export function loadStationPcm(args: LoadPcmArgs): Promise<StationPcm> {
       void audioCachePut(f.audioId, f.ext, bytes)
     }
     const data = await decodeToMono48k(bytes)
-    return { data, rate: TARGET_RATE, peak: peakOf(data), duration: data.length / TARGET_RATE }
+    const original = new Blob([bytes as BlobPart], { type: audioMimeForExt(f.ext) })
+    return { data, rate: TARGET_RATE, peak: peakOf(data), duration: data.length / TARGET_RATE, original }
   })()
   decoded.set(key, p)
   p.catch(() => decoded.delete(key))

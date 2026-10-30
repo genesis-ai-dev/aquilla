@@ -39,7 +39,7 @@ import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
 import { StationLevels } from "./StationLevels"
 import { StationScroll, StationTransport } from "./StationTransport"
-import { useStationEditor } from "./useStationEditor"
+import { STATION_EDIT_MAX_SEC, useStationEditor } from "./useStationEditor"
 
 /** The Station's tab content: the open recording, or how to open one. */
 export function StationPanel({ host, visible }: { host: StationHost | null; visible: boolean }) {
@@ -161,6 +161,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const [saving, setSaving] = useState(false)
   const unsaved = ed.ops.length > 0
   const calm = ed.sel == null && !hovering && !unsaved
+  const tooLong = (ed.pcm?.duration ?? 0) > STATION_EDIT_MAX_SEC
   const line = host.lineName(target.cellId)
   const places = host.placementsOf(take.fileId, take.att.url)
   const placeLines = places.length > 1 ? places.map((p) => host.lineName(p.cell.id)) : [line]
@@ -317,8 +318,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     else if (mod || e.altKey) handled = false
     else if (k === " ") ed.togglePlay()
     else if (k === "k" || k === "K") void ed.keepSelection()
-    else if ((k === "Backspace" || k === "Delete") && editable) ed.deleteSelection()
-    else if ((k === "i" || k === "I") && editable && ed.sel) setInsertOpen(true)
+    else if ((k === "Backspace" || k === "Delete") && editable && !tooLong) ed.deleteSelection()
+    else if ((k === "i" || k === "I") && editable && !tooLong && ed.sel) setInsertOpen(true)
     else if (k === "a" || k === "A") approve()
     else if (k === "=" || k === "+") ed.zoomBy(2)
     else if (k === "-") ed.zoomBy(0.5)
@@ -372,7 +373,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             generated={Boolean(take.att.voiceId)}
             onHover={setHovering}
             {...(editable && levelsShown() ? { hoverLayer: (h: boolean, lane: HTMLElement | null) => <StationLevels ed={ed} lane={lane} hover={h} /> } : {})}
-            {...(editable
+            {...(editable && tooLong ? { editNote: t("editor.station.tooLong") } : {})}
+            {...(editable && !tooLong
               ? {
                   onDelete: ed.deleteSelection,
                   onInsert: () => setInsertOpen((o) => !o),

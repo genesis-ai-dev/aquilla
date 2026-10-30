@@ -32,13 +32,15 @@ interface LaneProps {
   hoverLayer?: (hover: boolean, lane: HTMLElement | null) => ReactNode
   /** The pointer is over the lane: the quiet hint steps aside (item 29). */
   onHover?(hover: boolean): void
+  /** Slice 12: why Delete and Insert aren't offered (a very long recording). */
+  editNote?: string
 }
 
 type Drag =
   | { kind: "sel"; x: number; y: number; t0: number; moved: boolean }
   | { kind: "trimA" | "trimB"; x: number; y: number; moved: boolean }
 
-export function StationLane({ ed, editable, trackVars, generated, onDelete, onInsert, insertOpen, insertMenu, hoverLayer, onHover }: LaneProps) {
+export function StationLane({ ed, editable, trackVars, generated, onDelete, onInsert, insertOpen, insertMenu, hoverLayer, onHover, editNote }: LaneProps) {
   const t = useT()
   const [box, setBox] = useState<HTMLDivElement | null>(null)
   const size = useBox(box)
@@ -267,6 +269,7 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
                   {t("editor.station.insertHere")}
                 </ActionButton>
               ) : null}
+              {editNote ? <span className="px-1 text-[11px] text-muted-foreground/70">{editNote}</span> : null}
               <span className="ps-1 pe-1.5 font-mono text-[10.5px] text-muted-foreground/70">
                 {range
                   ? t("editor.station.selRange", { a: formatStationTime(sel.a), b: formatStationTime(sel.b), len: formatStationLength(sel.b - sel.a) })

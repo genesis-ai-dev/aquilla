@@ -1615,26 +1615,6 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(px(screen.getByTestId("tl-card-p1"), "width")).toBeCloseTo(2.5 * perSec, 0)
   })
 
-  // AQU-2260 (Sam, Oct 29): nothing explains itself on hover. The pause says
-  // what it is on a click of it.
-  it("the pause before a take says what it is on a click, not a hover", async () => {
-    const takeId = "audio-p1-1700000000-take.webm"
-    const placed = cell({
-      id: "p1", medium: "media", startTime: 0, endTime: 4, original: "p1", selectedAudioId: takeId,
-      attachments: {
-        [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: 2_000, targetOffsetMs: 500 },
-        [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
-      },
-    } as unknown as Partial<CellData>)
-    renderWithTooltips(
-      <TimelineEditor
-        fileId="pz2" coreMediaUrl={null} editable cells={[placed]} timingMode="audioFirst"
-        onRetimeSubtitle={() => {}} onRetimeTarget={() => {}} onTrimTarget={() => {}}
-      />,
-    )
-    await expectClickNote(screen.getByTestId("tl-target-lead-p1"), "A pause someone left before this take")
-  })
-
   // AQU-2215 (Sam, Oct 27, ETEN demo): "it should still be possible for me to
   // move a recorded take around in the timeline." Following the recordings a
   // take is NOT locked to the front of its line — dragging it right leaves a

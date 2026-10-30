@@ -1,6 +1,7 @@
 import JSZip from "jszip"
 import type { JSZipObject } from "jszip"
 import { inspectIdml } from "./archive.js"
+import { releaseOversizedNoBreak } from "./no-break.js"
 import { sha256, sha256Text } from "./crypto.js"
 import { IdmlError, throwIfAborted } from "./errors.js"
 import {
@@ -155,6 +156,36 @@ export async function parseIdml(
   options?: IdmlParseOptions,
 ): Promise<IdmlParseResult> {
   return (await parseIdmlInternal(bytes, profile, options)).result
+}
+
+/**
+ * Drop `NoBreak` from runs that cannot sit on one line, and repackage.
+ *
+ * Call this only after `validateExport` has accepted the translated package.
+ * The structural fingerprint includes `NoBreak`, so removing it earlier is
+ * reported as a change outside literal text and the download is refused.
+ * Runs that still fit a column keep the attribute.
+ */
+export async function releaseOversizedNoBreakInPackage(
+  bytes: Uint8Array | ArrayBuffer,
+  options?: IdmlParseOptions,
+): Promise<Uint8Array> {
+  const loaded = await loadPackage(bytes, options)
+  const changedMembers = new Map<string, Uint8Array>()
+  for (const [path, member] of loaded.members) {
+    if (!member.xml) continue
+    const updated = releaseOversizedNoBreak(member.xml.source)
+    if (updated === member.xml.source) continue
+    parseXml(updated, path)
+    changedMembers.set(path, new TextEncoder().encode(updated))
+  }
+  if (changedMembers.size === 0) return loaded.inputBytes
+  return packageIdml(loaded, changedMembers, {
+    strict: true,
+    ...(options?.limits ? { limits: options.limits } : {}),
+    ...(options?.signal ? { signal: options.signal } : {}),
+    ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
+  })
 }
 
 export async function exportIdml(
@@ -545,6 +576,10 @@ export async function exportIdml(
     if (!member?.xml) {
       throw new IdmlError("LOCATOR_MISSING", `IDML member ${memberPath} is unavailable`)
     }
+    // NoBreak stays on the translated run here. validateExport fingerprints
+    // every attribute, so dropping it in this package would fail the check
+    // and block the download. releaseOversizedNoBreakInPackage runs after
+    // that proof and is what InDesign should open.
     const updated = applyReplacements(member.xml.source, replacements, memberPath)
     parseXml(updated, memberPath)
     changedMemberBytes.set(memberPath, new TextEncoder().encode(updated))

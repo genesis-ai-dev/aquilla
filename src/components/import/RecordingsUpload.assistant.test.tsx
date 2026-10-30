@@ -321,6 +321,24 @@ describe("a rule is kept for the team only when it truly placed the folder (revi
     expect(screen.queryAllByTestId("recordings-unmatched-row")).toHaveLength(0)
     expect(saves()).toHaveLength(0)
   })
+
+  it("keeps a pieces naming that placed every name: 4a and 4b are two pieces of Matthew 19:4 (Sam, Oct 30)", async () => {
+    answers = [{
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+      explanation: "Mt is Matthew; the chapter, the verse, and a letter for each piece.",
+    }]
+    await askAndConfirm(["Mt-ch19_v03.ogg", "Mt-ch19_v04a.ogg", "Mt-ch19_v04b.ogg"], async () => {
+      const rows = screen.getAllByTestId("recordings-row")
+      expect(rows.map((r) => within(r).getByTestId("recordings-how").textContent)).toEqual([
+        "by the assistant's rule",
+        "by the assistant's rule · part 1 of 2",
+        "by the assistant's rule · part 2 of 2",
+      ])
+    })
+    expect(saves()).toHaveLength(1)
+    expect(saves()[0].body!.shapes).toEqual(["mt-ch#_v#.ogg", "mt-ch#_v#a.ogg", "mt-ch#_v#b.ogg"])
+  })
 })
 
 describe("a contributor, and a saved rule set aside (review, Oct 30)", () => {

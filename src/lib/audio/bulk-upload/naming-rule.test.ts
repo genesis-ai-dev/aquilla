@@ -350,4 +350,66 @@ describe("whether a rule placed the names it was asked about (review, Oct 30)", 
     expect(j.placed.size).toBe(3)
     expect(j.keep).toBe(false)
   })
+
+  // Sam, Oct 30: pieces of one verse are what the bulk upload expects (AQU-981
+  // rule 4), so they no longer stop a rule being kept. The same verse twice
+  // with nothing telling the files apart still does.
+  const pieces = () => parseNamingRule({
+    templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+    books: { Mt: "MAT" },
+  })!
+
+  it("keeps a pieces naming placed in full: 4a and 4b are two pieces of one verse", () => {
+    const rule = pieces()
+    const landed = landAll(rule, ["Files/Mt-ch19_v03.ogg", "Files/Mt-ch19_v04a.ogg", "Files/Mt-ch19_v04b.ogg"], mat)
+    expect(landed.assignments.map((a) => [a.cellIds?.[0], a.part?.rank])).toEqual([["mat:19:3", undefined], ["mat:19:4", 1], ["mat:19:4", 2]])
+    const j = judge(rule, landed)
+    expect(j.placed.size).toBe(3)
+    expect(j.keep).toBe(true)
+  })
+
+  it("still doesn't keep a rule that puts the same verse twice with no part", () => {
+    // The pieces read with their part ignored: two takes of Matthew 19:4.
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}_{any}" }], books: { Mt: "MAT" } })!
+    const landed = landAll(rule, ["Files/Mt-ch19_v04_first.ogg", "Files/Mt-ch19_v04_second.ogg"], mat)
+    expect(landed.assignments.map((a) => [a.cellIds?.[0], a.part])).toEqual([["mat:19:4", undefined], ["mat:19:4", undefined]])
+    const j = judge(rule, landed)
+    expect(j.placed.size).toBe(2)
+    expect(j.keep).toBe(false)
+  })
+
+  it("doesn't keep a rule that names one part twice: the second file isn't placed", () => {
+    const rule = pieces()
+    const landed = landAll(rule, ["Files/Mt-ch19_v04a.ogg", "Files/Mt-ch19_v4a.ogg"], mat)
+    const j = judge(rule, landed)
+    expect(j.placed.size).toBe(1)
+    expect(j.keep).toBe(false)
+  })
+
+  describe("a joined line (Matthew 19:4-5 as one line)", () => {
+    const joined = (): TargetFile => {
+      const file = book("mat", "MAT", "Matthew", MAT)
+      const at = file.lines.findIndex((l) => l.ref === "MAT 19:4")
+      file.lines.splice(at, 2, { cellId: "mat:19:4-5", ref: "MAT 19:4-5", text: "", structural: false, hasRecording: false })
+      return file
+    }
+
+    it("keeps a rule whose verses 4 and 5 land on it as its two pieces, as AQU-981 joins them", () => {
+      const rule = chapterVerse()
+      const landed = landAll(rule, ["Files/Mt-ch19_v03.ogg", "Files/Mt-ch19_v04.ogg", "Files/Mt-ch19_v05.ogg"], [joined()])
+      expect(landed.assignments.map((a) => [a.cellIds?.[0], a.part?.rank])).toEqual([["mat:19:3", undefined], ["mat:19:4-5", 4], ["mat:19:4-5", 5]])
+      const j = judge(rule, landed)
+      expect(j.placed.size).toBe(3)
+      expect(j.keep).toBe(true)
+    })
+
+    it("still doesn't keep a rule that puts verse 4 on it twice: two takes of the line", () => {
+      const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}_{any}" }], books: { Mt: "MAT" } })!
+      const landed = landAll(rule, ["Files/Mt-ch19_v04_first.ogg", "Files/Mt-ch19_v04_second.ogg"], [joined()])
+      expect(landed.assignments.map((a) => [a.cellIds?.[0], a.part])).toEqual([["mat:19:4-5", undefined], ["mat:19:4-5", undefined]])
+      const j = judge(rule, landed)
+      expect(j.placed.size).toBe(2)
+      expect(j.keep).toBe(false)
+    })
+  })
 })

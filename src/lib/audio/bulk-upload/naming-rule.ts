@@ -11,8 +11,10 @@
 // perfectly well ("MAT 5:1 take 2" for what was verse 2). So the preview shows
 // every row "by the assistant's rule", nothing is saved until the person
 // confirms, and a rule is kept for the team only when `judgeRule` finds it
-// placed every name by reading it, put no two files on one line, and leans on
-// no book, chapter or file it was told (review, Oct 30).
+// placed every name by reading it, made no two files takes of one line, and
+// leans on no book, chapter or file it was told (review, Oct 30). Pieces of a
+// line ("v04a", "v04b", or verses 4 and 5 of a joined 4-5) are not takes, and
+// don't stop the keep (Sam, Oct 30).
 //
 // Sam, Oct 29: "uses as little API usage as possible but does the task
 // accurately and consistently". At most two calls per folder, a bounded sample
@@ -33,7 +35,7 @@ import {
 } from "../../../../shared/recording-naming-rule"
 import { englishBookName } from "./book-names"
 import { LAST_VERSES } from "./verse-counts"
-import type { Assignment, ProjectFileInfo, UnmatchedReason } from "./match"
+import { piecesOfOneLine, type Assignment, type ProjectFileInfo, type UnmatchedReason } from "./match"
 
 export {
   compileRule,
@@ -217,9 +219,14 @@ export interface RuleJudgement {
  * A name counts as placed only when the matcher placed it by reading the
  * rule's name, never by folder order, and not when the person chose or
  * corrected its line by hand. The rule is kept only when every name was placed
- * that way, no two files share a line (a rule with the take and the verse
- * swapped stacks every file on one verse as takes), and it leans on no
- * constant (`isSavableRule`).
+ * that way, it leans on no constant (`isSavableRule`), and no two files share
+ * a line unless they are its pieces. Two files on the very same spot, with no
+ * part telling them apart, are takes of one another: what a rule with the take
+ * and the verse swapped makes of a whole folder, so that isn't kept. Pieces
+ * are told apart by their part, the matcher's own way (`piecesOfOneLine`):
+ * "v04a" and "v04b", and verses 4 and 5 landing on a joined line 4-5, which
+ * the matcher joins as that line's pieces just as it would for any upload
+ * (Sam, Oct 30).
  */
 export function judgeRule(
   rule: NamingRule,
@@ -231,7 +238,7 @@ export function judgeRule(
   const byIndex = new Map(assignments.map((a) => [a.index, a]))
   const placed = new Set<number>()
   const failures: RuleFailure[] = []
-  const lines = new Set<string>()
+  const lines = new Map<string, Assignment[]>()
   let shared = false
   for (const index of eligible) {
     const a = byIndex.get(index)
@@ -239,8 +246,9 @@ export function judgeRule(
       placed.add(index)
       for (const cellId of a.cellIds) {
         const key = `${a.fileId}\u0000${cellId}`
-        if (lines.has(key)) shared = true
-        lines.add(key)
+        const held = lines.get(key) ?? []
+        if (held.some((h) => !piecesOfOneLine(h, a))) shared = true
+        lines.set(key, [...held, a])
       }
       continue
     }

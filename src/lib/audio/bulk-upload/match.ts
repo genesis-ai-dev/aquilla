@@ -1044,6 +1044,15 @@ function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): strin
 }
 
 /**
+ * Two files on one line that are its pieces: each names a part of that one
+ * line, and not the same part ("4a" and "4b", or verses 4 and 5 of a joined
+ * line 4-5). They upload joined, in order, as one recording (rule 4).
+ */
+export function piecesOfOneLine(a: Assignment, b: Assignment): boolean {
+  return a.cellIds?.length === 1 && b.cellIds?.length === 1 && a.part != null && b.part != null && a.part.rank !== b.part.rank
+}
+
+/**
  * Two files on one line. Pieces of one verse share it. So do any files that
  * are not parts (Sam, Oct 29): each uploads as a take of the line, whether the
  * names say "take 2", say the same verse twice ("Genesis 1-1", "Genesis 1-1
@@ -1067,9 +1076,8 @@ function settleConflicts(read: readonly ReadRecording[], assignments: Assignment
       const held = claims.get(`${a.fileId}\u0000${cellId}`) ?? []
       for (const h of held) {
         const sameLine = h.cellIds!.length === 1 && a.cellIds!.length === 1
-        const pieces = sameLine && h.part != null && a.part != null && h.part.rank !== a.part.rank
         const takes = sameLine && !h.part && !a.part
-        if (!pieces && !takes) { clash = h; break }
+        if (!piecesOfOneLine(h, a) && !takes) { clash = h; break }
       }
       if (clash) break
     }

@@ -522,10 +522,13 @@ export function RecordingsReview({
         setStarting(true)
         setError(null)
         const labelOf = new Map(assignments.map((a) => [a.index, a.read ?? ""]))
-        // The assistant's rule is kept for the team once a person uploads
-        // with it, and only when `judgeRule` says so: every name it was asked
-        // about placed by reading it, no two files on one line, and no
-        // constant book, chapter or file.
+        // The assistant's rule in use is kept for the team once a person
+        // uploads with it, and only when `judgeRule` says so: every name it
+        // was asked about placed by reading it, no constant book, chapter or
+        // file, and no two files on one line unless they are its pieces
+        // ("v04a" and "v04b"; verses 4 and 5 on a joined line). Two files on
+        // the same spot with no part between them are takes of one another,
+        // and stop the keep.
         if (rule?.from === "assistant" && judgement?.keep) {
           void saveNamingRule({ projectId, identityToken: session.jwt, shapes: rule.shapes, rule: rule.rule })
         }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import { MediaTopBar } from "./MediaTopBar"
@@ -1488,8 +1489,20 @@ describe("TimelineEditor — audio-first mode", () => {
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
     const heading = await screen.findByTestId("tl-timing-menu-heading")
     expect(heading).toHaveTextContent("What decides how long each line is")
-    // What the bar's (i) said is beside the heading now.
-    await expectTooltip(within(heading).getByTestId("tl-timing-mode-info"), /Switching changes no recordings and no times/)
+    // What the bar's (i) said is beside the heading now. It opens in place,
+    // under the heading, on a click, and shuts on a second one; hovering opens
+    // nothing (Sam, Oct 28: an (i) is a click, never a hover).
+    const info = within(heading).getByTestId("tl-timing-mode-info")
+    const infoText = screen.getByTestId("tl-timing-mode-info-text")
+    expect(infoText).toHaveAttribute("data-open", "false")
+    expect(infoText).toHaveTextContent(/Switching changes no recordings and no times/)
+    await userEvent.setup().hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(info)
+    expect(infoText).toHaveAttribute("data-open", "true")
+    expect(screen.getByTestId("tl-timing-menu-heading")).toBeInTheDocument()
+    fireEvent.click(info)
+    expect(infoText).toHaveAttribute("data-open", "false")
     expect(screen.getByTestId("tl-timing-mode-dubbing-length")).toHaveTextContent("16.0 s")
     // Following the recordings each verse is as long as its take: 11 + 4.
     expect(screen.getByTestId("tl-timing-mode-audioFirst-length")).toHaveTextContent("15.0 s")
@@ -5839,6 +5852,14 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     )
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
     fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
-    await expectTooltip(await screen.findByTestId("tl-stand-in-info"), /at a stand-in length worked out from its text/)
+    // It opens in place, under its line, on a click, not on a hover.
+    const standIn = await screen.findByTestId("tl-stand-in-info")
+    const standInText = screen.getByTestId("tl-stand-in-info-text")
+    expect(standInText).toHaveAttribute("data-open", "false")
+    await userEvent.setup().hover(standIn)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    fireEvent.click(standIn)
+    expect(standInText).toHaveAttribute("data-open", "true")
+    expect(standInText).toHaveTextContent(/at a stand-in length worked out from its text/)
   })
 })

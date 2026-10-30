@@ -572,6 +572,10 @@ describe("saving a project's own visibility floors (AQU-1771)", () => {
       assignmentMinRole: 400,
       autoPropagateRepetitions: false,
       exportMinRole: 400,
+      // AQU-2304: this org never set an import floor, so the bundle carries
+      // the PROJECT_LEAD default rather than omitting the key — a
+      // project-only member must not have to guess it.
+      importMinRole: 500,
     })
     expect(body.visibilityFloors).toEqual({
       rosterViewMinRole: { org: 600, project: 700, effective: 700 },

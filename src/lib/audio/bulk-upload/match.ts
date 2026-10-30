@@ -351,13 +351,26 @@ function letterPart(letter: string): PartInfo {
   return { rank: letter.charCodeAt(0) - 96, label: letter }
 }
 
+/** The numbers a book goes by in front of chapter and verse, in both schemes. */
+function bookNumbers(code: string | null): number[] {
+  const at = code ? BOOK_CODES.indexOf(code) : -1
+  if (at < 0) return []
+  return at < 39 ? [at + 1] : [at + 1, at + 2]
+}
+
 /**
  * Drop a number every file in the folder shares in the same place, when the
  * scheme has one number too many for it: "01_001_001", "01_001_002" … in a
  * Bible book (the book's own number), "LOTE_2023_012" in a document (a year).
  * Never the last one standing.
+ *
+ * In a Bible book the first number goes only when it can be the book's own:
+ * no name says the book in words (then the first number is the chapter), the
+ * three numbers are written alike ("01_001_001", not "1-4_1", a verse's
+ * part), and it is this book's number in either scheme. "Genesis 1-4_1" and
+ * "1-4_1" keep chapter 1.
  */
-function pruneConstants(group: ReadRecording[], bible: boolean): Map<number, NameNumber[]> {
+function pruneConstants(group: ReadRecording[], bible: boolean, bookCode: string | null): Map<number, NameNumber[]> {
   const out = new Map<number, NameNumber[]>()
   for (const r of group) out.set(r.index, r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part"))
   if (group.length < 3) return out
@@ -367,7 +380,13 @@ function pruneConstants(group: ReadRecording[], bible: boolean): Map<number, Nam
   if (lists.some((l) => l.some((n) => n.marker))) return out
   const constant = (pos: number) => lists.every((l) => l[pos].value === lists[0][pos].value)
   if (bible) {
-    if (k === 3 && !lists.some((l) => isRangeSep(l[2].sepBefore)) && constant(0)) {
+    const own = bookNumbers(bookCode)
+    const bookNumber =
+      k === 3 && constant(0) &&
+      !group.some((r) => r.reading.book) &&
+      !lists.some((l) => isRangeSep(l[2].sepBefore) || l[1].sepBefore !== l[2].sepBefore) &&
+      (own.length === 0 || own.includes(lists[0][0].value))
+    if (bookNumber) {
       for (const r of group) out.set(r.index, out.get(r.index)!.slice(1))
     }
     return out
@@ -826,7 +845,7 @@ export function matchRecordings(
     const group = fi.bible
       ? rawGroup.map((r) => (r.folderChapter && !fi.chapters.has(r.folderChapter.chapter) ? { ...r, folderChapter: undefined } : r))
       : rawGroup.map((r) => (r.reading.book ? { ...r, reading: readName(r.file.name, NO_BOOKS) } : r))
-    const nums = pruneConstants(group, fi.bible)
+    const nums = pruneConstants(group, fi.bible, fi.file.bookCode)
     // A number alone in a Bible book: chapter or verse, by the folder's count.
     const lone = new Map<number, NameNumber>()
     if (fi.bible) {

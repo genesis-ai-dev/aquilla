@@ -713,6 +713,22 @@ describe("the review's cases (Oct 29)", () => {
     expect(assignments.map(lineOf)).toEqual(["g:3:5", "g:3:1", "g:3:6", "g:3:7", "g:1:1", "g:3:8,g:3:9,g:3:10"])
   })
 
+  it("the chapter in front is never dropped as a book number when the names say the book, or mix separators", () => {
+    const g = book("g", "GEN", "Genesis", GEN)
+    const parts = ["Genesis 1-4_1.mp3", "Genesis 1-4_2.mp3", "Genesis 1-5_1.mp3", "Genesis 1-5_2.mp3"].map((n) => audio(n))
+    expect(run(parts, [g], fileScope("g")).jobs).toEqual([
+      { kind: "pieces", fileId: "g", cellId: "g:1:4", files: [0, 1] },
+      { kind: "pieces", fileId: "g", cellId: "g:1:5", files: [2, 3] },
+    ])
+    const plain = ["1-4_1.mp3", "1-4_2.mp3", "1-5_1.mp3"].map((n) => audio(n))
+    expect(run(plain, [g], fileScope("g")).assignments.map(lineOf)).toEqual(["g:1:4", "g:1:4", "g:1:5"])
+    const years = ["Genesis 1-5 2023.mp3", "Genesis 1-6 2023.mp3", "Genesis 1-7 2023.mp3"].map((n) => audio(n))
+    expect(run(years, [g], fileScope("g")).assignments.map(lineOf)).toEqual(["g:1:5", "g:1:6", "g:1:7"])
+    // The book's own number still goes: "01_001_001" is Genesis 1:1.
+    const numbered = ["01_001_001.wav", "01_001_002.wav", "01_002_001.wav"].map((n) => audio(n))
+    expect(run(numbered, [g], fileScope("g")).assignments.map(lineOf)).toEqual(["g:1:1", "g:1:2", "g:2:1"])
+  })
+
   it("a folder that is just a number is that chapter", () => {
     const files = ["05.mp3", "06.mp3"].map((n) => audio(`3/${n}`))
     expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])

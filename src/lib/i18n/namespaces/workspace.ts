@@ -239,6 +239,8 @@ export const workspace = defineNamespace({
     "workspace.aiDownloadChip.runsInBackground": "Runs in the background — keep working as normal.",
 
     // -- AiSetupDialog --
+    "workspace.aiSetup.teamProviderLocked":
+      "The AI provider and model are set for the whole project. Only {role} can change them. You can still pick your own provider in Preferences.",
     "workspace.aiSetup.title": "Set up AI",
     "workspace.aiSetup.description":
       "Choose once how this project drafts. You can change it later in settings.",
@@ -256,7 +258,6 @@ export const workspace = defineNamespace({
 
     // -- ApiKeyField --
     "workspace.apiKeyField.saveAcrossProjects": "Save across my projects (this browser)",
-    "workspace.apiKeyField.usingSavedKey": "Using your saved key. Type to override for this project only.",
     "workspace.apiKeyField.forgetSavedKey": "Forget saved key",
 
     // -- AssignModal --
@@ -1314,6 +1315,14 @@ export const workspace = defineNamespace({
           "setting and not the device-wide personal override.",
         screenshot: "confirm-dialog",
       },
+      "workspace.aiSetup.teamProviderLocked": {
+        description:
+          "Error in the Set up AI dialog when someone below the settings floor picks a provider " +
+          "that would change the project's shared AI provider or model.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Maintainers'.",
+        },
+      },
       "workspace.aiSetup.overrideDescription": {
         description:
           "Body of the personal-override option, naming the saved endpoint " +
@@ -1336,12 +1345,6 @@ export const workspace = defineNamespace({
           "Checkbox label on the reusable API-key input, offering to also " +
           "save the key to this browser's local storage so it's reused by " +
           "other projects, not just the current one.",
-      },
-      "workspace.apiKeyField.usingSavedKey": {
-        description:
-          "Confirmation note shown when the field is displaying a key that " +
-          "came from browser-local storage rather than this project's own " +
-          "settings, and that typing will override it for this project only.",
       },
       "workspace.apiKeyField.forgetSavedKey": {
         description:

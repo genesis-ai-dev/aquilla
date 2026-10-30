@@ -494,11 +494,13 @@ export const editor = defineNamespace({
     "editor.view.footnotesTray": "Bottom tray",
     "editor.view.textDirection": "Text Direction",
     "editor.view.fontSize": "Font Size",
+    // AQU-2263: under the two font size rows. {size} is a number of pixels.
+    "editor.view.fontSizeDefault": "Default from Preferences: {size}px",
+    "editor.view.fontSizeReset": "Reset to default",
     "editor.view.directionAuto": "Auto",
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
-    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -1206,8 +1208,10 @@ export const editor = defineNamespace({
     // The link-video dialog and the chip strip's field labels.
     "editor.timeline.linkVideoTitleChange": "Change the linked video",
     "editor.timeline.linkVideoTitleNew": "Link a video",
+    // AQU-2259: it used to say the video always plays muted. It is muted only
+    // while the file's uploaded recording is what plays (MediaVideoPane).
     "editor.timeline.linkVideoDescription":
-      "Paste the address of the video this file was dubbed from. It plays beside the text, muted and in step with the audio — the recording you hear is always the one on the timeline.",
+      "Paste the address of the video this file was dubbed from. It plays beside the text, in step with the timeline. When the file has an uploaded recording, you hear that recording and the video is muted; a YouTube video keeps its own sound until you pick the recording from its Sound menu.",
     "editor.timeline.linkVideoAddressLabel": "Video address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
@@ -1336,9 +1340,20 @@ export const editor = defineNamespace({
     "editor.timeline.rowsTallerTooltip": "Taller rows (⌘ + scroll)",
     "editor.timeline.timingsUnlocked": "Timings unlocked",
     "editor.timeline.pairingsFailed": "The pairings couldn't be loaded — what's shown may be incomplete.",
+    // AQU-2259: the audio VTT dialog has no such checkbox. The notice shows
+    // with the Pairings drawer open, whose button does the pairing.
     "editor.timeline.neverPaired":
-      'These cues have never been paired with the subtitles — re-import the audio VTT and tick "work out the subtitle pairings".',
+      'These cues have never been paired with the subtitles. Choose "{repairAll}" to work out the pairings.',
     "editor.timeline.badgePairing": "pairing…",
+    // AQU-2259: the Sources and Check menu rows, hard-coded English before.
+    "editor.timeline.menuCheckLinks": "Check links",
+    "editor.timeline.menuStopLinking": "Stop linking",
+    "editor.timeline.menuCheckCharacters": "Check characters",
+    "editor.timeline.menuFilm": "Film",
+    "editor.timeline.menuAudioCues": "Audio cues",
+    "editor.timeline.badgeCharactersSubtitle": "{count} subtitle",
+    "editor.timeline.badgeCharactersHeard": "{count} heard",
+    "editor.timeline.badgeCharactersBoth": "{subtitle} + {heard}",
     // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
     // It differed only in case, and a case-only split is pure duplicate work:
     // three of the four target locales have no letter case at all. The badge
@@ -3717,6 +3732,44 @@ export const editor = defineNamespace({
           "Error shown in that confirmation when the change could not be saved " +
           "(for example the track changed meanwhile). The dialog stays open.",
       },
+      "editor.timeline.menuCheckLinks": {
+        description: "Check menu row (timeline toolbar) that turns on the mode for checking which audio cue pairs with which subtitle.",
+      },
+      "editor.timeline.menuStopLinking": {
+        description: "The same Check menu row while that pairing mode is on: turns it off.",
+      },
+      "editor.timeline.menuCheckCharacters": {
+        description: "Check menu row that opens the review of lines whose speaking character disagrees between sources.",
+      },
+      "editor.timeline.menuFilm": {
+        description: "Sources menu row for the film (video) linked to this file; its badge says Linked or Not linked.",
+      },
+      "editor.timeline.menuAudioCues": {
+        description: "Sources menu row for the file's audio cues (imported from an audio VTT); its badge says how many.",
+      },
+      "editor.timeline.badgeCharactersSubtitle": {
+        description: "Badge on the Characters row: how many characters came from the subtitles. Short; 'subtitle' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '12'." },
+      },
+      "editor.timeline.badgeCharactersHeard": {
+        description: "Badge on the Characters row: how many characters were heard in the audio. Short; 'heard' qualifies the count.",
+        placeholders: { count: "A plain number, e.g. '3'." },
+      },
+      "editor.timeline.badgeCharactersBoth": {
+        description: "Badge on the Characters row when both kinds exist: the two counts side by side.",
+        placeholders: {
+          subtitle: "editor.timeline.badgeCharactersSubtitle, already filled in, e.g. '12 subtitle'.",
+          heard: "editor.timeline.badgeCharactersHeard, already filled in, e.g. '3 heard'.",
+        },
+      },
+      "editor.timeline.neverPaired": {
+        description:
+          "Notice in the timeline's pairing mode when a file's audio cues have never been paired " +
+          "with its subtitles. Shown while the Pairings drawer is open.",
+        placeholders: {
+          repairAll: "The label of the drawer's button, exactly as translated: editor.timeline.cueLinkRepairAll ('Re-pair everything').",
+        },
+      },
       "editor.timeline.soundSourceTrigger": {
         description:
           "Tooltip and accessible name of the 'Sound: …' button in a YouTube " +
@@ -4687,6 +4740,12 @@ export const editor = defineNamespace({
           "is a section heading.",
         maxLength: 22,
       },
+      "editor.view.fontSizeDefault": {
+        description:
+          "Under the Source and Target font size rows in a file's Editor settings: the size an untouched file uses, " +
+          "which comes from the app font size in Preferences.",
+        placeholders: { size: "A whole number of pixels, e.g. 14." },
+      },
       "editor.view.fontSize": {
         description:
           "Section heading in the view-settings popover for the per-column text " +
@@ -4723,17 +4782,6 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
-        placeholders: {
-          side:
-            "Which column, lower-cased by the app from editor.column.source / " +
-            "editor.column.target.",
-        },
-      },
-      "editor.view.useAppFontSize": {
-        description:
-          "Tooltip and screen-reader name of the button that drops a column's " +
-          "custom size so it follows the app-wide font size again. Shown only " +
-          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +

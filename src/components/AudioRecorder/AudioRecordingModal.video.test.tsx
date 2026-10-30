@@ -405,6 +405,22 @@ describe("AudioRecordingModal — the countdown preference", () => {
     expect(screen.getByRole("tab", { name: "Off" })).toHaveAttribute("aria-selected", "true")
   })
 
+  // AQU-2264: the beep was the one recorder setting nothing remembered — it
+  // came back on with every reload, and in every other project.
+  it("remembers the countdown beep after the recorder closes and the page reloads", () => {
+    const { unmount } = render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByTestId("rec-beep"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
+    unmount()
+
+    resetRecordingCountdownCacheForTests() // a reload
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-checked", "false")
+  })
+
   // AQU-1210 (Sam, 25 Sep): the count has a speed. Fast is half a second a
   // count, so zero — and the take — arrive at 1.5s, not 3s.
   it("a Fast count reaches zero in half the time", async () => {

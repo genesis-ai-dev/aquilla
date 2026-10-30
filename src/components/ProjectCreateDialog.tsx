@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Plus, X } from "lucide-react"
+import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
@@ -142,10 +143,6 @@ const EXTRA_LANGUAGES_WARNING =
  * never cancelled; this only decides when the dialog stops being a dead end.
  */
 const LONG_RUNNING_WORK_MS = 120_000
-
-const LONG_RUNNING_WORK_MESSAGE =
-  "This is taking longer than expected. You can close this dialog — the project " +
-  "may still finish and show up in your projects list."
 
 /**
  * AQU-1519: what the dialog is busy doing. Anything non-null locks every
@@ -1218,7 +1215,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               className="shrink-0 text-xs text-amber-600"
               data-testid="create-taking-long"
             >
-              {LONG_RUNNING_WORK_MESSAGE}
+              {t("projectSettings.create.longRunningNote")}
             </p>
           )}
 
@@ -1253,8 +1250,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}
                   {isSubmitting
-                    ? (willLink ? "Creating & linking…" : "Creating…")
-                    : (willLink ? "Create & Link" : "Create Project")}
+                    ? (willLink ? t("projectSettings.create.submitCreatingAndLinking") : t("common.creating"))
+                    : (willLink ? t("projectSettings.create.submitCreateAndLink") : t("projectSettings.create.submitCreate"))}
                 </Button>
               )
             }}
@@ -1437,7 +1434,9 @@ function AddAsLaneRecommendation({
           onClick={() => void handleAddAsLane()}
         >
           {status === "loading" && <Spinner data-icon="inline-start" />}
-          {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
+          {status === "loading"
+            ? t("projectSettings.create.laneRecommendationAdding")
+            : t("projectSettings.create.laneRecommendationAddButton", { projectName: upstreamProject.name })}
         </Button>
       </div>
       {message && status === "error" && (
@@ -1716,19 +1715,13 @@ function TargetLanguageInputs({
         </div>
       ) : (
         <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
+          <AddLanguageButton
             disabled={disabled || !canAddMore}
-            data-testid="create-add-target-lang"
+            testId="create-add-target-lang"
             onClick={() =>
               sync([...lanes, { id: nextLaneId.current++, value: "", delivers: "text" }], bulk)
             }
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            {t("projectSettings.create.addTargetLanguageAction")}
-          </Button>
+          />
         </div>
       )}
     </div>

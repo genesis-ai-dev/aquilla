@@ -1,3 +1,4 @@
+import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
@@ -237,11 +238,11 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
   return { session, projectId: data.project_id };
 }
 
-export async function requestPasswordReset(email: string): Promise<void> {
+export async function requestPasswordReset(email: string, returnTo?: string): Promise<void> {
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, return_to: orgInviteReturnTo(returnTo) }),
   });
   if (!res.ok) {
     // AQU-820: dropped body.detail/body.error — showing it here would both
@@ -373,6 +374,19 @@ export function isJwtExpired(token: string | null | undefined, skewSeconds = 30)
   } catch {
     return false;
   }
+}
+
+/**
+ * AQU-2259: save the account's display name — the name shown where the app
+ * reads COALESCE(display_name, username). Empty clears it. Throws on refusal.
+ */
+export async function updateMyDisplayName(jwt: string, displayName: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/me`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  if (!res.ok) throw new Error(`saving the display name failed (${res.status})`);
 }
 
 /** Best-effort email from GET /auth/me — JWTs only carry `sub` today. */

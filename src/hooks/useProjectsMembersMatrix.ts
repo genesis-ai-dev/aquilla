@@ -75,7 +75,7 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   const jwt = session?.jwt ?? null;
   const { projects, error: projectsError } = useAccessibleProjects();
   const { state: orgState } = useOrg();
-  const orgId = orgState.kind === "success" ? orgState.org.id : null;
+  const orgId = orgState.kind === "success" ? orgState.org?.id ?? null : null;
   const { members: orgMembers } = useOrgMembers(orgId);
   const [matrix, setMatrix] = useState<MembersMatrix | null>(null);
   const [isLoading, setLoading] = useState(false);

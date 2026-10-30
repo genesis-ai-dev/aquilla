@@ -318,26 +318,27 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
 // AQU-1083; the page gated the control on the maintainer floor instead.
 describe("ProjectSettings — Count headings follows its own project-lead floor (AQU-1912)", () => {
   const headingsControl = () =>
-    screen.getByRole("combobox", { name: /count headings as translatable content/i })
+    screen.getByRole("switch", { name: /count headings as translatable content/i })
 
   it("a project lead can change it while the rest of the validation card stays locked", () => {
     currentProject = makeProject({ syncRole: { level: 500, source: "member" } } as Partial<ProjectRecord>)
     currentCanEditCountStructural = true
     currentReasonCannotEditCountStructural = null
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).not.toBeDisabled()
+    expect(headingsControl()).not.toHaveAttribute("aria-disabled", "true")
     // canEdit (maintainer) stays false — see beforeEach.
-    expect(screen.getByRole("combobox", { name: /auto-propagate repetitions/i })).toBeDisabled()
+    expect(screen.getByRole("switch", { name: /auto-propagate repetitions/i })).toHaveAttribute("aria-disabled", "true")
   })
 
   it("a contributor sees it locked, and the hint names Project leads", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
-    expect(headingsControl()).toBeDisabled()
+    expect(headingsControl()).toHaveAttribute("aria-disabled", "true")
     // The card says Maintainers once; Count headings, locked for another
-    // reason, says its own line beneath it, beside what the organization does.
+    // reason, says its own line beneath it (AQU-2260). What the organization
+    // does is on the menu beside it (AQU-2263).
     expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
     expect(screen.getByText("Only Project leads can change this.")).toBeVisible()
-    expect(screen.getAllByText(/The organization currently/).length).toBeGreaterThan(0)
+    expect(screen.getByTestId("count-structural-cells-source")).toHaveTextContent(/Organization default/)
   })
 })

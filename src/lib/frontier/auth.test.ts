@@ -239,6 +239,25 @@ describe("register — AQU-820 (server detail composed into a translated frame)"
 describe("password reset + verify-email — AQU-820 (no raw server body)", () => {
   beforeEach(() => { vi.restoreAllMocks(); });
 
+  it.each([
+    [undefined, undefined],
+    ["/join-org/invite-token", "/join-org/invite-token"],
+    ["https://example.com/join-org/invite-token", undefined],
+    ["//example.com/join-org/invite-token", undefined],
+    ["/join-org/../settings", undefined],
+    ["/join-org/invite%2Ftoken", undefined],
+    ["/join-org/invite-token?next=/settings", undefined],
+    ["/join-org/invite-token#fragment", undefined],
+    ["/join-org/invite-token\n", undefined],
+  ])("only sends supported invitation context for %s", async (returnTo, expected) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}"));
+    await requestPasswordReset("alice@example.com", returnTo);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `${AUTH_BASE}/api/v2/auth/password-reset/request`,
+      expect.objectContaining({ body: JSON.stringify({ email: "alice@example.com", return_to: expected }) }),
+    );
+  });
+
   it("requestPasswordReset drops server body.error/detail", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "no such account on file" }), { status: 404 })

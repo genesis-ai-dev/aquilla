@@ -1,4 +1,10 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
+import {
+  DEFAULT_PROJECT_SORT,
+  readProjectSort,
+  writeProjectSort,
+  type ProjectSort,
+} from "@/lib/org/project-list-sort"
 import { useNavigate, useLocation } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { UserPlus, Users, CloudDownload, CloudOff, HardDriveDownload } from "lucide-react"
@@ -64,25 +70,10 @@ export type OrgProjectRow = PortfolioProject & {
   archivedAt?: string | null
 }
 
-type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
-
-function lensToSorting(lens: ProjectLens) {
-  switch (lens) {
-    case "recent":
-      return [{ id: "edited", desc: true }] as const
-    case "attention":
-      return [{ id: "status", desc: true }] as const
-    case "least-translated":
-      return [{ id: "translated", desc: false }] as const
-    case "most-progress":
-      return [{ id: "translated", desc: true }] as const
-    case "name":
-      return [{ id: "name", desc: false }] as const
-    case "pm":
-      // AQU-507: ascending by PM username; unassigned stays last via
-      // sortUndefined: "last" on the column (direction-immune).
-      return [{ id: "pm", desc: false }] as const
-  }
+/** AQU-2259: save the sort picked from a header (one column at a time). */
+function rememberProjectSort(sorting: readonly { id: string; desc: boolean }[]): void {
+  const [first] = sorting
+  if (first) writeProjectSort({ column: first.id, desc: first.desc })
 }
 
 /**
@@ -200,7 +191,8 @@ export function OrgProjectsDataTable({
   now,
   showOrg = false,
   roleByProjectId,
-  initialLens = "recent",
+  initialSort,
+  rememberSort = false,
   emptyTitle = "No projects yet.",
   emptyDescription,
   emptyAction,
@@ -230,7 +222,14 @@ export function OrgProjectsDataTable({
   now: number
   showOrg?: boolean
   roleByProjectId?: Map<string, CloudProjectSummary["role"]>
-  initialLens?: ProjectLens
+  /**
+   * The sort to open on. Omitted: the one saved on this device when
+   * `rememberSort` is on (src/lib/org/project-list-sort.ts), else "Recently
+   * updated". The "Needs attention" filter passes its own.
+   */
+  initialSort?: ProjectSort
+  /** AQU-2259: remember the sort someone picks from a header, on this device. */
+  rememberSort?: boolean
   emptyTitle?: string
   emptyDescription?: string
   emptyAction?: ReactNode
@@ -671,6 +670,8 @@ export function OrgProjectsDataTable({
     ],
   )
 
+  const startSort = initialSort ?? (rememberSort ? readProjectSort() : DEFAULT_PROJECT_SORT)
+
   const colSpan = columns.filter((c) => !(c.meta as { hidden?: boolean } | undefined)?.hidden).length
 
   const assignProject = assignTarget
@@ -680,7 +681,7 @@ export function OrgProjectsDataTable({
   return (
     <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col">
       <DataTable
-        key={`${layout}:${initialLens}`}
+        key={`${layout}:${initialSort ? `${initialSort.column}:${initialSort.desc}` : "saved"}`}
         columns={columns}
         data={tableData}
         getRowId={(p) => p.id}
@@ -694,7 +695,8 @@ export function OrgProjectsDataTable({
         rowClassName={(p) => cn("group", p.archivedAt && "opacity-60")}
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
-        initialSorting={[...lensToSorting(initialLens)]}
+        initialSorting={[{ id: startSort.column, desc: startSort.desc }]}
+        onSortingChange={rememberSort ? rememberProjectSort : undefined}
         searchPlaceholder="Search projects…"
         searchValue={searchValue}
         onSearchChange={onSearchChange}

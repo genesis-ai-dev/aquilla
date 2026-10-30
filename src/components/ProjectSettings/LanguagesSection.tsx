@@ -37,7 +37,6 @@ import {
   Globe,
   MoreHorizontal,
   Pencil,
-  Plus,
   TriangleAlert,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -73,6 +72,7 @@ import { laneLabelSuffixesById } from "@/lib/lanes/lane-language"
 import { withLaneLabelSuffix } from "@/lib/lanes/lane-label-suffix"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { LaneDeliversSelect } from "@/components/LaneDeliversSelect"
+import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { laneRowDelivers, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { useFormat } from "@/lib/i18n/format"
 import { cn } from "@/lib/utils"
@@ -1070,20 +1070,14 @@ export function LanguagesSection({
             </div>
           ) : (
             <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="add-lane-open"
+              <AddLanguageButton
+                testId="add-lane-open"
                 disabled={!canEdit}
                 onClick={() => {
                   resetAddForm()
                   setAddOpen(true)
                 }}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {t("org.overviewLaneTable.addLanguageAction")}
-              </Button>
+              />
             </DisabledFieldTooltip>
           )}
         </div>

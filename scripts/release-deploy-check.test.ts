@@ -1,30 +1,49 @@
 import { describe, expect, it } from "vitest"
-import { decide, jevDecision } from "./release-deploy-check.mjs"
+import { decide, jevDecision, jevTrustedLogins } from "./release-deploy-check.mjs"
 
 const MARKER = "<!-- aquilla-smart-tests -->"
-const jev = (line: string) => `${MARKER}\n\n## Smart tests\n\n| Journey | Result |\n\n${line}\n\nA journey FAIL holds this HEAD.`
+const TRUSTED = "jev-reporter"
+const jevBody = (line: string) => `${MARKER}\n\n## Smart tests\n\n| Journey | Result |\n\n${line}\n\nA journey FAIL holds this HEAD.`
+// A marker comment from the trusted reporting identity, the normal case.
+const jev = (line: string, login = TRUSTED) => ({ body: jevBody(line), login })
+const decideWith = (comments: Array<{ body?: unknown; login?: string }>) => jevDecision(comments, [TRUSTED])
 
 // The hourly deploy reads only these two signals. Reading them wrong in
 // either direction is a production incident: too strict and the line
 // stalls silently, too loose and a FAIL ships.
 describe("jevDecision", () => {
   it("reads each of the four decision lines the comment renderer writes", () => {
-    expect(jevDecision([jev("**FAIL — this release HEAD does not deploy.**")])).toBe("fail")
-    expect(jevDecision([jev("**PASS — a person may deploy this release HEAD.**")])).toBe("pass")
-    expect(jevDecision([jev("**INCONCLUSIVE — this does not hold the deploy.**")])).toBe("inconclusive")
-    expect(jevDecision([jev("**HARNESS UNAVAILABLE does not hold this deploy.**")])).toBe("unavailable")
+    expect(decideWith([jev("**FAIL — this release HEAD does not deploy.**")])).toBe("fail")
+    expect(decideWith([jev("**PASS — a person may deploy this release HEAD.**")])).toBe("pass")
+    expect(decideWith([jev("**INCONCLUSIVE — this does not hold the deploy.**")])).toBe("inconclusive")
+    expect(decideWith([jev("**HARNESS UNAVAILABLE does not hold this deploy.**")])).toBe("unavailable")
   })
 
   it("ignores comments without the marker, even ones quoting the decision text", () => {
-    expect(jevDecision(["**PASS — a person may deploy this release HEAD.**", "release notes", 42])).toBeNull()
+    expect(decideWith([{ body: "**PASS — a person may deploy this release HEAD.**", login: TRUSTED }, { body: "release notes", login: TRUSTED }, { body: 42 }])).toBeNull()
   })
 
   it("is null for a marker comment with no decision line yet", () => {
-    expect(jevDecision([`${MARKER} queued`])).toBeNull()
+    expect(decideWith([{ body: `${MARKER} queued`, login: TRUSTED }])).toBeNull()
   })
 
-  it("lets the newest marker comment win", () => {
-    expect(jevDecision([jev("**PASS — a person may deploy this release HEAD.**"), jev("**FAIL — this release HEAD does not deploy.**")])).toBe("fail")
+  it("lets the newest marker comment win, except that a FAIL holds whatever follows it", () => {
+    expect(decideWith([jev("**PASS — a person may deploy this release HEAD.**"), jev("**FAIL — this release HEAD does not deploy.**")])).toBe("fail")
+    expect(decideWith([jev("**FAIL — this release HEAD does not deploy.**"), jev("**PASS — a person may deploy this release HEAD.**")])).toBe("fail")
+    expect(decideWith([jev("**INCONCLUSIVE — this does not hold the deploy.**"), jev("**PASS — a person may deploy this release HEAD.**")])).toBe("pass")
+  })
+
+  // Any collaborator can post a commit comment with the marker. Only the
+  // reporting identity decides a production deploy; everyone else is noise.
+  it("ignores a marker comment from anyone but a trusted login, even a PASS", () => {
+    expect(decideWith([jev("**PASS — a person may deploy this release HEAD.**", "someone-else")])).toBeNull()
+    expect(decideWith([jev("**FAIL — this release HEAD does not deploy.**"), jev("**PASS — a person may deploy this release HEAD.**", "someone-else")])).toBe("fail")
+    expect(decideWith([jev("**PASS — a person may deploy this release HEAD.**", "someone-else"), jev("**PASS — a person may deploy this release HEAD.**")])).toBe("pass")
+  })
+
+  it("reads trusted logins from JEV_TRUSTED_LOGINS, falling back to the runbook's reporter", () => {
+    expect(jevTrustedLogins({ JEV_TRUSTED_LOGINS: "a, b" })).toEqual(["a", "b"])
+    expect(jevTrustedLogins({})).toEqual(["ryderwishart"])
   })
 })
 

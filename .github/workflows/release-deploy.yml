@@ -62,6 +62,8 @@ jobs:
       - id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Who may decide the deploy by commit comment; see release-deploy-check.mjs.
+          JEV_TRUSTED_LOGINS: ${{ vars.JEV_TRUSTED_LOGINS }}
         run: |
           node scripts/release-deploy-check.mjs > "$RUNNER_TEMP/check.json"
           cat "$RUNNER_TEMP/check.json"

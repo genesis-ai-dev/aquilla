@@ -33,11 +33,32 @@ const JEV_DECISIONS = [
   [/\*\*HARNESS UNAVAILABLE does not hold this deploy\.\*\*/, "unavailable"],
 ]
 
-export function jevDecision(commentBodies) {
+// Who may decide a deploy. The Hetzner runner reports with the owner's own
+// GitHub identity (docs/runbooks/smart-testing-webhook.md, "The reporting
+// credential"); a GitHub App can replace it by changing this list, or
+// JEV_TRUSTED_LOGINS in the deploy workflow. Any collaborator can post a
+// commit comment, so the marker alone must never decide a production deploy.
+export const DEFAULT_JEV_TRUSTED_LOGINS = ["ryderwishart"]
+
+export function jevTrustedLogins(env = process.env) {
+  const configured = (env.JEV_TRUSTED_LOGINS ?? "").split(",").map((login) => login.trim()).filter(Boolean)
+  return configured.length ? configured : DEFAULT_JEV_TRUSTED_LOGINS
+}
+
+// comments: [{ body, login }], oldest first as the API lists them. Only a
+// trusted author's marker comments count. Among those, a FAIL holds whatever
+// came after it: a later PASS on the same HEAD is a re-run that disagreed
+// with itself, and the hold is the safe reading. Otherwise the newest wins.
+export function jevDecision(comments, trustedLogins = DEFAULT_JEV_TRUSTED_LOGINS) {
   let decision = null
-  for (const body of commentBodies) {
+  for (const comment of comments) {
+    const body = comment?.body
     if (typeof body !== "string" || !body.includes(JEV_MARKER)) continue
-    for (const [pattern, name] of JEV_DECISIONS) if (pattern.test(body)) decision = name
+    if (!trustedLogins.includes(comment.login)) continue
+    for (const [pattern, name] of JEV_DECISIONS) {
+      if (!pattern.test(body)) continue
+      if (decision !== "fail") decision = name
+    }
   }
   return decision
 }
@@ -87,7 +108,10 @@ async function main() {
   const newest = runs.sort((a, b) => String(b.started_at).localeCompare(String(a.started_at)))[0]
   const verify = newest ? (newest.status === "completed" ? newest.conclusion : newest.status) : undefined
   const comments = await githubApi(`/commits/${sha}/comments?per_page=100`, token)
-  const jev = jevDecision((Array.isArray(comments) ? comments : []).map((comment) => comment.body))
+  const jev = jevDecision(
+    (Array.isArray(comments) ? comments : []).map((comment) => ({ body: comment.body, login: comment.user?.login })),
+    jevTrustedLogins(),
+  )
   console.log(JSON.stringify({ branch, sha, ...decide({ verify, jev }) }))
 }
 

@@ -168,6 +168,9 @@ export interface ReadRecording {
   folderChapter?: { chapter: number; segment: string }
   /** True when the book was read from the number in front ("01_001_001"). */
   bookFromNumber?: boolean
+  /** Files it may go to when its book number is unclear: loaded too, so the
+   *  person can choose its line in either. */
+  candidateFileIds?: string[]
   /** The folder the file sits in — files in one folder share a naming scheme. */
   folderKey: string
 }
@@ -327,8 +330,10 @@ export function readRecordings(files: readonly BulkInputFile[], opts: ReadOption
         // that is a different book in each ("41": Mark, or Paratext's Matthew)
         // is asked about rather than guessed.
         const other = paratext === canonical ? bookFromNumber(r.reading.numbers[0].value, "paratext") : null
-        if (code && other && other !== code && fileForBook(other)) {
+        const otherFile = other && other !== code ? fileForBook(other) : undefined
+        if (code && other && otherFile) {
           r.targetReason = { code: "bookNumberUnclear", first: englishBookName(code), second: englishBookName(other) }
+          r.candidateFileIds = [target.fileId, otherFile.fileId]
           continue
         }
         r.targetFileId = target.fileId
@@ -343,7 +348,7 @@ export function readRecordings(files: readonly BulkInputFile[], opts: ReadOption
 
 /** The project files a project-wide upload has to load lines for. */
 export function targetsWanted(read: readonly ReadRecording[]): string[] {
-  return [...new Set(read.flatMap((r) => (r.targetFileId && !r.refused ? [r.targetFileId] : [])))]
+  return [...new Set(read.flatMap((r) => (r.refused ? [] : r.targetFileId ? [r.targetFileId] : r.candidateFileIds ?? [])))]
 }
 
 // ── Interpreting the numbers ─────────────────────────────────────────────────

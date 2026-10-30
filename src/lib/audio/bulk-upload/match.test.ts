@@ -732,8 +732,10 @@ describe("the review's cases (Oct 29)", () => {
   it("a book number that means a different book in each numbering is asked about, not guessed", () => {
     const targets = [book("mat", "MAT", "Matthew", [25]), book("mrk", "MRK", "Mark", [45])]
     const files = ["41_001_001.mp3", "41_001_002.mp3", "41_001_003.mp3"].map((n) => audio(n))
-    const { assignments } = run(files, targets, { kind: "project" })
+    const { read, assignments } = run(files, targets, { kind: "project" })
     expect(assignments.map((a) => a.reason)).toEqual(files.map(() => ({ code: "bookNumberUnclear", first: "Mark", second: "Matthew" })))
+    // Both books load, so the person can choose each file's line in either.
+    expect(targetsWanted(read).sort()).toEqual(["mat", "mrk"])
     // A project with only one of them leaves no doubt.
     expect(run(files, [targets[0]], { kind: "project" }).assignments.map(lineOf)).toEqual(["mat:1:1", "mat:1:2", "mat:1:3"])
   })

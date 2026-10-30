@@ -4452,7 +4452,9 @@ export function TimelineEditor({
     <>
       {/* Meeting 2026-08-05: generated voices default to compressed
           playback; fast connections can opt into the original WAV. Mic
-          recordings have no lossless form — the description says so. */}
+          recordings have no lossless form. AQU-2260 (Sam, Oct 29): nothing
+          explains the row on hover — its words name it, its tick is its
+          state. */}
       <DropdownMenuCheckboxItem
         checked={audioQuality === "original"}
         onCheckedChange={(on) => setAudioQualityPref(on ? "original" : "compressed")}
@@ -4465,7 +4467,6 @@ export function TimelineEditor({
       {!audioFirst && (
         <DropdownMenuCheckboxItem
           checked={snapOn}
-          // AQU-2264: a preference that follows the person.
           onCheckedChange={(on) => timelineSnapPref.set(on)}
           data-testid="tl-snap-toggle"
         >
@@ -4476,9 +4477,9 @@ export function TimelineEditor({
       <DropdownMenuCheckboxItem
         checked={follow}
         onCheckedChange={(next) => {
-          // AQU-2264: off turns the preference off; on takes the playhead
-          // back (after a manual scroll that is all it does) and, when the
-          // preference was off, turns it on.
+          // AQU-2264: off turns the preference off. On takes the playhead
+          // back: after a manual scroll that is all it does; when the
+          // preference was off, it turns it on.
           if (!next) timelineFollowPlayheadPref.set(false)
           else {
             setFollowReleased(false)

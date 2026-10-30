@@ -13,7 +13,7 @@ import { DataTable } from "@/components/ui/data-table"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { AdminSectionSkeleton } from "./shared"
 
@@ -102,9 +102,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
       {
         id: "today",
         header: () => (
-          <AppTooltip content="Total spend today across all rails (agent + chat + TTS).">
-            <span>Today</span>
-          </AppTooltip>
+          <NoteOnClick note="Total spend today across all rails (agent + chat + TTS).">
+            Today
+          </NoteOnClick>
         ),
         cell: ({ row }) => (
           <SpendWindow
@@ -119,9 +119,9 @@ export function AdminCreditsSection({ jwt }: { jwt: string }) {
       {
         id: "week",
         header: () => (
-          <AppTooltip content="Total spend this week across all rails.">
-            <span>This week</span>
-          </AppTooltip>
+          <NoteOnClick note="Total spend this week across all rails.">
+            This week
+          </NoteOnClick>
         ),
         cell: ({ row }) => (
           <SpendWindow
@@ -325,11 +325,9 @@ function Toggle({
    * What the toggle actually does (AQU-688). These captions are two words of
    * platform jargon in a dense table; without this the operator has to read
    * the source to recall what flipping one costs. It reaches a sighted
-   * operator as the caption's tooltip — the dotted underline is the
-   * affordance saying an explanation exists — and assistive tech as the
-   * switch's description. The caption stays a plain span rather than becoming
-   * a tab stop, matching the tooltip'd column headers above; the description
-   * is what keeps the text reachable without the hover.
+   * operator as a note the caption opens on click (AQU-2260: never a hover;
+   * the dotted underline says an explanation is there), and assistive tech as
+   * the switch's description.
    */
   help?: string
   testId: string
@@ -337,7 +335,7 @@ function Toggle({
   const helpId = help ? `${testId}-help` : undefined
   const captionEl = caption ? (
     <span
-      className={`text-[11px] text-muted-foreground${help ? " cursor-help underline decoration-dotted underline-offset-2" : ""}`}
+      className={`text-[11px] text-muted-foreground${help ? " underline decoration-dotted underline-offset-2" : ""}`}
     >
       {caption}
     </span>
@@ -352,7 +350,7 @@ function Toggle({
         data-testid={testId}
         size="sm"
       />
-      {captionEl && help ? <AppTooltip content={help}>{captionEl}</AppTooltip> : captionEl}
+      {captionEl && help ? <NoteOnClick note={help}>{captionEl}</NoteOnClick> : captionEl}
       {help ? (
         <span id={helpId} className="sr-only">
           {help}

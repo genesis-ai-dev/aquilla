@@ -5,6 +5,7 @@ import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -217,15 +218,24 @@ export function FileRow(props: FileRowProps) {
           {unassigned && (
             <span className="sr-only">{t("nav.fileRow.notAssignedToYou")}</span>
           )}
+          {/* What the mark means opens on a click of it, never a hover
+              (AQU-2260). Its click and keys are its own: they never open the
+              file the row belongs to. */}
           {isTimeOrdered && (
-            <AppTooltip content={t("nav.fileRow.timelineOrderedTooltip")} side="right">
-              <span
+            <span
+              className="inline-flex shrink-0"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <NoteOnClick
+                note={t("nav.fileRow.timelineOrderedTooltip")}
+                label={t("nav.fileRow.timelineOrderedFile")}
+                side="right"
                 className="shrink-0 text-muted-foreground/70"
-                aria-label={t("nav.fileRow.timelineOrderedFile")}
               >
-                <AudioWaveform className="h-3.5 w-3.5" />
-              </span>
-            </AppTooltip>
+                <AudioWaveform className="h-3.5 w-3.5" aria-hidden="true" />
+              </NoteOnClick>
+            </span>
           )}
           <div className="flex-1 min-w-0">
             {editing ? (
@@ -329,7 +339,9 @@ export function FileRow(props: FileRowProps) {
             </DropdownMenuTrigger>
           )}
           {hasSuggestion && !editing && (
-            <AppTooltip content={t("nav.fileRow.suggestionTooltip")} side="right" className="max-w-xs">
+            // The hover names it (AQU-2260); "a cleaner name was detected" is
+            // what the name already says.
+            <AppTooltip content={t("nav.fileRow.applyRenameSuggestion")} side="right">
               <button
                 className="p-1 rounded-md shrink-0 transition-colors hover:text-foreground"
                 onClick={(e) => { e.stopPropagation(); onApplySuggestion?.() }}

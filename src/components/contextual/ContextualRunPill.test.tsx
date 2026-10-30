@@ -2,6 +2,9 @@ import type { ReactElement } from "react"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { act, render as rtlRender, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import userEvent from "@testing-library/user-event"
+import { expectClickNote } from "@/test-utils/tooltip"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ContextualRunPill } from "./ContextualRunPill"
 
 // The pill links into the run's Team conversation, so it needs a router. The
@@ -415,5 +418,34 @@ describe("ContextualRunPill", () => {
     expect(screen.getByText("Waiting for you · 5 passages left")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Translate everything" })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): nothing on the pill explains itself on hover. The
+// waiting-drafts mark opens its note on click; Continue and Translate
+// everything are labelled, so what each does is behind one (i) beside them.
+describe("ContextualRunPill explanations open on click", () => {
+  it("the waiting-drafts mark says what it counts on click", async () => {
+    hydrateContextualDrafts(attachContextualDrafts("p1", "file-1", ""), [
+      { draftId: "draft-1", cellId: "cell-1", text: "Draft one" },
+    ])
+    applyRemoteFrame(frame("failed", { done: 6, total: 10, failed: 4 }))
+    render(<TooltipProvider delay={0}><ContextualRunPill projectId="p1" fileId="file-1" canControl /></TooltipProvider>)
+    await expectClickNote(screen.getByTestId("contextual-pending-drafts"), "Suggestions waiting in your cells")
+  })
+
+  it("Continue and Translate everything show nothing on hover; the (i) beside them says what each does", async () => {
+    applyRemoteFrame({ ...frame("parked", { done: 1, total: 6 }), parkReason: "awaiting_input" })
+    render(<TooltipProvider delay={0}><ContextualRunPill projectId="p1" fileId="file-1" canControl /></TooltipProvider>)
+    const user = userEvent.setup()
+    for (const name of ["Continue", "Translate everything"]) {
+      await user.hover(screen.getByRole("button", { name }))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+    }
+    await expectClickNote(
+      screen.getByRole("button", { name: "About Continue and Translate everything" }),
+      /Draft a few more passages, then check back with you[\s\S]*without stopping to ask/,
+    )
   })
 })

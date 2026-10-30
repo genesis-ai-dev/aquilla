@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 
 const emitSelect = vi.fn(async (..._args: unknown[]) => "evt-1")
@@ -588,9 +588,11 @@ describe("TakesStrip — reporting the last take", () => {
 
       const badge = await screen.findByTestId("take-text-drift-a")
       expect(badge.textContent).toContain("Text changed")
-      // The tooltip must quote the wording AS RECORDED — that is the whole
-      // point of the feature, not just "something changed".
-      expect(badge.getAttribute("title")).toContain("In the beginning")
+      // The note must quote the wording AS RECORDED — that is the whole point
+      // of the feature, not just "something changed". AQU-2260: it opens on a
+      // click, never a hover.
+      expect(badge).not.toHaveAttribute("title")
+      await expectClickNote(badge, "In the beginning")
     })
 
     it("leaves an undrifted take unmarked", () => {
@@ -749,5 +751,36 @@ describe("one number per take, however many pieces it has", () => {
     await act(async () => {})
     expect(emitRename).not.toHaveBeenCalled()
     offline.mockRestore()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. A take's
+// status marks explain themselves on a click.
+describe("TakesStrip — status marks open their notes on click", () => {
+  it("says why a take's length is a question mark", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 0), durationMs: null } as unknown as AudioAttachmentOut]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-unknown-length-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "Length unknown")
+  })
+
+  it("says a take that is still saving is kept on this device", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), pendingSync: true }]} selectedAudioId="a" />,
+    )
+    const mark = await screen.findByTestId("take-saving-a")
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "kept safe on this device")
+  })
+
+  it("keeps the retry a plain button, and says the take is still on this device behind its (i)", async () => {
+    renderWithTooltips(
+      <TakesStrip {...common} takes={[{ ...take("a", 1000), syncFailed: true }]} selectedAudioId="a" />,
+    )
+    const retry = await screen.findByTestId("take-sync-failed-a")
+    expect(retry).not.toHaveAttribute("title")
+    await expectClickNote(screen.getByRole("button", { name: "About Not saved — retry" }), "still on this device")
   })
 })

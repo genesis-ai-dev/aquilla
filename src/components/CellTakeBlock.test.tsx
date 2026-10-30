@@ -8,7 +8,10 @@
 // file — which is worse than the empty tab this fixes.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 
 const audioCalls: Array<{ fileId: string; selectedAudioId: unknown; attachments: unknown }> = []
@@ -106,6 +109,7 @@ function draw(over: Partial<React.ComponentProps<typeof CellTakeBlock>> = {}) {
       onCommitted={onCommitted}
       {...over}
     />,
+    { wrapper: ({ children }) => <TooltipProvider delay={0}>{children}</TooltipProvider> },
   )
   return { onUseAsCellText, onOpenRecording, onCommitted }
 }
@@ -471,6 +475,19 @@ describe("the take that plays", () => {
     expect(screen.getByText("Text changed")).toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29): what the mark means opens on a click, never a hover.
+  it("quotes the wording as recorded on a click of Text changed", async () => {
+    draw({
+      provenance: {
+        audioId: "x", recordedAt: Date.parse("2026-09-28T10:00:00Z"), recordedBy: "sam",
+        textAtRecording: "the old wording", textAtRecordingEventId: "e1", latestText: "new", latestTextEventId: "e2", drifted: true,
+      },
+    })
+    const mark = screen.getByText("Text changed").closest("span")!
+    expect(mark).not.toHaveAttribute("title")
+    await expectClickNote(mark, "the old wording")
+  })
+
   // Sam, 2026-09-29: the take's validation in its own line. Sam, 2026-09-30:
   // and it takes the vote — this is the take that plays, heard right here.
   it("takes the vote on the take that plays, in its line", () => {
@@ -647,5 +664,16 @@ describe("Join into one recording", () => {
     fireEvent.click(screen.getByTestId("cell-take-join"))
     await waitFor(() => expect(joinCalls).toHaveLength(1))
     expect(joinCalls[0]).toMatchObject({ cellId: "c1", slot: "recording", label: "Take 3" })
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "New
+// take" carries its own words.
+describe("hover only names icon buttons", () => {
+  it("New take has no hover", async () => {
+    draw()
+    await userEvent.setup().hover(screen.getByTestId("cell-take-new"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

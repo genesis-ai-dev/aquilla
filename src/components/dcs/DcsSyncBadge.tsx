@@ -17,7 +17,7 @@
 import { useMemo } from "react"
 import { DownloadCloud } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { readCursor } from "@/lib/dcs/cursor"
 import type { DcsCursor } from "@/lib/dcs/types"
@@ -46,24 +46,41 @@ function pinTooltip(cursor: DcsCursor, locale: string, t: TFunction): string {
   })
 }
 
+/**
+ * AQU-2260 (Sam, Oct 29): the pin's explanation opens on click, never on
+ * hover. As a button (it jumps to Project Settings) the badge keeps that
+ * click, so the explanation is an (i) beside it; as a plain badge, the badge
+ * itself opens it.
+ */
 export function DcsSyncBadge({ cursor, onClick }: DcsSyncBadgeProps) {
   const { locale, t } = useI18n()
   if (!cursor) return null
+  const note = pinTooltip(cursor, locale, t)
+  const repo = `${cursor.owner}/${cursor.repo}`
+  if (!onClick) {
+    return (
+      <NoteOnClick note={note} testId="dcs-sync-badge">
+        <Badge variant="outline">
+          <DownloadCloud data-icon="inline-start" aria-hidden />
+          {repo} @ {cursor.ref}
+        </Badge>
+      </NoteOnClick>
+    )
+  }
   return (
-    <AppTooltip content={pinTooltip(cursor, locale, t)} side="bottom">
+    <span className="inline-flex items-center gap-0.5">
       <Badge
         variant="outline"
         data-testid="dcs-sync-badge"
-        render={
-          onClick
-            ? <button type="button" onClick={onClick} aria-label={t("importExport.dcs.badgeAriaLabel")} />
-            : undefined
-        }
+        render={<button type="button" onClick={onClick} aria-label={t("importExport.dcs.badgeAriaLabel")} />}
       >
         <DownloadCloud data-icon="inline-start" aria-hidden />
-        {cursor.owner}/{cursor.repo} @ {cursor.ref}
+        {repo} @ {cursor.ref}
       </Badge>
-    </AppTooltip>
+      <InfoNote label={t("common.aboutAria", { name: repo })} testId="dcs-sync-badge-info" align="end">
+        {note}
+      </InfoNote>
+    </span>
   )
 }
 

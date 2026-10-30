@@ -11,6 +11,8 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import type { WorkingSetRow } from "@/lib/agent/working-set"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import { WorkingSetPanel } from "./WorkingSetPanel"
 
 function row(overrides: Partial<WorkingSetRow>): WorkingSetRow {
@@ -144,5 +146,32 @@ describe("row lifecycle", () => {
     const reject = screen.getByRole("button", { name: "Reject draft for MRK 1:1" })
     expect(accept.querySelector("svg")).toBeNull()
     expect(reject.querySelector("svg")).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): labelled buttons say nothing on hover. Accept
+// remaining, open and the draft's own text carry their words on their face, and
+// the keyboard line under the panel has the shortcuts.
+describe("no hover explanations on labelled buttons", () => {
+  it("Accept remaining, open and the draft text show nothing on hover", async () => {
+    renderWithTooltips(
+      <WorkingSetPanel
+        rows={[row({ fileName: "Mark.usfm" })]}
+        onAcceptAll={() => {}}
+        onAccept={() => {}}
+        onReject={() => {}}
+        onJumpToCell={() => {}}
+      />,
+    )
+    const user = userEvent.setup()
+    for (const el of [
+      screen.getByRole("button", { name: /Accept remaining \(1\)/ }),
+      screen.getByRole("button", { name: "open" }),
+      screen.getByRole("button", { name: "nuevo" }),
+    ]) {
+      await user.hover(el)
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+    }
   })
 })

@@ -14,6 +14,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
@@ -791,37 +792,51 @@ export function TakesStrip({
                     ) : (
                       // SUB-48: no measured length. Say so — a blank space read
                       // as "fine" while the chip was quietly section-width.
-                      <span
-                        title={t("audio.takesStrip.unknownLengthTooltip")}
-                        data-testid={`take-unknown-length-${att.audioId}`}
-                        className="shrink-0 text-muted-foreground/50"
-                      >
-                        ?
-                      </span>
+                      // Why, on a click of the mark (AQU-2260).
+                      <NoteOnClick note={t("audio.takesStrip.unknownLengthTooltip")} className="shrink-0">
+                        <span
+                          data-testid={`take-unknown-length-${att.audioId}`}
+                          className="shrink-0 text-muted-foreground/50"
+                        >
+                          ?
+                        </span>
+                      </NoteOnClick>
                     )}
                     {att.pendingSync && (
-                      <span
-                        title={t("audio.takesStrip.pendingSyncTooltip")}
-                        data-testid={`take-saving-${att.audioId}`}
-                        className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
-                      >
-                        <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
-                      </span>
+                      <NoteOnClick note={t("audio.takesStrip.pendingSyncTooltip")} className="shrink-0">
+                        <span
+                          data-testid={`take-saving-${att.audioId}`}
+                          className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground/70"
+                        >
+                          <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
+                        </span>
+                      </NoteOnClick>
                     )}
                     {/* AQU-924: this take never reached the server. Say so ON the
                         take and offer the retry here — it used to just vanish. */}
+                    {/* The button says what happened and what it does; that
+                        the take is still safe on this device is behind its (i)
+                        (AQU-2260 — never a hover). */}
                     {att.syncFailed && (
-                      <button
-                        type="button"
-                        title={t("audio.takesStrip.syncFailedTooltip")}
-                        data-testid={`take-sync-failed-${att.audioId}`}
-                        onClick={() => {
-                          void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
-                        }}
-                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
-                      >
-                        <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
-                      </button>
+                      <span className="flex shrink-0 items-center">
+                        <button
+                          type="button"
+                          data-testid={`take-sync-failed-${att.audioId}`}
+                          onClick={() => {
+                            void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
+                          }}
+                          className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
+                        >
+                          <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
+                        </button>
+                        <InfoNote
+                          label={t("common.aboutAria", { name: t("audio.takesStrip.syncFailedRetry") })}
+                          className="text-destructive/70 hover:text-destructive"
+                          iconClassName="h-3 w-3"
+                        >
+                          {t("audio.takesStrip.syncFailedTooltip")}
+                        </InfoNote>
+                      </span>
                     )}
                     {/* AQU-1372: "recorded when, by whom" — the answer the
                         event log already holds, on the row that asks it.
@@ -860,16 +875,20 @@ export function TakesStrip({
                         got there (Sam, 2026-10-15 — using a transcript AS the
                         text was flagging its own take). */}
                     {!isGenerated && provenance?.drifted && verdict?.kind !== "match" && (
-                      <span
-                        title={t("audio.takesStrip.textDriftTooltip", {
+                      <NoteOnClick
+                        note={t("audio.takesStrip.textDriftTooltip", {
                           date: new Date(provenance.recordedAt).toLocaleDateString(),
                           text: provenance.textAtRecording ?? "",
                         })}
-                        data-testid={`take-text-drift-${att.audioId}`}
-                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+                        className="shrink-0"
                       >
-                        <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
-                      </span>
+                        <span
+                          data-testid={`take-text-drift-${att.audioId}`}
+                          className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+                        >
+                          <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
+                        </span>
+                      </NoteOnClick>
                     )}
                     {/* The tab's question about every take: does it say the
                         text? A generated take is read FROM the text, so only

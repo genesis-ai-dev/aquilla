@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { formatScopePath } from "@/lib/access/scope-path"
 import type { MemberAccess, ScopePath } from "@/lib/access/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -139,17 +140,14 @@ describe("InheritedRoleControl (§3.7 rule 2)", () => {
     )
     expect(screen.getByRole("button", { name: "Role" })).toBeDisabled()
     const path = formatScopePath(teamPath)
-    // a11y: the disabled control is described, and the link is the only extra tab stop.
+    // a11y: the disabled control is described, and the link says where to go.
     expect(screen.getByRole("button", { name: "Role" })).toHaveAccessibleDescription(`Set at ${path} — change it there`)
     expect(screen.getByTestId("inherited-role-control")).not.toHaveAttribute("tabindex")
     expect(screen.getByRole("link", { name: `Change at ${path}` })).toHaveAttribute("href", "/access/t1")
 
-    const trigger = screen.getByTestId("inherited-role-control")
-    fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
-    fireEvent.mouseEnter(trigger)
-    await waitFor(() => {
-      expect(screen.getByRole("tooltip")).toHaveTextContent(`Set at ${path} — change it there`)
-    })
+    // AQU-2260 (Sam, Oct 29): why it is locked opens on CLICK, in a note
+    // anchored to the control. Hovering it shows nothing.
+    await expectDisabledNote(screen.getByRole("button", { name: "Role" }), `Set at ${path} — change it there`)
   })
 
   it("leaves direct grants editable — only inherited rows are locked", () => {

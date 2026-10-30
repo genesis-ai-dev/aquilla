@@ -17,7 +17,6 @@ import { useMemo, type ReactNode } from "react"
 import { UsersRound, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { BIBLE_DATA_SOURCE_SHORT_NAME_KEYS } from "@/lib/bible-data/enrichment-labels"
 import { isOriginalLanguageTag } from "@/lib/bible-data/macula-alignment"
 import type { BkpEntityId } from "@/lib/bible-data/pack-types"
@@ -62,23 +61,22 @@ export function WhosWhoSidebar({ open, onToggle, className, ...rest }: WhosWhoSi
   if (!open) {
     // Closed: a slim edge tab, so the cast is one click away while reading.
     return (
-      <AppTooltip content={t("bibleData.whosWho.panel.openTooltip")} side="left">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-label={t("bibleData.whosWho.panel.showAria")}
-          data-testid="whos-who-edge-tab"
-          className={cn(
-            "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-s bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
-            className,
-          )}
-        >
-          <UsersRound className="h-4 w-4" aria-hidden="true" />
-          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
-            {t("bibleData.whosWho.panel.edgeTab")}
-          </span>
-        </button>
-      </AppTooltip>
+      // Its word names it: no hover (AQU-2260).
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={t("bibleData.whosWho.panel.showAria")}
+        data-testid="whos-who-edge-tab"
+        className={cn(
+          "hidden h-full w-9 shrink-0 flex-col items-center gap-1.5 border-s bg-background pt-3 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground sm:flex",
+          className,
+        )}
+      >
+        <UsersRound className="h-4 w-4" aria-hidden="true" />
+        <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">
+          {t("bibleData.whosWho.panel.edgeTab")}
+        </span>
+      </button>
     )
   }
   return (

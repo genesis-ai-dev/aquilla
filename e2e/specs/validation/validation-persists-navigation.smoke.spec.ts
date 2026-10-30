@@ -41,7 +41,7 @@ test("validated cell stays validated after navigating away and back", async ({ a
   // Cell 0 validation button should still report validated state.
   const row = ws2.cellRow(0)
   await row.hover()
-  const validationButton = row.getByRole("button", { name: /Validated/i }).first()
+  const validationButton = row.getByTestId("validation-gutter").getByRole("button", { name: /Validated/i }).first()
   await expect(validationButton).toBeVisible({ timeout: 10_000 })
   await expect(validationButton).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
 })

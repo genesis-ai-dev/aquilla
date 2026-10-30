@@ -27,6 +27,7 @@ import { Combine, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { TakeTextVerdict } from "./audio/TakeTextVerdict"
 import { transcriptVerdict } from "@/lib/audio/transcript-verdict"
 import type { RecordingTextDrift } from "@/lib/audio/text-drift"
@@ -520,16 +521,18 @@ function CellTakeBlockView({
             recording says the current text, however the text got there
             (Sam, 2026-10-15 — using a transcript AS the text flagged its own
             take). */}
+        {/* What it means opens on a click of it, never a hover (AQU-2260). */}
         {!isGenerated && provenance?.drifted && !(showVerdict && verdict.kind === "match") && (
-          <span
-            title={t("audio.takesStrip.textDriftTooltip", {
+          <NoteOnClick
+            note={t("audio.takesStrip.textDriftTooltip", {
               date: new Date(provenance.recordedAt).toLocaleDateString(),
               text: provenance.textAtRecording ?? "",
             })}
-            className="flex items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
           >
-            <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
-          </span>
+            <span className="flex items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400">
+              <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
+            </span>
+          </NoteOnClick>
         )}
         {showVerdict && (
           <TakeTextVerdict
@@ -631,20 +634,19 @@ function CellTakeBlockView({
             />
           )}
           {/* The one way into the recorder from here: it records, uploads
-              and generates, and switches takes too. */}
-          <AppTooltip content={t("editor.recordingTab.newTakeTooltip")}>
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              data-testid="cell-take-new"
-              onClick={() => onOpenRecording?.(owner.id, newTakeSlot)}
-              disabled={!editable || !onOpenRecording}
-            >
-              <Mic className="h-3 w-3" />
-              {t("editor.recordingTab.newTake")}
-            </Button>
-          </AppTooltip>
+              and generates, and switches takes too. Its words name it: no
+              hover (AQU-2260). */}
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            data-testid="cell-take-new"
+            onClick={() => onOpenRecording?.(owner.id, newTakeSlot)}
+            disabled={!editable || !onOpenRecording}
+          >
+            <Mic className="h-3 w-3" />
+            {t("editor.recordingTab.newTake")}
+          </Button>
           {!isSection && selectedAudioId && attachment && (
             <AppTooltip content={t("audio.takesStrip.deleteTakeTooltip")}>
               <Button

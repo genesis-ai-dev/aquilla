@@ -14,7 +14,7 @@ import {
 } from "./AudioValidationControl"
 import { TargetValidationControl } from "./TargetValidationControl"
 import { lineState, takeState } from "./audio-validation-state"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtShortCalendarDate, fmtShortCalendarDateTime } from "@/lib/format-date"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 import { expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
 
@@ -727,7 +727,8 @@ describe("the date under each validator", () => {
     await userEvent.click(button()!)
     const list = await screen.findByRole("dialog")
 
-    expect(validatorRow(list, "bo")).toHaveTextContent(fmtShortCalendarDate(boVoted))
+    // The day and the clock time, not the day alone (Matthew, 2026-10-30).
+    expect(validatorRow(list, "bo")).toHaveTextContent(fmtShortCalendarDateTime(boVoted))
     // No stamp for cy: the name alone, never a blank line or "Invalid Date".
     expect(validatorRow(list, "cy").textContent).toBe("cy")
   })
@@ -743,8 +744,8 @@ describe("the date under each validator", () => {
     const list = await screen.findByRole("dialog")
 
     const [first, second] = within(list).getAllByText(/^bo/).map((el) => el.closest("li")!)
-    expect(first).toHaveTextContent(fmtShortCalendarDate(onFirst))
-    expect(second).toHaveTextContent(fmtShortCalendarDate(onSecond))
+    expect(first).toHaveTextContent(fmtShortCalendarDateTime(onFirst))
+    expect(second).toHaveTextContent(fmtShortCalendarDateTime(onSecond))
     // The sub-headings still name their takes above their own lists.
     expect(within(list).getByText("Take 1")).toBeInTheDocument()
     expect(within(list).getByText("Take 2")).toBeInTheDocument()
@@ -755,6 +756,7 @@ describe("the date under each validator", () => {
     await userEvent.click(button()!)   // the press is the VOTE
     await userEvent.click(button()!)   // now it opens the list
     const list = await screen.findByRole("dialog")
+    // The day only: the click and this line can straddle a minute boundary.
     expect(validatorRow(list, "ana")).toHaveTextContent(fmtShortCalendarDate(Date.now()))
   })
 })
@@ -793,5 +795,15 @@ describe("the two validated-by lists are spaced alike", () => {
     const textList = (await screen.findAllByRole("dialog")).find((el) => el !== audioList)!
 
     expect(boxClasses(audioRow)).toBe(boxClasses(validatorRow(textList, "bo")))
+
+    // The heading is the list's own first row, as the text list keeps it —
+    // not a sibling above the list. The popover shell is a flex column with a
+    // gap between its children, so a heading of its own opened a gap between
+    // the title and the first name that the text popover does not have.
+    const headingOf = (list: HTMLElement) => within(list).getByText(/validated by$/)
+    expect(headingOf(audioList).tagName).toBe("LI")
+    expect(headingOf(audioList).parentElement!.parentElement).toBe(audioList)
+    expect(headingOf(audioList).parentElement!.contains(audioRow)).toBe(true)
+    expect(headingOf(audioList).className).toBe(headingOf(textList).className)
   })
 })

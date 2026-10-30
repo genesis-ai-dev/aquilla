@@ -190,17 +190,25 @@ export function VersionTag() {
 }
 
 /**
- * Floating badge for screens without a left rail (dashboard, onboarding, join,
- * settings, centred project pages). Click to copy build info.
+ * Standalone auth pages provide their own footer so build info cannot cover
+ * form controls on small screens.
  */
-export function VersionBadge() {
+function hasAuthPageVersionTag(pathname: string): boolean {
+  return /^\/(?:login|signup|onboarding|reset-password|join|join-org)(?:\/|$)/.test(pathname)
+}
+
+/** Floating on other screens without chrome; inline inside an AuthPage footer. */
+export function VersionBadge({ inline = false }: { inline?: boolean }) {
   const t = useT()
   const { pathname } = useLocation()
   const { copied, copy } = useCopyBuildInfo()
-  if (hasChromeVersionTag(pathname)) return null
+  if (!inline && (hasChromeVersionTag(pathname) || hasAuthPageVersionTag(pathname))) return null
 
   return (
-    <div className="fixed bottom-3 start-3 z-30 flex max-w-[90vw] items-center gap-1">
+    <div className={cn(
+      "flex items-center gap-1",
+      inline ? "w-full flex-wrap justify-start" : "fixed bottom-3 start-3 z-30 max-w-[90vw]",
+    )}>
       <EnvironmentTag className="bg-card border-amber-500/50" />
       <Tooltip>
         <TooltipTrigger

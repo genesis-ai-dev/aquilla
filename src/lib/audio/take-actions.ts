@@ -178,7 +178,7 @@ export async function renameWholeTake(args: {
   const { pieces, name, ...where } = args
   await withGroup({ labelKey: "editor.history.stepRenameTake", fileId: args.fileId }, async () => {
     for (const rename of wholeTakeRenames(pieces, name)) await renameTake({ ...where, ...rename })
-  }, { alwaysGroup: true })
+  }, { alwaysGroup: true, owns: { cells: [args.cellId], kinds: ["take."] } })
 }
 
 /**

@@ -1016,8 +1016,12 @@ export const org = defineNamespace({
     "org.joinOrgPage.organizationLine": "Organization: {name}",
     "org.joinOrgPage.unnamedOrgFallback": "Unnamed organization",
     // "Loading invitation details…" → auth.join.loadingDetails (identical text)
-    "org.joinOrgPage.genericInviteFallback":
-      "You've been invited to join an organization on Aquilla.",
+    "org.joinOrgPage.unavailableTitle": "Invitation unavailable",
+    "org.joinOrgPage.unavailableDescription":
+      "This invitation is invalid or no longer available. Ask the person who invited you for a new link.",
+    "org.joinOrgPage.previewErrorTitle": "Couldn't check invitation",
+    "org.joinOrgPage.previewErrorDescription":
+      "We couldn't load the invitation details. Check your connection and try again.",
     // "Invalid invite link" → auth.join.invalidInviteLink (identical text)
     // "Go home" → error.notFound.goHome (identical text)
     "org.joinOrgPage.cantJoinTitle": "Can't join",

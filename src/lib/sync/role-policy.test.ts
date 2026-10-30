@@ -12,6 +12,10 @@ import {
   canMutateComment,
   commentFloorsFrom,
   DEFAULT_COMMENT_FLOORS,
+  DEFAULT_IMPORT_MIN_ROLE,
+  resolveImportFloor,
+  canImportSourceFiles,
+  importDenialFloor,
 } from "./role-policy"
 
 describe("role-policy (client mirror)", () => {
@@ -424,5 +428,74 @@ describe("canAttachSourceAudio", () => {
   it("fails open on an unknown role, like canPerform", () => {
     expect(canAttachSourceAudio(null)).toBe(true)
     expect(canAttachSourceAudio(undefined)).toBe(true)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: the org-configurable import floor, on the client side.
+//
+// WHY THESE AND NOT A WORKSPACE RENDER: the workspace reads one value
+// (`canImportSourceFiles`) for all five source-import affordances — the header
+// button, the dialog's "New source text", the sidebar re-import, the IDML copy
+// repair and the openImportFlow backstop — so what can regress is this
+// decision, not any one button's wiring. The dialog's greyed-out state given a
+// `sourceDisabledReason` is already covered in ImportDialog.translation.test.tsx.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("resolveImportFloor", () => {
+  it("keeps an in-range org value", () => {
+    expect(resolveImportFloor(ROLE.MAINTAINER)).toBe(600)
+    expect(resolveImportFloor(ROLE.PROJECT_LEAD)).toBe(500)
+  })
+
+  it("falls back to Project lead when the org set nothing or set nonsense", () => {
+    // Mirrors the server's resolveImportMinRole: a misconfigured floor is a
+    // no-op, never a lockout.
+    expect(resolveImportFloor(undefined)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(null)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(NaN)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(-1)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+    expect(resolveImportFloor(9999)).toBe(DEFAULT_IMPORT_MIN_ROLE)
+  })
+})
+
+describe("canImportSourceFiles", () => {
+  it("is Project lead and up when the org set nothing — today's behaviour", () => {
+    expect(canImportSourceFiles(ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canImportSourceFiles(ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canImportSourceFiles(ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(ROLE.OWNER)).toBe(true)
+  })
+
+  it("withdraws a project lead's import when the org asks for Maintainer", () => {
+    expect(canImportSourceFiles(ROLE.PROJECT_LEAD, ROLE.MAINTAINER)).toBe(false)
+    expect(canImportSourceFiles(ROLE.MAINTAINER, ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(ROLE.OWNER, ROLE.MAINTAINER)).toBe(true)
+  })
+
+  it("never LOWERS the static file.create bar, whatever the org stores", () => {
+    // The org's value only ever raises. A stored 400 cannot hand imports to
+    // translators, because the server's static table refuses them too.
+    expect(canImportSourceFiles(ROLE.CONTRIBUTOR, ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canImportSourceFiles(ROLE.REVIEWER, ROLE.VIEWER)).toBe(false)
+  })
+
+  it("fails open on an unknown role, like canPerform", () => {
+    // A local / git-imported project has no sync role and no org floor.
+    expect(canImportSourceFiles(null, ROLE.MAINTAINER)).toBe(true)
+    expect(canImportSourceFiles(undefined, ROLE.MAINTAINER)).toBe(true)
+  })
+})
+
+describe("importDenialFloor", () => {
+  it("names the org's floor when the org is what refused", () => {
+    // A lead locked out by an org at Maintainer must be told "Maintainer".
+    expect(importDenialFloor(ROLE.MAINTAINER)).toBe(ROLE.MAINTAINER)
+  })
+
+  it("names the static bar when the org set nothing or set it lower", () => {
+    expect(importDenialFloor()).toBe(ROLE.PROJECT_LEAD)
+    expect(importDenialFloor(ROLE.CONTRIBUTOR)).toBe(ROLE.PROJECT_LEAD)
+    expect(importDenialFloor(9999)).toBe(ROLE.PROJECT_LEAD)
   })
 })

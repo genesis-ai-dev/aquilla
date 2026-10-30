@@ -2985,7 +2985,6 @@ export const ar: Catalog = {
   "org.accessModelLegend.creator.description": "دور المالك دائم حتى يتم نقل ملكية المشروع. أدره في إعدادات المشروع → المشاركة.",
   "org.joinOrgPage.organizationLine": "المنظمة: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "منظمة بدون اسم",
-  "org.joinOrgPage.genericInviteFallback": "تمت دعوتك للانضمام إلى منظمة على Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "لا يمكنك الانضمام",
   "org.joinOrgPage.youreInTitle": "أنت هنا",
   "org.joinOrgPage.joinedRedirect": "انضممت إلى {org}. جاري نقلك هناك…",

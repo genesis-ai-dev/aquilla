@@ -130,7 +130,7 @@ accept, import-and-edit, …) stay hermetic per-test.
 | Surface | Spec |
 | --- | --- |
 | Comments page empty / filters / sort / search / back-nav / resolved | `e2e/specs/editor/comments-page.smoke.spec.ts` |
-| Onboarding wizard steps | `e2e/specs/projects/onboarding.smoke.spec.ts` |
+| Short signup: welcome, privacy choice, account (AQU-2300) | `e2e/specs/projects/onboarding.smoke.spec.ts` |
 | Formatting bubble + shortcuts + loss warning | `e2e/specs/editor/formatting.smoke.spec.ts` |
 | Search toolbar + replace + scope | `e2e/specs/editor/search.smoke.spec.ts` |
 | Rules create / edit / delete / org / dialogs | `e2e/specs/rules/rules-crud.smoke.spec.ts` |
@@ -244,6 +244,15 @@ UI chrome that used to be one smoke file per click is covered under
   RTL rather than becoming a smoke journey.
 - Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling, five-minute totals/average/slowest reply, failure counts, sample freshness, expiry, and five-second chart buckets (`connection-activity.test.ts`); separate traffic/reply scales and honest gaps for missing samples (`ConnectionHistoryChart.test.tsx`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome.
+  Recovery's single validation message and return-to-sign-in are covered in RTL
+  (`FrontierForgotPasswordForm.test.tsx`, AQU-2300). The old eight-step wizard was shortened to welcome, privacy choice and signup;
+  anonymous Skip for now was retired; `Signup.test.tsx` covers direct signup,
+  hydration, safe destinations and billing continuation. Preferences and in-app
+  workspace/project creation replace the removed setup steps.
+  Organization invitation preview gating (unavailable links, retryable failures,
+  pending/stale requests, signed-in/out states) is covered in RTL by
+  `JoinOrgPage.test.tsx` (AQU-2297). Membership acceptance and reopening a used
+  link as its still-member redeemer stay in `share-invite.smoke.spec.ts`.
   Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
   copy with word-for-word identical wording whichever datastore reserved the identity,
   and the Sign in action carries the typed identifier into the login field
@@ -407,6 +416,29 @@ UI chrome that used to be one smoke file per click is covered under
   longer produce that drift — it lives in data written before them — so a walk has to delete
   a grant row by hand first. The inspector-shows-the-gap → regrant →
   contributor-reloads walk is on this issue's QA checklist rather than written blind.
+- Org import floor (AQU-2304): an org owner sets **Settings → Security → "Who can import files"**
+  to Maintainer, and in every project of that org only maintainers and owners may bring a NEW
+  source file in — the Import dialog's "New source text", the sidebar re-import and the IDML copy
+  repair all withdraw from a project lead, while importing a TRANSLATION into a file already in the
+  project stays open to contributors and the Door43 upstream panel stays Maintainer-only either way.
+  The server is the boundary: `file.create` is refused with a 403 naming the required role, so a
+  stale or hand-crafted client cannot get around the setting. The perimeter refusal and every
+  fail-safe (unset, garbage, unreadable or org-less → Project lead; owner never reads settings at
+  all; one org-settings read per batch through the request cache) are in
+  `sync-worker/src/__tests__/authorize-import-floor.test.ts`; the owner-only write gate, the
+  role-ladder validation, the carry-over of an omitted key and the resolved floor on the project's
+  settings response (for a project lead by direct grant who is NOT an org member, and whose org read
+  is a 403) in `auth-worker/src/__tests__/org-settings-import-floor.test.ts`; the Security row — two
+  options, disabled below owner, the patched key, the owner-only error, the page's intro sentence —
+  in `Settings.test.tsx`; and the client gate, with the floor's trip from the settings response into
+  the one decision all five source-import affordances read, in `role-policy.test.ts` /
+  `project-org-policy.test.ts`. **No smoke yet, and the gap is deliberate:** the cross-layer walk
+  this contract deserves (owner flips the org → the lead's own browser loses Import on its next
+  settings re-read → a hand-posted `file.create` from that lead 403s → flip back and the same post
+  succeeds) needs two role-seeded sessions and a direct sync-API post, and the box this landed on
+  had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
+  rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
+  smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.

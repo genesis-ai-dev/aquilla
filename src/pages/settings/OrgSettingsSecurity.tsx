@@ -5,6 +5,7 @@ import { CommentPermissionsSection } from "@/components/settings/CommentPermissi
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
 import { TermbaseEditSection } from "@/components/settings/TermbaseEditSection"
 import { LanguageEditSection } from "@/components/settings/LanguageEditSection"
+import { ImportPermissionsSection } from "@/components/settings/ImportPermissionsSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings, canEditRosterProgressFloor, canEditCommentFloors } from "@/hooks/useOrgSettings"
@@ -38,6 +39,7 @@ export function OrgSettingsSecurity() {
         <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEdit} />
         <TermbaseEditSection orgSettings={orgSettings} canEdit={canEdit} />
         <LanguageEditSection orgSettings={orgSettings} canEdit={canEdit} />
+        <ImportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

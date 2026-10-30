@@ -1,35 +1,27 @@
-# Sign up and walk the onboarding wizard end to end
+# Welcome, choose usage sharing, and create an account
 
 Smoke twin: `e2e/specs/projects/onboarding.smoke.spec.ts`
 
+AQU-2300 reduces the eight-step onboarding wizard to three screens. The filename and old URL are retained for compatibility with journey selectors and marketing links.
+
 ## Preconditions
 
-- No login needed. Open `/onboarding` directly; this is the wizard's own signup path, not the `/__dev/login` shortcut.
-- A unique username, email, and project name (include a timestamp) so the run does not collide with another agent's account.
+- Signed out in an isolated test browser.
+- A unique test username and email.
 
 ## Steps
 
-1. Open `/onboarding`. Click **Get Started**.
-2. On the privacy step, click **Continue** (leave **Share usage data** as found).
-3. On **Create your Aquilla account**, fill **Username**, **Email**, and **Password**, then click **Create account**. This is a real registration call, not a mock.
-4. On **What should we call you?**, the **Display name** field is pre-filled with the username. Replace it with a real name, then click **Continue**.
-5. On **How will you use Aquilla?**, click **Just me**.
-6. On **Create your first project**, fill **Project Name**, **Source Language**, and **Target language**, then click **Create Project**.
-7. On **You're all set!**, click **Start Translating**.
+1. Open `/onboarding` (or `/signup`). On Welcome, choose **Get Started**, then on Help us improve choose whether to share usage data and **Continue**. Sharing defaults on; users can switch it off. A previously saved choice skips this privacy screen. Welcome also offers **Sign in** for existing accounts.
+2. Fill **Username**, **Email**, and **Password**, then click **Create account**. This is real registration, not a fixture response.
+3. Wait for `/orgs/...` and the signed-in account menu.
+4. Reload and verify the account menu and app destination remain available.
 
 ## Expected end state
 
-- Step 3 advances to the display-name step without an error; a failed registration would leave you stuck on the account step.
-- Step 7 lands on `/project/<id>/editor` for the project you just named.
+The new account is signed in and can use the app. No workspace/project setup or anonymous completion is required. Workspace/project creation and Preferences remain available inside the app.
 
 ## Counts as a failure
 
-- **Create account** does nothing, or an error appears instead of advancing to the display-name step.
-- **Create Project** does nothing, or **You're all set!** never appears.
-- **Start Translating** does not navigate to `/project/<id>/editor`.
-
-## Notes for the agent
-
-- Every step here is a `main "Account setup"` region with one heading; the fastest way to confirm you moved forward is that the heading text changed, not just that a click succeeded.
-- **Source Language** and **Target language** on the project step accept typed language names (`English`, `French`), not just codes, and don't need their option list to open.
-- The wizard also offers a **Dev login (skip auth)** button and a **Skip for now** button on the account step. Do not use them: this journey exists to prove the real signup path the smoke spec exercises.
+- Registration errors or stalls.
+- Signup advances past account creation into workspace/project setup or exposes an anonymous skip action.
+- Reload loses the session or returns to registration.

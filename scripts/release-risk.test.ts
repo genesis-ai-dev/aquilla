@@ -110,3 +110,27 @@ describe("holdingAreas", () => {
     }
   })
 })
+
+// A PR that edits the gate's harness, corpus or golden could make its own
+// gate pass. Those files are infra, which holds with no gate, and they hold
+// even though most of them sit under __tests__ (which otherwise never holds).
+describe("gate machinery holds as infra", () => {
+  it.each([
+    "sync-worker/replay-corpus/golden.json",
+    "sync-worker/replay-corpus/manifest.json",
+    "sync-worker/replay-corpus/synthetic/genesis-sample.json",
+    "sync-worker/src/__tests__/replay-corpus.test.ts",
+    "sync-worker/src/__tests__/helpers/replay-corpus.ts",
+    "scripts/replay-corpus.mjs",
+    ".github/workflows/risk-label.yml",
+  ])("%s", (file) => {
+    const { areas, pathHolds } = classifyFiles([file])
+    expect(areas).toContain("infra")
+    expect(pathHolds).toBe(true)
+    expect(AREA_GATES).not.toHaveProperty("infra")
+  })
+
+  it("still ignores an ordinary sync-worker test", () => {
+    expect(classifyFiles(["sync-worker/src/__tests__/rebuild.test.ts"]).areas).toEqual([])
+  })
+})

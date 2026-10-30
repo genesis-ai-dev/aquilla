@@ -158,7 +158,12 @@ today:
   that goes to a person, and the golden's diff is what they review before
   adding `release:approved`. A gate passing does not excuse a failed walk,
   and a PR's other holding areas (a migration beside the events change)
-  still hold.
+  still hold. Two things keep the gate honest: the planner accepts a
+  gate run only from GitHub Actions (`app.slug`), and the gate's own
+  machinery (`sync-worker/replay-corpus/**`, the harness under
+  `__tests__`, `scripts/replay-corpus.mjs`, the workflow) is classified
+  as `infra`, which holds with no gate, so a PR cannot edit the harness
+  or the golden and pass itself.
 - **`auth` → permission matrix**: not built (open items).
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and

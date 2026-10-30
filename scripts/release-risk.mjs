@@ -67,9 +67,19 @@ export const AREAS = AREA_PATTERNS.map(([area]) => area)
 // otherwise hold a PR that only adds a sync-worker test.
 const TEST_FILE = /\.test\.[jt]sx?$|^e2e\/|^sync-worker\/src\/__tests__\//
 
+// The gates' own machinery: the harness, its corpus, its golden and the
+// tooling around them. A PR that edits these can make its own gate pass,
+// so they are infra (holding, no gate) and are checked BEFORE the test-file
+// skip, since most of the harness lives under __tests__.
+const GATE_MACHINERY = /^sync-worker\/replay-corpus\/|^sync-worker\/src\/__tests__\/(replay-corpus\.test\.ts|helpers\/replay-corpus\.ts)$|^scripts\/replay-corpus/
+
 export function classifyFiles(files) {
   const areas = new Set()
   for (const file of files) {
+    if (GATE_MACHINERY.test(file)) {
+      areas.add("infra")
+      continue
+    }
     if (TEST_FILE.test(file)) continue
     for (const [area, pattern] of AREA_PATTERNS) if (pattern.test(file)) areas.add(area)
   }

@@ -84,13 +84,16 @@ function fakeGitHub({
   associatedPrs = [],
   comments = [],
   checkRuns = [],
-}: { associatedPrs?: AssociatedPr[]; comments?: FakeComment[]; checkRuns?: Array<{ name: string; conclusion: string | null }> } = {}) {
+}: { associatedPrs?: AssociatedPr[]; comments?: FakeComment[]; checkRuns?: Array<{ name: string; conclusion: string | null; app?: { slug: string } }> } = {}) {
   const calls: string[] = []
   const fetchImpl = async (url: string) => {
     calls.push(url)
     if (url.includes("/pulls")) return { ok: true, json: async () => associatedPrs }
     if (url.includes("/comments")) return { ok: true, json: async () => comments }
-    if (url.includes("/check-runs")) return { ok: true, json: async () => ({ check_runs: checkRuns }) }
+    if (url.includes("/check-runs")) {
+      // GitHub Actions is the producer unless a case says otherwise.
+      return { ok: true, json: async () => ({ check_runs: checkRuns.map((run) => ({ app: { slug: "github-actions" }, ...run })) }) }
+    }
     return { ok: false, status: 404, json: async () => null }
   }
   return { fetchImpl, calls }
@@ -209,6 +212,14 @@ describe("lookupPr", () => {
     })
     expect(await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toEqual({ walk: "unknown", approved: false, gates: ["events"] })
     expect(calls.find((url) => url.includes("/check-runs"))).toContain(`/commits/${HEAD_SHA}/check-runs`)
+  })
+
+  it("does not pass a gate posted by anything but GitHub Actions, even when it says success", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      checkRuns: [{ name: "replay-gate", conclusion: "success", app: { slug: "some-other-app" } }],
+    })
+    expect((await lookupPr({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).gates).toEqual([])
   })
 
   it("does not pass a gate whose newest run failed or is still running", async () => {

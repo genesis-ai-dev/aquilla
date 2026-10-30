@@ -35,7 +35,10 @@ export function lookupPr(
   options: LookupWalkOptions,
 ): Promise<{ walk: "PASS" | "fail" | "none" | "unknown"; approved: boolean; gates: string[] }>
 
-/** Areas whose AREA_GATES check concluded success on this head sha (newest run per name). */
+/** The only check-run producer a gate is accepted from. */
+export const GATE_PRODUCER: string
+
+/** Areas whose AREA_GATES check, produced by GitHub Actions, concluded success on this head sha (newest run per name). */
 export function passedGates(headSha: string, opts: Omit<LookupWalkOptions, "mergeSha">): Promise<string[]>
 
 // Resolves one dev-branch merge commit to the walk verdict for the PR it

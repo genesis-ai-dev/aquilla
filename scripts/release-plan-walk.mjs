@@ -95,6 +95,15 @@ export async function lookupPr({ mergeSha, repo = REPO, token, fetchImpl = fetch
 // the first run seen per name is the one that counts; a re-run that failed
 // after an earlier pass does not pass. Read from the head sha, never the
 // merge commit: the gate ran on the PR, and that is the code that merged.
+//
+// Only a run GitHub Actions itself produced counts (`app.slug`): any other
+// GitHub App with checks:write on the repo could post a check named
+// `replay-gate`. The workflow that produced it is read from base
+// (risk-label.yml checks out the base sha for the classifier) and the
+// gate's own files are a holding area with no gate (release-risk.mjs
+// GATE_MACHINERY), so a PR cannot edit the harness and pass itself.
+export const GATE_PRODUCER = "github-actions"
+
 export async function passedGates(headSha, opts) {
   const names = new Map(Object.entries(AREA_GATES).map(([area, name]) => [name, area]))
   const latest = new Map()
@@ -102,7 +111,8 @@ export async function passedGates(headSha, opts) {
     const body = await githubApi(`/commits/${headSha}/check-runs?per_page=100&page=${page}`, opts)
     const runs = Array.isArray(body?.check_runs) ? body.check_runs : []
     for (const run of runs) {
-      if (names.has(run?.name) && !latest.has(run.name)) latest.set(run.name, run.conclusion)
+      if (!names.has(run?.name) || latest.has(run.name)) continue
+      latest.set(run.name, run.app?.slug === GATE_PRODUCER ? run.conclusion : "untrusted-producer")
     }
     if (runs.length < 100) break
   }

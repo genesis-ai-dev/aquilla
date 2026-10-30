@@ -5,13 +5,14 @@
 
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TVars } from "@/lib/i18n/translate"
-import { roleDisplayLabel, roleNameKey } from "@/lib/frontier/roles"
+import { ORG_WIDE_ACCESS_FLOOR, roleDisplayLabel, roleNameKey } from "@/lib/frontier/roles"
 
 export type GrantTranslator = (key: MessageKey, vars?: TVars) => string
 
 /**
  * What the grant covers.
- * - organization: the whole org, every project.
+ * - organization: the org. Every project only from Maintainer up (AQU-1107);
+ *   below that the person sees a project once they're added to it.
  * - project + lanes "all": the named project, every lane (no lane scope).
  * - project + lanes "unknown": the named project, lane list not loaded yet.
  * - project + lane labels: those lanes only.
@@ -60,12 +61,20 @@ function roleLabel(t: GrantTranslator, level: number, count: number): string {
 function scopeParts(
   t: GrantTranslator,
   scope: GrantScope,
+  roleLevel: number,
   locale: string,
 ): { scope: string; echo: string } {
   if (scope.kind === "organization") {
+    // AQU-2289: only a Maintainer or Owner org role opens every project.
+    if (roleLevel >= ORG_WIDE_ACCESS_FLOOR) {
+      return {
+        scope: t("org.grantScope.scope.organization"),
+        echo: t("org.grantScope.echo.organization"),
+      }
+    }
     return {
-      scope: t("org.grantScope.scope.organization"),
-      echo: t("org.grantScope.echo.organization"),
+      scope: t("org.grantScope.scope.organizationOnly"),
+      echo: t("org.grantScope.echo.organizationOnly"),
     }
   }
   const project = scope.projectName
@@ -126,7 +135,7 @@ export function describeGrant(t: GrantTranslator, input: DescribeGrantInput): Gr
   const names = (input.names ?? []).map((name) => name.trim()).filter(Boolean)
   const several = !input.link && names.length > 1
   const role = roleLabel(t, input.roleLevel, several ? names.length : 1)
-  const parts = scopeParts(t, input.scope, locale)
+  const parts = scopeParts(t, input.scope, input.roleLevel, locale)
   let sentence: string
   if (input.link) {
     sentence = t("org.grantScope.sentence.link", { role, scope: parts.scope })

@@ -1273,11 +1273,14 @@ export const org = defineNamespace({
     "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
     "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
     "org.grantScope.scope.organization": "of the whole organization — every project",
+    // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
+    "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
     "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
     "org.grantScope.scope.project": "on {project}",
     "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
     "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
+    "org.grantScope.echo.organizationOnly": "organization only",
     "org.grantScope.echo.allLanes": "every language lane",
     "org.grantScope.echo.laneOnly": "{lane} language lane only",
     "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
@@ -3282,6 +3285,10 @@ export const org = defineNamespace({
         description:
           "Scope phrase for an organization grant: the person joins the whole organization and therefore every project. Begins with 'of' so it reads after 'as a {role}'.",
       },
+      "org.grantScope.scope.organizationOnly": {
+        description:
+          "Scope phrase for an organization grant below Maintainer: the person joins the organization but sees no project until someone adds them to one (or to a team that has it). Begins with 'of' so it reads after 'as a {role}'.",
+      },
       "org.grantScope.scope.projectAllLanes": {
         description:
           "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
@@ -3310,6 +3317,10 @@ export const org = defineNamespace({
       },
       "org.grantScope.echo.organization": {
         description: "Short scope echo appended to an organization invite or add button.",
+      },
+      "org.grantScope.echo.organizationOnly": {
+        description:
+          "Short scope echo appended to an organization add button when the role opens no project (below Maintainer): the person joins the organization only.",
       },
       "org.grantScope.echo.allLanes": {
         description: "Short scope echo appended to a button that grants a whole project, every lane.",

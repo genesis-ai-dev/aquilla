@@ -159,7 +159,6 @@ async function main(): Promise<void> {
           ifMatchVersion: planned.version,
           updatedBy,
           // AQU-1615: a maintenance write must never mint a lane out of the blob.
-          registerLanes: false,
         })
         if (written.status === "ok") {
           report.applied = true

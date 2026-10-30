@@ -88,7 +88,7 @@ beforeEach(() => {
 describe("AiSetupDialog", () => {
   it("offers Frontier, a project API key, and Continue", () => {
     renderDialog()
-    expect(screen.getByRole("button", { name: /Frontier AI/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Aquilla AI/i })).toBeInTheDocument()
     expect(projectKeyOption()).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Personal override/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument()
@@ -116,7 +116,7 @@ describe("AiSetupDialog", () => {
     overrideState.current = { endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-or-test" }
     renderDialog()
     expect(screen.getByRole("button", { name: /Personal override/i })).toHaveAttribute("aria-pressed", "true")
-    expect(screen.getByRole("button", { name: /Frontier AI/i })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: /Aquilla AI/i })).toHaveAttribute("aria-pressed", "false")
   })
 
   it("requires an API key when choosing this project's API key for OpenRouter", async () => {

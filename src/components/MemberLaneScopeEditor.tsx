@@ -123,7 +123,7 @@ export function MemberLaneScopeEditor({
         )
         setDraft(normalizeLaneScopes(scopes ?? [], rows))
         const defaultLanguage = settings
-          ? laneLanguageForTag("", settings.lanes, settings.settings) ?? ""
+          ? laneLanguageForTag("", settings.lanes) ?? ""
           : ""
         setLaneOptions(
           rows.length > 0

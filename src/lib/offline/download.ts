@@ -128,27 +128,12 @@ const defaultDeps: DownloadProjectDeps = {
 }
 
 /** Deletes every locally held row for a project (cells, files, the project
- *  row itself, and the offline_projects row) — used both for an explicit
- *  "Remove offline copy" and to roll back a failed/aborted download rather
- *  than leave a partial copy masquerading as complete. */
+ *  row itself, its sync cursors, and the offline_projects row) in one commit —
+ *  used both for an explicit "Remove offline copy" and to roll back a
+ *  failed/aborted download rather than leave a partial copy masquerading as
+ *  complete. */
 function deleteProjectRows(store: Store<typeof schema>, projectId: string): void {
-  for (const row of store.query(tables.cells.select().where({ projectId }))) {
-    store.commit(
-      events.cellRemoved({
-        projectId,
-        fileId: row.fileId,
-        cellId: row.cellId,
-        side: row.side,
-        laneKey: row.laneKey,
-      }),
-    )
-  }
-  for (const row of store.query(tables.files.select().where({ projectId }))) {
-    store.commit(events.fileRemoved({ id: row.id }))
-  }
-  store.commit(events.projectRemoved({ id: projectId }))
-  store.commit(events.syncCursorsRemoved({ projectId }))
-  store.commit(events.offlineProjectRemoved({ projectId }))
+  store.commit(events.offlineCopyRemoved({ projectId }))
 }
 
 /**
@@ -309,9 +294,6 @@ export function removeOfflineProject(store: Store<typeof schema>, projectId: str
   const queueDepth = getOfflineQueueDepth(store, projectId)
   if (queueDepth > 0) return { ok: false, reason: "queue-not-empty", queueDepth }
 
-  store.commit(
-    events.offlineProjectStatusSet({ projectId, status: "removing", syncedAt: row.syncedAt, queueDepth: 0 }),
-  )
   deleteProjectRows(store, projectId)
   return { ok: true }
 }

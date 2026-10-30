@@ -1,12 +1,12 @@
 // AQU-2227 — migration 0194 clears a stored Follows recordings choice on files
 // with a film linked.
 //
-// WHY: before this release a linked film LOCKED a file to Follows source, so a
-// stored 'audioFirst' on such a file was never shown. AQU-2227 lets the file's
-// own choice win, so without this fix those files would switch to Follows
-// recordings at deploy, hiding their film. Clearing too much would wipe a
-// choice that users do see today: a file with no film that follows its
-// recordings.
+// WHY: before this release a file timed to a film (footage linked, or an audio
+// cue file paired with it) was LOCKED to Follows source, so a stored
+// 'audioFirst' on such a file was never shown. AQU-2227 lets the file's own
+// choice win, so without this fix those files would switch to Follows
+// recordings at deploy. Clearing too much would wipe a choice that users do
+// see today: a file with no film and no cue file that follows its recordings.
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -40,12 +40,16 @@ const FILES: Record<string, [string, string, string, string | null, number | nul
   "no-film-free": ["helloao", "source", JSON.stringify({ timingMode: "audioFirst" }), null, null],
   "empty-film-free": ["vtt", "source", JSON.stringify({ coreMediaUrl: "", timingMode: "audioFirst" }), null, null],
   "null-film-free": ["vtt", "source", JSON.stringify({ coreMediaUrl: null, timingMode: "audioFirst" }), null, null],
-  "cues-only-free": ["vtt", "source", JSON.stringify({ timingMode: "audioFirst" }), null, null],
-  "cues-only-free-cues": ["vtt", "audio-cues", "{}", "cues-only-free", null],
+  "blank-film-free": ["vtt", "source", JSON.stringify({ coreMediaUrl: "   ", timingMode: "audioFirst" }), null, null],
+  "cues-free": ["vtt", "source", JSON.stringify({ timingMode: "audioFirst" }), null, null],
+  "cues-free-cues": ["vtt", "audio-cues", "{}", "cues-free", null],
+  // A deleted cue file no longer reaches the app, so it times nothing.
+  "dead-cues-free": ["vtt", "source", JSON.stringify({ timingMode: "audioFirst" }), null, null],
+  "dead-cues-free-cues": ["vtt", "audio-cues", "{}", "dead-cues-free", 1_700_000_000_000],
   "blank-meta": ["vtt", "source", "", null, null],
 }
 
-const CLEARED = ["sub-film-free", "book-film-free", "deleted-film-free"]
+const CLEARED = ["sub-film-free", "book-film-free", "deleted-film-free", "cues-free"]
 
 async function seed(td: TestDb): Promise<void> {
   for (const [id, [kind, role, meta, anchor, deletedAt]] of Object.entries(FILES)) {
@@ -66,7 +70,7 @@ async function snapshot(td: TestDb): Promise<Record<string, { meta: string; even
 }
 
 describe("migration 0194", () => {
-  it("clears Follows recordings only on files with a film linked, keeps their other keys, and is safe to re-run", async () => {
+  it("clears Follows recordings only on files with a film or a live audio cue file, keeps their other keys, and is safe to re-run", async () => {
     const td = (t = await makeTestDb())
     await seed(td)
     const before = await snapshot(td)

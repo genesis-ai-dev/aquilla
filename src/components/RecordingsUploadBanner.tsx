@@ -39,6 +39,9 @@ export function RecordingsUploadBanner() {
   if (!state) return null
   const fmt = (n: number) => formatNumber(n, locale)
   const { total, done, failed, notStarted, cancelled, waitingForConnection, finished, takes } = state
+  // Files, like `total` and `done`: a failed verse in parts is one failure
+  // but several files.
+  const failedFiles = failed.reduce((n, f) => n + f.files, 0)
 
   const dismiss = (
     <AppTooltip content={t("common.dismiss")}>
@@ -64,7 +67,7 @@ export function RecordingsUploadBanner() {
               : t("recordingsUpload.banner.done", { count: fmt(done) })}
             {takes.length > 0 && <> {takesSentence(t, locale, takes)}</>}
             {failed.length > 0 && (
-              <> {t("recordingsUpload.banner.failedSummary", { failed: fmt(failed.length), total: fmt(total) })}</>
+              <> {t("recordingsUpload.banner.failedSummary", { failed: fmt(failedFiles), total: fmt(total) })}</>
             )}
           </span>
           {failed.length > 0 && (
@@ -109,7 +112,7 @@ export function RecordingsUploadBanner() {
     )
   }
 
-  const settled = done + failed.length
+  const settled = done + failedFiles
   const pct = total > 0 ? Math.round((settled / total) * 100) : 0
   return (
     <div className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm" data-testid="recordings-banner" data-state="running">

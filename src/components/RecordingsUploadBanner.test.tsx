@@ -44,3 +44,21 @@ describe("RecordingsUploadBanner: lines given several takes", () => {
     expect(screen.getByTestId("recordings-banner-text").textContent).toBe("3 recordings uploaded.")
   })
 })
+
+// The Oct 29 review: a verse in three parts that fails is one failure but
+// three files, and the counts are files.
+describe("RecordingsUploadBanner: counts files, not failures", () => {
+  const failure = (files: number) => ({ index: 0, name: "a.wav", target: "Genesis 1:1", code: "refused" as const, message: "no", files })
+
+  it("a failed verse in three parts counts three files in the summary", () => {
+    state = finished({ total: 10, done: 7, failed: [failure(3)] })
+    render(<RecordingsUploadBanner />)
+    expect(screen.getByTestId("recordings-banner-text").textContent).toContain("3 of 10")
+  })
+
+  it("the bar reaches its end when every file has landed or failed", () => {
+    state = { ...finished({ total: 10, done: 7, failed: [failure(3)] }), finished: false }
+    render(<RecordingsUploadBanner />)
+    expect(screen.getByTestId("recordings-banner-count").textContent).toBe("10/10")
+  })
+})
